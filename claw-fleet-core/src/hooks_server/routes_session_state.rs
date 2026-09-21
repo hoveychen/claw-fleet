@@ -15,44 +15,40 @@ pub(crate) fn route_session_mark(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                match serde_json::from_slice::<crate::session_mark::SetSessionMarkRequest>(
-                    &body_bytes,
-                ) {
-                    Ok(req_body) => {
-                        match crate::session_mark::set_mark(
-                            &req_body.session_id,
-                            &req_body.workspace_path,
-                            req_body.mark,
-                        ) {
-                            Ok(()) => {
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                        .with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body = serde_json::json!({"error": e}).to_string();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    match serde_json::from_slice::<crate::session_mark::SetSessionMarkRequest>(&body_bytes) {
+        Ok(req_body) => {
+            match crate::session_mark::set_mark(
+                &req_body.session_id,
+                &req_body.workspace_path,
+                req_body.mark,
+            ) {
+                Ok(()) => {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                    );
+                }
+                Err(e) => {
+                    let body = serde_json::json!({"error": e}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_session_title(
     ctx: &ServeCtx,
@@ -61,41 +57,37 @@ pub(crate) fn route_session_title(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                match serde_json::from_slice::<crate::session_title::SetSessionTitleRequest>(
-                    &body_bytes,
-                ) {
-                    Ok(req_body) => {
-                        match crate::session_title::set_title(
-                            &req_body.session_id,
-                            &req_body.workspace_path,
-                            req_body.title,
-                        ) {
-                            Ok(()) => {
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                        .with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body = serde_json::json!({"error": e}).to_string();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    match serde_json::from_slice::<crate::session_title::SetSessionTitleRequest>(&body_bytes) {
+        Ok(req_body) => {
+            match crate::session_title::set_title(
+                &req_body.session_id,
+                &req_body.workspace_path,
+                req_body.title,
+            ) {
+                Ok(()) => {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                    );
+                }
+                Err(e) => {
+                    let body = serde_json::json!({"error": e}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}

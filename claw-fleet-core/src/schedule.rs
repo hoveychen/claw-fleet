@@ -366,7 +366,9 @@ fn create_in(
         agent_source: agent_source.filter(|s| !blank(s)).map(str::to_string),
         fired_session_id: None,
         until_cmd: gate.as_ref().map(|g| g.until_cmd.trim().to_string()),
-        poll_secs: gate.as_ref().map(|g| g.poll_secs.max(crate::watch::MIN_POLL_SECS)),
+        poll_secs: gate
+            .as_ref()
+            .map(|g| g.poll_secs.max(crate::watch::MIN_POLL_SECS)),
         gate_timeout_secs: gate.as_ref().map(|g| g.timeout_secs),
         gate_timed_out: false,
     };
@@ -756,7 +758,7 @@ pub fn fire_once(id: &str, generation: u64) -> Result<ScheduleRecord, ClaimError
                     permission_mode: perm.map(str::to_string),
                     session_id: None,
                     entrypoint: ep.to_string(),
-                images: Vec::new(),
+                    images: Vec::new(),
                 },
             )
         },
@@ -804,25 +806,27 @@ fn fire_once_in(
 /// (a fired one is just re-run). Returns the spawned session id, if any.
 pub fn run_now(id: &str) -> Result<Option<String>, String> {
     let dir = schedules_dir().ok_or_else(|| "no fleet home".to_string())?;
-    run_now_in(
-        &dir,
-        id,
-        &move |source, ws, prompt, model, effort, perm, ep| {
-            crate::agent_source::spawn_session(
-                source,
-                &crate::agent_source::SpawnSpec {
-                    workspace_path: ws.to_string(),
-                    prompt: prompt.to_string(),
-                    model: model.map(str::to_string),
-                    effort: effort.map(str::to_string),
-                    permission_mode: perm.map(str::to_string),
-                    session_id: None,
-                    entrypoint: ep.to_string(),
+    run_now_in(&dir, id, &move |source,
+                                ws,
+                                prompt,
+                                model,
+                                effort,
+                                perm,
+                                ep| {
+        crate::agent_source::spawn_session(
+            source,
+            &crate::agent_source::SpawnSpec {
+                workspace_path: ws.to_string(),
+                prompt: prompt.to_string(),
+                model: model.map(str::to_string),
+                effort: effort.map(str::to_string),
+                permission_mode: perm.map(str::to_string),
+                session_id: None,
+                entrypoint: ep.to_string(),
                 images: Vec::new(),
-                },
-            )
-        },
-    )
+            },
+        )
+    })
 }
 
 fn run_now_in(dir: &Path, id: &str, spawn: &SpawnFn<'_>) -> Result<Option<String>, String> {
@@ -1052,7 +1056,9 @@ fn arm_timer_with(fleet_bin: &str, rec: &ScheduleRecord) -> Result<u32, String> 
             Ok(())
         });
     }
-    let mut child = cmd.spawn().map_err(|e| format!("spawn schedule timer: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn schedule timer: {e}"))?;
     let pid = child.id();
     // Reap the direct child handle; the timer keeps running detached.
     std::thread::spawn(move || {
@@ -1111,22 +1117,74 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_past_time_and_beyond_horizon() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", None, 2_000, None, None, None, None, None, "x", 1_000)
-            .unwrap_err()
-            .contains("prompt is required"));
+        assert!(create_in(
+            d.path(),
+            "/ws",
+            "  ",
+            None,
+            2_000,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "x",
+            1_000
+        )
+        .unwrap_err()
+        .contains("prompt is required"));
         // in the past
-        assert!(create_in(d.path(), "/ws", "p", None, 500, None, None, None, None, None, "x", 1_000)
-            .unwrap_err()
-            .contains("in the past"));
+        assert!(create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            500,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "x",
+            1_000
+        )
+        .unwrap_err()
+        .contains("in the past"));
         // exactly now is still the past (must be strictly future)
-        assert!(create_in(d.path(), "/ws", "p", None, 1_000, None, None, None, None, None, "x", 1_000)
-            .unwrap_err()
-            .contains("in the past"));
+        assert!(create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            1_000,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "x",
+            1_000
+        )
+        .unwrap_err()
+        .contains("in the past"));
         // beyond the 365-day horizon
         let too_far = 1_000 + MAX_HORIZON_MS + 1;
-        assert!(create_in(d.path(), "/ws", "p", None, too_far, None, None, None, None, None, "x", 1_000)
-            .unwrap_err()
-            .contains("horizon"));
+        assert!(create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            too_far,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "x",
+            1_000
+        )
+        .unwrap_err()
+        .contains("horizon"));
     }
 
     /// The whole point of a schedule vs a loop: it fires however far out, with no
@@ -1199,7 +1257,13 @@ mod tests {
         rec.generation = 2;
         write_record(d.path(), &rec).unwrap();
         let err = claim_fire_in(d.path(), "s1", 0, 300_000).unwrap_err();
-        assert_eq!(err, ClaimError::StaleGeneration { expected: 0, found: 2 });
+        assert_eq!(
+            err,
+            ClaimError::StaleGeneration {
+                expected: 0,
+                found: 2
+            }
+        );
     }
 
     #[test]
@@ -1235,8 +1299,16 @@ mod tests {
     fn ok_spawner<'a>(
         calls: &'a RefCell<Vec<SpawnCall>>,
         sid: &'a str,
-    ) -> impl Fn(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>, &str)
-        -> Result<crate::session_launch::SpawnSessionResponse, String> + 'a {
+    ) -> impl Fn(
+        &str,
+        &str,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        &str,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String>
+           + 'a {
         move |source, ws, prompt, model, _effort, _perm, ep| {
             calls.borrow_mut().push(SpawnCall {
                 agent_source: source.to_string(),
@@ -1272,7 +1344,8 @@ mod tests {
         .unwrap();
 
         let calls = RefCell::new(Vec::new());
-        let claimed = fire_once_in(d.path(), "s1", 0, 300_000, &ok_spawner(&calls, "fired-sid")).unwrap();
+        let claimed =
+            fire_once_in(d.path(), "s1", 0, 300_000, &ok_spawner(&calls, "fired-sid")).unwrap();
         assert_eq!(claimed.status, ScheduleStatus::Fired);
 
         let calls = calls.into_inner();
@@ -1298,9 +1371,14 @@ mod tests {
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "s1", 0, 300_000, &ok_spawner(&calls, "s1sid")).unwrap();
         // second timer still holding gen 0: the record is now fired (gen 1)
-        let err = fire_once_in(d.path(), "s1", 0, 300_000, &ok_spawner(&calls, "s2sid")).unwrap_err();
+        let err =
+            fire_once_in(d.path(), "s1", 0, 300_000, &ok_spawner(&calls, "s2sid")).unwrap_err();
         assert_eq!(err, ClaimError::AlreadyFired);
-        assert_eq!(calls.into_inner().len(), 1, "the stale timer must not spawn");
+        assert_eq!(
+            calls.into_inner().len(),
+            1,
+            "the stale timer must not spawn"
+        );
     }
 
     /// A spawn failure must not un-fire: the record stays `Fired` so no timer
@@ -1309,17 +1387,42 @@ mod tests {
     fn a_spawn_failure_still_marks_fired() {
         let d = dir();
         make(d.path(), "s1", 0, 300_000);
-        let failing = |_s: &str, _w: &str, _p: &str, _m: Option<&str>, _e: Option<&str>, _pm: Option<&str>, _ep: &str|
-            -> Result<crate::session_launch::SpawnSessionResponse, String> { Err("boom".into()) };
+        let failing = |_s: &str,
+                       _w: &str,
+                       _p: &str,
+                       _m: Option<&str>,
+                       _e: Option<&str>,
+                       _pm: Option<&str>,
+                       _ep: &str|
+         -> Result<crate::session_launch::SpawnSessionResponse, String> {
+            Err("boom".into())
+        };
         let claimed = fire_once_in(d.path(), "s1", 0, 300_000, &failing).unwrap();
         assert_eq!(claimed.status, ScheduleStatus::Fired);
-        assert_eq!(get_in(d.path(), "s1").unwrap().status, ScheduleStatus::Fired);
+        assert_eq!(
+            get_in(d.path(), "s1").unwrap().status,
+            ScheduleStatus::Fired
+        );
     }
 
     #[test]
     fn codex_schedule_fires_on_codex_source() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", None, 300_000, None, None, Some("codex"), None, None, "cx", 0).unwrap();
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            Some("codex"),
+            None,
+            None,
+            "cx",
+            0,
+        )
+        .unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
         assert_eq!(calls.into_inner()[0].agent_source, "codex");
@@ -1328,7 +1431,21 @@ mod tests {
     #[test]
     fn schedule_without_source_defaults_to_claude() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", None, 300_000, None, None, None, None, None, "cl", 0).unwrap();
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "cl",
+            0,
+        )
+        .unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
         assert_eq!(calls.into_inner()[0].agent_source, "claude");
@@ -1372,7 +1489,11 @@ mod tests {
 
         let mut armed = Vec::new();
         let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
-        assert_eq!(rearmed, vec!["stranded"], "only the stranded pending schedule is re-armed");
+        assert_eq!(
+            rearmed,
+            vec!["stranded"],
+            "only the stranded pending schedule is re-armed"
+        );
         assert_eq!(armed, vec!["stranded"]);
     }
 
@@ -1432,9 +1553,21 @@ mod tests {
     fn title_set_blank_normalised_and_clearable() {
         let d = dir();
         // Blank at create time is no title at all.
-        let rec =
-            create_in(d.path(), "/ws", "p", Some("  "), 300_000, None, None, None, None, None, "s1", 0)
-                .unwrap();
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            Some("  "),
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "s1",
+            0,
+        )
+        .unwrap();
         assert_eq!(rec.title, None, "blank title normalises to None");
         // A real title is trimmed and persisted.
         let rec = create_in(
@@ -1453,27 +1586,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rec.title.as_deref(), Some("发版前跑一遍回归"));
-        assert_eq!(get_in(d.path(), "s2").unwrap().title.as_deref(), Some("发版前跑一遍回归"));
+        assert_eq!(
+            get_in(d.path(), "s2").unwrap().title.as_deref(),
+            Some("发版前跑一遍回归")
+        );
         // update sets it on a record that had none…
         let u = update_in(
             d.path(),
-            &ScheduleUpdate { title: Some("补个名字".into()), ..upd("s1") },
+            &ScheduleUpdate {
+                title: Some("补个名字".into()),
+                ..upd("s1")
+            },
             0,
         )
         .unwrap();
         assert_eq!(u.title.as_deref(), Some("补个名字"));
         // …and an empty string clears it back to the prompt fallback.
-        let u =
-            update_in(d.path(), &ScheduleUpdate { title: Some("".into()), ..upd("s1") }, 0).unwrap();
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate {
+                title: Some("".into()),
+                ..upd("s1")
+            },
+            0,
+        )
+        .unwrap();
         assert_eq!(u.title, None, r#"Some("") clears the title"#);
         // Omitting the field leaves an existing title alone.
         let u = update_in(
             d.path(),
-            &ScheduleUpdate { prompt: Some("p2".into()), ..upd("s2") },
+            &ScheduleUpdate {
+                prompt: Some("p2".into()),
+                ..upd("s2")
+            },
             0,
         )
         .unwrap();
-        assert_eq!(u.title.as_deref(), Some("发版前跑一遍回归"), "None leaves it untouched");
+        assert_eq!(
+            u.title.as_deref(),
+            Some("发版前跑一遍回归"),
+            "None leaves it untouched"
+        );
     }
 
     /// Records written before titles existed must still deserialize.
@@ -1535,7 +1688,10 @@ mod tests {
         .unwrap();
         assert_eq!(u.model, None, "blank model clears to inherit-default");
         assert_eq!(u.effort.as_deref(), Some("max"), "effort left untouched");
-        assert_eq!(u.agent_source, None, "blank source clears to inherit-default");
+        assert_eq!(
+            u.agent_source, None,
+            "blank source clears to inherit-default"
+        );
     }
 
     /// Editing a Claude schedule to a Codex model must move the schedule to
@@ -1545,20 +1701,35 @@ mod tests {
     fn update_to_a_cross_harness_model_moves_the_source() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "p", None, 300_000,
-            Some("claude-opus-5"), Some("xhigh"), Some("claude-code"),
-            None, None, "s1", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            Some("claude-opus-5"),
+            Some("xhigh"),
+            Some("claude-code"),
+            None,
+            None,
+            "s1",
+            0,
         )
         .unwrap();
         let u = update_in(
             d.path(),
-            &ScheduleUpdate { model: Some("gpt-5.6-sol".into()), ..upd("s1") },
+            &ScheduleUpdate {
+                model: Some("gpt-5.6-sol".into()),
+                ..upd("s1")
+            },
             0,
         )
         .unwrap();
         assert_eq!(u.agent_source.as_deref(), Some("codex"));
         assert_eq!(u.model.as_deref(), Some("gpt-5.6-sol"));
-        assert_eq!(u.effort, None, "Claude's xhigh must not ride along to Codex");
+        assert_eq!(
+            u.effort, None,
+            "Claude's xhigh must not ride along to Codex"
+        );
 
         // An explicitly named source still wins — the desktop editor sends the
         // tool and the model together, and its pick is not a guess.
@@ -1583,7 +1754,10 @@ mod tests {
         write_record(d.path(), &fired).unwrap();
         assert!(update_in(
             d.path(),
-            &ScheduleUpdate { fire_at: Some(900_000), ..upd("f") },
+            &ScheduleUpdate {
+                fire_at: Some(900_000),
+                ..upd("f")
+            },
             0
         )
         .unwrap_err()
@@ -1592,14 +1766,20 @@ mod tests {
         make(d.path(), "s1", 0, 300_000);
         assert!(update_in(
             d.path(),
-            &ScheduleUpdate { fire_at: Some(500), ..upd("s1") },
+            &ScheduleUpdate {
+                fire_at: Some(500),
+                ..upd("s1")
+            },
             1_000
         )
         .unwrap_err()
         .contains("in the past"));
         assert!(update_in(
             d.path(),
-            &ScheduleUpdate { fire_at: Some(1_000 + MAX_HORIZON_MS + 1), ..upd("s1") },
+            &ScheduleUpdate {
+                fire_at: Some(1_000 + MAX_HORIZON_MS + 1),
+                ..upd("s1")
+            },
             1_000
         )
         .unwrap_err()
@@ -1607,7 +1787,10 @@ mod tests {
         // empty prompt rejected
         assert!(update_in(
             d.path(),
-            &ScheduleUpdate { prompt: Some("   ".into()), ..upd("s1") },
+            &ScheduleUpdate {
+                prompt: Some("   ".into()),
+                ..upd("s1")
+            },
             0
         )
         .unwrap_err()
@@ -1615,7 +1798,10 @@ mod tests {
         // unknown id
         assert!(update_in(
             d.path(),
-            &ScheduleUpdate { prompt: Some("x".into()), ..upd("nope") },
+            &ScheduleUpdate {
+                prompt: Some("x".into()),
+                ..upd("nope")
+            },
             0
         )
         .unwrap_err()
@@ -1634,15 +1820,26 @@ mod tests {
     #[test]
     fn parse_at_absolute_matches_local_interpretation() {
         use chrono::{Local, NaiveDateTime, TimeZone};
-        for s in ["2026-07-25 09:30", "2026-07-25T09:30", "2026-07-25 09:30:15"] {
+        for s in [
+            "2026-07-25 09:30",
+            "2026-07-25T09:30",
+            "2026-07-25 09:30:15",
+        ] {
             let got = parse_at(s, 0).unwrap();
             let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
                 .unwrap();
-            let want = Local.from_local_datetime(&naive).single().unwrap().timestamp_millis() as u64;
-            assert_eq!(got, want, "parse_at({s}) must match local-tz interpretation");
+            let want = Local
+                .from_local_datetime(&naive)
+                .single()
+                .unwrap()
+                .timestamp_millis() as u64;
+            assert_eq!(
+                got, want,
+                "parse_at({s}) must match local-tz interpretation"
+            );
         }
     }
 
@@ -1665,7 +1862,9 @@ mod tests {
     #[test]
     fn parse_at_rejects_garbage_and_empty() {
         assert!(parse_at("", 0).unwrap_err().contains("required"));
-        assert!(parse_at("not-a-date", 0).unwrap_err().contains("cannot parse"));
+        assert!(parse_at("not-a-date", 0)
+            .unwrap_err()
+            .contains("cannot parse"));
     }
 
     #[test]
@@ -1689,8 +1888,21 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", None, 300_000, Some("  "), Some(""), None, None, None, "s2", 0)
-            .unwrap();
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            Some("  "),
+            Some(""),
+            None,
+            None,
+            None,
+            "s2",
+            0,
+        )
+        .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
     }
@@ -1714,7 +1926,10 @@ mod tests {
         assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
         // A manual run has the user present — it is NOT exempt from the decision
         // card, so its footer must NOT carry the unattended marker.
-        assert!(!calls[0].prompt.contains("无人值守"), "manual run stays interactive");
+        assert!(
+            !calls[0].prompt.contains("无人值守"),
+            "manual run stays interactive"
+        );
 
         // the record is byte-for-byte unchanged: still pending, no generation
         // bump, no fired stamp — the scheduled fire is untouched.
@@ -1730,7 +1945,11 @@ mod tests {
         let calls = RefCell::new(Vec::new());
         let err = run_now_in(d.path(), "nope", &ok_spawner(&calls, "x")).unwrap_err();
         assert!(err.contains("no schedule with id nope"), "got: {err}");
-        assert_eq!(calls.into_inner().len(), 0, "no spawn for a missing schedule");
+        assert_eq!(
+            calls.into_inner().len(),
+            0,
+            "no spawn for a missing schedule"
+        );
     }
 
     // ── gate (--until) ───────────────────────────────────────────────────────
@@ -1741,22 +1960,45 @@ mod tests {
     fn create_stamps_gate_and_clamps_poll_floor() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
             Some(gate("test -f /tmp/ready", 1, 3600)), // poll below the 5s floor
-            "g1", 0,
+            "g1",
+            0,
         )
         .unwrap();
         assert!(rec.has_gate());
         assert_eq!(rec.until_cmd.as_deref(), Some("test -f /tmp/ready"));
-        assert_eq!(rec.poll_secs, Some(crate::watch::MIN_POLL_SECS), "poll clamps up to floor");
+        assert_eq!(
+            rec.poll_secs,
+            Some(crate::watch::MIN_POLL_SECS),
+            "poll clamps up to floor"
+        );
         assert_eq!(rec.gate_timeout_secs, Some(3600));
         // give-up deadline is measured from the due time
         assert_eq!(rec.gate_deadline(), Some(300_000 + 3600 * 1000));
 
         // a blank gate command ⇒ no gate
         let rec = create_in(
-            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
-            Some(gate("   ", 30, 3600)), "g2", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            Some(gate("   ", 30, 3600)),
+            "g2",
+            0,
         )
         .unwrap();
         assert!(!rec.has_gate());
@@ -1768,8 +2010,18 @@ mod tests {
     fn gate_fields_serialize_camelcase() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
-            Some(gate("true", 30, 3600)), "g1", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            Some(gate("true", 30, 3600)),
+            "g1",
+            0,
         )
         .unwrap();
         let raw = fs::read_to_string(record_path(d.path(), "g1")).unwrap();
@@ -1787,9 +2039,15 @@ mod tests {
         let d = dir();
         let rec = make(d.path(), "s1", 0, 300_000);
         // not due ⇒ nap toward the due time, capped at POLL_CAP (30s)
-        assert_eq!(decide(&rec, 0, 100_000, || panic!("gate must not be polled")), SchedStep::Nap { ms: 30_000 });
+        assert_eq!(
+            decide(&rec, 0, 100_000, || panic!("gate must not be polled")),
+            SchedStep::Nap { ms: 30_000 }
+        );
         // due ⇒ fire, gate never consulted
-        assert_eq!(decide(&rec, 0, 300_000, || panic!("gate must not be polled")), SchedStep::Fire);
+        assert_eq!(
+            decide(&rec, 0, 300_000, || panic!("gate must not be polled")),
+            SchedStep::Fire
+        );
     }
 
     /// Gated + due: naps while the gate is unmet, fires the moment it's met. The
@@ -1798,16 +2056,32 @@ mod tests {
     fn decide_gated_naps_until_met_then_fires() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
-            Some(gate("gate", 30, 3600)), "g1", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            Some(gate("gate", 30, 3600)),
+            "g1",
+            0,
         )
         .unwrap();
         // due, gate not met ⇒ nap one poll interval (30s), never past deadline
-        assert_eq!(decide(&rec, 0, 300_000, || false), SchedStep::Nap { ms: 30_000 });
+        assert_eq!(
+            decide(&rec, 0, 300_000, || false),
+            SchedStep::Nap { ms: 30_000 }
+        );
         // due, gate met ⇒ fire
         assert_eq!(decide(&rec, 0, 300_000, || true), SchedStep::Fire);
         // not due yet ⇒ nap to due, gate never polled
-        assert_eq!(decide(&rec, 0, 100_000, || panic!("early: no poll")), SchedStep::Nap { ms: 30_000 });
+        assert_eq!(
+            decide(&rec, 0, 100_000, || panic!("early: no poll")),
+            SchedStep::Nap { ms: 30_000 }
+        );
     }
 
     /// Gated: once the give-up window has elapsed past the due time, abandon —
@@ -1816,16 +2090,32 @@ mod tests {
     fn decide_gated_abandons_past_deadline() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
-            Some(gate("gate", 30, 60)), "g1", 0, // 60s window past due (300_000)
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            Some(gate("gate", 30, 60)),
+            "g1",
+            0, // 60s window past due (300_000)
         )
         .unwrap();
         let deadline = 300_000 + 60_000;
         // just before the deadline, still polling
-        assert_eq!(decide(&rec, 0, deadline - 1, || false), SchedStep::Nap { ms: 1 });
+        assert_eq!(
+            decide(&rec, 0, deadline - 1, || false),
+            SchedStep::Nap { ms: 1 }
+        );
         // at/after the deadline, abandon regardless of gate
         assert_eq!(decide(&rec, 0, deadline, || true), SchedStep::Abandon);
-        assert_eq!(decide(&rec, 0, deadline + 5_000, || false), SchedStep::Abandon);
+        assert_eq!(
+            decide(&rec, 0, deadline + 5_000, || false),
+            SchedStep::Abandon
+        );
     }
 
     /// The abandon path claims the schedule (flips Fired) and stamps
@@ -1834,13 +2124,26 @@ mod tests {
     fn abandon_marks_fired_timed_out() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
-            Some(gate("gate", 30, 60)), "g1", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            Some(gate("gate", 30, 60)),
+            "g1",
+            0,
         )
         .unwrap();
         let claimed = abandon_on_timeout_in(d.path(), "g1", 0, 400_000).unwrap();
         assert_eq!(claimed.status, ScheduleStatus::Fired);
-        assert!(claimed.gate_timed_out, "abandoned schedule is stamped timed-out");
+        assert!(
+            claimed.gate_timed_out,
+            "abandoned schedule is stamped timed-out"
+        );
         assert!(claimed.fired_session_id.is_none(), "abandon spawns nothing");
         // persisted, kept as history
         let on_disk = get_in(d.path(), "g1").unwrap();

@@ -372,7 +372,6 @@ pub fn is_public(path: &str) -> bool {
         || path.starts_with(DECISION_ASSET_PREFIX)
 }
 
-
 /// The Agent Client Protocol surface.
 ///
 /// Not a path on this HTTP server: ACP listens on its own port (see

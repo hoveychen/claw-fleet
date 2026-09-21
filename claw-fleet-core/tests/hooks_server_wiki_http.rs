@@ -36,26 +36,39 @@ struct Resp {
 impl Resp {
     fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap_or_else(|e| {
-            panic!("non-JSON body (status {}): {e}\n{}", self.status, String::from_utf8_lossy(&self.body))
+            panic!(
+                "non-JSON body (status {}): {e}\n{}",
+                self.status,
+                String::from_utf8_lossy(&self.body)
+            )
         })
     }
 
     /// The `error` field every 4xx wiki route answers with.
     fn error(&self) -> String {
-        assert!(self.status >= 400, "expected an error status, got {}", self.status);
+        assert!(
+            self.status >= 400,
+            "expected an error status, got {}",
+            self.status
+        );
         self.json()["error"].as_str().unwrap_or("").to_string()
     }
 }
 
 fn request(port: u16, method: &str, path: &str, token: &str, body: Option<&str>) -> Resp {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("tcp connect");
-    stream.set_read_timeout(Some(Duration::from_secs(30))).expect("set read timeout");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .expect("set read timeout");
 
     let mut req = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n"
     );
     if let Some(b) = body {
-        req.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n", b.len()));
+        req.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            b.len()
+        ));
     }
     req.push_str("\r\n");
     if let Some(b) = body {
@@ -78,7 +91,10 @@ fn request(port: u16, method: &str, path: &str, token: &str, body: Option<&str>)
         .and_then(|s| s.parse().ok())
         .expect("status line");
     let mut body = raw[split + 4..].to_vec();
-    if head.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+    if head
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
         body = dechunk(&body);
     }
     Resp { status, body }
@@ -88,7 +104,10 @@ fn dechunk(raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < raw.len() {
-        let line_end = raw[i..].windows(2).position(|w| w == b"\r\n").map(|p| i + p);
+        let line_end = raw[i..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .map(|p| i + p);
         let Some(end) = line_end else { break };
         let size_str = String::from_utf8_lossy(&raw[i..end]);
         let size = usize::from_str_radix(size_str.trim().split(';').next().unwrap_or("0"), 16)
@@ -124,7 +143,12 @@ impl Fixture {
     /// POST that must succeed and answer JSON.
     fn post_json(&self, path: &str, body: &Value) -> Value {
         let r = self.post(path, Some(body));
-        assert_eq!(r.status, 200, "POST {path} failed: {}", String::from_utf8_lossy(&r.body));
+        assert_eq!(
+            r.status,
+            200,
+            "POST {path} failed: {}",
+            String::from_utf8_lossy(&r.body)
+        );
         r.json()
     }
 
@@ -142,8 +166,14 @@ impl Fixture {
     fn seed_with(&self, slug: &str, body: &str) {
         let src = self.home.path().join("seed.md");
         std::fs::write(&src, body).unwrap();
-        claw_fleet_core::wiki::publish_in(&self.wiki_root(), &src, Some(slug), None, self.home.path())
-            .unwrap();
+        claw_fleet_core::wiki::publish_in(
+            &self.wiki_root(),
+            &src,
+            Some(slug),
+            None,
+            self.home.path(),
+        )
+        .unwrap();
     }
 
     fn slugs(&self) -> Vec<String> {
@@ -182,7 +212,10 @@ fn boot() -> Fixture {
     // `serve` writes the OS-assigned port once it is listening.
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let port = loop {
-        assert!(std::time::Instant::now() < deadline, "serve never wrote its port file");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "serve never wrote its port file"
+        );
         if let Ok(text) = std::fs::read_to_string(&port_file) {
             if let Ok(p) = text.trim().parse::<u16>() {
                 if p != 0 {
@@ -193,7 +226,11 @@ fn boot() -> Fixture {
         std::thread::sleep(Duration::from_millis(20));
     };
 
-    Fixture { port, home, _guard: guard }
+    Fixture {
+        port,
+        home,
+        _guard: guard,
+    }
 }
 
 #[test]
@@ -234,7 +271,11 @@ fn live_tail_image_result_uses_transport_trimming_contract() {
     });
     std::fs::write(&path, format!("{line}\n")).unwrap();
 
-    let endpoint = format!("{}?path={}&offset=0", routes::TAIL, encode(path.to_str().unwrap()));
+    let endpoint = format!(
+        "{}?path={}&offset=0",
+        routes::TAIL,
+        encode(path.to_str().unwrap())
+    );
     let resp = fx.get(&endpoint);
     assert_eq!(resp.status, 200);
     let body = resp.json();
@@ -256,7 +297,10 @@ fn wiki_move_rekeys_and_normalizes_the_target_slug() {
     let fx = boot();
     fx.seed("overview");
 
-    let doc = fx.post_json(routes::WIKI_MOVE, &json!({ "from": "overview", "to": "Arch/Overview" }));
+    let doc = fx.post_json(
+        routes::WIKI_MOVE,
+        &json!({ "from": "overview", "to": "Arch/Overview" }),
+    );
 
     // The server normalizes; the client gets the canonical slug back.
     assert_eq!(doc["slug"], "arch/overview");
@@ -273,7 +317,11 @@ fn wiki_move_onto_an_occupied_slug_is_a_400_with_a_message() {
     assert_eq!(resp.status, 400);
     let err = resp.error();
     assert!(err.contains("already exists"), "unexpected error: {err}");
-    assert_eq!(fx.slugs(), vec!["a", "b"], "the rejected move changed nothing");
+    assert_eq!(
+        fx.slugs(),
+        vec!["a", "b"],
+        "the rejected move changed nothing"
+    );
 }
 
 // ── /wiki_delete ────────────────────────────────────────────────────────────
@@ -286,7 +334,14 @@ fn wiki_delete_removes_a_doc_whose_slug_has_directories() {
     fx.seed("arch/deep/overview");
     fx.seed("keeper");
 
-    let resp = fx.post(&format!("{}?slug={}", routes::WIKI_DELETE, encode("arch/deep/overview")), None);
+    let resp = fx.post(
+        &format!(
+            "{}?slug={}",
+            routes::WIKI_DELETE,
+            encode("arch/deep/overview")
+        ),
+        None,
+    );
     assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
 
     assert_eq!(fx.slugs(), vec!["keeper"]);
@@ -300,17 +355,30 @@ fn wiki_delete_drops_one_version_and_keeps_the_current() {
 
     let doc = claw_fleet_core::wiki::get_doc_in(&fx.wiki_root(), "notes").unwrap();
     assert_eq!(doc.versions.len(), 2);
-    let old = doc.versions.iter().find(|v| v.id != doc.current_version).unwrap().id.clone();
+    let old = doc
+        .versions
+        .iter()
+        .find(|v| v.id != doc.current_version)
+        .unwrap()
+        .id
+        .clone();
 
     let resp = fx.post(
-        &format!("{}?slug=notes&version={}", routes::WIKI_DELETE, encode(&old)),
+        &format!(
+            "{}?slug=notes&version={}",
+            routes::WIKI_DELETE,
+            encode(&old)
+        ),
         None,
     );
     assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
 
     let after = claw_fleet_core::wiki::get_doc_in(&fx.wiki_root(), "notes").unwrap();
     assert_eq!(after.versions.len(), 1);
-    assert_eq!(after.current_version, doc.current_version, "current version survives");
+    assert_eq!(
+        after.current_version, doc.current_version,
+        "current version survives"
+    );
 }
 
 // ── /wiki_move_folder ───────────────────────────────────────────────────────
@@ -323,10 +391,20 @@ fn wiki_move_folder_rekeys_every_doc_beneath_and_returns_them() {
     fx.seed("arch"); // same name as the folder — renders beside it, must stay
     fx.seed("unrelated");
 
-    let moved = fx.post_json(routes::WIKI_MOVE_FOLDER, &json!({ "from": "arch", "to": "design" }));
+    let moved = fx.post_json(
+        routes::WIKI_MOVE_FOLDER,
+        &json!({ "from": "arch", "to": "design" }),
+    );
 
-    assert_eq!(moved.as_array().map(Vec::len), Some(2), "server returns exactly the docs it moved");
-    assert_eq!(fx.slugs(), vec!["arch", "design/deep/two", "design/one", "unrelated"]);
+    assert_eq!(
+        moved.as_array().map(Vec::len),
+        Some(2),
+        "server returns exactly the docs it moved"
+    );
+    assert_eq!(
+        fx.slugs(),
+        vec!["arch", "design/deep/two", "design/one", "unrelated"]
+    );
 }
 
 /// `to: ""` is how the UI dissolves a folder. It has to survive JSON — an
@@ -337,7 +415,10 @@ fn wiki_move_folder_with_empty_target_dissolves_into_the_root() {
     fx.seed("arch/one");
     fx.seed("arch/two");
 
-    let moved = fx.post_json(routes::WIKI_MOVE_FOLDER, &json!({ "from": "arch", "to": "" }));
+    let moved = fx.post_json(
+        routes::WIKI_MOVE_FOLDER,
+        &json!({ "from": "arch", "to": "" }),
+    );
 
     assert_eq!(moved.as_array().map(Vec::len), Some(2));
     assert_eq!(fx.slugs(), vec!["one", "two"]);
@@ -352,7 +433,10 @@ fn wiki_move_folder_collision_is_a_400_and_moves_nothing() {
     fx.seed("a/y");
     fx.seed("b/y"); // b/y is taken, so a/y cannot land
 
-    let resp = fx.post(routes::WIKI_MOVE_FOLDER, Some(&json!({ "from": "a", "to": "b" })));
+    let resp = fx.post(
+        routes::WIKI_MOVE_FOLDER,
+        Some(&json!({ "from": "a", "to": "b" })),
+    );
     assert_eq!(resp.status, 400);
     let err = resp.error();
     assert!(err.contains("already exists"), "unexpected error: {err}");
@@ -382,10 +466,16 @@ fn wiki_delete_folder_on_an_empty_prefix_is_a_400() {
     let fx = boot();
     fx.seed("keeper");
 
-    let resp = fx.post(routes::WIKI_DELETE_FOLDER, Some(&json!({ "prefix": "nosuch" })));
+    let resp = fx.post(
+        routes::WIKI_DELETE_FOLDER,
+        Some(&json!({ "prefix": "nosuch" })),
+    );
     assert_eq!(resp.status, 400);
     let err = resp.error();
-    assert!(err.contains("no wiki docs under"), "unexpected error: {err}");
+    assert!(
+        err.contains("no wiki docs under"),
+        "unexpected error: {err}"
+    );
     assert_eq!(fx.slugs(), vec!["keeper"]);
 }
 
@@ -408,14 +498,21 @@ fn wiki_publish_text_creates_then_appends_over_http() {
         })
     };
 
-    let created = fx.post_json(routes::WIKI_PUBLISH_TEXT, &req("# First\n\nentry one\n", "replace"));
+    let created = fx.post_json(
+        routes::WIKI_PUBLISH_TEXT,
+        &req("# First\n\nentry one\n", "replace"),
+    );
     assert_eq!(created["slug"], "notes/from-reader");
     assert_eq!(created["kind"], "markdown");
     // Title was left empty on the wire, so the server derived it.
     assert_eq!(created["title"], "First");
 
     let appended = fx.post_json(routes::WIKI_PUBLISH_TEXT, &req("entry two\n", "append"));
-    assert_eq!(appended["versions"].as_array().map(Vec::len), Some(2), "a note keeps its history");
+    assert_eq!(
+        appended["versions"].as_array().map(Vec::len),
+        Some(2),
+        "a note keeps its history"
+    );
 
     let body = claw_fleet_core::wiki::get_file_in(
         &fx.wiki_root(),
@@ -439,7 +536,10 @@ fn wiki_publish_text_rejects_an_unusable_slug_with_a_400() {
     );
     assert_eq!(resp.status, 400);
     let err = resp.error();
-    assert!(err.contains("cannot derive a slug"), "unexpected error: {err}");
+    assert!(
+        err.contains("cannot derive a slug"),
+        "unexpected error: {err}"
+    );
     assert!(fx.slugs().is_empty(), "nothing must be written");
 }
 
@@ -452,7 +552,10 @@ fn wiki_move_folder_rejects_a_malformed_body() {
     let resp = fx.post(routes::WIKI_MOVE_FOLDER, Some(&json!({ "nonsense": "x" })));
     assert_eq!(resp.status, 400);
     let err = resp.error();
-    assert!(err.contains("bad /wiki_move_folder body"), "unexpected error: {err}");
+    assert!(
+        err.contains("bad /wiki_move_folder body"),
+        "unexpected error: {err}"
+    );
 
     // The server is still alive and the wiki is untouched.
     let health = fx.get(routes::HEALTH);

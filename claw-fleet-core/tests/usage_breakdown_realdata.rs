@@ -120,7 +120,10 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
             // input against a fully-billed cost; Codex-provider calls are logged
             // unpriced with char-estimated tokens), which is why the surface is
             // agent-only.
-            assert_ne!(l.source, "fleet", "{label}: Fleet's own spend is back on the receipt");
+            assert_ne!(
+                l.source, "fleet",
+                "{label}: Fleet's own spend is back on the receipt"
+            );
             // Provider-priced (dsh) lines carry the provider's own charge for an
             // open model space, which Fleet's reference $/M table cannot
             // reproduce — so per-row pricing does not reconcile by design. Same
@@ -151,7 +154,11 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
                 l.model,
                 l.source,
                 l.cost_usd,
-                if l.cost_usd != 0.0 { drift / l.cost_usd * 100.0 } else { 0.0 },
+                if l.cost_usd != 0.0 {
+                    drift / l.cost_usd * 100.0
+                } else {
+                    0.0
+                },
             );
             // Historical days keep whatever cost their report stored, so a small
             // residue is expected there; a mis-scaled row shows up as multiples.
@@ -164,7 +171,10 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
             );
             worst = worst.max(drift);
         }
-        eprintln!("{label:>5} — {} lines, worst drift ${worst:.4}\n", b.lines.len());
+        eprintln!(
+            "{label:>5} — {} lines, worst drift ${worst:.4}\n",
+            b.lines.len()
+        );
     }
 }
 
@@ -200,7 +210,8 @@ fn real_daily_report_matches_receipt_day() {
     assert!(!sessions.is_empty(), "no sessions overlap {date}");
 
     let refs: Vec<_> = sessions.iter().collect();
-    let report = claw_fleet_core::daily_report::generate_report_from_sessions(&date, "local", &refs);
+    let report =
+        claw_fleet_core::daily_report::generate_report_from_sessions(&date, "local", &refs);
 
     let ids: std::collections::HashSet<_> = sessions.iter().map(|s| s.id.as_str()).collect();
     let usage_cache = std::fs::read(home.join(".fleet/usage-breakdown-cache.json"))

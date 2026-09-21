@@ -87,7 +87,9 @@ pub fn record_with_entrypoint(
     entrypoint: Option<&str>,
 ) {
     let clean = |v: Option<&str>| {
-        v.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+        v.map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     };
     let spec = LaunchSpec {
         model: clean(model),
@@ -137,7 +139,11 @@ pub fn resume_spec(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> (Option<String>, Option<String>) {
-    let clean = |v: Option<&str>| v.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let clean = |v: Option<&str>| {
+        v.map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
     let recorded = get(session_id);
     let model = clean(model).or_else(|| recorded.as_ref().and_then(|s| s.model.clone()));
     let effort = clean(effort).or_else(|| recorded.as_ref().and_then(|s| s.effort.clone()));
@@ -267,7 +273,11 @@ mod tests {
             let prev = std::env::var_os("FLEET_HOME");
             // SAFETY: serialized on the process-wide FLEET_HOME lock.
             unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _lock: lock }
+            Self {
+                dir,
+                prev,
+                _lock: lock,
+            }
         }
     }
 
@@ -305,8 +315,14 @@ mod tests {
         record("s2", None, None);
         record("s3", Some("  "), Some(""));
         // Marker is present for both — Fleet spawned them.
-        assert!(spec_path("s2").unwrap().exists(), "default-flag spawn must leave a marker");
-        assert!(spec_path("s3").unwrap().exists(), "blank-override spawn must leave a marker");
+        assert!(
+            spec_path("s2").unwrap().exists(),
+            "default-flag spawn must leave a marker"
+        );
+        assert!(
+            spec_path("s3").unwrap().exists(),
+            "blank-override spawn must leave a marker"
+        );
         assert!(was_fleet_spawned("s2"));
         assert!(was_fleet_spawned("s3"));
         // …but no phantom override leaks back out.
@@ -323,9 +339,17 @@ mod tests {
     #[test]
     fn first_record_establishes_the_marker_cutoff() {
         let _home = TmpHome::new("cutoff");
-        assert_eq!(spawn_marker_cutoff_ms(), u64::MAX, "no cutoff before any spawn");
+        assert_eq!(
+            spawn_marker_cutoff_ms(),
+            u64::MAX,
+            "no cutoff before any spawn"
+        );
         record("c1", None, None);
-        assert_ne!(spawn_marker_cutoff_ms(), u64::MAX, "cutoff stamped after first spawn");
+        assert_ne!(
+            spawn_marker_cutoff_ms(),
+            u64::MAX,
+            "cutoff stamped after first spawn"
+        );
     }
 
     /// Only one of the two flags is common (model set, effort left to default).
@@ -344,9 +368,18 @@ mod tests {
     #[test]
     fn a_no_override_resume_inherits_the_launch_model_instead_of_blanking_it() {
         let _home = TmpHome::new("resume-inherit");
-        record_with_entrypoint("r1", Some("gpt-6-astra"), Some("high"), Some("fleet-desktop"));
+        record_with_entrypoint(
+            "r1",
+            Some("gpt-6-astra"),
+            Some("high"),
+            Some("fleet-desktop"),
+        );
         let (model, effort) = resume_spec("r1", None, None);
-        assert_eq!(model.as_deref(), Some("gpt-6-astra"), "resume must keep the launch model");
+        assert_eq!(
+            model.as_deref(),
+            Some("gpt-6-astra"),
+            "resume must keep the launch model"
+        );
         assert_eq!(effort.as_deref(), Some("high"));
         // …and the note still says so for the next resume / queued-message drain.
         assert_eq!(model_of("r1").as_deref(), Some("gpt-6-astra"));
@@ -362,7 +395,11 @@ mod tests {
         record("r2", Some("gpt-6-astra"), Some("high"));
         let (model, effort) = resume_spec("r2", Some("gpt-5.6-sol"), None);
         assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
-        assert_eq!(effort.as_deref(), Some("high"), "an unset flag still inherits");
+        assert_eq!(
+            effort.as_deref(),
+            Some("high"),
+            "an unset flag still inherits"
+        );
         assert_eq!(model_of("r2").as_deref(), Some("gpt-5.6-sol"));
     }
 

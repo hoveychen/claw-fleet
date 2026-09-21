@@ -124,7 +124,10 @@ pub fn prompt_content(prompt: &str) -> Vec<Value> {
         // Over the count ceiling the remainder degrades to text paths rather
         // than being dropped: the model can still be told which files were
         // meant, and dsh would refuse a 21st image outright.
-        match (images.len() < MAX_IMAGES).then(|| image_part(path)).flatten() {
+        match (images.len() < MAX_IMAGES)
+            .then(|| image_part(path))
+            .flatten()
+        {
             Some(part) => images.push(part),
             None => kept.push(path),
         }
@@ -806,7 +809,10 @@ mod tests {
 
     #[test]
     fn image_block_key_refuses_a_block_that_is_not_a_sha256_reference() {
-        assert_eq!(image_block_key(&json!({ "type": "text", "text": "hi" })), None);
+        assert_eq!(
+            image_block_key(&json!({ "type": "text", "text": "hi" })),
+            None
+        );
         assert_eq!(
             image_block_key(&json!({ "attachment": { "attachmentId": "opaque-id" } })),
             None
@@ -816,7 +822,9 @@ mod tests {
             None
         );
         assert_eq!(
-            image_block_key(&json!({ "attachment": { "attachmentId": "sha256:zzzzzzzzzzzzzzzzzz" } })),
+            image_block_key(
+                &json!({ "attachment": { "attachmentId": "sha256:zzzzzzzzzzzzzzzzzz" } })
+            ),
             None,
             "a non-hex digest is not a content key"
         );

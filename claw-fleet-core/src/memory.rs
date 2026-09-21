@@ -700,7 +700,8 @@ pub fn promote_memory(memory_path: &str, target: &str, workspace_path: &str) -> 
         };
 
         let new_content = format!("{}{}{}\n", existing, separator, content.trim());
-        crate::atomic_json::write_atomic(&claude_md_path, new_content.as_bytes()).map_err(|e| e.to_string())
+        crate::atomic_json::write_atomic(&claude_md_path, new_content.as_bytes())
+            .map_err(|e| e.to_string())
     })?;
 
     // Delete the memory file

@@ -269,7 +269,12 @@ mod tests {
                 std::env::set_var("FLEET_HOME", &dir);
                 std::env::set_var("CODEX_HOME", dir.join(".codex"));
             }
-            Self { dir, previous_fleet, previous_codex, _lock: lock }
+            Self {
+                dir,
+                previous_fleet,
+                previous_codex,
+                _lock: lock,
+            }
         }
 
         fn plant_codex_session(&self, id: &str, workspace: &std::path::Path) {
@@ -427,7 +432,10 @@ mod tests {
         fs::write(dir.join("answered.response.json"), "{}").unwrap();
 
         let ids = list_pending_in_dir(&dir).unwrap();
-        assert!(ids.is_empty(), "answered orphan leaked into pending: {ids:?}");
+        assert!(
+            ids.is_empty(),
+            "answered orphan leaked into pending: {ids:?}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -76,8 +76,7 @@ pub fn load() -> HashMap<String, (u64, SessionInfo)> {
 /// Atomically persist the cache. Writes to `<path>.tmp` then renames so a
 /// crashed process can't leave a half-written file behind.
 pub fn save(cache: &HashMap<String, (u64, SessionInfo)>) -> io::Result<()> {
-    let p = cache_path()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no fleet dir"))?;
+    let p = cache_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no fleet dir"))?;
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -97,8 +96,7 @@ pub fn save(cache: &HashMap<String, (u64, SessionInfo)>) -> io::Result<()> {
         version: CACHE_VERSION,
         entries,
     };
-    let json = serde_json::to_string(&disk)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string(&disk).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     let tmp = p.with_extension("json.tmp");
     fs::write(&tmp, json.as_bytes())?;
@@ -155,7 +153,12 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,            compact_count: 0,
+            task_plan: None,
+            handoff: None,
+            user_mark: None,
+            task_outcome: None,
+            title_override: None,
+            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
@@ -180,7 +183,11 @@ mod tests {
     // `(tmp, env, lock)` shape released the lock first, leaving a race
     // window where the next test could acquire the lock and `set_var` its
     // own tempdir before this test's `EnvGuard` cleared `FLEET_HOME`.
-    fn with_temp_home() -> (std::sync::MutexGuard<'static, ()>, EnvGuard, tempfile::TempDir) {
+    fn with_temp_home() -> (
+        std::sync::MutexGuard<'static, ()>,
+        EnvGuard,
+        tempfile::TempDir,
+    ) {
         let lock = fleet_home_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("FLEET_HOME", tmp.path());
@@ -199,7 +206,10 @@ mod tests {
 
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded.get("/a/s1.jsonl").map(|(m, _)| *m), Some(12_345));
-        assert_eq!(loaded.get("/a/s1.jsonl").map(|(_, i)| i.id.clone()), Some("s1".into()));
+        assert_eq!(
+            loaded.get("/a/s1.jsonl").map(|(_, i)| i.id.clone()),
+            Some("s1".into())
+        );
         assert_eq!(loaded.get("/b/s2.jsonl").map(|(m, _)| *m), Some(67_890));
     }
 
@@ -232,7 +242,11 @@ mod tests {
     fn should_persist_now_returns_true_when_never_persisted() {
         use crate::session::should_persist_now;
         use std::time::{Duration, Instant};
-        assert!(should_persist_now(None, Instant::now(), Duration::from_secs(30)));
+        assert!(should_persist_now(
+            None,
+            Instant::now(),
+            Duration::from_secs(30)
+        ));
     }
 
     #[test]
@@ -241,7 +255,11 @@ mod tests {
         use std::time::{Duration, Instant};
         let now = Instant::now();
         let recent = now - Duration::from_secs(5);
-        assert!(!should_persist_now(Some(recent), now, Duration::from_secs(30)));
+        assert!(!should_persist_now(
+            Some(recent),
+            now,
+            Duration::from_secs(30)
+        ));
     }
 
     #[test]
@@ -250,7 +268,11 @@ mod tests {
         use std::time::{Duration, Instant};
         let now = Instant::now();
         let long_ago = now - Duration::from_secs(60);
-        assert!(should_persist_now(Some(long_ago), now, Duration::from_secs(30)));
+        assert!(should_persist_now(
+            Some(long_ago),
+            now,
+            Duration::from_secs(30)
+        ));
     }
 
     #[test]

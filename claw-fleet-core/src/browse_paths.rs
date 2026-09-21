@@ -144,7 +144,11 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             let prev = std::env::var_os("FLEET_HOME");
             unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _guard: guard }
+            Self {
+                dir,
+                prev,
+                _guard: guard,
+            }
         }
     }
 
@@ -163,7 +167,10 @@ mod tests {
     fn make_dir(under: &Path, name: &str) -> String {
         let p = under.join(name);
         std::fs::create_dir_all(&p).unwrap();
-        std::fs::canonicalize(&p).unwrap().to_string_lossy().to_string()
+        std::fs::canonicalize(&p)
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
     }
 
     #[test]
@@ -213,7 +220,10 @@ mod tests {
 
         let file = home.dir.join("a-file");
         std::fs::write(&file, b"x").unwrap();
-        assert!(add(file.to_str().unwrap()).is_err(), "a file is not browsable");
+        assert!(
+            add(file.to_str().unwrap()).is_err(),
+            "a file is not browsable"
+        );
 
         assert!(
             add(home.dir.join("does-not-exist").to_str().unwrap()).is_err(),

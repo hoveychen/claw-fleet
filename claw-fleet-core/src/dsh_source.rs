@@ -348,8 +348,11 @@ impl DshSource {
             return Ok(fresh);
         }
 
-        let value =
-            self.with_client(|client| client.call("session/list", json!({ "_request": {} })).map_err(Into::into))?;
+        let value = self.with_client(|client| {
+            client
+                .call("session/list", json!({ "_request": {} }))
+                .map_err(Into::into)
+        })?;
         *lock(roster_slot()) = Some((std::time::Instant::now(), value.clone()));
         Ok(value)
     }
@@ -400,7 +403,10 @@ impl DshSource {
     /// The launcher pid, or 0 when the server is not up. Reported as a dsh
     /// session's pid — see [`DshServer::pid`] for why it is shared.
     fn server_pid() -> u32 {
-        lock(server_slot()).as_ref().map(DshServer::pid).unwrap_or(0)
+        lock(server_slot())
+            .as_ref()
+            .map(DshServer::pid)
+            .unwrap_or(0)
     }
 
     /// The phase the downlinks report for `session_id`, if any is fresh.
@@ -615,7 +621,9 @@ where
 /// degradation here is exactly the failure the preset exists to prevent, so it
 /// is never swallowed.
 fn log_chat_preset_skip(reason: &str) {
-    eprintln!("fleet dsh: chat preset unavailable, session keeps the default composition — {reason}");
+    eprintln!(
+        "fleet dsh: chat preset unavailable, session keeps the default composition — {reason}"
+    );
 }
 
 /// Split Fleet's single `model` string into dsh's `provider` + `model` pair.
@@ -1169,7 +1177,8 @@ impl AgentSource for DshSource {
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        let mut records = history_with(id, None, |before, max| self.fetch_history(id, before, max))?;
+        let mut records =
+            history_with(id, None, |before, max| self.fetch_history(id, before, max))?;
         self.resolve_images(id, &mut records);
         records.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(records)
@@ -1177,8 +1186,9 @@ impl AgentSource for DshSource {
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        let mut records =
-            history_with(id, Some(n), |before, max| self.fetch_history(id, before, max))?;
+        let mut records = history_with(id, Some(n), |before, max| {
+            self.fetch_history(id, before, max)
+        })?;
         self.resolve_images(id, &mut records);
         records.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(records)
@@ -1244,7 +1254,12 @@ impl AgentSource for DshSource {
                     "dsh spawn: asked for session {session_id}, got {assigned}"
                 ));
             }
-            Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
+            Self::select_model(
+                client,
+                &session_id,
+                spec.model.as_deref(),
+                spec.effort.as_deref(),
+            )?;
             Self::prompt(client, &session_id, &spec.prompt)
         })?;
 
@@ -1303,7 +1318,12 @@ impl AgentSource for DshSource {
         let armed = Self::arm_turn_end(&session_id, on_exit);
 
         let started = self.with_client(|client| {
-            Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
+            Self::select_model(
+                client,
+                &session_id,
+                spec.model.as_deref(),
+                spec.effort.as_deref(),
+            )?;
             Self::prompt(client, &session_id, prompt)
         });
 
@@ -1451,8 +1471,11 @@ fn dsh_token_breakdown_from_projections(projections: &Value) -> DshTokenBreakdow
 /// a stale URI reports that instead of rendering a plausible all-zero panel.
 pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
-    let value = DshSource::new()
-        .with_client(|client| client.call("session/list", json!({ "_request": {} })).map_err(Into::into))?;
+    let value = DshSource::new().with_client(|client| {
+        client
+            .call("session/list", json!({ "_request": {} }))
+            .map_err(Into::into)
+    })?;
 
     let item = value
         .get("items")
@@ -2270,8 +2293,11 @@ fn parse_model_catalog(value: &Value) -> DshModelCatalog {
 /// Credential reference names learned from `settings/describe` (`apiKeyEnv`
 /// fields anywhere in the redacted namespace values).
 pub fn dsh_credential_refs() -> Result<Vec<String>, String> {
-    let v = DshSource::new()
-        .with_client(|client| client.call("settings/describe", json!({})).map_err(Into::into))?;
+    let v = DshSource::new().with_client(|client| {
+        client
+            .call("settings/describe", json!({}))
+            .map_err(Into::into)
+    })?;
     let mut refs = Vec::new();
     collect_api_key_envs(&v, &mut refs);
     refs.sort();
@@ -2319,7 +2345,10 @@ pub fn dsh_credentials_describe(refs: Vec<String>) -> Result<Value, String> {
 pub fn dsh_credentials_set(reference: &str, value: &str) -> Result<(), String> {
     DshSource::new().with_client(|client| {
         client
-            .call("credentials/set", json!({ "ref": reference, "value": value }))
+            .call(
+                "credentials/set",
+                json!({ "ref": reference, "value": value }),
+            )
             .map(|_| ())
             .map_err(Into::into)
     })
@@ -2336,8 +2365,11 @@ pub fn dsh_credentials_unset(reference: &str) -> Result<(), String> {
 }
 
 pub fn dsh_models() -> Result<DshModelCatalog, String> {
-    let value = DshSource::new()
-        .with_client(|client| client.call("session/modelCatalog", json!({})).map_err(Into::into))?;
+    let value = DshSource::new().with_client(|client| {
+        client
+            .call("session/modelCatalog", json!({}))
+            .map_err(Into::into)
+    })?;
     Ok(parse_model_catalog(&value))
 }
 
@@ -2450,7 +2482,10 @@ mod spend_refresh_tests {
 
         // Priced again after those tokens landed: nothing left to do.
         let caught_up = BTreeMap::from([("live".to_string(), spend_at(200, 2_743))]);
-        assert_eq!(pick_stale_spend(&infos, &updated, &caught_up, &none()), None);
+        assert_eq!(
+            pick_stale_spend(&infos, &updated, &caught_up, &none()),
+            None
+        );
     }
 
     /// A session that cannot be priced must not be retried forever.
@@ -2548,7 +2583,10 @@ mod tests {
         dsh_credentials_unset(test_ref).unwrap();
         assert_eq!(configured, Some(true));
         let desc = dsh_credentials_describe(vec![test_ref.to_string()]).unwrap();
-        assert_eq!(desc["credentials"][test_ref]["configured"].as_bool(), Some(false));
+        assert_eq!(
+            desc["credentials"][test_ref]["configured"].as_bool(),
+            Some(false)
+        );
     }
 
     /// Verbatim shape of one `session/list` item observed live.
@@ -2596,12 +2634,19 @@ mod tests {
         std::env::set_var("FLEET_HOME", tmp.path());
 
         let item = live_list_item();
-        let id = item.get("sessionId").and_then(Value::as_str).unwrap().to_string();
+        let id = item
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
 
         // Not spawned by Fleet (a session the user started in dsh's own UI):
         // it belongs in the sessions list, never in the Tasks list.
         let foreign = session_info_from_list_item(&item).expect("mapped");
-        assert!(!foreign.fleet_spawned, "an unrecorded session is not Fleet's");
+        assert!(
+            !foreign.fleet_spawned,
+            "an unrecorded session is not Fleet's"
+        );
         assert_eq!(foreign.entrypoint, None);
 
         // Spawned by Fleet: the spawn path records the marker, and the mapping
@@ -2622,7 +2667,10 @@ mod tests {
             Some(crate::session_launch::NEW_SESSION_ENTRYPOINT),
             "entrypoint must be one isFleetOwnedEntrypoint() accepts"
         );
-        assert!(!owned.is_subagent, "a spawned dsh session is a main session");
+        assert!(
+            !owned.is_subagent,
+            "a spawned dsh session is a main session"
+        );
 
         match prev {
             Some(v) => std::env::set_var("FLEET_HOME", v),
@@ -2765,7 +2813,10 @@ mod tests {
             Some("session-9ba2e49d-36d8-49d1-90bd-500d81a9a433")
         );
         assert_eq!(info.agent_type.as_deref(), Some("one-shot"));
-        assert_eq!(info.agent_description.as_deref(), Some("Read secret.txt token"));
+        assert_eq!(
+            info.agent_description.as_deref(),
+            Some("Read secret.txt token")
+        );
     }
 
     #[test]
@@ -2829,7 +2880,10 @@ mod tests {
             }
         }));
         let sel = roster_selection(&p).expect("a selection");
-        assert_eq!(sel.route.as_deref(), Some("deepseek-official/deepseek-v4-pro"));
+        assert_eq!(
+            sel.route.as_deref(),
+            Some("deepseek-official/deepseek-v4-pro")
+        );
         assert_eq!(sel.effort.as_deref(), Some("high"));
     }
 
@@ -2844,7 +2898,10 @@ mod tests {
             }
         }));
         let sel = roster_selection(&p).expect("a selection");
-        assert_eq!(sel.route.as_deref(), Some("deepseek-official/deepseek-flash"));
+        assert_eq!(
+            sel.route.as_deref(),
+            Some("deepseek-official/deepseek-flash")
+        );
         assert_eq!(sel.effort, None);
     }
 
@@ -2911,7 +2968,10 @@ mod tests {
                           "reasoningEffort": "high" }
         });
         let info = session_info_from_list_item(&item).expect("mapped");
-        assert_eq!(info.model.as_deref(), Some("deepseek-official/deepseek-v4-pro"));
+        assert_eq!(
+            info.model.as_deref(),
+            Some("deepseek-official/deepseek-v4-pro")
+        );
         assert_eq!(info.effort.as_deref(), Some("high"));
     }
 
@@ -3111,7 +3171,11 @@ mod tests {
             "the effort chip needs the same free ride as the model chip"
         );
         // A later page that names a route but no effort must not erase it.
-        merge_page(id, &[reply_event(900, "deepseek-official", "deepseek-v4-pro")], false);
+        merge_page(
+            id,
+            &[reply_event(900, "deepseek-official", "deepseek-v4-pro")],
+            false,
+        );
         assert_eq!(known_effort(id).as_deref(), Some("high"));
         forget_history(id);
     }
@@ -3328,7 +3392,9 @@ mod tests {
         /// Append one more message, as a live session would between two polls.
         fn append_message(&self, label: &str, chunks: usize) {
             let mut events = self.events.lock().unwrap();
-            let mut seq = events.last().map_or(0, |(_, e)| e["event"]["seq"].as_i64().unwrap() + 1);
+            let mut seq = events
+                .last()
+                .map_or(0, |(_, e)| e["event"]["seq"].as_i64().unwrap() + 1);
             let m = events.last().map_or(0, |(m, _)| m + 1);
             events.push((m, wire_user_event(seq, label)));
             seq += 1;
@@ -3597,7 +3663,11 @@ mod tests {
             })
         };
         let events = raw_history_with(page).expect("walk");
-        assert_eq!(events.len(), 2, "the boundary repeat is dropped: {events:?}");
+        assert_eq!(
+            events.len(),
+            2,
+            "the boundary repeat is dropped: {events:?}"
+        );
         assert_eq!(events[0]["seq"], 10, "oldest first");
         assert_eq!(events[1]["type"], "assistant/message");
         assert_eq!(
@@ -3656,7 +3726,10 @@ mod tests {
             Some(("openrouter", "anthropic/claude-haiku-4.5")),
             "the provider is the first segment; the rest is the model verbatim"
         );
-        assert_eq!(split_model("deepseek/deepseek-chat"), Some(("deepseek", "deepseek-chat")));
+        assert_eq!(
+            split_model("deepseek/deepseek-chat"),
+            Some(("deepseek", "deepseek-chat"))
+        );
     }
 
     /// A model with no provider cannot be selected, and guessing one would point
@@ -3711,8 +3784,8 @@ mod tests {
     #[test]
     fn only_a_chat_workspace_resolves_a_preset_and_it_walks_both_rpcs() {
         let _guard = crate::session::fleet_home_lock();
-        let base = std::env::temp_dir()
-            .join(format!("fleet-dsh-preset-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("fleet-dsh-preset-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("dsh-home")).unwrap();
         let prev_dsh = std::env::var_os("DSH_HOME");
@@ -3895,7 +3968,10 @@ mod tests {
 
         let pro = &cat.groups[0].models[0];
         assert_eq!(
-            pro.efforts.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            pro.efforts
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
             ["off", "low", "high", "max"]
         );
         assert_eq!(pro.efforts[3].name, "Max");
@@ -3943,7 +4019,8 @@ mod tests {
 
         // A default with no effort is still a usable model.
         let mut bare = live_models_value();
-        bare["default"] = json!({ "provider": "openrouter", "model": "anthropic/claude-haiku-4.5" });
+        bare["default"] =
+            json!({ "provider": "openrouter", "model": "anthropic/claude-haiku-4.5" });
         let cat = parse_model_catalog(&bare);
         assert_eq!(
             cat.default_spec.as_deref(),
@@ -3989,10 +4066,15 @@ mod tests {
 
         // Nothing named: no RPC at all, and `current` is never consulted.
         assert_eq!(
-            resolve_selection(None, None, || panic!("must not resolve a model for nothing")),
+            resolve_selection(None, None, || panic!(
+                "must not resolve a model for nothing"
+            )),
             None
         );
-        assert_eq!(resolve_selection(Some(""), Some(""), || unreachable!()), None);
+        assert_eq!(
+            resolve_selection(Some(""), Some(""), || unreachable!()),
+            None
+        );
 
         // Effort only, but no model can be found: drop the effort rather than
         // guess — the old behaviour, now the explicit last resort.

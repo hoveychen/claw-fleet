@@ -96,7 +96,9 @@ fn resolve<'a>(sessions: &'a [SessionInfo], needle: &str) -> Result<&'a SessionI
     let n = needle.to_lowercase();
     let hits: Vec<&SessionInfo> = sessions
         .iter()
-        .filter(|s| s.id.to_lowercase().starts_with(&n) || s.workspace_name.to_lowercase().starts_with(&n))
+        .filter(|s| {
+            s.id.to_lowercase().starts_with(&n) || s.workspace_name.to_lowercase().starts_with(&n)
+        })
         .collect();
     match hits.len() {
         0 => Err(format!(
@@ -118,7 +120,10 @@ fn resolve<'a>(sessions: &'a [SessionInfo], needle: &str) -> Result<&'a SessionI
 
 pub fn handle_inspect(args: &Value, action: &str) -> Result<String, String> {
     match action {
-        "list" => Ok(render_list(&load_sessions(), crate::mcp_control::flag(args, "all"))),
+        "list" => Ok(render_list(
+            &load_sessions(),
+            crate::mcp_control::flag(args, "all"),
+        )),
         "get" => {
             let id = crate::mcp_control::req(args, "id")?;
             let sessions = load_sessions();
@@ -176,7 +181,10 @@ fn render_detail(s: &SessionInfo) -> String {
     out.push_str(&format!("  workspace: {}\n", s.workspace_path));
     out.push_str(&format!("  status:    {}\n", status_label(&s.status)));
     out.push_str(&format!("  harness:   {}\n", s.agent_source));
-    out.push_str(&format!("  model:     {}\n", s.model.as_deref().unwrap_or("-")));
+    out.push_str(&format!(
+        "  model:     {}\n",
+        s.model.as_deref().unwrap_or("-")
+    ));
     if let Some(t) = &s.ai_title {
         out.push_str(&format!("  title:     {t}\n"));
     }
@@ -346,7 +354,8 @@ fn render_audit(level: &str, filter: Option<&str>) -> Result<String, String> {
     let scanned = selected.len();
     let mut events = Vec::new();
     for s in selected {
-        let Some(source) = crate::agent_source::find_source_for_path(&sources, &s.jsonl_path) else {
+        let Some(source) = crate::agent_source::find_source_for_path(&sources, &s.jsonl_path)
+        else {
             continue;
         };
         if let Ok(messages) = source.get_messages(&s.jsonl_path) {
@@ -401,7 +410,8 @@ fn vet_send_target<'a>(
     }
     if self_id == Some(target.id.as_str()) {
         return Err(
-            "that is this session — write the note down yourself instead of queueing it".to_string(),
+            "that is this session — write the note down yourself instead of queueing it"
+                .to_string(),
         );
     }
     Ok(target)
@@ -564,9 +574,15 @@ mod tests {
             sample("bbbbbbbb-2", "beta", SessionStatus::Executing),
         ];
         let active = render_list(&s, false);
-        assert!(active.contains("bbbbbbbb") && !active.contains("aaaaaaaa"), "{active}");
+        assert!(
+            active.contains("bbbbbbbb") && !active.contains("aaaaaaaa"),
+            "{active}"
+        );
         let all = render_list(&s, true);
-        assert!(all.contains("aaaaaaaa") && all.contains("bbbbbbbb"), "{all}");
+        assert!(
+            all.contains("aaaaaaaa") && all.contains("bbbbbbbb"),
+            "{all}"
+        );
         // An empty active view must point at the escape hatch, not read as
         // "there are no sessions at all".
         let only_idle = vec![sample("cccccccc-3", "gamma", SessionStatus::Idle)];

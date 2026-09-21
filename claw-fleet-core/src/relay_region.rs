@@ -66,7 +66,11 @@ fn detect_country_uncached() -> Option<String> {
     // POSIX locale envs, in the precedence order the C library uses. Present
     // for a terminal-launched `fleet`, usually absent for a GUI-launched app.
     for key in ["LC_ALL", "LC_MESSAGES", "LANG"] {
-        if let Some(c) = std::env::var(key).ok().as_deref().and_then(country_from_locale) {
+        if let Some(c) = std::env::var(key)
+            .ok()
+            .as_deref()
+            .and_then(country_from_locale)
+        {
             return Some(c);
         }
     }

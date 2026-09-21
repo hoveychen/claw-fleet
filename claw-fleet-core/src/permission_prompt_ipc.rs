@@ -200,10 +200,8 @@ mod tests {
         let back: PermissionPromptResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(back.decision, PermissionPromptDecision::Allow);
 
-        let deny: PermissionPromptResponse = serde_json::from_str(
-            r#"{"id":"x","decision":"deny","reason":"nope"}"#,
-        )
-        .unwrap();
+        let deny: PermissionPromptResponse =
+            serde_json::from_str(r#"{"id":"x","decision":"deny","reason":"nope"}"#).unwrap();
         assert_eq!(deny.decision, PermissionPromptDecision::Deny);
         assert_eq!(deny.reason.as_deref(), Some("nope"));
     }

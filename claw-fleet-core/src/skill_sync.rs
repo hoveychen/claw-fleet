@@ -471,8 +471,7 @@ pub fn inventory() -> Result<Vec<SkillSyncEntry>, String> {
             .is_some_and(|(canonical, path)| points_to(path, canonical));
         // A runtime this skill deliberately skips counts as satisfied: absence
         // there is the goal, not damage to repair.
-        let claude_ok =
-            claude_managed || !is_expected(&slug, SkillTarget::ClaudeCode);
+        let claude_ok = claude_managed || !is_expected(&slug, SkillTarget::ClaudeCode);
         let codex_ok = codex_managed || !is_expected(&slug, SkillTarget::Codex);
         let state = if canonical_path.is_none() {
             SkillSyncState::Unmanaged
@@ -946,10 +945,7 @@ mod tests {
         );
         let error = unlink("foreign", SkillTarget::Codex).unwrap_err();
         assert!(error.contains("unmanaged"));
-        assert!(temp
-            .path()
-            .join(".codex/skills/foreign/SKILL.md")
-            .is_file());
+        assert!(temp.path().join(".codex/skills/foreign/SKILL.md").is_file());
     }
 
     #[test]
@@ -1225,7 +1221,9 @@ mod tests {
         );
         adopt(&source.join(SKILL_FILE)).unwrap();
         assert!(
-            temp.path().join(".codex/skills/codex-dir/SKILL.md").exists(),
+            temp.path()
+                .join(".codex/skills/codex-dir/SKILL.md")
+                .exists(),
             "Codex projection must land in ~/.codex/skills"
         );
         assert!(
@@ -1251,7 +1249,9 @@ mod tests {
         // Toggle on — should collect the already-present skill right away.
         set_auto_sync_enabled(true).unwrap();
         assert!(
-            temp.path().join(".fleet/skills/preexisting/SKILL.md").is_file(),
+            temp.path()
+                .join(".fleet/skills/preexisting/SKILL.md")
+                .is_file(),
             "enabling auto-sync should adopt the pre-existing skill immediately"
         );
     }

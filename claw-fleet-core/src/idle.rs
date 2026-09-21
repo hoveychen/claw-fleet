@@ -73,7 +73,9 @@ pub fn mark_turn_start(session_id: &str) -> Result<(), String> {
 pub fn read_turn_start(session_id: &str) -> Option<u64> {
     let path = turn_start_path(session_id)?;
     let body = fs::read_to_string(path).ok()?;
-    serde_json::from_str::<IdleRecord>(&body).ok().map(|r| r.since)
+    serde_json::from_str::<IdleRecord>(&body)
+        .ok()
+        .map(|r| r.since)
 }
 
 /// Clear a session's idle sentinel. Idempotent — missing file is OK.
@@ -89,7 +91,9 @@ mod tests {
 
     #[test]
     fn idle_record_round_trips_through_json() {
-        let rec = IdleRecord { since: 1_700_000_000_000 };
+        let rec = IdleRecord {
+            since: 1_700_000_000_000,
+        };
         let s = serde_json::to_string(&rec).unwrap();
         let back: IdleRecord = serde_json::from_str(&s).unwrap();
         assert_eq!(back.since, rec.since);

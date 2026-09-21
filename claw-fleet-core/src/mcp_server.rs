@@ -289,7 +289,11 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
 /// the only one available and how the caller is told apart.
 fn refuse_if_subagent(name: &str, effect: &str, args: &Value) -> Option<Value> {
     let agent_type = crate::subagent_caller::detect_tool_caller(&current_session_id(), name, args)?;
-    Some(tool_error(crate::subagent_caller::subagent_tool_refusal(name, effect, &agent_type)))
+    Some(tool_error(crate::subagent_caller::subagent_tool_refusal(
+        name,
+        effect,
+        &agent_type,
+    )))
 }
 
 /// Handed back when a session that has already registered a `fleet handoff`
@@ -368,7 +372,9 @@ fn resolve_workspace_cwd() -> std::path::PathBuf {
         .ok()
         .filter(|d| !d.trim().is_empty())
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        })
 }
 
 /// Shared arg plumbing for both image tools.
@@ -698,7 +704,11 @@ fn handle_set_session_title_call(params: &Value) -> Result<Value, JsonRpcError> 
         title.to_string(),
     ) {
         Ok(outcome) => outcome,
-        Err(error) => return Ok(tool_error(format!("Failed to set Fleet session title: {error}"))),
+        Err(error) => {
+            return Ok(tool_error(format!(
+                "Failed to set Fleet session title: {error}"
+            )))
+        }
     };
 
     if outcome == crate::session_title::AgentTitleOutcome::ManualTitlePreserved {
@@ -765,7 +775,10 @@ struct InflightGuard {
 
 impl InflightGuard {
     fn new(session_id: &str, request_id: &str) -> Self {
-        Self { session_id: session_id.to_string(), request_id: request_id.to_string() }
+        Self {
+            session_id: session_id.to_string(),
+            request_id: request_id.to_string(),
+        }
     }
 }
 
@@ -865,7 +878,11 @@ fn normalize_option_label(label: &str) -> Option<String> {
     let norm = norm
         .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')
         .trim();
-    if norm.is_empty() { None } else { Some(norm.to_string()) }
+    if norm.is_empty() {
+        None
+    } else {
+        Some(norm.to_string())
+    }
 }
 
 /// What [`strip_hand_rolled_end_options`] removed from a `fleet__ask` payload.
@@ -911,7 +928,10 @@ impl StrippedEndOptions {
 fn strip_hand_rolled_end_options(
     questions: &mut [crate::mcp_ipc::FleetAskQuestion],
 ) -> StrippedEndOptions {
-    let mut out = StrippedEndOptions { labels: Vec::new(), implies_complete: false };
+    let mut out = StrippedEndOptions {
+        labels: Vec::new(),
+        implies_complete: false,
+    };
     for q in questions.iter_mut() {
         q.options.retain(|o| {
             if !is_hand_rolled_end_option(&o.label) {
@@ -929,19 +949,19 @@ fn strip_hand_rolled_end_options(
 
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
-    let mut questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
-        match args.get("questions").cloned() {
-            Some(q) => serde_json::from_value(q).map_err(|e| JsonRpcError {
+    let mut questions: Vec<crate::mcp_ipc::FleetAskQuestion> = match args.get("questions").cloned()
+    {
+        Some(q) => serde_json::from_value(q).map_err(|e| JsonRpcError {
+            code: -32602,
+            message: format!("Invalid `questions` payload: {e}"),
+        })?,
+        None => {
+            return Err(JsonRpcError {
                 code: -32602,
-                message: format!("Invalid `questions` payload: {e}"),
-            })?,
-            None => {
-                return Err(JsonRpcError {
-                    code: -32602,
-                    message: "Missing `questions` argument".into(),
-                });
-            }
-        };
+                message: "Missing `questions` argument".into(),
+            });
+        }
+    };
     if questions.is_empty() {
         return Err(JsonRpcError {
             code: -32602,
@@ -972,9 +992,10 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     // free-text escape hatch is still answerable and bouncing the call would
     // undo the repair.
     let min_options = if stripped.is_empty() { 2 } else { 1 };
-    if let Some(idx) = questions.iter().position(|q| {
-        q.options.len() < min_options && q.html.is_none() && q.form_fields.is_empty()
-    }) {
+    if let Some(idx) = questions
+        .iter()
+        .position(|q| q.options.len() < min_options && q.html.is_none() && q.form_fields.is_empty())
+    {
         return Err(JsonRpcError {
             code: -32602,
             message: if stripped.is_empty() {
@@ -1018,7 +1039,10 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     // parent and the terminal button on that card closes the *parent's* task —
     // see `subagent_caller` for the 2026-09-08 case that motivated this. Refuse
     // it and tell the agent to hand its report back to the parent as text.
-    let first_question = questions.first().map(|q| q.question.as_str()).unwrap_or_default();
+    let first_question = questions
+        .first()
+        .map(|q| q.question.as_str())
+        .unwrap_or_default();
     if let Some(agent_type) = crate::subagent_caller::detect_ask_caller(&session_id, first_question)
     {
         return Ok(tool_error(format!(
@@ -1038,7 +1062,10 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     // A dropped 「收工」-style option *was* the agent's terminal intent, so fold
     // it into the flag the permanent button actually reads. An explicit
     // `taskComplete: true` still wins over a dropped 「放弃任务」.
-    let task_complete = args.get("taskComplete").and_then(|v| v.as_bool()).unwrap_or(false)
+    let task_complete = args
+        .get("taskComplete")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
         || stripped.implies_complete;
 
     // Chain-completion gate: a `taskComplete: true` card from a session that is
@@ -1103,11 +1130,15 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     // and blank their local paths, so the card can load them through the
     // `fleet-decision://` protocol instead of base64-inlined `html`.
     if let Err(e) = crate::mcp_ipc::ingest_images(&mut req) {
-        return Ok(tool_error(format!("Failed to stage fleet__ask images: {e}")));
+        return Ok(tool_error(format!(
+            "Failed to stage fleet__ask images: {e}"
+        )));
     }
 
     if let Err(e) = crate::mcp_ipc::write_request(&req) {
-        return Ok(tool_error(format!("Failed to queue fleet__ask request: {e}")));
+        return Ok(tool_error(format!(
+            "Failed to queue fleet__ask request: {e}"
+        )));
     }
 
     // Poll for the response, watching the consumer heartbeat so we exit
@@ -1222,9 +1253,9 @@ fn persist_fleet_ask_history(
         answers,
         chrono::Utc::now().to_rfc3339(),
     );
-    if let Err(e) =
-        crate::decision_history::append_record(&crate::decision_history::DecisionHistoryRecord::FleetAsk(rec))
-    {
+    if let Err(e) = crate::decision_history::append_record(
+        &crate::decision_history::DecisionHistoryRecord::FleetAsk(rec),
+    ) {
         eprintln!("decision_history append (fleet__ask): {e}");
     }
 }
@@ -1495,9 +1526,7 @@ mod tests {
         // with the repo name, not the task-id leaf — same contract as the
         // session list. Buggy behaviour took only PathBuf::file_name().
         assert_eq!(
-            workspace_name_from_project_dir(Some(
-                "/Users/x/claude-fleet/.worktrees/some-plan"
-            )),
+            workspace_name_from_project_dir(Some("/Users/x/claude-fleet/.worktrees/some-plan")),
             "claude-fleet"
         );
         // Non-worktree path still yields its basename; unset stays empty.
@@ -1718,7 +1747,10 @@ mod tests {
     fn generator_points_at_the_edit_tool() {
         // An agent that doesn't know the follow-up path exists will regenerate
         // from scratch and lose the previous image from context.
-        let desc = image_tool_def()["description"].as_str().unwrap().to_string();
+        let desc = image_tool_def()["description"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert!(desc.contains("fleet__image_edit"), "{desc}");
         assert!(desc.contains("thread_id"), "{desc}");
     }
@@ -1753,7 +1785,10 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(text.starts_with("thread_id: 01a06fc8"), "{text}");
-        assert!(text.contains("fleet__image_edit"), "must name the follow-up: {text}");
+        assert!(
+            text.contains("fleet__image_edit"),
+            "must name the follow-up: {text}"
+        );
         assert!(text.contains("/d/a.png (42 bytes)"), "{text}");
         assert!(text.contains("[command] sips -z 1024 1024 a.png"), "{text}");
         assert!(text.contains("saved it"), "{text}");
@@ -1802,10 +1837,7 @@ mod tests {
             ALWAYS_ON_TOOL_NAMES.len(),
             "non-Fleet session sees only the always-on tools"
         );
-        let names: Vec<&str> = tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"fleet__ask"));
         assert!(names.contains(&"fleet__render_a2ui"));
         assert!(names.contains(&"fleet__permission_prompt"));
@@ -1819,7 +1851,10 @@ mod tests {
         assert!(pp["inputSchema"]["properties"].get("input").is_some());
         let ask = tools.iter().find(|t| t["name"] == "fleet__ask").unwrap();
         let schema = &ask["inputSchema"]["properties"]["questions"]["items"]["properties"];
-        assert!(schema.get("html").is_some(), "html field present in fleet__ask schema");
+        assert!(
+            schema.get("html").is_some(),
+            "html field present in fleet__ask schema"
+        );
         assert!(
             schema.get("formFields").is_some(),
             "formFields field present in fleet__ask schema (camelCase)"
@@ -1869,7 +1904,10 @@ mod tests {
         );
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         for control in crate::mcp_control::CONTROL_TOOL_NAMES {
-            assert!(names.contains(&control), "{control} must be advertised to Fleet sessions");
+            assert!(
+                names.contains(&control),
+                "{control} must be advertised to Fleet sessions"
+            );
         }
         // The UI tools remain present alongside them.
         assert!(names.contains(&"fleet__ask"));
@@ -1878,10 +1916,8 @@ mod tests {
     #[test]
     fn set_session_title_call_persists_for_current_session() {
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-mcp-session-title-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet-mcp-session-title-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let previous_home = std::env::var_os("FLEET_HOME");
@@ -1901,7 +1937,10 @@ mod tests {
             }
         });
         let resp = call(&req.to_string()).expect("response");
-        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert!(
+            resp.get("error").is_none(),
+            "expected ok envelope, got {resp}"
+        );
         assert_eq!(resp["result"]["isError"], false);
         assert_eq!(
             crate::session_title::read("session-title-test").as_deref(),
@@ -1927,8 +1966,8 @@ mod tests {
     #[test]
     fn cards_are_refused_once_a_handoff_is_registered() {
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir()
-            .join(format!("fleet-mcp-handoff-card-{}", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet-mcp-handoff-card-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let previous_home = std::env::var_os("FLEET_HOME");
@@ -2004,9 +2043,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
 
         for (label, resp) in [("fleet__ask", ask), ("fleet__render_a2ui", a2ui)] {
-            assert!(resp.get("error").is_none(), "{label}: expected ok envelope, got {resp}");
-            assert_eq!(resp["result"]["isError"], true, "{label}: must refuse, got {resp}");
-            let text = resp["result"]["content"][0]["text"].as_str().unwrap_or_default();
+            assert!(
+                resp.get("error").is_none(),
+                "{label}: expected ok envelope, got {resp}"
+            );
+            assert_eq!(
+                resp["result"]["isError"], true,
+                "{label}: must refuse, got {resp}"
+            );
+            let text = resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default();
             assert!(
                 text.contains("fleet handoff"),
                 "{label}: refusal must name the registered relay, got {text}"
@@ -2031,12 +2078,7 @@ mod tests {
         });
         let resp = call(&req.to_string()).expect("response");
         assert_eq!(resp["error"]["code"], -32602);
-        assert!(
-            resp["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("blank")
-        );
+        assert!(resp["error"]["message"].as_str().unwrap().contains("blank"));
     }
 
     #[test]
@@ -2046,10 +2088,8 @@ mod tests {
         // Force an empty FLEET_HOME (no heartbeat file) so the consumer-check
         // resolves to "not alive" regardless of the dev's machine state.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-ask-no-consumer-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet-ask-no-consumer-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock`; no other thread is
@@ -2088,7 +2128,10 @@ mod tests {
 
         // JSON-RPC envelope succeeded (no `error` member); the tool itself
         // reports the failure via `isError: true` per MCP spec.
-        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert!(
+            resp.get("error").is_none(),
+            "expected ok envelope, got {resp}"
+        );
         assert_eq!(resp["result"]["isError"], true);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(
@@ -2138,8 +2181,8 @@ mod tests {
         // `isError` envelope rather than a JSON-RPC error — proving the guard,
         // not the heartbeat, is what rejects it.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir()
-            .join(format!("fleet-ask-unanswerable-{}", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet-ask-unanswerable-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock`.
@@ -2263,8 +2306,7 @@ mod tests {
         // the (not-alive) consumer check and come back as an `isError`
         // envelope, so a JSON-RPC -32602 proves *this* guard rejected it.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir()
-            .join(format!("fleet-ask-end-option-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("fleet-ask-end-option-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock`.
@@ -2315,8 +2357,10 @@ mod tests {
         // pass condition, and it also proves the relaxed min-option count holds
         // when the strip leaves exactly one.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir()
-            .join(format!("fleet-ask-end-option-repair-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-ask-end-option-repair-{}",
+            std::process::id()
+        ));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock`.
@@ -2365,8 +2409,8 @@ mod tests {
         // finishing something. Reaching the consumer check (isError, not a
         // -32602 envelope) is the pass condition.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir()
-            .join(format!("fleet-ask-end-option-neg-{}", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet-ask-end-option-neg-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock`.
@@ -2415,10 +2459,7 @@ mod tests {
         // has to be a parseable {"behavior":"deny"} payload, because the
         // caller is Claude Code's permission machinery, not the agent.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-pp-no-consumer-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("fleet-pp-no-consumer-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock` (matches fleet__ask sibling test).
@@ -2448,13 +2489,19 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&tmp);
 
-        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert!(
+            resp.get("error").is_none(),
+            "expected ok envelope, got {resp}"
+        );
         assert_eq!(resp["result"]["isError"], false);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let payload: Value = serde_json::from_str(text).expect("contract JSON");
         assert_eq!(payload["behavior"], "deny");
         assert!(
-            payload["message"].as_str().unwrap().contains("denied by default"),
+            payload["message"]
+                .as_str()
+                .unwrap()
+                .contains("denied by default"),
             "unexpected message: {payload}"
         );
     }
@@ -2477,10 +2524,8 @@ mod tests {
     #[test]
     fn tools_call_a2ui_without_consumer_returns_structured_error() {
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-a2ui-no-consumer-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet-a2ui-no-consumer-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by `fleet_home_lock` (matches fleet__ask sibling test).
@@ -2513,7 +2558,10 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&tmp);
 
-        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert!(
+            resp.get("error").is_none(),
+            "expected ok envelope, got {resp}"
+        );
         assert_eq!(resp["result"]["isError"], true);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(
@@ -2566,14 +2614,15 @@ mod tests {
 
     #[test]
     fn unknown_method_returns_method_not_found() {
-        let resp = call(r#"{"jsonrpc":"2.0","id":5,"method":"unknown/x","params":{}}"#)
-            .expect("response");
+        let resp =
+            call(r#"{"jsonrpc":"2.0","id":5,"method":"unknown/x","params":{}}"#).expect("response");
         assert_eq!(resp["error"]["code"], -32601);
     }
 
     #[test]
     fn notification_returns_no_response() {
-        let resp = handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#);
+        let resp =
+            handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#);
         assert!(resp.is_none());
     }
 

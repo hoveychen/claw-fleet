@@ -336,7 +336,10 @@ where
     Ok(items
         .into_iter()
         .map(|i| match i {
-            Item::Legacy(pid) => HolderEntry { pid, start_time_secs: 0 },
+            Item::Legacy(pid) => HolderEntry {
+                pid,
+                start_time_secs: 0,
+            },
             Item::New(e) => e,
         })
         .collect())
@@ -353,11 +356,8 @@ pub fn is_process_alive(pid: u32) -> bool {
     const STILL_ACTIVE: u32 = 259;
     const ERROR_INVALID_PARAMETER: u32 = 87;
     extern "system" {
-        fn OpenProcess(
-            dw_desired_access: u32,
-            b_inherit_handle: i32,
-            dw_process_id: u32,
-        ) -> Handle;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
+            -> Handle;
         fn CloseHandle(h_object: Handle) -> i32;
         fn GetExitCodeProcess(h_process: Handle, lp_exit_code: *mut u32) -> i32;
         fn GetLastError() -> u32;
@@ -460,10 +460,7 @@ fn newest_transcript_cwd(project_dir: &std::path::Path) -> Option<String> {
 #[cfg(any(not(unix), test))]
 pub(crate) fn windows_drive_split<'a>(parts: &'a [&'a str]) -> Option<(&'a str, &'a [&'a str])> {
     let first = parts.first()?;
-    if first.len() == 1
-        && first.as_bytes()[0].is_ascii_alphabetic()
-        && parts.get(1) == Some(&"")
-    {
+    if first.len() == 1 && first.as_bytes()[0].is_ascii_alphabetic() && parts.get(1) == Some(&"") {
         Some((first, &parts[2..]))
     } else {
         None
@@ -797,11 +794,7 @@ pub(crate) fn workspace_name(path: &str) -> String {
             return segments[idx - 1].to_string();
         }
     }
-    segments
-        .last()
-        .copied()
-        .unwrap_or(path)
-        .to_string()
+    segments.last().copied().unwrap_or(path).to_string()
 }
 
 /// Collapse an in-repo worktree checkout to its repo root *path*.
@@ -890,7 +883,10 @@ mod repo_root_path_tests {
             "/Users/x/proj/.worktrees/a",
             "/Users/x/proj/.worktrees/b"
         ));
-        assert!(same_repo_root("/Users/x/proj/.worktrees/a", "/Users/x/proj"));
+        assert!(same_repo_root(
+            "/Users/x/proj/.worktrees/a",
+            "/Users/x/proj"
+        ));
     }
 
     #[test]
@@ -970,4 +966,3 @@ mod claude_config_dir_tests {
         );
     }
 }
-

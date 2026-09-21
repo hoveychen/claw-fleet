@@ -93,10 +93,7 @@ fn probe_claude() -> HarnessStatus {
     // A live `--version` beats the version parsed out of an extension dir
     // name: the dir name is the bundle's version, not necessarily what the
     // binary reports after a self-update.
-    let version = path
-        .as_deref()
-        .and_then(probe_version)
-        .or(dir_version);
+    let version = path.as_deref().and_then(probe_version).or(dir_version);
 
     let (logged_in, auth_detail) = match crate::account::read_keychain_credentials() {
         Ok((_token, subscription)) => (Some(true), Some(subscription)),
@@ -146,7 +143,10 @@ fn claude_channel_for_path_hit(path: &Path) -> &'static str {
         "native-installer"
     } else if canon.contains("node_modules") {
         "npm-global"
-    } else if canon.contains("/Cellar/") || canon.contains("/Caskroom/") || canon.contains("/homebrew/") {
+    } else if canon.contains("/Cellar/")
+        || canon.contains("/Caskroom/")
+        || canon.contains("/homebrew/")
+    {
         "homebrew"
     } else {
         "path"
@@ -167,8 +167,7 @@ fn probe_codex() -> HarnessStatus {
     };
 
     let version = path.as_deref().and_then(probe_version);
-    let (logged_in, auth_detail) =
-        codex_auth_state(crate::codex_launch::codex_home().as_deref());
+    let (logged_in, auth_detail) = codex_auth_state(crate::codex_launch::codex_home().as_deref());
 
     HarnessStatus {
         source: "codex".to_string(),
@@ -329,7 +328,10 @@ pub(crate) fn probe_version(bin: &str) -> Option<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    cmd.env("PATH", crate::session_launch::augmented_path_with_front(&[]));
+    cmd.env(
+        "PATH",
+        crate::session_launch::augmented_path_with_front(&[]),
+    );
 
     let child = cmd.spawn().ok()?;
     let child_id = child.id();
@@ -359,7 +361,11 @@ pub(crate) fn parse_version_token(output: &str) -> Option<String> {
         .find(|l| !l.trim().is_empty())?
         .split_whitespace()
         .find(|tok| {
-            tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && tok.contains('.')
+            tok.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+                && tok.contains('.')
         })
         .map(|s| s.to_string())
 }
@@ -379,7 +385,10 @@ mod tests {
             parse_version_token("codex-cli 0.148.0").as_deref(),
             Some("0.148.0")
         );
-        assert_eq!(parse_version_token("0.1.1-rc.2").as_deref(), Some("0.1.1-rc.2"));
+        assert_eq!(
+            parse_version_token("0.1.1-rc.2").as_deref(),
+            Some("0.1.1-rc.2")
+        );
     }
 
     #[test]
@@ -477,7 +486,9 @@ mod tests {
         }
         assert_eq!(claude_channel_for_path_hit(&real), "native-installer");
 
-        let npm = tmp.path().join("lib/node_modules/@anthropic-ai/claude-code/cli.js");
+        let npm = tmp
+            .path()
+            .join("lib/node_modules/@anthropic-ai/claude-code/cli.js");
         std::fs::create_dir_all(npm.parent().unwrap()).unwrap();
         std::fs::write(&npm, b"js").unwrap();
         assert_eq!(claude_channel_for_path_hit(&npm), "npm-global");
@@ -544,7 +555,10 @@ mod tests {
         );
         assert!(old.installed, "an old dsh is still installed");
         assert!(old.outdated, "0.1.1 must be flagged outdated");
-        assert_eq!(old.min_version.as_deref(), Some(crate::dsh_server::MIN_VERSION));
+        assert_eq!(
+            old.min_version.as_deref(),
+            Some(crate::dsh_server::MIN_VERSION)
+        );
 
         // The 0.1.2 wire-contract build is now below the content floor and
         // must be flagged, not silently accepted.
@@ -570,12 +584,12 @@ mod tests {
         let missing = dsh_status_from_probe(None, None, None);
         assert!(!missing.installed);
         assert!(!missing.outdated);
-        let unknown = dsh_status_from_probe(
-            Some("/usr/local/bin/dsh".to_string()),
-            Some("path"),
-            None,
+        let unknown =
+            dsh_status_from_probe(Some("/usr/local/bin/dsh".to_string()), Some("path"), None);
+        assert!(
+            !unknown.outdated,
+            "an unreadable version must not read as old"
         );
-        assert!(!unknown.outdated, "an unreadable version must not read as old");
     }
 
     /// Manual smoke probe against the real machine — run with

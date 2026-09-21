@@ -278,8 +278,8 @@ impl ReportStore {
     pub fn save_report(&self, report: &DailyReport) -> Result<(), String> {
         let metrics_json =
             serde_json::to_string(&report.metrics).map_err(|e| format!("json encode: {e}"))?;
-        let session_ids_json = serde_json::to_string(&report.session_ids)
-            .map_err(|e| format!("json encode: {e}"))?;
+        let session_ids_json =
+            serde_json::to_string(&report.session_ids).map_err(|e| format!("json encode: {e}"))?;
         let lessons_json = match &report.lessons {
             Some(l) => Some(serde_json::to_string(l).map_err(|e| format!("json encode: {e}"))?),
             None => None,
@@ -304,8 +304,7 @@ impl ReportStore {
             )
             .map_err(|e| format!("insert report: {e}"))?;
 
-        let total_tokens =
-            report.metrics.total_input_tokens + report.metrics.total_output_tokens;
+        let total_tokens = report.metrics.total_input_tokens + report.metrics.total_output_tokens;
 
         self.conn
             .execute(
@@ -363,13 +362,26 @@ impl ReportStore {
 
         match result {
             None => Ok(None),
-            Some((date, timezone, generated_at, metrics_json, ai_summary, ai_summary_generated_at, session_ids_json, lessons_json, lessons_generated_at)) => {
+            Some((
+                date,
+                timezone,
+                generated_at,
+                metrics_json,
+                ai_summary,
+                ai_summary_generated_at,
+                session_ids_json,
+                lessons_json,
+                lessons_generated_at,
+            )) => {
                 let metrics: DailyMetrics = serde_json::from_str(&metrics_json)
                     .map_err(|e| format!("json decode metrics: {e}"))?;
                 let session_ids: Vec<String> = serde_json::from_str(&session_ids_json)
                     .map_err(|e| format!("json decode session_ids: {e}"))?;
                 let lessons: Option<Vec<Lesson>> = match lessons_json {
-                    Some(j) => Some(serde_json::from_str(&j).map_err(|e| format!("json decode lessons: {e}"))?),
+                    Some(j) => Some(
+                        serde_json::from_str(&j)
+                            .map_err(|e| format!("json decode lessons: {e}"))?,
+                    ),
                     None => None,
                 };
                 Ok(Some(DailyReport {
@@ -630,14 +642,21 @@ fn extract_session_activity_for_date(
             .get("timestamp")
             .and_then(Value::as_str)
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+            .map(|dt| {
+                dt.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d")
+                    .to_string()
+            })
         else {
             continue;
         };
         if turn_date != date {
             continue;
         }
-        let msg_id = message.get("id").and_then(Value::as_str).unwrap_or_default();
+        let msg_id = message
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if !msg_id.is_empty() && !seen_msg_ids.insert(msg_id.to_string()) {
             continue;
         }
@@ -717,9 +736,8 @@ pub fn generate_report_from_sessions(
                 .saturating_add(cache_creation)
                 .saturating_add(line.cache_read_tokens);
             metrics.output_tokens = metrics.output_tokens.saturating_add(line.output_tokens);
-            metrics.cache_creation_tokens = metrics
-                .cache_creation_tokens
-                .saturating_add(cache_creation);
+            metrics.cache_creation_tokens =
+                metrics.cache_creation_tokens.saturating_add(cache_creation);
             metrics.cache_creation_1h_tokens = metrics
                 .cache_creation_1h_tokens
                 .saturating_add(line.cache_creation_1h_tokens);
@@ -736,7 +754,11 @@ pub fn generate_report_from_sessions(
         if model_lines.is_empty() && metrics.tool_calls.is_empty() {
             continue;
         }
-        session_data.push(SessionData { metrics, model_lines, info: i });
+        session_data.push(SessionData {
+            metrics,
+            model_lines,
+            info: i,
+        });
     }
 
     // Group by workspace_path
@@ -857,9 +879,8 @@ pub fn generate_report_from_sessions(
                     .saturating_add(cache_creation)
                     .saturating_add(line.cache_read_tokens);
                 entry.output_tokens = entry.output_tokens.saturating_add(line.output_tokens);
-                entry.cache_creation_tokens = entry
-                    .cache_creation_tokens
-                    .saturating_add(cache_creation);
+                entry.cache_creation_tokens =
+                    entry.cache_creation_tokens.saturating_add(cache_creation);
                 entry.cache_creation_1h_tokens = entry
                     .cache_creation_1h_tokens
                     .saturating_add(line.cache_creation_1h_tokens);
@@ -869,9 +890,7 @@ pub fn generate_report_from_sessions(
                 entry.cost_usd += line.cost_usd;
             }
 
-            *source_breakdown
-                .entry(si.agent_source.clone())
-                .or_insert(0) += 1;
+            *source_breakdown.entry(si.agent_source.clone()).or_insert(0) += 1;
 
             // Hourly activity from created_at_ms
             if si.created_at_ms > 0 {
@@ -1053,11 +1072,30 @@ fn strip_summary_preamble(summary: &str) -> String {
     let lower = first.to_lowercase();
     let has_opener = [
         // English announcement openers
-        "generating", "here is", "here's", "here are", "below is", "below are",
-        "i'll", "i will", "let me", "as requested", "based on the provided",
-        "based purely on the provided", "sure,", "certainly", "of course",
+        "generating",
+        "here is",
+        "here's",
+        "here are",
+        "below is",
+        "below are",
+        "i'll",
+        "i will",
+        "let me",
+        "as requested",
+        "based on the provided",
+        "based purely on the provided",
+        "sure,",
+        "certainly",
+        "of course",
         // Chinese announcement openers
-        "以下是", "以下为", "下面是", "这是", "这份", "好的", "根据提供的", "根据以上",
+        "以下是",
+        "以下为",
+        "下面是",
+        "这是",
+        "这份",
+        "好的",
+        "根据提供的",
+        "根据以上",
     ]
     .iter()
     .any(|m| lower.contains(m));
@@ -1110,8 +1148,14 @@ pub fn generate_ai_summary_routed(
     locale: &str,
 ) -> Option<String> {
     for route in crate::llm_provider::daily_report_routes(config) {
-        log_debug(&format!("[daily_report] trying summary provider '{}' model '{}'", route.provider.name(), route.model));
-        if let Some(summary) = generate_ai_summary(route.provider.as_ref(), &route.model, report, locale) {
+        log_debug(&format!(
+            "[daily_report] trying summary provider '{}' model '{}'",
+            route.provider.name(),
+            route.model
+        ));
+        if let Some(summary) =
+            generate_ai_summary(route.provider.as_ref(), &route.model, report, locale)
+        {
             return Some(summary);
         }
     }
@@ -1198,9 +1242,7 @@ pub fn extract_conversation_pairs(
 /// `CLAUDE.md` files so the lesson generator can avoid producing duplicates.
 fn collect_existing_rules(workspace_paths: &[String]) -> String {
     let mut sections = Vec::new();
-    let truncate = |s: &str| -> String {
-        s.chars().take(2000).collect()
-    };
+    let truncate = |s: &str| -> String { s.chars().take(2000).collect() };
 
     // 1. Global ~/.claude/CLAUDE.md
     if let Some(claude_dir) = crate::session::get_claude_dir() {
@@ -1263,7 +1305,9 @@ fn build_decision_signals_section(
             body.push_str("  User REJECTED the AI's proposal.\n\n");
         } else {
             let choice: String = ctx.user_choice.chars().take(400).collect();
-            body.push_str(&format!("  User instead answered (\"Other\"): {choice}\n\n"));
+            body.push_str(&format!(
+                "  User instead answered (\"Other\"): {choice}\n\n"
+            ));
         }
     }
 
@@ -1380,10 +1424,18 @@ fn parse_lessons(output: &str, pairs: &[ConversationPair]) -> Vec<Lesson> {
             // Flush previous
             if let (Some(content), Some(reason)) = (current_content.take(), current_reason.take()) {
                 let workspace = current_workspace.take().unwrap_or_else(|| {
-                    pairs.first().map(|p| p.workspace_name.clone()).unwrap_or_default()
+                    pairs
+                        .first()
+                        .map(|p| p.workspace_name.clone())
+                        .unwrap_or_default()
                 });
                 let session = current_session.take().unwrap_or_default();
-                lessons.push(Lesson { content, reason, workspace_name: workspace, session_id: session });
+                lessons.push(Lesson {
+                    content,
+                    reason,
+                    workspace_name: workspace,
+                    session_id: session,
+                });
             }
             current_content = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("REASON:") {
@@ -1398,10 +1450,18 @@ fn parse_lessons(output: &str, pairs: &[ConversationPair]) -> Vec<Lesson> {
     // Flush final
     if let (Some(content), Some(reason)) = (current_content, current_reason) {
         let workspace = current_workspace.unwrap_or_else(|| {
-            pairs.first().map(|p| p.workspace_name.clone()).unwrap_or_default()
+            pairs
+                .first()
+                .map(|p| p.workspace_name.clone())
+                .unwrap_or_default()
         });
         let session = current_session.unwrap_or_default();
-        lessons.push(Lesson { content, reason, workspace_name: workspace, session_id: session });
+        lessons.push(Lesson {
+            content,
+            reason,
+            workspace_name: workspace,
+            session_id: session,
+        });
     }
 
     lessons
@@ -1577,8 +1637,14 @@ pub fn generate_lessons_routed(
     locale: &str,
 ) -> Option<Vec<Lesson>> {
     for route in crate::llm_provider::daily_report_routes(config) {
-        log_debug(&format!("[daily_report] trying lessons provider '{}' model '{}'", route.provider.name(), route.model));
-        if let Some(lessons) = generate_lessons(route.provider.as_ref(), &route.model, report, locale) {
+        log_debug(&format!(
+            "[daily_report] trying lessons provider '{}' model '{}'",
+            route.provider.name(),
+            route.model
+        ));
+        if let Some(lessons) =
+            generate_lessons(route.provider.as_ref(), &route.model, report, locale)
+        {
             return Some(lessons);
         }
     }
@@ -1631,10 +1697,8 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
         // Decode workspace path from directory name
         let stripped = encoded_name.trim_start_matches('-');
         let parts: Vec<&str> = stripped.split('-').collect();
-        let workspace_path = crate::session::heal_workspace_path(
-            &ws_path,
-            decode_workspace_path_with_parts(&parts),
-        );
+        let workspace_path =
+            crate::session::heal_workspace_path(&ws_path, decode_workspace_path_with_parts(&parts));
         // Shared helper: collapse `.worktrees/<task-id>` to the repo so a repo's
         // worktree sessions group under one project, matching the session list.
         let workspace_name = crate::session::workspace_name(&workspace_path);
@@ -1650,7 +1714,11 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
             // Top-level JSONL = main-agent session
             if file_path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                 if let Some(si) = make_session_info_for_date(
-                    &file_path, date, &workspace_path, &workspace_name, false,
+                    &file_path,
+                    date,
+                    &workspace_path,
+                    &workspace_name,
+                    false,
                 ) {
                     sessions.push(si);
                 }
@@ -1671,7 +1739,11 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
                     continue;
                 }
                 if let Some(si) = make_session_info_for_date(
-                    &sub_path, date, &workspace_path, &workspace_name, true,
+                    &sub_path,
+                    date,
+                    &workspace_path,
+                    &workspace_name,
+                    true,
                 ) {
                     sessions.push(si);
                 }
@@ -1800,7 +1872,12 @@ fn make_session_info_for_date(
         rate_limit: None,
         todos: None,
         background_tasks: Vec::new(),
-        task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,        compact_count: 0,
+        task_plan: None,
+        handoff: None,
+        user_mark: None,
+        task_outcome: None,
+        title_override: None,
+        compact_count: 0,
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
@@ -1906,9 +1983,7 @@ pub fn start_report_scheduler(
                         } else {
                             "unknown panic".to_string()
                         };
-                        log_debug(&format!(
-                            "[report-scheduler] PANIC in backfill: {msg}"
-                        ));
+                        log_debug(&format!("[report-scheduler] PANIC in backfill: {msg}"));
                     }
                 }
                 // Check every 10 minutes so today's report stays fresh
@@ -2053,7 +2128,9 @@ fn run_backfill_check(
         {
             let store = lock_store(report_store);
             if let Err(e) = store.save_report(&r) {
-                log_debug(&format!("[report-scheduler] save report for {date} failed: {e}"));
+                log_debug(&format!(
+                    "[report-scheduler] save report for {date} failed: {e}"
+                ));
                 continue;
             }
         }
@@ -2092,7 +2169,9 @@ fn run_backfill_check(
 
         // Check cooldown: don't retry if we failed recently
         {
-            let cooldowns = AI_FAILURE_COOLDOWN.lock().unwrap_or_else(|p| p.into_inner());
+            let cooldowns = AI_FAILURE_COOLDOWN
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             if let Some(last_failure) = cooldowns.get(&date) {
                 if last_failure.elapsed() < AI_RETRY_COOLDOWN {
                     continue;
@@ -2107,7 +2186,9 @@ fn run_backfill_check(
         let mut became_readable = false;
 
         if report.ai_summary.is_none() {
-            log_debug(&format!("[report-scheduler] generating AI summary for {date}..."));
+            log_debug(&format!(
+                "[report-scheduler] generating AI summary for {date}..."
+            ));
             if let Some(summary) = generate_ai_summary_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
                 store.update_ai_summary(&date, &summary).ok();
@@ -2119,7 +2200,9 @@ fn run_backfill_check(
             }
         }
         if report.lessons.is_none() {
-            log_debug(&format!("[report-scheduler] generating lessons for {date}..."));
+            log_debug(&format!(
+                "[report-scheduler] generating lessons for {date}..."
+            ));
             if let Some(lessons) = generate_lessons_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
                 store.update_lessons(&date, &lessons).ok();
@@ -2591,7 +2674,10 @@ mod tests {
         );
         let m = extract_session_metrics(line);
         assert_eq!(m.cache_creation_tokens, 1_000_000);
-        assert_eq!(m.cache_creation_1h_tokens, 1_000_000, "1h subset must persist");
+        assert_eq!(
+            m.cache_creation_1h_tokens, 1_000_000,
+            "1h subset must persist"
+        );
         assert!(
             (m.cost_usd - 24.0).abs() < 1e-9,
             "expected $24.00 at the 1h rate, got ${}",
@@ -2694,7 +2780,12 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,            compact_count: 0,
+            task_plan: None,
+            handoff: None,
+            user_mark: None,
+            task_outcome: None,
+            title_override: None,
+            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
@@ -2748,7 +2839,12 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,            compact_count: 0,
+            task_plan: None,
+            handoff: None,
+            user_mark: None,
+            task_outcome: None,
+            title_override: None,
+            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
@@ -2761,14 +2857,16 @@ mod tests {
 
         let codex_path = dir.join("codex-rollout.jsonl");
         let codex_lines = [
-            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}).to_string(),
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-5.6-sol"}})
+                .to_string(),
             serde_json::json!({
                 "type":"event_msg",
                 "timestamp":"2026-03-31T14:00:00Z",
                 "payload":{"type":"token_count","info":{"total_token_usage":{
                     "input_tokens":1000,"cached_input_tokens":600,"output_tokens":10
                 }}}
-            }).to_string(),
+            })
+            .to_string(),
         ];
         std::fs::write(&codex_path, codex_lines.join("\n")).unwrap();
         let mut s3 = s1.clone();
@@ -2925,7 +3023,12 @@ mod tests {
         let report = make_test_report("2026-03-31");
         store.save_report(&report).unwrap();
 
-        assert!(store.get_report("2026-03-31").unwrap().unwrap().lessons.is_none());
+        assert!(store
+            .get_report("2026-03-31")
+            .unwrap()
+            .unwrap()
+            .lessons
+            .is_none());
 
         let lessons = vec![Lesson {
             content: "Use tests".to_string(),

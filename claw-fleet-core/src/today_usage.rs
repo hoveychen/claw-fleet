@@ -150,17 +150,17 @@ fn build_today_usage_cached(
     let output_tokens = b.total_output_tokens;
     let date = b.date;
 
-// Fleet's own LLM calls (guard analysis, audit-rule suggestions, daily-report
-// summaries, session outcome analysis, mascot quips) are deliberately NOT part of
-// this figure. They are Fleet's operational overhead rather than the user's agent
-// spend, and their accounting cannot be made to reconcile with the receipt's
-// per-row itemisation: entries logged before TTL-aware accounting recorded the
-// CLI's last-iteration `usage.input_tokens` against a fully-billed `cost_usd`,
-// and Codex-provider calls are logged unpriced (`cost_usd: 0.0`,
-// `cost_accurate: false`) with char-estimated tokens. Rather than show a line
-// that visibly fails `Σ rows == subtotal`, this surface is agent-only. Fleet's
-// own consumption stays visible in Settings → Usage, which renders the raw
-// `llm_usage::list_usage_daily_buckets` trend directly.
+    // Fleet's own LLM calls (guard analysis, audit-rule suggestions, daily-report
+    // summaries, session outcome analysis, mascot quips) are deliberately NOT part of
+    // this figure. They are Fleet's operational overhead rather than the user's agent
+    // spend, and their accounting cannot be made to reconcile with the receipt's
+    // per-row itemisation: entries logged before TTL-aware accounting recorded the
+    // CLI's last-iteration `usage.input_tokens` against a fully-billed `cost_usd`,
+    // and Codex-provider calls are logged unpriced (`cost_usd: 0.0`,
+    // `cost_accurate: false`) with char-estimated tokens. Rather than show a line
+    // that visibly fails `Σ rows == subtotal`, this surface is agent-only. Fleet's
+    // own consumption stays visible in Settings → Usage, which renders the raw
+    // `llm_usage::list_usage_daily_buckets` trend directly.
 
     TodayUsage {
         date,
@@ -313,8 +313,7 @@ pub struct TodayUsageBreakdown {
 }
 
 /// Mutable accumulator for one receipt line while folding turns.
-#[derive(Default)]
-#[derive(Debug)]
+#[derive(Default, Debug)]
 struct LineAcc {
     input: u64,
     cache_creation: u64,
@@ -706,7 +705,14 @@ fn fold_session_turns_range(
         by_model
             .entry((source.to_string(), model))
             .or_default()
-            .add(input, cache_creation, cache_creation_1h, cache_read, output, cost);
+            .add(
+                input,
+                cache_creation,
+                cache_creation_1h,
+                cache_read,
+                output,
+                cost,
+            );
         by_day.entry(local_date_str(ts_ms)).or_default().add(
             input,
             cache_creation,
@@ -834,10 +840,14 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
             },
         );
 
-        cells
-            .entry((date, model))
-            .or_default()
-            .add(input, cache_creation, cache_creation_1h, cache_read, output, cost);
+        cells.entry((date, model)).or_default().add(
+            input,
+            cache_creation,
+            cache_creation_1h,
+            cache_read,
+            output,
+            cost,
+        );
     }
     cells
 }
@@ -887,17 +897,14 @@ fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
             cache_creation_1h_tokens: 0,
             web_search_requests: 0,
         };
-        cells
-            .entry((date, model.clone()))
-            .or_default()
-            .add(
-                d.input_tokens,
-                0,
-                0,
-                d.cached_input_tokens,
-                d.output_tokens,
-                turn_cost_usd(&model, &turn),
-            );
+        cells.entry((date, model.clone())).or_default().add(
+            d.input_tokens,
+            0,
+            0,
+            d.cached_input_tokens,
+            d.output_tokens,
+            turn_cost_usd(&model, &turn),
+        );
     }
     if had_undated {
         // An all-zero cell under the `""` date: invisible to every sum (the
@@ -1226,8 +1233,7 @@ struct PersistedCache {
 /// DST boundary without moving any cell, and flushing this cache costs a full
 /// re-fold of every transcript.
 fn local_tz_id() -> String {
-    iana_time_zone::get_timezone()
-        .unwrap_or_else(|_| chrono::Local::now().format("%z").to_string())
+    iana_time_zone::get_timezone().unwrap_or_else(|_| chrono::Local::now().format("%z").to_string())
 }
 
 impl UsageBreakdownCache {
@@ -1451,7 +1457,12 @@ fn build_range_breakdown(
     from_ms: i64,
     to_ms: i64,
 ) -> UsageRangeBreakdown {
-    build_range_breakdown_cached(sessions, from_ms, to_ms, &mut UsageBreakdownCache::default())
+    build_range_breakdown_cached(
+        sessions,
+        from_ms,
+        to_ms,
+        &mut UsageBreakdownCache::default(),
+    )
 }
 
 /// Pure core of [`usage_range_breakdown`], with Fleet's own LLM entries injected
@@ -2126,13 +2137,12 @@ mod breakdown_tests {
     /// which asserted the birth-daybasis.)
     #[test]
     fn badge_counts_only_today_dated_turns() {
-        let yesterday_iso =
-            chrono::DateTime::from_timestamp_millis(
-                chrono::Local::now().timestamp_millis() - 30 * 3_600_000,
-            )
-            .unwrap()
-            .with_timezone(&chrono::Local)
-            .to_rfc3339();
+        let yesterday_iso = chrono::DateTime::from_timestamp_millis(
+            chrono::Local::now().timestamp_millis() - 30 * 3_600_000,
+        )
+        .unwrap()
+        .with_timezone(&chrono::Local)
+        .to_rfc3339();
 
         // 1000 in / 100 out on Sonnet = $0.003 + $0.0015 = $0.0045 per session.
         let today_a = today_session_with_jsonl(
@@ -2173,7 +2183,10 @@ mod breakdown_tests {
             u.cost_usd
         );
         assert_eq!(u.output_tokens, 300, "3 × 100 output");
-        assert_eq!(u.session_count, 2, "subagent and idle-today session excluded");
+        assert_eq!(
+            u.session_count, 2,
+            "subagent and idle-today session excluded"
+        );
     }
 
     /// The badge's `input_tokens` is the cache-inclusive "sent to the API"
@@ -2211,7 +2224,10 @@ mod breakdown_tests {
         let u = build_today_usage(&[s], now);
 
         assert_eq!(u.cost_usd, 0.0);
-        assert_eq!((u.input_tokens, u.output_tokens, u.session_count), (0, 0, 0));
+        assert_eq!(
+            (u.input_tokens, u.output_tokens, u.session_count),
+            (0, 0, 0)
+        );
     }
 
     /// A minimal codex rollout: one `turn_context` (for the model) and one
@@ -2319,7 +2335,11 @@ mod breakdown_tests {
 
         let rows = sessions_usage_for_date_with(&mut cache, &[&session], &date);
         let lines = rows.into_iter().next().expect("one session, one row");
-        assert_eq!(lines.len(), 1, "the dsh session must produce a receipt line");
+        assert_eq!(
+            lines.len(),
+            1,
+            "the dsh session must produce a receipt line"
+        );
         assert_eq!(lines[0].source, "dsh");
         assert!((lines[0].cost_usd - 0.42).abs() < 1e-9);
     }
@@ -2357,7 +2377,10 @@ mod report_source_tests {
         let mut acc = LineAcc::default();
         acc.add(10, 0, 0, 20, 30, 0.42);
         by_model.insert(
-            (infer_report_source("deepseek-v4-flash"), "deepseek-v4-flash".to_string()),
+            (
+                infer_report_source("deepseek-v4-flash"),
+                "deepseek-v4-flash".to_string(),
+            ),
             acc,
         );
         let lines = build_lines(by_model);
@@ -2452,7 +2475,10 @@ mod dsh_ledger_tests {
         ]);
         let acc = cells.values().next().expect("one cell");
         assert_eq!(acc.output, 150, "both calls' tokens are counted");
-        assert!((acc.cost - 0.10).abs() < 1e-9, "only the priced call adds money");
+        assert!(
+            (acc.cost - 0.10).abs() < 1e-9,
+            "only the priced call adds money"
+        );
         assert_eq!(acc.unpriced, 1, "the gap must be reportable, not invisible");
     }
 
@@ -2464,10 +2490,7 @@ mod dsh_ledger_tests {
         let mut acc = LineAcc::default();
         acc.add(10, 0, 0, 20, 150, 0.10);
         acc.add_unpriced(1);
-        by_model.insert(
-            ("dsh".to_string(), "deepseek-v4-flash".to_string()),
-            acc,
-        );
+        by_model.insert(("dsh".to_string(), "deepseek-v4-flash".to_string()), acc);
         let lines = build_lines(by_model);
         assert_eq!(lines[0].unpriced_calls, 1);
     }
@@ -2572,7 +2595,10 @@ mod range_breakdown_tests {
         let mut cells = SessionCells::new();
         let mut acc = LineAcc::default();
         acc.add(100, 5, 3, 50, 20, 1.5);
-        cells.insert(("2026-07-21".to_string(), "claude-opus-4-8".to_string()), acc);
+        cells.insert(
+            ("2026-07-21".to_string(), "claude-opus-4-8".to_string()),
+            acc,
+        );
         cache.entries.insert(
             "s1".to_string(),
             CacheEntry {
@@ -2638,7 +2664,9 @@ mod range_breakdown_tests {
         // Same timezone → the cache is trusted (no needless full re-fold).
         cache.store_to(&path);
         assert!(
-            UsageBreakdownCache::load_from(&path).entries.contains_key("s1"),
+            UsageBreakdownCache::load_from(&path)
+                .entries
+                .contains_key("s1"),
             "an unmoved machine must keep its cache"
         );
 
@@ -2665,14 +2693,22 @@ mod range_breakdown_tests {
 
     /// A Claude session whose JSONL holds `jsonl`, with explicit created /
     /// last-activity so the window prune is exercised realistically.
-    fn claude_session(tag: &str, created_ms: i64, last_activity_ms: i64, jsonl: &str) -> SessionInfo {
+    fn claude_session(
+        tag: &str,
+        created_ms: i64,
+        last_activity_ms: i64,
+        jsonl: &str,
+    ) -> SessionInfo {
         let dir = std::env::temp_dir().join(format!("fleet-range-test-{tag}"));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.jsonl");
         std::fs::write(&path, jsonl).unwrap();
-        let mut s: SessionInfo =
-            serde_json::from_value(session_skeleton("claude-code", created_ms, last_activity_ms))
-                .expect("construct SessionInfo");
+        let mut s: SessionInfo = serde_json::from_value(session_skeleton(
+            "claude-code",
+            created_ms,
+            last_activity_ms,
+        ))
+        .expect("construct SessionInfo");
         s.created_at_ms = created_ms.max(0) as u64;
         s.last_activity_ms = last_activity_ms.max(0) as u64;
         s.jsonl_path = path.to_string_lossy().to_string();
@@ -2782,9 +2818,17 @@ mod range_breakdown_tests {
     /// A minimal codex rollout: one `turn_context` (model) + one cumulative
     /// `token_count` event, written to an absolute temp file, returned as a
     /// `codex://<abs>` URI SessionInfo (created within `created_ms`'s day).
-    fn codex_session(tag: &str, created_ms: i64, model: &str, raw: u64, cached: u64, output: u64) -> SessionInfo {
+    fn codex_session(
+        tag: &str,
+        created_ms: i64,
+        model: &str,
+        raw: u64,
+        cached: u64,
+        output: u64,
+    ) -> SessionInfo {
         let jsonl = [
-            serde_json::json!({ "type": "turn_context", "payload": { "model": model } }).to_string(),
+            serde_json::json!({ "type": "turn_context", "payload": { "model": model } })
+                .to_string(),
             serde_json::json!({
                 "type": "event_msg",
                 "payload": { "type": "token_count", "info": { "total_token_usage": {
@@ -2830,7 +2874,11 @@ mod range_breakdown_tests {
         assert_eq!(b.lines[0].input_tokens, 40_000, "full-price = raw − cached");
         assert_eq!(b.lines[0].cache_read_tokens, 60_000);
         assert_eq!(b.daily.len(), 1);
-        assert_eq!(b.daily[0].date, local_date_str(created), "trend at creation day");
+        assert_eq!(
+            b.daily[0].date,
+            local_date_str(created),
+            "trend at creation day"
+        );
     }
 
     /// A fully timestamped rollout needs no footnote — the flag is about undated
@@ -2876,7 +2924,8 @@ mod range_breakdown_tests {
         snaps: &[(&str, u64, u64, u64)],
     ) -> SessionInfo {
         let mut lines = vec![
-            serde_json::json!({ "type": "turn_context", "payload": { "model": model } }).to_string(),
+            serde_json::json!({ "type": "turn_context", "payload": { "model": model } })
+                .to_string(),
         ];
         for (iso, raw, cached, output) in snaps {
             lines.push(
@@ -2945,9 +2994,23 @@ mod range_breakdown_tests {
         let day2 = b.daily.iter().find(|d| d.date == d2).expect("day 2 point");
 
         // Day 1 = first snapshot. full-price input = raw − cached = 20k.
-        assert_eq!((day1.input_tokens, day1.cache_read_tokens, day1.output_tokens), (20_000, 40_000, 2_000));
+        assert_eq!(
+            (
+                day1.input_tokens,
+                day1.cache_read_tokens,
+                day1.output_tokens
+            ),
+            (20_000, 40_000, 2_000)
+        );
         // Day 2 = the delta: raw +40k of which cached +20k → full-price +20k.
-        assert_eq!((day2.input_tokens, day2.cache_read_tokens, day2.output_tokens), (20_000, 20_000, 3_000));
+        assert_eq!(
+            (
+                day2.input_tokens,
+                day2.cache_read_tokens,
+                day2.output_tokens
+            ),
+            (20_000, 20_000, 3_000)
+        );
 
         // The split must not change the session's total.
         let l = &b.lines[0];
@@ -3020,7 +3083,11 @@ mod range_breakdown_tests {
         let u = today_usage(&[]);
         std::env::remove_var("FLEET_HOME");
 
-        assert!((u.cost_usd - 0.0).abs() < 1e-9, "今日累计 counted Fleet: ${}", u.cost_usd);
+        assert!(
+            (u.cost_usd - 0.0).abs() < 1e-9,
+            "今日累计 counted Fleet: ${}",
+            u.cost_usd
+        );
         assert!((u.fleet_cost_usd - 0.0).abs() < 1e-9);
         assert_eq!(u.input_tokens, 0, "Fleet's input tokens leaked in");
         assert_eq!(u.output_tokens, 0, "Fleet's output tokens leaked in");
@@ -3042,7 +3109,10 @@ mod range_breakdown_tests {
 
         assert!(b.lines.is_empty(), "fleet opened a line on today's receipt");
         assert!((b.total_cost_usd - 0.0).abs() < 1e-9);
-        assert_eq!(b.total_output_tokens, 0, "fleet tokens leaked into the header");
+        assert_eq!(
+            b.total_output_tokens, 0,
+            "fleet tokens leaked into the header"
+        );
     }
 
     /// Fleet's own LLM calls (guard analysis, audit-rule suggestions, report
@@ -3069,7 +3139,10 @@ mod range_breakdown_tests {
             "fleet line still on the receipt: {:?}",
             b.lines.iter().map(|l| &l.source).collect::<Vec<_>>()
         );
-        assert!((b.fleet_cost_usd - 0.0).abs() < 1e-9, "fleet cost leaked into the split");
+        assert!(
+            (b.fleet_cost_usd - 0.0).abs() < 1e-9,
+            "fleet cost leaked into the split"
+        );
         assert!(
             b.daily.iter().all(|d| d.cost_usd == 0.0),
             "fleet spend leaked into the daily trend"
@@ -3096,7 +3169,6 @@ mod range_breakdown_tests {
         });
     }
 
-
     /// A `<synthetic>` control turn must not open a receipt line of its own:
     /// it is not a model, so `get_model_costs` prices it at the unknown-model
     /// fallback. Its usage belongs to the conversation's real model — the same
@@ -3117,7 +3189,10 @@ mod range_breakdown_tests {
         let acc = cells
             .get(&("2026-07-20".to_string(), "claude-opus-4-8".to_string()))
             .expect("real-model cell");
-        assert_eq!(acc.input, 107, "control turn's usage folds into the real model");
+        assert_eq!(
+            acc.input, 107,
+            "control turn's usage folds into the real model"
+        );
         assert_eq!(acc.output, 23);
     }
 
@@ -3153,7 +3228,10 @@ mod range_breakdown_tests {
         let acc = by_model
             .get(&("claude-code".to_string(), "claude-opus-4-8".to_string()))
             .expect("line keyed by inferred source");
-        assert_eq!(acc.input, 700, "input row must be net of both cache figures");
+        assert_eq!(
+            acc.input, 700,
+            "input row must be net of both cache figures"
+        );
         assert_eq!(acc.cache_creation, 200);
         assert_eq!(acc.cache_creation_1h, 200);
         assert_eq!(acc.cache_read, 100);
@@ -3201,7 +3279,13 @@ mod range_breakdown_tests {
         };
         let mut by_model = std::collections::HashMap::new();
         let mut by_day = std::collections::BTreeMap::new();
-        fold_report_model("2026-04-20", "claude-opus-4-8", &mt, &mut by_model, &mut by_day);
+        fold_report_model(
+            "2026-04-20",
+            "claude-opus-4-8",
+            &mt,
+            &mut by_model,
+            &mut by_day,
+        );
         let acc = by_model.values().next().unwrap();
         assert_eq!(acc.input, 0, "clamped, not wrapped");
     }
@@ -3240,9 +3324,12 @@ mod range_breakdown_tests {
             "rows ${rows} vs subtotal ${}",
             l.cost_usd
         );
-        assert!((l.cost_usd - 40.0).abs() < 1e-9, "expected $40.00, got ${}", l.cost_usd);
+        assert!(
+            (l.cost_usd - 40.0).abs() < 1e-9,
+            "expected $40.00, got ${}",
+            l.cost_usd
+        );
     }
-
 
     /// The cache-ready `(date, model)` cells must reconstruct the receipt
     /// bit-for-bit: date-window sum == `fold_session_turns_range` (undated turns
@@ -3285,12 +3372,26 @@ mod range_breakdown_tests {
             &mut new_model,
             &mut new_day,
         );
-        assert_eq!(snap(&old_model), snap(&new_model), "range by_model mismatch");
-        assert_eq!(snap_day(&old_day), snap_day(&new_day), "range by_day mismatch");
+        assert_eq!(
+            snap(&old_model),
+            snap(&new_model),
+            "range by_model mismatch"
+        );
+        assert_eq!(
+            snap_day(&old_day),
+            snap_day(&new_day),
+            "range by_day mismatch"
+        );
 
         // The undated turn `c` lands in the "" bucket and never reaches the trend.
-        assert!(cells.keys().any(|(d, _)| d.is_empty()), "undated turn not bucketed");
-        assert!(!new_day.keys().any(|d| d.is_empty()), "range trend leaked an undated turn");
+        assert!(
+            cells.keys().any(|(d, _)| d.is_empty()),
+            "undated turn not bucketed"
+        );
+        assert!(
+            !new_day.keys().any(|d| d.is_empty()),
+            "range trend leaked an undated turn"
+        );
     }
 
     /// Cache writes carry a TTL and Anthropic prices the two tiers differently:
@@ -3330,7 +3431,10 @@ mod range_breakdown_tests {
         );
         let cells = fold_claude_session_cells(jsonl);
         let cost: f64 = cells.values().map(|a| a.cost).sum();
-        assert!((cost - 22.875).abs() < 1e-9, "expected $22.875, got ${cost}");
+        assert!(
+            (cost - 22.875).abs() < 1e-9,
+            "expected $22.875, got ${cost}"
+        );
     }
 
     /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int
@@ -3401,7 +3505,10 @@ mod range_breakdown_tests {
         assert_eq!(acc.cache_creation_1h, 0, "dsh has no 1h TTL split");
         assert_eq!(acc.cache_read, 300);
         assert_eq!(acc.output, 40);
-        assert!((acc.cost - 0.1234).abs() < 1e-9, "provider cost carried verbatim");
+        assert!(
+            (acc.cost - 0.1234).abs() < 1e-9,
+            "provider cost carried verbatim"
+        );
         assert_eq!(acc.unpriced, 0);
     }
 
@@ -3438,7 +3545,10 @@ mod range_breakdown_tests {
         let mut dsh_acc = LineAcc::default();
         dsh_acc.add(10, 2, 0, 30, 4, 0.42);
         by_model.insert(
-            ("dsh".to_string(), "deepseek-v4-flash-vision-exp".to_string()),
+            (
+                "dsh".to_string(),
+                "deepseek-v4-flash-vision-exp".to_string(),
+            ),
             dsh_acc,
         );
         let mut claude_acc = LineAcc::default();
@@ -3450,7 +3560,10 @@ mod range_breakdown_tests {
 
         let lines = build_lines(by_model);
         let dsh = lines.iter().find(|l| l.source == "dsh").expect("dsh line");
-        assert!(dsh.priced_by_provider, "dsh must be flagged provider-priced");
+        assert!(
+            dsh.priced_by_provider,
+            "dsh must be flagged provider-priced"
+        );
         assert!((dsh.cost_usd - 0.42).abs() < 1e-9);
         assert_eq!(dsh.cache_creation_tokens, 2);
         assert_eq!(dsh.cache_creation_1h_tokens, 0);
@@ -3459,7 +3572,13 @@ mod range_breakdown_tests {
             .iter()
             .find(|l| l.source == "claude-code")
             .expect("claude line");
-        assert!(!claude.priced_by_provider, "rate-table sources are not provider-priced");
-        assert_eq!(claude.cache_creation_1h_tokens, 2, "claude TTL split preserved");
+        assert!(
+            !claude.priced_by_provider,
+            "rate-table sources are not provider-priced"
+        );
+        assert_eq!(
+            claude.cache_creation_1h_tokens, 2,
+            "claude TTL split preserved"
+        );
     }
 }

@@ -91,7 +91,10 @@ mod tests {
         let content = format!("user rules\n\n{}{OTHER}", block());
         let out = strip(&content, BEGIN, END);
         assert!(!out.contains("demo.md"));
-        assert!(out.contains("other.md"), "must not eat a neighbouring block");
+        assert!(
+            out.contains("other.md"),
+            "must not eat a neighbouring block"
+        );
         assert!(out.starts_with("user rules\n\n"));
     }
 

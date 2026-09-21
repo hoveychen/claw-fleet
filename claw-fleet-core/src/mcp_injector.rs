@@ -222,7 +222,10 @@ fn entry_command_is_live(entry: &serde_json::Value) -> bool {
         return false;
     }
     let path = Path::new(cmd);
-    let bare_name = path.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true);
+    let bare_name = path
+        .parent()
+        .map(|p| p.as_os_str().is_empty())
+        .unwrap_or(true);
     bare_name || is_executable_file(path)
 }
 
@@ -325,9 +328,7 @@ fn extract_fleet_entry(v: &serde_json::Value) -> (Option<serde_json::Value>, boo
     // in permissions_injector for readability.
     let mcp = v.get("mcpServers");
     let had_mcp = mcp.map(|m| m.is_object()).unwrap_or(false);
-    let fleet = mcp
-        .and_then(|m| m.get(FLEET_SERVER_KEY))
-        .cloned();
+    let fleet = mcp.and_then(|m| m.get(FLEET_SERVER_KEY)).cloned();
     (fleet, had_mcp, false)
 }
 
@@ -349,8 +350,12 @@ fn set_fleet_entry(v: &mut serde_json::Value, entry: serde_json::Value) {
 
 fn remove_fleet_entry(v: &mut serde_json::Value) {
     let Some(obj) = v.as_object_mut() else { return };
-    let Some(mcp) = obj.get_mut("mcpServers") else { return };
-    let Some(mcp_obj) = mcp.as_object_mut() else { return };
+    let Some(mcp) = obj.get_mut("mcpServers") else {
+        return;
+    };
+    let Some(mcp_obj) = mcp.as_object_mut() else {
+        return;
+    };
     mcp_obj.remove(FLEET_SERVER_KEY);
     // If mcpServers is now an empty object AND it didn't exist before Fleet,
     // we strip it entirely. The caller (restore_from_snapshot) decides
@@ -415,7 +420,9 @@ pub fn acquire(pid: u32, fleet_path: &str) -> std::io::Result<()> {
 ///
 /// Safe to call when no lock exists (returns `Ok(())`).
 pub fn release(pid: u32) -> std::io::Result<()> {
-    let Some(mut lock) = read_lock() else { return Ok(()) };
+    let Some(mut lock) = read_lock() else {
+        return Ok(());
+    };
     prune_dead_holders(&mut lock);
     lock.holders.retain(|h| h.pid != pid);
 
@@ -449,7 +456,9 @@ pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
     if !may_publish(fleet_path, config_is_isolated()) {
         return Err(ephemeral_publish_refused(fleet_path));
     }
-    let Some(mut lock) = read_lock() else { return Ok(false) };
+    let Some(mut lock) = read_lock() else {
+        return Ok(false);
+    };
     prune_dead_holders(&mut lock);
     if lock.holders.is_empty() {
         // No live holders → nothing to enforce. Don't touch the file.
@@ -581,7 +590,10 @@ mod tests {
             assert!(p.exists(), "acquire should create ~/.claude.json");
             let v: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
-            assert_eq!(v["mcpServers"][FLEET_SERVER_KEY]["command"], "/usr/local/bin/fleet");
+            assert_eq!(
+                v["mcpServers"][FLEET_SERVER_KEY]["command"],
+                "/usr/local/bin/fleet"
+            );
             assert_eq!(v["mcpServers"][FLEET_SERVER_KEY]["args"][0], FLEET_MCP_ARG);
         });
     }
@@ -603,7 +615,10 @@ mod tests {
                 serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
             assert_eq!(after["mcpServers"]["filesystem"]["command"], "fs-mcp");
             assert_eq!(after["mcpServers"]["github"]["command"], "gh-mcp");
-            assert_eq!(after["mcpServers"][FLEET_SERVER_KEY]["command"], "/bin/fleet");
+            assert_eq!(
+                after["mcpServers"][FLEET_SERVER_KEY]["command"],
+                "/bin/fleet"
+            );
             assert_eq!(after["someOtherKey"], 42);
         });
     }
@@ -622,10 +637,14 @@ mod tests {
             release(42).unwrap();
             let after: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
-            assert!(after["mcpServers"].get(FLEET_SERVER_KEY).is_none(),
-                "fleet entry should be removed on last release");
-            assert_eq!(after["mcpServers"]["filesystem"]["command"], "fs-mcp",
-                "unrelated mcp servers must survive");
+            assert!(
+                after["mcpServers"].get(FLEET_SERVER_KEY).is_none(),
+                "fleet entry should be removed on last release"
+            );
+            assert_eq!(
+                after["mcpServers"]["filesystem"]["command"], "fs-mcp",
+                "unrelated mcp servers must survive"
+            );
         });
     }
 
@@ -637,8 +656,10 @@ mod tests {
             acquire(7, "/bin/fleet").unwrap();
             assert!(p.exists());
             release(7).unwrap();
-            assert!(!p.exists(),
-                "if Fleet created claude.json from scratch, release should delete it");
+            assert!(
+                !p.exists(),
+                "if Fleet created claude.json from scratch, release should delete it"
+            );
         });
     }
 
@@ -659,7 +680,10 @@ mod tests {
             release(11).unwrap();
             let after: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
-            assert_eq!(after["mcpServers"][FLEET_SERVER_KEY]["command"], "/opt/custom/fleet");
+            assert_eq!(
+                after["mcpServers"][FLEET_SERVER_KEY]["command"],
+                "/opt/custom/fleet"
+            );
             assert_eq!(after["mcpServers"][FLEET_SERVER_KEY]["args"][1], "--debug");
         });
     }
@@ -712,7 +736,10 @@ mod tests {
         // start_time 0 never matches a real live process.
         let mut lock = McpLock {
             holders: vec![
-                HolderEntry { pid: 999_999_999_u32.min(u32::MAX), start_time_secs: 0 },
+                HolderEntry {
+                    pid: 999_999_999_u32.min(u32::MAX),
+                    start_time_secs: 0,
+                },
                 HolderEntry::capture(std::process::id()),
             ],
             ..Default::default()
@@ -723,7 +750,10 @@ mod tests {
             "current pid (captured with real start_time) should survive prune"
         );
         assert!(
-            !lock.holders.iter().any(|h| h.pid == 999_999_999_u32.min(u32::MAX)),
+            !lock
+                .holders
+                .iter()
+                .any(|h| h.pid == 999_999_999_u32.min(u32::MAX)),
             "obviously-dead pid should be pruned"
         );
     }
@@ -734,8 +764,11 @@ mod tests {
             acquire(55, "/bin/fleet").unwrap();
             acquire(55, "/bin/fleet").unwrap();
             let lock = read_lock().unwrap();
-            assert_eq!(lock.holders.iter().filter(|h| h.pid == 55).count(), 1,
-                "same pid must not double-register");
+            assert_eq!(
+                lock.holders.iter().filter(|h| h.pid == 55).count(),
+                1,
+                "same pid must not double-register"
+            );
         });
     }
 
@@ -767,7 +800,10 @@ mod tests {
         // Pruning a legacy lock should drop everything: start_time 0
         // never matches any real live process.
         prune_dead_holders(&mut lock);
-        assert!(lock.holders.is_empty(), "legacy holders must prune to empty");
+        assert!(
+            lock.holders.is_empty(),
+            "legacy holders must prune to empty"
+        );
     }
 
     #[test]
@@ -864,7 +900,10 @@ mod tests {
             // And the file has Fleet's entry alongside the unrelated one.
             let after: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(&claude_p).unwrap()).unwrap();
-            assert_eq!(after["mcpServers"][FLEET_SERVER_KEY]["command"], "/bin/fleet");
+            assert_eq!(
+                after["mcpServers"][FLEET_SERVER_KEY]["command"],
+                "/bin/fleet"
+            );
             assert_eq!(after["mcpServers"]["filesystem"]["command"], "fs-mcp");
 
             // Last release restores fully.
@@ -955,7 +994,10 @@ mod tests {
     #[test]
     fn verify_leaves_a_live_entry_from_another_fleet_build_alone() {
         with_temp_home(|| {
-            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            let live = std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
             acquire(std::process::id(), &live).unwrap();
 
             let injected = verify_and_reinject("/some/other/build/fleet").unwrap();
@@ -963,7 +1005,11 @@ mod tests {
                 !injected,
                 "a live entry must not be rewritten just because the path isn't mine"
             );
-            assert_eq!(registered_command(), live, "the published command must stand");
+            assert_eq!(
+                registered_command(),
+                live,
+                "the published command must stand"
+            );
 
             let _ = release(std::process::id());
         });
@@ -976,7 +1022,10 @@ mod tests {
     #[test]
     fn verify_reinjects_when_the_registered_command_is_dead() {
         with_temp_home(|| {
-            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            let live = std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
             acquire(std::process::id(), &live).unwrap();
             seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
 

@@ -356,7 +356,11 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert_eq!(scans.load(Ordering::SeqCst), 1, "exactly one background scan, not one per read");
+        assert_eq!(
+            scans.load(Ordering::SeqCst),
+            1,
+            "exactly one background scan, not one per read"
+        );
         assert_eq!(
             snap.sessions_if_scanned().map(|s| s.len()),
             Some(1),

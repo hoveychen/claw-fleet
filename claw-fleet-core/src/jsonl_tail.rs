@@ -116,7 +116,11 @@ mod tests {
 
     fn write_tmp(name: &str, content: &[u8]) -> std::path::PathBuf {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("jsonl_tail_test_{}_{}.jsonl", name, std::process::id()));
+        let path = dir.join(format!(
+            "jsonl_tail_test_{}_{}.jsonl",
+            name,
+            std::process::id()
+        ));
         let mut f = File::create(&path).unwrap();
         f.write_all(content).unwrap();
         path
@@ -173,10 +177,7 @@ mod tests {
 
     #[test]
     fn malformed_lines_are_skipped() {
-        let p = write_tmp(
-            "bad",
-            b"{\"i\":1}\nnot json\n{\"i\":3}\n   \n{\"i\":5}\n",
-        );
+        let p = write_tmp("bad", b"{\"i\":1}\nnot json\n{\"i\":3}\n   \n{\"i\":5}\n");
         let out = read_tail_lines_as_json(&p, 10).unwrap();
         assert_eq!(out.len(), 3);
         assert_eq!(out[0]["i"], 1);
@@ -229,7 +230,11 @@ mod tests {
         let buf = "{\"i\":1}\n{\"i\":2}\n";
         let (lines, consumed) = parse_incremental_tail(buf);
         assert_eq!(lines.len(), 2);
-        assert_eq!(consumed, buf.len(), "a clean newline-terminated buffer is fully consumed");
+        assert_eq!(
+            consumed,
+            buf.len(),
+            "a clean newline-terminated buffer is fully consumed"
+        );
     }
 
     #[test]

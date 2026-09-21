@@ -66,17 +66,19 @@ fn main() {
         .arg(&src)
         .output()
         .expect("rustc");
-    assert!(rustc.status.success(), "{}", String::from_utf8_lossy(&rustc.stderr));
+    assert!(
+        rustc.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
 
-    claw_fleet_core::remote_workspace::upsert(
-        claw_fleet_core::remote_workspace::RemoteWorkspace {
-            path: ws.clone(),
-            ssh_target: Some(ssh_target.clone()),
-            remote_rca_path: Some(remote_rca),
-            label: Some(ssh_target.clone()),
-            ..Default::default()
-        },
-    )
+    claw_fleet_core::remote_workspace::upsert(claw_fleet_core::remote_workspace::RemoteWorkspace {
+        path: ws.clone(),
+        ssh_target: Some(ssh_target.clone()),
+        remote_rca_path: Some(remote_rca),
+        label: Some(ssh_target.clone()),
+        ..Default::default()
+    })
     .expect("register the remote workspace");
 
     let session_id = "mirror-live-1";
@@ -84,7 +86,11 @@ fn main() {
     let stderr_log = home.join("stderr.log");
     claw_fleet_core::session_launch::spawn_claude_detached_with_envs(
         bin.to_str().unwrap(),
-        &[ws.clone(), "--session-id".to_string(), session_id.to_string()],
+        &[
+            ws.clone(),
+            "--session-id".to_string(),
+            session_id.to_string(),
+        ],
         &ws,
         &stderr_log,
         "mirror-live-test",
@@ -97,12 +103,13 @@ fn main() {
     )
     .expect("spawn through rca");
 
-    rx.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| {
-        panic!(
-            "the probe never exited.\nstderr: {:?}",
-            std::fs::read_to_string(&stderr_log).unwrap_or_default()
-        )
-    });
+    rx.recv_timeout(Duration::from_secs(60))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the probe never exited.\nstderr: {:?}",
+                std::fs::read_to_string(&stderr_log).unwrap_or_default()
+            )
+        });
 
     // Control first: if the absolute write did not reach the remote, the tunnel
     // was broken and the rest of this test proves nothing.

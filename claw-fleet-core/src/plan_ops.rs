@@ -48,12 +48,7 @@ pub fn workspace_tasks_path(cwd: &Path) -> PathBuf {
 /// Returns warnings rather than failing: a missing session id or a
 /// `task_progress` write error both degrade to a warning, matching the CLI's
 /// "the edit still applies, attribution is best-effort" contract.
-fn record_focus(
-    cwd: &Path,
-    plan_id: &str,
-    content: &str,
-    session_id: Option<&str>,
-) -> Vec<String> {
+fn record_focus(cwd: &Path, plan_id: &str, content: &str, session_id: Option<&str>) -> Vec<String> {
     let Some(sid) = session_id else {
         return vec![format!(
             "no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set); \
@@ -62,7 +57,8 @@ fn record_focus(
     };
     let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let current = pt::plan_body(content, plan_id).and_then(|b| pt::first_pending_task(&b));
-    if let Err(e) = crate::task_progress::set_current(sid, &ws.to_string_lossy(), plan_id, current) {
+    if let Err(e) = crate::task_progress::set_current(sid, &ws.to_string_lossy(), plan_id, current)
+    {
         return vec![format!("could not record task focus: {e}")];
     }
     Vec::new()
@@ -88,7 +84,10 @@ pub fn mutate_checkbox(
     if done {
         if let Some((msg, mut w)) = backtrack_on_completion(cwd, plan_id, &updated, session_id) {
             warnings.append(&mut w);
-            return Ok(PlanOutcome { message: msg, warnings });
+            return Ok(PlanOutcome {
+                message: msg,
+                warnings,
+            });
         }
     }
     Ok(PlanOutcome {
@@ -368,7 +367,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
 
-        let created = create(cwd, "demo", "Demo work", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        let created = create(
+            cwd,
+            "demo",
+            "Demo work",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
         assert!(created.message.contains("created plan 'demo'"));
         // No session id ⇒ attribution is a warning, but the edit still lands.
         assert_eq!(created.warnings.len(), 1);
@@ -396,8 +405,28 @@ mod tests {
     #[test]
     fn create_with_both_parent_and_root_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "par", "Parent", None, true, None, pt::PlanKind::Exec, None).unwrap();
-        let err = create(tmp.path(), "kid", "Kid", Some("par"), true, None, pt::PlanKind::Exec, None).unwrap_err();
+        create(
+            tmp.path(),
+            "par",
+            "Parent",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
+        let err = create(
+            tmp.path(),
+            "kid",
+            "Kid",
+            Some("par"),
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("mutually exclusive"), "{err}");
     }
 
@@ -406,10 +435,30 @@ mod tests {
     fn create_accepts_root_and_parent_shapes() {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
-        create(cwd, "top", "Top", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        create(
+            cwd,
+            "top",
+            "Top",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
         assert!(read_tasks(cwd).contains("<!-- fleet:prd:begin id=\"top\" v=\"2\" -->"));
 
-        let child = create(cwd, "side", "Side", Some("top"), false, None, pt::PlanKind::Exec, None).unwrap();
+        let child = create(
+            cwd,
+            "side",
+            "Side",
+            Some("top"),
+            false,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
         assert!(child.message.contains("parent 'top'"), "{}", child.message);
         assert!(read_tasks(cwd).contains("id=\"side\" v=\"2\" parent=\"top\""));
     }
@@ -418,7 +467,17 @@ mod tests {
     /// i.e. an agent that is mid-plan and now authors another one.
     fn ws_focused_on_host() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "host", "Host plan", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        create(
+            tmp.path(),
+            "host",
+            "Host plan",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
         add(tmp.path(), "host", "P1", "open task").unwrap();
         tmp
     }
@@ -458,7 +517,17 @@ mod tests {
     #[test]
     fn an_explicit_parent_wins_over_the_focused_plan() {
         let tmp = ws_focused_on_host();
-        create(tmp.path(), "other", "Other", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        create(
+            tmp.path(),
+            "other",
+            "Other",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
         create_in(
             tmp.path(),
             "kid",
@@ -516,7 +585,11 @@ mod tests {
             Some("host"),
         )
         .unwrap();
-        assert!(out.message.contains("created plan 'flat'"), "{}", out.message);
+        assert!(
+            out.message.contains("created plan 'flat'"),
+            "{}",
+            out.message
+        );
         assert!(read_tasks(tmp.path()).contains("id=\"flat\""));
         assert!(
             !read_tasks(tmp.path()).contains("id=\"flat\" v=\"2\" parent="),
@@ -568,7 +641,11 @@ mod tests {
             None, // …but this session is executing nothing
         )
         .unwrap();
-        assert!(out.message.contains("created plan 'fresh'"), "{}", out.message);
+        assert!(
+            out.message.contains("created plan 'fresh'"),
+            "{}",
+            out.message
+        );
         assert!(
             !read_tasks(tmp.path()).contains("id=\"fresh\" v=\"2\" parent="),
             "no focus ⇒ no inherited parent"
@@ -644,7 +721,17 @@ mod tests {
     #[test]
     fn resume_without_session_id_errors() {
         let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "demo", "Demo", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        create(
+            tmp.path(),
+            "demo",
+            "Demo",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
         add(tmp.path(), "demo", "P1", "task").unwrap();
         let err = resume(tmp.path(), "demo", None, None).unwrap_err();
         assert!(err.contains("no session id"));

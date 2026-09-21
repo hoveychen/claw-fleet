@@ -89,7 +89,10 @@ pub enum ExplorerFileContent {
 
 /// Enumerate the browsable roots of `workspace`: the checkout itself plus
 /// every linked git worktree of its repository.
-pub fn list_roots(workspace: &str, known_workspaces: &[String]) -> Result<Vec<ExplorerRoot>, String> {
+pub fn list_roots(
+    workspace: &str,
+    known_workspaces: &[String],
+) -> Result<Vec<ExplorerRoot>, String> {
     let ws = validate_workspace(workspace, known_workspaces)?;
     Ok(discover_roots(&ws))
 }
@@ -145,16 +148,17 @@ fn list_dir_in(
 
     for entry in rd.flatten() {
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+        let Some(name) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
         if name == ".git" {
             continue;
         }
-        let is_symlink = entry
-            .file_type()
-            .map(|t| t.is_symlink())
-            .unwrap_or(false);
+        let is_symlink = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
         // Follow symlinks for size/kind; fall back to the link's own metadata
         // when the target is dangling.
         let Ok(metadata) = crate::tcc::guarded_metadata(&path).or_else(|_| entry.metadata()) else {
@@ -443,7 +447,10 @@ pub fn resolve_prose_path(workspace_root: &str, raw: &str) -> PathResolution {
 
     let raw = raw.trim();
     if raw.is_empty() {
-        return PathResolution { resolved: None, tried };
+        return PathResolution {
+            resolved: None,
+            tried,
+        };
     }
 
     if let Some(rest) = raw.strip_prefix("~/") {
@@ -451,7 +458,12 @@ pub fn resolve_prose_path(workspace_root: &str, raw: &str) -> PathResolution {
             Some(home) => push(home.join(rest)),
             // No home means no reading of `~` at all — say so by trying nothing
             // rather than inventing a relative one.
-            None => return PathResolution { resolved: None, tried },
+            None => {
+                return PathResolution {
+                    resolved: None,
+                    tried,
+                }
+            }
         }
     } else if is_absolute_spelling(raw) {
         push(PathBuf::from(raw));
@@ -560,7 +572,11 @@ pub fn find_by_suffix(
         if visited >= SUFFIX_SEARCH_VISIT_CAP || hits.len() >= SUFFIX_SEARCH_HIT_CAP {
             break;
         }
-        let dir = if rel_dir.is_empty() { root.clone() } else { root.join(&rel_dir) };
+        let dir = if rel_dir.is_empty() {
+            root.clone()
+        } else {
+            root.join(&rel_dir)
+        };
         let Ok(rd) = crate::tcc::guarded_read_dir(&dir) else {
             continue; // unreadable level — the rest of the walk still stands
         };
@@ -575,7 +591,11 @@ pub fn find_by_suffix(
             if name == ".git" {
                 continue;
             }
-            let rel = if rel_dir.is_empty() { name } else { format!("{rel_dir}/{name}") };
+            let rel = if rel_dir.is_empty() {
+                name
+            } else {
+                format!("{rel_dir}/{name}")
+            };
             // Symlinked directories are not followed: a link back up the tree
             // would loop, and every real file is reachable without them.
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -647,11 +667,9 @@ fn resolve_root(ws: &Path, root: &str) -> Result<PathBuf, String> {
     if rc == ws {
         return Ok(rc);
     }
-    let allowed = discover_roots(ws).iter().any(|r| {
-        fs::canonicalize(&r.path)
-            .map(|c| c == rc)
-            .unwrap_or(false)
-    });
+    let allowed = discover_roots(ws)
+        .iter()
+        .any(|r| fs::canonicalize(&r.path).map(|c| c == rc).unwrap_or(false));
     if !allowed {
         return Err("root is not the workspace or one of its worktrees".into());
     }
@@ -698,10 +716,7 @@ fn discover_roots(ws: &Path) -> Vec<ExplorerRoot> {
     // checkout (git2 0.18 has no `commondir()`). Otherwise it is this
     // repo's own workdir.
     let main_workdir = if repo.is_worktree() {
-        repo.path()
-            .ancestors()
-            .nth(3)
-            .map(Path::to_path_buf)
+        repo.path().ancestors().nth(3).map(Path::to_path_buf)
     } else {
         repo.workdir().map(Path::to_path_buf)
     };
@@ -816,8 +831,14 @@ mod tests {
     #[test]
     fn rejects_unknown_workspace() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let err = list_dir(tmp.path().to_str().unwrap(), tmp.path().to_str().unwrap(), "", false, &[])
-            .unwrap_err();
+        let err = list_dir(
+            tmp.path().to_str().unwrap(),
+            tmp.path().to_str().unwrap(),
+            "",
+            false,
+            &[],
+        )
+        .unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
     }
 
@@ -835,7 +856,10 @@ mod tests {
 
         let repo = home.path().join("cloned-repo");
         fs::create_dir_all(repo.join("src")).unwrap();
-        let repo_s = fs::canonicalize(&repo).unwrap().to_string_lossy().to_string();
+        let repo_s = fs::canonicalize(&repo)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         crate::browse_paths::add(&repo_s).unwrap();
 
         // No sessions anywhere — exactly the state right after a clone.
@@ -866,7 +890,9 @@ mod tests {
         fs::write(&file, b"# out of tree").unwrap();
 
         match read_external_file(file.to_str().unwrap()).unwrap() {
-            ExplorerFileContent::Text { content, truncated, .. } => {
+            ExplorerFileContent::Text {
+                content, truncated, ..
+            } => {
                 assert_eq!(content, "# out of tree");
                 assert!(!truncated);
             }
@@ -903,10 +929,7 @@ mod tests {
                 .contains("not a file"),
             "this is a single-file surface, not a second directory browser"
         );
-        assert!(read_external_file(
-            tmp.path().join("missing.md").to_str().unwrap()
-        )
-        .is_err());
+        assert!(read_external_file(tmp.path().join("missing.md").to_str().unwrap()).is_err());
     }
 
     // ── resolve_prose_path ───────────────────────────────────────────────────
@@ -991,7 +1014,12 @@ mod tests {
             "tried: {:?}",
             got.tried
         );
-        assert_eq!(got.tried.len(), 2, "a third reading would be a duplicate: {:?}", got.tried);
+        assert_eq!(
+            got.tried.len(),
+            2,
+            "a third reading would be a duplicate: {:?}",
+            got.tried
+        );
     }
 
     /// An absolute path has one reading, and that is the whole ladder.
@@ -1014,7 +1042,12 @@ mod tests {
         let (_tmp, ws, _) = prose_fixture();
         let got = resolve_prose_path(&ws, "my-project/gone/x.md");
         assert_eq!(got.resolved, None);
-        assert_eq!(got.tried.len(), 2, "doubled join + parent join: {:?}", got.tried);
+        assert_eq!(
+            got.tried.len(),
+            2,
+            "doubled join + parent join: {:?}",
+            got.tried
+        );
         assert!(got.tried.iter().all(|c| c.ends_with("gone/x.md")));
         // No duplicates: the parent join and the prefix strip name the same
         // path in this layout and must not be listed twice.
@@ -1128,8 +1161,7 @@ mod tests {
         fs::write(tmp.path().join("victim.txt"), "secret").unwrap();
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(tmp.path().join("victim.txt"), ws.join("link.txt"))
-                .unwrap();
+            std::os::unix::fs::symlink(tmp.path().join("victim.txt"), ws.join("link.txt")).unwrap();
             let w = ws.to_str().unwrap();
             let err = read_file(w, w, "link.txt", &known(&ws)).unwrap_err();
             assert!(err.contains("escapes root"), "got: {err}");
@@ -1169,12 +1201,18 @@ mod tests {
         let w = ws.to_str().unwrap();
 
         let hidden = list_dir(w, w, "", false, &known(&ws)).unwrap();
-        assert!(hidden.iter().all(|e| e.name != "target"), "target should be filtered");
+        assert!(
+            hidden.iter().all(|e| e.name != "target"),
+            "target should be filtered"
+        );
         assert!(hidden.iter().any(|e| e.name == "kept.txt"));
         assert!(hidden.iter().all(|e| e.name != ".git"), ".git never listed");
 
         let shown = list_dir(w, w, "", true, &known(&ws)).unwrap();
-        let target = shown.iter().find(|e| e.name == "target").expect("target visible");
+        let target = shown
+            .iter()
+            .find(|e| e.name == "target")
+            .expect("target visible");
         assert!(target.is_ignored);
     }
 
@@ -1211,7 +1249,10 @@ mod tests {
         hits.sort();
         assert_eq!(
             hits,
-            vec!["a/public/icon.png".to_string(), "b/public/icon.png".to_string()]
+            vec![
+                "a/public/icon.png".to_string(),
+                "b/public/icon.png".to_string()
+            ]
         );
     }
 
@@ -1225,8 +1266,12 @@ mod tests {
         fs::write(ws.join("my-icon.png"), "x").unwrap();
         let w = ws.to_str().unwrap();
 
-        assert!(find_by_suffix(w, w, "icon.png", &known(&ws)).unwrap().is_empty());
-        assert!(find_by_suffix(w, w, "nope/gone.txt", &known(&ws)).unwrap().is_empty());
+        assert!(find_by_suffix(w, w, "icon.png", &known(&ws))
+            .unwrap()
+            .is_empty());
+        assert!(find_by_suffix(w, w, "nope/gone.txt", &known(&ws))
+            .unwrap()
+            .is_empty());
     }
 
     /// The whole point of walking at all is that it must stay cheap in a real dev
@@ -1281,7 +1326,9 @@ mod tests {
         let w = ws.to_str().unwrap();
 
         match read_file(w, w, "hello.rs", &known(&ws)).unwrap() {
-            ExplorerFileContent::Text { content, truncated, .. } => {
+            ExplorerFileContent::Text {
+                content, truncated, ..
+            } => {
                 assert_eq!(content, "fn main() {}");
                 assert!(!truncated);
             }
@@ -1329,7 +1376,11 @@ mod tests {
     fn make_scratchpad(base: &Path, ws: &Path, sid: &str) -> PathBuf {
         let canon = fs::canonicalize(ws).unwrap();
         let slug = crate::session::encode_workspace_path(&canon.to_string_lossy());
-        let pad = base.join("claude-501").join(slug).join(sid).join("scratchpad");
+        let pad = base
+            .join("claude-501")
+            .join(slug)
+            .join(sid)
+            .join("scratchpad");
         fs::create_dir_all(&pad).unwrap();
         pad
     }
@@ -1374,7 +1425,10 @@ mod tests {
         assert!(scratchpad_root_in(&base, w, "00000000-0000-0000-0000-000000000000").is_none());
         // Ids that could inject path components are refused outright.
         for bad in ["..", "../..", "a/b", "a\\b", ""] {
-            assert!(scratchpad_root_in(&base, w, bad).is_none(), "accepted {bad:?}");
+            assert!(
+                scratchpad_root_in(&base, w, bad).is_none(),
+                "accepted {bad:?}"
+            );
         }
     }
 
@@ -1396,7 +1450,8 @@ mod tests {
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(tmp.path().join("victim.txt"), pad.join("link.txt")).unwrap();
+            std::os::unix::fs::symlink(tmp.path().join("victim.txt"), pad.join("link.txt"))
+                .unwrap();
             let err = read_file_at(&root, "link.txt").unwrap_err();
             assert!(err.contains("escapes root"), "got: {err}");
         }

@@ -935,8 +935,8 @@ pub fn reconcile_dsh_agents_md(
 /// user who uninstalls dsh still gets their file reconciled (and removed) rather
 /// than left with a stale block.
 pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result<(), String> {
-    let dsh_present = dsh_home().map(|d| d.exists()).unwrap_or(false)
-        || crate::dsh_server::is_available();
+    let dsh_present =
+        dsh_home().map(|d| d.exists()).unwrap_or(false) || crate::dsh_server::is_available();
     let has_file = agents_md_path().map(|p| p.exists()).unwrap_or(false);
     if !dsh_present && !has_file {
         return Ok(());
@@ -967,7 +967,6 @@ pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result
     );
     crate::dsh_plugin::reconcile_dsh_patch(prd, user_title, locale)
 }
-
 
 /// Whether the dsh PRD-discipline block is still present in
 /// `$DSH_HOME/AGENTS.md`.
@@ -1073,8 +1072,14 @@ mod tests {
     #[test]
     fn prd_block_carries_worktree_and_rhythm() {
         let g = render_dsh_prd_block("Boss", "en");
-        assert!(g.contains("git worktree add -b prd/"), "must show worktree creation");
-        assert!(g.contains("git merge --no-ff"), "must mandate --no-ff merge back");
+        assert!(
+            g.contains("git worktree add -b prd/"),
+            "must show worktree creation"
+        );
+        assert!(
+            g.contains("git merge --no-ff"),
+            "must mandate --no-ff merge back"
+        );
         assert!(
             g.contains("--squash") && g.contains("forbidden"),
             "must forbid --squash so dsh doesn't substitute it"
@@ -1086,8 +1091,14 @@ mod tests {
             g.contains("should I continue"),
             "Rule 4 must name the forbidden progress-report checkpoint pattern"
         );
-        assert!(g.contains("fleet handoff"), "must teach the Rule 5 handoff relay");
-        assert!(g.contains("fleet watch create"), "must teach the Rule 6 watch");
+        assert!(
+            g.contains("fleet handoff"),
+            "must teach the Rule 5 handoff relay"
+        );
+        assert!(
+            g.contains("fleet watch create"),
+            "must teach the Rule 6 watch"
+        );
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),
             "must teach the fleet plan subcommands"
@@ -1279,7 +1290,10 @@ mod tests {
     #[test]
     fn blocks_use_title_and_locale() {
         let prd = render_dsh_prd_block("师父", "zh");
-        assert!(prd.contains("师父"), "PRD block must interpolate the user title");
+        assert!(
+            prd.contains("师父"),
+            "PRD block must interpolate the user title"
+        );
         assert!(
             prd.contains("中文书写"),
             "zh locale must select the Chinese TASKS.md line"
@@ -1326,9 +1340,15 @@ mod tests {
     #[test]
     fn wiki_and_model_blocks_carry_their_essence() {
         let wiki = render_dsh_wiki_block("en");
-        assert!(wiki.contains("fleet wiki publish"), "wiki must teach publish");
+        assert!(
+            wiki.contains("fleet wiki publish"),
+            "wiki must teach publish"
+        );
         assert!(wiki.contains("[[slug]]"), "wiki must teach cross-links");
-        assert!(!wiki.contains("git worktree"), "wiki block must not drag in PRD content");
+        assert!(
+            !wiki.contains("git worktree"),
+            "wiki block must not drag in PRD content"
+        );
         // Against an all-available probe, not `render_dsh_model_block`: the sheet
         // only renders the harnesses this machine actually has
         // ([`crate::model_catalog::render_sheet_with`]), and dsh's arm is gated on
@@ -1443,8 +1463,8 @@ mod tests {
     /// need no lock of their own.
     fn with_absent_dsh_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
         let _guard = crate::session::fleet_home_lock();
-        let base = std::env::temp_dir()
-            .join(format!("fleet-dsh-absent-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("fleet-dsh-absent-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let prev = std::env::var_os("DSH_HOME");
         std::env::set_var("DSH_HOME", &base);
@@ -1485,7 +1505,10 @@ mod tests {
     #[test]
     fn lessons_block_renders_each_and_caps() {
         let body = render_dsh_lessons_block(
-            &[ml("Line one.\n\nLine two.", "Because reasons."), ml("Second.", "")],
+            &[
+                ml("Line one.\n\nLine two.", "Because reasons."),
+                ml("Second.", ""),
+            ],
             "en",
         )
         .unwrap();
@@ -1540,7 +1563,10 @@ mod tests {
             let twice = fs::read_to_string(&agents).unwrap();
             assert_eq!(once, twice, "composing twice must not accumulate content");
             assert!(once.contains("keep me."), "user content preserved");
-            assert!(once.starts_with("# My dsh AGENTS"), "user content stays first");
+            assert!(
+                once.starts_with("# My dsh AGENTS"),
+                "user content stays first"
+            );
             assert!(!once.contains("\n\n\n"), "no triple newline");
         });
     }

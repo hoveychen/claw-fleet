@@ -75,9 +75,7 @@ pub fn respond(assets: &AssetSource, path: &str) -> Response<Cursor<Vec<u8>>> {
         Some(asset) => {
             let header: Header = format!("Content-Type: {}", asset.mime)
                 .parse()
-                .unwrap_or_else(|_| {
-                    "Content-Type: application/octet-stream".parse().unwrap()
-                });
+                .unwrap_or_else(|_| "Content-Type: application/octet-stream".parse().unwrap());
             Response::from_data(asset.bytes).with_header(header)
         }
         None => Response::from_data(b"no such file".to_vec()).with_status_code(404),

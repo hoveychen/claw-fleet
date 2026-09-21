@@ -22,12 +22,24 @@ use claw_fleet_core::model_cost::{turn_cost_usd, TurnUsage};
 struct StubClaude;
 
 impl LlmProvider for StubClaude {
-    fn name(&self) -> &str { "claude" }
-    fn display_name(&self) -> &str { "Stub Claude" }
-    fn is_available(&self) -> bool { true }
-    fn list_models(&self) -> Vec<LlmModel> { Vec::new() }
-    fn default_fast_model(&self) -> &str { "haiku" }
-    fn default_standard_model(&self) -> &str { "sonnet" }
+    fn name(&self) -> &str {
+        "claude"
+    }
+    fn display_name(&self) -> &str {
+        "Stub Claude"
+    }
+    fn is_available(&self) -> bool {
+        true
+    }
+    fn list_models(&self) -> Vec<LlmModel> {
+        Vec::new()
+    }
+    fn default_fast_model(&self) -> &str {
+        "haiku"
+    }
+    fn default_standard_model(&self) -> &str {
+        "sonnet"
+    }
     fn complete(&self, _prompt: &str, _model: &str, _timeout: Duration) -> Option<Completion> {
         Some(Completion {
             text: "Stub response: this is the synthesized answer the stub provider returns for \
@@ -55,7 +67,11 @@ fn append_backdated(
 ) {
     let now = now_ms();
     let ts = now - days_ago * 86_400_000 - hour_offset * 3_600_000;
-    let usage = TurnUsage { input_tokens, output_tokens, ..Default::default() };
+    let usage = TurnUsage {
+        input_tokens,
+        output_tokens,
+        ..Default::default()
+    };
     let canonical = match model {
         "haiku" => "claude-haiku-4-5",
         "sonnet" => "claude-sonnet-5",
@@ -106,14 +122,7 @@ fn main() {
                 // Vary tokens a bit so the chart isn't flat.
                 let jitter_in = input_tokens + (day * 37 + call as u64 * 53) % 300;
                 let jitter_out = output_tokens + (day * 11 + call as u64 * 19) % 80;
-                append_backdated(
-                    day,
-                    hour_offset,
-                    scenario,
-                    model,
-                    jitter_in,
-                    jitter_out,
-                );
+                append_backdated(day, hour_offset, scenario, model, jitter_in, jitter_out);
                 written += 1;
             }
         }

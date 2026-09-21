@@ -783,7 +783,11 @@ pub fn reconcile_codex_agents_md(
         blocks.push_str(&wrap(begin, end, &body));
     };
     if set.prd {
-        push(PRD_BEGIN, PRD_END, render_codex_prd_block(user_title, locale));
+        push(
+            PRD_BEGIN,
+            PRD_END,
+            render_codex_prd_block(user_title, locale),
+        );
     }
     if set.interaction {
         push(
@@ -973,7 +977,10 @@ mod tests {
             g.contains("git worktree add -b prd/"),
             "must show worktree creation"
         );
-        assert!(g.contains("git merge --no-ff"), "must mandate --no-ff merge back");
+        assert!(
+            g.contains("git merge --no-ff"),
+            "must mandate --no-ff merge back"
+        );
         assert!(
             g.contains("--squash") && g.contains("forbidden"),
             "must forbid --squash so codex doesn't substitute it"
@@ -985,8 +992,14 @@ mod tests {
             g.contains("should I continue"),
             "Rule 4 must name the forbidden progress-report checkpoint pattern"
         );
-        assert!(g.contains("fleet handoff"), "must teach the Rule 5 handoff relay");
-        assert!(g.contains("fleet watch create"), "must teach the Rule 6 watch");
+        assert!(
+            g.contains("fleet handoff"),
+            "must teach the Rule 5 handoff relay"
+        );
+        assert!(
+            g.contains("fleet watch create"),
+            "must teach the Rule 6 watch"
+        );
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),
             "must teach the fleet plan subcommands"
@@ -1097,7 +1110,10 @@ mod tests {
     #[test]
     fn blocks_use_title_and_locale() {
         let prd = render_codex_prd_block("师父", "zh");
-        assert!(prd.contains("师父"), "PRD block must interpolate the user title");
+        assert!(
+            prd.contains("师父"),
+            "PRD block must interpolate the user title"
+        );
         assert!(
             prd.contains("中文书写"),
             "zh locale must select the Chinese TASKS.md line"
@@ -1142,13 +1158,26 @@ mod tests {
     #[test]
     fn wiki_and_model_blocks_carry_their_essence() {
         let wiki = render_codex_wiki_block("en");
-        assert!(wiki.contains("fleet wiki publish"), "wiki must teach publish");
+        assert!(
+            wiki.contains("fleet wiki publish"),
+            "wiki must teach publish"
+        );
         assert!(wiki.contains("[[slug]]"), "wiki must teach cross-links");
-        assert!(!wiki.contains("git worktree"), "wiki block must not drag in PRD content");
+        assert!(
+            !wiki.contains("git worktree"),
+            "wiki block must not drag in PRD content"
+        );
         let model = render_codex_model_block("en");
-        assert!(model.contains("gpt-6-astra") && model.contains("gpt-5.6-sol") && model.contains("claude-opus-5"),
-            "model block must cover both families");
-        assert!(model.contains("inherit"), "model block must teach the inherit default");
+        assert!(
+            model.contains("gpt-6-astra")
+                && model.contains("gpt-5.6-sol")
+                && model.contains("claude-opus-5"),
+            "model block must cover both families"
+        );
+        assert!(
+            model.contains("inherit"),
+            "model block must teach the inherit default"
+        );
     }
 
     /// A codex session used to be told only about the wiki, so an agent that
@@ -1232,7 +1261,8 @@ mod tests {
 
     fn with_temp_codex_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
         let _guard = crate::session::fleet_home_lock();
-        let base = std::env::temp_dir().join(format!("fleet-codex-guidance-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("fleet-codex-guidance-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         let prev = std::env::var_os("CODEX_HOME");
@@ -1362,7 +1392,10 @@ mod tests {
             reconcile_codex_agents_md(set(true, true, false, false), "Boss", "en").unwrap();
             let c = fs::read_to_string(&agents).unwrap();
             assert!(c.contains("keep me."), "user content preserved");
-            assert!(!c.contains(LEGACY_BEGIN), "legacy monolithic block migrated away");
+            assert!(
+                !c.contains(LEGACY_BEGIN),
+                "legacy monolithic block migrated away"
+            );
             assert!(!c.contains("old packed guidance"));
             assert!(
                 c.contains(PRD_BEGIN) && c.contains(INTERACTION_BEGIN),

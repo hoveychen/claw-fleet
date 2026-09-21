@@ -63,7 +63,10 @@ fn mobile_web_request_methods() -> HashSet<String> {
 fn collect_ts(dir: &Path, re: &Regex, out: &mut HashSet<String>) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
-        Err(e) => panic!("drift-guard: cannot read mobile-web dir {}: {e}", dir.display()),
+        Err(e) => panic!(
+            "drift-guard: cannot read mobile-web dir {}: {e}",
+            dir.display()
+        ),
     };
     for entry in entries.flatten() {
         let path = entry.path();

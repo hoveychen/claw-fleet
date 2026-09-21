@@ -270,7 +270,10 @@ mod tests {
                 std::fs::create_dir_all(&dir).unwrap();
                 dir
             });
-            Self { dir: fleet.home().to_path_buf(), _fleet: fleet }
+            Self {
+                dir: fleet.home().to_path_buf(),
+                _fleet: fleet,
+            }
         }
     }
 
@@ -320,7 +323,12 @@ mod tests {
             "a bare host must also get the commit-attribution setting turned off"
         );
         for step in &first {
-            assert!(step.result.is_ok(), "{} failed: {:?}", step.name, step.result);
+            assert!(
+                step.result.is_ok(),
+                "{} failed: {:?}",
+                step.name,
+                step.result
+            );
         }
 
         // Second run: everything is installed, so heal must do nothing. A
@@ -328,7 +336,10 @@ mod tests {
         // which would reinstall that feature on every single start.
         let second = heal(&s);
         let names: Vec<&str> = second.iter().map(|s| s.name).collect();
-        assert!(second.is_empty(), "heal must be quiet once whole, got {names:?}");
+        assert!(
+            second.is_empty(),
+            "heal must be quiet once whole, got {names:?}"
+        );
     }
 
     #[test]
@@ -359,8 +370,11 @@ mod tests {
         // release looks like from here.
         let fresh = crate::interaction_mode::render_guidance(&s.title, &s.locale);
         let header = fresh.lines().next().expect("header line");
-        std::fs::write(&guidance, format!("{header}\n\nan older release wrote this\n"))
-            .expect("age the guidance file");
+        std::fs::write(
+            &guidance,
+            format!("{header}\n\nan older release wrote this\n"),
+        )
+        .expect("age the guidance file");
 
         let third = heal(&s);
         let names: Vec<&str> = third.iter().map(|s| s.name).collect();
@@ -399,10 +413,15 @@ mod tests {
             .join("fleet-interaction-mode.md");
         let before = std::fs::read_to_string(&guidance).expect("zh guidance");
 
-        let en = Settings { locale: "en".into(), ..zh.clone() };
+        let en = Settings {
+            locale: "en".into(),
+            ..zh.clone()
+        };
         let steps = heal(&en);
         assert!(
-            !steps.iter().any(|s| s.name == Feature::InteractionMode.key()),
+            !steps
+                .iter()
+                .any(|s| s.name == Feature::InteractionMode.key()),
             "a locale difference is not staleness"
         );
         assert_eq!(
@@ -467,7 +486,10 @@ mod tests {
         // call, so nothing is recorded as disabled.
         let claude = crate::session::get_claude_dir().expect("claude dir");
         std::fs::remove_dir_all(&claude).expect("wipe ~/.claude");
-        assert!(!is_disabled(Feature::GuardHook), "a wipe is not a user opt-out");
+        assert!(
+            !is_disabled(Feature::GuardHook),
+            "a wipe is not a user opt-out"
+        );
 
         let after = heal(&s);
         assert!(

@@ -77,7 +77,8 @@ fn apply_model_guidance_inner(locale: &str) -> Result<(), String> {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content =
             crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
+            .map_err(|e| format!("write CLAUDE.md: {e}"))
     })
 }
 
@@ -97,7 +98,8 @@ fn remove_model_guidance_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes())
+                        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())
@@ -182,7 +184,8 @@ mod tests {
 
     #[test]
     fn strip_leaves_other_modes_blocks_alone() {
-        let content = "<!-- fleet:wiki-guidance:begin -->\n@x.md\n<!-- fleet:wiki-guidance:end -->\n";
+        let content =
+            "<!-- fleet:wiki-guidance:begin -->\n@x.md\n<!-- fleet:wiki-guidance:end -->\n";
         assert_eq!(strip_sentinel_block(content), content);
     }
 
@@ -192,14 +195,23 @@ mod tests {
             let g = render_guidance(locale);
             // Claude family model IDs
             assert!(g.contains("claude-opus-5"), "{locale} must list Opus 5");
-            assert!(g.contains("claude-fable-5-1"), "{locale} must list Fable 5.1");
+            assert!(
+                g.contains("claude-fable-5-1"),
+                "{locale} must list Fable 5.1"
+            );
             assert!(g.contains("claude-fable-5"), "{locale} must list Fable 5");
             assert!(g.contains("claude-sonnet-5"), "{locale} must list Sonnet 5");
-            assert!(g.contains("claude-haiku-4-5"), "{locale} must list Haiku 4.5");
+            assert!(
+                g.contains("claude-haiku-4-5"),
+                "{locale} must list Haiku 4.5"
+            );
             // Codex family model IDs
             assert!(g.contains("gpt-6-astra"), "{locale} must list GPT-6 Astra");
             assert!(g.contains("gpt-5.6-sol"), "{locale} must list Codex Sol");
-            assert!(g.contains("gpt-5.6-terra"), "{locale} must list Codex Terra");
+            assert!(
+                g.contains("gpt-5.6-terra"),
+                "{locale} must list Codex Terra"
+            );
             assert!(g.contains("gpt-5.6-luna"), "{locale} must list Codex Luna");
         }
     }
@@ -210,9 +222,18 @@ mod tests {
         // chosen — the four override surfaces must be named in both locales.
         for locale in ["en", "zh"] {
             let g = render_guidance(locale);
-            assert!(g.contains("opts.model"), "{locale} must name the Workflow agent() override");
-            assert!(g.contains("--model"), "{locale} must name the spawn/dispatch override");
-            assert!(g.contains("--effort"), "{locale} must name the effort override");
+            assert!(
+                g.contains("opts.model"),
+                "{locale} must name the Workflow agent() override"
+            );
+            assert!(
+                g.contains("--model"),
+                "{locale} must name the spawn/dispatch override"
+            );
+            assert!(
+                g.contains("--effort"),
+                "{locale} must name the effort override"
+            );
         }
     }
     /// The sheet quotes no prices at all.
@@ -227,7 +248,10 @@ mod tests {
         for locale in ["zh", "en"] {
             let g = render_guidance(locale);
             assert!(!g.contains('$'), "{locale} must not quote a price");
-            assert!(!g.contains("/1M"), "{locale} must not carry a per-Mtok column");
+            assert!(
+                !g.contains("/1M"),
+                "{locale} must not carry a per-Mtok column"
+            );
         }
     }
 }

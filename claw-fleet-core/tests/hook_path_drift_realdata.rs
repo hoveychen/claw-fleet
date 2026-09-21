@@ -75,15 +75,20 @@ fn the_real_settings_json_converges_onto_one_binary() {
 
     let before: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(cfg.join("settings.json")).unwrap()).unwrap();
-    let before_bins: std::collections::BTreeSet<String> =
-        fleet_invocations(&before).into_iter().map(|(b, _)| b).collect();
+    let before_bins: std::collections::BTreeSet<String> = fleet_invocations(&before)
+        .into_iter()
+        .map(|(b, _)| b)
+        .collect();
     if before_bins.is_empty() {
         eprintln!("no Fleet hooks in this host's settings.json — skipping");
         let _ = std::fs::remove_dir_all(&tmp);
         return;
     }
-    eprintln!("before: {} fleet hook(s) over {} binaries: {before_bins:?}",
-        fleet_invocations(&before).len(), before_bins.len());
+    eprintln!(
+        "before: {} fleet hook(s) over {} binaries: {before_bins:?}",
+        fleet_invocations(&before).len(),
+        before_bins.len()
+    );
 
     let moved = claw_fleet_core::hooks::repoint_fleet_hooks().expect("repoint");
 
@@ -92,7 +97,10 @@ fn the_real_settings_json_converges_onto_one_binary() {
     let after_pairs = fleet_invocations(&after);
     let after_bins: std::collections::BTreeSet<&str> =
         after_pairs.iter().map(|(b, _)| b.as_str()).collect();
-    eprintln!("after: moved {moved}, now over {} binaries: {after_bins:?}", after_bins.len());
+    eprintln!(
+        "after: moved {moved}, now over {} binaries: {after_bins:?}",
+        after_bins.len()
+    );
 
     assert_eq!(
         after_bins.len(),
@@ -106,7 +114,10 @@ fn the_real_settings_json_converges_onto_one_binary() {
     );
     // Subcommands must survive the rewrite verbatim — a hook moved onto the
     // right binary but pointed at the wrong subcommand is worse than drift.
-    let before_subs: Vec<String> = fleet_invocations(&before).into_iter().map(|(_, s)| s).collect();
+    let before_subs: Vec<String> = fleet_invocations(&before)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
     let after_subs: Vec<String> = after_pairs.iter().map(|(_, s)| s.clone()).collect();
     assert_eq!(before_subs, after_subs);
 

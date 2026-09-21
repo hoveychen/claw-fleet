@@ -15,13 +15,10 @@ pub(crate) fn route_mobile_relay_config_get(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let cfg = crate::mobile_relay::load_config();
-                let body = serde_json::to_string(&cfg).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let cfg = crate::mobile_relay::load_config();
+    let body = serde_json::to_string(&cfg).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_mobile_relay_config_post(
     ctx: &ServeCtx,
@@ -30,27 +27,26 @@ pub(crate) fn route_mobile_relay_config_post(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                let parsed: Result<crate::mobile_relay::MobileRelayConfig, _> =
-                    serde_json::from_slice(&body_bytes);
-                let (status, body) = match parsed {
-                    Ok(cfg) => match crate::mobile_relay::set_config_normalized(cfg) {
-                        Ok(stored) => (200, serde_json::to_string(&stored).unwrap_or_default()),
-                        Err(e) => (500, serde_json::json!({"error": e}).to_string()),
-                    },
-                    Err(e) => (
-                        400,
-                        serde_json::json!({"error": format!("invalid body: {e}")}).to_string(),
-                    ),
-                };
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body)
-                        .with_status_code(status)
-                        .with_header(json_header),
-                );
-            }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let parsed: Result<crate::mobile_relay::MobileRelayConfig, _> =
+        serde_json::from_slice(&body_bytes);
+    let (status, body) = match parsed {
+        Ok(cfg) => match crate::mobile_relay::set_config_normalized(cfg) {
+            Ok(stored) => (200, serde_json::to_string(&stored).unwrap_or_default()),
+            Err(e) => (500, serde_json::json!({"error": e}).to_string()),
+        },
+        Err(e) => (
+            400,
+            serde_json::json!({"error": format!("invalid body: {e}")}).to_string(),
+        ),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
 
 pub(crate) fn route_mobile_relay_rotate(
     ctx: &ServeCtx,
@@ -59,17 +55,16 @@ pub(crate) fn route_mobile_relay_rotate(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let (status, body) = match crate::mobile_relay::rotate_secret() {
-                    Ok(cfg) => (200, serde_json::to_string(&cfg).unwrap_or_default()),
-                    Err(e) => (500, serde_json::json!({"error": e}).to_string()),
-                };
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body)
-                        .with_status_code(status)
-                        .with_header(json_header),
-                );
-            }
+    let (status, body) = match crate::mobile_relay::rotate_secret() {
+        Ok(cfg) => (200, serde_json::to_string(&cfg).unwrap_or_default()),
+        Err(e) => (500, serde_json::json!({"error": e}).to_string()),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
 
 pub(crate) fn route_mobile_relay_status(
     ctx: &ServeCtx,
@@ -78,13 +73,10 @@ pub(crate) fn route_mobile_relay_status(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let status = crate::mobile_relay::status();
-                let body = serde_json::to_string(&status).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let status = crate::mobile_relay::status();
+    let body = serde_json::to_string(&status).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 /// `POST /mobile_rpc` — the phone's data surface over plain HTTP.
 ///
@@ -142,7 +134,6 @@ pub(crate) fn route_mobile_rpc(
     let _ = request.respond(res);
 }
 
-
 /// Text form of the pairing URL — what the desktop's "Copy Pairing Link" button
 /// copies. Separate from the QR route because a self-hosted relay can only be
 /// paired by pasting (App Links need the host baked into the manifest).
@@ -172,15 +163,14 @@ pub(crate) fn route_mobile_relay_qr(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let lang = query.get("lang").map(String::as_str);
-                let (status, body) = match crate::mobile_relay::qr_svg(lang) {
-                    Ok(svg) => (200, serde_json::json!({"svg": svg}).to_string()),
-                    Err(e) => (404, serde_json::json!({"error": e}).to_string()),
-                };
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body)
-                        .with_status_code(status)
-                        .with_header(json_header),
-                );
-            }
+    let lang = query.get("lang").map(String::as_str);
+    let (status, body) = match crate::mobile_relay::qr_svg(lang) {
+        Ok(svg) => (200, serde_json::json!({"svg": svg}).to_string()),
+        Err(e) => (404, serde_json::json!({"error": e}).to_string()),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}

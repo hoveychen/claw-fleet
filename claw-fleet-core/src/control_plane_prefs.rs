@@ -247,7 +247,10 @@ mod tests {
                 fs::create_dir_all(&dir).unwrap();
                 dir
             });
-            Self { dir: fleet.home().to_path_buf(), _fleet: fleet }
+            Self {
+                dir: fleet.home().to_path_buf(),
+                _fleet: fleet,
+            }
         }
     }
 

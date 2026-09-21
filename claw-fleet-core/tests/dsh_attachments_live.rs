@@ -94,21 +94,25 @@ fn live_an_attached_image_reaches_the_model_and_renders_from_the_store() {
     //    can name both halves.
     let answer = wait_for(Duration::from_secs(180), || {
         let records = source.get_messages_tail(&uri, 50).ok()?;
-        records.iter().rev().find_map(|r| {
-            (r.get("type").and_then(|t| t.as_str()) == Some("assistant")).then(|| {
-                r["message"]["content"]
-                    .as_array()
-                    .map(|blocks| {
-                        blocks
-                            .iter()
-                            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-                            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                            .collect::<Vec<_>>()
-                            .join("")
-                    })
-                    .unwrap_or_default()
+        records
+            .iter()
+            .rev()
+            .find_map(|r| {
+                (r.get("type").and_then(|t| t.as_str()) == Some("assistant")).then(|| {
+                    r["message"]["content"]
+                        .as_array()
+                        .map(|blocks| {
+                            blocks
+                                .iter()
+                                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("")
+                        })
+                        .unwrap_or_default()
+                })
             })
-        }).filter(|s| !s.trim().is_empty())
+            .filter(|s| !s.trim().is_empty())
     })
     .expect("the vision turn must produce an assistant answer");
     println!("model answered: {answer:?}");
@@ -186,9 +190,7 @@ fn live_a_text_only_model_still_gets_the_prompt() {
                         .map(|blocks| {
                             blocks
                                 .iter()
-                                .filter(|b| {
-                                    b.get("type").and_then(|t| t.as_str()) == Some("text")
-                                })
+                                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
                                 .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
                                 .collect::<Vec<_>>()
                                 .join("")

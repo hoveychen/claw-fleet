@@ -54,12 +54,18 @@ fn main() {
     let mut miss_bytes = 0u64;
     let mut miss_list: Vec<(u64, String, String)> = Vec::new();
     for s in &sessions {
-        let fp = (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens);
+        let fp = (
+            s.last_activity_ms,
+            s.total_input_tokens,
+            s.total_output_tokens,
+        );
         match persisted.get(&s.id) {
             Some(p) if *p == fp => hit += 1,
             Some(p) => {
                 miss_changed += 1;
-                let bytes = std::fs::metadata(&s.jsonl_path).map(|m| m.len()).unwrap_or(0);
+                let bytes = std::fs::metadata(&s.jsonl_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
                 miss_bytes += bytes;
                 miss_list.push((
                     bytes,
@@ -74,9 +80,15 @@ fn main() {
             }
             None => {
                 miss_absent += 1;
-                let bytes = std::fs::metadata(&s.jsonl_path).map(|m| m.len()).unwrap_or(0);
+                let bytes = std::fs::metadata(&s.jsonl_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
                 miss_bytes += bytes;
-                miss_list.push((bytes, s.agent_source.clone(), format!("{} ABSENT", &s.id[..8.min(s.id.len())])));
+                miss_list.push((
+                    bytes,
+                    s.agent_source.clone(),
+                    format!("{} ABSENT", &s.id[..8.min(s.id.len())]),
+                ));
             }
         }
     }
@@ -91,13 +103,17 @@ fn main() {
     // costs from the second run on.
     let mut miss_new_rule = 0usize;
     for s in &sessions {
-        let same = persisted
-            .get(&s.id)
-            .is_some_and(|p| if s.agent_source == "dsh" {
+        let same = persisted.get(&s.id).is_some_and(|p| {
+            if s.agent_source == "dsh" {
                 (p.1, p.2) == (s.total_input_tokens, s.total_output_tokens)
             } else {
-                *p == (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens)
-            });
+                *p == (
+                    s.last_activity_ms,
+                    s.total_input_tokens,
+                    s.total_output_tokens,
+                )
+            }
+        });
         if !same {
             miss_new_rule += 1;
         }
@@ -113,7 +129,11 @@ fn main() {
     let t = Instant::now();
     let mut lines = 0u64;
     for s in &sessions {
-        let fp = (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens);
+        let fp = (
+            s.last_activity_ms,
+            s.total_input_tokens,
+            s.total_output_tokens,
+        );
         if persisted.get(&s.id) == Some(&fp) {
             continue;
         }
@@ -156,7 +176,10 @@ fn main() {
         all_bytes as f64 / 1e6
     );
 
-    let dsh: Vec<_> = sessions.iter().filter(|s| s.agent_source == "dsh").collect();
+    let dsh: Vec<_> = sessions
+        .iter()
+        .filter(|s| s.agent_source == "dsh")
+        .collect();
     println!("\ndsh sessions in scan: {}", dsh.len());
 
     // ── the same fold, N threads wide ─────────────────────────────────────
@@ -175,7 +198,9 @@ fn main() {
         std::thread::scope(|scope| {
             for _ in 0..width {
                 scope.spawn(|| loop {
-                    let Some(s) = queue.lock().unwrap().pop() else { break };
+                    let Some(s) = queue.lock().unwrap().pop() else {
+                        break;
+                    };
                     let _ = claw_fleet_core::dsh_cost::dsh_session_calls(&s.jsonl_path);
                 });
             }
@@ -195,7 +220,10 @@ fn main() {
         let n = claw_fleet_core::dsh_cost::dsh_session_calls(&s.jsonl_path)
             .map(|c| c.len())
             .unwrap_or(0);
-        slow.push((one.elapsed().as_millis(), format!("{} calls={n}", &s.id[..8.min(s.id.len())])));
+        slow.push((
+            one.elapsed().as_millis(),
+            format!("{} calls={n}", &s.id[..8.min(s.id.len())]),
+        ));
     }
     let total = t.elapsed().as_secs_f64();
     slow.sort_by(|a, b| b.0.cmp(&a.0));
@@ -211,14 +239,22 @@ fn main() {
         .map(|s| {
             (
                 s.id.as_str(),
-                (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens),
+                (
+                    s.last_activity_ms,
+                    s.total_input_tokens,
+                    s.total_output_tokens,
+                ),
             )
         })
         .collect();
     let mut unstable = 0;
     let mut unstable_dsh = 0;
     for s in &sessions {
-        let fp = (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens);
+        let fp = (
+            s.last_activity_ms,
+            s.total_input_tokens,
+            s.total_output_tokens,
+        );
         if map2.get(s.id.as_str()).is_some_and(|f| *f != fp) {
             unstable += 1;
             if s.agent_source == "dsh" {

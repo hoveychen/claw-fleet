@@ -108,9 +108,17 @@ fn usage_log_path() -> Option<PathBuf> {
 }
 
 pub fn append_usage_entry(entry: &FleetLlmUsageEntry) {
-    let Some(path) = usage_log_path() else { return; };
-    let Ok(line) = serde_json::to_string(entry) else { return; };
-    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    let Some(path) = usage_log_path() else {
+        return;
+    };
+    let Ok(line) = serde_json::to_string(entry) else {
+        return;
+    };
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         Ok(mut file) => {
             let _ = writeln!(file, "{line}");
         }
@@ -120,8 +128,12 @@ pub fn append_usage_entry(entry: &FleetLlmUsageEntry) {
 
 /// Read all entries in the [from_ms, to_ms] window (inclusive on both ends).
 pub fn list_usage_entries(from_ms: u64, to_ms: u64) -> Vec<FleetLlmUsageEntry> {
-    let Some(path) = usage_log_path() else { return Vec::new(); };
-    let Ok(content) = std::fs::read_to_string(&path) else { return Vec::new(); };
+    let Some(path) = usage_log_path() else {
+        return Vec::new();
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
     content
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -214,8 +226,16 @@ pub fn complete_accounted(
     let completion = provider.complete(prompt, model, timeout)?;
     let duration_ms = started.elapsed().as_millis() as u64;
 
-    let (input_tokens, output_tokens, cache_creation_tokens, cache_creation_1h_tokens,
-         cache_read_tokens, cost_usd, token_accurate, cost_accurate) = match &completion.usage {
+    let (
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens,
+        cache_creation_1h_tokens,
+        cache_read_tokens,
+        cost_usd,
+        token_accurate,
+        cost_accurate,
+    ) = match &completion.usage {
         Some(u) => (
             u.input_tokens,
             u.output_tokens,
@@ -338,8 +358,9 @@ mod tests {
                 .with_timezone(&chrono::Local)
                 .format("%Y-%m-%d")
                 .to_string();
-            let b = map.entry((date.clone(), e.scenario.clone())).or_insert_with(|| {
-                FleetLlmUsageDailyBucket {
+            let b = map
+                .entry((date.clone(), e.scenario.clone()))
+                .or_insert_with(|| FleetLlmUsageDailyBucket {
                     date,
                     scenario: e.scenario.clone(),
                     calls: 0,
@@ -350,14 +371,17 @@ mod tests {
                     cost_usd: 0.0,
                     has_estimated_tokens: false,
                     has_unpriced_calls: false,
-                }
-            });
+                });
             b.calls += 1;
             b.input_tokens += e.input_tokens;
             b.output_tokens += e.output_tokens;
             b.cost_usd += e.cost_usd;
-            if !e.token_accurate { b.has_estimated_tokens = true; }
-            if !e.cost_accurate { b.has_unpriced_calls = true; }
+            if !e.token_accurate {
+                b.has_estimated_tokens = true;
+            }
+            if !e.cost_accurate {
+                b.has_unpriced_calls = true;
+            }
         }
         let buckets: Vec<_> = map.into_values().collect();
         assert_eq!(buckets.len(), 1, "same day + same scenario should collapse");

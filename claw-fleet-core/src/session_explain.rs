@@ -191,7 +191,8 @@ fn write_record_in(root: &Path, rec: &ExplainRecord) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     let bytes = serde_json::to_vec_pretty(rec).map_err(|e| e.to_string())?;
-    crate::atomic_json::write_atomic(&path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))
+    crate::atomic_json::write_atomic(&path, &bytes)
+        .map_err(|e| format!("write {}: {e}", path.display()))
 }
 
 fn write_record(rec: &ExplainRecord) -> Result<(), String> {
@@ -227,7 +228,9 @@ pub fn list_in(root: &Path, session_id: &str) -> Vec<ExplainRecord> {
 
 /// Every explanation recorded for `session_id`, oldest first.
 pub fn list(session_id: &str) -> Vec<ExplainRecord> {
-    explain_dir().map(|d| list_in(&d, session_id)).unwrap_or_default()
+    explain_dir()
+        .map(|d| list_in(&d, session_id))
+        .unwrap_or_default()
 }
 
 /// Every fork identity any explanation left on disk, across all sessions.
@@ -258,14 +261,21 @@ pub fn fork_session_ids() -> std::collections::HashSet<String> {
 
 fn preset_question(preset: ExplainPreset, custom: Option<&str>) -> String {
     match preset {
-        ExplainPreset::Explain => "这段话是什么意思？请用通俗的话解释它在本任务里的含义。".to_string(),
+        ExplainPreset::Explain => {
+            "这段话是什么意思？请用通俗的话解释它在本任务里的含义。".to_string()
+        }
         ExplainPreset::Translate => {
             "请把这段话翻译成中文（若原文已是中文则译为英文），保持术语准确，只给译文。".to_string()
         }
         ExplainPreset::Rationale => {
-            "你为什么这么判断 / 这么做？说明背后的取舍、被放弃的备选方案，以及你当时的不确定之处。".to_string()
+            "你为什么这么判断 / 这么做？说明背后的取舍、被放弃的备选方案，以及你当时的不确定之处。"
+                .to_string()
         }
-        ExplainPreset::Custom => custom.map(str::trim).filter(|q| !q.is_empty()).unwrap_or("请解释这段话。").to_string(),
+        ExplainPreset::Custom => custom
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .unwrap_or("请解释这段话。")
+            .to_string(),
     }
 }
 
@@ -287,7 +297,13 @@ pub fn build_prompt(quote: &str, question: &str, prior: &[ExplainRecord]) -> Str
     if !prior.is_empty() {
         out.push_str("\n【此前围绕这段原文的追问】\n");
         for (i, p) in prior.iter().enumerate() {
-            out.push_str(&format!("Q{}: {}\nA{}: {}\n", i + 1, p.question.trim(), i + 1, p.text.trim()));
+            out.push_str(&format!(
+                "Q{}: {}\nA{}: {}\n",
+                i + 1,
+                p.question.trim(),
+                i + 1,
+                p.text.trim()
+            ));
         }
     }
     out.push_str("\n【问题】\n");
@@ -401,11 +417,16 @@ fn run(mut rec: ExplainRecord, spec: ForkAskSpec) {
 
     match outcome {
         Ok(out) => {
-            let text = if out.text.trim().is_empty() { streamed.clone() } else { out.text.clone() };
+            let text = if out.text.trim().is_empty() {
+                streamed.clone()
+            } else {
+                out.text.clone()
+            };
             if text.trim().is_empty() {
                 settle_error(
                     &mut rec,
-                    "the fork produced no text (it may have tried to call a tool); try again".to_string(),
+                    "the fork produced no text (it may have tried to call a tool); try again"
+                        .to_string(),
                     started,
                 );
                 return;
@@ -575,7 +596,11 @@ impl ClaudeStreamFold {
                 }
                 self.is_error = is_error;
                 if is_error {
-                    self.error_text = Some(if text.is_empty() { "claude reported an error".to_string() } else { text.to_string() });
+                    self.error_text = Some(if text.is_empty() {
+                        "claude reported an error".to_string()
+                    } else {
+                        text.to_string()
+                    });
                 } else {
                     self.result_text = Some(text.to_string());
                 }
@@ -612,9 +637,14 @@ impl ClaudeStreamFold {
 
     pub fn into_outcome(self) -> Result<ForkAskOutcome, String> {
         if self.is_error {
-            return Err(self.error_text.unwrap_or_else(|| "claude reported an error".to_string()));
+            return Err(self
+                .error_text
+                .unwrap_or_else(|| "claude reported an error".to_string()));
         }
-        let text = self.result_text.filter(|t| !t.trim().is_empty()).unwrap_or(self.streamed);
+        let text = self
+            .result_text
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or(self.streamed);
         Ok(ForkAskOutcome {
             text,
             model: self.model,
@@ -653,22 +683,33 @@ pub(crate) fn claude_fork_ask(
     }
     let claude = claude_path.unwrap_or_else(|| "claude".to_string());
     if !Path::new(&spec.workspace_path).is_dir() {
-        return Err(format!("workspace directory not found: {}", spec.workspace_path));
+        return Err(format!(
+            "workspace directory not found: {}",
+            spec.workspace_path
+        ));
     }
 
     let model = crate::session::resolve_session_model_spec(&spec.session_id);
     let effort = crate::launch_spec::effort_of(&spec.session_id);
 
     // The fork must look Fleet-owned to `fleet mcp`, or the prompt cache is
-    // lost from the first message on. `fleet mcp` advertises its 12 control
+    // lost from the tools block on. `fleet mcp` advertises its 12 control
     // tools only to sessions with a `launch_spec` note; the source session has
     // one, a CLI-minted fork id does not, so the fork's MCP tool set — and with
     // it the deferred-tools listing Claude Code writes into the conversation
-    // — differed from the source's. Measured 2026-09-20 on a 58K-token
-    // session: a fork without the note read 15.5K (tools + system only) at
-    // $0.89; the next fork *with* the note read 58.5K at $0.04. The note is a
-    // lie about persistence (the fork writes no transcript), so it is dropped
+    // — differed from the source's (seen 2026-09-20 by capturing both request
+    // bodies: 47 tools in the note-less fork vs 14 in the source). The note is
+    // a lie about persistence (the fork writes no transcript), so it is dropped
     // again the moment the process ends — on every exit path, via the guard.
+    //
+    // Verified end to end 2026-09-21 on a 59K-token session whose first turn
+    // made two requests: the fork read 59.3K from cache and wrote 1.2K, $0.07.
+    // The one case that still misses is a session whose first turn issued a
+    // single request: the entry that request writes (it ends in the
+    // SessionStart hook's system-role message) is not matched by *any* later
+    // request, not even the session's own second one — a Claude Code quirk,
+    // not a fork one. Real sessions call at least one tool in their first
+    // turn, so the fork lands on a later, matchable entry.
     let fork_session_id = uuid::Uuid::new_v4().to_string();
     crate::launch_spec::record(&fork_session_id, model.as_deref(), effort.as_deref());
     let _forget = ForgetLaunchSpec(fork_session_id.clone());
@@ -744,7 +785,10 @@ pub(crate) fn claude_fork_ask(
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn claude fork: {e}"))?;
     let pid = child.id();
-    let stdout = child.stdout.take().ok_or_else(|| "claude fork: no stdout".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "claude fork: no stdout".to_string())?;
 
     // Watchdog: SIGKILL the fork if it outlives the ceiling. `finished` lets a
     // normal exit disarm it.
@@ -760,7 +804,9 @@ pub(crate) fn claude_fork_ask(
                 std::thread::sleep(Duration::from_millis(250));
             }
             if !finished.load(Ordering::Relaxed) {
-                crate::log_debug(&format!("[session_explain] fork pid {pid} timed out; killing"));
+                crate::log_debug(&format!(
+                    "[session_explain] fork pid {pid} timed out; killing"
+                ));
                 crate::llm_provider::kill_process(pid);
             }
         });
@@ -774,7 +820,8 @@ pub(crate) fn claude_fork_ask(
         }
     }
     let status = child.wait();
-    let timed_out = !finished.swap(true, Ordering::Relaxed) && status.as_ref().map(|s| !s.success()).unwrap_or(true)
+    let timed_out = !finished.swap(true, Ordering::Relaxed)
+        && status.as_ref().map(|s| !s.success()).unwrap_or(true)
         && fold.result_text.is_none()
         && fold.error_text.is_none();
     if timed_out && fold.streamed.is_empty() {
@@ -823,7 +870,10 @@ mod tests {
         write_record_in(dir.path(), &rec("a", "s1", 10)).unwrap();
         write_record_in(dir.path(), &rec("c", "s2", 5)).unwrap();
         let got = list_in(dir.path(), "s1");
-        assert_eq!(got.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
+        assert_eq!(
+            got.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
         assert_eq!(get_in(dir.path(), "s2", "c").unwrap().created_ms, 5);
         assert!(get_in(dir.path(), "s1", "zzz").is_none());
         assert!(list_in(dir.path(), "nope").is_empty());
@@ -866,8 +916,14 @@ mod tests {
     fn presets_have_questions_and_custom_falls_back() {
         assert!(preset_question(ExplainPreset::Translate, None).contains("翻译"));
         assert!(preset_question(ExplainPreset::Rationale, None).contains("取舍"));
-        assert_eq!(preset_question(ExplainPreset::Custom, Some("  hm? ")), "hm?");
-        assert_eq!(preset_question(ExplainPreset::Custom, Some("   ")), "请解释这段话。");
+        assert_eq!(
+            preset_question(ExplainPreset::Custom, Some("  hm? ")),
+            "hm?"
+        );
+        assert_eq!(
+            preset_question(ExplainPreset::Custom, Some("   ")),
+            "请解释这段话。"
+        );
     }
 
     #[test]
@@ -879,7 +935,10 @@ mod tests {
             Some("claude-fable-5-1"),
             Some("high"),
             crate::session_launch::live_thinking_stream_args(),
-            vec!["--permission-prompt-tool".into(), "mcp__fleet__fleet__permission_prompt".into()],
+            vec![
+                "--permission-prompt-tool".into(),
+                "mcp__fleet__fleet__permission_prompt".into(),
+            ],
             vec![],
         );
         let joined = args.join(" ");
@@ -942,7 +1001,9 @@ mod tests {
     fn stream_fold_falls_back_to_streamed_text_when_result_is_blank() {
         let mut fold = ClaudeStreamFold::default();
         fold.feed(r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}}"#);
-        fold.feed(r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":""}"#);
+        fold.feed(
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":""}"#,
+        );
         assert_eq!(fold.into_outcome().unwrap().text, "partial");
     }
 
@@ -985,9 +1046,17 @@ mod tests {
             assert!(Instant::now() < deadline, "probe timed out");
         };
         eprintln!("{}", serde_json::to_string_pretty(&final_rec).unwrap());
-        assert_eq!(final_rec.status, ExplainStatus::Done, "{:?}", final_rec.error);
+        assert_eq!(
+            final_rec.status,
+            ExplainStatus::Done,
+            "{:?}",
+            final_rec.error
+        );
         assert!(!final_rec.text.trim().is_empty());
-        assert!(final_rec.cache_read_tokens > 0, "fork did not hit the prompt cache");
+        assert!(
+            final_rec.cache_read_tokens > 0,
+            "fork did not hit the prompt cache"
+        );
     }
 
     #[test]

@@ -277,7 +277,14 @@ pub fn elicitation_to_form(
         p.insert("type".into(), json!("string"));
         p.insert("title".into(), json!(q.header.clone()));
         if !q.options.is_empty() {
-            p.insert("enum".into(), json!(q.options.iter().map(|o| o.label.clone()).collect::<Vec<_>>()));
+            p.insert(
+                "enum".into(),
+                json!(q
+                    .options
+                    .iter()
+                    .map(|o| o.label.clone())
+                    .collect::<Vec<_>>()),
+            );
         }
         props.insert(q.question.clone(), Value::Object(p));
         required.push(q.question.clone());
@@ -287,7 +294,11 @@ pub fn elicitation_to_form(
         .first()
         .map(|q| q.question.clone())
         .unwrap_or_else(|| "Fleet needs your input".to_string());
-    CreateElicitationRequest::form(session_id, message, ElicitationSchema::object(props, required))
+    CreateElicitationRequest::form(
+        session_id,
+        message,
+        ElicitationSchema::object(props, required),
+    )
 }
 
 /// Keys the plan-approval form answers on.
@@ -324,7 +335,6 @@ pub fn plan_approval_to_form(
     )
 }
 
-
 // ───────────────────────── url-mode elicitations ────────────────────
 
 /// Whether a fleet-ask question carries a preview a form cannot render.
@@ -340,7 +350,9 @@ pub fn has_rich_preview(q: &crate::mcp_ipc::FleetAskQuestion) -> bool {
 /// is configured, since a link the client cannot resolve is worse than none.
 pub fn preview_url(card_id: &str, question_index: usize) -> Option<String> {
     let base = super::attachments::public_base_url()?;
-    Some(format!("{base}/decision_asset/{card_id}/q{question_index}/index.html"))
+    Some(format!(
+        "{base}/decision_asset/{card_id}/q{question_index}/index.html"
+    ))
 }
 
 /// A fleet-ask card as a URL-mode elicitation.
@@ -447,7 +459,11 @@ pub fn form_answer_to_plan(
         .map(String::from);
     crate::plan_approval::PlanApprovalResponse {
         id: id.to_string(),
-        decision: if approved { "approve".into() } else { "reject".into() },
+        decision: if approved {
+            "approve".into()
+        } else {
+            "reject".into()
+        },
         edited_plan: if approved { edited } else { None },
         feedback: None,
     }
@@ -482,8 +498,11 @@ fn stringify_map(content: &Map<String, Value>) -> std::collections::HashMap<Stri
 /// typed is dropped rather than reported, because answering with the literal
 /// word would tell the agent a choice was made when none was.
 fn collapse_other_fields(answers: &mut std::collections::HashMap<String, String>) {
-    let siblings: Vec<String> =
-        answers.keys().filter(|k| k.ends_with("__other")).cloned().collect();
+    let siblings: Vec<String> = answers
+        .keys()
+        .filter(|k| k.ends_with("__other"))
+        .cloned()
+        .collect();
 
     for sib in siblings {
         let text = answers.remove(&sib).unwrap_or_default();
@@ -531,7 +550,10 @@ mod tests {
         // GuardDecision is Allow or Block only, so "remember" is not offered:
         // it could not be honoured on the way back.
         assert_eq!(r.options.len(), 2);
-        assert!(r.options.iter().all(|o| o.kind != PermissionOptionKind::AllowAlways));
+        assert!(r
+            .options
+            .iter()
+            .all(|o| o.kind != PermissionOptionKind::AllowAlways));
         assert_eq!(r.options[0].option_id, OPT_ALLOW);
         assert_eq!(r.options[1].option_id, OPT_REJECT);
     }
@@ -586,7 +608,10 @@ mod tests {
         req.tool_input = json!({});
         let p = permission_prompt_to_permission("s", &req);
         assert!(
-            p.tool_call.title.unwrap_or_default().contains("SomeFutureTool"),
+            p.tool_call
+                .title
+                .unwrap_or_default()
+                .contains("SomeFutureTool"),
             "an unmapped tool is still named rather than left to render as \"Other\""
         );
     }
@@ -605,11 +630,21 @@ mod tests {
             tool_input: json!({"file_path": "/w/a.rs"}),
             tool_use_id: Some("toolu_XYZ".into()),
         };
-        assert_eq!(permission_prompt_to_permission("s", &req).tool_call.tool_call_id, "toolu_XYZ");
+        assert_eq!(
+            permission_prompt_to_permission("s", &req)
+                .tool_call
+                .tool_call_id,
+            "toolu_XYZ"
+        );
 
         // With no tool_use_id there is still something to answer on.
         req.tool_use_id = None;
-        assert_eq!(permission_prompt_to_permission("s", &req).tool_call.tool_call_id, "p1");
+        assert_eq!(
+            permission_prompt_to_permission("s", &req)
+                .tool_call
+                .tool_call_id,
+            "p1"
+        );
 
         // Fleet cannot persist an "always" for this channel, so it is not offered.
         assert!(permission_prompt_to_permission("s", &req)
@@ -625,7 +660,9 @@ mod tests {
         // nobody approved.
         assert!(!outcome_allows(&RequestPermissionOutcome::Cancelled));
 
-        assert!(outcome_allows(&RequestPermissionOutcome::Selected { option_id: OPT_ALLOW.into() }));
+        assert!(outcome_allows(&RequestPermissionOutcome::Selected {
+            option_id: OPT_ALLOW.into()
+        }));
         assert!(!outcome_allows(&RequestPermissionOutcome::Selected {
             option_id: OPT_REJECT.into()
         }));
@@ -639,7 +676,10 @@ mod tests {
     fn the_guard_title_leads_with_the_summary_and_keeps_risk_tags() {
         let t = guard_title(&guard_req());
         assert!(t.starts_with("Delete a temp dir"));
-        assert!(t.contains("destructive"), "the risk is the reason to look: {t}");
+        assert!(
+            t.contains("destructive"),
+            "the risk is the reason to look: {t}"
+        );
 
         // With no summary the command itself is the label.
         let mut r = guard_req();
@@ -694,7 +734,9 @@ mod tests {
             assert_eq!(p["enum"], json!(["a", "b"]), "{kind:?}");
         }
         // A free-text field has no enum even though options is populated.
-        assert!(form_field_to_property(&field("f", FormFieldKind::Text)).get("enum").is_none());
+        assert!(form_field_to_property(&field("f", FormFieldKind::Text))
+            .get("enum")
+            .is_none());
     }
 
     #[test]
@@ -723,8 +765,16 @@ mod tests {
                 header: "Approach".into(),
                 multi_select: false,
                 options: vec![
-                    FleetAskOption { label: "A".into(), description: "d".into(), preview: None },
-                    FleetAskOption { label: "B".into(), description: "d".into(), preview: None },
+                    FleetAskOption {
+                        label: "A".into(),
+                        description: "d".into(),
+                        preview: None,
+                    },
+                    FleetAskOption {
+                        label: "B".into(),
+                        description: "d".into(),
+                        preview: None,
+                    },
                 ],
                 html: None,
                 form_fields: vec![field("note", FormFieldKind::Textarea)],
@@ -743,7 +793,10 @@ mod tests {
         let schema = e.requested_schema.unwrap();
         // The options, plus the escape hatch every Fleet question carries —
         // see `a_question_keeps_its_other_escape_hatch`.
-        assert_eq!(schema.properties["Which approach?"]["enum"], json!(["A", "B", OPT_OTHER]));
+        assert_eq!(
+            schema.properties["Which approach?"]["enum"],
+            json!(["A", "B", OPT_OTHER])
+        );
         // Form fields sit alongside the question.
         assert_eq!(schema.properties["note"]["type"], "string");
         // The question is required; an optional field is not.
@@ -765,16 +818,20 @@ mod tests {
         };
         let e = plan_approval_to_form("sess", &req);
         let schema = e.requested_schema.unwrap();
-        assert_eq!(schema.properties[PLAN_DECISION]["enum"], json!(["approve", "reject"]));
+        assert_eq!(
+            schema.properties[PLAN_DECISION]["enum"],
+            json!(["approve", "reject"])
+        );
         // The plan is pre-filled so the user edits rather than retypes.
         assert_eq!(schema.properties[PLAN_EDITED]["default"], "step one");
         assert_eq!(schema.required, vec![PLAN_DECISION.to_string()]);
     }
 
     fn accept(v: Value) -> ElicitationAction {
-        ElicitationAction::Accept { content: Some(v.as_object().unwrap().clone()) }
+        ElicitationAction::Accept {
+            content: Some(v.as_object().unwrap().clone()),
+        }
     }
-
 
     fn caps(form: bool, url: bool) -> super::super::types::ClientCapabilities {
         let mut v = serde_json::Map::new();
@@ -808,10 +865,19 @@ mod tests {
     fn a_client_without_form_support_cannot_be_asked() {
         // The spec forbids using URL mode against a client that did not
         // advertise it, so there is nothing left to try.
-        assert_eq!(choose_delivery(false, &caps(false, false)), Delivery::Unsupported);
-        assert_eq!(choose_delivery(true, &caps(false, false)), Delivery::Unsupported);
+        assert_eq!(
+            choose_delivery(false, &caps(false, false)),
+            Delivery::Unsupported
+        );
+        assert_eq!(
+            choose_delivery(true, &caps(false, false)),
+            Delivery::Unsupported
+        );
         // A plain question with only url support has no form to render.
-        assert_eq!(choose_delivery(false, &caps(false, true)), Delivery::Unsupported);
+        assert_eq!(
+            choose_delivery(false, &caps(false, true)),
+            Delivery::Unsupported
+        );
     }
 
     #[test]
@@ -833,7 +899,10 @@ mod tests {
     fn a_preview_url_needs_a_configured_base() {
         let prev = std::env::var("FLEET_PUBLIC_BASE_URL").ok();
         std::env::remove_var("FLEET_PUBLIC_BASE_URL");
-        assert!(preview_url("card1", 0).is_none(), "a link nothing resolves is worse than none");
+        assert!(
+            preview_url("card1", 0).is_none(),
+            "a link nothing resolves is worse than none"
+        );
 
         std::env::set_var("FLEET_PUBLIC_BASE_URL", "https://f.example.com");
         assert_eq!(
@@ -902,7 +971,10 @@ mod tests {
         let a = accept(json!({"Which approach?": "A", other_key.clone(): ""}));
         let r = form_answer_to_fleet_ask("a1", &a);
         assert_eq!(r.answers["Which approach?"], "A");
-        assert!(!r.answers.contains_key(&other_key), "the sibling never reaches the agent");
+        assert!(
+            !r.answers.contains_key(&other_key),
+            "the sibling never reaches the agent"
+        );
 
         // Choosing Other: the typed text *is* the answer, exactly as Fleet's
         // own panel would have reported it.
@@ -952,7 +1024,10 @@ mod tests {
         assert_eq!(r.answers["agree"], "true");
         assert_eq!(r.answers["count"], "3");
         assert_eq!(r.answers["note"], "x");
-        assert!(!r.answers.contains_key("skipped"), "null is no answer at all");
+        assert!(
+            !r.answers.contains_key("skipped"),
+            "null is no answer at all"
+        );
     }
 
     #[test]
@@ -966,7 +1041,10 @@ mod tests {
         // A submitted form that never answered the question is not consent.
         let silent = form_answer_to_plan("p1", &accept(json!({PLAN_EDITED: "rewritten"})));
         assert_eq!(silent.decision, "reject");
-        assert!(silent.edited_plan.is_none(), "a rejected plan carries no edit");
+        assert!(
+            silent.edited_plan.is_none(),
+            "a rejected plan carries no edit"
+        );
     }
 
     #[test]
@@ -1005,14 +1083,18 @@ mod tests {
         assert_eq!(v["mode"], "url");
         assert_eq!(v["elicitationId"], "el-1");
         assert_eq!(v["url"], "https://x.test/a");
-        assert!(v.get("requestedSchema").is_none(), "url mode carries no schema");
+        assert!(
+            v.get("requestedSchema").is_none(),
+            "url mode carries no schema"
+        );
     }
 
     #[test]
     fn permission_outcomes_deserialize_from_the_wire() {
-        let sel: RequestPermissionResponseForTest =
-            serde_json::from_value(json!({"outcome": {"outcome": "selected", "optionId": "allow"}}))
-                .unwrap();
+        let sel: RequestPermissionResponseForTest = serde_json::from_value(
+            json!({"outcome": {"outcome": "selected", "optionId": "allow"}}),
+        )
+        .unwrap();
         assert!(outcome_allows(&sel.outcome));
 
         let cancelled: RequestPermissionResponseForTest =

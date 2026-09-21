@@ -143,8 +143,8 @@ impl TaskReviewStore {
     pub fn save(&self, review: &TaskReview) -> Result<(), String> {
         let ids = serde_json::to_string(&review.session_ids)
             .map_err(|e| format!("json encode session_ids: {e}"))?;
-        let lessons =
-            serde_json::to_string(&review.lessons).map_err(|e| format!("json encode lessons: {e}"))?;
+        let lessons = serde_json::to_string(&review.lessons)
+            .map_err(|e| format!("json encode lessons: {e}"))?;
         let outcome = match review.outcome {
             TaskOutcome::Completed => "completed",
             TaskOutcome::Abandoned => "abandoned",
@@ -390,11 +390,7 @@ pub fn task_sessions(session_id: &str) -> Vec<String> {
     }
 }
 
-fn run_review(
-    session_id: &str,
-    workspace_path: &str,
-    outcome: TaskOutcome,
-) -> Result<(), String> {
+fn run_review(session_id: &str, workspace_path: &str, outcome: TaskOutcome) -> Result<(), String> {
     let session_ids = task_sessions(session_id);
     let root = session_ids
         .first()
@@ -421,8 +417,10 @@ fn run_review(
         // Keep the tail: the end of a task is where its outcome was decided.
         pairs = pairs.split_off(pairs.len() - MAX_PAIRS);
     }
-    let other_picks =
-        crate::decision_history::collect_other_picks_for_sessions(&session_ids, MAX_DECISION_SIGNALS);
+    let other_picks = crate::decision_history::collect_other_picks_for_sessions(
+        &session_ids,
+        MAX_DECISION_SIGNALS,
+    );
 
     if pairs.is_empty() && other_picks.is_empty() {
         return Err("no trace to review".into());
@@ -516,13 +514,20 @@ fn build_review_prompt(
     for (i, p) in pairs.iter().enumerate() {
         let a: String = p.assistant_text().chars().take(1200).collect();
         let u: String = p.user_text().chars().take(1200).collect();
-        trace.push_str(&format!("--- Turn {} ---\nAGENT: {a}\nUSER: {u}\n\n", i + 1));
+        trace.push_str(&format!(
+            "--- Turn {} ---\nAGENT: {a}\nUSER: {u}\n\n",
+            i + 1
+        ));
     }
 
     let mut signals = String::new();
     for (i, ctx) in other_picks.iter().enumerate() {
         let q: String = ctx.question.chars().take(400).collect();
-        signals.push_str(&format!("--- Card {} [{}] ---\n  AI raised: {q}\n", i + 1, ctx.card_type));
+        signals.push_str(&format!(
+            "--- Card {} [{}] ---\n  AI raised: {q}\n",
+            i + 1,
+            ctx.card_type
+        ));
         if ctx.user_choice.trim().is_empty() {
             signals.push_str("  User REJECTED the AI's proposal.\n\n");
         } else {
@@ -647,8 +652,12 @@ mod tests {
     fn save_and_range_roundtrip() {
         let path = tmpdb("crud");
         let store = TaskReviewStore::open_at(&path).unwrap();
-        store.save(&sample("s1", TaskOutcome::Abandoned, 1_000)).unwrap();
-        store.save(&sample("s2", TaskOutcome::Completed, 2_000)).unwrap();
+        store
+            .save(&sample("s1", TaskOutcome::Abandoned, 1_000))
+            .unwrap();
+        store
+            .save(&sample("s2", TaskOutcome::Completed, 2_000))
+            .unwrap();
 
         let all = store.list_in_range(0, 10_000).unwrap();
         assert_eq!(all.len(), 2);
@@ -665,7 +674,9 @@ mod tests {
         assert_eq!(window[0].root_session_id, "s2");
 
         // Re-terminating overwrites rather than duplicating.
-        store.save(&sample("s1", TaskOutcome::Completed, 1_000)).unwrap();
+        store
+            .save(&sample("s1", TaskOutcome::Completed, 1_000))
+            .unwrap();
         assert_eq!(store.list_in_range(0, 10_000).unwrap().len(), 2);
         assert_eq!(store.get("s1").unwrap().outcome, TaskOutcome::Completed);
         std::fs::remove_file(&path).ok();
@@ -683,7 +694,10 @@ mod tests {
         assert_eq!(p.title, "Wire the relay");
         assert!(p.summary.starts_with("The agent shipped"));
         assert_eq!(p.lessons.len(), 2);
-        assert_eq!(p.lessons[0].content, "Enumerate every surface before claiming done");
+        assert_eq!(
+            p.lessons[0].content,
+            "Enumerate every surface before claiming done"
+        );
         // Lessons attach to the last hop — the session the user was looking at.
         assert_eq!(p.lessons[0].session_id, "b");
     }

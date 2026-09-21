@@ -65,7 +65,10 @@ pub fn find_transcript(session_id: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn reject_compressed(path: PathBuf) -> Result<PathBuf, String> {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
     if name.ends_with(".jsonl.zst") {
         return Err(format!(
             "the transcript {} is a zstd-compressed (archived) Codex rollout — history \
@@ -104,7 +107,9 @@ pub fn search(session_id: &str, query: &str, limit: usize) -> Result<Vec<History
     if transcripts.is_empty() {
         // Surface the *reason* for the caller's own session (missing vs
         // compressed) rather than a generic "nothing found".
-        return Err(find_transcript(session_id).err().unwrap_or_else(|| no_transcript_error(session_id)));
+        return Err(find_transcript(session_id)
+            .err()
+            .unwrap_or_else(|| no_transcript_error(session_id)));
     }
     let index = SearchIndex::open().map_err(|e| format!("cannot open search index: {e}"))?;
     search_with(&index, &transcripts, query, limit)
@@ -156,7 +161,12 @@ pub fn read(
     let readable = crate::session_notes::readable_sessions(session_id);
     let target = ensure_readable(&readable, target_session.unwrap_or(session_id))?;
     let path = find_transcript(target)?;
-    read_record(&path, line_no, offset_chars, limit_chars.unwrap_or(DEFAULT_READ_CHARS))
+    read_record(
+        &path,
+        line_no,
+        offset_chars,
+        limit_chars.unwrap_or(DEFAULT_READ_CHARS),
+    )
 }
 
 /// Refuse a target outside the caller's scope (a successor's transcript, or an
@@ -267,12 +277,18 @@ fn render_codex_record(val: &Value) -> String {
     match ptype {
         "function_call" => {
             let name = payload["name"].as_str().unwrap_or("tool");
-            let args = payload["arguments"].as_str().map(str::to_string).unwrap_or_else(|| payload["arguments"].to_string());
+            let args = payload["arguments"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| payload["arguments"].to_string());
             out.push_str(&format!("<tool_use name=\"{name}\">{args}</tool_use>\n"));
         }
         "custom_tool_call" => {
             let name = payload["name"].as_str().unwrap_or("tool");
-            let input = payload["input"].as_str().map(str::to_string).unwrap_or_else(|| payload["input"].to_string());
+            let input = payload["input"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| payload["input"].to_string());
             out.push_str(&format!("<tool_use name=\"{name}\">{input}</tool_use>\n"));
         }
         "function_call_output" | "custom_tool_call_output" => {
@@ -375,18 +391,40 @@ mod tests {
         let pred = dir.join("pred.jsonl");
         let other = dir.join("other.jsonl");
         fs::write(&own, OWN).unwrap();
-        fs::write(&pred, "{\"type\":\"user\",\"message\":{\"content\":\"zqhist from the predecessor\"}}\n").unwrap();
-        fs::write(&other, "{\"type\":\"user\",\"message\":{\"content\":\"zqhist unrelated session\"}}\n").unwrap();
+        fs::write(
+            &pred,
+            "{\"type\":\"user\",\"message\":{\"content\":\"zqhist from the predecessor\"}}\n",
+        )
+        .unwrap();
+        fs::write(
+            &other,
+            "{\"type\":\"user\",\"message\":{\"content\":\"zqhist unrelated session\"}}\n",
+        )
+        .unwrap();
 
         let idx = SearchIndex::open_at(&dir.join("idx.db")).unwrap();
         // The unrelated transcript is indexed too, and must never surface.
         idx.index_session(other.to_str().unwrap(), "other").unwrap();
 
-        let scope = vec![("own".to_string(), own.clone()), ("pred".to_string(), pred.clone())];
+        let scope = vec![
+            ("own".to_string(), own.clone()),
+            ("pred".to_string(), pred.clone()),
+        ];
         let mut hits = search_with(&idx, &scope, "zqhist", 10).unwrap();
-        hits.sort_by(|a, b| a.session_id.cmp(&b.session_id).then(a.line_no.cmp(&b.line_no)));
-        let located: Vec<(&str, i64)> = hits.iter().map(|h| (h.session_id.as_str(), h.line_no)).collect();
-        assert_eq!(located, vec![("own", 1), ("own", 3), ("pred", 1)], "{hits:?}");
+        hits.sort_by(|a, b| {
+            a.session_id
+                .cmp(&b.session_id)
+                .then(a.line_no.cmp(&b.line_no))
+        });
+        let located: Vec<(&str, i64)> = hits
+            .iter()
+            .map(|h| (h.session_id.as_str(), h.line_no))
+            .collect();
+        assert_eq!(
+            located,
+            vec![("own", 1), ("own", 3), ("pred", 1)],
+            "{hits:?}"
+        );
         assert!(search_with(&idx, &scope, "   ", 10).is_err());
 
         let _ = fs::remove_dir_all(&dir);
@@ -401,7 +439,10 @@ mod tests {
         let l3 = read_record(&own, 3, 0, 10_000).unwrap();
         assert!(l3.starts_with("[assistant]"), "{l3}");
         assert!(l3.contains("looking at zqhist now"));
-        assert!(l3.contains("<tool_use name=\"Bash\">{\"command\":\"cargo test\"}</tool_use>"), "{l3}");
+        assert!(
+            l3.contains("<tool_use name=\"Bash\">{\"command\":\"cargo test\"}</tool_use>"),
+            "{l3}"
+        );
 
         let l4 = read_record(&own, 4, 0, 10_000).unwrap();
         assert!(l4.contains("<tool_result is_error=\"true\">error[E0425]: cannot find value zqfail</tool_result>"), "{l4}");
@@ -455,10 +496,19 @@ mod tests {
             r(3),
             "[custom_tool_call_output]\n<tool_result>Script completed\n error[E0425]: zqfail</tool_result>\n"
         );
-        assert_eq!(r(4), "[function_call]\n<tool_use name=\"wait\">{\"cell_id\":\"118\"}</tool_use>\n");
-        assert_eq!(r(5), "[function_call_output]\n<tool_result>Script running with cell ID 118</tool_result>\n");
+        assert_eq!(
+            r(4),
+            "[function_call]\n<tool_use name=\"wait\">{\"cell_id\":\"118\"}</tool_use>\n"
+        );
+        assert_eq!(
+            r(5),
+            "[function_call_output]\n<tool_result>Script running with cell ID 118</tool_result>\n"
+        );
         assert_eq!(r(6), "[reasoning]\n**Planning**\n");
-        assert_eq!(r(7), "[developer]\n<skills_instructions>injected</skills_instructions>\n");
+        assert_eq!(
+            r(7),
+            "[developer]\n<skills_instructions>injected</skills_instructions>\n"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -471,8 +521,10 @@ mod tests {
         let dir = fresh_dir("codex-find");
         let day = dir.join("sessions").join("2026").join("09").join("06");
         fs::create_dir_all(&day).unwrap();
-        let live = day.join("rollout-2026-09-06T05-06-25-01a0751c-52d9-7f22-a351-04889a84f941.jsonl");
-        let archived = day.join("rollout-2026-09-01T00-00-00-deadbeef-0000-7000-8000-000000000000.jsonl.zst");
+        let live =
+            day.join("rollout-2026-09-06T05-06-25-01a0751c-52d9-7f22-a351-04889a84f941.jsonl");
+        let archived =
+            day.join("rollout-2026-09-01T00-00-00-deadbeef-0000-7000-8000-000000000000.jsonl.zst");
         fs::write(&live, "{}\n").unwrap();
         fs::write(&archived, b"\x28\xb5\x2f\xfd").unwrap();
 
@@ -482,12 +534,19 @@ mod tests {
             Some(live.clone())
         );
         // A prefix of the id must not match (the suffix match is anchored on `-`).
-        assert_eq!(crate::codex_source::find_rollout_in(&sessions, "04889a84f941"), None);
+        assert_eq!(
+            crate::codex_source::find_rollout_in(&sessions, "04889a84f941"),
+            None
+        );
         assert_eq!(crate::codex_source::find_rollout_in(&sessions, ""), None);
-        assert_eq!(crate::codex_source::find_rollout_in(&sessions, "nope"), None);
+        assert_eq!(
+            crate::codex_source::find_rollout_in(&sessions, "nope"),
+            None
+        );
 
-        let zst = crate::codex_source::find_rollout_in(&sessions, "deadbeef-0000-7000-8000-000000000000")
-            .expect("compressed rollout is still located");
+        let zst =
+            crate::codex_source::find_rollout_in(&sessions, "deadbeef-0000-7000-8000-000000000000")
+                .expect("compressed rollout is still located");
         let err = reject_compressed(zst).unwrap_err();
         assert!(err.contains("zstd-compressed"), "{err}");
         assert!(reject_compressed(live).is_ok());
@@ -505,7 +564,10 @@ mod tests {
     #[test]
     fn slice_chars_is_char_safe_for_cjk() {
         let s = "决策卡走 fleet 工具"; // 13 chars
-        assert_eq!(slice_chars(s, 0, 3), "决策卡\n… [10 more chars; pass offset_chars=3 to continue]");
+        assert_eq!(
+            slice_chars(s, 0, 3),
+            "决策卡\n… [10 more chars; pass offset_chars=3 to continue]"
+        );
         assert_eq!(slice_chars(s, 3, 100), "走 fleet 工具");
         assert_eq!(slice_chars(s, 100, 5), "");
     }

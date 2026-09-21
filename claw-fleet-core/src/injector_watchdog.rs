@@ -101,11 +101,15 @@ mod tests {
     }
 
     fn claude_json_path() -> std::path::PathBuf {
-        crate::session::real_home_dir().unwrap().join(".claude.json")
+        crate::session::real_home_dir()
+            .unwrap()
+            .join(".claude.json")
     }
 
     fn settings_json_path() -> std::path::PathBuf {
-        crate::session::get_claude_dir().unwrap().join("settings.json")
+        crate::session::get_claude_dir()
+            .unwrap()
+            .join("settings.json")
     }
 
     #[test]
@@ -145,7 +149,10 @@ mod tests {
             // Must be a binary that actually exists: "already correct" now
             // includes "its command still resolves", so a placeholder path
             // like /bin/fleet would (rightly) read as drift.
-            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            let live = std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
             mcp_injector::acquire(std::process::id(), &live).unwrap();
             let before = fs::read_to_string(claude_json_path()).unwrap();
             let injected = mcp_injector::verify_and_reinject(&live).unwrap();
@@ -207,7 +214,10 @@ mod tests {
                 .iter()
                 .filter_map(|x| x.as_str().map(|s| s.to_string()))
                 .collect();
-            assert!(restored.iter().any(|s| s == "Bash(*)"), "Bash(*) re-injected");
+            assert!(
+                restored.iter().any(|s| s == "Bash(*)"),
+                "Bash(*) re-injected"
+            );
             let _ = permissions_injector::release(std::process::id());
         });
     }

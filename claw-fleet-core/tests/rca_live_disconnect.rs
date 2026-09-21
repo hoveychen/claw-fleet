@@ -168,12 +168,13 @@ fn main() {
 
     // Fleet must reap the agent. Generous window: this covers rca noticing the
     // reset, printing it, our monitor reading the line, and the kill landing.
-    rx.recv_timeout(Duration::from_secs(30)).unwrap_or_else(|_| {
-        panic!(
-            "the agent survived a dead tunnel.\nstderr: {:?}",
-            std::fs::read_to_string(&stderr_log).unwrap_or_default()
-        )
-    });
+    rx.recv_timeout(Duration::from_secs(30))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the agent survived a dead tunnel.\nstderr: {:?}",
+                std::fs::read_to_string(&stderr_log).unwrap_or_default()
+            )
+        });
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let rec = loop {
@@ -201,7 +202,10 @@ fn main() {
          shipped rca's wording may have changed: {}",
         rec.detail
     );
-    assert!(rec.agent_stopped, "Fleet reported it could not stop the agent");
+    assert!(
+        rec.agent_stopped,
+        "Fleet reported it could not stop the agent"
+    );
     assert_eq!(rec.host_label.as_deref(), Some(ssh_target.as_str()));
 
     // The probe must NOT have logged a long run of MISSING lines: that would

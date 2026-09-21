@@ -13,21 +13,43 @@ fn main() {
     let project_root = Path::new("/Users/hoveychen/workspace/claude-fleet");
     let task = aggregate_task(Path::new(jsonl), Some(project_root)).expect("ok");
     println!("=== Task breakdown ===");
-    println!("main session: {} ({} msgs, model={:?})", task.main.session_id, task.main.messages, task.main.model);
+    println!(
+        "main session: {} ({} msgs, model={:?})",
+        task.main.session_id, task.main.messages, task.main.model
+    );
     println!("subagents: {}", task.subagents.len());
-    println!("baseline_loaded: {}  bundle_size_tokens: {}", task.baseline_loaded, task.bundle_size_tokens);
+    println!(
+        "baseline_loaded: {}  bundle_size_tokens: {}",
+        task.baseline_loaded, task.bundle_size_tokens
+    );
     println!();
     println!("Totals:");
     println!("  usage.input         {}", task.totals_usage.input_tokens);
-    println!("  usage.cache_creation {}", task.totals_usage.cache_creation_tokens);
-    println!("  usage.cache_read    {}", task.totals_usage.cache_read_tokens);
+    println!(
+        "  usage.cache_creation {}",
+        task.totals_usage.cache_creation_tokens
+    );
+    println!(
+        "  usage.cache_read    {}",
+        task.totals_usage.cache_read_tokens
+    );
     println!("  usage.output        {}", task.totals_usage.output_tokens);
-    println!("  est cost USD        ${:.2}", task.totals_estimated_cost_usd.unwrap_or(0.0));
+    println!(
+        "  est cost USD        ${:.2}",
+        task.totals_estimated_cost_usd.unwrap_or(0.0)
+    );
     println!();
     println!("Sources (input attribution):");
     let s = &task.totals_sources;
     let total = s.total();
-    let print = |label: &str, v: u64| println!("  {:30}  {:>10}  ({:5.1}%)", label, v, 100.0 * v as f64 / total.max(1) as f64);
+    let print = |label: &str, v: u64| {
+        println!(
+            "  {:30}  {:>10}  ({:5.1}%)",
+            label,
+            v,
+            100.0 * v as f64 / total.max(1) as f64
+        )
+    };
     print("cc_base_system_prompt", s.cc_base_system_prompt);
     print("tool_defs", s.tool_defs);
     print("user_claudemd", s.user_claudemd);

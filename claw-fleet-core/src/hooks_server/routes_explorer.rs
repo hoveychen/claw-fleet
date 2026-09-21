@@ -15,20 +15,16 @@ pub(crate) fn route_workflow_trees(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                // Claude Code Workflow runs for a session. `path` is the parent
-                // session's .jsonl transcript path; discovery reads the sibling
-                // `<sid>/subagents/workflows/wf_*/` dirs server-side so remote
-                // clients see runs that live on the remote host.
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let trees = crate::workflow::discover_workflow_trees(std::path::Path::new(
-                    &file_path,
-                ));
-                let body = serde_json::to_string(&trees).unwrap_or_default();
-                let _ = request
-                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
-            }
+    // Claude Code Workflow runs for a session. `path` is the parent
+    // session's .jsonl transcript path; discovery reads the sibling
+    // `<sid>/subagents/workflows/wf_*/` dirs server-side so remote
+    // clients see runs that live on the remote host.
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let trees = crate::workflow::discover_workflow_trees(std::path::Path::new(&file_path));
+    let body = serde_json::to_string(&trees).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_token_breakdown(
     ctx: &ServeCtx,
@@ -37,30 +33,31 @@ pub(crate) fn route_token_breakdown(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let project_root = query.get("project_root").map(|s| {
-                    percent_decode_str(s).decode_utf8_lossy().to_string()
-                });
-                let main_path = std::path::Path::new(&file_path);
-                let project_path = project_root.as_deref().map(std::path::Path::new);
-                match crate::token_analysis::aggregate_task(main_path, project_path) {
-                    Ok(t) => {
-                        let body = serde_json::to_string(&t).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(format!("{{\"error\":{}}}", serde_json::to_string(&e).unwrap_or_default()))
-                                .with_status_code(500)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let project_root = query
+        .get("project_root")
+        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string());
+    let main_path = std::path::Path::new(&file_path);
+    let project_path = project_root.as_deref().map(std::path::Path::new);
+    match crate::token_analysis::aggregate_task(main_path, project_path) {
+        Ok(t) => {
+            let body = serde_json::to_string(&t).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(format!(
+                    "{{\"error\":{}}}",
+                    serde_json::to_string(&e).unwrap_or_default()
+                ))
+                .with_status_code(500)
+                .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_codex_token_breakdown(
     ctx: &ServeCtx,
@@ -74,8 +71,8 @@ pub(crate) fn route_codex_token_breakdown(
     match crate::codex_source::codex_token_breakdown(&file_path) {
         Ok(t) => {
             let body = serde_json::to_string(&t).unwrap_or_default();
-            let _ = request
-                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let _ = request.respond(
@@ -105,8 +102,8 @@ pub(crate) fn route_dsh_token_breakdown(
     match crate::dsh_source::dsh_token_breakdown(&uri) {
         Ok(t) => {
             let body = serde_json::to_string(&t).unwrap_or_default();
-            let _ = request
-                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let _ = request.respond(
@@ -136,8 +133,8 @@ pub(crate) fn route_dsh_session_cost(
     match crate::dsh_cost::dsh_session_cost(&uri) {
         Ok(c) => {
             let body = serde_json::to_string(&c).unwrap_or_default();
-            let _ = request
-                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let _ = request.respond(
@@ -166,8 +163,8 @@ pub(crate) fn route_dsh_models(
     match crate::dsh_source::dsh_models() {
         Ok(c) => {
             let body = serde_json::to_string(&c).unwrap_or_default();
-            let _ = request
-                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let _ = request.respond(
@@ -194,10 +191,8 @@ pub(crate) fn route_model_catalog(
     json_header: tiny_http::Header,
 ) {
     let _ = ctx;
-    let body =
-        serde_json::to_string(&crate::model_catalog::picker_catalog()).unwrap_or_default();
-    let _ =
-        request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+    let body = serde_json::to_string(&crate::model_catalog::picker_catalog()).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
 pub(crate) fn route_explorer_roots(
@@ -209,84 +204,80 @@ pub(crate) fn route_explorer_roots(
 ) {
     let sources = ctx.sources;
 
-                let decode = |key: &str| {
-                    query
-                        .get(key)
-                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-                        .unwrap_or_default()
-                };
-                // The out-of-workspace read has no workspace to validate, so it
-                // answers before the session scan every gated arm below needs.
-                if path == crate::routes::EXPLORER_EXTERNAL_FILE {
-                    respond_explorer_json(
-                        request,
-                        json_header,
-                        crate::file_explorer::read_external_file(&decode("path"))
-                            .map(|c| serde_json::to_string(&c).unwrap_or_default()),
-                    );
-                    return;
-                }
-                // Same shape: the candidates it stats can sit outside every
-                // workspace (that is the whole point of the parent-directory
-                // reading), so there is nothing to validate `ws` against.
-                if path == crate::routes::EXPLORER_RESOLVE {
-                    let got =
-                        crate::file_explorer::resolve_prose_path(&decode("ws"), &decode("path"));
-                    respond_explorer_json(
-                        request,
-                        json_header,
-                        Ok(serde_json::to_string(&got).unwrap_or_default()),
-                    );
-                    return;
-                }
+    let decode = |key: &str| {
+        query
+            .get(key)
+            .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+            .unwrap_or_default()
+    };
+    // The out-of-workspace read has no workspace to validate, so it
+    // answers before the session scan every gated arm below needs.
+    if path == crate::routes::EXPLORER_EXTERNAL_FILE {
+        respond_explorer_json(
+            request,
+            json_header,
+            crate::file_explorer::read_external_file(&decode("path"))
+                .map(|c| serde_json::to_string(&c).unwrap_or_default()),
+        );
+        return;
+    }
+    // Same shape: the candidates it stats can sit outside every
+    // workspace (that is the whole point of the parent-directory
+    // reading), so there is nothing to validate `ws` against.
+    if path == crate::routes::EXPLORER_RESOLVE {
+        let got = crate::file_explorer::resolve_prose_path(&decode("ws"), &decode("path"));
+        respond_explorer_json(
+            request,
+            json_header,
+            Ok(serde_json::to_string(&got).unwrap_or_default()),
+        );
+        return;
+    }
 
-                let ws = decode("ws");
-                let sessions: Vec<String> = sources
-                    .iter()
-                    .flat_map(|s| s.scan_sessions())
-                    .map(|s| s.workspace_path)
-                    .collect();
-                let known = crate::file_explorer::browsable_workspaces(&sessions);
-                let result: Result<String, String> = match path {
-                    crate::routes::EXPLORER_ROOTS => crate::file_explorer::list_roots(&ws, &known)
-                        .map(|r| serde_json::to_string(&r).unwrap_or_default()),
-                    crate::routes::EXPLORER_DIR => {
-                        let show_ignored = query.get("ignored").map(|s| s == "true").unwrap_or(false);
-                        crate::file_explorer::list_dir(
-                            &ws,
-                            &decode("root"),
-                            &decode("rel"),
-                            show_ignored,
-                            &known,
-                        )
-                        .map(|e| serde_json::to_string(&e).unwrap_or_default())
-                    }
-                    crate::routes::EXPLORER_FIND => crate::file_explorer::find_by_suffix(
-                        &ws,
-                        &decode("root"),
-                        &decode("rel"),
-                        &known,
-                    )
-                    .map(|p| serde_json::to_string(&p).unwrap_or_default()),
-                    crate::routes::SCRATCHPAD_DIR => crate::file_explorer::list_scratchpad_dir(
-                        &ws,
-                        &decode("session"),
-                        &decode("rel"),
-                        &known,
-                    )
-                    .map(|e| serde_json::to_string(&e).unwrap_or_default()),
-                    crate::routes::SCRATCHPAD_FILE => crate::file_explorer::read_scratchpad_file(
-                        &ws,
-                        &decode("session"),
-                        &decode("rel"),
-                        &known,
-                    )
-                    .map(|c| serde_json::to_string(&c).unwrap_or_default()),
-                    _ => crate::file_explorer::read_file(&ws, &decode("root"), &decode("rel"), &known)
-                        .map(|c| serde_json::to_string(&c).unwrap_or_default()),
-                };
-                respond_explorer_json(request, json_header, result);
-            }
+    let ws = decode("ws");
+    let sessions: Vec<String> = sources
+        .iter()
+        .flat_map(|s| s.scan_sessions())
+        .map(|s| s.workspace_path)
+        .collect();
+    let known = crate::file_explorer::browsable_workspaces(&sessions);
+    let result: Result<String, String> = match path {
+        crate::routes::EXPLORER_ROOTS => crate::file_explorer::list_roots(&ws, &known)
+            .map(|r| serde_json::to_string(&r).unwrap_or_default()),
+        crate::routes::EXPLORER_DIR => {
+            let show_ignored = query.get("ignored").map(|s| s == "true").unwrap_or(false);
+            crate::file_explorer::list_dir(
+                &ws,
+                &decode("root"),
+                &decode("rel"),
+                show_ignored,
+                &known,
+            )
+            .map(|e| serde_json::to_string(&e).unwrap_or_default())
+        }
+        crate::routes::EXPLORER_FIND => {
+            crate::file_explorer::find_by_suffix(&ws, &decode("root"), &decode("rel"), &known)
+                .map(|p| serde_json::to_string(&p).unwrap_or_default())
+        }
+        crate::routes::SCRATCHPAD_DIR => crate::file_explorer::list_scratchpad_dir(
+            &ws,
+            &decode("session"),
+            &decode("rel"),
+            &known,
+        )
+        .map(|e| serde_json::to_string(&e).unwrap_or_default()),
+        crate::routes::SCRATCHPAD_FILE => crate::file_explorer::read_scratchpad_file(
+            &ws,
+            &decode("session"),
+            &decode("rel"),
+            &known,
+        )
+        .map(|c| serde_json::to_string(&c).unwrap_or_default()),
+        _ => crate::file_explorer::read_file(&ws, &decode("root"), &decode("rel"), &known)
+            .map(|c| serde_json::to_string(&c).unwrap_or_default()),
+    };
+    respond_explorer_json(request, json_header, result);
+}
 
 /// Serialised body → 200, explorer error → 400 with `{"error": …}`. Shared by
 /// every arm of `route_explorer_roots`, including the early-returning one.
@@ -297,7 +288,8 @@ fn respond_explorer_json(
 ) {
     match result {
         Ok(body) => {
-            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
@@ -349,7 +341,8 @@ pub(crate) fn route_git_clone(
         .map(|r| serde_json::to_string(&r).unwrap_or_default());
     match result {
         Ok(body) => {
-            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
@@ -389,8 +382,8 @@ pub(crate) fn route_git_clone_stream(
         .map_err(|e| e.to_string())
         .and_then(|req| {
             let prepared = crate::git_ops::prepare_clone(&req.url, &req.dest)?;
-            let exe = std::env::current_exe()
-                .map_err(|e| format!("cannot locate fleet binary: {e}"))?;
+            let exe =
+                std::env::current_exe().map_err(|e| format!("cannot locate fleet binary: {e}"))?;
             crate::proc_runner::spawn_proc(
                 &exe,
                 &prepared.parent.to_string_lossy(),
@@ -402,7 +395,8 @@ pub(crate) fn route_git_clone_stream(
         .map(|rec| serde_json::to_string(&rec).unwrap_or_default());
     match result {
         Ok(body) => {
-            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
@@ -457,7 +451,8 @@ pub(crate) fn route_browse_paths_mutate(
         .map(|list| serde_json::to_string(&list).unwrap_or_default());
     match result {
         Ok(body) => {
-            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
@@ -479,41 +474,40 @@ pub(crate) fn route_git_status(
 ) {
     let sources = ctx.sources;
 
-                let decode = |key: &str| {
-                    query
-                        .get(key)
-                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-                        .unwrap_or_default()
-                };
-                let ws = decode("ws");
-                let root = decode("root");
-                let sessions: Vec<String> = sources
-                    .iter()
-                    .flat_map(|s| s.scan_sessions())
-                    .map(|s| s.workspace_path)
-                    .collect();
-                let known = crate::file_explorer::browsable_workspaces(&sessions);
-                let result: Result<String, String> = match path {
-                    crate::routes::GIT_STATUS => crate::git_ops::git_status(&ws, &root, &known)
-                        .map(|s| serde_json::to_string(&s).unwrap_or_default()),
-                    crate::routes::GIT_PUSH => crate::git_ops::git_push(&ws, &root, &known)
-                        .map(|r| serde_json::to_string(&r).unwrap_or_default()),
-                    _ => crate::git_ops::git_pull(&ws, &root, &known)
-                        .map(|r| serde_json::to_string(&r).unwrap_or_default()),
-                };
-                match result {
-                    Ok(body) => {
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({ "error": e }).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let decode = |key: &str| {
+        query
+            .get(key)
+            .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+            .unwrap_or_default()
+    };
+    let ws = decode("ws");
+    let root = decode("root");
+    let sessions: Vec<String> = sources
+        .iter()
+        .flat_map(|s| s.scan_sessions())
+        .map(|s| s.workspace_path)
+        .collect();
+    let known = crate::file_explorer::browsable_workspaces(&sessions);
+    let result: Result<String, String> = match path {
+        crate::routes::GIT_STATUS => crate::git_ops::git_status(&ws, &root, &known)
+            .map(|s| serde_json::to_string(&s).unwrap_or_default()),
+        crate::routes::GIT_PUSH => crate::git_ops::git_push(&ws, &root, &known)
+            .map(|r| serde_json::to_string(&r).unwrap_or_default()),
+        _ => crate::git_ops::git_pull(&ws, &root, &known)
+            .map(|r| serde_json::to_string(&r).unwrap_or_default()),
+    };
+    match result {
+        Ok(body) => {
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}

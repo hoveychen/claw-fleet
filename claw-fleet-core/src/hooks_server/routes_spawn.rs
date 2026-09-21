@@ -15,66 +15,64 @@ pub(crate) fn route_resume_session(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
-                    Ok(req) => {
-                        // A "done" task resumed over HTTP is active again — drop
-                        // the done mark on the host where it lives so it
-                        // re-surfaces as needs-review.
-                        crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
-                        crate::task_outcome::clear_on_resume(&req.session_id);
-                        // Same as the desktop resume: a retry clears the stale
-                        // remote-disconnect verdict on the host where it lives.
-                        crate::remote_disconnect::clear(&req.session_id);
-                        crate::mirror_guard::clear(&req.session_id);
-                        // Route by source: codex sessions resume via
-                        // `codex exec resume`, claude via `claude --resume`.
-                        // Manual resume is untracked → no-op on_exit box.
-                        match crate::agent_source::resume_session(
-                            &req.agent_source,
-                            &crate::agent_source::ResumeSpec {
-                                session_id: req.session_id.clone(),
-                                workspace_path: req.workspace_path.clone(),
-                                prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
-                                model: req.model.clone(),
-                                effort: req.effort.clone(),
-                                permission_mode: req.permission_mode.clone(),
-                            images: Vec::new(),
-                            },
-                            Box::new(|_| {}),
-                        ) {
-                            Ok(()) => {
-                                // Same reason as the spawn route: a resumed
-                                // session changes the roster, and only a rescan
-                                // puts that in the snapshot.
-                                ctx.snapshot.invalidate();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                        .with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body = serde_json::json!({"error": e}).to_string();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
+        Ok(req) => {
+            // A "done" task resumed over HTTP is active again — drop
+            // the done mark on the host where it lives so it
+            // re-surfaces as needs-review.
+            crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
+            crate::task_outcome::clear_on_resume(&req.session_id);
+            // Same as the desktop resume: a retry clears the stale
+            // remote-disconnect verdict on the host where it lives.
+            crate::remote_disconnect::clear(&req.session_id);
+            crate::mirror_guard::clear(&req.session_id);
+            // Route by source: codex sessions resume via
+            // `codex exec resume`, claude via `claude --resume`.
+            // Manual resume is untracked → no-op on_exit box.
+            match crate::agent_source::resume_session(
+                &req.agent_source,
+                &crate::agent_source::ResumeSpec {
+                    session_id: req.session_id.clone(),
+                    workspace_path: req.workspace_path.clone(),
+                    prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
+                    model: req.model.clone(),
+                    effort: req.effort.clone(),
+                    permission_mode: req.permission_mode.clone(),
+                    images: Vec::new(),
+                },
+                Box::new(|_| {}),
+            ) {
+                Ok(()) => {
+                    // Same reason as the spawn route: a resumed
+                    // session changes the roster, and only a rescan
+                    // puts that in the snapshot.
+                    ctx.snapshot.invalidate();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                    );
+                }
+                Err(e) => {
+                    let body = serde_json::json!({"error": e}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_enqueue_message(
     ctx: &ServeCtx,
@@ -161,24 +159,22 @@ pub(crate) fn route_chat_workspace(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                match crate::chat_workspace::chat_workspace_for_ui() {
-                    Ok(path) => {
-                        let body = serde_json::json!({"path": path}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(500)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    match crate::chat_workspace::chat_workspace_for_ui() {
+        Ok(path) => {
+            let body = serde_json::json!({"path": path}).to_string();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(500)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_browse_dir(
     ctx: &ServeCtx,
@@ -189,32 +185,31 @@ pub(crate) fn route_browse_dir(
 ) {
     let sources = ctx.sources;
 
-                let path = query
-                    .get("path")
-                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-                    .filter(|s| !s.is_empty());
-                let known: Vec<String> = sources
-                    .iter()
-                    .flat_map(|s| s.scan_sessions())
-                    .map(|s| s.workspace_path)
-                    .collect();
-                match crate::workspace_browse::browse_dir(path.as_deref(), &known) {
-                    Ok(resp) => {
-                        let body = serde_json::to_string(&resp).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({ "error": e }).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let path = query
+        .get("path")
+        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+        .filter(|s| !s.is_empty());
+    let known: Vec<String> = sources
+        .iter()
+        .flat_map(|s| s.scan_sessions())
+        .map(|s| s.workspace_path)
+        .collect();
+    match crate::workspace_browse::browse_dir(path.as_deref(), &known) {
+        Ok(resp) => {
+            let body = serde_json::to_string(&resp).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 /// GET `/remote_browse_dir?target=<ssh target>&path=<dir>` — the listing is of
 /// a host one ssh hop past this one, so the ssh originates here (this process
@@ -233,7 +228,9 @@ pub(crate) fn route_remote_browse_dir(
     let Some(target) = decode("target") else {
         let body = serde_json::json!({ "error": "target is required" }).to_string();
         let _ = request.respond(
-            tiny_http::Response::from_string(body).with_status_code(400).with_header(json_header),
+            tiny_http::Response::from_string(body)
+                .with_status_code(400)
+                .with_header(json_header),
         );
         return;
     };
@@ -269,12 +266,13 @@ pub(crate) fn route_remote_host_health(
     let Some(target) = target else {
         let body = serde_json::json!({ "error": "target is required" }).to_string();
         let _ = request.respond(
-            tiny_http::Response::from_string(body).with_status_code(400).with_header(json_header),
+            tiny_http::Response::from_string(body)
+                .with_status_code(400)
+                .with_header(json_header),
         );
         return;
     };
-    let body =
-        serde_json::to_string(&crate::remote_host::host_health(&target)).unwrap_or_default();
+    let body = serde_json::to_string(&crate::remote_host::host_health(&target)).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
@@ -287,36 +285,38 @@ pub(crate) fn route_create_dir(
 ) {
     let sources = ctx.sources;
 
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                let body: serde_json::Value = serde_json::from_str(&buf).unwrap_or_default();
-                let parent = body
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty());
-                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or_default();
-                let known: Vec<String> = sources
-                    .iter()
-                    .flat_map(|s| s.scan_sessions())
-                    .map(|s| s.workspace_path)
-                    .collect();
-                match crate::workspace_browse::create_dir(parent, name, &known) {
-                    Ok(resp) => {
-                        let body = serde_json::to_string(&resp).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({ "error": e }).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let body: serde_json::Value = serde_json::from_str(&buf).unwrap_or_default();
+    let parent = body
+        .get("path")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let name = body
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let known: Vec<String> = sources
+        .iter()
+        .flat_map(|s| s.scan_sessions())
+        .map(|s| s.workspace_path)
+        .collect();
+    match crate::workspace_browse::create_dir(parent, name, &known) {
+        Ok(resp) => {
+            let body = serde_json::to_string(&resp).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_spawn_session(
     ctx: &ServeCtx,
@@ -325,60 +325,54 @@ pub(crate) fn route_spawn_session(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                match serde_json::from_str::<crate::session_launch::SpawnSessionRequest>(&buf) {
-                    Ok(req) => {
-                        // Route by tool ("claude" default / "codex"); the spec
-                        // preserves the caller-preassigned session_id for the
-                        // Claude idempotency path (Codex ignores it).
-                        let spec = crate::agent_source::SpawnSpec {
-                            workspace_path: req.workspace_path.clone(),
-                            prompt: req.prompt.clone(),
-                            model: req.model.clone(),
-                            effort: req.effort.clone(),
-                            permission_mode: req.permission_mode.clone(),
-                            session_id: req.session_id.clone(),
-                            entrypoint: String::new(),
-                        images: Vec::new(),
-                        };
-                        match crate::agent_source::spawn_session(
-                            req.tool.as_deref().unwrap_or("claude"),
-                            &spec,
-                        ) {
-                            Ok(resp) => {
-                                // The roster the routes serve is a snapshot; without
-                                // this the caller's own new session would not appear
-                                // until the next ticker refresh.
-                                ctx.snapshot.invalidate();
-                                let body =
-                                    serde_json::to_string(&resp).unwrap_or_default();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body = serde_json::json!({"error": e}).to_string();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    match serde_json::from_str::<crate::session_launch::SpawnSessionRequest>(&buf) {
+        Ok(req) => {
+            // Route by tool ("claude" default / "codex"); the spec
+            // preserves the caller-preassigned session_id for the
+            // Claude idempotency path (Codex ignores it).
+            let spec = crate::agent_source::SpawnSpec {
+                workspace_path: req.workspace_path.clone(),
+                prompt: req.prompt.clone(),
+                model: req.model.clone(),
+                effort: req.effort.clone(),
+                permission_mode: req.permission_mode.clone(),
+                session_id: req.session_id.clone(),
+                entrypoint: String::new(),
+                images: Vec::new(),
+            };
+            match crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)
+            {
+                Ok(resp) => {
+                    // The roster the routes serve is a snapshot; without
+                    // this the caller's own new session would not appear
+                    // until the next ticker refresh.
+                    ctx.snapshot.invalidate();
+                    let body = serde_json::to_string(&resp).unwrap_or_default();
+                    let _ = request
+                        .respond(tiny_http::Response::from_string(body).with_header(json_header));
+                }
+                Err(e) => {
+                    let body = serde_json::json!({"error": e}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 /// GET the remote-workspace registry (`~/.fleet/remote-workspaces.json`).
 /// POST `/remote_create_dir` `{target, path, name}` — mkdir one level on an
@@ -390,7 +384,11 @@ pub(crate) fn route_remote_create_dir(
     let mut buf = String::new();
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     let body: serde_json::Value = serde_json::from_str(&buf).unwrap_or_default();
-    let str_of = |k: &str| body.get(k).and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let str_of = |k: &str| {
+        body.get(k)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+    };
     let (out, code) = match (str_of("target"), str_of("name")) {
         (Some(target), Some(name)) => {
             match crate::remote_host::create_remote_dir(target, str_of("path"), name) {
@@ -398,10 +396,15 @@ pub(crate) fn route_remote_create_dir(
                 Err(e) => (serde_json::json!({ "error": e }).to_string(), 400),
             }
         }
-        _ => (serde_json::json!({ "error": "target and name are required" }).to_string(), 400),
+        _ => (
+            serde_json::json!({ "error": "target and name are required" }).to_string(),
+            400,
+        ),
     };
     let _ = request.respond(
-        tiny_http::Response::from_string(out).with_status_code(code).with_header(json_header),
+        tiny_http::Response::from_string(out)
+            .with_status_code(code)
+            .with_header(json_header),
     );
 }
 
@@ -421,13 +424,21 @@ pub(crate) fn route_ssh_hosts_upsert(
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     let (body, code) = match serde_json::from_str::<crate::remote_host::SshHost>(&buf) {
         Ok(host) => match crate::remote_host::upsert_host(host) {
-            Ok(book) => (serde_json::to_string(&book).unwrap_or_else(|_| "[]".into()), 200),
+            Ok(book) => (
+                serde_json::to_string(&book).unwrap_or_else(|_| "[]".into()),
+                200,
+            ),
             Err(e) => (serde_json::json!({ "error": e }).to_string(), 500),
         },
-        Err(e) => (serde_json::json!({ "error": e.to_string() }).to_string(), 400),
+        Err(e) => (
+            serde_json::json!({ "error": e.to_string() }).to_string(),
+            400,
+        ),
     };
     let _ = request.respond(
-        tiny_http::Response::from_string(body).with_status_code(code).with_header(json_header),
+        tiny_http::Response::from_string(body)
+            .with_status_code(code)
+            .with_header(json_header),
     );
 }
 
@@ -444,13 +455,21 @@ pub(crate) fn route_ssh_hosts_remove(
         .filter(|s| !s.is_empty());
     let (body, code) = match id {
         Some(id) => match crate::remote_host::remove_host(&id) {
-            Ok(book) => (serde_json::to_string(&book).unwrap_or_else(|_| "[]".into()), 200),
+            Ok(book) => (
+                serde_json::to_string(&book).unwrap_or_else(|_| "[]".into()),
+                200,
+            ),
             Err(e) => (serde_json::json!({ "error": e }).to_string(), 500),
         },
-        None => (serde_json::json!({ "error": "id is required" }).to_string(), 400),
+        None => (
+            serde_json::json!({ "error": "id is required" }).to_string(),
+            400,
+        ),
     };
     let _ = request.respond(
-        tiny_http::Response::from_string(body).with_status_code(code).with_header(json_header),
+        tiny_http::Response::from_string(body)
+            .with_status_code(code)
+            .with_header(json_header),
     );
 }
 
@@ -517,7 +536,11 @@ pub(crate) fn route_remote_workspaces_remove(
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     let ws_path = serde_json::from_str::<serde_json::Value>(&buf)
         .ok()
-        .and_then(|v| v.get("path").and_then(|s| s.as_str()).map(|s| s.to_string()));
+        .and_then(|v| {
+            v.get("path")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        });
     match ws_path {
         Some(ws_path) => match crate::remote_workspace::remove(&ws_path) {
             Ok(cfg) => {

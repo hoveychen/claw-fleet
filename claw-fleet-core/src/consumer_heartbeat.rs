@@ -138,7 +138,10 @@ pub fn write_heartbeat_as(kind: WriterKind) {
 /// over the same tmp file.
 fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "atomic_write: path has no parent")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "atomic_write: path has no parent",
+        )
     })?;
     let file_name = path
         .file_name()
@@ -318,11 +321,8 @@ pub(crate) fn process_alive(pid: u32) -> bool {
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const STILL_ACTIVE: u32 = 259;
     extern "system" {
-        fn OpenProcess(
-            dw_desired_access: u32,
-            b_inherit_handle: i32,
-            dw_process_id: u32,
-        ) -> Handle;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
+            -> Handle;
         fn CloseHandle(h_object: Handle) -> i32;
         fn GetExitCodeProcess(h_process: Handle, lp_exit_code: *mut u32) -> i32;
     }
@@ -397,7 +397,10 @@ mod tests {
         let our_pid = std::process::id();
         let content = format!("{}\n{}\nserver\n", now - 60_000, our_pid);
         let s = classify(&content, now, STALE_AFTER_MS);
-        assert!(!s.is_alive(), "a daemon with no head attached must not read as alive: {s}");
+        assert!(
+            !s.is_alive(),
+            "a daemon with no head attached must not read as alive: {s}"
+        );
         assert!(
             matches!(s, ConsumerStatus::StaleServerNoHead { pid, age_ms } if pid == our_pid && age_ms == 60_000),
             "got {s}",
@@ -433,7 +436,10 @@ mod tests {
         let now: u128 = 1_000_000_000;
         let content = format!("{}\n{}\nserver\n", now - 1_000, std::process::id());
         let s = classify(&content, now, STALE_AFTER_MS);
-        assert!(matches!(s, ConsumerStatus::Alive { fresh: true, .. }), "got {s}");
+        assert!(
+            matches!(s, ConsumerStatus::Alive { fresh: true, .. }),
+            "got {s}"
+        );
     }
 
     /// The writer and the reader have to agree on the tag, and a typo in either
@@ -442,7 +448,12 @@ mod tests {
     #[test]
     fn the_kind_the_server_writes_is_the_kind_the_reader_recognises() {
         let now: u128 = 1_000_000_000;
-        let content = format!("{}\n{}\n{}\n", now - 60_000, std::process::id(), WriterKind::Server.tag());
+        let content = format!(
+            "{}\n{}\n{}\n",
+            now - 60_000,
+            std::process::id(),
+            WriterKind::Server.tag()
+        );
         assert!(matches!(
             classify(&content, now, STALE_AFTER_MS),
             ConsumerStatus::StaleServerNoHead { .. }
@@ -477,7 +488,9 @@ mod tests {
         let content = format!("{}\nnot-a-pid\n", now - 60_000);
         let s = classify(&content, now, STALE_AFTER_MS);
         assert!(!s.is_alive());
-        assert!(matches!(s, ConsumerStatus::StalePidUnparseable { age_ms, .. } if age_ms == 60_000));
+        assert!(
+            matches!(s, ConsumerStatus::StalePidUnparseable { age_ms, .. } if age_ms == 60_000)
+        );
     }
 
     #[test]
@@ -497,8 +510,8 @@ mod tests {
     /// atomic on POSIX.
     #[test]
     fn atomic_write_never_exposes_empty_to_reader() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
 
         let dir = std::env::temp_dir().join(format!(
             "fleet-hb-race-{}-{}",

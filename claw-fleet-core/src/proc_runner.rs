@@ -191,8 +191,8 @@ fn gen_id() -> String {
 }
 
 fn read_record(dir: &Path, id: &str) -> Result<ProcRecord, String> {
-    let raw = fs::read_to_string(meta_path(dir, id))
-        .map_err(|e| format!("no such proc {id}: {e}"))?;
+    let raw =
+        fs::read_to_string(meta_path(dir, id)).map_err(|e| format!("no such proc {id}: {e}"))?;
     serde_json::from_str(&raw).map_err(|e| format!("corrupt proc meta {id}: {e}"))
 }
 
@@ -221,13 +221,16 @@ fn require_dir() -> Result<PathBuf, String> {
 /// `SHELL` in its environment at all, which is why the filesystem fallback here
 /// is load-bearing rather than defensive padding.
 fn resolve_shell() -> String {
-    std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| {
-        if Path::new("/bin/zsh").exists() {
-            "/bin/zsh".into()
-        } else {
-            "/bin/sh".into()
-        }
-    })
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            if Path::new("/bin/zsh").exists() {
+                "/bin/zsh".into()
+            } else {
+                "/bin/sh".into()
+            }
+        })
 }
 
 /// What "open a terminal here" runs when the caller names no command.
@@ -492,7 +495,11 @@ pub fn proc_output(id: &str, offset: Option<u64>) -> Result<ProcOutputChunk, Str
     proc_output_in(&dir, id, offset)
 }
 
-pub fn proc_output_in(dir: &Path, id: &str, offset: Option<u64>) -> Result<ProcOutputChunk, String> {
+pub fn proc_output_in(
+    dir: &Path,
+    id: &str,
+    offset: Option<u64>,
+) -> Result<ProcOutputChunk, String> {
     use std::io::{Read, Seek, SeekFrom};
 
     let mut record = read_record(dir, id)?;
@@ -754,8 +761,7 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
         for msg in msgs {
             match msg {
                 ControlMsg::Stdin { data_b64 } => {
-                    let Ok(bytes) =
-                        base64::engine::general_purpose::STANDARD.decode(data_b64)
+                    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data_b64)
                     else {
                         continue;
                     };
@@ -1015,15 +1021,20 @@ mod drain_control_file_tests {
         write!(
             f,
             "{}\n{}\n{{\"op\":\"stdin\",\"data_", // third line cut mid-append
-            r#"{"op":"stdin","data_b64":"aGk="}"#,
-            r#"{"op":"resize","cols":120,"rows":40}"#,
+            r#"{"op":"stdin","data_b64":"aGk="}"#, r#"{"op":"resize","cols":120,"rows":40}"#,
         )
         .unwrap();
 
         let (msgs, offset) = drain_control_file(&path, 0);
         assert_eq!(msgs.len(), 2, "only the two complete lines parse");
         assert!(matches!(&msgs[0], ControlMsg::Stdin { data_b64 } if data_b64 == "aGk="));
-        assert!(matches!(msgs[1], ControlMsg::Resize { cols: 120, rows: 40 }));
+        assert!(matches!(
+            msgs[1],
+            ControlMsg::Resize {
+                cols: 120,
+                rows: 40
+            }
+        ));
 
         // Nothing new yet: same offset, no messages.
         let (again, same) = drain_control_file(&path, offset);
@@ -1042,7 +1053,11 @@ mod drain_control_file_tests {
     fn truncated_file_restarts_and_missing_file_is_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p2.ctl");
-        assert_eq!(drain_control_file(&path, 5).1, 5, "missing file keeps the offset");
+        assert_eq!(
+            drain_control_file(&path, 5).1,
+            5,
+            "missing file keeps the offset"
+        );
 
         fs::write(&path, "{\"op\":\"stdin\",\"data_b64\":\"YQ==\"}\n").unwrap();
         // Offset beyond the (shorter) file = it was replaced → restart at 0.
@@ -1191,8 +1206,8 @@ mod tests {
                 break;
             }
         }
-        let payload = base64::engine::general_purpose::STANDARD
-            .encode(b"echo ok-from-shell\nexit\n");
+        let payload =
+            base64::engine::general_purpose::STANDARD.encode(b"echo ok-from-shell\nexit\n");
         send_control(&dir, &rec.id, &ControlMsg::Stdin { data_b64: payload }).unwrap();
 
         host.join().unwrap().unwrap();

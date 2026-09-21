@@ -131,7 +131,10 @@ pub fn parse_deepseek_balances(body: &str) -> Result<Vec<(String, f64)>, String>
 /// when the number matters most. So: the funded ones, or — if there are none —
 /// the first row, printed as the zero it is.
 pub fn fund_bearing<'a>(entries: &'a [(String, f64)]) -> Vec<&'a (String, f64)> {
-    let funded: Vec<&(String, f64)> = entries.iter().filter(|(_, amount)| *amount != 0.0).collect();
+    let funded: Vec<&(String, f64)> = entries
+        .iter()
+        .filter(|(_, amount)| *amount != 0.0)
+        .collect();
     if !funded.is_empty() {
         return funded;
     }
@@ -158,7 +161,9 @@ pub fn parse_openrouter_credits(body: &str) -> Result<f64, String> {
 /// `Ok(None)` rather than an error: no ceiling is not a failure to read one.
 pub fn parse_openrouter_key_limit(body: &str) -> Result<Option<(f64, f64)>, String> {
     let v: Value = serde_json::from_str(body).map_err(|e| format!("bad JSON: {e}"))?;
-    let data = v.get("data").ok_or_else(|| "no data in response".to_string())?;
+    let data = v
+        .get("data")
+        .ok_or_else(|| "no data in response".to_string())?;
     let Some(limit) = data.get("limit").and_then(Value::as_f64) else {
         return Ok(None);
     };
@@ -235,7 +240,9 @@ fn openrouter_row(credits_body: &str, key_body: Option<&str>) -> DshProviderBala
         Ok(balance) => row.balance = Some(balance),
         Err(e) => row.error = Some(e),
     }
-    if let Some((limit, used)) = key_body.and_then(|b| parse_openrouter_key_limit(b).ok()).flatten()
+    if let Some((limit, used)) = key_body
+        .and_then(|b| parse_openrouter_key_limit(b).ok())
+        .flatten()
     {
         row.limit = Some(limit);
         row.used = Some(used);
@@ -379,12 +386,7 @@ mod tests {
         for row in &item.balances {
             println!(
                 "{} [{}] balance={:?} limit={:?} used={:?} error={:?}",
-                row.label,
-                row.provider,
-                row.balance,
-                row.limit,
-                row.used,
-                row.error
+                row.label, row.provider, row.balance, row.limit, row.used, row.error
             );
         }
         assert!(

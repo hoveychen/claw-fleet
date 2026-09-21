@@ -29,7 +29,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Cap and post-truncation retention, mirroring [`crate::hooks::hooks_events_path`]'s
 /// own truncation policy so this file can't grow without bound either.
@@ -257,7 +257,10 @@ mod tests {
         // why `end` is called explicitly rather than via Drop).
         let records = with_temp_home(|home| {
             let t = HookTiming::begin("session-idle", "sess-blocked");
-            t.end(2, json!({"blocked": true, "crons": 1, "background_tasks": 1}));
+            t.end(
+                2,
+                json!({"blocked": true, "crons": 1, "background_tasks": 1}),
+            );
             read_records(home)
         });
         let end = &records[1];

@@ -120,7 +120,10 @@ pub fn ensure_fleet_cli_link() -> Result<PathBuf, String> {
 /// hook commands it writes to `settings.json`) and the desktop MCP injector
 /// both go through it, so none of them can drift back to being POSIX-only.
 pub fn resolve_fleet_binary() -> Option<PathBuf> {
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from))
+    {
         if let Some(p) = sidecar_in(&dir) {
             return Some(p);
         }
@@ -136,7 +139,10 @@ pub fn resolve_fleet_binary() -> Option<PathBuf> {
     // PATH lookup: `which` everywhere but Windows, which spells it `where` and
     // may list several hits, newline-separated.
     let probe = if cfg!(windows) { "where" } else { "which" };
-    let out = crate::process_util::command(probe).arg("fleet").output().ok()?;
+    let out = crate::process_util::command(probe)
+        .arg("fleet")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

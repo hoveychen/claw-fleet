@@ -534,9 +534,7 @@ fn accumulate_first_q_fleet_ask(s: &mut DecisionTypeStats, r: &FleetAskRecord) {
 /// `user-prompt` records are ignored. Public within the crate for unit tests.
 fn accumulate_record(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord, date: &str) {
     let (type_key, requested_at, resolved_at) = match rec {
-        DecisionHistoryRecord::Elicitation(r) => {
-            ("elicitation", &r.requested_at, &r.resolved_at)
-        }
+        DecisionHistoryRecord::Elicitation(r) => ("elicitation", &r.requested_at, &r.resolved_at),
         DecisionHistoryRecord::FleetAsk(r) => ("fleet-ask", &r.requested_at, &r.resolved_at),
         DecisionHistoryRecord::PlanApproval(r) => {
             ("plan-approval", &r.requested_at, &r.resolved_at)
@@ -608,16 +606,16 @@ fn for_each_record_on_date(date: &str, mut f: impl FnMut(&DecisionHistoryRecord)
     };
 
     // Compute the start-of-day SystemTime for mtime pruning.
-    let start_sys: Option<std::time::SystemTime> = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .ok()
-        .and_then(|d| d.and_hms_opt(0, 0, 0))
-        .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
-        .and_then(|dt| {
-            let secs = dt.timestamp();
-            (secs >= 0).then(|| {
-                std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64)
-            })
-        });
+    let start_sys: Option<std::time::SystemTime> =
+        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+            .and_then(|dt| {
+                let secs = dt.timestamp();
+                (secs >= 0)
+                    .then(|| std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64))
+            });
 
     let Ok(entries) = fs::read_dir(&dir) else {
         return;
@@ -950,10 +948,7 @@ const INJECTED_TEXT_PREFIXES: &[&str] = &["<ide_opened_file>", "<ide_selection>"
 /// Scan `jsonl_path` for real user prompts and append any not-yet-seen ones
 /// to `~/.fleet/decision-history/<session_id>.jsonl` as `UserPrompt` records.
 /// Existing record uuids are loaded once and used for de-dup.
-pub fn sync_user_prompts_from_jsonl(
-    session_id: &str,
-    jsonl_path: &Path,
-) -> Result<(), String> {
+pub fn sync_user_prompts_from_jsonl(session_id: &str, jsonl_path: &Path) -> Result<(), String> {
     // Serialise the read-then-append below. `list_session_decisions` used to be
     // a synchronous Tauri command, so the main thread was the de-facto lock;
     // now it runs on a threadpool and two cards mounting for the same session
@@ -1064,10 +1059,16 @@ fn parse_user_prompt_line(line: &str, session_id: &str) -> Option<UserPromptReco
     if v.get("type")?.as_str()? != "user" {
         return None;
     }
-    if v.get("isSidechain").and_then(|x| x.as_bool()).unwrap_or(false) {
+    if v.get("isSidechain")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
+    {
         return None;
     }
-    if v.get("isCompactSummary").and_then(|x| x.as_bool()).unwrap_or(false) {
+    if v.get("isCompactSummary")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
+    {
         return None;
     }
     if v.get("isMeta").and_then(|x| x.as_bool()).unwrap_or(false) {
@@ -1141,8 +1142,7 @@ mod tests {
     use crate::elicitation::{ElicitationOption, ElicitationQuestion, ElicitationRequest};
 
     fn tmp_jsonl(name: &str, content: &[u8]) -> std::path::PathBuf {
-        let p = std::env::temp_dir()
-            .join(format!("dh_incr_{}_{}.jsonl", name, std::process::id()));
+        let p = std::env::temp_dir().join(format!("dh_incr_{}_{}.jsonl", name, std::process::id()));
         std::fs::write(&p, content).unwrap();
         p
     }
@@ -1591,7 +1591,10 @@ mod tests {
             answers.clone(),
             "2026-05-28T00:00:06Z".into(),
         );
-        assert!(rec.answers.is_empty(), "cancelled should not retain answers");
+        assert!(
+            rec.answers.is_empty(),
+            "cancelled should not retain answers"
+        );
 
         let rec_hbl = build_fleet_ask_record(
             &req,
@@ -1666,7 +1669,10 @@ mod tests {
         match &listed[0] {
             DecisionHistoryRecord::FleetAsk(r) => {
                 assert_eq!(r.outcome, FleetAskOutcome::Answered);
-                assert_eq!(r.answers.get("Pick or fill?").map(String::as_str), Some("A"));
+                assert_eq!(
+                    r.answers.get("Pick or fill?").map(String::as_str),
+                    Some("A")
+                );
             }
             other => panic!("expected FleetAsk, got {other:?}"),
         }
@@ -1787,7 +1793,10 @@ mod tests {
     fn stats_count_recommended_hit() {
         let req = recommended_request("s", "c1");
         let mut answers = HashMap::new();
-        answers.insert("Which approach?".into(), "Do it inline (Recommended)".into());
+        answers.insert(
+            "Which approach?".into(),
+            "Do it inline (Recommended)".into(),
+        );
         let rec = build_elicitation_record(
             &req,
             ElicitationOutcome::Answered,
@@ -1811,7 +1820,10 @@ mod tests {
         let req = recommended_request("s", "c2");
         let mut answers = HashMap::new();
         // User typed something not in the option list → "Other".
-        answers.insert("Which approach?".into(), "Just delete the whole module".into());
+        answers.insert(
+            "Which approach?".into(),
+            "Just delete the whole module".into(),
+        );
         let rec = build_elicitation_record(
             &req,
             ElicitationOutcome::Answered,
@@ -1822,7 +1834,10 @@ mod tests {
         accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
         let s = &stats.by_type["elicitation"];
         assert_eq!(s.answered, 1);
-        assert_eq!(s.with_recommendation, 1, "card offered a recommended option");
+        assert_eq!(
+            s.with_recommendation, 1,
+            "card offered a recommended option"
+        );
         assert_eq!(s.recommended_hit, 0);
         assert_eq!(s.other_pick, 1);
     }
@@ -1960,7 +1975,10 @@ mod tests {
         // Card 1: user typed a free-text answer via "Other" → should be collected.
         let req_other = recommended_request("sess-collect", "other-1");
         let mut a1 = HashMap::new();
-        a1.insert("Which approach?".into(), "just rewrite it from scratch".into());
+        a1.insert(
+            "Which approach?".into(),
+            "just rewrite it from scratch".into(),
+        );
         let rec_other = build_elicitation_record(
             &req_other,
             ElicitationOutcome::Answered,
@@ -1982,7 +2000,11 @@ mod tests {
         append_record(&DecisionHistoryRecord::Elicitation(rec_picked)).unwrap();
 
         let picks = collect_other_picks_for_date("2026-04-28", 40);
-        assert_eq!(picks.len(), 1, "only the Other-answered card should be collected");
+        assert_eq!(
+            picks.len(),
+            1,
+            "only the Other-answered card should be collected"
+        );
         let ctx = &picks[0];
         assert_eq!(ctx.card_type, "elicitation");
         assert_eq!(ctx.question, "Which approach?");
@@ -2043,8 +2065,15 @@ mod tests {
         );
         let mut stats = DecisionCardStats::default();
         // Ask for a different day than the record's requestedAt.
-        accumulate_record(&mut stats, &DecisionHistoryRecord::Elicitation(rec), "2020-01-01");
-        assert!(stats.by_type.is_empty(), "record on another day must be excluded");
+        accumulate_record(
+            &mut stats,
+            &DecisionHistoryRecord::Elicitation(rec),
+            "2020-01-01",
+        );
+        assert!(
+            stats.by_type.is_empty(),
+            "record on another day must be excluded"
+        );
     }
 
     /// `list_session_decisions` used to be a synchronous Tauri command, so the
@@ -2092,7 +2121,10 @@ mod tests {
             unique.len(),
             "concurrent sync appended duplicate user-prompt records: {ids:?}"
         );
-        assert_eq!(unique.len(), 5, "each of the 5 prompts recorded exactly once");
+        assert_eq!(
+            unique.len(),
+            5,
+            "each of the 5 prompts recorded exactly once"
+        );
     }
 }
-

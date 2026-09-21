@@ -118,8 +118,7 @@ fn read_mcp_fleet_command() -> Option<String> {
 }
 
 fn read_guidance_file() -> Option<String> {
-    let path = crate::session::get_claude_dir()?
-        .join("fleet-interaction-mode.md");
+    let path = crate::session::get_claude_dir()?.join("fleet-interaction-mode.md");
     fs::read_to_string(&path).ok()
 }
 
@@ -137,10 +136,9 @@ pub fn check_claude_md_sentinel(installed: bool) -> DiagnosticCheck {
             id: id::CLAUDE_MD_SENTINEL.into(),
             label: "CLAUDE.md sentinel block".into(),
             status: CheckStatus::Fail,
-            detail:
-                "~/.claude/CLAUDE.md is missing the fleet:interaction-mode sentinel block — \
+            detail: "~/.claude/CLAUDE.md is missing the fleet:interaction-mode sentinel block — \
                  Agent will not load the AskUserQuestion guidance"
-                    .into(),
+                .into(),
             fix_action: Some(FixAction::ReinstallInteractionMode),
         }
     }
@@ -189,10 +187,9 @@ pub fn check_elicitation_hook(installed: bool) -> DiagnosticCheck {
             id: id::ELICITATION_HOOK.into(),
             label: "elicitation hook in settings.json".into(),
             status: CheckStatus::Fail,
-            detail:
-                "~/.claude/settings.json does not have the Fleet elicitation hook — \
+            detail: "~/.claude/settings.json does not have the Fleet elicitation hook — \
                  AskUserQuestion calls will not be intercepted"
-                    .into(),
+                .into(),
             fix_action: Some(FixAction::EnableElicitationHook),
         }
     }
@@ -207,10 +204,7 @@ pub fn check_mcp_injection(fleet_command: Option<String>) -> DiagnosticCheck {
                     id: id::MCP_INJECTION.into(),
                     label: "mcpServers.fleet in ~/.claude.json".into(),
                     status: CheckStatus::Pass,
-                    detail: format!(
-                        "Fleet MCP server registered, command → {} (exists)",
-                        cmd
-                    ),
+                    detail: format!("Fleet MCP server registered, command → {} (exists)", cmd),
                     fix_action: None,
                 }
             } else {
@@ -231,10 +225,9 @@ pub fn check_mcp_injection(fleet_command: Option<String>) -> DiagnosticCheck {
             id: id::MCP_INJECTION.into(),
             label: "mcpServers.fleet in ~/.claude.json".into(),
             status: CheckStatus::Fail,
-            detail:
-                "~/.claude.json has no mcpServers.fleet entry — \
+            detail: "~/.claude.json has no mcpServers.fleet entry — \
                  the fleet__ask MCP tool will be invisible to Claude Code"
-                    .into(),
+                .into(),
             fix_action: Some(FixAction::EnableMcpInjector),
         },
     }
@@ -344,7 +337,10 @@ mod tests {
 
     #[test]
     fn watcher_alive_fresh_passes() {
-        let s = ConsumerStatus::Alive { fresh: true, pid: Some(42) };
+        let s = ConsumerStatus::Alive {
+            fresh: true,
+            pid: Some(42),
+        };
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Pass);
         assert!(c.fix_action.is_none());
@@ -352,7 +348,10 @@ mod tests {
 
     #[test]
     fn watcher_alive_stale_warns() {
-        let s = ConsumerStatus::Alive { fresh: false, pid: Some(42) };
+        let s = ConsumerStatus::Alive {
+            fresh: false,
+            pid: Some(42),
+        };
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Warn);
         assert!(c.detail.contains("stale"));
@@ -363,12 +362,18 @@ mod tests {
         let s = ConsumerStatus::FileUnreadable("No such file".into());
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Fail);
-        assert!(c.fix_action.is_none(), "no automated fix for watcher absence");
+        assert!(
+            c.fix_action.is_none(),
+            "no automated fix for watcher absence"
+        );
     }
 
     #[test]
     fn watcher_stale_pid_dead_fails() {
-        let s = ConsumerStatus::StalePidDead { age_ms: 120_000, pid: 9999 };
+        let s = ConsumerStatus::StalePidDead {
+            age_ms: 120_000,
+            pid: 9999,
+        };
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Fail);
     }
@@ -378,10 +383,17 @@ mod tests {
     /// the thing already true in this state.
     #[test]
     fn watcher_stale_server_no_head_fails_and_does_not_blame_the_server() {
-        let s = ConsumerStatus::StaleServerNoHead { age_ms: 120_000, pid: 1688 };
+        let s = ConsumerStatus::StaleServerNoHead {
+            age_ms: 120_000,
+            pid: 1688,
+        };
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Fail);
-        assert!(c.detail.contains("nothing is watching"), "detail was {:?}", c.detail);
+        assert!(
+            c.detail.contains("nothing is watching"),
+            "detail was {:?}",
+            c.detail
+        );
     }
 
     #[test]

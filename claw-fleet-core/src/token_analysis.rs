@@ -168,7 +168,10 @@ pub struct OutputBuckets {
 
 impl OutputBuckets {
     pub fn total(&self) -> u64 {
-        self.output_text + self.output_thinking_visible + self.output_tool_use + self.output_reasoning_invisible
+        self.output_text
+            + self.output_thinking_visible
+            + self.output_tool_use
+            + self.output_reasoning_invisible
     }
     fn add(&mut self, other: &OutputBuckets) {
         self.output_text += other.output_text;
@@ -232,7 +235,9 @@ pub struct DiskBaseline {
 }
 
 impl DiskBaseline {
-    pub fn empty() -> Self { Self::default() }
+    pub fn empty() -> Self {
+        Self::default()
+    }
 
     pub fn load(project_root: Option<&Path>, claude_projects_encoded_dir: Option<&Path>) -> Self {
         let mut b = Self::default();
@@ -271,9 +276,13 @@ fn read_file_tokens(path: &Path) -> u64 {
 /// installed skill SKILL.md.
 fn scan_skills_manifest_tokens() -> u64 {
     let mut total = 0u64;
-    let Some(claude_dir) = crate::session::get_claude_dir() else { return 0 };
+    let Some(claude_dir) = crate::session::get_claude_dir() else {
+        return 0;
+    };
     let skill_root = claude_dir.join("skills");
-    let Ok(dir) = fs::read_dir(&skill_root) else { return 0 };
+    let Ok(dir) = fs::read_dir(&skill_root) else {
+        return 0;
+    };
     for entry in dir.flatten() {
         let skill_md = entry.path().join("SKILL.md");
         if let Ok(buf) = fs::read_to_string(&skill_md) {
@@ -286,7 +295,9 @@ fn scan_skills_manifest_tokens() -> u64 {
 }
 
 fn extract_frontmatter_len(s: &str) -> usize {
-    if !s.starts_with("---\n") { return s.len().min(800); }
+    if !s.starts_with("---\n") {
+        return s.len().min(800);
+    }
     let after_first = &s[4..];
     if let Some(end) = after_first.find("\n---") {
         // Include both `---` markers + the content
@@ -325,10 +336,16 @@ fn split_reminder_chars(s: &str) -> (usize, usize) {
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() { return Some(0); }
-    if haystack.len() < needle.len() { return None; }
+    if needle.is_empty() {
+        return Some(0);
+    }
+    if haystack.len() < needle.len() {
+        return None;
+    }
     for i in 0..=haystack.len() - needle.len() {
-        if &haystack[i..i + needle.len()] == needle { return Some(i); }
+        if &haystack[i..i + needle.len()] == needle {
+            return Some(i);
+        }
     }
     None
 }
@@ -363,18 +380,21 @@ fn count_user_chars(content: &Value) -> UserCharCounts {
                                 Value::Array(inner) => {
                                     for ib in inner {
                                         if ib.get("type").and_then(|v| v.as_str()) == Some("text") {
-                                            if let Some(t) = ib.get("text").and_then(|v| v.as_str()) {
+                                            if let Some(t) = ib.get("text").and_then(|v| v.as_str())
+                                            {
                                                 let (r, rest) = split_reminder_chars(t);
                                                 c.reminder += r;
                                                 c.tool_result += rest;
                                                 continue;
                                             }
                                         }
-                                        c.tool_result += serde_json::to_string(ib).unwrap_or_default().len();
+                                        c.tool_result +=
+                                            serde_json::to_string(ib).unwrap_or_default().len();
                                     }
                                 }
                                 _ => {
-                                    c.tool_result += serde_json::to_string(content).unwrap_or_default().len();
+                                    c.tool_result +=
+                                        serde_json::to_string(content).unwrap_or_default().len();
                                 }
                             }
                         }
@@ -406,23 +426,41 @@ struct AssistantCharCounts {
 
 fn count_assistant_chars(content: &Value) -> AssistantCharCounts {
     let mut c = AssistantCharCounts::default();
-    let Some(blocks) = content.as_array() else { return c };
+    let Some(blocks) = content.as_array() else {
+        return c;
+    };
     for b in blocks {
         let block_type = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match block_type {
             "text" => {
-                c.text += b.get("text").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
+                c.text += b
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
             }
             "thinking" => {
-                c.thinking += b.get("thinking").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
-                c.thinking += b.get("text").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
+                c.thinking += b
+                    .get("thinking")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                c.thinking += b
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
             }
             "tool_use" | "server_tool_use" => {
                 let input_len = b
                     .get("input")
                     .map(|v| serde_json::to_string(v).unwrap_or_default().len())
                     .unwrap_or(0);
-                let name_len = b.get("name").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
+                let name_len = b
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
                 c.tool_use += input_len + name_len;
             }
             _ => {
@@ -526,8 +564,12 @@ fn analyze_messages(
         }
 
         if msg_type == "user" {
-            let Some(inner) = msg.get("message") else { continue };
-            let Some(content) = inner.get("content") else { continue };
+            let Some(inner) = msg.get("message") else {
+                continue;
+            };
+            let Some(content) = inner.get("content") else {
+                continue;
+            };
             let c = count_user_chars(content);
             if awaiting_compact_summary {
                 compact_summary_chars = c.text + c.tool_result + c.reminder;
@@ -540,8 +582,12 @@ fn analyze_messages(
             continue;
         }
 
-        if msg_type != "assistant" { continue; }
-        let Some(inner) = msg.get("message") else { continue };
+        if msg_type != "assistant" {
+            continue;
+        }
+        let Some(inner) = msg.get("message") else {
+            continue;
+        };
         // Only count finalized turns; streaming half-turns have `stop_reason`
         // missing or null. Matches `compute_session_stats` in session.rs so the
         // Token tab agrees with the header cost chip.
@@ -555,15 +601,34 @@ fn analyze_messages(
             }
         }
         if model.is_none() {
-            model = inner.get("model").and_then(|v| v.as_str()).map(String::from);
+            model = inner
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
-        is_sidechain = is_sidechain || msg.get("isSidechain").and_then(|v| v.as_bool()).unwrap_or(false);
+        is_sidechain = is_sidechain
+            || msg
+                .get("isSidechain")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
         let api_usage = inner.get("usage").cloned().unwrap_or(Value::Null);
-        let input_tokens = api_usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let output_tokens = api_usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cache_creation = api_usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cache_read = api_usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let input_tokens = api_usage
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let output_tokens = api_usage
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_creation = api_usage
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_read = api_usage
+            .get("cache_read_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let eph_5m = api_usage
             .get("cache_creation")
             .and_then(|v| v.get("ephemeral_5m_input_tokens"))
@@ -582,7 +647,10 @@ fn analyze_messages(
         usage.ephemeral_5m_tokens += eph_5m;
         usage.ephemeral_1h_tokens += eph_1h;
 
-        let content = inner.get("content").cloned().unwrap_or(Value::Array(vec![]));
+        let content = inner
+            .get("content")
+            .cloned()
+            .unwrap_or(Value::Array(vec![]));
         let a = count_assistant_chars(&content);
 
         assistant_idx += 1;
@@ -700,7 +768,10 @@ fn estimate_cost_usd(u: &UsageTotals, model: Option<&str>) -> f64 {
 
 /// Aggregate a main session + all its recursive subagent JSONLs into one
 /// TaskTokenBreakdown. Walks `<session-id>/subagents/*.jsonl` sibling dirs.
-pub fn aggregate_task(main_jsonl: &Path, project_root: Option<&Path>) -> Result<TaskTokenBreakdown, String> {
+pub fn aggregate_task(
+    main_jsonl: &Path,
+    project_root: Option<&Path>,
+) -> Result<TaskTokenBreakdown, String> {
     let memdir = derive_project_memory_dir(main_jsonl);
     let baseline = DiskBaseline::load(project_root, memdir.as_deref());
     let baseline_loaded = baseline.bundle_total > CC_SYSTEM_PROMPT_TOKENS + STOCK_TOOL_DEFS_TOKENS;
@@ -726,7 +797,10 @@ pub fn aggregate_task(main_jsonl: &Path, project_root: Option<&Path>) -> Result<
         totals_usage.ephemeral_1h_tokens += sess.usage.ephemeral_1h_tokens;
         totals_sources.add(&sess.sources);
         totals_output.add(&sess.output);
-        if let Some(c) = sess.estimated_cost_usd { totals_cost += c; have_cost = true; }
+        if let Some(c) = sess.estimated_cost_usd {
+            totals_cost += c;
+            have_cost = true;
+        }
     }
 
     Ok(TaskTokenBreakdown {
@@ -742,10 +816,16 @@ pub fn aggregate_task(main_jsonl: &Path, project_root: Option<&Path>) -> Result<
 }
 
 fn scan_subagent_jsonls(main_jsonl: &Path) -> Vec<PathBuf> {
-    let Some(stem) = main_jsonl.file_stem().and_then(|s| s.to_str()) else { return vec![] };
-    let Some(parent) = main_jsonl.parent() else { return vec![] };
+    let Some(stem) = main_jsonl.file_stem().and_then(|s| s.to_str()) else {
+        return vec![];
+    };
+    let Some(parent) = main_jsonl.parent() else {
+        return vec![];
+    };
     let sub_dir = parent.join(stem).join("subagents");
-    let Ok(dir) = fs::read_dir(&sub_dir) else { return vec![] };
+    let Ok(dir) = fs::read_dir(&sub_dir) else {
+        return vec![];
+    };
     let mut out = Vec::new();
     for entry in dir.flatten() {
         let p = entry.path();
@@ -768,7 +848,9 @@ mod tests {
 
     fn write_jsonl(lines: &[Value]) -> NamedTempFile {
         let mut f = NamedTempFile::with_suffix(".jsonl").expect("tempfile");
-        for l in lines { writeln!(f, "{}", serde_json::to_string(l).unwrap()).unwrap(); }
+        for l in lines {
+            writeln!(f, "{}", serde_json::to_string(l).unwrap()).unwrap();
+        }
         f.flush().unwrap();
         f
     }
@@ -780,7 +862,11 @@ mod tests {
             fleet_reminders: fleet,
             memory_files: 0,
             skills_manifest: skills,
-            bundle_total: CC_SYSTEM_PROMPT_TOKENS + STOCK_TOOL_DEFS_TOKENS + claude_md + fleet + skills,
+            bundle_total: CC_SYSTEM_PROMPT_TOKENS
+                + STOCK_TOOL_DEFS_TOKENS
+                + claude_md
+                + fleet
+                + skills,
         }
     }
 
@@ -795,7 +881,10 @@ mod tests {
     fn split_reminder_separates_xml_tags() {
         let s = "before<system-reminder>reminder body</system-reminder>after";
         let (rem, rest) = split_reminder_chars(s);
-        assert_eq!(rem, "<system-reminder>reminder body</system-reminder>".len());
+        assert_eq!(
+            rem,
+            "<system-reminder>reminder body</system-reminder>".len()
+        );
         assert_eq!(rest, "beforeafter".len());
     }
 
@@ -997,7 +1086,10 @@ mod tests {
             assert!(
                 (estimated - billed).abs() < 1e-6,
                 "model={} estimated=${:.4} billed=${:.4} delta=${:.4}",
-                model, estimated, billed, estimated - billed,
+                model,
+                estimated,
+                billed,
+                estimated - billed,
             );
         }
     }

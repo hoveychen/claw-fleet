@@ -242,10 +242,7 @@ fn check_session_cache(
 ) -> Option<(SessionInfo, f64)> {
     let metadata = fs::metadata(path).ok()?;
     let last_modified = metadata.modified().ok()?;
-    let mtime_ms = last_modified
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_millis() as u64;
+    let mtime_ms = last_modified.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
     let age_secs = SystemTime::now()
         .duration_since(last_modified)
         .unwrap_or(Duration::from_secs(3600))
@@ -309,7 +306,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     // Reuse cached process list if fresh (< 10 s).
     let cli_processes = {
         let mut guard = scan_cache.process_cache.lock().unwrap();
-        let stale = guard.0.map_or(true, |t| t.elapsed() > Duration::from_secs(10));
+        let stale = guard
+            .0
+            .map_or(true, |t| t.elapsed() > Duration::from_secs(10));
         if stale {
             guard.1 = scan_cli_processes();
             guard.0 = Some(Instant::now());
@@ -436,7 +435,12 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     // derived from the same project dir and can only be better.
                     info.workspace_path = workspace_path.clone();
                     info.workspace_name = ws_name.clone();
-                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id), age);
+                    apply_pid_liveness(
+                        &mut info,
+                        exact_proc_alive,
+                        hook_states.get(&session_id),
+                        age,
+                    );
                     info.background_tasks = hook_snapshot
                         .background_tasks
                         .get(&session_id)
@@ -475,7 +479,12 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         // frozen; pass age 0 so a freshly-written turn is never
                         // misread as stuck. Stuck only fires on the cache-hit path
                         // above, where `age` reflects a genuinely quiet file.
-                        apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id), 0.0);
+                        apply_pid_liveness(
+                            &mut info,
+                            exact_proc_alive,
+                            hook_states.get(&session_id),
+                            0.0,
+                        );
                         info.background_tasks = hook_snapshot
                             .background_tasks
                             .get(&session_id)
@@ -539,7 +548,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 }
 
                 for agent_path in agent_paths {
-
                     let agent_id = agent_path
                         .file_stem()
                         .and_then(|s| s.to_str())
@@ -562,7 +570,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     let (sub_pid, _) = resolve_pid(&procs_in_cwd, &parent_session_id);
 
                     // Try session cache first for subagents too.
-                    if let Some((mut info, age)) = check_session_cache(&agent_path, &session_cache_snapshot) {
+                    if let Some((mut info, age)) =
+                        check_session_cache(&agent_path, &session_cache_snapshot)
+                    {
                         age_out_status(&mut info, age);
                         // Same re-stamp as the main-session cache hit above.
                         info.workspace_path = workspace_path.clone();
@@ -616,7 +626,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     // Prune stale entries from session cache.
     {
         let live_paths: HashSet<String> = sessions.iter().map(|s| s.jsonl_path.clone()).collect();
-        scan_cache.session_cache.lock().unwrap().retain(|k, _| live_paths.contains(k));
+        scan_cache
+            .session_cache
+            .lock()
+            .unwrap()
+            .retain(|k, _| live_paths.contains(k));
 
         // The fold state must be pruned on the same beat, or a session that
         // ages out of the 7-day window leaves its accumulator (including its
@@ -819,8 +833,7 @@ pub(crate) fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
             session.token_speed + speed_by_parent.get(&session.id).copied().unwrap_or(0.0);
         let sub_activity = activity_by_parent.get(&session.id).copied().unwrap_or(0);
         session.agent_last_activity_ms = session.last_activity_ms.max(sub_activity);
-        session.running_subagent_count =
-            running_by_parent.get(&session.id).copied().unwrap_or(0);
+        session.running_subagent_count = running_by_parent.get(&session.id).copied().unwrap_or(0);
     }
 }
 
@@ -933,7 +946,14 @@ mod rollup_tests {
     use super::*;
 
     /// Build a subagent pointing at `parent`, with a given status/activity/cost.
-    fn sub(id: &str, parent: &str, status: SessionStatus, activity: u64, cost: f64, speed: f64) -> SessionInfo {
+    fn sub(
+        id: &str,
+        parent: &str,
+        status: SessionStatus,
+        activity: u64,
+        cost: f64,
+        speed: f64,
+    ) -> SessionInfo {
         let mut s = test_session(id);
         s.is_subagent = true;
         s.parent_session_id = Some(parent.into());
@@ -970,8 +990,14 @@ mod rollup_tests {
         aggregate_subagent_rollup(&mut sessions);
         let m = &sessions[0];
 
-        assert_eq!(m.running_subagent_count, 2, "only the two in-flight subagents run");
-        assert_eq!(m.agent_last_activity_ms, 9_000, "freshest is subagent a, not the parent's 1000");
+        assert_eq!(
+            m.running_subagent_count, 2,
+            "only the two in-flight subagents run"
+        );
+        assert_eq!(
+            m.agent_last_activity_ms, 9_000,
+            "freshest is subagent a, not the parent's 1000"
+        );
         // Accumulators sum own + all subagents (parked ones included for cost).
         assert!((m.agent_total_cost_usd - 0.16).abs() < 1e-9);
         assert!((m.agent_token_speed - 15.0).abs() < 1e-9);
@@ -986,7 +1012,10 @@ mod rollup_tests {
         let mut sessions = vec![main];
         aggregate_subagent_rollup(&mut sessions);
         assert_eq!(sessions[0].running_subagent_count, 0);
-        assert_eq!(sessions[0].agent_last_activity_ms, 4_242, "falls back to own activity");
+        assert_eq!(
+            sessions[0].agent_last_activity_ms, 4_242,
+            "falls back to own activity"
+        );
     }
 
     #[test]
@@ -1038,7 +1067,10 @@ mod rollup_tests {
     fn an_active_subagent_counts_and_promotes_its_parent() {
         let mut main = test_session("main");
         main.status = SessionStatus::Idle;
-        let mut sessions = vec![main, sub("a", "main", SessionStatus::Active, 9_000, 0.0, 3.0)];
+        let mut sessions = vec![
+            main,
+            sub("a", "main", SessionStatus::Active, 9_000, 0.0, 3.0),
+        ];
 
         promote_delegating_parents(&mut sessions);
         aggregate_subagent_rollup(&mut sessions);
@@ -1071,7 +1103,10 @@ mod rollup_tests {
     fn promoting_twice_leaves_the_parent_delegating() {
         let mut main = test_session("main");
         main.status = SessionStatus::Idle;
-        let mut sessions = vec![main, sub("a", "main", SessionStatus::Executing, 9_000, 0.0, 1.0)];
+        let mut sessions = vec![
+            main,
+            sub("a", "main", SessionStatus::Executing, 9_000, 0.0, 1.0),
+        ];
         promote_delegating_parents(&mut sessions);
         promote_delegating_parents(&mut sessions);
         assert!(matches!(sessions[0].status, SessionStatus::Delegating));

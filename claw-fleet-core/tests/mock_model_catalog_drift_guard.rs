@@ -112,11 +112,7 @@ fn matching(src: &str, open: usize, o: char, c: char) -> usize {
             x if x == c => {
                 depth -= 1;
                 if depth == 0 {
-                    return src
-                        .char_indices()
-                        .nth(i)
-                        .expect("index in range")
-                        .0;
+                    return src.char_indices().nth(i).expect("index in range").0;
                 }
             }
             _ => {}
@@ -267,12 +263,7 @@ fn mock_model_catalog_matches_the_real_picker_catalog() {
         for (r, m) in rows.iter().zip(h.models.iter()) {
             assert_eq!(r.label, m.label, "drift-guard: {} label", r.id);
             assert_eq!(r.harness, m.harness, "drift-guard: {} harness", r.id);
-            assert_eq!(
-                Some(r.tier.clone()),
-                m.tier,
-                "drift-guard: {} tier",
-                r.id
-            );
+            assert_eq!(Some(r.tier.clone()), m.tier, "drift-guard: {} tier", r.id);
             assert_eq!(
                 r.efforts, m.efforts,
                 "drift-guard: {} effort ladder — these differ within a harness, so a \

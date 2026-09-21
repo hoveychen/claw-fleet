@@ -76,7 +76,14 @@ pub fn observe(session_id: &str, output_tokens: u64, cost_usd: f64, now_ms: u64)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let samples = guard.entry(session_id.to_string()).or_default();
-    push(samples, Sample { at_ms: now_ms, output_tokens, cost_usd });
+    push(
+        samples,
+        Sample {
+            at_ms: now_ms,
+            output_tokens,
+            cost_usd,
+        },
+    );
     speed_of(samples, now_ms)
 }
 
@@ -147,7 +154,14 @@ mod tests {
     fn window(samples: &[(u64, u64, f64)]) -> VecDeque<Sample> {
         let mut q = VecDeque::new();
         for &(at_ms, output_tokens, cost_usd) in samples {
-            push(&mut q, Sample { at_ms, output_tokens, cost_usd });
+            push(
+                &mut q,
+                Sample {
+                    at_ms,
+                    output_tokens,
+                    cost_usd,
+                },
+            );
         }
         q
     }

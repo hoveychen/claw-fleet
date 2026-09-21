@@ -481,13 +481,13 @@ mod input_accumulation_tests {
         // Turn 1: 100 + 2000 + 0     = 2100
         // Turn 2: 150 + 0    + 5000  = 5150   (cache re-read of turn 1's context)
         // Cumulative must be 7250 — NOT the last-turn snapshot (5150).
-        let lines = vec![
-            turn("m1", 100, 2000, 0, 30),
-            turn("m2", 150, 0, 5000, 40),
-        ];
+        let lines = vec![turn("m1", 100, 2000, 0, 30), turn("m2", 150, 0, 5000, 40)];
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let stats = compute_session_stats(&refs);
-        assert_eq!(stats.total_input_tokens, 7250, "cumulative input incl cache");
+        assert_eq!(
+            stats.total_input_tokens, 7250,
+            "cumulative input incl cache"
+        );
         assert_eq!(stats.total_output_tokens, 70);
     }
 
@@ -592,4 +592,3 @@ mod context_window_tests {
         }
     }
 }
-

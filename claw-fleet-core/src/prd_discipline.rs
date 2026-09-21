@@ -503,7 +503,8 @@ fn apply_prd_discipline_inner(user_title: &str, locale: &str) -> Result<(), Stri
     crate::claude_md_lock::with_lock(&claude_md, || {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content = compose_claude_md(&existing, &block);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
+            .map_err(|e| format!("write CLAUDE.md: {e}"))
     })?;
     Ok(())
 }
@@ -530,7 +531,8 @@ fn remove_prd_discipline_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes())
+                        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())
@@ -597,9 +599,15 @@ mod tests {
         let existing = format!("user stuff\n\nother block end\n\n{block}");
         let once = compose_claude_md(&existing, &block);
         let twice = compose_claude_md(&once, &block);
-        assert_eq!(once, twice, "composing twice must not accumulate blank lines");
+        assert_eq!(
+            once, twice,
+            "composing twice must not accumulate blank lines"
+        );
         // Exactly one blank line between prior content and the block.
-        assert!(once.contains("other block end\n\n<!--"), "one blank-line separator: {once:?}");
+        assert!(
+            once.contains("other block end\n\n<!--"),
+            "one blank-line separator: {once:?}"
+        );
         assert!(!once.contains("\n\n\n"), "no triple newline: {once:?}");
     }
 
@@ -666,11 +674,13 @@ mod tests {
             // because the card is what keeps the Stop hook (and hence the
             // successor) from firing, not just a place to lose an answer.
             assert!(
-                g.contains("一张决策卡都不要再发") || g.contains("raise **no decision card at all**"),
+                g.contains("一张决策卡都不要再发")
+                    || g.contains("raise **no decision card at all**"),
                 "[{locale}] it must ban every post-register card, wrap-up included"
             );
             assert!(
-                g.contains("接力靠回合*结束*触发") || g.contains("the relay fires when the turn *ends*"),
+                g.contains("接力靠回合*结束*触发")
+                    || g.contains("the relay fires when the turn *ends*"),
                 "[{locale}] it must say why: a card holds the turn open, stranding the successor"
             );
             assert!(
@@ -724,12 +734,23 @@ mod tests {
                 g.contains("### 增量笔记") || g.contains("### Incremental notes"),
                 "[{locale}] notes need their own heading"
             );
-            for tool in ["fleet__notes", "fleet__history", "fleet notes", "fleet history"] {
+            for tool in [
+                "fleet__notes",
+                "fleet__history",
+                "fleet notes",
+                "fleet history",
+            ] {
                 assert!(g.contains(tool), "[{locale}] must name {tool}");
             }
             // The injected block the agent is told to read first.
-            assert!(g.contains("<fleet_notes>"), "[{locale}] must name the injected hint block");
-            assert!(g.contains("line_no"), "[{locale}] must teach history search → read by line_no");
+            assert!(
+                g.contains("<fleet_notes>"),
+                "[{locale}] must name the injected hint block"
+            );
+            assert!(
+                g.contains("line_no"),
+                "[{locale}] must teach history search → read by line_no"
+            );
             assert!(
                 g.contains("内部记账") || g.contains("internal bookkeeping"),
                 "[{locale}] must mark notes as internal, not for the user"
@@ -770,7 +791,10 @@ mod tests {
     #[test]
     fn render_teaches_v2_and_fleet_plan() {
         let g = render_guidance("Boss", "en");
-        assert!(g.contains("v=\"2\""), "guidance must show the v2 sentinel attribute");
+        assert!(
+            g.contains("v=\"2\""),
+            "guidance must show the v2 sentinel attribute"
+        );
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan migrate"),
             "guidance must teach the fleet plan subcommands for updating plans"

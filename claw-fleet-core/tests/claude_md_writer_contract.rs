@@ -78,8 +78,14 @@ fn promoting_a_memory_waits_for_the_claude_md_lock() {
          guidance applying at the same moment"
     );
     let after = std::fs::read_to_string(&claude_md).unwrap();
-    assert!(after.contains("the fact worth keeping"), "promote must land");
-    assert!(after.contains("# user content"), "must not drop user content");
+    assert!(
+        after.contains("the fact worth keeping"),
+        "promote must land"
+    );
+    assert!(
+        after.contains("# user content"),
+        "must not drop user content"
+    );
 }
 
 /// Guard: a CLAUDE.md with no PRD block, but prefs that record no such choice
@@ -231,7 +237,10 @@ fn a_missing_prd_block_alone_does_not_strip_codex_agents_md() {
         }
     }
 
-    assert!(installed_at_start, "setup: codex PRD block should start installed");
+    assert!(
+        installed_at_start,
+        "setup: codex PRD block should start installed"
+    );
     assert_eq!(
         kept,
         Ok(true),

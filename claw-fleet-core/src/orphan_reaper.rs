@@ -38,12 +38,7 @@ pub struct ProcCandidate {
 /// Command-line signatures of the leak classes we reclaim. Each is a
 /// long-lived server or browser an agent starts as a side effect of a turn and
 /// never shuts down.
-const REAPABLE: &[&str] = &[
-    "/vite/bin/vite.js",
-    "pnpm dev",
-    "patchwright",
-    "playwright",
-];
+const REAPABLE: &[&str] = &["/vite/bin/vite.js", "pnpm dev", "patchwright", "playwright"];
 
 /// Overrides [`REAPABLE`] unconditionally. These carry a session id purely
 /// because a session happened to launch them; they are not that session's

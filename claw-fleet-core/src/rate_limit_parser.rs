@@ -75,10 +75,7 @@ pub struct ParsedRateLimit {
 /// Parse a Claude Code rate-limit assistant-message `content.text` into a
 /// precise `resets_at` timestamp. If the rendered string cannot be recovered,
 /// returns an estimate based on `error_timestamp + limit_type.fallback_duration()`.
-pub fn parse_rate_limit_content(
-    content: &str,
-    error_timestamp: DateTime<Utc>,
-) -> ParsedRateLimit {
+pub fn parse_rate_limit_content(content: &str, error_timestamp: DateTime<Utc>) -> ParsedRateLimit {
     let limit_type = classify_limit_type(content);
 
     let Some(reset_segment) = extract_reset_segment(content) else {
@@ -358,10 +355,7 @@ fn parse_hour_minute_ampm(s: &str) -> Result<(u32, u32), EstimateReason> {
 /// Attach a naive wall-clock to an IANA zone, resolving ambiguities
 /// conservatively: pick the earlier instant for ambiguous (fall-back DST),
 /// and fail for non-existent (spring-forward) — falling back to estimation.
-fn localize(
-    tz: Tz,
-    naive: chrono::NaiveDateTime,
-) -> Result<DateTime<Utc>, EstimateReason> {
+fn localize(tz: Tz, naive: chrono::NaiveDateTime) -> Result<DateTime<Utc>, EstimateReason> {
     use chrono::offset::LocalResult;
     match tz.from_local_datetime(&naive) {
         LocalResult::Single(dt) => Ok(dt.with_timezone(&Utc)),
@@ -392,8 +386,8 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata")
             .join("reset_time_golden.jsonl");
-        let text = fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read golden {path:?}: {e}"));
+        let text =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read golden {path:?}: {e}"));
         text.lines()
             .filter(|l| !l.trim().is_empty())
             .map(|l| serde_json::from_str(l).expect("parse golden row"))
@@ -412,7 +406,11 @@ mod tests {
     #[test]
     fn golden_roundtrip_all_rows() {
         let rows = load_golden();
-        assert!(rows.len() >= 80, "expected ≥80 golden rows, got {}", rows.len());
+        assert!(
+            rows.len() >= 80,
+            "expected ≥80 golden rows, got {}",
+            rows.len()
+        );
 
         let mut failures = Vec::new();
         for row in &rows {
@@ -494,15 +492,30 @@ mod tests {
 
     #[test]
     fn classify_unknown_prefix() {
-        assert_eq!(classify_limit_type("Some other error"), RateLimitType::Unknown);
+        assert_eq!(
+            classify_limit_type("Some other error"),
+            RateLimitType::Unknown
+        );
     }
 
     #[test]
     fn fallback_durations() {
-        assert_eq!(RateLimitType::SessionLimit.fallback_duration(), Duration::hours(5));
-        assert_eq!(RateLimitType::WeeklyLimit.fallback_duration(), Duration::days(7));
-        assert_eq!(RateLimitType::OpusLimit.fallback_duration(), Duration::days(7));
-        assert_eq!(RateLimitType::UsageLimit.fallback_duration(), Duration::hours(5));
+        assert_eq!(
+            RateLimitType::SessionLimit.fallback_duration(),
+            Duration::hours(5)
+        );
+        assert_eq!(
+            RateLimitType::WeeklyLimit.fallback_duration(),
+            Duration::days(7)
+        );
+        assert_eq!(
+            RateLimitType::OpusLimit.fallback_duration(),
+            Duration::days(7)
+        );
+        assert_eq!(
+            RateLimitType::UsageLimit.fallback_duration(),
+            Duration::hours(5)
+        );
     }
 
     #[test]
@@ -540,7 +553,10 @@ mod tests {
         let error_ts = Utc.with_ymd_and_hms(2026, 4, 15, 10, 0, 0).unwrap();
         let result = parse_rate_limit_content("You've hit your session limit", error_ts);
         assert!(!result.parsed);
-        assert_eq!(result.estimate_reason, Some(EstimateReason::NoResetsSegment));
+        assert_eq!(
+            result.estimate_reason,
+            Some(EstimateReason::NoResetsSegment)
+        );
         assert_eq!(result.resets_at, error_ts + Duration::hours(5));
     }
 
@@ -673,10 +689,7 @@ mod tests {
             "2026-04-05T15:32:54.581Z".parse().unwrap(),
         );
         assert!(!r.parsed);
-        assert_eq!(
-            r.estimate_reason,
-            Some(EstimateReason::NoResetsSegment)
-        );
+        assert_eq!(r.estimate_reason, Some(EstimateReason::NoResetsSegment));
         let expected_ts: DateTime<Utc> = "2026-04-05T15:32:54.581Z".parse().unwrap();
         assert_eq!(r.resets_at, expected_ts + Duration::hours(5));
     }

@@ -75,7 +75,12 @@ pub struct ZipStream<W: Write> {
 
 impl<W: Write> ZipStream<W> {
     pub fn new(sink: W) -> Self {
-        Self { sink, written: 0, entries: Vec::new(), zip64_threshold: U32_MAX }
+        Self {
+            sink,
+            written: 0,
+            entries: Vec::new(),
+            zip64_threshold: U32_MAX,
+        }
     }
 
     /// Lower the zip64 threshold so the zip64 paths can be tested without a
@@ -105,8 +110,7 @@ impl<W: Write> ZipStream<W> {
         declared_size: u64,
         source: &mut R,
     ) -> io::Result<()> {
-        let zip64 = declared_size > self.zip64_threshold
-            || self.written > self.zip64_threshold;
+        let zip64 = declared_size > self.zip64_threshold || self.written > self.zip64_threshold;
         let name_bytes = name.as_bytes();
         let offset = self.written;
 
@@ -117,7 +121,7 @@ impl<W: Write> ZipStream<W> {
         self.put(&(FLAG_DATA_DESCRIPTOR | FLAG_UTF8_NAME).to_le_bytes())?;
         self.put(&0u16.to_le_bytes())?; // method: stored
         self.put(&0u32.to_le_bytes())?; // dos time+date
-        // With bit 3 set these three are zero here and real in the descriptor.
+                                        // With bit 3 set these three are zero here and real in the descriptor.
         self.put(&0u32.to_le_bytes())?; // crc
         self.put(&0u32.to_le_bytes())?; // compressed size
         self.put(&0u32.to_le_bytes())?; // uncompressed size
@@ -159,7 +163,13 @@ impl<W: Write> ZipStream<W> {
             self.put(&(size as u32).to_le_bytes())?;
         }
 
-        self.entries.push(Entry { name: name.to_string(), crc, size, offset, zip64 });
+        self.entries.push(Entry {
+            name: name.to_string(),
+            crc,
+            size,
+            offset,
+            zip64,
+        });
         Ok(())
     }
 
@@ -250,13 +260,29 @@ impl<W: Write> ZipStream<W> {
         self.put(&SIG_EOCD.to_le_bytes())?;
         self.put(&0u16.to_le_bytes())?; // this disk
         self.put(&0u16.to_le_bytes())?; // cd start disk
-        let stored_count = if count > u16::MAX as u64 - 1 { u16::MAX } else { count as u16 };
+        let stored_count = if count > u16::MAX as u64 - 1 {
+            u16::MAX
+        } else {
+            count as u16
+        };
         self.put(&stored_count.to_le_bytes())?;
         self.put(&stored_count.to_le_bytes())?;
-        self.put(&(if cd_size > self.zip64_threshold { u32::MAX } else { cd_size as u32 })
-            .to_le_bytes())?;
-        self.put(&(if cd_offset > self.zip64_threshold { u32::MAX } else { cd_offset as u32 })
-            .to_le_bytes())?;
+        self.put(
+            &(if cd_size > self.zip64_threshold {
+                u32::MAX
+            } else {
+                cd_size as u32
+            })
+            .to_le_bytes(),
+        )?;
+        self.put(
+            &(if cd_offset > self.zip64_threshold {
+                u32::MAX
+            } else {
+                cd_offset as u32
+            })
+            .to_le_bytes(),
+        )?;
         self.put(&0u16.to_le_bytes())?; // comment len
 
         self.sink.flush()?;
@@ -332,7 +358,8 @@ mod tests {
     fn zip_of(members: &[(&str, &[u8])]) -> Vec<u8> {
         let mut z = ZipStream::new(Vec::new());
         for (name, body) in members {
-            z.add(name, body.len() as u64, &mut Cursor::new(*body)).unwrap();
+            z.add(name, body.len() as u64, &mut Cursor::new(*body))
+                .unwrap();
         }
         z.finish().unwrap()
     }
@@ -403,7 +430,11 @@ print(json.dumps(out))
         let dir = TempDir::new().unwrap();
         let archive = dir.path().join("a.zip");
         std::fs::write(&archive, bytes).unwrap();
-        let test = Command::new("unzip").arg("-t").arg(&archive).output().unwrap();
+        let test = Command::new("unzip")
+            .arg("-t")
+            .arg(&archive)
+            .output()
+            .unwrap();
         assert!(
             test.status.success(),
             "unzip -t rejected the archive: {}{}",
@@ -448,11 +479,13 @@ print(json.dumps(out))
     fn the_zip64_branches_produce_an_archive_unzip_accepts() {
         let big = vec![b'x'; 300];
         let mut z = ZipStream::new(Vec::new()).with_zip64_threshold(64);
-        z.add("big-one.bin", big.len() as u64, &mut Cursor::new(&big[..])).unwrap();
+        z.add("big-one.bin", big.len() as u64, &mut Cursor::new(&big[..]))
+            .unwrap();
         // Small, but its *offset* is now past the (lowered) threshold — the
         // case where a central entry needs zip64 though its local header did
         // not.
-        z.add("after.txt", 5, &mut Cursor::new(&b"hello"[..])).unwrap();
+        z.add("after.txt", 5, &mut Cursor::new(&b"hello"[..]))
+            .unwrap();
         let bytes = z.finish().unwrap();
 
         // The zip64 end-of-central-directory record must be there.
@@ -481,9 +514,13 @@ print(json.dumps(out))
         // must still produce a correct archive: the descriptor and central
         // directory carry what was actually read.
         let mut z = ZipStream::new(Vec::new());
-        z.add("a.txt", 9_999, &mut Cursor::new(&b"four"[..])).unwrap();
+        z.add("a.txt", 9_999, &mut Cursor::new(&b"four"[..]))
+            .unwrap();
         let bytes = z.finish().unwrap();
-        assert_eq!(extract(&bytes), vec![("a.txt".to_string(), b"four".to_vec())]);
+        assert_eq!(
+            extract(&bytes),
+            vec![("a.txt".to_string(), b"four".to_vec())]
+        );
     }
 
     #[test]
@@ -491,7 +528,10 @@ print(json.dumps(out))
         assert_eq!(sanitize_member_name("../../etc/passwd"), "etc/passwd");
         assert_eq!(sanitize_member_name("/abs/path.pdf"), "abs/path.pdf");
         assert_eq!(sanitize_member_name("a/./b/../c.txt"), "a/b/c.txt");
-        assert_eq!(sanitize_member_name("win\\style\\name.txt"), "win/style/name.txt");
+        assert_eq!(
+            sanitize_member_name("win\\style\\name.txt"),
+            "win/style/name.txt"
+        );
         assert_eq!(sanitize_member_name("交付/报告.pdf"), "交付/报告.pdf");
         // Nothing usable left.
         assert_eq!(sanitize_member_name("../.."), "file");
@@ -503,11 +543,23 @@ print(json.dumps(out))
     fn duplicate_member_names_are_suffixed_not_overwritten() {
         let mut used = HashSet::new();
         assert_eq!(unique_member_name("report.pdf", &mut used), "report.pdf");
-        assert_eq!(unique_member_name("report.pdf", &mut used), "report (2).pdf");
-        assert_eq!(unique_member_name("report.pdf", &mut used), "report (3).pdf");
+        assert_eq!(
+            unique_member_name("report.pdf", &mut used),
+            "report (2).pdf"
+        );
+        assert_eq!(
+            unique_member_name("report.pdf", &mut used),
+            "report (3).pdf"
+        );
         // Per directory, so the same name in two folders is untouched.
-        assert_eq!(unique_member_name("sub/report.pdf", &mut used), "sub/report.pdf");
-        assert_eq!(unique_member_name("sub/report.pdf", &mut used), "sub/report (2).pdf");
+        assert_eq!(
+            unique_member_name("sub/report.pdf", &mut used),
+            "sub/report.pdf"
+        );
+        assert_eq!(
+            unique_member_name("sub/report.pdf", &mut used),
+            "sub/report (2).pdf"
+        );
         // A dotfile's leading dot is not an extension.
         assert_eq!(unique_member_name(".env", &mut used), ".env");
         assert_eq!(unique_member_name(".env", &mut used), ".env (2)");

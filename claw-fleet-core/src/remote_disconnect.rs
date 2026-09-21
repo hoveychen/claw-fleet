@@ -71,9 +71,7 @@ const TRANSPORT_MARKERS: [&str; 3] = [
 /// sessions over a `ssh: connect to host … Connection refused` printed by a
 /// *tool the agent ran*, which is the agent working correctly.
 pub fn transport_failure_marker(line: &str) -> Option<&'static str> {
-    TRANSPORT_MARKERS
-        .into_iter()
-        .find(|m| line.contains(m))
+    TRANSPORT_MARKERS.into_iter().find(|m| line.contains(m))
 }
 
 /// What Fleet knows about a session whose remote transport died.
@@ -214,7 +212,9 @@ pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::Ses
 /// and the record would otherwise pin that session's status forever.
 pub fn prune_old(max_age_secs: u64) {
     let Some(dir) = disconnect_dir() else { return };
-    let Ok(entries) = fs::read_dir(&dir) else { return };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return;
+    };
     let cutoff = now_ms().saturating_sub(max_age_secs * 1000);
     for entry in entries.flatten() {
         let path = entry.path();
@@ -250,7 +250,11 @@ pub(crate) fn watch_stderr(
     workspace_path: &str,
     stop: impl FnOnce() -> bool,
 ) {
-    let mut log = fs::OpenOptions::new().create(true).append(true).open(log_path).ok();
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .ok();
     let mut stop = Some(stop);
     for line in BufReader::new(stderr).lines() {
         let Ok(line) = line else { break };
@@ -285,7 +289,11 @@ pub(crate) fn watch_stderr(
                 f,
                 "[{}] fleet remote-disconnect: transport lost ({marker}) — agent {}",
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                if agent_stopped { "stopped" } else { "COULD NOT BE STOPPED" }
+                if agent_stopped {
+                    "stopped"
+                } else {
+                    "COULD NOT BE STOPPED"
+                }
             );
         }
     }
@@ -343,7 +351,11 @@ mod tests {
             "rca serve [fs] PREAD handle=2 off=0 len=6 -> 6",
             "",
         ] {
-            assert_eq!(transport_failure_marker(benign), None, "must not match: {benign}");
+            assert_eq!(
+                transport_failure_marker(benign),
+                None,
+                "must not match: {benign}"
+            );
         }
     }
 
@@ -382,9 +394,17 @@ mod tests {
 
         enrich_sessions_in(&dir, &mut sessions);
 
-        assert_eq!(sessions[0].status, crate::session::SessionStatus::RemoteDisconnected);
-        assert_eq!(sessions[0].remote_disconnect.as_ref().map(|r| r.detail.clone()),
-                   Some(mk_rec().detail));
+        assert_eq!(
+            sessions[0].status,
+            crate::session::SessionStatus::RemoteDisconnected
+        );
+        assert_eq!(
+            sessions[0]
+                .remote_disconnect
+                .as_ref()
+                .map(|r| r.detail.clone()),
+            Some(mk_rec().detail)
+        );
         assert_eq!(sessions[1].remote_disconnect, None);
         // Status is not restored (we don't know the old one) but it stops being
         // stamped; the next scan's transcript parse owns it again.
@@ -396,7 +416,10 @@ mod tests {
     fn enrich_with_no_dir_clears() {
         let mut sessions = vec![mk_session("s")];
         sessions[0].remote_disconnect = Some(mk_rec());
-        enrich_sessions_in(Path::new("/nonexistent/fleet/remote-disconnect"), &mut sessions);
+        enrich_sessions_in(
+            Path::new("/nonexistent/fleet/remote-disconnect"),
+            &mut sessions,
+        );
         assert_eq!(sessions[0].remote_disconnect, None);
     }
 
@@ -424,7 +447,10 @@ mod tests {
 
         let logged = fs::read_to_string(&log).unwrap();
         for line in ["PREAD handle=2", "stream reset", "again", "trailing line"] {
-            assert!(logged.contains(line), "stderr line lost from log: {line}\n{logged}");
+            assert!(
+                logged.contains(line),
+                "stderr line lost from log: {line}\n{logged}"
+            );
         }
         assert_eq!(
             stops.load(std::sync::atomic::Ordering::SeqCst),
@@ -433,7 +459,10 @@ mod tests {
         );
         let rec = read("sess-1").expect("a record must be written");
         assert_eq!(rec.code, crate::remote_workspace::codes::TRANSPORT_LOST);
-        assert!(rec.detail.contains("stream reset"), "record must name the first line");
+        assert!(
+            rec.detail.contains("stream reset"),
+            "record must name the first line"
+        );
         assert!(rec.agent_stopped);
 
         unsafe {

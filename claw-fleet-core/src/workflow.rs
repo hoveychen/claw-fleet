@@ -805,8 +805,7 @@ fn extract_prompt_builders(body: &str) -> BTreeMap<String, String> {
                 let name = String::from_utf8_lossy(&b[id_start..j]).into_owned();
                 let k = skip_ws_comments(b, j);
                 // a single `=` (not `==` / `=>`)
-                if k < n && b[k] == b'=' && (k + 1 >= n || (b[k + 1] != b'=' && b[k + 1] != b'>'))
-                {
+                if k < n && b[k] == b'=' && (k + 1 >= n || (b[k + 1] != b'=' && b[k + 1] != b'>')) {
                     let rhs = skip_ws_comments(b, k + 1);
                     let fp = match find_arrow(b, rhs) {
                         Some(arrow) => {
@@ -1004,7 +1003,12 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
 fn leftover_target(steps: &[ScriptStep]) -> usize {
     steps
         .iter()
-        .rposition(|s| matches!(s.kind, WorkflowNodeKind::Parallel | WorkflowNodeKind::Pipeline))
+        .rposition(|s| {
+            matches!(
+                s.kind,
+                WorkflowNodeKind::Parallel | WorkflowNodeKind::Pipeline
+            )
+        })
         .unwrap_or(steps.len() - 1)
 }
 
@@ -1039,10 +1043,11 @@ fn fingerprint_binding(
     let mut approx: Vec<bool> = vec![false; steps.len()];
     let mut leftover: Vec<String> = Vec::new();
     for a in agents {
-        let hit = a
-            .prompt_text
-            .as_deref()
-            .and_then(|pt| fps.iter().find(|(_, fp)| pt.starts_with(fp)).map(|(i, _)| *i));
+        let hit = a.prompt_text.as_deref().and_then(|pt| {
+            fps.iter()
+                .find(|(_, fp)| pt.starts_with(fp))
+                .map(|(i, _)| *i)
+        });
         match hit {
             Some(si) => bound[si].push(a.agent_id.clone()),
             None => leftover.push(a.agent_id.clone()),
@@ -1081,8 +1086,7 @@ fn heuristic_binding(
                 if let Some(at) = &step.agent_type {
                     // consume the run of consecutive agents of this declared type
                     let start = ai;
-                    while ai < agents.len()
-                        && agents[ai].agent_type.as_deref() == Some(at.as_str())
+                    while ai < agents.len() && agents[ai].agent_type.as_deref() == Some(at.as_str())
                     {
                         bound[ni].push(agents[ai].agent_id.clone());
                         ai += 1;
@@ -1122,7 +1126,10 @@ fn heuristic_binding(
 /// journal agents. Agents are bound to call-site nodes by prompt fingerprint
 /// when possible (ground truth), else by the `agentType`/order heuristic.
 /// Heuristic / leftover bindings flag the node `approximate = true`.
-fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
+fn build_dag(
+    steps: &[ScriptStep],
+    agents: &[WorkflowAgent],
+) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     if steps.is_empty() {
         return (Vec::new(), Vec::new());
     }
@@ -1160,8 +1167,7 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
             .label
             .clone()
             .filter(|s| s.trim().chars().count() >= 2)
-            .unwrap_or_else(|| {
-            match &step.phase {
+            .unwrap_or_else(|| match &step.phase {
                 Some(p) => {
                     let pk = p.clone();
                     let c = per_phase_idx.entry(pk).or_insert(0);
@@ -1174,8 +1180,7 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
                     lbl
                 }
                 None => format!("agent #{}", ni + 1),
-            }
-        });
+            });
         nodes.push(WorkflowNode {
             id: format!("n{ni}"),
             label,
@@ -1928,7 +1933,10 @@ const synthesis = await agent(
         // synthesize uses a backtick prompt `synth ${...}` → static head "synth ";
         // the parallel probe uses a bare `a.prompt` variable → no fingerprint.
         let steps = parse_script_steps(CANONICAL);
-        assert_eq!(steps[0].prompt_fingerprint, None, "variable prompt has no static head");
+        assert_eq!(
+            steps[0].prompt_fingerprint, None,
+            "variable prompt has no static head"
+        );
         assert_eq!(steps[1].prompt_fingerprint.as_deref(), Some("synth "));
     }
 
@@ -1965,10 +1973,16 @@ const r = await pipeline(angles,
 )
 "###;
         let builders = extract_prompt_builders(script);
-        assert_eq!(builders.get("SEARCH_PROMPT").map(String::as_str), Some("## Web Searcher: "));
+        assert_eq!(
+            builders.get("SEARCH_PROMPT").map(String::as_str),
+            Some("## Web Searcher: ")
+        );
         let steps = parse_script_steps(script);
         assert_eq!(steps.len(), 1);
-        assert_eq!(steps[0].prompt_fingerprint.as_deref(), Some("## Web Searcher: "));
+        assert_eq!(
+            steps[0].prompt_fingerprint.as_deref(),
+            Some("## Web Searcher: ")
+        );
         assert_eq!(steps[0].kind, WorkflowNodeKind::Pipeline);
     }
 
@@ -2091,7 +2105,10 @@ const report = await agent("## Synthesis: research report\n\n" + Q, { label: "sy
 
         // Agents interleaved (not grouped by call-site) — order must not matter.
         let agents = vec![
-            mk_agent_pt("scope0", "Decompose this research question.\n\n## Q\nwhat is X?"),
+            mk_agent_pt(
+                "scope0",
+                "Decompose this research question.\n\n## Q\nwhat is X?",
+            ),
             mk_agent_pt("search0", "## Web Searcher: protocol-layer\n\n..."),
             mk_agent_pt("fetch0", "## Source Extractor\n\nhttps://a.example\n..."),
             mk_agent_pt("verify0", "## Adversarial Claim Verifier (voter 1)\n\n..."),
@@ -2110,10 +2127,16 @@ const report = await agent("## Synthesis: research report\n\n" + Q, { label: "sy
         assert_eq!(nodes[0].agent_ids, vec!["scope0"]);
         assert_eq!(nodes[1].agent_ids, vec!["search0", "search1"]);
         assert_eq!(nodes[2].agent_ids, vec!["fetch0", "fetch1", "fetch2"]);
-        assert_eq!(nodes[3].agent_ids, vec!["verify0", "verify1", "verify2", "verify3"]);
+        assert_eq!(
+            nodes[3].agent_ids,
+            vec!["verify0", "verify1", "verify2", "verify3"]
+        );
         assert_eq!(nodes[4].agent_ids, vec!["synth0"]);
         // Every binding is ground truth (a real prompt match) — nothing approximate.
-        assert!(nodes.iter().all(|n| !n.approximate), "fingerprint binding is exact");
+        assert!(
+            nodes.iter().all(|n| !n.approximate),
+            "fingerprint binding is exact"
+        );
     }
 
     #[test]
@@ -2122,9 +2145,18 @@ const report = await agent("## Synthesis: research report\n\n" + Q, { label: "sy
         // fingerprint binding returns None and the legacy heuristic runs, which
         // for this untyped shape collapses fan-out to ×1 + a leftover dump.
         let steps = parse_script_steps(DEEP_RESEARCH);
-        assert!(fingerprint_binding(&steps, &[]).is_none(), "no agents → no fingerprint binding");
+        assert!(
+            fingerprint_binding(&steps, &[]).is_none(),
+            "no agents → no fingerprint binding"
+        );
         let agents: Vec<WorkflowAgent> = (0..6)
-            .map(|i| mk_agent(&format!("a{i}"), "workflow-subagent", WorkflowAgentStatus::Done))
+            .map(|i| {
+                mk_agent(
+                    &format!("a{i}"),
+                    "workflow-subagent",
+                    WorkflowAgentStatus::Done,
+                )
+            })
             .collect();
         assert!(
             fingerprint_binding(&steps, &agents).is_none(),
@@ -2150,9 +2182,18 @@ const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("
         let agents = vec![mk_agent_pt("s0", "## S a"), mk_agent_pt("v0", "## V 0")];
         let (nodes, _) = build_dag(&steps, &agents);
         let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
-        assert!(labels.contains(&"search:"), "informative label kept: {labels:?}");
-        assert!(labels.contains(&"Verify"), "trivial 'v' label → phase: {labels:?}");
-        assert!(!labels.contains(&"v"), "must not label a node 'v': {labels:?}");
+        assert!(
+            labels.contains(&"search:"),
+            "informative label kept: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"Verify"),
+            "trivial 'v' label → phase: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"v"),
+            "must not label a node 'v': {labels:?}"
+        );
     }
 
     #[test]
@@ -2232,7 +2273,11 @@ return [ra, rb]
                 "message": { "content": prompt }
             })
             .to_string();
-            fs::write(wf_dir.join(format!("agent-{id}.jsonl")), format!("{line}\n")).unwrap();
+            fs::write(
+                wf_dir.join(format!("agent-{id}.jsonl")),
+                format!("{line}\n"),
+            )
+            .unwrap();
         }
         let scripts_dir = session_dir.join("workflows").join("scripts");
         fs::create_dir_all(&scripts_dir).unwrap();
@@ -2242,7 +2287,9 @@ return [ra, rb]
 
     #[test]
     fn discover_sidecar_routes_same_type_agents_by_resolved_prompt() {
-        let _g = SIDECAR_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = SIDECAR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::remove_var("FLEET_NODE_BIN");
         if !node_runnable() {
             eprintln!("skipping: node not available");
@@ -2263,13 +2310,18 @@ return [ra, rb]
             .resolved_prompt
             .as_deref()
             .expect("node A carries resolvedPrompt from execution");
-        assert!(rp.starts_with("alpha task"), "node A resolved prompt: {rp:?}");
+        assert!(
+            rp.starts_with("alpha task"),
+            "node A resolved prompt: {rp:?}"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn discover_falls_back_to_static_when_node_missing() {
-        let _g = SIDECAR_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = SIDECAR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Force the sidecar to fail (node "binary" that can't run the harness).
         std::env::set_var("FLEET_NODE_BIN", "/bin/false");
         let (tmp, session_dir) = make_routing_fixture("fallback");
@@ -2305,8 +2357,16 @@ return [ra, rb]
         )
         .unwrap();
         // meta.json: two Explore probes + one default synthesize
-        fs::write(wf_dir.join("agent-id0.meta.json"), "{\"agentType\":\"Explore\"}").unwrap();
-        fs::write(wf_dir.join("agent-id1.meta.json"), "{\"agentType\":\"Explore\"}").unwrap();
+        fs::write(
+            wf_dir.join("agent-id0.meta.json"),
+            "{\"agentType\":\"Explore\"}",
+        )
+        .unwrap();
+        fs::write(
+            wf_dir.join("agent-id1.meta.json"),
+            "{\"agentType\":\"Explore\"}",
+        )
+        .unwrap();
         fs::write(
             wf_dir.join("agent-id2.meta.json"),
             "{\"agentType\":\"workflow-subagent\"}",
@@ -2363,10 +2423,13 @@ return [ra, rb]
 
     #[test]
     fn args_from_transcript_recovers_string_arg() {
-        let (tmp, session_dir) =
-            args_fixture("str", "wf_q-1", serde_json::json!("what is rust?"));
+        let (tmp, session_dir) = args_fixture("str", "wf_q-1", serde_json::json!("what is rust?"));
         let got = args_from_transcript(&session_dir, "wf_q-1");
-        assert_eq!(got.as_deref(), Some("\"what is rust?\""), "string args round-trip");
+        assert_eq!(
+            got.as_deref(),
+            Some("\"what is rust?\""),
+            "string args round-trip"
+        );
         // wrong run id → no args
         assert_eq!(args_from_transcript(&session_dir, "wf_other"), None);
         let _ = fs::remove_dir_all(&tmp);

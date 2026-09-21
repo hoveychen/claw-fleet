@@ -114,7 +114,9 @@ pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String>
         crate::log_debug(&format!(
             "interrupt_pid: SIGINT to root {pid} (captured tree of {}, dedicated group of {})",
             tree.len(),
-            process_group.as_ref().map_or(0, |(_, members)| members.len())
+            process_group
+                .as_ref()
+                .map_or(0, |(_, members)| members.len())
         ));
         if unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) } != 0 {
             return Err(format!("no such process: {pid}"));
@@ -145,7 +147,9 @@ pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String>
                 .collect();
             if let Some((pgid, members)) = &process_group {
                 survivors.extend(
-                    members.iter().copied()
+                    members
+                        .iter()
+                        .copied()
                         .filter(|&p| p != pid && process_still_in_group(p, *pgid)),
                 );
             }
@@ -286,10 +290,16 @@ pub fn deliver_console_ctrl_c(pid: u32) -> Result<(), String> {
         }
         // Shield the helper itself from the event it is about to broadcast.
         if SetConsoleCtrlHandler(std::ptr::null_mut(), 1) == 0 {
-            return Err(format!("SetConsoleCtrlHandler failed (error {})", GetLastError()));
+            return Err(format!(
+                "SetConsoleCtrlHandler failed (error {})",
+                GetLastError()
+            ));
         }
         if GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) == 0 {
-            return Err(format!("GenerateConsoleCtrlEvent failed (error {})", GetLastError()));
+            return Err(format!(
+                "GenerateConsoleCtrlEvent failed (error {})",
+                GetLastError()
+            ));
         }
     }
     // Let conhost dispatch the event to its clients before this process exits
@@ -334,7 +344,11 @@ fn taskkill_outcome(args: &[String], status: std::process::ExitStatus) -> Result
     if status.success() {
         return Ok(());
     }
-    Err(format!("taskkill {} exited with {}", args.join(" "), status))
+    Err(format!(
+        "taskkill {} exited with {}",
+        args.join(" "),
+        status
+    ))
 }
 
 #[cfg(test)]
@@ -348,14 +362,18 @@ mod taskkill_tests {
     fn nonzero_taskkill_exit_is_an_error() {
         let args = build_taskkill_tree_args(&[4242]).expect("non-empty");
 
-        let failed = std::process::Command::new("false").status().expect("spawn false");
+        let failed = std::process::Command::new("false")
+            .status()
+            .expect("spawn false");
         let err = match taskkill_outcome(&args, failed) {
             Err(e) => e,
             Ok(()) => panic!("a failed taskkill must not be reported as a successful kill"),
         };
         assert!(err.contains("4242"), "error should name the pid: {err}");
 
-        let ok = std::process::Command::new("true").status().expect("spawn true");
+        let ok = std::process::Command::new("true")
+            .status()
+            .expect("spawn true");
         assert_eq!(taskkill_outcome(&args, ok), Ok(()));
     }
 
@@ -584,7 +602,10 @@ mod interrupt_tests {
     #[test]
     fn interrupt_reports_missing_process() {
         // Reap a child, then signal its (now free) pid.
-        let mut child = Command::new("sh").args(["-c", "exit 0"]).spawn().expect("spawn");
+        let mut child = Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("spawn");
         let pid = child.id();
         child.wait().expect("wait");
         std::thread::sleep(Duration::from_millis(100));
@@ -621,7 +642,10 @@ mod interrupt_orphan_tests {
             .spawn()
             .expect("spawn");
         std::thread::sleep(Duration::from_millis(300));
-        assert!(alive(marker), "precondition: the tool child must be running");
+        assert!(
+            alive(marker),
+            "precondition: the tool child must be running"
+        );
 
         interrupt_pid_with_grace(child.id(), Duration::from_millis(300)).expect("interrupt");
         let status = child.wait().expect("wait");
@@ -630,9 +654,15 @@ mod interrupt_orphan_tests {
         // Grace window + the sweep's own SIGTERM->SIGKILL delay.
         std::thread::sleep(Duration::from_millis(1200));
         let leaked = alive(marker);
-        Command::new("pkill").args(["-9", "-f", marker]).output().ok();
+        Command::new("pkill")
+            .args(["-9", "-f", marker])
+            .output()
+            .ok();
 
-        assert!(!leaked, "interrupt orphaned the tool child after the root exited");
+        assert!(
+            !leaked,
+            "interrupt orphaned the tool child after the root exited"
+        );
     }
 
     /// A tool may deliberately daemonize work with `nohup ... &`. By the time
@@ -673,7 +703,9 @@ mod interrupt_orphan_tests {
         );
 
         interrupt_pid_with_grace(child.id(), Duration::from_millis(300)).expect("interrupt");
-        child.wait().expect("root must exit after interrupt escalation");
+        child
+            .wait()
+            .expect("root must exit after interrupt escalation");
 
         std::thread::sleep(Duration::from_millis(1200));
         let leaked = unsafe { libc::kill(detached_pid as libc::pid_t, 0) } == 0;
@@ -682,6 +714,9 @@ mod interrupt_orphan_tests {
         }
         std::fs::remove_file(pid_file).ok();
 
-        assert!(!leaked, "interrupt left detached process-group member running");
+        assert!(
+            !leaked,
+            "interrupt left detached process-group member running"
+        );
     }
 }

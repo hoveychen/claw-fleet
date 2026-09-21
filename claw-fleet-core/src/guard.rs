@@ -250,10 +250,7 @@ mod tests {
             unquoted_equals_word("python3 - <<'EOF'\nif x==1:\n  print('=>')\nEOF"),
             None
         );
-        assert_eq!(
-            unquoted_equals_word("cat <<EOF\n=== banner ===\nEOF"),
-            None
-        );
+        assert_eq!(unquoted_equals_word("cat <<EOF\n=== banner ===\nEOF"), None);
         assert_eq!(unquoted_equals_word("cat <<-  END\n==x\n\tEND"), None);
         // Text after the heredoc closes is scanned again.
         assert_eq!(
@@ -261,7 +258,10 @@ mod tests {
             Some("===")
         );
         // A here-string is not a heredoc; its word is expanded.
-        assert_eq!(unquoted_equals_word("cat <<< ===x").as_deref(), Some("===x"));
+        assert_eq!(
+            unquoted_equals_word("cat <<< ===x").as_deref(),
+            Some("===x")
+        );
         // An unterminated heredoc must not loop or panic.
         assert_eq!(unquoted_equals_word("cat <<EOF\n==x\n"), None);
     }
@@ -272,8 +272,14 @@ mod tests {
     #[test]
     fn operator_and_split_flag_contexts_are_suppressed() {
         assert_eq!(unquoted_equals_word("set -- ${=spec}; echo $1"), None);
-        assert_eq!(unquoted_equals_word("echo $((1 + (e == 2 ? 0 : 3) ))"), None);
-        assert_eq!(unquoted_equals_word("[[ \"$f\" == *.b.* ]] && echo yes"), None);
+        assert_eq!(
+            unquoted_equals_word("echo $((1 + (e == 2 ? 0 : 3) ))"),
+            None
+        );
+        assert_eq!(
+            unquoted_equals_word("[[ \"$f\" == *.b.* ]] && echo yes"),
+            None
+        );
         assert_eq!(unquoted_equals_word("(( x == 1 )) && echo yes"), None);
         // Nested quotes inside a substitution: silent rather than wrong.
         assert_eq!(
@@ -504,7 +510,10 @@ mod tests {
         assert!(bash_missing_description(&bash_hook_full("ls", Some(""))));
         assert!(bash_missing_description(&bash_hook_full("ls", Some("   "))));
         // Present and meaningful → not missing.
-        assert!(!bash_missing_description(&bash_hook_full("ls", Some("List files"))));
+        assert!(!bash_missing_description(&bash_hook_full(
+            "ls",
+            Some("List files")
+        )));
     }
 
     #[test]
@@ -596,12 +605,8 @@ mod tests {
         let markers = dir.join("markers");
         write_rollout(&transcript, Some("const r = await tools.exec_command({});"));
 
-        let first = missing_exec_note_reminder_output_in(
-            &transcript,
-            "session-A",
-            &markers,
-        )
-        .expect("first missing note should inject context");
+        let first = missing_exec_note_reminder_output_in(&transcript, "session-A", &markers)
+            .expect("first missing note should inject context");
         let parsed: serde_json::Value = serde_json::from_str(&first).unwrap();
         let context = parsed["hookSpecificOutput"]["additionalContext"]
             .as_str()

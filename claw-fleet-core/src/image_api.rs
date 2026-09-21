@@ -128,8 +128,8 @@ pub fn load_auth(codex_home: Option<&Path>) -> Result<ImageAuth, String> {
 /// without touching the process environment.
 pub fn auth_from_codex_home(codex_home: &Path) -> Result<ImageAuth, String> {
     let path = codex_home.join("auth.json");
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("parse {}: {e}", path.display()))?;
     auth_from_json(&v)
@@ -747,7 +747,10 @@ fn provenance(auth: &ImageAuth, req: &ImageRequest, meta: &ResponseMeta) -> Stri
     note.push_str(&format!(", {described}"));
     let ignored = ignored_controls(req, meta);
     if !ignored.is_empty() {
-        note.push_str(&format!(" — {} ignored by this backend", ignored.join(" and ")));
+        note.push_str(&format!(
+            " — {} ignored by this backend",
+            ignored.join(" and ")
+        ));
     }
     note
 }
@@ -1238,7 +1241,11 @@ mod tests {
         .unwrap();
 
         let listed = crate::codex_image::list_thread_images(&handle);
-        assert_eq!(listed.len(), 1, "native handle must list through codex_image");
+        assert_eq!(
+            listed.len(),
+            1,
+            "native handle must list through codex_image"
+        );
         let read = crate::codex_image::read_thread_image(&handle, "1.png").unwrap();
         assert_eq!(read.bytes, b"\x89PNG\r\n\x1a\n");
         assert_eq!(read.mime, "image/png");

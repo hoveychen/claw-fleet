@@ -38,11 +38,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::dsh_client::DshClient;
-use crate::dsh_events::DshFrame;
 use crate::decision_history::{
     build_elicitation_record, DecisionHistoryRecord, ElicitationOutcome,
 };
+use crate::dsh_client::DshClient;
+use crate::dsh_events::DshFrame;
 use crate::elicitation::{
     ElicitationOption, ElicitationQuestion, ElicitationRequest, ElicitationResponse,
 };
@@ -124,7 +124,10 @@ impl DshQuestion {
             detail: text("detail"),
             header: text("header"),
             options,
-            multi_select: v.get("multiSelect").and_then(Value::as_bool).unwrap_or(false),
+            multi_select: v
+                .get("multiSelect")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         })
     }
 }
@@ -666,7 +669,8 @@ mod tests {
     /// absent menu is not a malformed question.
     #[test]
     fn a_question_without_options_decodes_to_an_empty_menu() {
-        let q = DshQuestion::from_value(&json!({ "id": "q", "question": "Why?" })).expect("decoded");
+        let q =
+            DshQuestion::from_value(&json!({ "id": "q", "question": "Why?" })).expect("decoded");
         assert!(q.options.is_empty());
         assert!(!q.multi_select);
         assert_eq!(q.header, None);

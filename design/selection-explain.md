@@ -33,6 +33,21 @@
 
 五个探针都没有向原会话 transcript 写入任何对话行（fork 的新 session id 在 `~/.claude/projects` 下没有文件）。
 
+### 第 2、3 棒补充（2026-09-21，累计约 $18）
+
+| 探针 | 情形 | cache_read | cache_create | 费用 | 结论 |
+|---|---|---|---|---|---|
+| 6 | 58K 探针会话（首回合仅 1 个请求），fork 紧跟 live 结束 20 秒 | 15,554 | 44,012 | $0.89 | miss：只命中 tools+system |
+| 7 | 紧接探针 6 再 fork 一次 | 58,514 | 1,051 | $0.037 | fork 之间互相命中 |
+| 8 | 同 id `--resume`（探针 7 之后） | 58,455 | 2,061 | $0.057 | 命中的是 fork 写的条目，不是 live 的 |
+| 9 | 59K 探针会话（首回合 2 个请求：一次 Bash + 一句回复），走 `session_explain::ask` 真实代码路径 fork | **59,294** | 1,236 | **$0.073** | 全额命中，20 秒流式完成 |
+
+- **fork 首问 miss 的真因是 Claude Code 自身的行为，与 fork 无关**：会话首请求以 SessionStart hook 注入的 system 角色消息结尾，这个请求写的缓存条目不被任何后续请求命中——本机 627 个 Fleet 会话里 599 个的同进程第 2 个请求都 miss 了首请求（read 固定在 tools+system 的 14.7K），命中的 28 个首回合都没有 hook 上下文。探针 6～8 的会话首回合只有一个请求，所以只有那个不可命中的条目可供 fork 命中。
+- 真实会话首回合必然调用工具（≥2 个请求），fork 命中第 2 个请求之后写的条目，探针 9 证实。历史数据同样支持：Fleet 会话第二回合 resume 在 1 小时内几乎全部命中首回合（85 例）。
+- 抓包对比过的差异（均已排除）：billing header 的 entrypoint（已镜像）、`--effort`（已镜像）、hook 消息「块数组 vs 字符串」的形态（resume 命中数据证明不影响）。
+- 附带发现：fleet MCP 只对 `launch_spec` 里有记录的会话暴露 12 个控制工具，fork 用 CLI 自铸 id 时工具集与原会话不同（47 vs 14），已用「预生成 fork id → `launch_spec::record` → `--session-id` → 结束后 `forget`」修掉。
+- **产品语义**：原会话最近 1 小时内活跃 → 追问几分钱、约 10～20 秒；超过 1 小时 → 首问付一次全量 cache write（60K 上下文约 $1.2，150K 约 $3），之后 1 小时内几分钱。卡片上要把缓存命中率和费用一起显示，让老板看到这笔钱。
+
 要点：
 - 缓存命中的关键不是「fork 还是同 id」，而是**`--permission-prompt-tool` 与 `--model` 逐字一致**。Fleet 自己拼的 argv 就是真相：复用 `session_launch::permission_prompt_tool_args`，模型与 effort从 `launch_spec` 读回；`--max-turns 1`、`--no-session-persistence`、stream-json 那组 flag 都不影响前缀。
 - 缓存 TTL 是 1 小时。原会话最后一次请求超过 1 小时后，第一条追问要付一次全量 cache write（80K 上下文约 $1.6），之后一小时内的追问都是几分钱。

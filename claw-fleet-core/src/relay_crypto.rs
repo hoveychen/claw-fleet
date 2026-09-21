@@ -101,7 +101,13 @@ pub fn seal(enc_key: &[u8; 32], plaintext: &[u8]) -> SealedBox {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(enc_key));
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 96-bit, random per message
     let ct = cipher
-        .encrypt(&nonce, Payload { msg: plaintext, aad: AAD })
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext,
+                aad: AAD,
+            },
+        )
         .expect("AES-GCM encryption is infallible for valid inputs");
     SealedBox {
         enc: "box".to_string(),
@@ -116,11 +122,15 @@ pub fn open(enc_key: &[u8; 32], sealed: &SealedBox) -> Result<Vec<u8>, String> {
     if sealed.enc != "box" {
         return Err(format!("unexpected enc discriminator: {}", sealed.enc));
     }
-    let iv = B64.decode(&sealed.iv).map_err(|e| format!("bad iv b64: {e}"))?;
+    let iv = B64
+        .decode(&sealed.iv)
+        .map_err(|e| format!("bad iv b64: {e}"))?;
     if iv.len() != 12 {
         return Err(format!("iv must be 12 bytes, got {}", iv.len()));
     }
-    let ct = B64.decode(&sealed.ct).map_err(|e| format!("bad ct b64: {e}"))?;
+    let ct = B64
+        .decode(&sealed.ct)
+        .map_err(|e| format!("bad ct b64: {e}"))?;
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(enc_key));
     let nonce = Nonce::from_slice(&iv);
     cipher
@@ -192,7 +202,10 @@ mod tests {
         let good = derive_keys("good-secret-xxxxxxxxxxxxxxxxxxxx");
         let bad = derive_keys("bad-secret-xxxxxxxxxxxxxxxxxxxxx");
         let sealed = seal(&good.enc_key, b"secret data");
-        assert!(open(&bad.enc_key, &sealed).is_err(), "wrong key must not open");
+        assert!(
+            open(&bad.enc_key, &sealed).is_err(),
+            "wrong key must not open"
+        );
     }
 
     #[test]
@@ -203,7 +216,10 @@ mod tests {
         let mut ct = B64.decode(&sealed.ct).unwrap();
         ct[0] ^= 0x01;
         sealed.ct = B64.encode(&ct);
-        assert!(open(&keys.enc_key, &sealed).is_err(), "GCM tag must reject tampering");
+        assert!(
+            open(&keys.enc_key, &sealed).is_err(),
+            "GCM tag must reject tampering"
+        );
     }
 
     #[test]
@@ -212,7 +228,9 @@ mod tests {
         let sealed = seal(&keys.enc_key, b"x");
         let as_value = serde_json::to_value(&sealed).unwrap();
         assert!(SealedBox::is_sealed(&as_value));
-        assert!(!SealedBox::is_sealed(&serde_json::json!({"event": "answer"})));
+        assert!(!SealedBox::is_sealed(
+            &serde_json::json!({"event": "answer"})
+        ));
     }
 
     /// Frozen cross-endpoint vector. The mobile-web peer (`relayCrypto.test.ts`)
@@ -234,7 +252,10 @@ mod tests {
         // (The actual cross-decrypt is exercised in the mobile-web suite; here
         // we just pin the derived material so both suites share one source of
         // truth.)
-        println!("VECTOR channel_token={} enc_key={}", keys.channel_token, enc_hex);
+        println!(
+            "VECTOR channel_token={} enc_key={}",
+            keys.channel_token, enc_hex
+        );
     }
 
     // Helper kept beside the vector so the expected value lives in one place.
@@ -257,7 +278,13 @@ mod tests {
         let fixed_iv = [0u8; 12]; // 000000000000000000000000
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&keys.enc_key));
         let ct = cipher
-            .encrypt(Nonce::from_slice(&fixed_iv), Payload { msg: plaintext, aad: AAD })
+            .encrypt(
+                Nonce::from_slice(&fixed_iv),
+                Payload {
+                    msg: plaintext,
+                    aad: AAD,
+                },
+            )
             .unwrap();
         let sealed = SealedBox {
             enc: "box".to_string(),

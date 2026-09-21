@@ -323,7 +323,11 @@ impl DshClient {
         event_id: &str,
         value: Value,
     ) -> Result<(), DshRpcError> {
-        self.answer_event(client_id, event_id, json!({ "kind": "result", "value": value }))
+        self.answer_event(
+            client_id,
+            event_id,
+            json!({ "kind": "result", "value": value }),
+        )
     }
 
     /// Withdraw an answerable frame instead of answering it.
@@ -374,7 +378,6 @@ impl DshClient {
         )
         .map(|_| ())
     }
-
 }
 
 #[cfg(test)]
@@ -430,9 +433,16 @@ mod tests {
     /// `agentPreset`, …), so the wrapper belongs here, once.
     #[test]
     fn build_request_wraps_the_arguments_in_the_gateway_args_field() {
-        let body = build_request("id-2", "session/page", &json!({ "request": { "id": "s1" } }));
+        let body = build_request(
+            "id-2",
+            "session/page",
+            &json!({ "request": { "id": "s1" } }),
+        );
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["payload"], json!({ "args": { "request": { "id": "s1" } } }));
+        assert_eq!(
+            parsed["payload"],
+            json!({ "args": { "request": { "id": "s1" } } })
+        );
     }
 
     #[test]

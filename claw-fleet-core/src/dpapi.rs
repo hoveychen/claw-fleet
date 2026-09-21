@@ -23,7 +23,10 @@ pub fn decrypt_safe_storage(encoded: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("base64 decode failed: {e}"))?;
 
     if bytes.len() < 4 {
-        return Err(format!("safeStorage blob too short ({} bytes)", bytes.len()));
+        return Err(format!(
+            "safeStorage blob too short ({} bytes)",
+            bytes.len()
+        ));
     }
     // Strip the 3-byte `vNN` version tag. We don't enforce a literal value
     // because Chromium bumps it over time; the tag is not part of the DPAPI
@@ -34,8 +37,8 @@ pub fn decrypt_safe_storage(encoded: &str) -> Result<Vec<u8>, String> {
 }
 
 fn dpapi_unprotect(ciphertext: &[u8]) -> Result<Vec<u8>, String> {
-    use windows::Win32::Foundation::{HLOCAL, LocalFree};
-    use windows::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CryptUnprotectData};
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
     let in_blob = CRYPT_INTEGER_BLOB {
         cbData: ciphertext.len() as u32,
@@ -58,8 +61,7 @@ fn dpapi_unprotect(ciphertext: &[u8]) -> Result<Vec<u8>, String> {
         )
         .map_err(|e| format!("CryptUnprotectData failed: {e}"))?;
 
-        let result =
-            std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec();
+        let result = std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec();
         let _ = LocalFree(Some(HLOCAL(out_blob.pbData as *mut _)));
         Ok(result)
     }

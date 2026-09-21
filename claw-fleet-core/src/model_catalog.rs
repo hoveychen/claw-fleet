@@ -212,7 +212,9 @@ fn normalize_id(model: &str) -> String {
 /// offering a level the model rejects.
 pub fn entry(model: &str) -> Option<&'static ModelEntry> {
     let id = normalize_id(model);
-    catalog().iter().find(|e| e.id.trim().eq_ignore_ascii_case(&id))
+    catalog()
+        .iter()
+        .find(|e| e.id.trim().eq_ignore_ascii_case(&id))
 }
 
 /// The capability tier (`fast` / `standard` / `premium`) the catalog assigns
@@ -310,10 +312,6 @@ fn context_cell(e: &ModelEntry) -> String {
     tokens.map(window_label).unwrap_or_else(|| "—".to_string())
 }
 
-
-
-
-
 /// The listed rows of one family, in catalog order.
 pub fn listed_models(family: &str) -> Vec<&'static ModelEntry> {
     catalog()
@@ -327,9 +325,6 @@ pub fn listed_models(family: &str) -> Vec<&'static ModelEntry> {
         })
         .collect()
 }
-
-
-
 
 // ── Picker catalog (the UI surface) ─────────────────────────────────────────
 
@@ -547,7 +542,11 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
                 .is_some_and(|f| has(f))
         })
         .map(|e| {
-            let caveat = if zh { &e.legacy_note_zh } else { &e.legacy_note_en };
+            let caveat = if zh {
+                &e.legacy_note_zh
+            } else {
+                &e.legacy_note_en
+            };
             match caveat.as_deref() {
                 Some(c) if zh => format!("`{}`（{c}）", e.id),
                 Some(c) => format!("`{}` ({c})", e.id),
@@ -709,7 +708,12 @@ mod tests {
     /// Every listed Codex model in the cache does.
     #[test]
     fn xhigh_survives_the_hop_to_codex() {
-        for model in ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        for model in [
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ] {
             assert_eq!(map_effort("xhigh", model), Some("xhigh"), "{model}");
             assert_eq!(map_effort("max", model), Some("max"), "{model}");
         }
@@ -763,13 +767,25 @@ mod tests {
 
         // `medium` is not on that ladder, so carrying one over clamps down to
         // `low` rather than being dropped or passed through verbatim.
-        assert_eq!(map_effort("medium", "deepseek-official/deepseek-v4-pro"), Some("low"));
-        assert_eq!(map_effort("high", "deepseek-official/deepseek-v4-pro"), Some("high"));
-        assert_eq!(map_effort("ultra", "deepseek-official/deepseek-v4-flash"), Some("max"));
+        assert_eq!(
+            map_effort("medium", "deepseek-official/deepseek-v4-pro"),
+            Some("low")
+        );
+        assert_eq!(
+            map_effort("high", "deepseek-official/deepseek-v4-pro"),
+            Some("high")
+        );
+        assert_eq!(
+            map_effort("ultra", "deepseek-official/deepseek-v4-flash"),
+            Some("max")
+        );
 
         // An uncatalogued dsh id is still declined rather than guessed at.
         assert_eq!(effort_ladder("openrouter/anthropic/claude-opus-5"), None);
-        assert_eq!(map_effort("high", "openrouter/anthropic/claude-opus-5"), None);
+        assert_eq!(
+            map_effort("high", "openrouter/anthropic/claude-opus-5"),
+            None
+        );
     }
 
     /// Codex profile markers name a model the host's profile file picks, so the
@@ -891,11 +907,17 @@ mod tests {
             // The retired aliases are named once, on the legacy tail — never as
             // rows of their own.
             assert_eq!(
-                sheet.matches("deepseek-official/deepseek-v4-flash-vision-exp").count(),
+                sheet
+                    .matches("deepseek-official/deepseek-v4-flash-vision-exp")
+                    .count(),
                 1,
                 "{locale}: the retired alias belongs on the legacy line only"
             );
-            let caveat = if locale == "zh" { "不收图片输入" } else { "rejects image input" };
+            let caveat = if locale == "zh" {
+                "不收图片输入"
+            } else {
+                "rejects image input"
+            };
             let line = sheet
                 .lines()
                 .find(|l| l.contains(caveat))
@@ -943,11 +965,16 @@ mod tests {
     #[test]
     fn picker_catalog_omits_aliases_and_superseded_rows() {
         let cat = picker_catalog_with(|_| true);
-        let all: Vec<&str> =
-            cat.iter().flat_map(|h| h.models.iter().map(|m| m.id.as_str())).collect();
+        let all: Vec<&str> = cat
+            .iter()
+            .flat_map(|h| h.models.iter().map(|m| m.id.as_str()))
+            .collect();
         assert!(all.contains(&"claude-opus-5"));
         assert!(!all.contains(&"opus"), "bare alias leaked into the menu");
-        assert!(!all.contains(&"claude-opus-4-8"), "superseded row leaked into the menu");
+        assert!(
+            !all.contains(&"claude-opus-4-8"),
+            "superseded row leaked into the menu"
+        );
 
         let claude = &cat[0];
         for m in &claude.models {
@@ -1049,16 +1076,31 @@ mod tests {
         // Pro is delisted, but NOT as a superseded row: it is still its own
         // model at its own (dearer) price until the 14th.
         let pro = entry("deepseek-official/deepseek-v4-pro").expect("pro must stay catalogued");
-        assert!(!pro.is_listed(), "pro is retiring and no longer recommended");
+        assert!(
+            !pro.is_listed(),
+            "pro is retiring and no longer recommended"
+        );
         assert_eq!(pro.superseded_by, None, "pro must not claim Flash's price");
-        assert_eq!(pro.tier.as_deref(), Some("premium"), "delisting is not re-tiering");
-        for e in catalog().iter().filter(|e| e.family.as_deref() == Some("dsh")) {
+        assert_eq!(
+            pro.tier.as_deref(),
+            Some("premium"),
+            "delisting is not re-tiering"
+        );
+        for e in catalog()
+            .iter()
+            .filter(|e| e.family.as_deref() == Some("dsh"))
+        {
             assert!(e.tier.is_some(), "{} has no tier", e.id);
             assert_eq!(
                 e.efforts.as_deref(),
                 Some(
-                    ["off".to_string(), "low".to_string(), "high".to_string(), "max".to_string()]
-                        .as_slice()
+                    [
+                        "off".to_string(),
+                        "low".to_string(),
+                        "high".to_string(),
+                        "max".to_string()
+                    ]
+                    .as_slice()
                 ),
                 "{} should carry the measured deepseek-official ladder",
                 e.id
@@ -1098,8 +1140,8 @@ mod tests {
     #[test]
     fn user_overlay_is_field_level() {
         let base = parse(BUILTIN).unwrap();
-        let overlay = parse("[[model]]\nid = \"gpt-5.6-sol\"\nefforts = [\"low\", \"medium\"]\n")
-            .unwrap();
+        let overlay =
+            parse("[[model]]\nid = \"gpt-5.6-sol\"\nefforts = [\"low\", \"medium\"]\n").unwrap();
         let merged = merge(base, overlay);
         let sol = find(&merged, "gpt-5.6-sol");
         assert_eq!(
@@ -1117,7 +1159,10 @@ mod tests {
             parse("[[model]]\nid = \"gpt-9-future\"\ntier = \"premium\"\nefforts = [\"low\"]\n")
                 .unwrap();
         let merged = merge(parse(BUILTIN).unwrap(), overlay);
-        assert_eq!(find(&merged, "gpt-9-future").tier.as_deref(), Some("premium"));
+        assert_eq!(
+            find(&merged, "gpt-9-future").tier.as_deref(),
+            Some("premium")
+        );
     }
 
     /// A malformed user file is ignored rather than emptying the catalog: one
@@ -1125,7 +1170,10 @@ mod tests {
     #[test]
     fn malformed_overlay_is_ignored() {
         assert!(parse("this is not toml = = =").is_none());
-        let merged = merge(parse(BUILTIN).unwrap(), parse("nope = = =").unwrap_or_default());
+        let merged = merge(
+            parse(BUILTIN).unwrap(),
+            parse("nope = = =").unwrap_or_default(),
+        );
         assert!(merged.iter().any(|e| e.id == "gpt-5.6-sol"));
     }
 }

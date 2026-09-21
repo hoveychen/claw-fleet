@@ -119,11 +119,7 @@ fn launch_token_dir() -> Option<std::path::PathBuf> {
 
 fn launch_token_path(token: &str) -> Option<std::path::PathBuf> {
     // Tokens are Fleet-minted uuids; reject anything that could escape the dir.
-    if token.is_empty()
-        || token.contains('/')
-        || token.contains('\\')
-        || token.contains("..")
-    {
+    if token.is_empty() || token.contains('/') || token.contains('\\') || token.contains("..") {
         return None;
     }
     launch_token_dir().map(|d| d.join(token))
@@ -337,7 +333,9 @@ fn read_codex_turn_terminal(path: &std::path::Path) -> CodexTurnTerminal {
     };
     let mut terminal = CodexTurnTerminal::Missing;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         match value.get("type").and_then(Value::as_str) {
             Some("turn.completed") => terminal = CodexTurnTerminal::Completed,
             Some("turn.failed") => terminal = CodexTurnTerminal::Failed,
@@ -749,7 +747,11 @@ pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String>
     ];
     for (k, v) in session_env {
         args.push("-c".to_string());
-        args.push(format!("mcp_servers.fleet.env.{}={}", k, toml_basic_string(v)));
+        args.push(format!(
+            "mcp_servers.fleet.env.{}={}",
+            k,
+            toml_basic_string(v)
+        ));
     }
     args
 }
@@ -792,7 +794,9 @@ pub fn codex_image_args(images: &[String]) -> Vec<String> {
 
 pub fn fleet_notify_args() -> Vec<String> {
     let Some(fleet) = crate::fleet_cli::resolve_fleet_binary() else {
-        crate::log_debug("fleet_notify_args: no fleet binary resolved; skipping codex notify relay");
+        crate::log_debug(
+            "fleet_notify_args: no fleet binary resolved; skipping codex notify relay",
+        );
         return Vec::new();
     };
     let fleet = fleet.to_string_lossy().into_owned();
@@ -1114,8 +1118,10 @@ pub fn spawn_new_codex_session(
         return Err(format!("Workspace directory not found: {workspace_path}"));
     }
 
-    let codex = crate::codex_source::find_codex_binary()
-        .ok_or_else(|| "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)".to_string())?;
+    let codex = crate::codex_source::find_codex_binary().ok_or_else(|| {
+        "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)"
+            .to_string()
+    })?;
 
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("codex_new_session_stderr.log"))
@@ -1230,9 +1236,12 @@ pub fn spawn_new_codex_session(
         // Thread id captured from `thread.started`, kept so we can drop its
         // spawn-pid note once the child exits below.
         let mut spawned_thread: Option<String> = None;
-        if let Some(thread_id) =
-            tail_thread_started(&sink_path_owned, &mut child, deadline, Duration::from_millis(50))
-        {
+        if let Some(thread_id) = tail_thread_started(
+            &sink_path_owned,
+            &mut child,
+            deadline,
+            Duration::from_millis(50),
+        ) {
             // Note the spawn pid so new-session liveness can recognise this
             // still-running session before its id lands in any argv.
             record_spawn_pid(&thread_id, pid);
@@ -1389,7 +1398,11 @@ pub fn resume_codex_session(
         return Err("session_id is required".to_string());
     }
     let prompt = prompt.trim();
-    let prompt = if prompt.is_empty() { "continue" } else { prompt };
+    let prompt = if prompt.is_empty() {
+        "continue"
+    } else {
+        prompt
+    };
     let workspace_path = normalize_workspace_path(workspace_path)?;
     // Same remote-workspace mirror guarantee as the new-session path above.
     crate::remote_workspace::ensure_local_mirror(&workspace_path)?;
@@ -1397,8 +1410,10 @@ pub fn resume_codex_session(
         return Err(format!("Workspace directory not found: {workspace_path}"));
     }
 
-    let codex = crate::codex_source::find_codex_binary()
-        .ok_or_else(|| "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)".to_string())?;
+    let codex = crate::codex_source::find_codex_binary().ok_or_else(|| {
+        "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)"
+            .to_string()
+    })?;
 
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("codex_resume_stderr.log"))
@@ -1613,7 +1628,11 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             let prev = std::env::var_os("FLEET_HOME");
             unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _lock: lock }
+            Self {
+                dir,
+                prev,
+                _lock: lock,
+            }
         }
     }
 
@@ -1786,13 +1805,21 @@ mod tests {
     fn auth_json_gate_only_true_for_chatgpt_login() {
         use serde_json::json;
         // ChatGPT login: auth_mode == chatgpt, no API key → gated ON.
-        assert!(auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": null})));
+        assert!(auth_json_is_chatgpt(
+            &json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": null})
+        ));
         assert!(auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt"})));
-        assert!(auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": ""})));
+        assert!(auth_json_is_chatgpt(
+            &json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": ""})
+        ));
         // API-key login (even if auth_mode still says chatgpt) → OFF: repointing
         // the base_url would break a non-ChatGPT backend.
-        assert!(!auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-xyz"})));
-        assert!(!auth_json_is_chatgpt(&json!({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-xyz"})));
+        assert!(!auth_json_is_chatgpt(
+            &json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-xyz"})
+        ));
+        assert!(!auth_json_is_chatgpt(
+            &json!({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-xyz"})
+        ));
         // Missing / malformed → OFF.
         assert!(!auth_json_is_chatgpt(&json!({})));
         assert!(!auth_json_is_chatgpt(&json!({"auth_mode": "other"})));
@@ -1808,7 +1835,9 @@ mod tests {
         }
         // Selects the custom provider and disables WebSockets.
         assert!(args.contains(&"model_provider=chatgpt-http".to_string()));
-        assert!(args.contains(&"model_providers.chatgpt-http.supports_websockets=false".to_string()));
+        assert!(
+            args.contains(&"model_providers.chatgpt-http.supports_websockets=false".to_string())
+        );
         // Never touches the reserved built-in `openai` provider (Codex rejects that).
         assert!(!args.iter().any(|a| a.contains("model_providers.openai.")));
     }
@@ -1833,7 +1862,12 @@ mod tests {
     /// fall through to the ChatGPT default and still wants the overrides.
     #[test]
     fn ws_disable_still_applies_without_a_profile() {
-        for m in [Some("gpt-5.6-sol"), None, Some("profile:"), Some("profile:   ")] {
+        for m in [
+            Some("gpt-5.6-sol"),
+            None,
+            Some("profile:"),
+            Some("profile:   "),
+        ] {
             assert!(
                 ws_disable_args_for(m, true).contains(&"model_provider=chatgpt-http".to_string()),
                 "expected overrides for {m:?}"
@@ -1879,12 +1913,16 @@ mod tests {
         // args are non-empty regardless of what's installed on the host.
         let bin = crate::fleet_cli::fleet_bin_dir().expect("bin dir under FLEET_HOME");
         std::fs::create_dir_all(&bin).unwrap();
-        std::fs::write(bin.join(if cfg!(windows) { "fleet.exe" } else { "fleet" }), b"#!/bin/sh\n")
-            .unwrap();
+        std::fs::write(
+            bin.join(if cfg!(windows) { "fleet.exe" } else { "fleet" }),
+            b"#!/bin/sh\n",
+        )
+        .unwrap();
         let args = fleet_decision_card_args(&[]);
         assert!(!args.is_empty(), "fleet binary must resolve in this test");
         assert!(
-            args.iter().any(|a| a == "mcp_servers.fleet.tool_timeout_sec=86400"),
+            args.iter()
+                .any(|a| a == "mcp_servers.fleet.tool_timeout_sec=86400"),
             "must override codex's 300s client-side MCP tool timeout; got: {args:?}"
         );
     }
@@ -1907,7 +1945,10 @@ mod tests {
             .expect("has bypass flag");
         assert!(bypass < dd, "bypass flag must precede --");
         assert!(
-            args.iter().position(|a| a.starts_with("mcp_servers.fleet.command")).unwrap() < dd,
+            args.iter()
+                .position(|a| a.starts_with("mcp_servers.fleet.command"))
+                .unwrap()
+                < dd,
             "mcp override must precede --"
         );
         assert_eq!(args.last().unwrap(), "the prompt", "prompt stays last");
@@ -1943,7 +1984,9 @@ mod tests {
     fn arg_builder_drops_blank_model_and_effort() {
         let args = build_codex_exec_args("/ws", "hi", Some("  "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
-        assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
+        assert!(!args
+            .iter()
+            .any(|a| a.starts_with("model_reasoning_effort=")));
     }
 
     /// A bare model id stays on `-m` and must never turn into a profile —
@@ -1961,7 +2004,13 @@ mod tests {
     /// the profile's provider.
     #[test]
     fn arg_builder_maps_profile_prefix_to_dash_p() {
-        let args = build_codex_exec_args("/ws", "hi", Some("profile:deepseek-flash"), Some("high"), &[]);
+        let args = build_codex_exec_args(
+            "/ws",
+            "hi",
+            Some("profile:deepseek-flash"),
+            Some("high"),
+            &[],
+        );
         let pi = args.iter().position(|a| a == "-p").expect("has -p");
         assert_eq!(args[pi + 1], "deepseek-flash");
         assert!(!args.contains(&"-m".to_string()), "-p must replace -m");
@@ -1975,7 +2024,13 @@ mod tests {
     /// fall back to Codex's default model/provider mid-thread.
     #[test]
     fn resume_arg_builder_maps_profile_prefix_to_dash_p() {
-        let args = build_codex_resume_args("thread-1", "cont", Some("profile:deepseek-flash"), None, &[]);
+        let args = build_codex_resume_args(
+            "thread-1",
+            "cont",
+            Some("profile:deepseek-flash"),
+            None,
+            &[],
+        );
         let pi = args.iter().position(|a| a == "-p").expect("has -p");
         assert_eq!(args[pi + 1], "deepseek-flash");
         assert!(!args.contains(&"-m".to_string()));
@@ -2014,7 +2069,8 @@ mod tests {
         // so their writes went to *this* directory and their assertions read a
         // stale file. Held for the whole test, since the restore is at the end.
         let _lock = crate::session::fleet_home_lock();
-        let base = std::env::temp_dir().join(format!("fleet-codex-profiles-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("fleet-codex-profiles-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(
@@ -2057,7 +2113,8 @@ mod tests {
 
     #[test]
     fn parses_thread_id_from_thread_started_line() {
-        let line = r#"{"type":"thread.started","thread_id":"019f60cf-af8a-7b30-b43a-5ad17d5bb0f2"}"#;
+        let line =
+            r#"{"type":"thread.started","thread_id":"019f60cf-af8a-7b30-b43a-5ad17d5bb0f2"}"#;
         assert_eq!(
             parse_thread_started(line).as_deref(),
             Some("019f60cf-af8a-7b30-b43a-5ad17d5bb0f2")
@@ -2105,15 +2162,24 @@ mod tests {
     fn live_fleet_session_id_resolves_from_launch_token() {
         let ws = std::env::temp_dir().join(format!("fleet-codex-tok-live-{}", std::process::id()));
         std::fs::create_dir_all(&ws).unwrap();
-        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "reply with exactly: OK", None, None, &[])
-            .expect("spawn should succeed");
+        let resp = spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "reply with exactly: OK",
+            None,
+            None,
+            &[],
+        )
+        .expect("spawn should succeed");
         let sid = resp.session_id.expect("thread id captured");
 
         // Find the token whose note points at this thread id (the spawn just
         // wrote it once `thread.started` landed).
         let dir = launch_token_dir().expect("token dir");
         let mut found_token = None;
-        for entry in std::fs::read_dir(&dir).expect("token dir readable").flatten() {
+        for entry in std::fs::read_dir(&dir)
+            .expect("token dir readable")
+            .flatten()
+        {
             let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
             if content.trim() == sid {
                 found_token = entry.file_name().to_str().map(str::to_string);
@@ -2186,11 +2252,7 @@ mod tests {
         let source = crate::codex_source::CodexSource::new();
         let mut found = None;
         for _ in 0..40 {
-            if let Some(s) = source
-                .scan_sessions()
-                .into_iter()
-                .find(|s| s.id == sid)
-            {
+            if let Some(s) = source.scan_sessions().into_iter().find(|s| s.id == sid) {
                 found = Some(s);
                 break;
             }
@@ -2207,7 +2269,10 @@ mod tests {
         let args = build_codex_resume_args("019f-abc", "keep going", None, None, &[]);
         assert_eq!(args[0], "exec");
         assert_eq!(args[1], "resume");
-        assert_eq!(args[2], "019f-abc", "thread id is resume's first positional");
+        assert_eq!(
+            args[2], "019f-abc",
+            "thread id is resume's first positional"
+        );
         assert!(args.contains(&"--json".to_string()));
         assert!(args.contains(&"--skip-git-repo-check".to_string()));
         // prompt is the final arg, preceded by `--`
@@ -2227,20 +2292,34 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let completed = dir.join("completed.jsonl");
-        std::fs::write(&completed, concat!(
-            "{\"type\":\"thread.started\"}\n",
-            "not-json\n",
-            "{\"type\":\"turn.completed\"}\n"
-        )).unwrap();
-        assert_eq!(read_codex_turn_terminal(&completed), CodexTurnTerminal::Completed);
+        std::fs::write(
+            &completed,
+            concat!(
+                "{\"type\":\"thread.started\"}\n",
+                "not-json\n",
+                "{\"type\":\"turn.completed\"}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            read_codex_turn_terminal(&completed),
+            CodexTurnTerminal::Completed
+        );
 
         let failed = dir.join("failed.jsonl");
         std::fs::write(&failed, "{\"type\":\"turn.failed\"}\n").unwrap();
         assert_eq!(read_codex_turn_terminal(&failed), CodexTurnTerminal::Failed);
 
         let missing = dir.join("missing.jsonl");
-        std::fs::write(&missing, "{\"type\":\"item.completed\",\"item\":{\"type\":\"reasoning\"}}\n").unwrap();
-        assert_eq!(read_codex_turn_terminal(&missing), CodexTurnTerminal::Missing);
+        std::fs::write(
+            &missing,
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"reasoning\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_codex_turn_terminal(&missing),
+            CodexTurnTerminal::Missing
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2260,7 +2339,9 @@ mod tests {
     fn resume_arg_builder_drops_blank_model_and_effort() {
         let args = build_codex_resume_args("tid", "hi", Some(" "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
-        assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
+        assert!(!args
+            .iter()
+            .any(|a| a.starts_with("model_reasoning_effort=")));
     }
 
     /// Live smoke (M2 P6 acceptance): spawn a real Codex session, then resume it
@@ -2307,8 +2388,14 @@ mod tests {
             std::thread::sleep(Duration::from_millis(500));
             waited += Duration::from_millis(500);
         }
-        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume on_exit never fired");
-        assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "resume exited non-zero");
+        assert!(
+            done.load(std::sync::atomic::Ordering::SeqCst),
+            "resume on_exit never fired"
+        );
+        assert!(
+            ok.load(std::sync::atomic::Ordering::SeqCst),
+            "resume exited non-zero"
+        );
         let _ = std::fs::remove_dir_all(&ws);
     }
 
@@ -2339,18 +2426,14 @@ mod tests {
             ws.to_string_lossy().into_owned(),
         )]);
         assert!(
-            decision_args.iter().any(|a| a == "--dangerously-bypass-approvals-and-sandbox"),
+            decision_args
+                .iter()
+                .any(|a| a == "--dangerously-bypass-approvals-and-sandbox"),
             "bypass flag present"
         );
         let prompt = "Call the fleet__ask MCP tool from the \"fleet\" server with a single \
                       yes/no question, then reply with what it returned.";
-        let args = build_codex_exec_args(
-            &ws.to_string_lossy(),
-            prompt,
-            None,
-            None,
-            &decision_args,
-        );
+        let args = build_codex_exec_args(&ws.to_string_lossy(), prompt, None, None, &decision_args);
         let out = crate::process_util::command(&codex)
             .args(&args)
             .current_dir(&ws)
@@ -2384,7 +2467,11 @@ mod tests {
         );
         // Empty id is a guarded no-op — no file, no panic.
         on_codex_turn_exit("");
-        assert!(!crate::session::get_fleet_dir().unwrap().join("idle").join(".json").exists());
+        assert!(!crate::session::get_fleet_dir()
+            .unwrap()
+            .join("idle")
+            .join(".json")
+            .exists());
     }
 
     #[test]
@@ -2404,7 +2491,11 @@ mod tests {
         unsafe { std::env::set_var("CODEX_HOME", &dir) };
 
         // User has a notify → returned verbatim.
-        std::fs::write(dir.join("config.toml"), "notify = [\"my-notifier\", \"--flag\"]\n").unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "notify = [\"my-notifier\", \"--flag\"]\n",
+        )
+        .unwrap();
         assert_eq!(
             read_user_codex_notify(),
             Some(vec!["my-notifier".to_string(), "--flag".to_string()])
@@ -2452,9 +2543,7 @@ mod tests {
             None
         );
         assert_eq!(
-            parse_agent_turn_complete_thread_id(
-                r#"{"type":"agent-turn-complete","thread-id":""}"#
-            ),
+            parse_agent_turn_complete_thread_id(r#"{"type":"agent-turn-complete","thread-id":""}"#),
             None
         );
         // Garbage / non-JSON → None, no panic.
@@ -2480,7 +2569,13 @@ mod tests {
 
         // In a real argv they must sit before `--`, or codex would read them as
         // prompt text instead of flags.
-        let args = build_codex_exec_args("/ws", "-look at these", None, None, &codex_image_args(&imgs));
+        let args = build_codex_exec_args(
+            "/ws",
+            "-look at these",
+            None,
+            None,
+            &codex_image_args(&imgs),
+        );
         let dashdash = args.iter().position(|a| a == "--").expect("has --");
         let first_i = args.iter().position(|a| a == "-i").expect("has -i");
         assert!(first_i < dashdash, "images must precede --: {args:?}");
@@ -2523,8 +2618,9 @@ mod tests {
     #[test]
     fn apply_codex_launch_env_clears_inherited_session_ids() {
         let mut cmd = crate::process_util::command(std::path::Path::new("/bin/sh"));
-        cmd.arg("-c")
-            .arg("printf '%s|%s' \"${FLEET_SESSION_ID:-EMPTY}\" \"${CLAUDE_CODE_SESSION_ID:-EMPTY}\"");
+        cmd.arg("-c").arg(
+            "printf '%s|%s' \"${FLEET_SESSION_ID:-EMPTY}\" \"${CLAUDE_CODE_SESSION_ID:-EMPTY}\"",
+        );
         // Simulate the leaked, inherited ids the spawner's process tree carries.
         cmd.env("FLEET_SESSION_ID", "leaked-019f7047");
         cmd.env("CLAUDE_CODE_SESSION_ID", "leaked-claude");
@@ -2546,7 +2642,10 @@ mod tests {
         );
         assert_eq!(parse_thread_started("not json"), None);
         // thread.started without a usable id → None
-        assert_eq!(parse_thread_started(r#"{"type":"thread.started","thread_id":""}"#), None);
+        assert_eq!(
+            parse_thread_started(r#"{"type":"thread.started","thread_id":""}"#),
+            None
+        );
     }
 
     /// Unique temp file path for a stdout-sink test.
@@ -2571,7 +2670,11 @@ mod tests {
         std::fs::write(&path, r#"{"type":"thread.started","thread_id":"019abc"#).unwrap();
         assert_eq!(read_first_thread_started(&path), None);
         // Completed line → the id.
-        std::fs::write(&path, "{\"type\":\"thread.started\",\"thread_id\":\"019abc\"}\n").unwrap();
+        std::fs::write(
+            &path,
+            "{\"type\":\"thread.started\",\"thread_id\":\"019abc\"}\n",
+        )
+        .unwrap();
         assert_eq!(read_first_thread_started(&path).as_deref(), Some("019abc"));
         let _ = std::fs::remove_file(&path);
     }
@@ -2760,7 +2863,9 @@ mod remote_workspace_wrap_tests {
         assert_eq!(program, fake_rca);
         assert_eq!(
             out_args,
-            ["/opt/codex", "exec", "--json", "--code", "rca1.CODEX"].map(String::from).to_vec()
+            ["/opt/codex", "exec", "--json", "--code", "rca1.CODEX"]
+                .map(String::from)
+                .to_vec()
         );
         assert!(envs.iter().any(|(k, _)| k == "RCC_LOCAL_BINS"));
 

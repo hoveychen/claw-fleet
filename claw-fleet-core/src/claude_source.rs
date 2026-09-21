@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::agent_source::{AgentSource, ResumeSpec, WatchStrategy};
-use crate::ui_types::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::{get_claude_dir, CliProcess, SessionInfo, SessionStatus};
+use crate::ui_types::SourceUsageSummary;
 
 /// The `agent_source` id stamped on every Claude Code session (see
 /// `parse_session_info`). Mirror of `codex_launch::FLEET_AGENT_SOURCE_CODEX`.
@@ -62,8 +62,9 @@ impl AgentSource for ClaudeCodeSource {
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
-        let mut messages = crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
-            .map_err(|e| e.to_string())?;
+        let mut messages =
+            crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
+                .map_err(|e| e.to_string())?;
         messages.iter_mut().for_each(crate::queued_command::unfold);
         messages.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(messages)
@@ -341,7 +342,10 @@ mod liveness_tests {
         // A codex session with a stale flag must be left to the codex reconciler.
         let mut sessions = vec![mk("codex-dead", "codex", SessionStatus::Thinking, true)];
         assert!(!reconcile_claude_liveness(&mut sessions, &[]));
-        assert!(sessions[0].proc_alive, "codex session left for its own path");
+        assert!(
+            sessions[0].proc_alive,
+            "codex session left for its own path"
+        );
     }
 
     #[test]

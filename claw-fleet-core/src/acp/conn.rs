@@ -92,14 +92,16 @@ fn dispatch_inner(agent: &Arc<AcpAgent>, line: String, inflight: Option<&Arc<Ato
     let owned_agent = agent.clone();
     let owned_line = line.clone();
     let owned_count = inflight.cloned();
-    let spawned = std::thread::Builder::new().name("acp-request".into()).spawn(move || {
-        if let Some(reply) = handle_frame(owned_agent.as_ref(), &owned_line) {
-            owned_agent.send_frame(&reply);
-        }
-        if let Some(c) = owned_count {
-            c.fetch_sub(1, Ordering::AcqRel);
-        }
-    });
+    let spawned = std::thread::Builder::new()
+        .name("acp-request".into())
+        .spawn(move || {
+            if let Some(reply) = handle_frame(owned_agent.as_ref(), &owned_line) {
+                owned_agent.send_frame(&reply);
+            }
+            if let Some(c) = owned_count {
+                c.fetch_sub(1, Ordering::AcqRel);
+            }
+        });
     // A failed spawn must not silently drop the request — answer inline
     // instead. Slower, and it blocks the reader, but it never loses a frame.
     if spawned.is_err() {
@@ -171,13 +173,20 @@ mod tests {
         run_connection(agent, std::io::Cursor::new(input));
 
         let frames = log.lock().unwrap();
-        assert_eq!(frames.len(), 2, "one reply per request, nothing for the ping");
+        assert_eq!(
+            frames.len(),
+            2,
+            "one reply per request, nothing for the ping"
+        );
         let first: Value = serde_json::from_str(&frames[0]).unwrap();
         assert_eq!(first["id"], 1);
         assert_eq!(first["result"]["agentInfo"]["name"], "fleet");
         let second: Value = serde_json::from_str(&frames[1]).unwrap();
         assert_eq!(second["id"], 2);
-        assert_eq!(second["error"]["code"], crate::acp::jsonrpc::codes::METHOD_NOT_FOUND);
+        assert_eq!(
+            second["error"]["code"],
+            crate::acp::jsonrpc::codes::METHOD_NOT_FOUND
+        );
     }
 
     #[test]
@@ -193,7 +202,11 @@ mod tests {
         run_connection(agent, std::io::Cursor::new(input));
 
         let frames = log.lock().unwrap();
-        assert_eq!(frames.len(), 1, "the reply must land before the loop returns");
+        assert_eq!(
+            frames.len(),
+            1,
+            "the reply must land before the loop returns"
+        );
         let v: Value = serde_json::from_str(&frames[0]).unwrap();
         assert_eq!(v["id"], 1);
     }
@@ -219,7 +232,10 @@ mod tests {
             std::thread::yield_now();
         }
         run_connection(agent, std::io::Cursor::new(""));
-        assert!(waiter.join().unwrap().is_err(), "the parked request is failed, not left hanging");
+        assert!(
+            waiter.join().unwrap().is_err(),
+            "the parked request is failed, not left hanging"
+        );
     }
 
     #[test]
@@ -233,9 +249,16 @@ mod tests {
         run_connection(agent, std::io::Cursor::new(input));
 
         let frames = log.lock().unwrap();
-        assert_eq!(frames.len(), 2, "the bad frame must not kill the connection");
+        assert_eq!(
+            frames.len(),
+            2,
+            "the bad frame must not kill the connection"
+        );
         let bad: Value = serde_json::from_str(&frames[0]).unwrap();
-        assert_eq!(bad["error"]["code"], crate::acp::jsonrpc::codes::PARSE_ERROR);
+        assert_eq!(
+            bad["error"]["code"],
+            crate::acp::jsonrpc::codes::PARSE_ERROR
+        );
         let good: Value = serde_json::from_str(&frames[1]).unwrap();
         assert_eq!(good["id"], 5);
     }

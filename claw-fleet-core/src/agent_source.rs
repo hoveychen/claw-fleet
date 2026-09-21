@@ -12,9 +12,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ui_types::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::SessionInfo;
+use crate::ui_types::SourceUsageSummary;
 
 /// Parameters for launching a brand-new session, source-agnostic.
 ///
@@ -158,7 +158,8 @@ pub trait AgentSource: Send + Sync {
             return Ok((Vec::new(), size));
         }
         let mut file = std::fs::File::open(&real).map_err(|e| e.to_string())?;
-        file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .map_err(|e| e.to_string())?;
         let mut buf = String::new();
         file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
         // Advance only past complete (newline-terminated) lines; a half-written
@@ -314,7 +315,10 @@ pub trait AgentSource: Send + Sync {
         _spec: &ForkAskSpec,
         _on_delta: &mut dyn FnMut(&str),
     ) -> Result<ForkAskOutcome, String> {
-        Err(format!("{}: sessions cannot be forked for a side question", self.name()))
+        Err(format!(
+            "{}: sessions cannot be forked for a side question",
+            self.name()
+        ))
     }
 
     /// List memory files from this source.
@@ -380,10 +384,7 @@ impl SourcesConfig {
 
     /// Check if a source is enabled.  Missing entries → enabled by default.
     pub fn is_enabled(&self, name: &str) -> bool {
-        self.sources
-            .get(name)
-            .map(|e| e.enabled)
-            .unwrap_or(true)
+        self.sources.get(name).map(|e| e.enabled).unwrap_or(true)
     }
 
     /// Check if a source is enabled, accepting both config names ("claude-code")
@@ -418,21 +419,40 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
         ("claude-code", {
             let cli_exists = {
                 #[cfg(unix)]
-                { crate::process_util::command("which").arg("claude").output().map_or(false, |o| o.status.success()) }
+                {
+                    crate::process_util::command("which")
+                        .arg("claude")
+                        .output()
+                        .map_or(false, |o| o.status.success())
+                }
                 #[cfg(not(unix))]
-                { crate::process_util::command("where").arg("claude").output().map_or(false, |o| o.status.success()) }
+                {
+                    crate::process_util::command("where")
+                        .arg("claude")
+                        .output()
+                        .map_or(false, |o| o.status.success())
+                }
             };
             cli_exists || crate::session::get_claude_dir().map_or(false, |d| d.is_dir())
         }),
         ("codex", {
             let home = crate::session::real_home_dir();
-            home.as_ref().map_or(false, |h| h.join(".codex").is_dir())
-                || {
-                    #[cfg(unix)]
-                    { crate::process_util::command("which").arg("codex").output().map_or(false, |o| o.status.success()) }
-                    #[cfg(not(unix))]
-                    { crate::process_util::command("where").arg("codex").output().map_or(false, |o| o.status.success()) }
+            home.as_ref().map_or(false, |h| h.join(".codex").is_dir()) || {
+                #[cfg(unix)]
+                {
+                    crate::process_util::command("which")
+                        .arg("codex")
+                        .output()
+                        .map_or(false, |o| o.status.success())
                 }
+                #[cfg(not(unix))]
+                {
+                    crate::process_util::command("where")
+                        .arg("codex")
+                        .output()
+                        .map_or(false, |o| o.status.success())
+                }
+            }
         }),
         // dsh. Availability is the *binary*, not a home directory: `~/.dsh`
         // exists as soon as anything writes a setting there, but this source can
@@ -459,7 +479,9 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
 /// Toggle a source on/off and persist to disk.
 pub fn set_source_enabled_local(name: &str, enabled: bool) -> Result<(), String> {
     let mut config = SourcesConfig::load();
-    config.sources.insert(name.to_string(), SourceEntry { enabled });
+    config
+        .sources
+        .insert(name.to_string(), SourceEntry { enabled });
     config.save()
 }
 
@@ -698,7 +720,9 @@ pub fn route_launch_with(
             .effort
             .as_deref()
             .and_then(|e| {
-                model.as_deref().and_then(|m| crate::model_catalog::map_effort(e, m))
+                model
+                    .as_deref()
+                    .and_then(|m| crate::model_catalog::map_effort(e, m))
             })
             .map(str::to_string),
     };
@@ -715,7 +739,10 @@ pub fn find_source_by_api_name<'a>(
     sources: &'a [Box<dyn AgentSource>],
     api_name: &str,
 ) -> Option<&'a dyn AgentSource> {
-    sources.iter().find(|s| s.api_name() == api_name).map(|s| s.as_ref())
+    sources
+        .iter()
+        .find(|s| s.api_name() == api_name)
+        .map(|s| s.as_ref())
 }
 
 /// Find the source that handles a given path/URI by matching URI prefix.
@@ -757,7 +784,9 @@ pub fn find_source_for_path<'a>(
 
 /// Fetch usage summaries from all available sources via trait dispatch.
 /// All network I/O happens here, outside any Mutex guard.
-pub fn fetch_usage_summaries_from_sources(sources: &[Box<dyn AgentSource>]) -> Vec<SourceUsageSummary> {
+pub fn fetch_usage_summaries_from_sources(
+    sources: &[Box<dyn AgentSource>],
+) -> Vec<SourceUsageSummary> {
     sources
         .iter()
         .filter(|s| s.is_available())
@@ -794,13 +823,22 @@ mod tests {
     /// behind a Codex provider block) must stay unplaced rather than be guessed.
     #[test]
     fn model_specs_name_their_harness() {
-        for m in ["claude-opus-5", "claude-opus-5[1m]", "opus", "sonnet-4-6", "  fable  "] {
+        for m in [
+            "claude-opus-5",
+            "claude-opus-5[1m]",
+            "opus",
+            "sonnet-4-6",
+            "  fable  ",
+        ] {
             assert_eq!(source_for_model(m), Some("claude-code"), "{m}");
         }
         for m in ["gpt-5.6-sol", "gpt-6-astra", "profile:deepseek-flash"] {
             assert_eq!(source_for_model(m), Some("codex"), "{m}");
         }
-        for m in ["deepseek-official/deepseek-v4-pro", "openrouter/anthropic/claude-opus-5"] {
+        for m in [
+            "deepseek-official/deepseek-v4-pro",
+            "openrouter/anthropic/claude-opus-5",
+        ] {
             assert_eq!(source_for_model(m), Some("dsh"), "{m}");
         }
         for m in ["", "   ", "my-finetune-v3"] {
@@ -917,13 +955,9 @@ mod tests {
 
         // No override at all: pure inheritance, including a blank source that
         // falls back to the historical Claude default.
-        let inherited = route_launch_with(
-            &ctx("", "claude-opus-5", "high"),
-            None,
-            None,
-            all_available,
-        )
-        .unwrap();
+        let inherited =
+            route_launch_with(&ctx("", "claude-opus-5", "high"), None, None, all_available)
+                .unwrap();
         assert_eq!(inherited.agent_source, "claude-code");
         assert_eq!(inherited.model.as_deref(), Some("claude-opus-5"));
     }
@@ -995,16 +1029,36 @@ mod tests {
     }
 
     impl AgentSource for MockAgentSource {
-        fn name(&self) -> &'static str { self.name }
-        fn api_name(&self) -> &'static str { self.api_name }
-        fn uri_prefix(&self) -> &'static str { self.uri_prefix }
-        fn is_available(&self) -> bool { self.available }
-        fn scan_sessions(&self) -> Vec<SessionInfo> { self.sessions.clone() }
-        fn get_messages(&self, _path: &str) -> Result<Vec<Value>, String> { self.messages.clone() }
-        fn watch_strategy(&self) -> WatchStrategy { WatchStrategy::Poll(Duration::from_secs(5)) }
-        fn fetch_account(&self) -> Result<Value, String> { self.account.clone() }
-        fn fetch_usage(&self) -> Result<Value, String> { self.usage.clone() }
-        fn usage_summary(&self) -> Option<SourceUsageSummary> { self.summary.clone() }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn api_name(&self) -> &'static str {
+            self.api_name
+        }
+        fn uri_prefix(&self) -> &'static str {
+            self.uri_prefix
+        }
+        fn is_available(&self) -> bool {
+            self.available
+        }
+        fn scan_sessions(&self) -> Vec<SessionInfo> {
+            self.sessions.clone()
+        }
+        fn get_messages(&self, _path: &str) -> Result<Vec<Value>, String> {
+            self.messages.clone()
+        }
+        fn watch_strategy(&self) -> WatchStrategy {
+            WatchStrategy::Poll(Duration::from_secs(5))
+        }
+        fn fetch_account(&self) -> Result<Value, String> {
+            self.account.clone()
+        }
+        fn fetch_usage(&self) -> Result<Value, String> {
+            self.usage.clone()
+        }
+        fn usage_summary(&self) -> Option<SourceUsageSummary> {
+            self.summary.clone()
+        }
     }
 
     fn make_sources() -> Vec<Box<dyn AgentSource>> {
@@ -1085,17 +1139,16 @@ mod tests {
     #[test]
     fn usage_summary_filters_unavailable_sources() {
         let sources: Vec<Box<dyn AgentSource>> = vec![
-            Box::new(
-                MockAgentSource::new("source-a", "a", "a://")
-                    .with_summary(SourceUsageSummary {
-                        source: "a".into(),
-                        plan: Some("pro".into()),
-                        bars: vec![],
-                        balances: vec![],
-                        usage_source: None,
-                        email: None,
-                    }),
-            ),
+            Box::new(MockAgentSource::new("source-a", "a", "a://").with_summary(
+                SourceUsageSummary {
+                    source: "a".into(),
+                    plan: Some("pro".into()),
+                    bars: vec![],
+                    balances: vec![],
+                    usage_source: None,
+                    email: None,
+                },
+            )),
             Box::new(
                 MockAgentSource::new("source-b", "b", "b://")
                     .unavailable()
@@ -1109,8 +1162,7 @@ mod tests {
                     }),
             ),
             Box::new(
-                MockAgentSource::new("source-c", "c", "c://")
-                    // available but no summary
+                MockAgentSource::new("source-c", "c", "c://"), // available but no summary
             ),
         ];
 
@@ -1158,7 +1210,9 @@ mod tests {
     #[test]
     fn sources_config_is_source_enabled_maps_claude() {
         let mut config = SourcesConfig::default();
-        config.sources.insert("claude-code".into(), SourceEntry { enabled: false });
+        config
+            .sources
+            .insert("claude-code".into(), SourceEntry { enabled: false });
 
         // "claude" should map to "claude-code"
         assert!(!config.is_source_enabled("claude"));
@@ -1173,8 +1227,7 @@ mod tests {
     /// (Uses a bogus tool so no real process is ever spawned.)
     #[test]
     fn spawn_session_rejects_unknown_tool() {
-        let err = super::spawn_session("definitely-not-a-tool", &SpawnSpec::default())
-            .unwrap_err();
+        let err = super::spawn_session("definitely-not-a-tool", &SpawnSpec::default()).unwrap_err();
         assert!(
             err.contains("not available") || err.contains("disabled"),
             "unexpected error: {err}"

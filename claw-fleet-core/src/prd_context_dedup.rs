@@ -286,7 +286,9 @@ mod tests {
         .to_string();
         // A subagent's copy is in a different context window, and the notes
         // hint is a different hook — neither answers for this session's plans.
-        let notes_hint = claude_attachment("<system-reminder>\n<fleet_notes>…</fleet_notes>\n</system-reminder>");
+        let notes_hint = claude_attachment(
+            "<system-reminder>\n<fleet_notes>…</fleet_notes>\n</system-reminder>",
+        );
         let (_dir, path) = write(&[sidechain, notes_hint]);
         assert!(claude_needs_injection(&path, &text));
     }
@@ -294,7 +296,10 @@ mod tests {
     #[test]
     fn claude_injects_when_the_transcript_is_missing_or_empty() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(claude_needs_injection(&dir.path().join("absent.jsonl"), &reminder("x")));
+        assert!(claude_needs_injection(
+            &dir.path().join("absent.jsonl"),
+            &reminder("x")
+        ));
         let (_dir, path) = write(&[claude_user("first prompt")]);
         assert!(claude_needs_injection(&path, &reminder("x")));
     }

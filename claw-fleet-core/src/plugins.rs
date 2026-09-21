@@ -80,7 +80,11 @@ pub fn scan_all_plugins() -> Vec<PluginItem> {
         if !mp_dir.is_dir() {
             continue;
         }
-        let Some(mp_name) = mp_dir.file_name().and_then(|n| n.to_str()).map(String::from) else {
+        let Some(mp_name) = mp_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(String::from)
+        else {
             continue;
         };
         scan_plugin_dir(
@@ -130,8 +134,7 @@ pub fn merge_with_catalog(
     catalog: &[CliPlugin],
     enabled: &BTreeMap<String, bool>,
 ) -> Vec<PluginItem> {
-    let on_disk: BTreeSet<String> =
-        scanned.iter().map(|p| p.plugin_id.clone()).collect();
+    let on_disk: BTreeSet<String> = scanned.iter().map(|p| p.plugin_id.clone()).collect();
     for cp in catalog {
         if on_disk.contains(&cp.plugin_id) {
             continue;
@@ -258,8 +261,7 @@ fn scan_contributions(plugin_dir: &Path) -> PluginContributions {
         rd.flatten()
             .filter(|e| {
                 e.path().extension().and_then(|s| s.to_str()) == Some("md")
-                    && e.path().file_name().and_then(|s| s.to_str())
-                        != Some("README.md")
+                    && e.path().file_name().and_then(|s| s.to_str()) != Some("README.md")
             })
             .count() as u32
     };
@@ -307,11 +309,9 @@ fn parse_enabled_plugins(raw: &str) -> BTreeMap<String, bool> {
     let mut out = BTreeMap::new();
     if let Some(obj) = json.get("enabledPlugins").and_then(|v| v.as_object()) {
         for (k, v) in obj {
-            let enabled = v.as_bool().unwrap_or_else(|| {
-                v.get("enabled")
-                    .and_then(|x| x.as_bool())
-                    .unwrap_or(false)
-            });
+            let enabled = v
+                .as_bool()
+                .unwrap_or_else(|| v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false));
             out.insert(k.clone(), enabled);
         }
     }

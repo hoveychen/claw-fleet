@@ -237,7 +237,13 @@ mod tests {
         // through the protocol entry point returns the same bytes + a mime.
         let p1 = ingest_bytes(&png, "shot.png").unwrap();
         assert!(p1.starts_with(tmp.join(".fleet").join("user-attachments")));
-        let key = p1.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
+        let key = p1
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
 
         let got = read_user_attachment(&key, "shot.png").unwrap();
         assert_eq!(got.bytes, png);
@@ -293,7 +299,13 @@ mod tests {
         assert!(exists_in_store(&stored));
 
         // …a same-shaped path with no backing file is not…
-        let ghost = stored.parent().unwrap().parent().unwrap().join("deadbeef").join("gone.png");
+        let ghost = stored
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("deadbeef")
+            .join("gone.png");
         assert!(!exists_in_store(&ghost));
 
         // …and an out-of-store path is never confirmed, even if it exists on disk.

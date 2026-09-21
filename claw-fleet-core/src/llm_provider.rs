@@ -30,7 +30,11 @@ pub struct LlmModel {
 
 impl LlmModel {
     fn new(id: impl Into<String>, display_name: impl Into<String>) -> Self {
-        Self { id: id.into(), display_name: display_name.into(), aligned_display: None }
+        Self {
+            id: id.into(),
+            display_name: display_name.into(),
+            aligned_display: None,
+        }
     }
 }
 
@@ -73,7 +77,9 @@ impl Default for LlmConfig {
 
 impl LlmConfig {
     pub fn load() -> Self {
-        let Some(path) = config_path() else { return Self::default() };
+        let Some(path) = config_path() else {
+            return Self::default();
+        };
         std::fs::read_to_string(path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -93,10 +99,12 @@ impl LlmConfig {
         self.daily_report_preference
             .as_deref()
             .filter(|name| matches!(*name, "claude" | "codex" | "dsh"))
-            .or_else(|| matches!(self.provider.as_str(), "claude" | "codex" | "dsh").then_some(self.provider.as_str()))
+            .or_else(|| {
+                matches!(self.provider.as_str(), "claude" | "codex" | "dsh")
+                    .then_some(self.provider.as_str())
+            })
             .unwrap_or("claude")
     }
-
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
@@ -224,9 +232,10 @@ fn run_cli(
     tag: &str,
 ) -> Option<String> {
     // Only log the binary and flag names, not prompt content (which can be huge).
-    let safe_args: Vec<&str> = args.iter().map(|a| {
-        if a.len() > 80 { "<prompt…>" } else { a }
-    }).collect();
+    let safe_args: Vec<&str> = args
+        .iter()
+        .map(|a| if a.len() > 80 { "<prompt…>" } else { a })
+        .collect();
     log_debug(&format!("[{tag}] spawning: {bin} {}", safe_args.join(" ")));
     let mut cmd = crate::process_util::command(bin);
     for (key, value) in envs {
@@ -293,15 +302,19 @@ impl ClaudeCliProvider {
         // Use the unified discoverer so the LLM-completion path benefits from
         // the same IDE-extension scan and user override that auto-resume uses.
         let config = crate::claude_binary::ClaudeBinaryConfig::load();
-        let bin_path = crate::claude_binary::resolve(config.override_path.as_deref())
-            .map(|b| b.path);
+        let bin_path =
+            crate::claude_binary::resolve(config.override_path.as_deref()).map(|b| b.path);
         Self { bin_path }
     }
 }
 
 impl LlmProvider for ClaudeCliProvider {
-    fn name(&self) -> &str { "claude" }
-    fn display_name(&self) -> &str { "Claude Code" }
+    fn name(&self) -> &str {
+        "claude"
+    }
+    fn display_name(&self) -> &str {
+        "Claude Code"
+    }
 
     fn is_available(&self) -> bool {
         self.bin_path.is_some()
@@ -316,8 +329,12 @@ impl LlmProvider for ClaudeCliProvider {
         ]
     }
 
-    fn default_fast_model(&self) -> &str { "haiku" }
-    fn default_standard_model(&self) -> &str { "sonnet" }
+    fn default_fast_model(&self) -> &str {
+        "haiku"
+    }
+    fn default_standard_model(&self) -> &str {
+        "sonnet"
+    }
 
     fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
@@ -331,10 +348,13 @@ impl LlmProvider for ClaudeCliProvider {
         let raw = run_cli(
             bin,
             &[
-                "-p", prompt,
-                "--model", model,
+                "-p",
+                prompt,
+                "--model",
+                model,
                 "--no-session-persistence",
-                "--output-format", "json",
+                "--output-format",
+                "json",
             ],
             &[],
             timeout,
@@ -380,23 +400,22 @@ fn parse_claude_json_response(raw: &str) -> Option<Completion> {
             )
         };
         let pick = |mu_field: &str, usage_field: &str| -> u64 {
-            sum(mu_field).unwrap_or_else(|| {
-                u.get(usage_field).and_then(|n| n.as_u64()).unwrap_or(0)
-            })
+            sum(mu_field)
+                .unwrap_or_else(|| u.get(usage_field).and_then(|n| n.as_u64()).unwrap_or(0))
         };
         CompletionUsage {
             input_tokens: pick("inputTokens", "input_tokens"),
             output_tokens: pick("outputTokens", "output_tokens"),
-            cache_creation_tokens: pick(
-                "cacheCreationInputTokens",
-                "cache_creation_input_tokens",
-            ),
+            cache_creation_tokens: pick("cacheCreationInputTokens", "cache_creation_input_tokens"),
             // `modelUsage` carries no TTL split, so the breakdown always comes
             // from `usage.cache_creation` (its cache totals agree with
             // `modelUsage`'s — both are per-call sums).
             cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(Some(u)),
             cache_read_tokens: pick("cacheReadInputTokens", "cache_read_input_tokens"),
-            total_cost_usd: v.get("total_cost_usd").and_then(|n| n.as_f64()).unwrap_or(0.0),
+            total_cost_usd: v
+                .get("total_cost_usd")
+                .and_then(|n| n.as_f64())
+                .unwrap_or(0.0),
         }
     });
     Some(Completion { text, usage })
@@ -410,11 +429,14 @@ pub struct CodexCliProvider {
 
 impl CodexCliProvider {
     pub fn new() -> Self {
-        let bin_path = resolve_binary("codex", &[
-            "~/.local/bin/codex",
-            "/usr/local/bin/codex",
-            "/opt/homebrew/bin/codex",
-        ]);
+        let bin_path = resolve_binary(
+            "codex",
+            &[
+                "~/.local/bin/codex",
+                "/usr/local/bin/codex",
+                "/opt/homebrew/bin/codex",
+            ],
+        );
         Self { bin_path }
     }
 }
@@ -431,7 +453,10 @@ impl CodexCliProvider {
 /// Links `auth.json` (required) and `models_cache.json` (optional) and removes
 /// any stray `AGENTS.md`/`config.toml`, so a stale copy can never resurrect
 /// the guidance. Idempotent; call before every spawn.
-fn prepare_clean_codex_home(source: &std::path::Path, clean: &std::path::Path) -> Result<(), String> {
+fn prepare_clean_codex_home(
+    source: &std::path::Path,
+    clean: &std::path::Path,
+) -> Result<(), String> {
     if !source.join("auth.json").exists() {
         return Err(format!("no auth.json under {}", source.display()));
     }
@@ -455,11 +480,14 @@ fn prepare_clean_codex_home(source: &std::path::Path, clean: &std::path::Path) -
         // regular file (e.g. an atomic token-refresh rewrite), heal it here.
         remove_entry(&dst)?;
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&src, &dst).map_err(|e| format!("link {}: {e}", dst.display()))?;
+        std::os::unix::fs::symlink(&src, &dst)
+            .map_err(|e| format!("link {}: {e}", dst.display()))?;
         // Symlinks need elevated privileges on Windows; a per-call copy stays
         // fresh enough because we rebuild it before every spawn.
         #[cfg(not(unix))]
-        std::fs::copy(&src, &dst).map(|_| ()).map_err(|e| format!("copy {}: {e}", dst.display()))?;
+        std::fs::copy(&src, &dst)
+            .map(|_| ())
+            .map_err(|e| format!("copy {}: {e}", dst.display()))?;
     }
     Ok(())
 }
@@ -468,21 +496,29 @@ fn prepare_clean_codex_home(source: &std::path::Path, clean: &std::path::Path) -
 /// home, guidance bleed and all) when it cannot be prepared — a degraded run
 /// beats no run.
 fn clean_codex_home_env() -> Vec<(String, String)> {
-    let Some(home) = crate::session::real_home_dir() else { return Vec::new() };
+    let Some(home) = crate::session::real_home_dir() else {
+        return Vec::new();
+    };
     let source = home.join(".codex");
     let clean = home.join(".fleet").join("codex-clean-home");
     match prepare_clean_codex_home(&source, &clean) {
         Ok(()) => vec![("CODEX_HOME".into(), clean.to_string_lossy().into_owned())],
         Err(e) => {
-            log_debug(&format!("[llm:codex] clean CODEX_HOME unavailable ({e}), using default home"));
+            log_debug(&format!(
+                "[llm:codex] clean CODEX_HOME unavailable ({e}), using default home"
+            ));
             Vec::new()
         }
     }
 }
 
 impl LlmProvider for CodexCliProvider {
-    fn name(&self) -> &str { "codex" }
-    fn display_name(&self) -> &str { "Codex" }
+    fn name(&self) -> &str {
+        "codex"
+    }
+    fn display_name(&self) -> &str {
+        "Codex"
+    }
 
     fn is_available(&self) -> bool {
         self.bin_path.is_some()
@@ -506,8 +542,12 @@ impl LlmProvider for CodexCliProvider {
     // Luna is Codex's fast/cheap tier; Terra the balanced one. The previous
     // defaults (`gpt-5.1-codex-mini` / `gpt-5.3-codex`) 400 under a ChatGPT
     // account, so any scenario using Codex as its analysis provider failed.
-    fn default_fast_model(&self) -> &str { "gpt-5.6-luna" }
-    fn default_standard_model(&self) -> &str { "gpt-5.6-terra" }
+    fn default_fast_model(&self) -> &str {
+        "gpt-5.6-luna"
+    }
+    fn default_standard_model(&self) -> &str {
+        "gpt-5.6-terra"
+    }
 
     fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
@@ -523,11 +563,13 @@ impl LlmProvider for CodexCliProvider {
             &[
                 "exec",
                 prompt,
-                "-m", model,
+                "-m",
+                model,
                 "--ephemeral",
                 "--full-auto",
                 "--skip-git-repo-check",
-                "--sandbox", "read-only",
+                "--sandbox",
+                "read-only",
             ],
             &clean_codex_home_env(),
             timeout,
@@ -572,7 +614,9 @@ fn codex_model_is_listed(m: &serde_json::Value) -> bool {
 
 /// Read `~/.codex/models_cache.json` and return the models it lists.
 fn parse_codex_models_cache() -> Option<Vec<LlmModel>> {
-    let path = crate::session::real_home_dir()?.join(".codex").join("models_cache.json");
+    let path = crate::session::real_home_dir()?
+        .join(".codex")
+        .join("models_cache.json");
     let content = std::fs::read_to_string(path).ok()?;
     parse_codex_models_doc(&content)
 }
@@ -583,14 +627,20 @@ fn parse_codex_models_doc(content: &str) -> Option<Vec<LlmModel>> {
     let val: serde_json::Value = serde_json::from_str(content).ok()?;
 
     // The cache is either `{ "models": [...] }` or a bare array.
-    let arr = val.get("models").and_then(|v| v.as_array())
+    let arr = val
+        .get("models")
+        .and_then(|v| v.as_array())
         .or_else(|| val.as_array())?;
 
-    let models: Vec<LlmModel> = arr.iter()
+    let models: Vec<LlmModel> = arr
+        .iter()
         .filter(|m| codex_model_is_listed(m))
         .filter_map(|m| {
             let slug = m.get("slug").and_then(|v| v.as_str())?;
-            let display = m.get("display_name").and_then(|v| v.as_str()).unwrap_or(slug);
+            let display = m
+                .get("display_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(slug);
             Some(LlmModel::new(slug, display))
         })
         .collect();
@@ -606,11 +656,14 @@ pub struct DshCliProvider {
 
 impl DshCliProvider {
     pub fn new() -> Self {
-        let bin_path = resolve_binary("dsh", &[
-            "/opt/homebrew/bin/dsh",
-            "/usr/local/bin/dsh",
-            "~/.local/bin/dsh",
-        ]);
+        let bin_path = resolve_binary(
+            "dsh",
+            &[
+                "/opt/homebrew/bin/dsh",
+                "/usr/local/bin/dsh",
+                "~/.local/bin/dsh",
+            ],
+        );
         Self { bin_path }
     }
 }
@@ -632,9 +685,7 @@ fn split_dsh_model_spec(spec: &str) -> (&str, &str) {
 /// Without it the headless runner would fall back to the bundle default
 /// (`deepseek-flash`) and a selected model would silently never take effect.
 fn dsh_model_patch(provider: &str, model: &str) -> String {
-    format!(
-        "- id: agent-default-model\n  config:\n    provider: {provider}\n    model: {model}\n"
-    )
+    format!("- id: agent-default-model\n  config:\n    provider: {provider}\n    model: {model}\n")
 }
 
 /// A per-call isolated `DSH_HOME`, removed on drop.
@@ -686,8 +737,12 @@ fn prepare_dsh_home() -> Option<DshHome> {
 }
 
 impl LlmProvider for DshCliProvider {
-    fn name(&self) -> &str { "dsh" }
-    fn display_name(&self) -> &str { "DeepSeek Harness" }
+    fn name(&self) -> &str {
+        "dsh"
+    }
+    fn display_name(&self) -> &str {
+        "DeepSeek Harness"
+    }
 
     fn is_available(&self) -> bool {
         self.bin_path.is_some()
@@ -707,8 +762,12 @@ impl LlmProvider for DshCliProvider {
     // standard slots. There is no distinct cheap/fast tier in the built-in
     // route, and `deepseek-v4-pro` is being retired (routed to Flash from
     // 2026-09-14), so no separate premium model is offered.
-    fn default_fast_model(&self) -> &str { "deepseek-official/deepseek-flash" }
-    fn default_standard_model(&self) -> &str { "deepseek-official/deepseek-flash" }
+    fn default_fast_model(&self) -> &str {
+        "deepseek-official/deepseek-flash"
+    }
+    fn default_standard_model(&self) -> &str {
+        "deepseek-official/deepseek-flash"
+    }
 
     fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
@@ -724,8 +783,10 @@ impl LlmProvider for DshCliProvider {
         let text = run_cli(
             bin,
             &[
-                "--profile", "headless",
-                "--patch", patch_path.to_str()?,
+                "--profile",
+                "headless",
+                "--patch",
+                patch_path.to_str()?,
                 prompt,
             ],
             &[("DSH_HOME".into(), home.path.to_string_lossy().into_owned())],
@@ -764,7 +825,10 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
             let models = p
                 .list_models()
                 .into_iter()
-                .map(|m| LlmModel { aligned_display: aligned_tier_label(&name, &m.id), ..m })
+                .map(|m| LlmModel {
+                    aligned_display: aligned_tier_label(&name, &m.id),
+                    ..m
+                })
                 .collect();
             LlmProviderInfo {
                 display_name: p.display_name().into(),
@@ -793,7 +857,11 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
 // ── Quota-aware provider routing ────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QuotaState { Healthy, Limited, Unknown }
+pub enum QuotaState {
+    Healthy,
+    Limited,
+    Unknown,
+}
 
 pub struct LlmRoute {
     pub provider: Box<dyn LlmProvider>,
@@ -801,10 +869,17 @@ pub struct LlmRoute {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ModelSlot { Fast, Standard }
+pub enum ModelSlot {
+    Fast,
+    Standard,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ModelTier { Fast, Standard, Premium }
+enum ModelTier {
+    Fast,
+    Standard,
+    Premium,
+}
 
 /// Which capability tier a model sits in.
 ///
@@ -826,12 +901,19 @@ fn model_tier(model: &str, fallback: ModelSlot) -> ModelTier {
     let model = model.to_ascii_lowercase();
     if model.contains("haiku") || model.contains("luna") {
         ModelTier::Fast
-    } else if model.contains("opus") || model.contains("fable") || model.contains("sol") || model.contains("astra") {
+    } else if model.contains("opus")
+        || model.contains("fable")
+        || model.contains("sol")
+        || model.contains("astra")
+    {
         ModelTier::Premium
     } else if model.contains("sonnet") || model.contains("terra") {
         ModelTier::Standard
     } else {
-        match fallback { ModelSlot::Fast => ModelTier::Fast, ModelSlot::Standard => ModelTier::Standard }
+        match fallback {
+            ModelSlot::Fast => ModelTier::Fast,
+            ModelSlot::Standard => ModelTier::Standard,
+        }
     }
 }
 
@@ -851,7 +933,8 @@ fn equivalent_model(target_provider: &str, selected_model: &str, slot: ModelSlot
         ("dsh", ModelTier::Standard) => "deepseek-official/deepseek-flash",
         ("dsh", ModelTier::Premium) => "deepseek-official/deepseek-flash",
         _ => selected_model,
-    }.to_string()
+    }
+    .to_string()
 }
 
 /// Compact tier label for a model id, for the cross-engine `Haiku / Luna`
@@ -877,26 +960,40 @@ fn aligned_tier_label(provider: &str, id: &str) -> Option<String> {
         "codex" => "claude",
         _ => return None,
     };
-    Some(tier_label(&equivalent_model(other, id, ModelSlot::Standard)))
+    Some(tier_label(&equivalent_model(
+        other,
+        id,
+        ModelSlot::Standard,
+    )))
 }
 
 fn rank_providers(preference: &str, states: &[(String, QuotaState)]) -> Vec<String> {
-    let mut usable: Vec<&(String, QuotaState)> = states.iter()
+    let mut usable: Vec<&(String, QuotaState)> = states
+        .iter()
         .filter(|(_, state)| *state != QuotaState::Limited)
         .collect();
     usable.sort_by_key(|(name, state)| {
-        (usize::from(name != preference), usize::from(*state == QuotaState::Unknown))
+        (
+            usize::from(name != preference),
+            usize::from(*state == QuotaState::Unknown),
+        )
     });
     usable.into_iter().map(|(name, _)| name.clone()).collect()
 }
 
 fn claude_quota_state() -> QuotaState {
     const MAX_SNAPSHOT_AGE_MS: i64 = 20 * 60 * 1000;
-    let Some(snapshot) = crate::account::latest_usage_snapshot() else { return QuotaState::Unknown };
+    let Some(snapshot) = crate::account::latest_usage_snapshot() else {
+        return QuotaState::Unknown;
+    };
     if chrono::Utc::now().timestamp_millis() - snapshot.ts > MAX_SNAPSHOT_AGE_MS {
         return QuotaState::Unknown;
     }
-    let values = [snapshot.five_hour, snapshot.seven_day, snapshot.seven_day_sonnet];
+    let values = [
+        snapshot.five_hour,
+        snapshot.seven_day,
+        snapshot.seven_day_sonnet,
+    ];
     if values.iter().flatten().any(|value| *value >= 0.999) {
         QuotaState::Limited
     } else if values.iter().any(Option::is_some) {
@@ -911,7 +1008,9 @@ fn codex_quota_state() -> QuotaState {
         Ok(usage) if usage.rate_limit_reached_type.is_some() => QuotaState::Limited,
         Ok(_) => QuotaState::Healthy,
         Err(e) => {
-            log_debug(&format!("[daily_report] codex quota probe unavailable: {e}"));
+            log_debug(&format!(
+                "[daily_report] codex quota probe unavailable: {e}"
+            ));
             QuotaState::Unknown
         }
     }
@@ -924,7 +1023,9 @@ static QUOTA_CACHE: std::sync::LazyLock<
 fn provider_quota_state(name: &str) -> QuotaState {
     const TTL: Duration = Duration::from_secs(60);
     if let Some((checked_at, state)) = QUOTA_CACHE.lock().unwrap().get(name).copied() {
-        if checked_at.elapsed() < TTL { return state }
+        if checked_at.elapsed() < TTL {
+            return state;
+        }
     }
     let state = match name {
         "claude" => claude_quota_state(),
@@ -934,7 +1035,10 @@ fn provider_quota_state(name: &str) -> QuotaState {
         "dsh" => QuotaState::Healthy,
         _ => QuotaState::Unknown,
     };
-    QUOTA_CACHE.lock().unwrap().insert(name.to_string(), (Instant::now(), state));
+    QUOTA_CACHE
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), (Instant::now(), state));
     state
 }
 
@@ -942,53 +1046,77 @@ fn provider_quota_state(name: &str) -> QuotaState {
 /// be rate-limited and translating the selected model onto the equivalent tier
 /// of the fallback provider.
 pub fn provider_routes(config: &LlmConfig, slot: ModelSlot, preference: &str) -> Vec<LlmRoute> {
-    if config.provider == "none" { return Vec::new() }
+    if config.provider == "none" {
+        return Vec::new();
+    }
     let sources = crate::agent_source::SourcesConfig::load();
     let mut providers = Vec::<(String, Box<dyn LlmProvider>)>::new();
     for name in ["claude", "codex", "dsh"] {
-        if !sources.is_source_enabled(name) { continue }
-        let Some(provider) = resolve_provider(name) else { continue };
-        if provider.is_available() { providers.push((name.to_string(), provider)); }
+        if !sources.is_source_enabled(name) {
+            continue;
+        }
+        let Some(provider) = resolve_provider(name) else {
+            continue;
+        };
+        if provider.is_available() {
+            providers.push((name.to_string(), provider));
+        }
     }
     // Probe the preferred account first. If it is usable, the fallback's
     // quota does not affect this call and remains lazy (actual CLI failure
     // still falls through). Only probe the fallback eagerly when preference
     // is known-limited, avoiding a Codex app-server round trip on every first
     // Claude-preferred Guard/session-analysis call.
-    let primary = providers.iter()
+    let primary = providers
+        .iter()
         .find(|(name, _)| name == preference)
         .or_else(|| providers.first())
         .map(|(name, _)| name.clone());
-    let primary_state = primary.as_deref().map(provider_quota_state).unwrap_or(QuotaState::Unknown);
-    let states: Vec<(String, QuotaState)> = providers.iter().map(|(name, _)| {
-        let state = if Some(name.as_str()) == primary.as_deref() {
-            primary_state
-        } else if primary_state == QuotaState::Limited {
-            provider_quota_state(name)
-        } else {
-            QuotaState::Unknown
-        };
-        (name.clone(), state)
-    }).collect();
+    let primary_state = primary
+        .as_deref()
+        .map(provider_quota_state)
+        .unwrap_or(QuotaState::Unknown);
+    let states: Vec<(String, QuotaState)> = providers
+        .iter()
+        .map(|(name, _)| {
+            let state = if Some(name.as_str()) == primary.as_deref() {
+                primary_state
+            } else if primary_state == QuotaState::Limited {
+                provider_quota_state(name)
+            } else {
+                QuotaState::Unknown
+            };
+            (name.clone(), state)
+        })
+        .collect();
     let order = rank_providers(preference, &states);
     let selected_model = match slot {
         ModelSlot::Fast => &config.fast_model,
         ModelSlot::Standard => &config.standard_model,
     };
-    order.into_iter().filter_map(|name| {
-        let index = providers.iter().position(|(candidate, _)| candidate == &name)?;
-        let (_, provider) = providers.swap_remove(index);
-        let model = if name == config.provider {
-            selected_model.to_string()
-        } else {
-            equivalent_model(&name, selected_model, slot)
-        };
-        Some(LlmRoute { provider, model })
-    }).collect()
+    order
+        .into_iter()
+        .filter_map(|name| {
+            let index = providers
+                .iter()
+                .position(|(candidate, _)| candidate == &name)?;
+            let (_, provider) = providers.swap_remove(index);
+            let model = if name == config.provider {
+                selected_model.to_string()
+            } else {
+                equivalent_model(&name, selected_model, slot)
+            };
+            Some(LlmRoute { provider, model })
+        })
+        .collect()
 }
 
 pub fn daily_report_routes(config: &LlmConfig) -> Vec<LlmRoute> {
-    provider_routes(config, ModelSlot::Standard, config.effective_daily_report_preference())
+    provider_routes(
+        config,
+        ModelSlot::Standard,
+        config.effective_daily_report_preference(),
+    )
 }
 
 pub fn complete_routed(
@@ -999,9 +1127,17 @@ pub fn complete_routed(
     scenario: &str,
 ) -> Option<String> {
     for route in provider_routes(config, slot, &config.provider) {
-        log_debug(&format!("[llm:route] scenario={scenario} provider={} model={}", route.provider.name(), route.model));
+        log_debug(&format!(
+            "[llm:route] scenario={scenario} provider={} model={}",
+            route.provider.name(),
+            route.model
+        ));
         if let Some(text) = crate::llm_usage::complete_accounted(
-            route.provider.as_ref(), prompt, &route.model, timeout, scenario,
+            route.provider.as_ref(),
+            prompt,
+            &route.model,
+            timeout,
+            scenario,
         ) {
             return Some(text);
         }
@@ -1022,9 +1158,15 @@ mod tests {
 
     #[test]
     fn daily_report_routing_prefers_choice_and_skips_limited() {
-        let healthy = vec![("claude".into(), QuotaState::Healthy), ("codex".into(), QuotaState::Healthy)];
+        let healthy = vec![
+            ("claude".into(), QuotaState::Healthy),
+            ("codex".into(), QuotaState::Healthy),
+        ];
         assert_eq!(rank_providers("codex", &healthy), ["codex", "claude"]);
-        let limited = vec![("claude".into(), QuotaState::Limited), ("codex".into(), QuotaState::Healthy)];
+        let limited = vec![
+            ("claude".into(), QuotaState::Limited),
+            ("codex".into(), QuotaState::Healthy),
+        ];
         assert_eq!(rank_providers("claude", &limited), ["codex"]);
     }
 
@@ -1081,10 +1223,19 @@ mod tests {
             ModelTier::Premium
         );
         assert_eq!(model_tier("gpt-5.5", ModelSlot::Fast), ModelTier::Premium);
-        assert_eq!(model_tier("claude-sonnet-5", ModelSlot::Fast), ModelTier::Standard);
+        assert_eq!(
+            model_tier("claude-sonnet-5", ModelSlot::Fast),
+            ModelTier::Standard
+        );
         // Uncatalogued ids still fall back to the substring pass, then the slot.
-        assert_eq!(model_tier("some-haiku-fork", ModelSlot::Standard), ModelTier::Fast);
-        assert_eq!(model_tier("my-finetune-v3", ModelSlot::Standard), ModelTier::Standard);
+        assert_eq!(
+            model_tier("some-haiku-fork", ModelSlot::Standard),
+            ModelTier::Fast
+        );
+        assert_eq!(
+            model_tier("my-finetune-v3", ModelSlot::Standard),
+            ModelTier::Standard
+        );
     }
 
     /// The offline fallback list is the catalog's codex rows, so it cannot drift
@@ -1098,33 +1249,65 @@ mod tests {
             .collect();
         assert_eq!(ids, expected);
         assert!(ids.contains(&"gpt-6-astra".to_string()));
-        assert!(ids.contains(&"gpt-5.5".to_string()), "gpt-5.5 was missing before");
+        assert!(
+            ids.contains(&"gpt-5.5".to_string()),
+            "gpt-5.5 was missing before"
+        );
     }
 
     #[test]
     fn equivalent_models_preserve_capability_tier() {
-        assert_eq!(equivalent_model("codex", "haiku", ModelSlot::Fast), "gpt-5.6-luna");
-        assert_eq!(equivalent_model("codex", "sonnet", ModelSlot::Standard), "gpt-5.6-terra");
-        assert_eq!(equivalent_model("codex", "opus", ModelSlot::Standard), "gpt-5.6-sol");
-        assert_eq!(equivalent_model("claude", "gpt-5.6-luna", ModelSlot::Fast), "haiku");
-        assert_eq!(equivalent_model("claude", "gpt-5.6-terra", ModelSlot::Standard), "sonnet");
-        assert_eq!(equivalent_model("claude", "gpt-5.6-sol", ModelSlot::Standard), "opus");
+        assert_eq!(
+            equivalent_model("codex", "haiku", ModelSlot::Fast),
+            "gpt-5.6-luna"
+        );
+        assert_eq!(
+            equivalent_model("codex", "sonnet", ModelSlot::Standard),
+            "gpt-5.6-terra"
+        );
+        assert_eq!(
+            equivalent_model("codex", "opus", ModelSlot::Standard),
+            "gpt-5.6-sol"
+        );
+        assert_eq!(
+            equivalent_model("claude", "gpt-5.6-luna", ModelSlot::Fast),
+            "haiku"
+        );
+        assert_eq!(
+            equivalent_model("claude", "gpt-5.6-terra", ModelSlot::Standard),
+            "sonnet"
+        );
+        assert_eq!(
+            equivalent_model("claude", "gpt-5.6-sol", ModelSlot::Standard),
+            "opus"
+        );
     }
 
     #[test]
     fn provider_infos_pair_cross_engine_tier_labels() {
         let infos = all_provider_infos();
-        let claude = infos.iter().find(|p| p.name == "claude").expect("claude provider");
+        let claude = infos
+            .iter()
+            .find(|p| p.name == "claude")
+            .expect("claude provider");
         let label = |id: &str| {
-            claude.models.iter().find(|m| m.id == id)
-                .unwrap_or_else(|| panic!("model {id}")).aligned_display.clone()
+            claude
+                .models
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("model {id}"))
+                .aligned_display
+                .clone()
         };
         assert_eq!(label("haiku"), Some("Luna".into()));
         assert_eq!(label("sonnet"), Some("Terra".into()));
         assert_eq!(label("opus"), Some("Sol".into()));
         assert_eq!(label("fable"), Some("Sol".into()));
 
-        let codex = infos.iter().find(|p| p.name == "codex").expect("codex provider");
+        let codex = infos
+            .iter()
+            .find(|p| p.name == "codex")
+            .expect("codex provider");
         // Codex side always aligns back to one of Claude's short tier names.
         // (Robust to whether list_models came from the local cache or the
         // hardcoded fallback.)
@@ -1132,18 +1315,28 @@ mod tests {
             let aligned = m.aligned_display.as_deref();
             assert!(
                 matches!(aligned, Some("Haiku" | "Sonnet" | "Opus")),
-                "codex model {} aligned to {:?}", m.id, aligned,
+                "codex model {} aligned to {:?}",
+                m.id,
+                aligned,
             );
         }
 
         // The "none" provider has no counterpart, so nothing to align.
-        let none = infos.iter().find(|p| p.name == "none").expect("none provider");
+        let none = infos
+            .iter()
+            .find(|p| p.name == "none")
+            .expect("none provider");
         assert!(none.models.is_empty());
     }
 
     #[test]
     fn legacy_config_inherits_general_provider_for_report_preference() {
-        let cfg = LlmConfig { provider: "codex".into(), fast_model: "fast".into(), standard_model: "standard".into(), daily_report_preference: None };
+        let cfg = LlmConfig {
+            provider: "codex".into(),
+            fast_model: "fast".into(),
+            standard_model: "standard".into(),
+            daily_report_preference: None,
+        };
         assert_eq!(cfg.effective_daily_report_preference(), "codex");
     }
 
@@ -1169,7 +1362,9 @@ mod tests {
 
     #[test]
     fn codex_fallback_models_include_astra() {
-        assert!(codex_fallback_models().iter().any(|m| m.id == "gpt-6-astra"));
+        assert!(codex_fallback_models()
+            .iter()
+            .any(|m| m.id == "gpt-6-astra"));
     }
 
     #[test]
@@ -1186,15 +1381,24 @@ mod tests {
         prepare_clean_codex_home(&source, &clean).unwrap();
 
         // Credentials reach the clean home (as links to the live files)…
-        assert_eq!(std::fs::read_to_string(clean.join("auth.json")).unwrap(), "{}");
-        assert_eq!(std::fs::read_to_string(clean.join("models_cache.json")).unwrap(), "[]");
+        assert_eq!(
+            std::fs::read_to_string(clean.join("auth.json")).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(clean.join("models_cache.json")).unwrap(),
+            "[]"
+        );
         // …but guidance and config must not.
         assert!(!clean.join("AGENTS.md").exists());
         assert!(!clean.join("config.toml").exists());
 
         // Idempotent: a second run over the existing clean home succeeds.
         prepare_clean_codex_home(&source, &clean).unwrap();
-        assert_eq!(std::fs::read_to_string(clean.join("auth.json")).unwrap(), "{}");
+        assert_eq!(
+            std::fs::read_to_string(clean.join("auth.json")).unwrap(),
+            "{}"
+        );
     }
 
     /// Live probe through the real `complete()` path: with the clean
@@ -1245,7 +1449,10 @@ mod tests {
 
         prepare_clean_codex_home(&source, &clean).unwrap();
 
-        assert_eq!(std::fs::read_to_string(clean.join("auth.json")).unwrap(), "fresh");
+        assert_eq!(
+            std::fs::read_to_string(clean.join("auth.json")).unwrap(),
+            "fresh"
+        );
         assert!(!clean.join("AGENTS.md").exists());
     }
 
@@ -1312,7 +1519,10 @@ mod tests {
         assert_eq!(u.input_tokens, 530, "input must come from modelUsage");
         assert_eq!(u.output_tokens, 56, "output must come from modelUsage");
         assert_eq!(u.cache_creation_tokens, 30057);
-        assert_eq!(u.cache_creation_1h_tokens, 30057, "1h TTL split must survive");
+        assert_eq!(
+            u.cache_creation_1h_tokens, 30057,
+            "1h TTL split must survive"
+        );
         assert_eq!(u.cache_read_tokens, 17536);
 
         // With those tokens the receipt can reproduce the CLI's own cost.
@@ -1375,16 +1585,30 @@ mod tests {
     fn dsh_provider_lists_flash() {
         let p = DshCliProvider::new();
         let models = p.list_models();
-        assert!(models.iter().any(|m| m.id == "deepseek-official/deepseek-flash"));
+        assert!(models
+            .iter()
+            .any(|m| m.id == "deepseek-official/deepseek-flash"));
         assert_eq!(p.default_fast_model(), "deepseek-official/deepseek-flash");
-        assert_eq!(p.default_standard_model(), "deepseek-official/deepseek-flash");
+        assert_eq!(
+            p.default_standard_model(),
+            "deepseek-official/deepseek-flash"
+        );
     }
 
     #[test]
     fn split_dsh_model_spec_splits_on_first_slash() {
-        assert_eq!(split_dsh_model_spec("deepseek-official/deepseek-flash"), ("deepseek-official", "deepseek-flash"));
-        assert_eq!(split_dsh_model_spec("openrouter/anthropic/claude-haiku-4.5"), ("openrouter", "anthropic/claude-haiku-4.5"));
-        assert_eq!(split_dsh_model_spec("deepseek-flash"), ("deepseek-official", "deepseek-flash"));
+        assert_eq!(
+            split_dsh_model_spec("deepseek-official/deepseek-flash"),
+            ("deepseek-official", "deepseek-flash")
+        );
+        assert_eq!(
+            split_dsh_model_spec("openrouter/anthropic/claude-haiku-4.5"),
+            ("openrouter", "anthropic/claude-haiku-4.5")
+        );
+        assert_eq!(
+            split_dsh_model_spec("deepseek-flash"),
+            ("deepseek-official", "deepseek-flash")
+        );
     }
 
     #[test]
@@ -1397,25 +1621,52 @@ mod tests {
 
     #[test]
     fn equivalent_models_map_to_dsh_flash() {
-        assert_eq!(equivalent_model("dsh", "sonnet", ModelSlot::Standard), "deepseek-official/deepseek-flash");
-        assert_eq!(equivalent_model("dsh", "opus", ModelSlot::Standard), "deepseek-official/deepseek-flash");
-        assert_eq!(equivalent_model("dsh", "haiku", ModelSlot::Fast), "deepseek-official/deepseek-flash");
+        assert_eq!(
+            equivalent_model("dsh", "sonnet", ModelSlot::Standard),
+            "deepseek-official/deepseek-flash"
+        );
+        assert_eq!(
+            equivalent_model("dsh", "opus", ModelSlot::Standard),
+            "deepseek-official/deepseek-flash"
+        );
+        assert_eq!(
+            equivalent_model("dsh", "haiku", ModelSlot::Fast),
+            "deepseek-official/deepseek-flash"
+        );
         // And the reverse: a dsh-selected model still translates onto claude/codex.
-        assert_eq!(equivalent_model("claude", "deepseek-official/deepseek-flash", ModelSlot::Standard), "sonnet");
+        assert_eq!(
+            equivalent_model(
+                "claude",
+                "deepseek-official/deepseek-flash",
+                ModelSlot::Standard
+            ),
+            "sonnet"
+        );
     }
 
     #[test]
     fn daily_report_preference_accepts_dsh() {
-        let cfg = LlmConfig { provider: "dsh".into(), fast_model: "deepseek-official/deepseek-flash".into(), standard_model: "deepseek-official/deepseek-flash".into(), daily_report_preference: Some("dsh".into()) };
+        let cfg = LlmConfig {
+            provider: "dsh".into(),
+            fast_model: "deepseek-official/deepseek-flash".into(),
+            standard_model: "deepseek-official/deepseek-flash".into(),
+            daily_report_preference: Some("dsh".into()),
+        };
         assert_eq!(cfg.effective_daily_report_preference(), "dsh");
     }
 
     #[test]
     fn provider_infos_include_dsh() {
         let infos = all_provider_infos();
-        let dsh = infos.iter().find(|p| p.name == "dsh").expect("dsh provider");
+        let dsh = infos
+            .iter()
+            .find(|p| p.name == "dsh")
+            .expect("dsh provider");
         assert_eq!(dsh.display_name, "DeepSeek Harness");
-        assert!(dsh.models.iter().any(|m| m.id == "deepseek-official/deepseek-flash"));
+        assert!(dsh
+            .models
+            .iter()
+            .any(|m| m.id == "deepseek-official/deepseek-flash"));
         // dsh has no cross-engine tier sibling (claude↔codex pair only).
         assert!(dsh.models.iter().all(|m| m.aligned_display.is_none()));
     }

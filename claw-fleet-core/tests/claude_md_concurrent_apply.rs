@@ -49,8 +49,12 @@ fn concurrent_applies_keep_every_sentinel() {
         let _ = fs::remove_file(claude_dir.join("CLAUDE.md"));
 
         let handles: Vec<_> = vec![
-            std::thread::spawn(|| claw_fleet_core::interaction_mode::apply_interaction_mode("老板", "zh")),
-            std::thread::spawn(|| claw_fleet_core::prd_discipline::apply_prd_discipline("老板", "zh")),
+            std::thread::spawn(|| {
+                claw_fleet_core::interaction_mode::apply_interaction_mode("老板", "zh")
+            }),
+            std::thread::spawn(|| {
+                claw_fleet_core::prd_discipline::apply_prd_discipline("老板", "zh")
+            }),
             std::thread::spawn(|| claw_fleet_core::wiki_guidance::apply_wiki_guidance("zh")),
             std::thread::spawn(|| claw_fleet_core::model_guidance::apply_model_guidance("zh")),
             std::thread::spawn(|| {
