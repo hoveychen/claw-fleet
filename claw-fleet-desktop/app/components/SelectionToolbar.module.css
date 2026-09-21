@@ -1,0 +1,69 @@
+/* The floating bar over a selection of agent prose. Sits above the selection's
+   box (translated up by its own height), on the same raised layer as the rail
+   cards so it is never under one. */
+.toolbar {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  white-space: nowrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text);
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+.btn:disabled {
+  color: var(--color-text-dim);
+  cursor: default;
+}
+
+.custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.input {
+  width: 240px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

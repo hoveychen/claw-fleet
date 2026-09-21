@@ -6,13 +6,15 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { revealSlugInWikiPage } from "../hooks/useWikiDocs";
 import { useUIStore } from "../store";
-import { agentCardId, auxDocMeta, type AuxDoc, type AuxDocKind } from "../detailAux";
+import { agentCardId, auxDocMeta, explainCardId, type AuxDoc, type AuxDocKind } from "../detailAux";
+import type { ExplainRecord } from "../explainApi";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { SessionInfo } from "../types";
 import { buildChipMenu, type AuxCardTail } from "./auxDocMenu";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { SessionAuxAgent } from "./SessionAuxAgent";
 import { SessionAuxDoc } from "./SessionAuxDoc";
+import { SessionAuxExplain } from "./SessionAuxExplain";
 import { SubagentLiveCards } from "./SubagentLiveCards";
 import styles from "./SessionDetail.module.css";
 
@@ -79,6 +81,7 @@ export function SessionAuxRail({
   open,
   agents,
   docs,
+  explains,
   expandedId,
   workspacePath,
   onOpenAgent,
@@ -91,6 +94,10 @@ export function SessionAuxRail({
   onCollapseDoc,
   onHideRail,
   onOpenWiki,
+  onToggleExplain,
+  onCloseExplain,
+  onLocateExplain,
+  onFollowUpExplain,
   paths,
   cardWidth,
   onGripDown,
@@ -101,7 +108,9 @@ export function SessionAuxRail({
   /** Live subagents, most-recently-active first. */
   agents: SessionInfo[];
   docs: AuxDoc[];
-  /** The card expanded into a reader — a doc or an agent — if any. */
+  /** Side questions asked about this session's prose, oldest first. */
+  explains: ExplainRecord[];
+  /** The card expanded into a reader — a doc, an agent or a side question — if any. */
   expandedId: string | null;
   /** The session's repo, for the file card's open-in-repo action. */
   workspacePath: string;
@@ -124,6 +133,14 @@ export function SessionAuxRail({
   onHideRail: () => void;
   /** A `[[slug]]` followed from inside a wiki doc opens the next one. */
   onOpenWiki: (slug: string) => void;
+  /** Expand a side-question card into the full exchange, or collapse it. */
+  onToggleExplain: (id: string) => void;
+  /** Hide a side-question card for this view; the record stays on disk. */
+  onCloseExplain: (id: string) => void;
+  /** Scroll back to and re-select the passage a side question quoted. */
+  onLocateExplain: (rec: ExplainRecord) => void;
+  /** Ask a follow-up on a settled side question. */
+  onFollowUpExplain: (rec: ExplainRecord, question: string) => void;
   /** Workspace context for path chips inside an expanded agent transcript. */
   paths?: PathLinkContext;
   /** px width for the expanded card — owned by SessionDetail because the
@@ -141,12 +158,13 @@ export function SessionAuxRail({
   const expandedDoc = docs.find((d) => d.id === expandedId) ?? null;
 
   if (!open) return null;
-  const empty = agents.length === 0 && docs.length === 0;
+  const empty = agents.length === 0 && docs.length === 0 && explains.length === 0;
   // Either kind of expansion widens the box — a transcript needs the reading
   // width a file does. Checked against the cards actually in hand, so a stale
   // id (its agent retired and unpinned) cannot widen the rail around nothing.
   const expandedAgent = agents.some((a) => agentCardId(a.id) === expandedId);
-  const wide = cardWidth > 0 && (expandedDoc != null || expandedAgent);
+  const expandedExplain = explains.some((r) => explainCardId(r.id) === expandedId);
+  const wide = cardWidth > 0 && (expandedDoc != null || expandedAgent || expandedExplain);
 
   const tailFor = (d: AuxDoc): AuxCardTail => ({
     isExpanded: d.id === expandedId,
@@ -210,7 +228,7 @@ export function SessionAuxRail({
    */
   const railItems = (): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
-    if (expandedDoc || expandedAgent) {
+    if (expandedDoc || expandedAgent || expandedExplain) {
       items.push({
         id: "collapse",
         label: t("detail.aux_collapse_card", "收起此卡"),
@@ -270,6 +288,21 @@ export function SessionAuxRail({
         onGripDown={onGripDown}
         renderPane={(a) => <SessionAuxAgent agent={a} paths={paths} />}
       />
+      {/* The reader's own questions sit between what is running and what was
+          opened: newest first, so the one just asked lands where the eye is. */}
+      {[...explains].reverse().map((r) => (
+        <SessionAuxExplain
+          key={r.id}
+          rec={r}
+          isOpen={explainCardId(r.id) === expandedId}
+          onToggle={() => onToggleExplain(r.id)}
+          onClose={() => onCloseExplain(r.id)}
+          onLocate={() => onLocateExplain(r)}
+          onFollowUp={(q) => onFollowUpExplain(r, q)}
+          onGripDown={onGripDown}
+          onHideRail={onHideRail}
+        />
+      ))}
       {/* Newest first: the file the agent just named is the one you are most
           likely to be reaching for, and it lands nearest the live agents. */}
       {[...docs].reverse().map((d) => {

@@ -1,0 +1,185 @@
+import { Languages, LoaderCircle, MessageCircleQuestion, PencilLine, Scale } from "lucide-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
+
+import type { ExplainPreset } from "../explainApi";
+import { readAssistantSelection, type AssistantSelection } from "../selectionExplain";
+import styles from "./SelectionToolbar.module.css";
+
+/**
+ * The floating "ask about this" bar that appears over a selection of agent
+ * prose.
+ *
+ * Three canned questions and a free one. It answers the moment a reader
+ * finishes a drag inside an assistant row (`readAssistantSelection` decides
+ * what qualifies) and goes away when the selection collapses, the pane
+ * scrolls, or Escape is pressed. Choosing the custom question turns the bar
+ * into an input; focusing it collapses the document selection, so the passage
+ * is snapshotted at mouseup and the collapse is ignored while the input is up.
+ *
+ * Positioned in `pane`'s coordinate space (the pane is `position: relative`),
+ * centred above the selection's box and clamped to the pane's width.
+ */
+export function SelectionToolbar({
+  pane,
+  scroller,
+  enabled,
+  busy,
+  onAsk,
+}: {
+  /** The element the bar is positioned inside. */
+  pane: RefObject<HTMLElement | null>;
+  /** The transcript scroller; selections are read from inside it and a
+   *  scroll dismisses the bar. */
+  scroller: RefObject<HTMLElement | null>;
+  /** False when the session cannot be forked (no transcript path yet). */
+  enabled: boolean;
+  /** A question is being submitted; the buttons wait. */
+  busy: boolean;
+  onAsk: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [shown, setShown] = useState<{ sel: AssistantSelection; x: number; y: number } | null>(null);
+  const [custom, setCustom] = useState(false);
+  const [question, setQuestion] = useState("");
+  const customRef = useRef(custom);
+  customRef.current = custom;
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setShown(null);
+      return;
+    }
+    const read = () => {
+      const root = scroller.current;
+      const host = pane.current;
+      if (!root || !host) return;
+      const sel = readAssistantSelection(root);
+      if (!sel) {
+        if (!customRef.current) setShown(null);
+        return;
+      }
+      const hostRect = host.getBoundingClientRect();
+      const margin = 8;
+      const x = Math.min(
+        Math.max(sel.rect.left + sel.rect.width / 2 - hostRect.left, margin + 120),
+        hostRect.width - margin - 120,
+      );
+      const y = Math.max(sel.rect.top - hostRect.top - 6, margin + 28);
+      setCustom(false);
+      setQuestion("");
+      setShown({ sel, x, y });
+    };
+    // Read after the browser has settled the selection for this gesture.
+    const onUp = () => requestAnimationFrame(read);
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShown(null);
+        return;
+      }
+      if (e.shiftKey && e.key.startsWith("Arrow")) requestAnimationFrame(read);
+    };
+    const onSelChange = () => {
+      if (customRef.current) return;
+      const s = window.getSelection();
+      if (!s || s.isCollapsed) setShown(null);
+    };
+    const onScroll = () => {
+      if (!customRef.current) setShown(null);
+    };
+    const root = scroller.current;
+    document.addEventListener("mouseup", onUp);
+    document.addEventListener("keyup", onKeyUp);
+    document.addEventListener("selectionchange", onSelChange);
+    root?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("selectionchange", onSelChange);
+      root?.removeEventListener("scroll", onScroll);
+    };
+  }, [enabled, pane, scroller]);
+
+  useEffect(() => {
+    if (custom) inputRef.current?.focus();
+  }, [custom]);
+
+  if (!shown) return null;
+  const fire = (preset: ExplainPreset, q?: string) => {
+    if (busy) return;
+    onAsk(shown.sel, preset, q);
+    setShown(null);
+    setCustom(false);
+    setQuestion("");
+  };
+  // Buttons swallow mousedown so the click does not collapse the selection
+  // the bar is about; the input does not, it needs the focus.
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+
+  return (
+    <div
+      className={styles.toolbar}
+      style={{ left: shown.x, top: shown.y }}
+      role="toolbar"
+      aria-label={t("detail.explain_toolbar", "对选中内容追问")}
+      data-testid="selection-toolbar"
+    >
+      {custom ? (
+        <form
+          className={styles.custom}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const q = question.trim();
+            if (q) fire("custom", q);
+          }}
+        >
+          <input
+            ref={inputRef}
+            className={styles.input}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setShown(null);
+                setCustom(false);
+              }
+            }}
+            placeholder={t("detail.explain_custom_placeholder", "就这段话问点什么…")}
+            aria-label={t("detail.explain_custom", "自定义提问")}
+          />
+          <button type="submit" className={styles.btn} disabled={busy || !question.trim()}>
+            {busy ? <LoaderCircle size={12} className={styles.spin} aria-hidden="true" /> : null}
+            {t("detail.explain_send", "发送")}
+          </button>
+        </form>
+      ) : (
+        <>
+          <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("explain")} disabled={busy}>
+            <MessageCircleQuestion size={12} strokeWidth={1.8} aria-hidden="true" />
+            {t("detail.explain_preset_explain", "解释")}
+          </button>
+          <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("translate")} disabled={busy}>
+            <Languages size={12} strokeWidth={1.8} aria-hidden="true" />
+            {t("detail.explain_preset_translate", "翻译")}
+          </button>
+          <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("rationale")} disabled={busy}>
+            <Scale size={12} strokeWidth={1.8} aria-hidden="true" />
+            {t("detail.explain_preset_rationale", "为什么")}
+          </button>
+          <button
+            type="button"
+            className={styles.btn}
+            onMouseDown={keep}
+            onClick={() => setCustom(true)}
+            disabled={busy}
+          >
+            <PencilLine size={12} strokeWidth={1.8} aria-hidden="true" />
+            {t("detail.explain_custom", "自定义提问")}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}

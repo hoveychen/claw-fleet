@@ -42,6 +42,7 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         open
         agents={[]}
         docs={[]}
+        explains={[]}
         expandedId={null}
         workspacePath="/repo"
         onOpenAgent={() => {}}
@@ -54,6 +55,10 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         onCollapseDoc={() => {}}
         onHideRail={() => {}}
         onOpenWiki={() => {}}
+        onToggleExplain={() => {}}
+        onCloseExplain={() => {}}
+        onLocateExplain={() => {}}
+        onFollowUpExplain={() => {}}
         cardWidth={420}
         onGripDown={() => {}}
         {...props}

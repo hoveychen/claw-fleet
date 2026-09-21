@@ -238,6 +238,11 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     <div
       className={`${styles.message} ${isAssistant ? styles.assistant : styles.user} ${isActiveMatch ? styles.active_match : ""}`}
       data-msg-idx={msgIdx}
+      // Role and record uuid on the row: the selection toolbar reads the first
+      // to tell agent prose from the user's, and a side question keeps the
+      // second as its durable anchor (indices shift as history loads).
+      data-role={isAssistant ? "assistant" : "user"}
+      data-msg-uuid={msg.uuid}
     >
       {/* Tool-only assistant turns have no prose worth copying or reading. */}
       {copyText && (

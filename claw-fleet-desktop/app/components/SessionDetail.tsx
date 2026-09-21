@@ -64,11 +64,17 @@ import {
   showFacet,
   toggleAgent,
   toggleDoc,
+  toggleExplain,
+  explainCardId,
   type AuxDocKind,
   type AuxFacet,
   type AuxFacetItem,
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
+import { useSessionExplains } from "../hooks/useSessionExplains";
+import { selectQuoteIn, type AssistantSelection } from "../selectionExplain";
+import type { ExplainPreset, ExplainRecord } from "../explainApi";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
@@ -536,6 +542,12 @@ export function SessionDetail({
      a switch, and it is why this is an override rather than a plain boolean
      that would have to fight the auto behaviour. Reset per session below. */
   const [railOverride, setRailOverride] = useState<boolean | null>(null);
+  /* Side questions about this session's prose (选区追问), read from disk and
+     polled while a fork is answering. Scoped to the session like `aux`. */
+  const { explains, ask: askExplainRecord, dismiss: dismissExplain } = useSessionExplains(
+    liveSession?.id,
+  );
+  const [explainBusy, setExplainBusy] = useState(false);
   /* The header's numeric chips — spend, tokens, reasoning share, compactions —
      are reference figures you look up, not identity you read at a glance. Seven
      of them in a row turned the title area into a status bar, so they collapse
@@ -989,6 +1001,93 @@ export function SessionDetail({
   const collapseDocCard = useCallback(() => {
     setAux((st) => collapseDoc(st));
   }, []);
+  /* A side-question card expands into its exchange the way a doc card does. */
+  const pickExplain = useCallback((id: string) => {
+    setAux((st) => toggleExplain(st, id));
+  }, []);
+  const dropExplain = useCallback(
+    (id: string) => {
+      dismissExplain(id);
+      setAux((st) => (st.expanded === explainCardId(id) ? { ...st, expanded: null } : st));
+    },
+    [dismissExplain],
+  );
+  /** Scroll the transcript back to the passage a side question quoted, flash
+   *  its row, and re-select the passage itself. The uuid is the durable key;
+   *  the index is the fallback for a record (or a row) without one. */
+  const locateExplain = useCallback((rec: ExplainRecord) => {
+    const root = scrollRef.current;
+    if (!root) return;
+    let row: HTMLElement | null = null;
+    const uuid = rec.anchor?.msgUuid;
+    if (uuid && /^[\w-]+$/.test(uuid)) {
+      row = root.querySelector<HTMLElement>(`[data-msg-uuid="${uuid}"]`);
+    }
+    if (!row && rec.anchor?.msgIdx != null) {
+      row = root.querySelector<HTMLElement>(`[data-msg-idx="${rec.anchor.msgIdx}"]`);
+    }
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.remove(styles.explain_flash);
+    // Restart the animation even when the same row is located twice in a row.
+    void row.offsetWidth;
+    row.classList.add(styles.explain_flash);
+    window.setTimeout(() => row?.classList.remove(styles.explain_flash), 1700);
+    selectQuoteIn(row, rec.quote);
+  }, []);
+  /** Submit a question about a selected passage: fork the session and put the
+   *  answer's card in the rail, expanded, with the rail shown if it was hidden. */
+  const askExplain = useCallback(
+    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
+      const sid = liveSession?.id;
+      const path = liveSession?.jsonlPath;
+      if (!sid || !path) return;
+      setExplainBusy(true);
+      try {
+        const rec = await askExplainRecord({
+          sessionId: sid,
+          sessionPath: path,
+          workspacePath: workspacePath || undefined,
+          quote: sel.quote,
+          preset,
+          question: preset === "custom" ? question : undefined,
+          anchor: { msgUuid: sel.msgUuid ?? undefined, msgIdx: sel.msgIdx },
+          thread: [],
+        });
+        setRailOverride((v) => (v === false ? null : v));
+        setAux((st) => ({ ...st, expanded: explainCardId(rec.id) }));
+      } finally {
+        setExplainBusy(false);
+      }
+    },
+    [liveSession?.id, liveSession?.jsonlPath, workspacePath, askExplainRecord],
+  );
+  /** Continue a settled side question: the same passage, the prior Q/A folded
+   *  into a fresh fork of the session (the fork itself is never resumed). */
+  const followUpExplain = useCallback(
+    async (prev: ExplainRecord, question: string) => {
+      const sid = liveSession?.id;
+      const path = liveSession?.jsonlPath;
+      if (!sid || !path) return;
+      setExplainBusy(true);
+      try {
+        const rec = await askExplainRecord({
+          sessionId: sid,
+          sessionPath: path,
+          workspacePath: workspacePath || undefined,
+          quote: prev.quote,
+          preset: "custom",
+          question,
+          anchor: prev.anchor ?? undefined,
+          thread: [...(prev.thread ?? []), prev.id],
+        });
+        setAux((st) => ({ ...st, expanded: explainCardId(rec.id) }));
+      } finally {
+        setExplainBusy(false);
+      }
+    },
+    [liveSession?.id, liveSession?.jsonlPath, workspacePath, askExplainRecord],
+  );
 
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
@@ -1325,7 +1424,7 @@ export function SessionDetail({
     const pinned = sessions.find((s) => s.id === pinnedId);
     return pinned ? [pinned, ...liveSubagents] : liveSubagents;
   }, [aux.pinnedAgent, liveSubagents, sessions]);
-  const railCards = railAgents.length + aux.docs.length;
+  const railCards = railAgents.length + aux.docs.length + explains.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar
      switch. The switch owns *this* layer, not the drawer: the drawer is a place
@@ -1615,6 +1714,15 @@ export function SessionDetail({
               </div>
 
               <div className={styles.messages_pane} ref={messagesPaneRef}>
+                {/* Over a selection of agent prose: ask about it in a fork of
+                    the session. The answer lands as a card in the rail. */}
+                <SelectionToolbar
+                  pane={messagesPaneRef}
+                  scroller={scrollRef}
+                  enabled={Boolean(liveSession?.id && liveSession?.jsonlPath)}
+                  busy={explainBusy}
+                  onAsk={askExplain}
+                />
                 {syncingLatest && (
                   <div className={styles.syncing_latest} role="status" aria-live="polite">
                     <LoaderCircle size={14} aria-hidden="true" />
@@ -1710,6 +1818,7 @@ export function SessionDetail({
                   open={railOpen}
                   agents={railAgents}
                   docs={aux.docs}
+                  explains={explains}
                   expandedId={aux.expanded}
                   workspacePath={workspacePath ?? ""}
                   onOpenAgent={open}
@@ -1722,6 +1831,10 @@ export function SessionDetail({
                   onCollapseDoc={collapseDocCard}
                   onHideRail={toggleRail}
                   onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                  onToggleExplain={pickExplain}
+                  onCloseExplain={dropExplain}
+                  onLocateExplain={locateExplain}
+                  onFollowUpExplain={followUpExplain}
                   paths={pathLinks}
                   cardWidth={docCardW}
                   onGripDown={onGripDown}

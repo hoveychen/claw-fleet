@@ -1268,3 +1268,156 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ── Side-question cards (选区追问) ─────────────────────────────────────────
+   The reader's own questions about a passage, answered in a fork of the
+   session. Same card, same chip grammar as a doc; the fifth icon family. */
+.doc_card_icon[data-kind="explain"] {
+  color: var(--color-accent);
+}
+
+.explain_running {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.explain_running svg {
+  animation: explain_spin 0.9s linear infinite;
+}
+@keyframes explain_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.explain_failed {
+  color: var(--color-error);
+}
+
+/* The exchange. Scrolls on its own so a long answer never grows the card past
+   the rail; the quote and the follow-up box stay in the flow with it. */
+.explain_pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px var(--rail-card-pad-x) 10px;
+}
+
+/* The passage as it was selected, set as a quotation and clickable: the card
+   is about *this*, and the click takes you back to it. */
+.explain_quote {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-left: 2px solid var(--color-accent-soft);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 5px 8px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.explain_quote:hover {
+  border-left-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.explain_answer {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.explain_waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+.explain_waiting svg {
+  animation: explain_spin 0.9s linear infinite;
+}
+
+.explain_error {
+  font-size: 11px;
+  color: var(--color-error-fg);
+  background: var(--color-error-bg);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  white-space: pre-wrap;
+}
+
+/* model · cache share · cost · time — the line the card exists to show, since
+   the whole design rests on the fork hitting the cache. */
+.explain_meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--color-text-dim);
+}
+
+.explain_follow {
+  display: flex;
+  gap: 4px;
+  margin-top: auto;
+}
+.explain_follow_input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+}
+.explain_follow_input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.explain_follow_send {
+  flex-shrink: 0;
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.explain_follow_send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The transcript row a card pointed back to, for a moment: the same ring the
+   active search hit wears, fading out. */
+.explain_flash {
+  animation: explain_flash 1.6s ease-out forwards;
+  border-radius: var(--radius-sm);
+}
+@keyframes explain_flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}

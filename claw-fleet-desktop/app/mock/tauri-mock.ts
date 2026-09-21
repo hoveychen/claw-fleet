@@ -724,6 +724,44 @@ async function handleIPC(
     }
     case "get_workflow_trees":
       return [];
+    // Selection explain: the mock answers the canned question with a settled
+    // record so the rail card renders without a host to fork on.
+    case "list_explanations":
+      return [];
+    case "get_explanation":
+      return null;
+    case "explain_selection": {
+      const req = args.request as {
+        sessionId: string;
+        quote: string;
+        preset: string;
+        question?: string;
+        anchor?: unknown;
+        thread?: string[];
+      };
+      const now = Date.now();
+      return {
+        id: `mock-explain-${now}`,
+        sessionId: req.sessionId,
+        source: "claude-code",
+        createdMs: now,
+        updatedMs: now,
+        preset: req.preset,
+        quote: req.quote,
+        question: req.question ?? "这段话是什么意思？",
+        anchor: req.anchor,
+        thread: req.thread ?? [],
+        status: "done",
+        text: "（mock）这句话说的是 fork 出的子会话复用了原会话的全部前缀，所以请求命中提示词缓存，只为新增的问题付费。",
+        model: "claude-fable-5-1",
+        inputTokens: 1200,
+        outputTokens: 80,
+        cacheReadTokens: 58000,
+        cacheCreationTokens: 0,
+        costUsd: 0.07,
+        durationMs: 8200,
+      };
+    }
     case "list_session_decisions":
       return qaMode
         ? mockQaDecisionHistory(String(args.sessionId ?? ""))
