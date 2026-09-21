@@ -416,6 +416,14 @@ pub(crate) fn route_artifact_folder_rename(
 /// answer is `206` and a `Content-Range` naming the slice actually served —
 /// which may be smaller than what was asked for, since the store caps a single
 /// response at `MAX_RANGE_CHUNK`. A start past EOF is `416`, as the spec wants.
+///
+/// Conditional either way. `ArtifactsView` renders image artifacts as plain
+/// `<img src=…>` against the full-size blob, so every pane switch and remount
+/// re-fetched megabytes: 78 requests averaging 952KB — 76MB in 45 minutes on
+/// the muvee host, 2026-09-21, all of it bytes the browser already had. The
+/// `ETag` turns the repeats into empty 304s. `no-cache` keeps the round trip
+/// rather than a freshness window, because a new version can land under the
+/// same id and a stale image is worse than a conditional GET.
 pub(crate) fn route_artifact_blob(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -431,6 +439,12 @@ pub(crate) fn route_artifact_blob(
         .iter()
         .find(|h| h.field.equiv("Range"))
         .and_then(|h| crate::artifacts::parse_range_header(h.value.as_str()));
+    let if_none_match = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("If-None-Match"))
+        .map(|h| h.value.as_str().to_string())
+        .unwrap_or_default();
 
     let version = if version.is_empty() {
         None
@@ -439,9 +453,22 @@ pub(crate) fn route_artifact_blob(
     };
     match crate::artifacts::read_version_bytes(&id, version, range) {
         Ok(blob) => {
+            // Ahead of the range branch: RFC 9110 has If-None-Match win over
+            // Range, and a client holding the current bytes wants neither.
+            if etag_matches(&if_none_match, &blob.etag) {
+                let _ = request.respond(
+                    tiny_http::Response::empty(304)
+                        .with_header(header("ETag", &blob.etag))
+                        .with_header(header("Cache-Control", "private, no-cache"))
+                        .with_header(header("Accept-Ranges", "bytes")),
+                );
+                return;
+            }
             let mut resp = tiny_http::Response::from_data(blob.bytes)
                 .with_header(header("Content-Type", &blob.mime))
-                .with_header(header("Accept-Ranges", "bytes"));
+                .with_header(header("Accept-Ranges", "bytes"))
+                .with_header(header("ETag", &blob.etag))
+                .with_header(header("Cache-Control", "private, no-cache"));
             if let Some((start, end)) = blob.range {
                 resp = resp.with_status_code(206).with_header(header(
                     "Content-Range",
@@ -469,6 +496,18 @@ fn header(name: &str, value: &str) -> tiny_http::Header {
     // Both sides are ours (route constants and store-derived mimes), so a
     // parse failure would be a bug, not bad input.
     format!("{name}: {value}").parse().expect("static header")
+}
+
+/// RFC 9110 If-None-Match evaluation against one strong tag: a comma-separated
+/// candidate list, `*`, and the `W/` prefix an intermediary may have added.
+fn etag_matches(header_value: &str, etag: &str) -> bool {
+    if header_value.is_empty() || etag.is_empty() {
+        return false;
+    }
+    header_value.split(',').any(|cand| {
+        let cand = cand.trim();
+        cand == "*" || cand == etag || cand.strip_prefix("W/") == Some(etag)
+    })
 }
 
 fn decoded(query: &std::collections::HashMap<String, String>, key: &str) -> String {
