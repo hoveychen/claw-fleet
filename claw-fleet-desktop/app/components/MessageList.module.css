@@ -265,10 +265,16 @@
 
 .message.assistant {
   justify-content: flex-start;
+  /* Lane for the hover controls — see `.message.assistant .row_actions`. */
+  padding-right: 54px;
 }
 
 .message.user {
   justify-content: flex-end;
+  /* No controls live on this side — the user strip sits left of the bubble.
+     The padding is here so both roles end on the same vertical line; without
+     it every user bubble would jut 54px past the assistant text above it. */
+  padding-right: 54px;
 }
 
 /* Turn rhythm.
@@ -312,16 +318,22 @@
   50% { opacity: 0.4; }
 }
 
-/* Hover affordance. Absolutely positioned so revealing it never reflows the
-   row — a message that shifted on hover would be maddening to click. */
+/* Hover affordance. It gets a lane of its own on either side of the content —
+   never a box floating on top of it. The pair used to be `position: absolute;
+   top/right: 0` over an unreserved row, which on an assistant record parks two
+   opaque 22px boxes on the first line of prose, and the first line is the one
+   line that is always full width: it hid real words on every long message.
+
+   The lane costs ~54px of column on assistant rows, paid whether or not the
+   row is hovered. That is the price of never covering text, and it is the same
+   trade the user bubble already made below. Fading opacity rather than
+   toggling display keeps the lane's width constant, so revealing the pair
+   still costs no reflow. */
 .row_actions {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.12s;
 }
@@ -350,18 +362,26 @@
   border-color: var(--color-accent);
 }
 
+/* Assistant prose runs the full column, so the strip gets a lane of its own,
+   carved out of the row by `.message.assistant`'s padding-right above. That
+   padding is on every assistant row, including the tool-only ones that render
+   no strip at all — otherwise prose records and tool records would end 54px
+   apart and the column's right edge would go ragged as you scroll. */
+.message.assistant .row_actions {
+  position: absolute;
+  top: 8px;
+  right: 0;
+}
+
 /* The user bubble already hugs the right edge; put its control on the free
    side instead of on top of the bubble's corner.
 
    `left: 0` used to mean the far left of the *row*, which on a wide pane parks
    the pair hundreds of pixels away from the bubble they act on — two buttons
-   floating in blank space with nothing to attach them to. Dropping out of
-   absolute positioning makes them an ordinary flex item ahead of the content,
-   so `justify-content: flex-end` lands them exactly against the bubble's left
-   edge at any width. They keep their slot while hidden, so revealing them
-   still costs no reflow — the reason the base rule went absolute. */
+   floating in blank space with nothing to attach them to. As an ordinary flex
+   item ahead of the content, `justify-content: flex-end` lands them exactly
+   against the bubble's left edge at any width. */
 .message.user .row_actions {
-  position: static;
   align-self: flex-start;
   margin-top: 2px;
   margin-right: 6px;
