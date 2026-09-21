@@ -4,7 +4,7 @@ import { RelayStore, RelayPairing } from '../common/RelayStore';
 import { saveBase64File } from '../common/FileTransfer';
 import { setKeepScreenOn } from '../common/WakeLock';
 import { shareFile } from '../common/SystemShare';
-import { acquirePushToken } from '../common/PushRegister';
+import { acquirePushToken, setAppBadge } from '../common/PushRegister';
 import { SpeechAsr } from '../common/SpeechAsr';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { parseScan, DirectHostScan } from '../common/RelayStore';
@@ -91,6 +91,14 @@ class NativeBridge {
   /// a new `#k=`; the web side treats it as a new device as usual.
   scanPairing(): void {
     this.onScanRequested();
+  }
+
+  /// Launcher icon badge: the number of decision cards still waiting for an answer.
+  /// A push can set it (notification.badge.setNum), but nothing clears it — opening the
+  /// app or dismissing the notification leaves the number alone — so the page keeps it
+  /// honest via this method (mobile-web::appBadge.ts).
+  setBadge(count: number): void {
+    setAppBadge(count);
   }
 
   /// navigator.wakeLock may not be available in ArkWeb; page falls back to this when it's not.
@@ -713,7 +721,7 @@ struct WebShell {
             object: this.bridge,
             name: 'fleetNative',
             methodList: [
-              'saveFile', 'keepAwake', 'shareContent', 'scanPairing',
+              'saveFile', 'keepAwake', 'shareContent', 'scanPairing', 'setBadge',
               // Voice input. Web side uses startVoice presence in detectVoiceProvider—
               // old shell with new web: if these three methods don't exist, page auto-fallsback,
               // won't call non-existent implementations.
