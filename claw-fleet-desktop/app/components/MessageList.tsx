@@ -316,11 +316,13 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
           </div>
         )}
         {/* The footer also carries the read/copy pair, so a record with prose
-            but no usage counts (a streaming turn, a resumed transcript that
-            lost them) still renders one — otherwise the controls would have
-            nowhere to live on exactly the messages worth copying. */}
+            but no usage counts (a mid-turn text block, a resumed transcript
+            that lost them) still renders one — otherwise the controls would
+            have nowhere to live on exactly the messages worth copying. That
+            case is the common one, though, so it collapses to zero height and
+            floats the controls instead of holding an empty 26px line. */}
         {isAssistant && (turnUsage || actions) && (
-          <div className={styles.usage}>
+          <div className={turnUsage ? styles.usage : `${styles.usage} ${styles.usage_bare}`}>
             {turnUsage && (
               <>
                 {dotClass && <span className={`${styles.dot} ${dotClass}`} />}
