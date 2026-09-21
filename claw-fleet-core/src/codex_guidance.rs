@@ -495,10 +495,9 @@ toolset this turn (rare), respond with plain text as normal.",
             "en",
             crate::session_title_guidance::Harness::Codex,
         ),
-        // Same reasoning: English-only block, English section. Kept under 1 KiB
-        // by its own test because AGENTS.md sits close to the 32 KiB ceiling.
-        explain_marks =
-            crate::explain_marks_guidance::render_explain_marks_section(&title, "en"),
+        // English-only block, and the compact rendering: the full section left
+        // AGENTS.md 264 bytes under its 32 KiB ceiling (see that function's doc).
+        explain_marks = crate::explain_marks_guidance::render_explain_marks_section_compact(&title),
     )
 }
 
@@ -1031,7 +1030,7 @@ mod tests {
         assert!(g.contains(crate::explain_marks_guidance::BEGIN_MARKER));
         assert!(g.contains("## Inline marks `[?…]`"));
         assert!(g.contains("At most 5 per reply"));
-        assert!(g.contains("lets Boss ask"));
+        assert!(g.contains("so Boss can ask"), "compact variant, title interpolated");
     }
 
     #[test]

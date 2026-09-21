@@ -84,6 +84,27 @@ what matters most.",
     format!("{BEGIN_MARKER}\n{body}\n{END_MARKER}")
 }
 
+/// The codex variant: same heading and rules, fewer words. `~/.codex/AGENTS.md`
+/// carries five Fleet blocks plus a 6 KiB lessons budget under a 32 KiB
+/// ceiling; with the full English section the file measured 32,504 bytes on
+/// 2026-09-21 (264 bytes of headroom, lessons at 3.7 KiB of their 6 KiB), so
+/// the codex block takes this ~half-size rendering instead.
+pub fn render_explain_marks_section_compact(user_title: &str) -> String {
+    let body = format!(
+        "## Inline marks `[?…]`\n\
+\n\
+In prose for {title}, wrap a phrase where you made a trade-off without unpacking \
+it, used a term {title} may not know, or gave a conclusion without its derivation \
+in `[?` … `]`, e.g. `[?AUROC moved only 0.004]`. Fleet renders it clickable so \
+{title} can ask about that text without typing. At most 5 per reply; one phrase \
+or sentence each; never in code, tables, headings or links; no backticks or \
+emphasis inside; no ASCII `(` right after `]`. It marks where {title} would ask, \
+not what matters most.",
+        title = user_title,
+    );
+    format!("{BEGIN_MARKER}\n{body}\n{END_MARKER}")
+}
+
 /// The section as currently written into the interaction-mode file, or `None`
 /// when that feature is off (file absent) or predates the section.
 ///
@@ -131,6 +152,21 @@ mod tests {
         // codex AGENTS.md has a 32 KiB ceiling and was at 31.5 KiB before this
         // section existed; keep the embedded English variant well under 1 KiB.
         assert!(s.len() < 1024, "en section is {} bytes", s.len());
+    }
+
+    #[test]
+    fn compact_variant_keeps_every_rule_in_half_the_bytes() {
+        let full = render_explain_marks_section("Boss", "en");
+        let s = render_explain_marks_section_compact("Boss");
+        assert!(s.contains("## Inline marks `[?…]`"), "same heading as the full variant");
+        assert!(s.contains("At most 5 per reply"));
+        assert!(s.contains("no backticks or emphasis inside"));
+        assert!(s.contains("no ASCII `(` right after `]`"));
+        assert!(s.contains("never in code, tables, headings or links"));
+        // Measured 585 vs 945 bytes on 2026-09-21; the point is the ~360 bytes
+        // of AGENTS.md headroom they buy, so guard the ratio, not the exact size.
+        assert!(s.len() < 640, "compact section is {} bytes", s.len());
+        assert!(s.len() * 3 < full.len() * 2, "compact ({}) vs full ({})", s.len(), full.len());
     }
 
     #[test]
