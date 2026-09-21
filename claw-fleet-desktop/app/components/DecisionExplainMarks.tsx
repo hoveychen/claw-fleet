@@ -135,6 +135,7 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): D
           cacheReadTokens: 0,
           cacheCreationTokens: 0,
           durationMs: 0,
+          dismissed: false,
         };
       } finally {
         setBusy(false);

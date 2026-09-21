@@ -237,6 +237,7 @@ export class MockRelayClient extends RelayClient {
           cacheReadTokens: 0,
           cacheCreationTokens: 0,
           durationMs: 0,
+          dismissed: false,
         };
         this.mockExplains.set(id, rec);
         const words = MOCK_EXPLAIN_ANSWER.match(/[^，。；、！？\s]+[，。；、！？\s]*/g) ?? [MOCK_EXPLAIN_ANSWER];
