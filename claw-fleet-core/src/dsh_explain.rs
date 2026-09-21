@@ -26,14 +26,22 @@
 //!   answer. The plugin-side hard stop (`agent/pre-step` rejecting step ≥ 2)
 //!   is a separate task.
 //!
-//! The answer streams: the child's `session/follow` items are tapped raw off
-//! the shared mux socket ([`crate::dsh_events::LiveView::tap`]) and folded by
-//! [`DshFollowFold`] — `assistant/chunk` text deltas as they arrive,
+//! The child's `session/follow` items are tapped raw off the shared mux socket
+//! ([`crate::dsh_events::LiveView::tap`]) and folded by [`DshFollowFold`] —
+//! `assistant/chunk` text deltas if the release publishes them,
 //! `assistant/message` for the settled text, per-call usage and route, and
 //! `turn/end` for the outcome. Spend is priced from those same
 //! `assistant/message` events through [`crate::dsh_cost::price_events`], so the
 //! fork-inherited prefix (which a history read would also return) is never
 //! charged to the question.
+//!
+//! **No token streaming on 0.1.5-rc.1.** Dumped live 2026-09-20
+//! (`FLEET_EXPLAIN_DSH_DUMP`): the follow stream carried turn/start →
+//! step/start → request/header → assistant/message → step/end → turn/end and
+//! nothing in between; `assistant/chunk` no longer appears anywhere in that
+//! release's source. The answer lands whole when `assistant/message` settles,
+//! like Codex's. The in-flight partial `session/page`'s tail page carries is
+//! the candidate for streaming later.
 
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -292,9 +300,23 @@ pub(crate) fn dsh_fork_ask(
     crate::session_explain::mark_fork_session(&child);
 
     let (tx, rx) = mpsc::channel::<Value>();
+    // `FLEET_EXPLAIN_DSH_DUMP=<file>` appends every raw follow item, one JSON
+    // line each — the way to see what a dsh release actually streams when the
+    // fold stops matching it.
+    let dump = std::env::var_os("FLEET_EXPLAIN_DSH_DUMP").map(std::path::PathBuf::from);
     let _tap = source.tap(
         &child,
         Arc::new(move |item: &Value| {
+            if let Some(path) = &dump {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    use std::io::Write;
+                    let _ = writeln!(f, "{item}");
+                }
+            }
             let _ = tx.send(item.clone());
         }),
     )?;
