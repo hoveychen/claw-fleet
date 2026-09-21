@@ -535,8 +535,9 @@ pub(crate) fn encode_path_segment(name: &str) -> String {
 /// from the readdir `d_type` (no per-entry `stat`) so listing `~` doesn't fire a
 /// macOS permission dialog for `~/Documents`, `~/Downloads`, etc. Symlinks are
 /// only followed when their target is not TCC-protected.
-pub(crate) fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
-    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+///
+/// Memoized by directory mtime — see [`LEVEL_DIRS_CACHE`] for why that matters.
+pub(crate) fn read_level_dirs(parent: &str) -> LevelDirs {
     // A bare "C:" is drive-relative on Windows (it means "cwd on C"), so the
     // drive ROOT needs the separator appended. Unix never builds a "C:"-shaped
     // prefix (its walk starts at "" → "/…"), so this branch is inert there.
@@ -554,8 +555,90 @@ pub(crate) fn read_level_dirs(parent: &str) -> std::collections::HashMap<String,
     };
     let dir_path = std::path::Path::new(dir);
     if crate::tcc::is_tcc_protected(dir_path) {
-        return map;
+        return LevelDirs::default();
     }
+    // Stat only AFTER the TCC check — the whole point of that check is to avoid
+    // touching a protected directory at all.
+    let mtime = std::fs::metadata(dir_path)
+        .and_then(|m| m.modified())
+        .ok();
+    if let Some(mtime) = mtime {
+        if let Some(hit) = cache_lookup(dir, mtime) {
+            return hit;
+        }
+    }
+    let listed = LevelDirs::new(list_level_dirs_uncached(dir_path));
+    // No mtime means no invalidation signal, so such a directory is re-listed
+    // every time rather than cached forever.
+    if let Some(mtime) = mtime {
+        cache_store(dir, mtime, &listed);
+    }
+    listed
+}
+
+/// An `encoded name → real name` listing of one directory level, shared rather
+/// than cloned: the hot directory in the measurement below held 5261 entries,
+/// and handing every caller its own copy would trade the `read_dir` for an
+/// equally large allocation.
+pub(crate) type LevelDirs = std::sync::Arc<std::collections::HashMap<String, String>>;
+
+/// Memo for [`read_level_dirs`], keyed by directory path, invalidated by the
+/// directory's mtime.
+///
+/// [`decode_walk`] is a filesystem-guided decode, so every slug under
+/// `~/.claude/projects/` re-lists every level of its own path, and
+/// `local_backend`'s rescan loop repeats the whole sweep every 2 seconds.
+/// Measured on a real machine (2026-09-21, 254 slugs): 1685 `read_dir` calls
+/// and 943,523 `encode_path_segment` allocations per sweep — 936,458 of them
+/// from a single directory, `/private/tmp`, which held 5261 entries and was
+/// re-listed 178 times because 178 slugs lived under it. That sweep was ~60% of
+/// the desktop process's CPU samples.
+///
+/// mtime is the right key because the decode only cares about which
+/// sub-directories exist, and a directory's mtime changes whenever an entry is
+/// added or removed.
+static LEVEL_DIRS_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (std::time::SystemTime, LevelDirs)>>,
+> = std::sync::OnceLock::new();
+
+/// Distinct path prefixes are bounded in practice (the levels of the paths that
+/// actually host workspaces), so the cache is cleared wholesale rather than
+/// carrying an LRU for a map that normally holds a few dozen entries.
+const LEVEL_DIRS_CACHE_MAX: usize = 512;
+
+fn cache_lookup(dir: &str, mtime: std::time::SystemTime) -> Option<LevelDirs> {
+    let cache = LEVEL_DIRS_CACHE.get_or_init(Default::default);
+    let guard = cache.lock().ok()?;
+    let (cached_mtime, dirs) = guard.get(dir)?;
+    (*cached_mtime == mtime).then(|| dirs.clone())
+}
+
+fn cache_store(dir: &str, mtime: std::time::SystemTime, dirs: &LevelDirs) {
+    let cache = LEVEL_DIRS_CACHE.get_or_init(Default::default);
+    let Ok(mut guard) = cache.lock() else {
+        return;
+    };
+    if guard.len() >= LEVEL_DIRS_CACHE_MAX && !guard.contains_key(dir) {
+        guard.clear();
+    }
+    guard.insert(dir.to_string(), (mtime, dirs.clone()));
+}
+
+/// Drop every memoized listing. For tests that create directories and then
+/// expect the decode to see them within one mtime granularity tick.
+#[cfg(test)]
+pub(crate) fn clear_level_dirs_cache() {
+    if let Some(cache) = LEVEL_DIRS_CACHE.get() {
+        if let Ok(mut guard) = cache.lock() {
+            guard.clear();
+        }
+    }
+}
+
+fn list_level_dirs_uncached(
+    dir_path: &std::path::Path,
+) -> std::collections::HashMap<String, String> {
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let Ok(entries) = std::fs::read_dir(dir_path) else {
         return map;
     };
