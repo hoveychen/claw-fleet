@@ -4285,6 +4285,10 @@ where
         .or_else(|| payload.get("event").and_then(Value::as_str))
         .unwrap_or("?")
         .to_string();
+    // Kept out of the closure so a panicking handler can still be answered —
+    // the payload itself is moved into the blocking task. Absent on the
+    // unsolicited events the phone sends without expecting a reply.
+    let req_id = payload.get("req_id").cloned().filter(|v| !v.is_null());
     // Detached: the loop returns to `select!` immediately, so a slow handler can
     // no longer starve the ping or the frame reads. Replies go out through the
     // `OUT_TX` channel, which is already order-independent (every reply carries
@@ -4318,7 +4322,26 @@ where
             inflight_exit(inflight);
             (reply, queue_ms, t.elapsed().as_millis())
         });
-        let (reply, queue_ms, exec_ms) = blocking.await.unwrap_or((None, 0, 0));
+        let (reply, queue_ms, exec_ms) = match blocking.await {
+            Ok(measured) => measured,
+            // A panicking handler used to answer with nothing at all: the join
+            // error collapsed to `None`, no frame went out, and the phone had no
+            // way to tell that apart from a dead link — it just sat on the
+            // request until its own 15s timeout fired. Answer with an error
+            // frame instead, so the failure surfaces where it happened.
+            Err(e) => {
+                crate::log_debug(&format!("[relay] method={method} handler failed to join: {e}"));
+                let reply = req_id.map(|req_id| {
+                    json!({
+                        "event": "reply",
+                        "req_id": req_id,
+                        "ok": false,
+                        "error": format!("desktop handler for `{method}` panicked"),
+                    })
+                });
+                (reply, 0, 0)
+            }
+        };
         let handle_ms = started.elapsed().as_millis();
         // Whatever the two measured phases don't account for is time the finished
         // task spent waiting to be polled again.
@@ -7463,6 +7486,40 @@ mod tests {
             inner.is_err(),
             "a peer that never completes the handshake is not a connection"
         );
+    }
+
+    /// A handler that panics must still produce a frame. Before this, the join
+    /// error collapsed to "no reply" and the phone could not tell a crashed
+    /// handler from a dead link — it sat on the request for its whole timeout.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_panicking_handler_answers_with_an_error_frame() {
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+
+        dispatch_inbound(
+            json!({ "event": "req", "method": "tail", "req_id": "r-panic" }),
+            |_| panic!("handler exploded"),
+        )
+        .await;
+
+        let out = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a panicking handler must answer, not go silent")
+            .expect("outbound channel stays open");
+        let Outbound::Text(text) = out;
+        let reply = decode_out(&text);
+        assert_eq!(reply["req_id"], "r-panic");
+        assert_eq!(reply["ok"], false);
+        assert!(
+            reply["error"].as_str().unwrap_or_default().contains("tail"),
+            "the error must name the method that panicked, got {:?}",
+            reply["error"]
+        );
+
+        *OUT_TX.lock().unwrap() = None;
+        *ENC_KEY.lock().unwrap() = None;
     }
 
     /// The pure gzip-gate decision — no global state, safe to run alone.
