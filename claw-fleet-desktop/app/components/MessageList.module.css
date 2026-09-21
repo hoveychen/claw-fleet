@@ -466,6 +466,29 @@
   min-height: 22px;
 }
 
+/* A footer with no counts to show. Claude Code flushes each content block as
+   its own record, and turn usage is attributed only to a turn's *final*
+   assistant record (see turnUsageByRow), so the extremely common "say a
+   sentence, then call a tool" record has prose worth copying but nothing to
+   print. Rendering it as a full 26px line put a visibly empty row under most
+   of the prose in a long transcript.
+
+   Collapse the line and float the controls over the bottom-right of the record
+   instead. They still never cover the first line of prose — the one line that
+   is always full width — and a last line long enough to reach the right edge is
+   the rare case, not the rule. */
+.usage_bare {
+  position: relative;
+  margin-top: 0;
+  min-height: 0;
+}
+
+.usage_bare .row_actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+
 /* The user turn's timestamp, now a footer inside the bubble (see MessageList's
    note at the call site). The hairline rule is what turns "small grey text that
    happens to be last" into a footer — without it the time just reads as a
