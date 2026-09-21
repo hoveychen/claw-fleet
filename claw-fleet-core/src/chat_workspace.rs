@@ -154,11 +154,25 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 /// raw prompt excerpt (`ai_title ?? slug ?? last_message_preview`, and Claude
 /// Code stopped writing `ai-title` on 2026-09-06). The wording still has a
 /// single owner in [`crate::session_title_guidance`]; this only relocates it.
+///
+/// The inline `[?…]` marks section rides along the same way: it lives inside
+/// the interaction-mode file (also dropped by `--setting-sources project`) and
+/// is lifted from there by [`crate::explain_marks_guidance::installed_section`],
+/// so a chat session marks its prose exactly like an engineering session does
+/// — the boss's screenshot that motivated the feature was a chat session.
 fn chat_claude_md() -> String {
-    match crate::session_title_guidance::installed_section() {
-        Some(section) => format!("{CHAT_CLAUDE_MD}\n{section}\n"),
-        None => CHAT_CLAUDE_MD.to_string(),
+    let mut out = CHAT_CLAUDE_MD.to_string();
+    if let Some(section) = crate::session_title_guidance::installed_section() {
+        out.push('\n');
+        out.push_str(&section);
+        out.push('\n');
     }
+    if let Some(section) = crate::explain_marks_guidance::installed_section() {
+        out.push('\n');
+        out.push_str(&section);
+        out.push('\n');
+    }
+    out
 }
 
 /// Where the chat workspace is *created*: straight under the fleet dir, whose
@@ -381,6 +395,34 @@ mod tests {
 
     /// The settings-panel toggle stays authoritative: `remove` deletes the
     /// guidance file, and with no file there is no section to append.
+    /// The `[?…]` marks section lives in the interaction-mode file, which the
+    /// chat launch flags drop with the rest of `~/.claude/*.md`; the brief has
+    /// to carry it itself or chat replies never get marks — and a chat session
+    /// is exactly what the boss was reading when they asked for the feature.
+    #[test]
+    fn brief_carries_the_explain_marks_section_when_interaction_mode_is_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        with_home(tmp.path(), || {
+            with_claude_dir(&tmp.path().join(".claude"), || {
+                crate::interaction_mode::apply_interaction_mode("老板", "zh").unwrap();
+                ensure_chat_workspace().unwrap();
+                let body =
+                    std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();
+                assert!(body.contains("纯聊天工作区"), "still the chat brief");
+                assert!(body.contains("## 正文标注 `[?…]`"), "section heading appended");
+                assert!(body.contains("最多 5 处"));
+                assert!(
+                    !body.contains("# Fleet 交互模式"),
+                    "only the marks section is lifted, not the whole interaction-mode file"
+                );
+                assert!(
+                    !body.contains("## 三种卡"),
+                    "the decision-card rules must not leak into the chat brief"
+                );
+            });
+        });
+    }
+
     #[test]
     fn brief_omits_the_section_when_the_feature_is_off() {
         let tmp = tempfile::tempdir().unwrap();
