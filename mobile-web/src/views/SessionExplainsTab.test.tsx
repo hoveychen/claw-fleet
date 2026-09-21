@@ -39,6 +39,7 @@ function rec(
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     durationMs: 0,
+    dismissed: false,
     ...over,
   };
 }
