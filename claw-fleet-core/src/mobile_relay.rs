@@ -2328,15 +2328,39 @@ fn handle_request(payload: &Value) -> Value {
     }
 }
 
+/// How long the workspace access envelope is reused. It is a boundary list, not
+/// something the user reads, and it only ever widens when a new session starts,
+/// so a few seconds of staleness is invisible — while collapsing the six gated
+/// methods' repeated builds is not.
+const KNOWN_WORKSPACES_CACHE_TTL: Duration = Duration::from_secs(10);
+
 /// Workspace paths of every session the backend knows about — the access
 /// envelope the git/repo entry points validate against (same list the
 /// `/git_status` HTTP endpoint builds).
+///
+/// A projection of the session list, so it reads the host's warm copy like
+/// every other projection does ([`current_sessions`]). It used to call
+/// `build_sources().scan_sessions()` unconditionally, and six phone methods
+/// (`browse_dir`, `create_dir`, `repo_list`, `repo_detail`, `repo_push`,
+/// `repo_pull`) each paid a full walk of every transcript on disk — tens of
+/// seconds on a host with a few thousand of them, well past the phone's 15s
+/// request timeout, so the repository page simply spun until it gave up. The
+/// memo on top bounds the remaining cost for a headless host that has no
+/// provider registered and still falls back to a scan: one walk per window
+/// shared by all six, not one per call.
 fn known_workspaces() -> Vec<String> {
-    crate::agent_source::build_sources()
-        .iter()
-        .flat_map(|s| s.scan_sessions())
-        .map(|s| s.workspace_path)
-        .collect()
+    cached_by_key("known_workspaces", KNOWN_WORKSPACES_CACHE_TTL, || {
+        let mut paths: Vec<String> = current_sessions()
+            .into_iter()
+            .map(|s| s.workspace_path)
+            .collect();
+        paths.sort();
+        paths.dedup();
+        Ok(json!(paths))
+    })
+    .ok()
+    .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+    .unwrap_or_default()
 }
 
 /// The phone's whole data surface, as one method-name → handler table.
@@ -7588,6 +7612,67 @@ mod tests {
         );
         assert_eq!(usage["inputTokens"], 4_242);
         assert_eq!(usage["sessionCount"], 1);
+
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
+        *RESULT_CACHE.lock().unwrap() = None;
+    }
+
+    /// The access envelope six phone methods gate on is a projection of the
+    /// session list too. Re-walking every transcript per call is what made the
+    /// repository page outlast the phone's 15s request timeout on a real host.
+    #[test]
+    fn known_workspaces_projects_the_provided_session_list_without_scanning() {
+        let _guard = fleet_home_lock();
+        let sentinel = crate::session::SessionInfo {
+            id: "warm-workspace-sentinel".to_string(),
+            workspace_path: "/tmp/fleet-known-workspaces-sentinel".to_string(),
+            ..Default::default()
+        };
+        set_sessions_provider(move || Some(vec![sentinel.clone()]));
+        // The memo is keyed per method; a sibling test's value would mask this.
+        *RESULT_CACHE.lock().unwrap() = None;
+
+        let paths = known_workspaces();
+
+        assert_eq!(
+            paths,
+            vec!["/tmp/fleet-known-workspaces-sentinel".to_string()],
+            "a rescan would report this host's real workspaces, not the sentinel"
+        );
+
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
+        *RESULT_CACHE.lock().unwrap() = None;
+    }
+
+    /// And on a host with no provider the envelope still costs a scan, so the
+    /// six gated methods must share one build rather than each paying it.
+    #[test]
+    fn known_workspaces_is_memoised_across_the_gated_methods() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+
+        let _guard = fleet_home_lock();
+        let builds = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&builds);
+        set_sessions_provider(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Some(vec![crate::session::SessionInfo {
+                id: "memo-sentinel".to_string(),
+                workspace_path: "/tmp/fleet-known-workspaces-memo".to_string(),
+                ..Default::default()
+            }])
+        });
+        *RESULT_CACHE.lock().unwrap() = None;
+
+        for _ in 0..6 {
+            assert_eq!(known_workspaces().len(), 1);
+        }
+
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            1,
+            "six gated methods in one window must collapse onto a single build"
+        );
 
         *SESSIONS_PROVIDER.lock().unwrap() = None;
         *RESULT_CACHE.lock().unwrap() = None;
