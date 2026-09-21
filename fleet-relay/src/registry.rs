@@ -6,8 +6,11 @@
 //! HKDF-derived channel token, so the bucket is `hex(sha256(channel_token))` —
 //! the routing math is unchanged and the relay still only ever sees the token
 //! and ciphertext, never the pairing secret or the plaintext `msg` bodies.
-//! Connections push serialized frames through unbounded senders so the
-//! registry stays synchronous and unit-testable without real sockets.
+//! Connections push serialized frames through non-blocking senders so the
+//! registry stays synchronous and unit-testable without real sockets. The
+//! senders are *bounded* ([`OUT_QUEUE_CAP`]) and every push is a `try_send`: a
+//! peer that has stopped reading must show up as an undeliverable connection,
+//! not as an ever-growing backlog the sender is told was delivered.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,7 +18,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::Sender;
 
 use crate::frames::{OutFrame, Role};
 
@@ -34,7 +38,18 @@ pub enum OutMsg {
     Ping,
 }
 
-pub type Tx = UnboundedSender<OutMsg>;
+pub type Tx = Sender<OutMsg>;
+
+/// How many frames may sit in front of one connection's write pump.
+///
+/// A healthy pump drains in microseconds, so this is never reached on a live
+/// socket; it is reached when the peer has stopped reading and the pump is
+/// parked inside `sink.send`. At that point the queue is the only thing left
+/// that can tell the difference, which is why it is bounded at all — with an
+/// unbounded sender every push succeeded and the phone was told `delivered`
+/// about frames that were never going anywhere. Generous enough to absorb a
+/// full pending flush (32) plus a burst of snapshots behind one large send.
+pub const OUT_QUEUE_CAP: usize = 256;
 
 pub fn channel_id(secret: &str) -> String {
     let mut h = Sha256::new();
@@ -211,7 +226,7 @@ impl Registry {
                     held.len()
                 );
                 for p in held {
-                    let _ = tx.send(p.msg);
+                    let _ = tx.try_send(p.msg);
                 }
             }
         }
@@ -265,8 +280,17 @@ impl Registry {
         };
         let mut delivered = 0;
         for tx in ch.agents.values() {
-            if tx.send(msg.clone()).is_ok() {
-                delivered += 1;
+            // `try_send`, not `send`: a full queue means the agent's write pump
+            // is parked on a peer that stopped reading. Counting that as a
+            // delivery is exactly the lie this guards against — fall through and
+            // take custody of the frame instead.
+            match tx.try_send(msg.clone()) {
+                Ok(()) => delivered += 1,
+                Err(TrySendError::Full(_)) => log::warn!(
+                    "channel {}… agent write queue full ({OUT_QUEUE_CAP}); not counting it as delivered",
+                    &channel[..channel.len().min(12)]
+                ),
+                Err(TrySendError::Closed(_)) => {}
             }
         }
         if delivered > 0 {
@@ -294,8 +318,14 @@ impl Registry {
         };
         let mut delivered = 0;
         for tx in ch.members(from.opposite()).values() {
-            if tx.send(msg.clone()).is_ok() {
-                delivered += 1;
+            match tx.try_send(msg.clone()) {
+                Ok(()) => delivered += 1,
+                Err(TrySendError::Full(_)) => log::warn!(
+                    "channel {}… {:?} write queue full ({OUT_QUEUE_CAP}); frame dropped",
+                    &channel[..channel.len().min(12)],
+                    from.opposite()
+                ),
+                Err(TrySendError::Closed(_)) => {}
             }
         }
         delivered
@@ -311,7 +341,7 @@ impl Registry {
             return;
         };
         for tx in ch.members(changed.opposite()).values() {
-            let _ = tx.send(OutMsg::Text(serialized.clone()));
+            let _ = tx.try_send(OutMsg::Text(serialized.clone()));
         }
     }
 }
@@ -320,9 +350,16 @@ impl Registry {
 mod tests {
     use super::*;
     use serde_json::json;
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use tokio::sync::mpsc::Receiver;
 
-    fn drain(rx: &mut UnboundedReceiver<OutMsg>) -> Vec<serde_json::Value> {
+    /// A connection sender with the production queue bound, so a test that
+    /// fills it sees exactly what a real stalled write pump makes the registry
+    /// see.
+    fn test_channel() -> (Tx, Receiver<OutMsg>) {
+        tokio::sync::mpsc::channel(OUT_QUEUE_CAP)
+    }
+
+    fn drain(rx: &mut Receiver<OutMsg>) -> Vec<serde_json::Value> {
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
             match msg {
@@ -350,7 +387,7 @@ mod tests {
     #[test]
     fn client_frame_is_queued_while_no_agent_and_flushed_on_join() {
         let reg = Registry::default();
-        let (client_tx, _client_rx) = unbounded_channel();
+        let (client_tx, _client_rx) = test_channel();
         reg.join("ch", Role::Client, client_tx);
 
         // No agent yet — the frame must be taken into custody, not dropped.
@@ -358,7 +395,7 @@ mod tests {
         assert_eq!(d, Delivery::Queued(1), "an offline agent must not lose the answer");
 
         // The agent arrives and receives the held frame.
-        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         let got = drain(&mut agent_rx);
         assert!(
@@ -370,7 +407,7 @@ mod tests {
     #[test]
     fn queue_outlives_the_client_that_handed_it_over() {
         let reg = Registry::default();
-        let (client_tx, _client_rx) = unbounded_channel();
+        let (client_tx, _client_rx) = test_channel();
         let client = reg.join("ch", Role::Client, client_tx).expect("client joins");
         reg.deliver_or_queue("ch", text(json!({"answer": 2})));
 
@@ -378,7 +415,7 @@ mod tests {
         // socket lives seconds. The channel must survive to keep the answer.
         reg.leave("ch", Role::Client, client.conn_id);
 
-        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         let got = drain(&mut agent_rx);
         assert!(
@@ -387,10 +424,36 @@ mod tests {
         );
     }
 
+    /// A peer that stopped reading parks its write pump, and the queue in front
+    /// of it fills up. Counting that as a delivery is what told a phone its
+    /// answer had landed while nothing was draining the other end — past the
+    /// bound the frame must be taken into custody like an absent agent's.
+    #[test]
+    fn a_full_agent_queue_is_not_a_delivery() {
+        let reg = Registry::default();
+        // Nothing ever drains this receiver: the stalled-write-pump shape.
+        let (agent_tx, _agent_rx) = test_channel();
+        reg.join("ch", Role::Agent, agent_tx).expect("agent joins");
+
+        for i in 0..OUT_QUEUE_CAP {
+            assert_eq!(
+                reg.deliver_or_queue("ch", text(json!({ "n": i }))),
+                Delivery::Delivered(1),
+                "frame {i} still fits in the pump's queue"
+            );
+        }
+
+        assert_eq!(
+            reg.deliver_or_queue("ch", text(json!({ "n": "overflow" }))),
+            Delivery::Queued(1),
+            "a frame the agent's pump cannot take must be held, not reported delivered"
+        );
+    }
+
     #[test]
     fn live_agent_still_gets_frames_directly_without_queueing() {
         let reg = Registry::default();
-        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         drain(&mut agent_rx);
 
@@ -402,14 +465,14 @@ mod tests {
     #[test]
     fn pending_queue_is_capped_and_drops_the_oldest() {
         let reg = Registry::default().with_pending_limits(2, Duration::from_secs(600));
-        let (client_tx, _client_rx) = unbounded_channel();
+        let (client_tx, _client_rx) = test_channel();
         reg.join("ch", Role::Client, client_tx);
 
         for i in 1..=3 {
             reg.deliver_or_queue("ch", text(json!({"answer": i})));
         }
 
-        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         let got = drain(&mut agent_rx);
         let answers: Vec<_> = got.iter().filter(|v| v.get("answer").is_some()).collect();
@@ -424,13 +487,13 @@ mod tests {
     #[test]
     fn expired_pending_frames_are_not_replayed() {
         let reg = Registry::default().with_pending_limits(32, Duration::from_millis(30));
-        let (client_tx, _client_rx) = unbounded_channel();
+        let (client_tx, _client_rx) = test_channel();
         reg.join("ch", Role::Client, client_tx);
         reg.deliver_or_queue("ch", text(json!({"answer": 4})));
 
         std::thread::sleep(Duration::from_millis(60));
 
-        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         let got = drain(&mut agent_rx);
         assert!(
@@ -439,7 +502,7 @@ mod tests {
         );
     }
 
-    fn drain_binary(rx: &mut UnboundedReceiver<OutMsg>) -> Vec<Vec<u8>> {
+    fn drain_binary(rx: &mut Receiver<OutMsg>) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
             match msg {
@@ -463,9 +526,9 @@ mod tests {
     #[test]
     fn forwards_only_to_opposite_role() {
         let reg = Registry::default();
-        let (agent_tx, mut agent_rx) = unbounded_channel();
-        let (client_tx, mut client_rx) = unbounded_channel();
-        let (agent2_tx, mut agent2_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
+        let (client_tx, mut client_rx) = test_channel();
+        let (agent2_tx, mut agent2_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         reg.join("ch", Role::Agent, agent2_tx);
         reg.join("ch", Role::Client, client_tx);
@@ -489,8 +552,8 @@ mod tests {
     #[test]
     fn forward_binary_reaches_opposite_role_verbatim() {
         let reg = Registry::default();
-        let (agent_tx, mut agent_rx) = unbounded_channel();
-        let (client_tx, mut client_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
+        let (client_tx, mut client_rx) = test_channel();
         reg.join("ch", Role::Agent, agent_tx);
         reg.join("ch", Role::Client, client_tx);
         drain(&mut agent_rx);
@@ -506,8 +569,8 @@ mod tests {
     #[test]
     fn channels_are_isolated() {
         let reg = Registry::default();
-        let (a_tx, _a_rx) = unbounded_channel();
-        let (c_tx, mut c_rx) = unbounded_channel();
+        let (a_tx, _a_rx) = test_channel();
+        let (c_tx, mut c_rx) = test_channel();
         reg.join("ch-a", Role::Agent, a_tx);
         reg.join("ch-b", Role::Client, c_tx);
         drain(&mut c_rx);
@@ -520,12 +583,12 @@ mod tests {
     #[test]
     fn membership_changes_notify_opposite_role() {
         let reg = Registry::default();
-        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (agent_tx, mut agent_rx) = test_channel();
         let st = reg.join("ch", Role::Agent, agent_tx).unwrap();
         assert_eq!(st.clients, 0);
         assert!(st.agent_online);
 
-        let (client_tx, mut client_rx) = unbounded_channel();
+        let (client_tx, mut client_rx) = test_channel();
         let st = reg.join("ch", Role::Client, client_tx).unwrap();
         assert_eq!(st.clients, 1);
         let events = drain(&mut agent_rx);
@@ -541,9 +604,9 @@ mod tests {
     #[test]
     fn agent_departure_flips_agent_status() {
         let reg = Registry::default();
-        let (agent_tx, _agent_rx) = unbounded_channel();
+        let (agent_tx, _agent_rx) = test_channel();
         let agent = reg.join("ch", Role::Agent, agent_tx).unwrap();
-        let (client_tx, mut client_rx) = unbounded_channel();
+        let (client_tx, mut client_rx) = test_channel();
         reg.join("ch", Role::Client, client_tx);
         drain(&mut client_rx);
 
@@ -556,30 +619,30 @@ mod tests {
     #[test]
     fn channel_count_cap_rejects_new_channels_only() {
         let reg = Registry::new(1, 64); // room for exactly one channel
-        let (a_tx, _a) = unbounded_channel();
+        let (a_tx, _a) = test_channel();
         assert!(reg.join("ch-a", Role::Agent, a_tx).is_some(), "first channel admitted");
-        let (b_tx, _b) = unbounded_channel();
+        let (b_tx, _b) = test_channel();
         assert!(reg.join("ch-b", Role::Agent, b_tx).is_none(), "second channel over cap");
         // But another connection to the *existing* channel is fine (no new bucket).
-        let (a2_tx, _a2) = unbounded_channel();
+        let (a2_tx, _a2) = test_channel();
         assert!(reg.join("ch-a", Role::Client, a2_tx).is_some(), "existing channel still accepts");
     }
 
     #[test]
     fn per_channel_role_cap_rejects_within_channel() {
         let reg = Registry::new(100, 2); // 2 per role per channel
-        let (a1, _r1) = unbounded_channel();
-        let (a2, _r2) = unbounded_channel();
+        let (a1, _r1) = test_channel();
+        let (a2, _r2) = test_channel();
         assert!(reg.join("ch", Role::Agent, a1).is_some());
         assert!(reg.join("ch", Role::Agent, a2).is_some());
-        let (a3, _r3) = unbounded_channel();
+        let (a3, _r3) = test_channel();
         assert!(reg.join("ch", Role::Agent, a3).is_none(), "third agent over per-channel cap");
         // The other role has its own budget in the same channel.
-        let (c1, _rc1) = unbounded_channel();
-        let (c2, _rc2) = unbounded_channel();
+        let (c1, _rc1) = test_channel();
+        let (c2, _rc2) = test_channel();
         assert!(reg.join("ch", Role::Client, c1).is_some(), "client role has its own cap");
         assert!(reg.join("ch", Role::Client, c2).is_some());
-        let (c3, _rc3) = unbounded_channel();
+        let (c3, _rc3) = test_channel();
         assert!(reg.join("ch", Role::Client, c3).is_none(), "third client over per-channel cap");
     }
 }

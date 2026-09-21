@@ -17,12 +17,14 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::mpsc::unbounded_channel;
+// Fully qualified at the call site: `channel` is also the local variable
+// holding this connection's channel id.
+use tokio::sync::mpsc;
 
 use crate::frames::{InFrame, MsgAckStatus, OutFrame, PushPayload, Role};
 use crate::limits::ConnGuard;
 use crate::notify_target;
-use crate::registry::{channel_id, Delivery, OutMsg};
+use crate::registry::{channel_id, Delivery, OutMsg, OUT_QUEUE_CAP};
 use crate::AppState;
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -44,6 +46,16 @@ const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// (`claw-fleet-core/src/mobile_relay.rs`) so both ends of a dead link give up
 /// on roughly the same schedule.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// How long one frame may sit inside `sink.send` before the connection is
+/// written off.
+///
+/// A peer that stops reading does not error — TCP's receive window closes and
+/// the send simply never resolves. The write pump then parks forever while the
+/// registry keeps handing it frames and telling the sender `delivered`. Shorter
+/// than [`IDLE_TIMEOUT`] so a stalled writer is noticed on its own terms rather
+/// than waiting out the read side's clock.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Cap on a single WebSocket message (and frame). tungstenite's defaults are
 /// 64 MiB per message / 16 MiB per frame; on a public multi-tenant relay a
@@ -143,7 +155,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
     };
     let channel = channel_id(&secret);
 
-    let (tx, mut rx) = unbounded_channel::<OutMsg>();
+    let (tx, mut rx) = mpsc::channel::<OutMsg>(OUT_QUEUE_CAP);
     // Kept so this connection can push frames addressed to *itself* (the
     // `msg_ack` custody report) through the same write pump.
     let own_tx = tx.clone();
@@ -167,6 +179,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
     let (mut sink, mut stream) = socket.split();
 
     // write pump: registry -> socket
+    let write_channel = channel.clone();
     let write = tokio::spawn(async move {
         while let Some(out) = rx.recv().await {
             let msg = match out {
@@ -174,8 +187,21 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                 OutMsg::Binary(b) => Message::Binary(b.into()),
                 OutMsg::Ping => Message::Ping(Vec::new().into()),
             };
-            if sink.send(msg).await.is_err() {
-                break;
+            // Bounded: a peer that stopped reading parks this send forever (see
+            // `WRITE_TIMEOUT`). Giving up drops `rx`, which is what makes the
+            // registry's `try_send` start failing for this connection instead of
+            // reporting frames as delivered into a queue nothing drains.
+            match tokio::time::timeout(WRITE_TIMEOUT, sink.send(msg)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => break,
+                Err(_) => {
+                    log::info!(
+                        "write stalled {}s on channel {}…; dropping connection",
+                        WRITE_TIMEOUT.as_secs(),
+                        &write_channel[..12]
+                    );
+                    break;
+                }
             }
         }
         let _ = sink.close().await;
@@ -204,8 +230,9 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                 _ => break,
             },
             _ = ping.tick() => {
-                // A closed write pump means the socket is already gone.
-                if own_tx.send(OutMsg::Ping).is_err() {
+                // A closed write pump means the socket is already gone; a full
+                // one means it is parked mid-send and never coming back.
+                if own_tx.try_send(OutMsg::Ping).is_err() {
                     break;
                 }
                 if last_inbound.elapsed() > IDLE_TIMEOUT {
@@ -248,7 +275,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
             // *this* connection round-trips.
             InFrame::Ping { id } => {
                 if let Ok(s) = serde_json::to_string(&OutFrame::Pong { id }) {
-                    let _ = own_tx.send(OutMsg::Text(s));
+                    let _ = own_tx.try_send(OutMsg::Text(s));
                 }
             }
             InFrame::Msg { payload, ack_id } => {
@@ -275,7 +302,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                             // Straight back down this socket: the ack belongs to
                             // this connection, not to the channel's other role.
                             if let Ok(s) = serde_json::to_string(&ack) {
-                                let _ = own_tx.send(OutMsg::Text(s));
+                                let _ = own_tx.try_send(OutMsg::Text(s));
                             }
                         }
                     }
