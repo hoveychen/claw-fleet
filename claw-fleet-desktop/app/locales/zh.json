@@ -2393,7 +2393,9 @@
     "collapse": "折叠面板",
     "expand": "展开面板",
     "collapsed_label": "决策面板 · {{count}} 待处理",
-    "peek_hint": "按住 Option 透视"
+    "peek_hint": "按住 Option 透视",
+    "explain_column": "追问",
+    "explain_chip": "💬 追问 · {{count}}"
   },
   "session_pending": {
     "title": "会话等待输入",

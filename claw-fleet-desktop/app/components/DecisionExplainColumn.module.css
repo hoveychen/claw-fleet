@@ -1,0 +1,37 @@
+/* The side column holding a card's side questions (DecisionExplainColumn.tsx). */
+
+.column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  padding: 10px 12px 12px;
+  gap: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
+
+/* The answers own the scrolling here, so a long one never pushes the card's
+   prose or its options around. */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}

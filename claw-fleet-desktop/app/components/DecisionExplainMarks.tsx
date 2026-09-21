@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -32,13 +32,45 @@ import styles from "./DecisionExplainMarks.module.css";
  * sessions store. A card whose session the store does not know yet has
  * `enabled: false`, which keeps the bar away.
  */
-export function useDecisionExplainMarks(sessionId: string | null | undefined): {
+export type DecisionExplain = {
   enabled: boolean;
   busy: boolean;
   ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
   answers: ExplainRecord[];
   dismiss: (id: string) => void;
+};
+
+/**
+ * The panel-level side-question state, when there is one.
+ *
+ * `DecisionPanel` owns the state so the answers can be rendered in its side
+ * column instead of at the tail of the question body, where they were sharing
+ * a scroller with the prose and got squeezed into an unreadable sliver under a
+ * long card (the footer is flex-none and wins the height). A card rendered
+ * outside the panel — `SessionDetail`'s inline compact card — sees `null` here
+ * and falls back to owning the state itself, answers under the question.
+ */
+const DecisionExplainCtx = createContext<DecisionExplain | null>(null);
+
+export const DecisionExplainProvider = DecisionExplainCtx.Provider;
+
+/**
+ * What a card should use: the panel's state when the card sits in the panel,
+ * its own otherwise. `inline` says whether the card has to render the answers
+ * itself (nothing else will).
+ */
+export function useCardExplain(sessionId: string | null | undefined): {
+  explain: DecisionExplain;
+  inline: boolean;
 } {
+  const panel = useContext(DecisionExplainCtx);
+  // Hooks cannot be conditional: the own-state hook always runs, but with a
+  // null session when the panel already owns it, which keeps it inert.
+  const own = useDecisionExplainMarks(panel ? null : sessionId);
+  return { explain: panel ?? own, inline: !panel };
+}
+
+export function useDecisionExplainMarks(sessionId: string | null | undefined): DecisionExplain {
   const session = useSessionsStore((s) => s.sessions.find((x) => x.id === sessionId));
   const sessionPath = session?.jsonlPath;
   const workspacePath = session?.workspacePath;

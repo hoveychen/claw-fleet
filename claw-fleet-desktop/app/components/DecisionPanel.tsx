@@ -11,7 +11,13 @@ import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
-import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
+import { DecisionExplainColumn } from "./DecisionExplainColumn";
+import {
+  DecisionExplainAnswers,
+  DecisionExplainProvider,
+  useCardExplain,
+  useDecisionExplainMarks,
+} from "./DecisionExplainMarks";
 import explainStyles from "./DecisionExplainMarks.module.css";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { framePreviewSrcDoc } from "../decisionFrame";
@@ -625,9 +631,10 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
   // Side questions from inside the question — a drag, or a click on one of the
-  // agent's `[?text]` marks, brings up the same bar the transcript has; the
-  // answer lands under the question (see DecisionExplainMarks).
-  const explainMarks = useDecisionExplainMarks(decision.request.sessionId);
+  // agent's `[?text]` marks, brings up the same bar the transcript has. In the
+  // panel the answers go to its side column; inline (SessionDetail's compact
+  // card) they stay under the question (see DecisionExplainMarks).
+  const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId);
   const questionBodyRef = useRef<HTMLDivElement>(null);
   const {
     submitElicitation,
@@ -815,7 +822,9 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           )}
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
-        <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+        {explainInline && (
+          <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+        )}
       </div>
       </div>
 
@@ -1496,9 +1505,10 @@ export function FleetAskCard({
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
   // Side questions from inside the question — a drag, or a click on one of the
-  // agent's `[?text]` marks, brings up the same bar the transcript has; the
-  // answer lands under the question (see DecisionExplainMarks).
-  const explainMarks = useDecisionExplainMarks(decision.request.sessionId);
+  // agent's `[?text]` marks, brings up the same bar the transcript has. In the
+  // panel the answers go to its side column; inline (SessionDetail's compact
+  // card) they stay under the question (see DecisionExplainMarks).
+  const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId);
   const questionBodyRef = useRef<HTMLDivElement>(null);
   // The preview iframe is cross-origin, so the theme has to travel into it as a
   // value rather than through CSS custom properties.
@@ -1714,7 +1724,9 @@ export function FleetAskCard({
           )}
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
-        <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+        {explainInline && (
+          <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+        )}
 
         {q.images && q.images.length > 0 ? (
           // Image-bearing card: load the served index.html (agent html or auto
@@ -2015,6 +2027,10 @@ export function DecisionPanel() {
   );
   const sessionsList = useSessionsStore((s) => s.sessions);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Side questions asked from inside the active card. The panel owns the state
+  // (rather than the card) so the answers can live in the side column; see
+  // DecisionExplainColumn for why they cannot stay under the question.
+  const [explainOpen, setExplainOpen] = useState(false);
   // Review docs the agent attached to a fleet__ask card — shown as tabs in the
   // side column (same slot as the inline SessionDetail). Open by default so the
   // user sees them the moment the card arrives; the two share the column, so
@@ -2144,6 +2160,9 @@ export function DecisionPanel() {
     [sessionsList, activeSessionId],
   );
 
+  const explain = useDecisionExplainMarks(activeSessionId);
+  const answerCount = explain.answers.length;
+
   // Review docs attached to the active fleet__ask card (empty for other kinds).
   // Memoised so the `?? []` fallback can't hand `ReviewDocsColumn` a fresh
   // array on every one of this panel's (2s-cadence) re-renders, which would
@@ -2159,13 +2178,26 @@ export function DecisionPanel() {
     setDocsOpen(hasReviewDocs);
   }, [active?.id, hasReviewDocs]);
 
+  // A new answer (or the running record that precedes it) opens the side-question
+  // column and takes the slot from docs/history: the reader just asked for it.
+  // Declared after the docs reset so that on a render where both fire, this one
+  // has the last word.
+  useEffect(() => {
+    if (answerCount === 0) return;
+    setExplainOpen(true);
+    setDocsOpen(false);
+    setHistoryOpen(false);
+  }, [answerCount]);
+
   // SessionDetail in standalone mode owns its own state (no shared global
   // store), so two detail views can coexist on different sessions.
   const inlineDetailActive = historyOpen && !!activeSessionInfo;
   const docsColumnActive = docsOpen && hasReviewDocs;
-  // The docs panel and the SessionDetail history share the one side column;
-  // docs win when both would be open (they reset closed on card change).
-  const sideColumnActive = docsColumnActive || inlineDetailActive;
+  const explainColumnActive = explainOpen && explain.answers.length > 0;
+  // Side questions, the docs panel and the SessionDetail history all share the
+  // one side column. A freshly asked question wins it (that is the whole point
+  // of asking), then docs, then history.
+  const sideColumnActive = explainColumnActive || docsColumnActive || inlineDetailActive;
 
   // Bump tier when the card area overflows vertically, until no overflow or
   // we hit the maximum tier.
@@ -2251,13 +2283,16 @@ export function DecisionPanel() {
   const panelWidth = Math.min(targetTotalWidth, vpClamp);
 
   return (
+    <DecisionExplainProvider value={explain}>
     <div
       className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? (stackDetail ? styles.panel_with_detail_stacked : styles.panel_with_detail) : ""}`}
       style={{ width: `${panelWidth}px` }}
     >
       {sideColumnActive && (
         <div className={styles.detail_column}>
-          {docsColumnActive ? (
+          {explainColumnActive ? (
+            <DecisionExplainColumn explain={explain} />
+          ) : docsColumnActive ? (
             <ReviewDocsColumn
               docs={reviewDocs}
               sessionId={active.request.sessionId}
@@ -2285,6 +2320,28 @@ export function DecisionPanel() {
             </svg>
           </button>
           <span className={styles.panel_toolbar_spacer} />
+          {/* Side-question toggle: appears once this card has been asked
+           *  something. Shares the side column with docs and history. */}
+          {answerCount > 0 && (
+            <button
+              type="button"
+              className={`${styles.review_docs_toggle} ${explainColumnActive ? styles.review_docs_toggle_active : ""}`}
+              onClick={() =>
+                setExplainOpen((v) => {
+                  const next = !v;
+                  if (next) {
+                    setDocsOpen(false);
+                    setHistoryOpen(false);
+                  }
+                  return next;
+                })
+              }
+              title={t("decision_panel.explain_column", "追问")}
+              aria-pressed={explainColumnActive}
+            >
+              {t("decision_panel.explain_chip", "💬 追问 · {{count}}", { count: answerCount })}
+            </button>
+          )}
           {/* Review-docs toggle: the agent attached `.md` / wiki docs to this
            *  card. Opening docs closes history (they share the side column). */}
           {hasReviewDocs && (
@@ -2294,7 +2351,10 @@ export function DecisionPanel() {
               onClick={() =>
                 setDocsOpen((v) => {
                   const next = !v;
-                  if (next) setHistoryOpen(false);
+                  if (next) {
+                    setHistoryOpen(false);
+                    setExplainOpen(false);
+                  }
                   return next;
                 })
               }
@@ -2316,7 +2376,10 @@ export function DecisionPanel() {
               onToggle={() =>
                 setHistoryOpen((v) => {
                   const next = !v;
-                  if (next) setDocsOpen(false);
+                  if (next) {
+                    setDocsOpen(false);
+                    setExplainOpen(false);
+                  }
                   return next;
                 })
               }
@@ -2380,5 +2443,6 @@ export function DecisionPanel() {
         </div>
       </div>
     </div>
+    </DecisionExplainProvider>
   );
 }

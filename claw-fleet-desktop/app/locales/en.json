@@ -2396,7 +2396,9 @@
     "collapse": "Collapse panel",
     "expand": "Expand panel",
     "collapsed_label": "Decision panel · {{count}} pending",
-    "peek_hint": "Hold Option to peek behind"
+    "peek_hint": "Hold Option to peek behind",
+    "explain_column": "Side questions",
+    "explain_chip": "💬 Asked · {{count}}"
   },
   "session_pending": {
     "title": "Session waiting for input",
