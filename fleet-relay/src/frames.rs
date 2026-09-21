@@ -47,6 +47,12 @@ pub enum InFrame {
         tag: Option<String>,
         #[serde(default)]
         url: Option<String>,
+        /// How many items are waiting for the user once this notification
+        /// lands — rendered as the launcher icon's badge on HarmonyOS. It is
+        /// an absolute count, not an increment, so a phone that missed a
+        /// notification still ends up with the right number.
+        #[serde(default)]
+        badge: Option<u32>,
     },
     /// Client only: register a browser PushSubscription for this channel.
     PushSubscribe { subscription: Value },
@@ -82,6 +88,8 @@ pub enum OutFrame {
         tag: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        badge: Option<u32>,
     },
     /// Custody report for a client `msg` that carried an `ack_id`.
     ///
@@ -118,4 +126,9 @@ pub struct PushPayload<'a> {
     pub tag: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<&'a str>,
+    /// Absolute count of items awaiting the user, for the launcher badge.
+    /// HarmonyOS reads it from the push body; the web service worker may pass
+    /// it to `navigator.setAppBadge`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub badge: Option<u32>,
 }

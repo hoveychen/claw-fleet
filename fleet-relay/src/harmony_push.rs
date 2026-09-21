@@ -113,6 +113,10 @@ const DEFAULT_CATEGORY: &str = "WORK";
 /// channel. Required by `v3/messages:send`; omitting it fails with 80100003.
 const PUSH_TYPE_NOTIFICATION: &str = "0";
 
+/// Largest launcher badge Push Kit accepts in `notification.badge.setNum`
+/// (documented as an integer >= 0 and < 100).
+const MAX_BADGE: u32 = 99;
+
 /// Why a [`HarmonyPush::send`] failed, so the caller can decide whether to
 /// prune the OpenID. The inner `String` is a human-readable detail for logs.
 #[derive(Debug)]
@@ -397,15 +401,27 @@ fn build_app_notification(category: &str, token: &str, payload: &PushPayload<'_>
     if let Some(url) = payload.url {
         click["data"] = serde_json::json!({ "fleetUrl": url });
     }
+    let mut notification = serde_json::json!({
+        "category": category,
+        "title": payload.title,
+        "body": payload.body,
+        "clickAction": click
+    });
+    // `setNum` is the absolute number the launcher shows, and it outranks
+    // `addNum` when both are present — so a phone that slept through a few
+    // notifications still lands on the right count instead of accumulating
+    // one increment per delivered message. The badge is NOT cleared by
+    // opening the app or dismissing the notification (documented Push Kit
+    // behaviour); the shell zeroes it with `setBadgeNumber(0)`.
+    //
+    // Push Kit constrains `setNum` to an integer in 0..=99, so the count is
+    // clamped rather than sent through and rejected as an illegal payload.
+    // 99 pending cards already reads as "a lot".
+    if let Some(badge) = payload.badge {
+        notification["badge"] = serde_json::json!({ "setNum": badge.min(MAX_BADGE) });
+    }
     serde_json::json!({
-        "payload": {
-            "notification": {
-                "category": category,
-                "title": payload.title,
-                "body": payload.body,
-                "clickAction": click
-            }
-        },
+        "payload": { "notification": notification },
         "target": { "token": [token] }
     })
 }
@@ -466,6 +482,7 @@ cHMuOFehtqcSyMaY3z552xNj
             body: "有一个 AI 任务待确认",
             tag: Some("fleet-ask:42"),
             url: Some("/"),
+            badge: None,
         };
         let body = build_service_notification("MSG-1", "APP123", "TPL456", "OPENID-XYZ", &payload);
         assert_eq!(body["msgId"], "MSG-1");
@@ -484,6 +501,7 @@ cHMuOFehtqcSyMaY3z552xNj
             body: "有一个 AI 任务待确认",
             tag: Some("fleet-ask:42"),
             url: Some("/#d=fleet-ask:42"),
+            badge: Some(3),
         };
         let body = build_app_notification("WORK", "TOK-A", &payload);
         assert_eq!(body["payload"]["notification"]["category"], "WORK");
@@ -505,10 +523,41 @@ cHMuOFehtqcSyMaY3z552xNj
         // `url` is Option on the wire; an older desktop may not send one. An
         // empty `data` object is worse than none — the shell would hand the web
         // an empty target and it would look like a failed route.
-        let payload = PushPayload { title: "t", body: "b", tag: None, url: None };
+        let payload = PushPayload { title: "t", body: "b", tag: None, url: None, badge: None };
         let body = build_app_notification("WORK", "TOK-A", &payload);
         assert_eq!(body["payload"]["notification"]["clickAction"]["actionType"], 0);
         assert!(body["payload"]["notification"]["clickAction"]["data"].is_null());
+    }
+
+    #[test]
+    fn app_notification_sends_the_badge_as_an_absolute_count() {
+        // setNum, not addNum: a phone that slept through two notifications must
+        // still land on the true pending count rather than accumulate one
+        // increment per delivered message.
+        let payload =
+            PushPayload { title: "t", body: "b", tag: None, url: None, badge: Some(4) };
+        let body = build_app_notification("WORK", "TOK-A", &payload);
+        assert_eq!(body["payload"]["notification"]["badge"]["setNum"], 4);
+        assert!(body["payload"]["notification"]["badge"]["addNum"].is_null());
+    }
+
+    #[test]
+    fn app_notification_clamps_the_badge_to_push_kits_ceiling() {
+        // Push Kit rejects setNum >= 100 as an illegal payload, which would
+        // lose the whole notification, not just the badge.
+        let payload =
+            PushPayload { title: "t", body: "b", tag: None, url: None, badge: Some(1881) };
+        let body = build_app_notification("WORK", "TOK-A", &payload);
+        assert_eq!(body["payload"]["notification"]["badge"]["setNum"], 99);
+    }
+
+    #[test]
+    fn app_notification_omits_the_badge_when_absent() {
+        // An older desktop sends no count; emitting `setNum: 0` instead would
+        // actively clear a badge the user still has pending work behind.
+        let payload = PushPayload { title: "t", body: "b", tag: None, url: None, badge: None };
+        let body = build_app_notification("WORK", "TOK-A", &payload);
+        assert!(body["payload"]["notification"]["badge"].is_null());
     }
 
     #[test]
