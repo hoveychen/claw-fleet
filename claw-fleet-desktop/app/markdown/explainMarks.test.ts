@@ -135,10 +135,30 @@ describe("remarkExplainMarks: mdast rules", () => {
     ]);
   });
 
-  it("treats a nested [? literally, closing the outer mark at the first ]", () => {
+  it("pairs brackets, so a nested [?…] does not close the outer mark early", () => {
     const marks = collect(parse("[?外层 [?内层] 尾巴]"), "explainMark");
     expect(marks).toHaveLength(1);
-    expect(quoteOf(marks[0])).toBe("外层 [?内层");
+    // Nesting is still unsupported — the inner `[?` is literal text — but the
+    // outer mark now runs to its own `]` instead of being cut at the inner one.
+    expect(quoteOf(marks[0])).toBe("外层 [?内层] 尾巴");
+  });
+
+  it("keeps a bracketed index inside the mark", () => {
+    const marks = collect(parse("见 [?数组 a[0] 的值] 那里"), "explainMark");
+    expect(marks.map(quoteOf)).toEqual(["数组 a[0] 的值"]);
+    expect(collect(parse("见 [?数组 a[0] 的值] 那里"), "text").map((t) => t.value)).toEqual([
+      "见 ",
+      "数组 a[0] 的值",
+      " 那里",
+    ]);
+  });
+
+  it("leaves a mark whose ] is eaten by an unpaired [, and finds the next one", () => {
+    const tree = parse("先 [?数组 a[0 的值] 然后 [?好的] 收尾");
+    expect(collect(tree, "explainMark").map(quoteOf)).toEqual(["好的"]);
+    expect(collect(tree, "text").map((t) => t.value).join("")).toBe(
+      "先 [?数组 a[0 的值] 然后 好的 收尾",
+    );
   });
 
   it("returns an identical tree for text without marks", () => {
