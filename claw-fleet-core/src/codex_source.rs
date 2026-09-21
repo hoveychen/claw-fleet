@@ -7919,9 +7919,18 @@ pub fn start_codex_background_sampler(interval: std::time::Duration) {
 }
 
 /// Blocking implementation of the Codex app-server query.
+///
+/// Owns the child's lifetime so that *every* exit path reaps it. `Child::drop`
+/// deliberately does not wait, and `kill` only delivers the signal — it does
+/// not read the exit status — so a child that is killed and then dropped stays
+/// a zombie for as long as the parent lives. That matters here more than
+/// anywhere else: [`start_codex_background_sampler`] calls this every 10
+/// minutes for the whole life of the process, so one unreaped child per call
+/// meant a long-running `fleet serve` accumulating ~6 zombies an hour
+/// (hundreds after a few days). Keep the kill/wait pair in this wrapper rather
+/// than at each `return` inside the query, so a future early return can't
+/// reintroduce the leak.
 fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageItem, String> {
-    use std::io::{BufRead, BufReader, Write};
-
     let mut child = crate::process_util::command(bin)
         .arg("app-server")
         .stdin(std::process::Stdio::piped())
@@ -7929,6 +7938,24 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to spawn codex app-server: {e}"))?;
+
+    let result = query_codex_rate_limits(&mut child);
+
+    // The app-server has no shutdown request — killing it is the normal exit,
+    // not just the error path. `kill` on an already-exited child is a no-op we
+    // ignore; the `wait` is what actually clears the process table entry.
+    let _ = child.kill();
+    let _ = child.wait();
+
+    result
+}
+
+/// Drive one `account/rateLimits/read` round-trip over the app-server's stdio.
+///
+/// Borrows the child instead of owning it: reaping is the caller's job (see
+/// [`fetch_codex_usage_blocking_impl`]), which is why nothing in here kills.
+fn query_codex_rate_limits(child: &mut std::process::Child) -> Result<CodexUsageItem, String> {
+    use std::io::{BufRead, BufReader, Write};
 
     let mut stdin = child.stdin.take().ok_or("No stdin")?;
     let stdout = child.stdout.take().ok_or("No stdout")?;
@@ -7976,28 +8003,25 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
         }),
     )?;
 
-    // Read lines until we get the response with id=2 (timeout via child kill after 10s).
+    // Read lines until we get the response with id=2, giving up after 10s. The
+    // caller kills and reaps the child on every one of these exits.
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         if std::time::Instant::now() > deadline {
-            let _ = child.kill();
             return Err("Timeout waiting for rate-limit response".to_string());
         }
 
         let mut resp_line = String::new();
         match reader.read_line(&mut resp_line) {
             Ok(0) => {
-                let _ = child.kill();
                 return Err("EOF waiting for rate-limit response".to_string());
             }
             Err(e) => {
-                let _ = child.kill();
                 return Err(format!("read error: {e}"));
             }
             Ok(_) => {
                 if let Ok(msg) = serde_json::from_str::<serde_json::Value>(resp_line.trim()) {
                     if msg.get("id").and_then(|v| v.as_i64()) == Some(2) {
-                        let _ = child.kill();
                         if let Some(err) = msg.get("error") {
                             return Err(format!(
                                 "Codex error: {}",
