@@ -1180,7 +1180,10 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
             // The `/tmp/…` chip is load-bearing for the demo, not decoration:
             // it is the out-of-workspace path case, so clicking it exercises the
             // Files page's external-file preview rather than the tree.
-            text: "I'll create a mock mode that intercepts Tauri IPC calls and returns realistic demo data. I dumped the call graph to `/tmp/mock-ipc-callgraph.md` first; the app source itself is under `src/store.ts`.",
+            // `[?…]` is the agent's own explain mark (shared-ts/explainMarks.ts):
+            // rendered as a clickable annotation, clicking asks the mock
+            // `explain_selection`. Kept here so the mock exercises that surface.
+            text: "I'll create a mock mode that intercepts [?Tauri IPC calls] and returns realistic demo data. I dumped the call graph to `/tmp/mock-ipc-callgraph.md` first; the app source itself is under `src/store.ts`.",
           },
         ],
         stop_reason: "end_turn",
@@ -1235,7 +1238,7 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         content: [
           {
             type: "text",
-            text: "I've identified all the Tauri IPC calls. Now let me create the mock data module with sessions covering:\n\n- **Claude Code**: Main sessions + subagents (explore, plan, general-purpose)\n- **Codex**: Processing session\n- Various statuses: thinking, executing, streaming, processing, waitingInput, delegating, idle\n\nI'll also mock the usage data, memory panel, and account info.",
+            text: "I've identified all the Tauri IPC calls. Now let me create the mock data module with sessions covering:\n\n- **Claude Code**: Main sessions + subagents (explore, plan, general-purpose)\n- **Codex**: Processing session\n- Various statuses: thinking, executing, streaming, processing, [?waitingInput], delegating, idle\n\nI'll also mock the usage data, memory panel, and account info.",
           },
           {
             type: "tool_use",
