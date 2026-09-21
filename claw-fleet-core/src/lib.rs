@@ -19,6 +19,7 @@ pub mod claude_md_lock;
 pub mod claude_source;
 pub mod cmd_ast;
 pub mod codex_guidance;
+pub mod codex_explain;
 pub mod codex_image;
 pub mod codex_launch;
 pub mod codex_source;

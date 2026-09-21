@@ -657,7 +657,7 @@ impl ClaudeStreamFold {
 
 /// Drops the transient `launch_spec` note of a fork identity when the fork is
 /// over, whichever way it ended.
-struct ForgetLaunchSpec(String);
+pub(crate) struct ForgetLaunchSpec(pub(crate) String);
 
 impl Drop for ForgetLaunchSpec {
     fn drop(&mut self) {
@@ -665,8 +665,127 @@ impl Drop for ForgetLaunchSpec {
     }
 }
 
-fn claude_stderr_log() -> Option<PathBuf> {
+/// Removes a file the fork left on disk when the fork is over, whichever way
+/// it ended (codex rollout copies).
+pub(crate) struct RemoveOnDrop(pub(crate) PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn fork_stderr_log() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("session_explain_stderr.log"))
+}
+
+/// The forks' shared stderr sink, `~/.fleet/session_explain_stderr.log`, with
+/// a header line naming the fork. `flags` is the argv minus the prompt: when a
+/// fork misses the cache, the flags are the first thing to compare against the
+/// session's own launch. Falls back to `/dev/null` when the log is unwritable.
+pub(crate) fn fork_stderr_sink(header: &str, flags: &[String]) -> std::process::Stdio {
+    let Some(p) = fork_stderr_log() else {
+        return std::process::Stdio::null();
+    };
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::OpenOptions::new().create(true).append(true).open(&p) {
+        Ok(mut f) => {
+            let _ = writeln!(
+                f,
+                "[{}] {header} flags={}",
+                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                flags.join(" ")
+            );
+            std::process::Stdio::from(f)
+        }
+        Err(_) => std::process::Stdio::null(),
+    }
+}
+
+/// `args` minus the prompt that follows `prompt_flag` (`-p` for Claude) or
+/// everything after `--` (codex), for logging.
+pub(crate) fn flags_without_prompt(args: &[String], prompt_flag: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip = false;
+    for a in args {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if a == "--" {
+            break;
+        }
+        if a == prompt_flag {
+            skip = true;
+            continue;
+        }
+        out.push(a.clone());
+    }
+    out
+}
+
+/// How a fork process ended.
+pub(crate) struct ForkExit {
+    pub code: Option<i32>,
+    /// The watchdog killed it at [`ANSWER_TIMEOUT`].
+    pub timed_out: bool,
+}
+
+/// Spawn `cmd` (its stdout must be piped), hand every stdout line to
+/// `on_line` as it arrives, and SIGKILL the child if it outlives
+/// [`ANSWER_TIMEOUT`]. Shared by every backend that drives a CLI fork.
+pub(crate) fn drive_fork_process(
+    mut cmd: std::process::Command,
+    label: &str,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<ForkExit, String> {
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn {label} fork: {e}"))?;
+    let pid = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("{label} fork: no stdout"))?;
+
+    // Watchdog: `finished` disarms it on a normal exit; `killed` records that
+    // it fired, so the caller can tell a timeout from a crash.
+    let finished = Arc::new(AtomicBool::new(false));
+    let killed = Arc::new(AtomicBool::new(false));
+    {
+        let finished = Arc::clone(&finished);
+        let killed = Arc::clone(&killed);
+        let label = label.to_string();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + ANSWER_TIMEOUT;
+            while Instant::now() < deadline {
+                if finished.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            if !finished.load(Ordering::Relaxed) {
+                crate::log_debug(&format!(
+                    "[session_explain] {label} fork pid {pid} timed out; killing"
+                ));
+                killed.store(true, Ordering::Relaxed);
+                crate::llm_provider::kill_process(pid);
+            }
+        });
+    }
+
+    for line in BufReader::new(stdout).lines() {
+        let Ok(line) = line else { break };
+        on_line(&line);
+    }
+    let status = child.wait();
+    finished.store(true, Ordering::Relaxed);
+    Ok(ForkExit {
+        code: status.ok().and_then(|s| s.code()),
+        timed_out: killed.load(Ordering::Relaxed),
+    })
 }
 
 /// Fork a Claude Code session for one answer. See [`claude_fork_args`] for the
@@ -725,48 +844,16 @@ pub(crate) fn claude_fork_ask(
         crate::chat_workspace::chat_launch_args(&spec.workspace_path),
     );
 
-    let stderr = match claude_stderr_log() {
-        Some(p) => {
-            if let Some(parent) = p.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            match fs::OpenOptions::new().create(true).append(true).open(&p) {
-                Ok(mut f) => {
-                    // Log the argv minus the prompt: when a fork misses the
-                    // cache, the flags are the first thing to compare against
-                    // the session's own launch.
-                    let flags: Vec<&str> = {
-                        let mut v = Vec::new();
-                        let mut skip = false;
-                        for a in &args {
-                            if skip {
-                                skip = false;
-                                continue;
-                            }
-                            if a == "-p" {
-                                skip = true;
-                                continue;
-                            }
-                            v.push(a.as_str());
-                        }
-                        v
-                    };
-                    let _ = writeln!(
-                        f,
-                        "[{}] fork session={} cwd={} entrypoint={} flags={}",
-                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                        spec.session_id,
-                        spec.workspace_path,
-                        crate::session::session_entrypoint(&spec.session_id).unwrap_or_default(),
-                        flags.join(" ")
-                    );
-                    std::process::Stdio::from(f)
-                }
-                Err(_) => std::process::Stdio::null(),
-            }
-        }
-        None => std::process::Stdio::null(),
-    };
+    let entrypoint = crate::session::session_entrypoint(&spec.session_id)
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or_else(|| FORK_ENTRYPOINT_FALLBACK.to_string());
+    let stderr = fork_stderr_sink(
+        &format!(
+            "claude fork session={} cwd={} entrypoint={entrypoint}",
+            spec.session_id, spec.workspace_path
+        ),
+        &flags_without_prompt(&args, "-p"),
+    );
 
     let mut cmd = crate::process_util::command(&claude);
     cmd.args(&args)
@@ -778,57 +865,24 @@ pub(crate) fn claude_fork_ask(
     if let Some(home) = crate::session_launch::spawn_home_dir() {
         cmd.env("HOME", home);
     }
-    let entrypoint = crate::session::session_entrypoint(&spec.session_id)
-        .filter(|e| !e.trim().is_empty())
-        .unwrap_or_else(|| FORK_ENTRYPOINT_FALLBACK.to_string());
     cmd.env("CLAUDE_CODE_ENTRYPOINT", &entrypoint);
 
-    let mut child = cmd.spawn().map_err(|e| format!("spawn claude fork: {e}"))?;
-    let pid = child.id();
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "claude fork: no stdout".to_string())?;
-
-    // Watchdog: SIGKILL the fork if it outlives the ceiling. `finished` lets a
-    // normal exit disarm it.
-    let finished = Arc::new(AtomicBool::new(false));
-    {
-        let finished = Arc::clone(&finished);
-        std::thread::spawn(move || {
-            let deadline = Instant::now() + ANSWER_TIMEOUT;
-            while Instant::now() < deadline {
-                if finished.load(Ordering::Relaxed) {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(250));
-            }
-            if !finished.load(Ordering::Relaxed) {
-                crate::log_debug(&format!(
-                    "[session_explain] fork pid {pid} timed out; killing"
-                ));
-                crate::llm_provider::kill_process(pid);
-            }
-        });
-    }
-
     let mut fold = ClaudeStreamFold::default();
-    for line in BufReader::new(stdout).lines() {
-        let Ok(line) = line else { break };
-        if let Some(delta) = fold.feed(&line) {
+    let exit = drive_fork_process(cmd, "claude", &mut |line| {
+        if let Some(delta) = fold.feed(line) {
             on_delta(&delta);
         }
-    }
-    let status = child.wait();
-    let timed_out = !finished.swap(true, Ordering::Relaxed)
-        && status.as_ref().map(|s| !s.success()).unwrap_or(true)
-        && fold.result_text.is_none()
-        && fold.error_text.is_none();
-    if timed_out && fold.streamed.is_empty() {
-        return Err(format!(
-            "claude fork exited without an answer (status {:?}); see session_explain_stderr.log",
-            status.ok().and_then(|s| s.code())
-        ));
+    })?;
+    let no_answer = fold.result_text.is_none() && fold.error_text.is_none();
+    if no_answer && fold.streamed.is_empty() {
+        return Err(if exit.timed_out {
+            format!("claude fork timed out after {}s", ANSWER_TIMEOUT.as_secs())
+        } else {
+            format!(
+                "claude fork exited without an answer (status {:?}); see session_explain_stderr.log",
+                exit.code
+            )
+        });
     }
     fold.into_outcome()
 }
@@ -1019,10 +1073,13 @@ mod tests {
             return;
         };
         let path = std::env::var("FLEET_EXPLAIN_PROBE_PATH").unwrap_or_default();
+        // Codex/dsh sessions need their workspace named (only Claude's is
+        // resolvable from the transcript).
+        let workspace_path = std::env::var("FLEET_EXPLAIN_PROBE_WORKSPACE").ok();
         let accepted = ask(ExplainRequest {
             session_id: session_id.clone(),
             session_path: path,
-            workspace_path: None,
+            workspace_path,
             quote: "一定是fork，而不是单独一个新会话贴文本进去，这样才能命中input缓存".into(),
             preset: ExplainPreset::Explain,
             question: None,
@@ -1056,6 +1113,32 @@ mod tests {
         assert!(
             final_rec.cache_read_tokens > 0,
             "fork did not hit the prompt cache"
+        );
+    }
+
+    #[test]
+    fn flags_without_prompt_drops_the_prompt_on_both_conventions() {
+        let claude = vec![
+            "--resume".to_string(),
+            "s".into(),
+            "-p".into(),
+            "secret".into(),
+            "--verbose".into(),
+        ];
+        assert_eq!(
+            flags_without_prompt(&claude, "-p"),
+            vec!["--resume", "s", "--verbose"]
+        );
+        let codex = vec![
+            "exec".to_string(),
+            "resume".into(),
+            "f".into(),
+            "--".into(),
+            "secret".into(),
+        ];
+        assert_eq!(
+            flags_without_prompt(&codex, "--"),
+            vec!["exec", "resume", "f"]
         );
     }
 

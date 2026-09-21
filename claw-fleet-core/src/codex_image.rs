@@ -172,8 +172,10 @@ pub fn list_thread_images(id: &str) -> Vec<GeneratedImage> {
 // So the fix is not to harden the image prompt — it is to stop claiming the
 // thread is a session at all.
 
-/// Marker files naming threads Fleet drove purely as an internal image turn.
-/// One empty file per thread id, written after every generate/edit.
+/// Marker files naming threads Fleet drove purely as an internal turn: image
+/// generations (one empty file per thread id, written after every
+/// generate/edit) and `session_explain`'s rollout-copy forks
+/// (`crate::codex_explain`, marked before the copy is written).
 fn internal_thread_dir() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("codex-internal-threads"))
 }

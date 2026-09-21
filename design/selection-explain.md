@@ -46,6 +46,7 @@
 - 真实会话首回合必然调用工具（≥2 个请求），fork 命中第 2 个请求之后写的条目，探针 9 证实。历史数据同样支持：Fleet 会话第二回合 resume 在 1 小时内几乎全部命中首回合（85 例）。
 - 抓包对比过的差异（均已排除）：billing header 的 entrypoint（已镜像）、`--effort`（已镜像）、hook 消息「块数组 vs 字符串」的形态（resume 命中数据证明不影响）。
 - 附带发现：fleet MCP 只对 `launch_spec` 里有记录的会话暴露 12 个控制工具，fork 用 CLI 自铸 id 时工具集与原会话不同（47 vs 14），已用「预生成 fork id → `launch_spec::record` → `--session-id` → 结束后 `forget`」修掉。
+- **codex 后端已真跑（2026-09-21，`codex_explain::codex_fork_ask`，源线程 01a0bbd7 / gpt-5.6-luna，隔天冷缓存）**：8.5 秒回答；源 rollout md5 前后一致、行数不变；副本文件用完即删、`launch_spec` 便签已忘、`state_5.sqlite` 留一行由内部线程标记过滤；用量 input 23247 / cached 3840 / output 96，按表价 $0.024 入账（走 ChatGPT 套餐额度，不真扣美元）。`codex exec --json` 没有文本增量事件，答案在 `item.completed` 时整段落地，codex 这一路**没有逐字流式**。
 - **产品语义**：原会话最近 1 小时内活跃 → 追问几分钱、约 10～20 秒；超过 1 小时 → 首问付一次全量 cache write（60K 上下文约 $1.2，150K 约 $3），之后 1 小时内几分钱。卡片上要把缓存命中率和费用一起显示，让老板看到这笔钱。
 
 要点：

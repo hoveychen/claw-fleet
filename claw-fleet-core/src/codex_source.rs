@@ -141,7 +141,7 @@ fn read_zst_file(path: &Path) -> Result<String, String> {
 }
 
 /// Read a Codex session file (supports both .jsonl.zst and plain .jsonl).
-fn read_session_content(path: &Path) -> Result<String, String> {
+pub(crate) fn read_session_content(path: &Path) -> Result<String, String> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -368,7 +368,7 @@ pub fn codex_fleet_owned_cwd(thread_id: &str) -> Option<String> {
 }
 
 /// Extract the model name from turn_context lines.
-fn extract_model(lines: &[Value]) -> Option<String> {
+pub(crate) fn extract_model(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
         if line.get("type").and_then(|t| t.as_str()) == Some("turn_context") {
             if let Some(model) = line
@@ -393,7 +393,7 @@ fn extract_model(lines: &[Value]) -> Option<String> {
 /// turn_context, but the nested one is the older shape, so read the top-level
 /// first and fall back. Scans from the tail so a mid-session `/effort` change
 /// is what the header shows.
-fn extract_effort(lines: &[Value]) -> Option<String> {
+pub(crate) fn extract_effort(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
         if line.get("type").and_then(|t| t.as_str()) != Some("turn_context") {
             continue;
@@ -2134,6 +2134,19 @@ mod tests {
     /// (always forward slashes). On Windows the two spellings name the same
     /// directory, so the cwd tier of resolve_pid must not require an exact
     /// string match — a `C:\code\proj` process is the `C:/code/proj` session.
+    /// A process whose argv names another thread (a `session_explain` fork
+    /// resuming its rollout copy) must not be taken for this session on the
+    /// cwd tier, even when it is the only codex process in the workspace.
+    #[test]
+    fn resolve_pid_cwd_tier_skips_processes_bound_to_another_thread() {
+        let procs = vec![CodexProcess {
+            pid: 5151,
+            cwd: "/ws".to_string(),
+            thread_id: Some("fork-copy-id".to_string()),
+        }];
+        assert_eq!(resolve_pid(&procs, "source-thread", "/ws"), (None, false));
+    }
+
     #[test]
     fn resolve_pid_cwd_match_tolerates_separator_spelling() {
         let procs = vec![CodexProcess {
@@ -5653,9 +5666,13 @@ fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Optio
             return (Some(pid), true);
         }
     }
-    // Third: cwd match. Precise only if exactly one process matches.
+    // Third: cwd match. Precise only if exactly one process matches. A process
+    // whose argv names *another* thread is that thread's, not this one's —
+    // without this, a `session_explain` fork (`exec resume <copy-id>`) in the
+    // same workspace would light up its source session as running.
     let cwd_matches: Vec<_> = processes
         .iter()
+        .filter(|p| p.thread_id.is_none())
         .filter(|p| crate::session::same_workspace_path(&p.cwd, cwd))
         .collect();
     match cwd_matches.len() {
@@ -7001,6 +7018,14 @@ impl AgentSource for CodexSource {
 
     fn uri_prefix(&self) -> &'static str {
         CODEX_URI_PREFIX
+    }
+
+    fn fork_ask(
+        &self,
+        spec: &crate::agent_source::ForkAskSpec,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<crate::agent_source::ForkAskOutcome, String> {
+        crate::codex_explain::codex_fork_ask(spec, on_delta)
     }
 
     fn is_available(&self) -> bool {
