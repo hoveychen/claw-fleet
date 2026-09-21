@@ -135,10 +135,67 @@ describe("remarkExplainMarks: mdast rules", () => {
     ]);
   });
 
-  it("treats a nested [? literally, closing the outer mark at the first ]", () => {
+  // A mark that spans several inline siblings. Before the run-level scan each
+  // of these leaked its `[?` and `]` into the prose as literal brackets — the
+  // half before the code/bold looked unterminated and the half after it looked
+  // like a stray `]` (what 老板 saw on a decision card on 2026-09-21).
+  it("swallows inline code in the middle of a mark", () => {
+    const tree = parse("这不是理论风险——[?`step-code-retire` 那条计划的 P1 就在敲救这个]：线上没有。");
+    const marks = collect(tree, "explainMark");
+    expect(marks).toHaveLength(1);
+    expect(quoteOf(marks[0])).toBe("step-code-retire 那条计划的 P1 就在敲救这个");
+    // The code node is kept as a node, not flattened into the mark's text.
+    expect(marks[0].children?.map((c) => c.type)).toEqual(["inlineCode", "text"]);
+    expect(collect(tree, "text").map((t) => t.value)).toEqual([
+      "这不是理论风险——",
+      " 那条计划的 P1 就在敲救这个",
+      "：线上没有。",
+    ]);
+  });
+
+  it("swallows bold in the middle of a mark", () => {
+    const marks = collect(parse("风险在 [?**四条结论**全是同一类] 这里。"), "explainMark");
+    expect(marks).toHaveLength(1);
+    expect(quoteOf(marks[0])).toBe("四条结论全是同一类");
+    expect(marks[0].children?.map((c) => c.type)).toEqual(["strong", "text"]);
+  });
+
+  it("leaves a range containing a link literal, rather than nesting clickables", () => {
+    const tree = parse("见 [?这里 [文档](https://a.b) 说了] 。");
+    expect(collect(tree, "explainMark")).toHaveLength(0);
+    expect(collect(tree, "link")).toHaveLength(1);
+    expect(collect(tree, "text").map((t) => t.value).join("")).toBe("见 [?这里 文档 说了] 。");
+  });
+
+  it("marks either side of a swallowed node independently", () => {
+    const marks = collect(parse("先 [?`a` 一] 再 [?二] 完"), "explainMark");
+    expect(marks.map(quoteOf)).toEqual(["a 一", "二"]);
+  });
+
+  it("pairs brackets, so a nested [?…] does not close the outer mark early", () => {
     const marks = collect(parse("[?外层 [?内层] 尾巴]"), "explainMark");
     expect(marks).toHaveLength(1);
-    expect(quoteOf(marks[0])).toBe("外层 [?内层");
+    // Nesting is still unsupported — the inner `[?` is literal text — but the
+    // outer mark now runs to its own `]` instead of being cut at the inner one.
+    expect(quoteOf(marks[0])).toBe("外层 [?内层] 尾巴");
+  });
+
+  it("keeps a bracketed index inside the mark", () => {
+    const marks = collect(parse("见 [?数组 a[0] 的值] 那里"), "explainMark");
+    expect(marks.map(quoteOf)).toEqual(["数组 a[0] 的值"]);
+    expect(collect(parse("见 [?数组 a[0] 的值] 那里"), "text").map((t) => t.value)).toEqual([
+      "见 ",
+      "数组 a[0] 的值",
+      " 那里",
+    ]);
+  });
+
+  it("leaves a mark whose ] is eaten by an unpaired [, and finds the next one", () => {
+    const tree = parse("先 [?数组 a[0 的值] 然后 [?好的] 收尾");
+    expect(collect(tree, "explainMark").map(quoteOf)).toEqual(["好的"]);
+    expect(collect(tree, "text").map((t) => t.value).join("")).toBe(
+      "先 [?数组 a[0 的值] 然后 好的 收尾",
+    );
   });
 
   it("returns an identical tree for text without marks", () => {
@@ -178,6 +235,22 @@ describe("the desktop chain keeps the span", () => {
     const html = render("**加粗** 然后 [?AUROC 只动了 0.004]。");
     expect(html).toContain("<strong>加粗</strong>");
     expect(html).toContain('data-explain-quote="AUROC 只动了 0.004"');
+  });
+
+  it("keeps a swallowed <code> inside the span through sanitize", () => {
+    const html = render("这不是理论风险——[?`step-code-retire` 那条计划的 P1 就在敲救这个]：线上没有。");
+    expect(html).toContain(
+      '<span class="explain-mark" data-explain-quote="step-code-retire 那条计划的 P1 就在敲救这个">' +
+        "<code>step-code-retire</code> 那条计划的 P1 就在敲救这个</span>",
+    );
+    expect(html).not.toContain("[?");
+  });
+
+  it("carries a soft line break inside the mark (remark-breaks is in the chain)", () => {
+    const html = render("风险在 [?四条结论\n全是同一类] 这里。");
+    expect(html).toContain('class="explain-mark"');
+    expect(html).toMatch(/四条结论<br>?\s*\n?全是同一类<\/span>/);
+    expect(html).not.toContain("[?");
   });
 
   it("still strips a raw <span> that fakes the class with a handler", () => {

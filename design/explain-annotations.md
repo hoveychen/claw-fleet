@@ -57,7 +57,9 @@
 | `{?花括号}` / `==高亮==` | 纯文本 | 也安全，但没有 `[?…]` 直观 |
 | `<q data-why="x" class="fleet-q">…</q>` / `<span class data-q>` | rehype-raw 保留标签，**rehype-sanitize 默认 schema 剥掉 class 与所有 data-\*** | 走 HTML 要改两端的 sanitize schema，且 `<mark>`/`<abbr>`/`<u>` 整个标签被删 |
 
-**选 `[?…]`**：老板原话用的就是这个记号，纯 markdown 里退化成「[?原文]」可读，不依赖 rehype-raw，不用碰 sanitize schema。两条护栏写进 guidance：标注后不要紧跟半角 `(`；标注内不要嵌套 `code`/加粗（或由插件在 mdast 层容忍）。
+**选 `[?…]`**：老板原话用的就是这个记号，纯 markdown 里退化成「[?原文]」可读，不依赖 rehype-raw，不用碰 sanitize schema。护栏写进 guidance：标注后不要紧跟半角 `(`；标注内不要包链接（否则可点套可点）。
+
+> **2026-09-21 订正**：上面这一行原本还禁止标注内嵌 `code`/加粗，那只是因为第一版插件逐个 text 节点扫描，夹了行内格式就两头漏出 `[?` 与 `]` 原文（老板在一张决策卡上撞见）。现在 `shared-ts/explainMarks.ts` 改成对一串行内兄弟节点扫描，inlineCode / strong / emphasis / delete / break 会被一起裹进 span，禁令随之取消；同时标注内的方括号按配对处理，`[?数组 a[0] 的值]` 不再被第一个 `]` 截断。唯一仍保持原文的是范围里含链接的情形。
 
 可选扩展（我加的）：`[?文本|追问句]`，竖线后是 agent 预写的问题。GFM 表格单元格里 `|` 会切列，所以表格里禁用扩展形式。
 

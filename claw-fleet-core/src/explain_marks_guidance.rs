@@ -63,7 +63,7 @@ pub fn render_explain_marks_section(user_title: &str, locale: &str) -> String {
 \n\
 - 一条回复最多 5 处，宁缺毋滥；短回复可以一处都没有。\n\
 - 只包一个短语或一句话，不要包整段；不要在代码、表格、标题、链接文本里标。\n\
-- 标注里不要嵌套反引号或加粗；`]` 后面不要紧跟半角 `(`，否则会被当成链接。\n\
+- 标注里可以夹行内代码和加粗，但不要包链接（会变成可点套可点）；`]` 后面不要紧跟半角 `(`，否则会被当成链接。\n\
 - 它不是强调符号：标的是「{title}读到这里大概会想问」的位置，不是重点。",
             title = user_title,
         )
@@ -82,8 +82,8 @@ characters, harmless.\n\
 - At most 5 per reply; fewer is fine and a short reply may have none.\n\
 - Wrap one phrase or one sentence, never a paragraph; never inside code, tables, \
 headings or link text.\n\
-- No backticks or emphasis inside a mark; no ASCII `(` right after the `]`, or \
-markdown reads it as a link.\n\
+- Inline code and emphasis inside a mark are fine, a link is not; no ASCII `(` \
+right after the `]`, or markdown reads it as a link.\n\
 - It is not emphasis: it marks where {title} would probably pause to ask, not \
 what matters most.",
             title = user_title,
@@ -105,8 +105,9 @@ In prose for {title}, wrap a phrase where you made a trade-off without unpacking
 it, used a term {title} may not know, or gave a conclusion without its derivation \
 in `[?` … `]`, e.g. `[?AUROC moved only 0.004]`. Fleet renders it clickable so \
 {title} can ask about that text without typing. At most 5 per reply; one phrase \
-or sentence each; never in code, tables, headings or links; no backticks or \
-emphasis inside; no ASCII `(` right after `]`. It marks where {title} would ask, \
+or sentence each; never in code, tables, headings or links; inline code and \
+emphasis inside are fine; no ASCII `(` right after `]`. It marks where {title} \
+would ask, \
 not what matters most.",
         title = user_title,
     );
@@ -143,7 +144,7 @@ mod tests {
         assert!(s.ends_with(END_MARKER));
         assert!(s.contains("## 正文标注 `[?…]`"));
         assert!(s.contains("最多 5 处"));
-        assert!(s.contains("不要嵌套反引号或加粗"));
+        assert!(s.contains("可以夹行内代码和加粗，但不要包链接"));
         assert!(s.contains("不要紧跟半角 `(`"));
         assert!(s.contains("老板一点"), "user title is interpolated");
         assert!(!s.contains("{title}"), "no unexpanded placeholder");
@@ -154,7 +155,7 @@ mod tests {
         let s = render_explain_marks_section("Boss", "en");
         assert!(s.contains("## Inline marks `[?…]`"));
         assert!(s.contains("At most 5 per reply"));
-        assert!(s.contains("No backticks or emphasis inside a mark"));
+        assert!(s.contains("Inline code and emphasis inside a mark are fine"));
         assert!(s.contains("no ASCII `(` right after the `]`"));
         assert!(s.contains("lets Boss ask"));
         // codex AGENTS.md has a 32 KiB ceiling and was at 31.5 KiB before this
@@ -171,7 +172,7 @@ mod tests {
             "same heading as the full variant"
         );
         assert!(s.contains("At most 5 per reply"));
-        assert!(s.contains("no backticks or emphasis inside"));
+        assert!(s.contains("inline code and emphasis inside are fine"));
         assert!(s.contains("no ASCII `(` right after `]`"));
         assert!(s.contains("never in code, tables, headings or links"));
         // Measured 585 vs 945 bytes on 2026-09-21; the point is the ~360 bytes

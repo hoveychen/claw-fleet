@@ -99,6 +99,23 @@ describe("ExplainMarkSpan in TextBlock", () => {
     expect(sel).toMatchObject({ quote: "acquiescence bias", msgIdx: 7, msgUuid: "am-7" });
   });
 
+  it("selects a mark that wraps inline code, code and all", async () => {
+    const onAsk = vi.fn();
+    const md = "这不是理论风险——[?`step-code-retire` 那条计划的 P1 就在敲救这个]：线上没有。";
+    const el = mount(<Host role="assistant" idx={9} uuid="am-9" body={<TextBlock text={md} />} onAsk={onAsk} />);
+    expect(el.textContent).not.toContain("[?");
+    const mark = el.querySelector<HTMLElement>("[data-explain-quote]")!;
+    expect(mark.querySelector("code")?.textContent).toBe("step-code-retire");
+    act(() => mark.click());
+    expect(window.getSelection()?.toString()).toBe("step-code-retire 那条计划的 P1 就在敲救这个");
+    await nextFrame();
+    act(() => el.querySelector<HTMLButtonElement>("[data-testid='selection-toolbar'] button")!.click());
+    expect(onAsk.mock.calls[0][0]).toMatchObject({
+      quote: "step-code-retire 那条计划的 P1 就在敲救这个",
+      msgIdx: 9,
+    });
+  });
+
   it("reaches the bar from the keyboard too", async () => {
     const onAsk = vi.fn();
     const el = mount(<Host role="assistant" idx={2} uuid={null} body={<TextBlock text={MD} />} onAsk={onAsk} />);
