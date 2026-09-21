@@ -2341,7 +2341,9 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop_workspace" => serve_stop_workspace(params),
         "session_mark" => serve_session_mark(params),
         // Forks a session and spends money; a lost reply must not fork twice.
-        "session_explain_ask" => idempotent_write(method, params, || serve_session_explain_ask(params)),
+        "session_explain_ask" => {
+            idempotent_write(method, params, || serve_session_explain_ask(params))
+        }
         "upload_attachment" => serve_upload_attachment(params),
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
@@ -2568,7 +2570,10 @@ fn serve_session_explain(params: &Value) -> Result<Value, String> {
         .get("sessionId")
         .and_then(Value::as_str)
         .ok_or("missing sessionId")?;
-    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
     let rec = crate::session_explain::get(session_id, id).ok_or("no such explanation")?;
     serde_json::to_value(rec).map_err(|e| e.to_string())
 }
@@ -4498,8 +4503,8 @@ mod tests {
         // an error the phone can show, ask rejects before forking anything.
         let list = serve_request("session_explain_list", &json!({"sessionId": "../nope"})).unwrap();
         assert_eq!(list, json!([]));
-        let err = serve_request("session_explain", &json!({"sessionId": "s", "id": "nope"}))
-            .unwrap_err();
+        let err =
+            serve_request("session_explain", &json!({"sessionId": "s", "id": "nope"})).unwrap_err();
         assert!(err.contains("no such explanation"), "{err}");
         let err = serve_request(
             "session_explain_ask",
@@ -4507,7 +4512,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("nothing selected"), "{err}");
-        assert!(serve_request("session_explain", &json!({})).unwrap_err().contains("sessionId"));
+        assert!(serve_request("session_explain", &json!({}))
+            .unwrap_err()
+            .contains("sessionId"));
     }
 
     #[test]
@@ -6622,7 +6629,8 @@ mod tests {
         assert_eq!(payload["event"], "decision_resolved");
         assert_eq!(payload["id"], "e1");
 
-        let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "guard:g1", 3)).unwrap();
+        let frame: Value =
+            serde_json::from_str(&build_notify_frame("t", "b", "guard:g1", 3)).unwrap();
         assert_eq!(frame["type"], "notify");
         assert_eq!(frame["tag"], "guard:g1");
         // `url` is what every notification-click path routes on: the web service

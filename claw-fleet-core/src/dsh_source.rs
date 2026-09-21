@@ -565,9 +565,7 @@ impl DshSource {
                 .and_then(Value::as_array)?
                 .iter()
                 .find(|item| item.get("sessionId").and_then(Value::as_str) == Some(session_id))
-                .and_then(|item| {
-                    roster_selection(item.get("projections").unwrap_or(&Value::Null))
-                })
+                .and_then(|item| roster_selection(item.get("projections").unwrap_or(&Value::Null)))
         });
         let route = from_roster
             .as_ref()
