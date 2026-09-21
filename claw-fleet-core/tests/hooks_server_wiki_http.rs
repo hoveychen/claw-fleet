@@ -290,6 +290,74 @@ fn live_tail_image_result_uses_transport_trimming_contract() {
     assert!(data.contains("Fleet truncated"));
 }
 
+/// The untailed `/messages` fetch trims too. It did not until 2026-09-21,
+/// which made it the largest egress source on the muvee host — 747 requests
+/// averaging 344KB, 263MB in 45 minutes — for a caller that wanted one
+/// assistant string.
+///
+/// Both halves matter: the tool payload must shrink (that's the bandwidth),
+/// and the assistant text must survive whole (that's `get_guard_context`,
+/// the caller in question, which reads the last assistant text and would
+/// silently start analysing a 1KB preview if trimming reached it).
+#[test]
+fn untailed_messages_trims_tool_output_but_not_assistant_text() {
+    let fx = boot();
+    let path = fx.home.path().join("untailed.jsonl");
+    let long_text = "B".repeat(8_192);
+    let tool_line = json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "toolu_untailed",
+                "content": [{ "type": "text", "text": "A".repeat(8_192) }]
+            }]
+        }
+    });
+    let assistant_line = json!({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{ "type": "text", "text": long_text.clone() }]
+        }
+    });
+    std::fs::write(&path, format!("{tool_line}\n{assistant_line}\n")).unwrap();
+
+    let endpoint = format!(
+        "{}?path={}",
+        routes::MESSAGES,
+        encode(path.to_str().unwrap())
+    );
+    let resp = fx.get(&endpoint);
+    assert_eq!(resp.status, 200);
+    let messages = resp.json();
+
+    let tool = &messages[0];
+    assert_eq!(
+        tool["_fleetTruncated"], true,
+        "untailed fetch shipped full tool output"
+    );
+    let trimmed = tool["message"]["content"][0]["content"][0]["text"]
+        .as_str()
+        .expect("trimmed tool text");
+    assert!(trimmed.len() < 8_192);
+    assert!(trimmed.contains("Fleet truncated"));
+
+    let assistant = &messages[1];
+    assert!(
+        assistant.get("_fleetTruncated").is_none(),
+        "assistant message was flagged as trimmed"
+    );
+    assert_eq!(
+        assistant["message"]["content"][0]["text"]
+            .as_str()
+            .expect("assistant text"),
+        long_text,
+        "assistant text must cross the wire intact"
+    );
+}
+
 // ── /wiki_move ──────────────────────────────────────────────────────────────
 
 #[test]
