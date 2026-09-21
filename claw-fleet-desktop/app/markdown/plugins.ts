@@ -14,6 +14,11 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
 import { remarkCjkAutolinkFix } from "./cjkAutolinkFix";
 import { rehypeCjkIndent } from "./cjkIndent";
+import {
+  EXPLAIN_MARK_CLASS,
+  EXPLAIN_MARK_QUOTE_PROP,
+  remarkExplainMarks,
+} from "../../../shared-ts/explainMarks";
 import "katex/dist/katex.min.css";
 
 /**
@@ -73,7 +78,13 @@ const schema = {
     ...defaultSchema.attributes,
     span: [
       ...(defaultSchema.attributes?.span ?? []),
-      ["className", "math", "math-inline", "math-display"],
+      // `explain-mark` / `dataExplainQuote`: the `[?text]` annotation span
+      // `remarkExplainMarks` (shared-ts/explainMarks.ts) emits. It never goes
+      // through rehype-raw, but sanitize scrubs every element regardless, so
+      // the class and the quote attribute have to be admitted here or the
+      // mark renders as inert text. Pinned in plugins.test.ts.
+      ["className", "math", "math-inline", "math-display", EXPLAIN_MARK_CLASS],
+      EXPLAIN_MARK_QUOTE_PROP,
     ],
     // Presentation attributes are inert, so admitting them globally (rather
     // than per-SVG-tag) keeps the list readable without opening any HTML
@@ -224,6 +235,12 @@ export const safeRemarkPlugins: PluggableList = [
   remarkCjkFriendly,
   remarkMath,
   remarkCjkAutolinkFix,
+  // `[?text]` → `<span class="explain-mark">`, the agent's own "this may need
+  // explaining" annotation (shared-ts/explainMarks.ts). Parsed on every
+  // surface so a mark never leaks as literal brackets; whether the span is
+  // clickable is decided by the surface's `span` component (markdown/
+  // explainMarks.tsx), which needs a session to ask.
+  remarkExplainMarks,
 ];
 
 /**

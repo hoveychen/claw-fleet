@@ -131,4 +131,8 @@ describe("stripTtsDivider / summarizeQuestion", () => {
   it("caps a long divider-less question", () => {
     expect(summarizeQuestion("啊".repeat(200))).toHaveLength(80);
   });
+
+  it("reads an explain mark as its text, without the brackets", () => {
+    expect(summarizeQuestion("修好了 [?缓存命中率] 的显示\n\n---\n\n正文")).toBe("修好了 缓存命中率 的显示");
+  });
 });

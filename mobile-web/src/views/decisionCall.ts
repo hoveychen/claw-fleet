@@ -7,6 +7,7 @@
 // The card body only ever survives in the `tool_use` input; the answers survive
 // in three degrading forms, hence `resolveAnswers`.
 
+import { stripExplainMarks } from "../../../shared-ts/explainMarks";
 import type { FleetAskFormField, FleetAskImage } from "../generated/types";
 
 export interface DecisionOption {
@@ -219,7 +220,9 @@ export function stripTtsDivider(text: string): string {
  *  stands in for it on a transcript the relay didn't slim. */
 export function summarizeQuestion(question: string, max = 80): string {
   const m = question.match(/^\s*---\s*$/m);
-  const head = (m && m.index !== undefined ? question.slice(0, m.index) : question)
+  // `[?text]` explain marks are a rendering affordance; a one-line gist
+  // shows the text without the brackets.
+  const head = stripExplainMarks(m && m.index !== undefined ? question.slice(0, m.index) : question)
     .replace(/\s+/g, " ")
     .trim();
   return head.length > max ? `${head.slice(0, max - 1)}…` : head;

@@ -22,6 +22,10 @@ describe("normalizeForSpeech", () => {
       expect(normalizeForSpeech("要不要**重试**一次？")).toBe("要不要重试一次？");
     });
 
+    it("speaks an explain mark as its text, never the brackets", () => {
+      expect(normalizeForSpeech("我把它归因为 [?acquiescence bias]。")).toBe("我把它归因为 acquiescence bias。");
+    });
+
     it("strips code spans, headings and list bullets", () => {
       expect(normalizeForSpeech("## 已修复")).toBe("已修复");
       expect(normalizeForSpeech("`重试`")).toBe("重试");
