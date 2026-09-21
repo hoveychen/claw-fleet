@@ -99,6 +99,13 @@
   align-self: stretch;
 }
 
+/* The side-question column: one answer card at a time, so it gets less of the
+   panel than the docs viewer / inline transcript the column was sized for. */
+.detail_column_narrow {
+  flex: 1 1 420px;
+  min-width: 320px;
+}
+
 .main_column {
   display: flex;
   flex-direction: column;

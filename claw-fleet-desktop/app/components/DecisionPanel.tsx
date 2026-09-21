@@ -2269,16 +2269,20 @@ export function DecisionPanel() {
   // Detail column adds a fixed slab to the panel's overall width; clamp the
   // combined size to the viewport so the panel never escapes the screen.
   const DETAIL_COLUMN_WIDTH = 640;
+  // The side-question column holds one narrow answer card at a time, so it does
+  // not need the width the docs viewer and the inline transcript were sized for.
+  const EXPLAIN_COLUMN_WIDTH = 420;
+  const sideColumnWidth = explainColumnActive ? EXPLAIN_COLUMN_WIDTH : DETAIL_COLUMN_WIDTH;
   const vpClamp = viewportWidth - 24;
   // When the window is too narrow to seat the card and the detail column side by
   // side without dropping below their min-widths (detail 420 + card 380 = 800),
   // the two flex columns overflow the clamped panel and the card gets shoved
   // off-screen. Below this threshold, stack them vertically instead (card on
   // top, detail below) so everything stays inside the panel.
-  const STACK_DETAIL_BELOW = 900;
-  const stackDetail = sideColumnActive && vpClamp < STACK_DETAIL_BELOW;
+  const CARD_MIN_WIDTH = 380;
+  const stackDetail = sideColumnActive && vpClamp < sideColumnWidth + CARD_MIN_WIDTH;
   const targetTotalWidth = sideColumnActive && !stackDetail
-    ? DETAIL_COLUMN_WIDTH + currentWidth
+    ? sideColumnWidth + currentWidth
     : currentWidth;
   const panelWidth = Math.min(targetTotalWidth, vpClamp);
 
@@ -2289,7 +2293,7 @@ export function DecisionPanel() {
       style={{ width: `${panelWidth}px` }}
     >
       {sideColumnActive && (
-        <div className={styles.detail_column}>
+        <div className={`${styles.detail_column} ${explainColumnActive ? styles.detail_column_narrow : ""}`}>
           {explainColumnActive ? (
             <DecisionExplainColumn explain={explain} />
           ) : docsColumnActive ? (
