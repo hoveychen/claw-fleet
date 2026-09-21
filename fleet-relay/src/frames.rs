@@ -50,6 +50,17 @@ pub enum InFrame {
     },
     /// Client only: register a browser PushSubscription for this channel.
     PushSubscribe { subscription: Value },
+    /// Liveness probe from either role, answered with `pong` on the same
+    /// socket. A browser cannot send protocol-level pings (the WebSocket API
+    /// exposes no such call), so a phone has no way to tell a working link from
+    /// a half-open one that still reports `readyState === OPEN`. This gives it
+    /// one: no `pong` within its budget means the socket is dead regardless of
+    /// what the browser claims. `id` is echoed back so the sender can match a
+    /// reply to the probe it sent rather than to a stale one.
+    Ping {
+        #[serde(default)]
+        id: Option<String>,
+    },
     /// Client only: remove a previously registered subscription for this
     /// channel. The payload identifies the sub the same way `PushSubscribe`
     /// does — a harmony sub by `platform:"harmony"` plus either a device
@@ -97,6 +108,13 @@ pub enum OutFrame {
     Presence { clients: usize },
     /// Sent to clients when agent connectivity changes.
     AgentStatus { online: bool },
+    /// Answer to an `InFrame::Ping`, echoing its `id`. Goes straight back down
+    /// the socket it arrived on — it proves *this* connection round-trips, so
+    /// forwarding it to the opposite role would prove nothing.
+    Pong {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
     Error { message: String },
 }
 
@@ -118,4 +136,34 @@ pub struct PushPayload<'a> {
     pub tag: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<&'a str>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The phone builds these frames by hand in TypeScript
+    // (`mobile-web/src/relay.ts`), so the wire shape is a contract, not an
+    // implementation detail: a rename here silently strands the phone's
+    // liveness probe and it would go back to trusting a half-open socket.
+
+    #[test]
+    fn ping_frame_parses_with_and_without_id() {
+        let with = serde_json::from_str::<InFrame>(r#"{"type":"ping","id":"p7"}"#).unwrap();
+        assert!(matches!(with, InFrame::Ping { id: Some(ref s) } if s == "p7"));
+        let without = serde_json::from_str::<InFrame>(r#"{"type":"ping"}"#).unwrap();
+        assert!(matches!(without, InFrame::Ping { id: None }));
+    }
+
+    #[test]
+    fn pong_serializes_with_echoed_id() {
+        let s = serde_json::to_string(&OutFrame::Pong { id: Some("p7".into()) }).unwrap();
+        assert_eq!(s, r#"{"type":"pong","id":"p7"}"#);
+    }
+
+    #[test]
+    fn pong_omits_absent_id() {
+        let s = serde_json::to_string(&OutFrame::Pong { id: None }).unwrap();
+        assert_eq!(s, r#"{"type":"pong"}"#, "an absent id must not serialize as null");
+    }
 }

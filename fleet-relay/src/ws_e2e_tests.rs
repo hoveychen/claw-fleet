@@ -421,3 +421,41 @@ async fn oversized_message_is_rejected_not_forwarded() {
         "the oversized frame should close the sender's connection, got {after:?}"
     );
 }
+
+#[tokio::test]
+async fn ping_is_answered_with_pong_on_the_same_socket() {
+    // The phone's only way to distinguish a working link from a half-open
+    // socket that still reports `readyState === OPEN`. If this round trip
+    // breaks, the phone silently goes back to trusting a dead connection.
+    let url = spawn_server().await;
+    let (mut agent, _) = connect(&url, "agent", SECRET).await;
+    let (mut client, _) = connect(&url, "client", SECRET).await;
+    let _presence = recv_json(&mut agent).await;
+
+    client
+        .send(Message::Text(json!({"type": "ping", "id": "p1"}).to_string().into()))
+        .await
+        .unwrap();
+
+    let pong = recv_json(&mut client).await;
+    assert_eq!(pong["type"], "pong");
+    assert_eq!(pong["id"], "p1", "the probe's id must be echoed so a stale pong can't match");
+
+    // A ping is a property of one connection, so it must not reach the peer.
+    let quiet = tokio::time::timeout(std::time::Duration::from_millis(300), agent.next()).await;
+    assert!(quiet.is_err(), "a liveness probe must not be forwarded to the opposite role");
+}
+
+#[tokio::test]
+async fn agent_ping_is_also_answered() {
+    // Both roles share the arm; an agent that wants to probe its own link
+    // should not have to fake being a client.
+    let url = spawn_server().await;
+    let (mut agent, _) = connect(&url, "agent", SECRET).await;
+
+    agent.send(Message::Text(json!({"type": "ping"}).to_string().into())).await.unwrap();
+
+    let pong = recv_json(&mut agent).await;
+    assert_eq!(pong["type"], "pong");
+    assert!(pong.get("id").is_none(), "an idless probe gets an idless pong, not null");
+}
