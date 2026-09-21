@@ -1349,7 +1349,8 @@ mod tests {
             "session-a",
             Arc::new(move |v: &Value| sink.lock().unwrap().push(v.clone())),
         );
-        let item = json!({ "type": "event", "event": { "type": "turn/start", "seq": 1, "data": {} } });
+        let item =
+            json!({ "type": "event", "event": { "type": "turn/start", "seq": 1, "data": {} } });
         live.offer_raw("session-a", &item);
         live.offer_raw("session-b", &json!({ "type": "event" }));
         assert_eq!(seen.lock().unwrap().as_slice(), &[item.clone()]);

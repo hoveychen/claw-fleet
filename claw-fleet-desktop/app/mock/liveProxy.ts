@@ -878,6 +878,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { session_id: q(a.sessionId) },
   }),
 
+  dismiss_explanation: (a) => ({
+    method: "POST",
+    path: "/session_explain_dismiss",
+    body: { sessionId: a.sessionId, id: a.id, dismissed: a.dismissed },
+  }),
+
   list_sessions: () => ({ method: "GET", path: "/sessions" }),
 
   list_skill_files: (a) => ({

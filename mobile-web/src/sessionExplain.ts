@@ -64,5 +64,7 @@ export function refusedExplanation(req: ExplainRequest, error: unknown): Explain
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     durationMs: 0,
+    // Never reached the store, so there is no dismissal to read back.
+    dismissed: false,
   };
 }

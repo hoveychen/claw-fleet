@@ -166,7 +166,10 @@ mod tests {
     fn compact_variant_keeps_every_rule_in_half_the_bytes() {
         let full = render_explain_marks_section("Boss", "en");
         let s = render_explain_marks_section_compact("Boss");
-        assert!(s.contains("## Inline marks `[?…]`"), "same heading as the full variant");
+        assert!(
+            s.contains("## Inline marks `[?…]`"),
+            "same heading as the full variant"
+        );
         assert!(s.contains("At most 5 per reply"));
         assert!(s.contains("no backticks or emphasis inside"));
         assert!(s.contains("no ASCII `(` right after `]`"));
@@ -174,7 +177,12 @@ mod tests {
         // Measured 585 vs 945 bytes on 2026-09-21; the point is the ~360 bytes
         // of AGENTS.md headroom they buy, so guard the ratio, not the exact size.
         assert!(s.len() < 640, "compact section is {} bytes", s.len());
-        assert!(s.len() * 3 < full.len() * 2, "compact ({}) vs full ({})", s.len(), full.len());
+        assert!(
+            s.len() * 3 < full.len() * 2,
+            "compact ({}) vs full ({})",
+            s.len(),
+            full.len()
+        );
     }
 
     #[test]
@@ -183,6 +191,10 @@ mod tests {
         let file = format!("# header\n\nprose before\n\n{section}\n\n## Next section\nmore");
         assert_eq!(extract_section(&file).as_deref(), Some(section.as_str()));
         assert_eq!(extract_section("no sentinels here"), None);
-        assert_eq!(extract_section(BEGIN_MARKER), None, "unterminated block is not a section");
+        assert_eq!(
+            extract_section(BEGIN_MARKER),
+            None,
+            "unterminated block is not a section"
+        );
     }
 }

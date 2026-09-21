@@ -255,6 +255,7 @@ pub const SCRATCHPAD_FILE: &str = "/scratchpad_file";
 pub const SEARCH: &str = "/search";
 pub const SESSION_DECISIONS: &str = "/session_decisions";
 pub const SESSION_EXPLAIN: &str = "/session_explain";
+pub const SESSION_EXPLAIN_DISMISS: &str = "/session_explain_dismiss";
 pub const SESSION_EXPLAINS: &str = "/session_explains";
 pub const SESSION_MARK: &str = "/session_mark";
 pub const SESSION_NOTE: &str = "/session_note";

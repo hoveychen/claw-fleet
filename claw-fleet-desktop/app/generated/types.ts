@@ -155,7 +155,8 @@ export type ExplainRecord = { id: string, sessionId: string,
 source: string, createdMs: number, updatedMs: number, preset: ExplainPreset, quote: string, 
 question: string, anchor?: ExplainAnchor | null, thread?: Array<string>, status: ExplainStatus, 
 text: string, error?: string | null, model?: string | null, inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheCreationTokens: number, costUsd?: number | null, durationMs: number, 
-forkSessionId?: string | null, };
+forkSessionId?: string | null, 
+dismissed: boolean, };
 
 export type WorkflowAgentStatus = "running" | "done";
 

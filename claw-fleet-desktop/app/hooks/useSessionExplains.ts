@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  dismissExplanation,
   explainSelection,
   getExplanation,
   listExplanations,
@@ -18,9 +19,11 @@ import {
  * app was last closed. `ask` submits a new one and starts polling it; the
  * caller sees the `running` record at once and its text grow from there.
  *
- * `dismiss` only hides a card for this view: there is no delete on the store
- * (the records are the reader's notes on the run, "放着" was the ask), so a
- * dismissed question is back the next time the session is opened.
+ * `dismiss` hides a card for good: the flag is written to the store, so the ✕
+ * survives a session switch and an app restart (it used to live in this hook's
+ * state alone, which meant every switch handed the card straight back). The
+ * record itself is never deleted — they are the reader's notes on the run,
+ * "放着" was the ask — so `restore` can always bring one back.
  *
  * `all` is the unfiltered list — what the library facet lists, so a question
  * dismissed from the rail still has somewhere to be found and `restore` can
@@ -84,6 +87,8 @@ export function useSessionExplains(sessionId: string | undefined): {
       .then((list) => {
         if (!alive || current.current !== sessionId) return;
         setRecords([...list].sort((a, b) => a.createdMs - b.createdMs || a.id.localeCompare(b.id)));
+        // The store carries the dismissals, so the rail opens where it was left.
+        setHidden(new Set(list.filter((r) => r.dismissed).map((r) => r.id)));
         for (const r of list) if (r.status === "running") track(sessionId, r.id);
       })
       .catch((e) => console.error("list_explanations failed:", e));
@@ -122,6 +127,8 @@ export function useSessionExplains(sessionId: string | undefined): {
           cacheReadTokens: 0,
           cacheCreationTokens: 0,
           durationMs: 0,
+          // Never reached the store, so there is no dismissal to read back.
+          dismissed: false,
         };
       }
       upsert(rec);
@@ -131,23 +138,46 @@ export function useSessionExplains(sessionId: string | undefined): {
     [upsert, track],
   );
 
-  const dismiss = useCallback((id: string) => {
-    setHidden((prev) => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
-  }, []);
+  /* The card leaves (or returns to) the rail on the click; the store catches up
+     behind it. A refused write is logged rather than bounced back into the UI:
+     an ask that never reached the store (a `local-` error card) has nothing to
+     persist, and the card is still where the reader put it for this view. */
+  const persistDismissed = useCallback(
+    (id: string, dismissed: boolean) => {
+      const sid = current.current;
+      if (!sid || id.startsWith("local-")) return;
+      dismissExplanation(sid, id, dismissed).catch((e) =>
+        console.error("dismiss_explanation failed:", e),
+      );
+    },
+    [],
+  );
 
-  const restore = useCallback((id: string) => {
-    setHidden((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
+  const dismiss = useCallback(
+    (id: string) => {
+      persistDismissed(id, true);
+      setHidden((prev) => {
+        if (prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+    },
+    [persistDismissed],
+  );
+
+  const restore = useCallback(
+    (id: string) => {
+      persistDismissed(id, false);
+      setHidden((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    },
+    [persistDismissed],
+  );
 
   const explains = useMemo(() => records.filter((r) => !hidden.has(r.id)), [records, hidden]);
   return { explains, all: records, hidden, ask, dismiss, restore };

@@ -1030,7 +1030,10 @@ mod tests {
         assert!(g.contains(crate::explain_marks_guidance::BEGIN_MARKER));
         assert!(g.contains("## Inline marks `[?…]`"));
         assert!(g.contains("At most 5 per reply"));
-        assert!(g.contains("so Boss can ask"), "compact variant, title interpolated");
+        assert!(
+            g.contains("so Boss can ask"),
+            "compact variant, title interpolated"
+        );
     }
 
     #[test]

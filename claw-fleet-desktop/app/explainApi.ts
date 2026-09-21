@@ -28,3 +28,13 @@ export function getExplanation(sessionId: string, id: string): Promise<ExplainRe
 export function listExplanations(sessionId: string): Promise<ExplainRecord[]> {
   return invoke<ExplainRecord[]>("list_explanations", { sessionId });
 }
+
+/** Take a card out of the rail, or hand it back. Persisted, so the ✕ survives
+ *  a session switch and an app restart. */
+export function dismissExplanation(
+  sessionId: string,
+  id: string,
+  dismissed: boolean,
+): Promise<void> {
+  return invoke<void>("dismiss_explanation", { sessionId, id, dismissed });
+}

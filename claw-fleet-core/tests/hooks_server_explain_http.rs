@@ -148,6 +148,7 @@ impl Fixture {
             cost_usd: Some(0.01),
             duration_ms: 1234,
             fork_session_id: None,
+            dismissed: false,
         };
         let dir = self
             .home
@@ -285,4 +286,50 @@ fn unknown_record_is_a_404_and_bad_asks_are_400() {
 
     // Nothing was written by any of the rejected calls.
     assert!(!fx.home.path().join(".fleet").join("explain").exists());
+}
+
+/// The dismissal a reader presses ✕ for has to be readable back by every
+/// client, which is what makes the card stay gone across a session switch.
+#[test]
+fn dismissal_rides_back_on_the_records_the_clients_read() {
+    let fx = boot();
+    fx.seed("sess-1", "rec-a", "first answer");
+    fx.seed("sess-1", "rec-b", "second answer");
+
+    let listed = fx.get(&format!("{}?session_id=sess-1", routes::SESSION_EXPLAINS));
+    assert_eq!(listed.json()[0]["dismissed"], json!(false));
+
+    let ok = fx.post(
+        routes::SESSION_EXPLAIN_DISMISS,
+        &json!({"sessionId": "sess-1", "id": "rec-a", "dismissed": true}),
+    );
+    assert_eq!(ok.status, 200);
+
+    let listed = fx.get(&format!("{}?session_id=sess-1", routes::SESSION_EXPLAINS));
+    let rows = listed.json();
+    assert_eq!(rows.as_array().unwrap().len(), 2, "the record itself stays");
+    assert_eq!(rows[0]["id"], json!("rec-a"));
+    assert_eq!(rows[0]["dismissed"], json!(true));
+    assert_eq!(rows[1]["dismissed"], json!(false));
+
+    let one = fx.get(&format!(
+        "{}?session_id=sess-1&id=rec-a",
+        routes::SESSION_EXPLAIN
+    ));
+    assert_eq!(one.json()["dismissed"], json!(true));
+
+    // Handing it back is the same call with the flag flipped.
+    let back = fx.post(
+        routes::SESSION_EXPLAIN_DISMISS,
+        &json!({"sessionId": "sess-1", "id": "rec-a", "dismissed": false}),
+    );
+    assert_eq!(back.status, 200);
+    let one = fx.get(&format!(
+        "{}?session_id=sess-1&id=rec-a",
+        routes::SESSION_EXPLAIN
+    ));
+    assert_eq!(one.json()["dismissed"], json!(false));
+
+    let garbage = fx.post(routes::SESSION_EXPLAIN_DISMISS, &json!({"nope": true}));
+    assert_eq!(garbage.status, 400);
 }

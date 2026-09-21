@@ -170,6 +170,15 @@ pub struct ExplainRecord {
     /// The fork's persisted identity when the source had to leave one on disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_session_id: Option<String>,
+    /// Whether the reader took this card out of the rail.
+    ///
+    /// Stamped onto the record when it is read, never trusted from the record
+    /// file: the flag is kept in a per-session sidecar (see
+    /// [`set_dismissed`]) precisely so dismissing a *running* question cannot
+    /// be clobbered by the worker that is still streaming the answer into the
+    /// record it holds in memory.
+    #[serde(default)]
+    pub dismissed: bool,
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
@@ -205,9 +214,78 @@ fn write_record(rec: &ExplainRecord) -> Result<(), String> {
     write_record_in(&root, rec)
 }
 
+/// Sidecar holding the ids the reader dismissed in one session.
+///
+/// It sits beside the records rather than inside them because a record is
+/// rewritten by the worker streaming its answer, from a copy held in memory
+/// since before the ✕ was pressed — writing the flag into the record would let
+/// the next streaming write undo it. The sidecar is only ever touched by the
+/// dismiss path, so the two writers never race over the same bytes.
+const DISMISSED_FILE: &str = "dismissed.json";
+
+fn dismissed_path_in(root: &Path, session_id: &str) -> Option<PathBuf> {
+    if !safe_component(session_id) {
+        return None;
+    }
+    Some(root.join(session_id).join(DISMISSED_FILE))
+}
+
+fn read_dismissed_in(root: &Path, session_id: &str) -> std::collections::HashSet<String> {
+    let Some(path) = dismissed_path_in(root, session_id) else {
+        return std::collections::HashSet::new();
+    };
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .map(std::collections::HashSet::from_iter)
+        .unwrap_or_default()
+}
+
+/// Hide (or un-hide) one side question for every client that reads it back.
+///
+/// Dismissing used to be a `useState` in the desktop rail, so a ✕ lasted until
+/// the next session switch re-read the store and the card came straight back.
+pub fn set_dismissed_in(
+    root: &Path,
+    session_id: &str,
+    id: &str,
+    dismissed: bool,
+) -> Result<(), String> {
+    if !safe_component(id) {
+        return Err("invalid record id".to_string());
+    }
+    let path =
+        dismissed_path_in(root, session_id).ok_or_else(|| "invalid session id".to_string())?;
+    let mut ids = read_dismissed_in(root, session_id);
+    let changed = if dismissed {
+        ids.insert(id.to_string())
+    } else {
+        ids.remove(id)
+    };
+    if !changed {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    let mut sorted: Vec<&String> = ids.iter().collect();
+    sorted.sort();
+    let bytes = serde_json::to_vec_pretty(&sorted).map_err(|e| e.to_string())?;
+    crate::atomic_json::write_atomic(&path, &bytes)
+        .map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+/// [`set_dismissed_in`] against the real store.
+pub fn set_dismissed(session_id: &str, id: &str, dismissed: bool) -> Result<(), String> {
+    let root = explain_dir().ok_or_else(|| "no home dir".to_string())?;
+    set_dismissed_in(&root, session_id, id, dismissed)
+}
+
 pub fn get_in(root: &Path, session_id: &str, id: &str) -> Option<ExplainRecord> {
     let path = record_path_in(root, session_id, id)?;
-    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+    let mut rec: ExplainRecord = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    rec.dismissed = read_dismissed_in(root, session_id).contains(id);
+    Some(rec)
 }
 
 /// One record, or `None` when it does not exist (or the ids are malformed).
@@ -222,10 +300,19 @@ pub fn list_in(root: &Path, session_id: &str) -> Vec<ExplainRecord> {
     let Ok(entries) = fs::read_dir(root.join(session_id)) else {
         return Vec::new();
     };
+    let dismissed = read_dismissed_in(root, session_id);
     let mut out: Vec<ExplainRecord> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-        .filter_map(|e| serde_json::from_str(&fs::read_to_string(e.path()).ok()?).ok())
+        // The dismissal sidecar shares the directory and the extension.
+        .filter(|e| e.file_name() != std::ffi::OsStr::new(DISMISSED_FILE))
+        .filter_map(|e| {
+            serde_json::from_str::<ExplainRecord>(&fs::read_to_string(e.path()).ok()?).ok()
+        })
+        .map(|mut r| {
+            r.dismissed = dismissed.contains(&r.id);
+            r
+        })
         .collect();
     out.sort_by_key(|r| (r.created_ms, r.id.clone()));
     out
@@ -418,6 +505,7 @@ pub fn ask(req: ExplainRequest) -> Result<ExplainRecord, String> {
         cost_usd: None,
         duration_ms: 0,
         fork_session_id: None,
+        dismissed: false,
     };
     write_record(&rec)?;
 
@@ -961,7 +1049,45 @@ mod tests {
             cost_usd: None,
             duration_ms: 0,
             fork_session_id: None,
+            dismissed: false,
         }
+    }
+
+    #[test]
+    fn dismissal_survives_a_re_read_and_a_streaming_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        write_record_in(dir.path(), &rec("a", "s1", 10)).unwrap();
+        write_record_in(dir.path(), &rec("b", "s1", 20)).unwrap();
+        assert!(!get_in(dir.path(), "s1", "a").unwrap().dismissed);
+
+        set_dismissed_in(dir.path(), "s1", "a", true).unwrap();
+        assert!(get_in(dir.path(), "s1", "a").unwrap().dismissed);
+        assert!(!get_in(dir.path(), "s1", "b").unwrap().dismissed);
+
+        // A worker still streaming an answer rewrites the record from the copy
+        // it has held since before the ✕ — the flag must not ride on that copy.
+        write_record_in(dir.path(), &rec("a", "s1", 10)).unwrap();
+        let listed = list_in(dir.path(), "s1");
+        assert_eq!(
+            listed.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert!(listed[0].dismissed);
+        assert!(!listed[1].dismissed);
+
+        set_dismissed_in(dir.path(), "s1", "a", false).unwrap();
+        assert!(!get_in(dir.path(), "s1", "a").unwrap().dismissed);
+    }
+
+    #[test]
+    fn dismissal_sidecar_is_not_listed_as_a_record() {
+        let dir = tempfile::tempdir().unwrap();
+        write_record_in(dir.path(), &rec("a", "s1", 10)).unwrap();
+        set_dismissed_in(dir.path(), "s1", "a", true).unwrap();
+        assert_eq!(list_in(dir.path(), "s1").len(), 1);
+        assert!(dir.path().join("s1").join(DISMISSED_FILE).exists());
+        assert!(set_dismissed_in(dir.path(), "../x", "a", true).is_err());
+        assert!(set_dismissed_in(dir.path(), "s1", "a/b", true).is_err());
     }
 
     #[test]

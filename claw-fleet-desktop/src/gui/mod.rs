@@ -1805,6 +1805,7 @@ pub fn run() {
             explain_selection,
             get_explanation,
             list_explanations,
+            dismiss_explanation,
             list_skills,
             skill_sync_inventory,
             skill_sync_apply,

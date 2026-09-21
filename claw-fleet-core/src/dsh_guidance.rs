@@ -468,8 +468,7 @@ mode, present the plan through `exit_plan_mode`, not through \
         ix_lang = ix_lang,
         // The dsh block is English-only (locale only picks `ix_lang`), so the
         // shared section is rendered in English too.
-        explain_marks =
-            crate::explain_marks_guidance::render_explain_marks_section(&title, "en"),
+        explain_marks = crate::explain_marks_guidance::render_explain_marks_section(&title, "en"),
     )
 }
 

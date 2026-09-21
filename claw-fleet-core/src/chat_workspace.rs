@@ -409,7 +409,10 @@ mod tests {
                 let body =
                     std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();
                 assert!(body.contains("纯聊天工作区"), "still the chat brief");
-                assert!(body.contains("## 正文标注 `[?…]`"), "section heading appended");
+                assert!(
+                    body.contains("## 正文标注 `[?…]`"),
+                    "section heading appended"
+                );
                 assert!(body.contains("最多 5 处"));
                 assert!(
                     !body.contains("# Fleet 交互模式"),

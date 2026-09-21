@@ -431,7 +431,10 @@ fn artifact_blob_revalidates_and_keeps_one_tag_across_ranges() {
         Some(tag.as_str()),
         "a ranged read reported a different tag than the whole file"
     );
-    let ranged_hit = fx.get_with(&endpoint, &[("Range", "bytes=0-99"), ("If-None-Match", &tag)]);
+    let ranged_hit = fx.get_with(
+        &endpoint,
+        &[("Range", "bytes=0-99"), ("If-None-Match", &tag)],
+    );
     assert_eq!(
         ranged_hit.status, 304,
         "Range must not override If-None-Match"
