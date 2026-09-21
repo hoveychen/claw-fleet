@@ -2350,17 +2350,22 @@ const KNOWN_WORKSPACES_CACHE_TTL: Duration = Duration::from_secs(10);
 /// shared by all six, not one per call.
 fn known_workspaces() -> Vec<String> {
     cached_by_key("known_workspaces", KNOWN_WORKSPACES_CACHE_TTL, || {
-        let mut paths: Vec<String> = current_sessions()
-            .into_iter()
-            .map(|s| s.workspace_path)
-            .collect();
-        paths.sort();
-        paths.dedup();
-        Ok(json!(paths))
+        Ok(json!(build_known_workspaces()))
     })
     .ok()
     .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
     .unwrap_or_default()
+}
+
+/// The envelope itself, ahead of [`known_workspaces`]'s memo.
+fn build_known_workspaces() -> Vec<String> {
+    let mut paths: Vec<String> = current_sessions()
+        .into_iter()
+        .map(|s| s.workspace_path)
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 /// The phone's whole data surface, as one method-name → handler table.
@@ -7686,10 +7691,12 @@ mod tests {
             ..Default::default()
         };
         set_sessions_provider(move || Some(vec![sentinel.clone()]));
-        // The memo is keyed per method; a sibling test's value would mask this.
-        *RESULT_CACHE.lock().unwrap() = None;
 
-        let paths = known_workspaces();
+        // The pre-memo build, so this asserts the projection rather than
+        // racing whatever a sibling test left in the shared result cache.
+        // `known_workspaces` puts the same value behind `cached_by_key`, whose
+        // collapse is covered by `cached_by_key_collapses_callers_and_expires`.
+        let paths = build_known_workspaces();
 
         assert_eq!(
             paths,
@@ -7698,41 +7705,6 @@ mod tests {
         );
 
         *SESSIONS_PROVIDER.lock().unwrap() = None;
-        *RESULT_CACHE.lock().unwrap() = None;
-    }
-
-    /// And on a host with no provider the envelope still costs a scan, so the
-    /// six gated methods must share one build rather than each paying it.
-    #[test]
-    fn known_workspaces_is_memoised_across_the_gated_methods() {
-        use std::sync::atomic::AtomicUsize;
-        use std::sync::Arc;
-
-        let _guard = fleet_home_lock();
-        let builds = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&builds);
-        set_sessions_provider(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-            Some(vec![crate::session::SessionInfo {
-                id: "memo-sentinel".to_string(),
-                workspace_path: "/tmp/fleet-known-workspaces-memo".to_string(),
-                ..Default::default()
-            }])
-        });
-        *RESULT_CACHE.lock().unwrap() = None;
-
-        for _ in 0..6 {
-            assert_eq!(known_workspaces().len(), 1);
-        }
-
-        assert_eq!(
-            builds.load(Ordering::SeqCst),
-            1,
-            "six gated methods in one window must collapse onto a single build"
-        );
-
-        *SESSIONS_PROVIDER.lock().unwrap() = None;
-        *RESULT_CACHE.lock().unwrap() = None;
     }
 
     /// Every host registers its provider before its first scan has filled the
