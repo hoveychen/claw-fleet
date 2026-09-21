@@ -1996,6 +1996,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "stop"
             | "stop_workspace"
             | "session_mark"
+            | "session_explain_ask"
             | "upload_attachment"
             | "decision_answer"
     )
@@ -2276,6 +2277,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "session_notes" => serve_session_notes(params),
         "session_note" => serve_session_note(params),
         "session_notes_search" => serve_session_notes_search(params),
+        "session_explain" => serve_session_explain(params),
+        "session_explain_list" => serve_session_explain_list(params),
         "guard_analyze" => serve_guard_analyze(params),
         "session_search" => serve_session_search(params),
         "wiki_list" => serve_wiki_list(params),
@@ -2305,6 +2308,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop" => serve_stop(params),
         "stop_workspace" => serve_stop_workspace(params),
         "session_mark" => serve_session_mark(params),
+        // Forks a session and spends money; a lost reply must not fork twice.
+        "session_explain_ask" => idempotent_write(method, params, || serve_session_explain_ask(params)),
         "upload_attachment" => serve_upload_attachment(params),
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
@@ -2512,6 +2517,37 @@ fn serve_session_notes_search(params: &Value) -> Result<Value, String> {
         crate::session_notes::SEARCH_MAX_MATCHES_PER_FILE,
     )?;
     serde_json::to_value(matches).map_err(|e| e.to_string())
+}
+
+/// `session_explain_ask` — accept a side question about a session; returns the
+/// `running` record. Params are an `ExplainRequest` (camelCase) plus the
+/// optional `idempotencyKey` the write wrapper consumes.
+fn serve_session_explain_ask(params: &Value) -> Result<Value, String> {
+    let req: crate::session_explain::ExplainRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad session_explain_ask params: {e}"))?;
+    let rec = crate::session_explain::ask(req)?;
+    serde_json::to_value(rec).map_err(|e| e.to_string())
+}
+
+/// `session_explain {sessionId, id}` — one record as it stands; polled until
+/// its status leaves `running`.
+fn serve_session_explain(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let rec = crate::session_explain::get(session_id, id).ok_or("no such explanation")?;
+    serde_json::to_value(rec).map_err(|e| e.to_string())
+}
+
+/// `session_explain_list {sessionId}` — every record of the session, oldest first.
+fn serve_session_explain_list(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    serde_json::to_value(crate::session_explain::list(session_id)).map_err(|e| e.to_string())
 }
 
 fn serve_decision_asset(params: &Value) -> Result<Value, String> {
@@ -4425,6 +4461,24 @@ mod tests {
     // ── Plan A early submit-ack ──────────────────────────────────────────────────
 
     #[test]
+    fn session_explain_reads_answer_for_unknown_ids() {
+        // Malformed / unknown ids never touch the store: list is empty, get is
+        // an error the phone can show, ask rejects before forking anything.
+        let list = serve_request("session_explain_list", &json!({"sessionId": "../nope"})).unwrap();
+        assert_eq!(list, json!([]));
+        let err = serve_request("session_explain", &json!({"sessionId": "s", "id": "nope"}))
+            .unwrap_err();
+        assert!(err.contains("no such explanation"), "{err}");
+        let err = serve_request(
+            "session_explain_ask",
+            &json!({"sessionId": "s", "sessionPath": "/x.jsonl", "quote": "   ", "preset": "explain"}),
+        )
+        .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        assert!(serve_request("session_explain", &json!({})).unwrap_err().contains("sessionId"));
+    }
+
+    #[test]
     fn ackable_covers_writes_not_reads() {
         for m in [
             "spawn_session",
@@ -4435,6 +4489,7 @@ mod tests {
             "stop",
             "stop_workspace",
             "session_mark",
+            "session_explain_ask",
             "upload_attachment",
             "decision_answer",
         ] {

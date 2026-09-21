@@ -35,6 +35,7 @@ const SCENARIOS = [
   "daily_report_lessons",
   "session_analyze",
   "mascot_quips",
+  "session_explain",
 ] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
@@ -46,6 +47,7 @@ const SCENARIO_COLORS: Record<Scenario, string> = {
   daily_report_lessons: "#6366f1", // indigo — report sibling
   session_analyze: "#10b981",      // emerald — frequent ambient
   mascot_quips: "#a855f7",         // violet — cosmetic
+  session_explain: "#0ea5e9",      // sky — user-initiated side questions
 };
 
 type RangeKey = "7d" | "30d" | "all";

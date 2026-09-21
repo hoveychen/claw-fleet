@@ -137,6 +137,26 @@ sessionId: string, bytes: number, updatedMs: number, };
 export type NoteMatch = { path: string, sessionId: string, 
 line: number, text: string, };
 
+export type ExplainPreset = "explain" | "translate" | "rationale" | "custom";
+
+export type ExplainAnchor = { msgUuid?: string | null, msgIdx?: number | null, };
+
+export type ExplainRequest = { 
+sessionId: string, 
+sessionPath: string, 
+workspacePath?: string | null, 
+quote: string, preset: ExplainPreset, 
+question?: string | null, anchor?: ExplainAnchor | null, 
+thread?: Array<string>, };
+
+export type ExplainStatus = "running" | "done" | "error";
+
+export type ExplainRecord = { id: string, sessionId: string, 
+source: string, createdMs: number, updatedMs: number, preset: ExplainPreset, quote: string, 
+question: string, anchor?: ExplainAnchor | null, thread?: Array<string>, status: ExplainStatus, 
+text: string, error?: string | null, model?: string | null, inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheCreationTokens: number, costUsd?: number | null, durationMs: number, 
+forkSessionId?: string | null, };
+
 export type WorkflowAgentStatus = "running" | "done";
 
 export type WorkflowAgent = { 

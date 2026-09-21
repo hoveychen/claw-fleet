@@ -92,6 +92,11 @@ fn build_bundle() -> String {
         claw_fleet_core::skill_history::SkillInvocation,
         claw_fleet_core::session_notes::NoteFile,
         claw_fleet_core::session_notes::NoteMatch,
+        claw_fleet_core::session_explain::ExplainPreset,
+        claw_fleet_core::session_explain::ExplainAnchor,
+        claw_fleet_core::session_explain::ExplainRequest,
+        claw_fleet_core::session_explain::ExplainStatus,
+        claw_fleet_core::session_explain::ExplainRecord,
     );
 
     // ── workflow ───────────────────────────────────────────────────────────

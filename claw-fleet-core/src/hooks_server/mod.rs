@@ -63,6 +63,7 @@ mod routes_core;
 mod routes_daily_report;
 mod routes_decision;
 mod routes_elicitation;
+mod routes_explain;
 mod routes_explorer;
 mod routes_guard;
 mod routes_hooks;
@@ -85,6 +86,7 @@ use routes_core::*;
 use routes_daily_report::*;
 use routes_decision::*;
 use routes_elicitation::*;
+use routes_explain::*;
 use routes_explorer::*;
 use routes_guard::*;
 use routes_hooks::*;
@@ -1358,6 +1360,10 @@ fn handle_request(
             crate::routes::SESSION_NOTES_SEARCH => {
                 route_session_notes_search(request, &query, json_header)
             }
+
+            crate::routes::SESSION_EXPLAIN => route_session_explain(request, &query, json_header),
+
+            crate::routes::SESSION_EXPLAINS => route_session_explains(request, &query, json_header),
 
             crate::routes::MESSAGES => route_messages(ctx, request, &query, json_header, path),
 

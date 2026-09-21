@@ -859,6 +859,25 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { session_id: q(a.sessionId), q: q(a.query) },
   }),
 
+  explain_selection: (a) => ({
+    method: "POST",
+    path: "/session_explain",
+    // The body *is* the ExplainRequest (camelCase, as the Rust struct declares).
+    body: a.request,
+  }),
+
+  get_explanation: (a) => ({
+    method: "GET",
+    path: "/session_explain",
+    query: { session_id: q(a.sessionId), id: q(a.id) },
+  }),
+
+  list_explanations: (a) => ({
+    method: "GET",
+    path: "/session_explains",
+    query: { session_id: q(a.sessionId) },
+  }),
+
   list_sessions: () => ({ method: "GET", path: "/sessions" }),
 
   list_skill_files: (a) => ({

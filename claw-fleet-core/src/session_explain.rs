@@ -64,6 +64,7 @@ pub const FORK_ENTRYPOINT_FALLBACK: &str = "fleet-explain";
 
 /// The canned questions the selection toolbar offers.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ExplainPreset {
     /// "What does this mean?"
@@ -80,6 +81,7 @@ pub enum ExplainPreset {
 /// back to it. Both fields optional: the uuid is the durable key, the index a
 /// fallback for records without one.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExplainAnchor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -90,6 +92,7 @@ pub struct ExplainAnchor {
 
 /// A side question as a client submits it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExplainRequest {
     /// Session id of the conversation being asked about.
@@ -118,6 +121,7 @@ pub struct ExplainRequest {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ExplainStatus {
     Running,
@@ -127,6 +131,7 @@ pub enum ExplainStatus {
 
 /// One side question and its answer, as persisted and as served.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExplainRecord {
     pub id: String,

@@ -290,3 +290,38 @@ pub(crate) async fn list_session_images(
     let backend = state.backend.clone();
     run_blocking(move || backend.list_session_images(&session_id)).await
 }
+
+// ── Side questions (selection explain) ───────────────────────────────────────
+//
+// `ask` returns as soon as the `running` record is on disk (the fork itself
+// runs on a core-owned thread), but it still resolves the session's source and
+// workspace from files, so all three go through the blocking pool like the
+// other transcript readers.
+
+#[tauri::command]
+pub(crate) async fn explain_selection(
+    request: claw_fleet_core::session_explain::ExplainRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::session_explain::ExplainRecord, String> {
+    let backend = state.backend.clone();
+    run_blocking_result(move || backend.explain_selection(request)).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_explanation(
+    session_id: String,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::session_explain::ExplainRecord, String> {
+    let backend = state.backend.clone();
+    run_blocking_result(move || backend.get_explanation(&session_id, &id)).await
+}
+
+#[tauri::command]
+pub(crate) async fn list_explanations(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::session_explain::ExplainRecord>, String> {
+    let backend = state.backend.clone();
+    run_blocking(move || backend.list_explanations(&session_id)).await
+}
