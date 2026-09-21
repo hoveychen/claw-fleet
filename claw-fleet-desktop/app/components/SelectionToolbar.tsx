@@ -3,7 +3,11 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExplainPreset } from "../explainApi";
-import { readAssistantSelection, type AssistantSelection } from "../selectionExplain";
+import {
+  EXPLAIN_MARK_SELECT_EVENT,
+  readAssistantSelection,
+  type AssistantSelection,
+} from "../selectionExplain";
 import styles from "./SelectionToolbar.module.css";
 
 /**
@@ -29,8 +33,10 @@ export function SelectionToolbar({
 }: {
   /** The element the bar is positioned inside. */
   pane: RefObject<HTMLElement | null>;
-  /** The transcript scroller; selections are read from inside it and a
-   *  scroll dismisses the bar. */
+  /** The element selections are read from inside of (`readAssistantSelection`
+   *  needs them in an `[data-msg-idx][data-role=assistant]` container in it);
+   *  a scroll on it dismisses the bar. The transcript scroller, or a decision
+   *  card's question body. */
   scroller: RefObject<HTMLElement | null>;
   /** False when the session cannot be forked (no transcript path yet). */
   enabled: boolean;
@@ -92,10 +98,15 @@ export function SelectionToolbar({
     document.addEventListener("mouseup", onUp);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("selectionchange", onSelChange);
+    // A click (or Enter) on one of the agent's `[?text]` marks selects the mark
+    // and announces it; read it like a mouseup, since a keyboard activation
+    // has none. See markdown/explainMarks.
+    document.addEventListener(EXPLAIN_MARK_SELECT_EVENT, onUp);
     root?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener(EXPLAIN_MARK_SELECT_EVENT, onUp);
       document.removeEventListener("selectionchange", onSelChange);
       root?.removeEventListener("scroll", onScroll);
     };

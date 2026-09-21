@@ -1,72 +1,38 @@
 import {
-  createContext,
-  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type KeyboardEvent,
   type MouseEvent,
-  type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
 import { useTranslation } from "react-i18next";
 
 import { EXPLAIN_MARK_ATTR_QUOTE_PROPS, EXPLAIN_MARK_CLASS } from "./explainMarkProps";
-import type { ExplainAnchor } from "../explainApi";
+import { selectExplainMark } from "../selectionExplain";
 import styles from "./markdown.module.css";
 
 /**
  * Clickable `[?text]` marks — the rendering half of shared-ts/explainMarks.ts.
  *
  * The remark plugin (in `safeRemarkPlugins`) turns a mark into
- * `<span class="explain-mark" data-explain-quote="…">`; this file is the `span`
- * component every markdown surface maps that element to. What a click *does*
- * depends on where the prose is: in a transcript it asks a side question about
- * the marked text on that row, in a decision card it asks about the card's
- * session. The surface says so by providing `ExplainMarksProvider`; outside any
- * provider (a wiki doc, a handoff note) the mark renders as plain text with no
- * affordance, since there is no session to ask.
+ * `<span class="explain-mark" data-explain-quote="…">`; this is the `span`
+ * component every markdown surface maps that element to.
  *
- * Only agent prose is clickable. The transcript stamps every row with
- * `data-role`, and a mark inside a `user` row — the person quoting the agent
- * back, say — stays inert, mirroring `readAssistantSelection`.
+ * A click does not ask anything by itself: it *selects* the marked text, the
+ * way a drag would, and the ask bar that owns the surrounding prose
+ * (`SelectionToolbar`, over a transcript row or a decision card's question)
+ * reads the selection and offers 解释 / 翻译 / 为什么 / a custom question. One
+ * more click on 解释 is the no-typing path.
+ *
+ * Which marks are clickable follows the same rule the bar itself applies
+ * (`readAssistantSelection`): the mark has to sit inside an
+ * `[data-msg-idx][data-role="assistant"]` container. A mark in the user's own
+ * words, in a wiki doc, or in a side question's answer has no bar to speak to
+ * and renders as plain text.
  */
-export interface ExplainMarksContext {
-  /**
-   * Ask about `quote`. `anchor` is the transcript row the mark sits in
-   * (`data-msg-uuid` / `data-msg-idx`), or `undefined` when the prose is not a
-   * transcript row (a decision card body).
-   */
-  onMark: (quote: string, anchor: ExplainAnchor | undefined) => void;
-}
-
-const Ctx = createContext<ExplainMarksContext | null>(null);
-
-export function ExplainMarksProvider({
-  value,
-  children,
-}: {
-  value: ExplainMarksContext | null;
-  children: ReactNode;
-}) {
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-/** The ambient handler, or `null` outside any provider. */
-export function useExplainMarks(): ExplainMarksContext | null {
-  return useContext(Ctx);
-}
-
-/** The row a mark sits in, as the side question's anchor; `null` for a row the
- *  user wrote (not clickable), `undefined` when the prose is not a row. */
-export function anchorOfMark(el: Element): ExplainAnchor | null | undefined {
-  const row = el.closest<HTMLElement>("[data-msg-idx][data-role]");
-  if (!row) return undefined;
-  if (row.getAttribute("data-role") !== "assistant") return null;
-  const idx = Number(row.getAttribute("data-msg-idx"));
-  return {
-    msgUuid: row.getAttribute("data-msg-uuid") ?? undefined,
-    msgIdx: Number.isFinite(idx) ? idx : undefined,
-  };
-}
+export const ASSISTANT_PROSE_SELECTOR = "[data-msg-idx][data-role='assistant']";
 
 /** react-markdown hands each component the DOM props plus the hast `node`,
  *  which must not reach the element (`node="[object Object]"`). */
@@ -76,8 +42,6 @@ type SpanProps = ComponentPropsWithoutRef<"span"> & { node?: unknown };
  *  other span (KaTeX's, a raw one) passes through untouched. */
 export const ExplainMarkSpan: Components["span"] = function ExplainMarkSpan(props: SpanProps) {
   const { node: _node, className, children, ...rest } = props;
-  const ctx = useExplainMarks();
-  const { t } = useTranslation();
   const classes = typeof className === "string" ? className.split(/\s+/) : [];
   if (!classes.includes(EXPLAIN_MARK_CLASS)) {
     return (
@@ -86,24 +50,40 @@ export const ExplainMarkSpan: Components["span"] = function ExplainMarkSpan(prop
       </span>
     );
   }
-  const quote = readQuote(rest as Record<string, unknown>);
-  // No provider, or the plugin found nothing to quote: the text, unadorned.
-  if (!ctx || !quote) return <span>{children}</span>;
+  return <ExplainMark quote={readQuote(rest as Record<string, unknown>)}>{children}</ExplainMark>;
+};
 
+function ExplainMark({ quote, children }: { quote: string | null; children?: React.ReactNode }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLSpanElement>(null);
+  // Decided from the DOM, once mounted: the same containment test the ask bar
+  // runs on a selection, so a mark is clickable exactly when a click can lead
+  // somewhere.
+  const [clickable, setClickable] = useState(false);
+  useLayoutEffect(() => {
+    setClickable(!!quote && !!ref.current?.closest(ASSISTANT_PROSE_SELECTOR));
+  }, [quote]);
+
+  if (!clickable) {
+    return (
+      <span ref={ref} data-explain-quote={quote ?? undefined}>
+        {children}
+      </span>
+    );
+  }
   const fire = (e: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>) => {
-    const anchor = anchorOfMark(e.currentTarget);
-    if (anchor === null) return; // the user's own words
     e.preventDefault();
     e.stopPropagation();
-    ctx.onMark(quote, anchor);
+    selectExplainMark(e.currentTarget);
   };
   return (
     <span
+      ref={ref}
       className={styles.explain_mark}
       role="button"
       tabIndex={0}
-      title={t("markdown.explain_mark_hint", "点击解释这段话")}
-      data-explain-quote={quote}
+      title={t("markdown.explain_mark_hint", "点击对这段话追问")}
+      data-explain-quote={quote ?? undefined}
       onClick={fire}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") fire(e);
@@ -112,7 +92,7 @@ export const ExplainMarkSpan: Components["span"] = function ExplainMarkSpan(prop
       {children}
     </span>
   );
-};
+}
 
 function readQuote(props: Record<string, unknown>): string | null {
   for (const key of EXPLAIN_MARK_ATTR_QUOTE_PROPS) {

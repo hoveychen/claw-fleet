@@ -5,17 +5,20 @@
 // The remark plugin (in `mdRemarkPlugins`) turns a mark into
 // `<span class="explain-mark" data-explain-quote="…">`; `ExplainMarkSpan` is the
 // `span` entry of `mdComponents`, so every surface that renders markdown maps
-// it. What a tap does is the surface's call, said through
-// `ExplainMarksProvider`: in the transcript it asks a side question about the
-// marked text on that row, in a decision card about the card's session. With
-// no provider around (a wiki doc, a handoff note) the mark is plain text — there
-// is no session to ask.
+// it. A tap does not ask anything by itself: it *selects* the marked text, the
+// way a long-press would, and the `SelectionAskBar` that owns the surrounding
+// prose (a transcript row, or a decision card's question) reads the selection
+// and offers 解释 / 翻译 / 为什么 / a custom question. One more tap on 解释 is the
+// no-typing path.
 //
-// Only agent prose is tappable: `MessageRow` stamps `data-role` on every row,
-// and a mark inside a user row stays inert, mirroring `readAssistantSelection`.
+// Which marks are tappable follows the bar's own rule (`readAssistantSelection`):
+// the mark has to sit inside an `[data-msg-idx][data-role="assistant"]`
+// container. A mark in the user's words, a wiki doc or a side question's answer
+// has no bar to speak to and renders as plain text.
 import {
-  createContext,
-  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type KeyboardEvent,
   type MouseEvent,
@@ -28,44 +31,11 @@ import {
   EXPLAIN_MARK_QUOTE_ATTR,
   EXPLAIN_MARK_QUOTE_PROP,
 } from "../../../shared-ts/explainMarks";
-import type { ExplainAnchor } from "../generated/types";
+import { selectExplainMark } from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
 import styles from "./explainMark.module.css";
 
-export interface ExplainMarksContext {
-  /** Ask about `quote`; `anchor` is the transcript row the mark sits in, or
-   *  `undefined` when the prose is not a row (a decision card body). */
-  onMark: (quote: string, anchor: ExplainAnchor | undefined) => void;
-}
-
-const Ctx = createContext<ExplainMarksContext | null>(null);
-
-export function ExplainMarksProvider({
-  value,
-  children,
-}: {
-  value: ExplainMarksContext | null;
-  children: ReactNode;
-}) {
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-export function useExplainMarks(): ExplainMarksContext | null {
-  return useContext(Ctx);
-}
-
-/** The row a mark sits in, as the side question's anchor; `null` for a row the
- *  user wrote (not tappable), `undefined` when the prose is not a row. */
-export function anchorOfMark(el: Element): ExplainAnchor | null | undefined {
-  const row = el.closest<HTMLElement>("[data-msg-idx][data-role]");
-  if (!row) return undefined;
-  if (row.getAttribute("data-role") !== "assistant") return null;
-  const idx = Number(row.getAttribute("data-msg-idx"));
-  return {
-    msgUuid: row.getAttribute("data-msg-uuid") ?? undefined,
-    msgIdx: Number.isFinite(idx) ? idx : undefined,
-  };
-}
+export const ASSISTANT_PROSE_SELECTOR = "[data-msg-idx][data-role='assistant']";
 
 /** react-markdown hands each component the DOM props plus the hast `node`,
  *  which must not reach the element (`node="[object Object]"`). */
@@ -73,7 +43,6 @@ type SpanProps = ComponentPropsWithoutRef<"span"> & { node?: unknown };
 
 export const ExplainMarkSpan: Components["span"] = function ExplainMarkSpan(props: SpanProps) {
   const { node: _node, className, children, ...rest } = props;
-  const ctx = useExplainMarks();
   const classes = typeof className === "string" ? className.split(/\s+/) : [];
   if (!classes.includes(EXPLAIN_MARK_CLASS)) {
     return (
@@ -85,22 +54,38 @@ export const ExplainMarkSpan: Components["span"] = function ExplainMarkSpan(prop
   const bag = rest as Record<string, unknown>;
   const raw = bag[EXPLAIN_MARK_QUOTE_ATTR] ?? bag[EXPLAIN_MARK_QUOTE_PROP];
   const quote = typeof raw === "string" && raw.trim() ? raw : null;
-  if (!ctx || !quote) return <span>{children}</span>;
+  return <ExplainMark quote={quote}>{children}</ExplainMark>;
+};
 
+function ExplainMark({ quote, children }: { quote: string | null; children?: ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  // Decided from the DOM once mounted — the same containment test the ask bar
+  // runs on a selection, so a mark is tappable exactly when a tap leads somewhere.
+  const [clickable, setClickable] = useState(false);
+  useLayoutEffect(() => {
+    setClickable(!!quote && !!ref.current?.closest(ASSISTANT_PROSE_SELECTOR));
+  }, [quote]);
+
+  if (!clickable) {
+    return (
+      <span ref={ref} data-explain-quote={quote ?? undefined}>
+        {children}
+      </span>
+    );
+  }
   const fire = (e: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>) => {
-    const anchor = anchorOfMark(e.currentTarget);
-    if (anchor === null) return;
     e.preventDefault();
     e.stopPropagation();
-    ctx.onMark(quote, anchor);
+    selectExplainMark(e.currentTarget);
   };
   return (
     <span
+      ref={ref}
       className={styles.mark}
       role="button"
       tabIndex={0}
-      title={t("点击解释这段话")}
-      data-explain-quote={quote}
+      title={t("点击对这段话追问")}
+      data-explain-quote={quote ?? undefined}
       onClick={fire}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") fire(e);
@@ -109,4 +94,4 @@ export const ExplainMarkSpan: Components["span"] = function ExplainMarkSpan(prop
       {children}
     </span>
   );
-};
+}

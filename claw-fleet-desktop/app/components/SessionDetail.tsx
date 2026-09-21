@@ -73,8 +73,7 @@ import {
 import { useSessionAux } from "../useSessionAux";
 import { useSessionExplains } from "../hooks/useSessionExplains";
 import { locateExplainRow, selectQuoteIn, type AssistantSelection } from "../selectionExplain";
-import type { ExplainAnchor, ExplainPreset, ExplainRecord } from "../explainApi";
-import { ExplainMarksProvider, type ExplainMarksContext } from "../markdown/explainMarks";
+import type { ExplainPreset, ExplainRecord } from "../explainApi";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
@@ -1049,47 +1048,6 @@ export function SessionDetail({
     },
     [liveSession?.id, liveSession?.jsonlPath, workspacePath, askExplainRecord],
   );
-  /** A click on one of the agent's own `[?text]` marks. The mark *is* the
-   *  selection, so this is the toolbar's 「解释」 with the quote and row read
-   *  off the mark instead of off `window.getSelection()`. A mark whose text
-   *  this session has already asked about (and is not a failed ask) opens that
-   *  card rather than forking again — the answer is right there. */
-  const explainsRef = useRef(explains);
-  explainsRef.current = explains;
-  const onExplainMark = useCallback(
-    async (quote: string, anchor: ExplainAnchor | undefined) => {
-      const prior = explainsRef.current.find((r) => r.quote === quote && r.status !== "error");
-      if (prior) {
-        setRailOverride((v) => (v === false ? null : v));
-        setAux((st) => ({ ...st, expanded: explainCardId(prior.id) }));
-        return;
-      }
-      const sid = liveSession?.id;
-      const path = liveSession?.jsonlPath;
-      if (!sid || !path) return;
-      setExplainBusy(true);
-      try {
-        const rec = await askExplainRecord({
-          sessionId: sid,
-          sessionPath: path,
-          workspacePath: workspacePath || undefined,
-          quote,
-          preset: "explain",
-          anchor,
-          thread: [],
-        });
-        setRailOverride((v) => (v === false ? null : v));
-        setAux((st) => ({ ...st, expanded: explainCardId(rec.id) }));
-      } finally {
-        setExplainBusy(false);
-      }
-    },
-    [liveSession?.id, liveSession?.jsonlPath, workspacePath, askExplainRecord],
-  );
-  const explainMarks = useMemo<ExplainMarksContext | null>(
-    () => (liveSession?.id && liveSession?.jsonlPath ? { onMark: onExplainMark } : null),
-    [liveSession?.id, liveSession?.jsonlPath, onExplainMark],
-  );
   /** Continue a settled side question: the same passage, the prior Q/A folded
    *  into a fresh fork of the session (the fork itself is never resumed). */
   const followUpExplain = useCallback(
@@ -1497,7 +1455,6 @@ export function SessionDetail({
     // every tool-block renderer inherit them too — and both now land in the
     // auxiliary column, which every instance of this component has.
     <WikiLinksProvider value={wikiLinks}>
-      <ExplainMarksProvider value={explainMarks}>
       <WebLinkProvider value={openWebInAux}>
       <IngestOpenProvider value={ingestOpen}>
       <div
@@ -1908,7 +1865,6 @@ export function SessionDetail({
       </div>
       </IngestOpenProvider>
       </WebLinkProvider>
-      </ExplainMarksProvider>
     </WikiLinksProvider>
   );
 }

@@ -1,4 +1,18 @@
-/* Answers to a card's `[?text]` marks, under the question (DecisionExplainMarks.tsx). */
+/* Side questions from inside a card's question (DecisionExplainMarks.tsx). */
+
+/* The question body the SelectionToolbar is positioned inside of (it needs a
+   containing block) and reads selections from. */
+.body {
+  position: relative;
+}
+
+/* The custom question, when there was one, above the answer. */
+.question {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text);
+}
 
 .list {
   display: flex;

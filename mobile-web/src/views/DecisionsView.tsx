@@ -16,8 +16,8 @@ import { VoiceTextarea } from "./VoiceTextarea";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
-import { ExplainMarksProvider } from "../markdown/explainMarks";
 import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
+import { SelectionAskBar } from "./SelectionAskBar";
 import { fetchDecisionAsset } from "../decisionAsset";
 import { splitContextFiles } from "../userAttachments";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
@@ -1070,9 +1070,11 @@ function QuestionsCard({
   session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
 }) {
-  // The agent's `[?text]` marks in the question ask the card's session; the
+  // Side questions from inside the question — a long-press, or a tap on one of
+  // the agent's `[?text]` marks, brings up the same bar the transcript has; the
   // answer lands under the question (see DecisionExplainMarks).
   const explainMarks = useDecisionExplainMarks(client, session);
+  const questionBodyRef = useRef<HTMLDivElement>(null);
   // question text → selected option labels
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -1280,17 +1282,23 @@ function QuestionsCard({
       {[request.questions[qi]].map((q) => (
         <div key={qi} className={styles.question}>
           {q.header && <div className={styles.questionHeader}>{q.header}</div>}
-          <div className={styles.markdown}>
-            <ExplainMarksProvider value={explainMarks.marks}>
-              <ReactMarkdown
-                remarkPlugins={mdRemarkPlugins}
-                rehypePlugins={mdRehypePlugins}
-                components={mdComponents}
-              >
-                {stripTtsDivider(q.question)}
-              </ReactMarkdown>
-            </ExplainMarksProvider>
+          {/* Stamped like a transcript row so `readAssistantSelection` accepts a
+              selection here; the index is the question's, the anchor sent is empty. */}
+          <div ref={questionBodyRef} className={styles.markdown} data-role="assistant" data-msg-idx={qi}>
+            <ReactMarkdown
+              remarkPlugins={mdRemarkPlugins}
+              rehypePlugins={mdRehypePlugins}
+              components={mdComponents}
+            >
+              {stripTtsDivider(q.question)}
+            </ReactMarkdown>
           </div>
+          <SelectionAskBar
+            scroller={questionBodyRef}
+            enabled={explainMarks.enabled}
+            busy={explainMarks.busy}
+            onAsk={explainMarks.ask}
+          />
           <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
           {isFleetAsk && (q as FleetAskQuestion).html && (
             <HtmlPreview

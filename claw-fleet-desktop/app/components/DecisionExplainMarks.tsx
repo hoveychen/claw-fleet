@@ -1,36 +1,41 @@
 import { LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
   explainSelection,
   getExplanation,
   pollExplanation,
+  type ExplainPreset,
   type ExplainRecord,
   type ExplainRequest,
 } from "../explainApi";
-import type { ExplainMarksContext } from "../markdown/explainMarks";
-import { cacheHitRatio, costLabel } from "../selectionExplain";
+import { cacheHitRatio, costLabel, type AssistantSelection } from "../selectionExplain";
 import { useSessionsStore } from "../store";
 import { TextBlock } from "./blocks/TextBlock";
 import styles from "./DecisionExplainMarks.module.css";
 
 /**
- * `[?text]` marks inside a decision card's question.
+ * Side questions asked from inside a decision card's question.
  *
- * A card is not a transcript row, so a mark there has no `data-msg-idx` to
- * anchor to; the ask goes to the card's session with an empty anchor and the
- * answer lands *under the question*, inside the card — the reader is deciding
- * something and should not have to open the session's rail to read a
- * clarification. The record is persisted like every side question, so the
- * rail shows it later too.
+ * The card's question body is stamped `data-role="assistant"` /
+ * `data-msg-idx` (the question index) so the same `SelectionToolbar` that
+ * floats over transcript prose floats over it: a drag, or a click on one of the
+ * agent's `[?text]` marks, selects a passage and the bar offers the presets.
+ * The ask goes to the card's session with an empty anchor (a card is not a
+ * transcript row) and the answer lands *under the question*, inside the card —
+ * the reader is deciding something and should not have to open the session's
+ * rail to read a clarification. The record is persisted like every side
+ * question, so the rail shows it later too.
  *
  * `sessionPath` (the fork target) is not on the request; it is read off the
- * sessions store. A card whose session the store does not know yet gets a
- * `null` context, which renders the marks as plain text.
+ * sessions store. A card whose session the store does not know yet has
+ * `enabled: false`, which keeps the bar away.
  */
 export function useDecisionExplainMarks(sessionId: string | null | undefined): {
-  marks: ExplainMarksContext | null;
+  enabled: boolean;
+  busy: boolean;
+  ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
   answers: ExplainRecord[];
   dismiss: (id: string) => void;
 } {
@@ -38,9 +43,8 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): {
   const sessionPath = session?.jsonlPath;
   const workspacePath = session?.workspacePath;
   const [answers, setAnswers] = useState<ExplainRecord[]>([]);
+  const [busy, setBusy] = useState(false);
   const pollers = useRef(new Map<string, AbortController>());
-  const answersRef = useRef(answers);
-  answersRef.current = answers;
 
   const upsert = useCallback((rec: ExplainRecord) => {
     setAnswers((prev) => {
@@ -61,20 +65,20 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): {
     };
   }, [sessionId]);
 
-  const onMark = useCallback(
-    async (quote: string) => {
+  const ask = useCallback(
+    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
       if (!sessionId || !sessionPath) return;
-      // Already asked (and not failed): the answer is on screen below.
-      if (answersRef.current.some((r) => r.quote === quote && r.status !== "error")) return;
       const req: ExplainRequest = {
         sessionId,
         sessionPath,
         workspacePath: workspacePath || undefined,
-        quote,
-        preset: "explain",
+        quote: sel.quote,
+        preset,
+        question: preset === "custom" ? question : undefined,
         anchor: undefined,
         thread: [],
       };
+      setBusy(true);
       let rec: ExplainRecord;
       try {
         rec = await explainSelection(req);
@@ -86,9 +90,9 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): {
           source: "",
           createdMs: now,
           updatedMs: now,
-          preset: "explain",
-          quote,
-          question: "",
+          preset,
+          quote: sel.quote,
+          question: question ?? "",
           anchor: undefined,
           thread: [],
           status: "error",
@@ -100,7 +104,10 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): {
           cacheCreationTokens: 0,
           durationMs: 0,
         };
+      } finally {
+        setBusy(false);
       }
+      window.getSelection()?.removeAllRanges();
       upsert(rec);
       if (rec.status === "running" && !pollers.current.has(rec.id)) {
         const ctl = new AbortController();
@@ -121,14 +128,10 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): {
     setAnswers((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  const marks = useMemo<ExplainMarksContext | null>(
-    () => (sessionId && sessionPath ? { onMark } : null),
-    [sessionId, sessionPath, onMark],
-  );
-  return { marks, answers, dismiss };
+  return { enabled: Boolean(sessionId && sessionPath), busy, ask, answers, dismiss };
 }
 
-/** The answers asked from a card's marks, under its question: the quoted
+/** The answers asked from inside a card's question, under it: the quoted
  *  text, then the answer growing as the record is re-read. */
 export function DecisionExplainAnswers({
   answers,
@@ -149,7 +152,9 @@ export function DecisionExplainAnswers({
         return (
           <div key={rec.id} className={styles.card}>
             <div className={styles.head}>
-              <span className={styles.quote}>{rec.quote}</span>
+              <span className={styles.quote} title={rec.question || undefined}>
+                {rec.quote}
+              </span>
               {running && (
                 <span className={styles.state}>
                   <LoaderCircle size={10} aria-hidden="true" className={styles.spin} />
@@ -172,6 +177,7 @@ export function DecisionExplainAnswers({
                 ✕
               </button>
             </div>
+            {rec.question && <div className={styles.question}>{rec.question}</div>}
             {rec.text ? (
               <div className={styles.answer}>
                 <TextBlock text={rec.text} isPartial={running} />

@@ -1,21 +1,29 @@
-// `[?text]` marks inside a decision card's question, phone side — the
+// Side questions asked from inside a decision card's question, phone side — the
 // counterpart of claw-fleet-desktop/app/components/DecisionExplainMarks.tsx.
 //
-// A card is not a transcript row, so a mark there has no row to anchor to; the
-// ask goes to the card's session with an empty anchor and the answer lands
-// under the question, inside the card, where the person deciding can read it
-// without leaving. The record is persisted like every side question, so the
-// session's 追问 pane shows it later too.
+// The card's question body is stamped `data-role="assistant"` / `data-msg-idx`
+// (the question index) so the same `SelectionAskBar` that floats over
+// transcript prose floats over it: a long-press, or a tap on one of the agent's
+// `[?text]` marks, selects a passage and the bar offers the presets. The ask
+// goes to the card's session with an empty anchor (a card is not a transcript
+// row) and the answer lands under the question, inside the card, where the
+// person deciding can read it without leaving. The record is persisted like
+// every side question, so the session's 追问 pane shows it later too.
 import { LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cacheHitRatio, costLabel, pollExplanation } from "../../../shared-ts/sessionExplain";
+import {
+  cacheHitRatio,
+  costLabel,
+  pollExplanation,
+  type AssistantSelection,
+} from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
-import type { ExplainMarksContext } from "../markdown/explainMarks";
 import {
   askExplanation,
   getExplanation,
   refusedExplanation,
+  type ExplainPreset,
   type ExplainRecord,
   type ExplainRequest,
 } from "../sessionExplain";
@@ -28,7 +36,9 @@ export function useDecisionExplainMarks(
   client: FleetTransport | null,
   session: SessionInfo | undefined,
 ): {
-  marks: ExplainMarksContext | null;
+  enabled: boolean;
+  busy: boolean;
+  ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
   answers: ExplainRecord[];
   dismiss: (id: string) => void;
 } {
@@ -36,9 +46,8 @@ export function useDecisionExplainMarks(
   const sessionPath = session?.jsonlPath;
   const workspacePath = session?.workspacePath;
   const [answers, setAnswers] = useState<ExplainRecord[]>([]);
+  const [busy, setBusy] = useState(false);
   const pollers = useRef(new Map<string, AbortController>());
-  const answersRef = useRef(answers);
-  answersRef.current = answers;
 
   const upsert = useCallback((rec: ExplainRecord) => {
     setAnswers((prev) => {
@@ -58,25 +67,29 @@ export function useDecisionExplainMarks(
     };
   }, [sessionId]);
 
-  const onMark = useCallback(
-    async (quote: string) => {
+  const ask = useCallback(
+    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
       if (!client || !sessionId || !sessionPath) return;
-      if (answersRef.current.some((r) => r.quote === quote && r.status !== "error")) return;
       const req: ExplainRequest = {
         sessionId,
         sessionPath,
         workspacePath: workspacePath || undefined,
-        quote,
-        preset: "explain",
+        quote: sel.quote,
+        preset,
+        question: preset === "custom" ? question : undefined,
         anchor: undefined,
         thread: [],
       };
+      setBusy(true);
       let rec: ExplainRecord;
       try {
         rec = await askExplanation(client, req);
       } catch (e) {
         rec = refusedExplanation(req, e);
+      } finally {
+        setBusy(false);
       }
+      window.getSelection()?.removeAllRanges();
       upsert(rec);
       if (rec.status === "running" && !pollers.current.has(rec.id)) {
         const ctl = new AbortController();
@@ -97,14 +110,10 @@ export function useDecisionExplainMarks(
     setAnswers((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  const marks = useMemo<ExplainMarksContext | null>(
-    () => (client && sessionId && sessionPath ? { onMark } : null),
-    [client, sessionId, sessionPath, onMark],
-  );
-  return { marks, answers, dismiss };
+  return { enabled: Boolean(client && sessionId && sessionPath), busy, ask, answers, dismiss };
 }
 
-/** The answers asked from a card's marks, under its question. */
+/** The answers asked from inside a card's question, under it. */
 export function DecisionExplainAnswers({
   answers,
   onDismiss,
@@ -136,6 +145,7 @@ export function DecisionExplainAnswers({
                 ✕
               </button>
             </div>
+            {rec.question && <div className={styles.question}>{rec.question}</div>}
             {rec.text ? (
               <div className={styles.answer} data-partial={running || undefined}>
                 <Md text={rec.text} />

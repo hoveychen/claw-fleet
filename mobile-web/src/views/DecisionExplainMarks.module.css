@@ -1,4 +1,11 @@
-/* Answers to a card's `[?text]` marks, under the question (DecisionExplainMarks.tsx). */
+/* Side questions from inside a card's question (DecisionExplainMarks.tsx). */
+
+/* The custom question, when there was one, above the answer. */
+.question {
+  margin-top: 4px;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+}
 
 .list {
   display: flex;
