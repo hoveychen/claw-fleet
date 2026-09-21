@@ -1972,11 +1972,23 @@ pub fn publish_sessions(sessions: &Value) {
         let mut last = SESSIONS_LAST_SENT.lock().unwrap();
         if let Some(t) = *last {
             if t.elapsed() < SESSIONS_THROTTLE {
+                // Hold it for the trailing edge instead of dropping it. The
+                // throttle used to discard outright, which is fine only while
+                // more updates keep coming: the one that matters most —
+                // "the turn finished, this session is idle" — is precisely the
+                // update after which nothing else is written, so there was no
+                // later publish to carry it. Land inside the window and the
+                // phone sat on the previous state until some unrelated change
+                // or a reconnect happened to refresh it.
+                *SESSIONS_PENDING.lock().unwrap() = Some(sessions.clone());
+                ensure_sessions_flush_thread();
                 return;
             }
         }
         *last = Some(std::time::Instant::now());
     }
+    // Superseded by this push; a stale one must not be replayed over it.
+    *SESSIONS_PENDING.lock().unwrap() = None;
     let slim = slim_sessions_snapshot(sessions);
     let hash = snapshot_hash(&slim);
     if SESSIONS_LAST_HASH.swap(hash, Ordering::SeqCst) == hash {
@@ -2002,6 +2014,58 @@ pub fn publish_sessions(sessions: &Value) {
     };
     drop(baseline);
     send_out(encode_payload(&frame));
+}
+
+/// The most recent snapshot the throttle held back, waiting for the window to
+/// close. At most one — a newer snapshot supersedes an older one, since both
+/// describe the same thing and only the latest is true.
+static SESSIONS_PENDING: Mutex<Option<Value>> = Mutex::new(None);
+static SESSIONS_FLUSH_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// How often the trailing-edge flush looks for a held-back snapshot. Well under
+/// [`SESSIONS_THROTTLE`], so a held snapshot goes out shortly after the window
+/// closes rather than a whole window later.
+const SESSIONS_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Start the trailing-edge flusher, once per process.
+///
+/// Lazily started from the throttle's reject path: a Fleet whose phone never
+/// connects, or whose updates never bunch up, never pays for the thread.
+fn ensure_sessions_flush_thread() {
+    if SESSIONS_FLUSH_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if let Err(e) = std::thread::Builder::new()
+        .name("relay-sessions-flush".into())
+        .spawn(|| loop {
+            std::thread::sleep(SESSIONS_FLUSH_INTERVAL);
+            flush_pending_sessions();
+        })
+    {
+        // Without the thread the throttle is back to dropping held snapshots,
+        // so let the flag fall back and give a later publish another chance.
+        SESSIONS_FLUSH_STARTED.store(false, Ordering::SeqCst);
+        crate::log_debug(&format!("[mobile-relay] sessions flush spawn failed: {e}"));
+    }
+}
+
+/// Publish the held-back snapshot once the throttle window has passed.
+fn flush_pending_sessions() {
+    {
+        // Checked and released before the republish below, which takes the
+        // same lock — holding it across the call would deadlock.
+        let last = SESSIONS_LAST_SENT.lock().unwrap();
+        if last.is_some_and(|t| t.elapsed() < SESSIONS_THROTTLE) {
+            return;
+        }
+    }
+    let Some(pending) = SESSIONS_PENDING.lock().unwrap().take() else {
+        return;
+    };
+    // Straight back through the normal path: it owns hash dedup, the full-vs-
+    // delta decision and the baseline. If the window closed under us in the
+    // meantime it simply parks the snapshot again for the next tick.
+    publish_sessions(&pending);
 }
 
 // ── Inbound: answers and requests from mobile clients ────────────────────────
@@ -7729,6 +7793,74 @@ mod tests {
         CONNECTED.store(false, Ordering::SeqCst);
         CLIENTS.store(0, Ordering::SeqCst);
         *SESSIONS_LAST_SENT.lock().unwrap() = None;
+    }
+
+    /// The throttle must defer a snapshot, not discard it.
+    ///
+    /// The update that matters most — "the turn finished, this session is
+    /// idle" — is the one after which nothing else is written, so when it lands
+    /// inside the 2s window there is no later publish to carry it. Dropping it
+    /// left the phone showing the previous state indefinitely.
+    #[test]
+    fn throttled_snapshot_is_republished_on_the_trailing_edge() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let ep = NEW_SESSION_ENTRYPOINT;
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+        CONNECTED.store(true, Ordering::SeqCst);
+        CLIENTS.store(1, Ordering::SeqCst);
+        clear_clients();
+        reset_sessions_dedup();
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+        *SESSIONS_PENDING.lock().unwrap() = None;
+
+        // First push goes out and arms the throttle.
+        publish_sessions(&json!([
+            {"id": "s1", "isSubagent": false, "lastActivityMs": 1, "entrypoint": ep},
+        ]));
+        rx.try_recv().expect("first push emits a frame");
+
+        // Second push lands inside the window: held, not sent.
+        publish_sessions(&json!([
+            {"id": "s1", "isSubagent": false, "lastActivityMs": 2, "entrypoint": ep},
+        ]));
+        assert!(rx.try_recv().is_err(), "a throttled push must not go out immediately");
+        assert!(
+            SESSIONS_PENDING.lock().unwrap().is_some(),
+            "a throttled push must be held for the trailing edge, not dropped"
+        );
+
+        // A flush while the window is still open changes nothing.
+        flush_pending_sessions();
+        assert!(rx.try_recv().is_err(), "the window has not closed yet");
+        assert!(SESSIONS_PENDING.lock().unwrap().is_some());
+
+        // Window closes → the held snapshot is published, exactly once.
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+        flush_pending_sessions();
+        let Outbound::Text(t) = rx.try_recv().expect("the held snapshot is published");
+        let frame = decode_out(&t);
+        assert!(
+            frame["event"] == "sessions" || frame["event"] == "sessions_delta",
+            "unexpected frame: {frame}"
+        );
+        assert!(
+            SESSIONS_PENDING.lock().unwrap().is_none(),
+            "a published snapshot must be cleared, or it would be replayed"
+        );
+        flush_pending_sessions();
+        assert!(rx.try_recv().is_err(), "nothing is held, so nothing is republished");
+
+        clear_clients();
+        reset_sessions_dedup();
+        *OUT_TX.lock().unwrap() = None;
+        *ENC_KEY.lock().unwrap() = None;
+        CONNECTED.store(false, Ordering::SeqCst);
+        CLIENTS.store(0, Ordering::SeqCst);
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+        *SESSIONS_PENDING.lock().unwrap() = None;
     }
 
     fn hello_delta(client_id: &str, supports_delta: bool) -> Value {

@@ -19,6 +19,7 @@ export type ConnIconKind =
   | "connecting" // link not up yet, still retrying
   | "offline" // link down and not coming back on its own (Fleet Cloud only)
   | "desktop-offline" // relay up, desktop agent absent
+  | "stalled" // socket claims to be open, but nothing comes back through it
   | "good"
   | "fair"
   | "congested";
@@ -34,7 +35,10 @@ export function connIconKind(
 }
 
 /** Bars lit, out of 3, for the signal glyph. */
-const LIT: Record<Exclude<ConnIconKind, "connecting" | "offline" | "desktop-offline">, number> = {
+const LIT: Record<
+  Exclude<ConnIconKind, "connecting" | "offline" | "desktop-offline" | "stalled">,
+  number
+> = {
   good: 3,
   fair: 2,
   congested: 1,
@@ -88,6 +92,21 @@ function SignalOff() {
   );
 }
 
+/** Empty bars with an exclamation mark. Deliberately not `SignalOff`: that
+ *  shape means "we know we are not connected and are retrying", while this one
+ *  means "the socket says it is open and nothing is coming back" — the state
+ *  that used to be indistinguishable from a healthy link. */
+function SignalStalled() {
+  return (
+    <svg viewBox="0 0 16 16" width={SIZE} height={SIZE} aria-hidden>
+      <rect x={1} y={10} width={4} height={5} rx={1.2} fill="currentColor" opacity={0.22} />
+      <rect x={6} y={6.5} width={4} height={8.5} rx={1.2} fill="currentColor" opacity={0.22} />
+      <rect x={11.2} y={2.6} width={2.4} height={7} rx={1.2} fill="currentColor" />
+      <circle cx={12.4} cy={12.6} r={1.35} fill="currentColor" />
+    </svg>
+  );
+}
+
 /** A monitor with its screen struck through: the link is fine, the desktop end
  *  is not. Deliberately a different silhouette from the bars. */
 function DesktopOff() {
@@ -117,5 +136,6 @@ function DesktopOff() {
 export function ConnIcon({ kind }: { kind: ConnIconKind }) {
   if (kind === "connecting" || kind === "offline") return <SignalOff />;
   if (kind === "desktop-offline") return <DesktopOff />;
+  if (kind === "stalled") return <SignalStalled />;
   return <SignalBars lit={LIT[kind]} />;
 }

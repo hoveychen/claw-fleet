@@ -28,6 +28,23 @@ use crate::AppState;
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const MIN_SECRET_LEN: usize = 16;
 
+/// How often the relay pings each authed connection.
+///
+/// Without this the relay had no liveness signal at all: a peer whose TCP
+/// connection is half-open (phone changed networks, agent machine slept) keeps
+/// its registry entry, keeps counting as online, and keeps being handed frames
+/// that vanish — until the OS TCP keepalive notices, which on Linux defaults to
+/// roughly two hours. Every frame routed to it in the meantime is lost with the
+/// sender told `delivered`.
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Drop a connection that has produced nothing — not a frame, not a pong — for
+/// this long. Three missed pings; a link that cannot answer any of them is not
+/// coming back on its own. Matches the desktop agent's own 90s budget
+/// (`claw-fleet-core/src/mobile_relay.rs`) so both ends of a dead link give up
+/// on roughly the same schedule.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
 /// Cap on a single WebSocket message (and frame). tungstenite's defaults are
 /// 64 MiB per message / 16 MiB per frame; on a public multi-tenant relay a
 /// 64 MiB-per-connection ceiling is a needless memory-exhaustion surface, so we
@@ -140,6 +157,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
         clients: joined.clients,
         agent_online: joined.agent_online,
         binary: true,
+        pong: true,
     };
     if send_frame(&mut socket, &authed).await.is_err() {
         state.registry.leave(&channel, role, joined.conn_id);
@@ -154,6 +172,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
             let msg = match out {
                 OutMsg::Text(s) => Message::Text(s.into()),
                 OutMsg::Binary(b) => Message::Binary(b.into()),
+                OutMsg::Ping => Message::Ping(Vec::new().into()),
             };
             if sink.send(msg).await.is_err() {
                 break;
@@ -162,8 +181,47 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
         let _ = sink.close().await;
     });
 
-    // read loop: socket -> route
-    while let Some(Ok(msg)) = stream.next().await {
+    // read loop: socket -> route, with its own liveness clock.
+    //
+    // The loop cannot simply await `stream.next()`: a half-open socket never
+    // yields anything and never errors, so the connection would sit in the
+    // registry indefinitely. Pinging on a timer and dropping the connection
+    // once nothing has come back for `IDLE_TIMEOUT` is what bounds that.
+    // `interval_at`, not `interval`: the latter's first tick fires immediately,
+    // which would put a ping on the wire before the connection has said
+    // anything. A socket that just completed auth is self-evidently alive.
+    let mut ping = tokio::time::interval_at(
+        tokio::time::Instant::now() + PING_INTERVAL,
+        PING_INTERVAL,
+    );
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_inbound = std::time::Instant::now();
+    loop {
+        let msg = tokio::select! {
+            next = stream.next() => match next {
+                Some(Ok(m)) => m,
+                // Stream ended or errored — the normal close path.
+                _ => break,
+            },
+            _ = ping.tick() => {
+                // A closed write pump means the socket is already gone.
+                if own_tx.send(OutMsg::Ping).is_err() {
+                    break;
+                }
+                if last_inbound.elapsed() > IDLE_TIMEOUT {
+                    log::info!(
+                        "{role:?} idle {}s on channel {}…; dropping half-open connection",
+                        last_inbound.elapsed().as_secs(),
+                        &channel[..12]
+                    );
+                    break;
+                }
+                continue;
+            }
+        };
+        // Any inbound traffic proves the link works — a pong counts, which is
+        // the whole point of sending the pings above.
+        last_inbound = std::time::Instant::now();
         let text = match msg {
             Message::Text(t) => t.to_string(),
             // A binary frame is always an opaque `msg` payload (a compressed
@@ -186,6 +244,13 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
         };
         match frame {
             InFrame::Auth { .. } => {} // already authed; ignore
+            // Answered on this socket, never forwarded: the probe asks whether
+            // *this* connection round-trips.
+            InFrame::Ping { id } => {
+                if let Ok(s) = serde_json::to_string(&OutFrame::Pong { id }) {
+                    let _ = own_tx.send(OutMsg::Text(s));
+                }
+            }
             InFrame::Msg { payload, ack_id } => {
                 let out = OutFrame::Msg { payload };
                 match role {

@@ -186,6 +186,8 @@ export function DeviceConnection({
       onSessionsKind: (kind) => d({ type: "sessionsKind", kind }),
       onRttSample: (sample: RttSample) => d({ type: "rtt", sample }),
       onReconnect: () => d({ type: "reconnect", now: Date.now() }),
+      onRequestTimeout: () => d({ type: "requestTimeout" }),
+      onDeadLink: () => d({ type: "deadLink" }),
       onAuthError: (message) => d({ type: "authError", message }),
     });
     clientRef.current = client;

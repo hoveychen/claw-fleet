@@ -626,11 +626,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       ? t("连接中…")
       : connKind === "desktop-offline"
         ? t("桌面端离线")
-        : connKind === "congested"
-          ? t("在线 · 网络拥挤")
-          : connKind === "fair"
-            ? t("在线 · 网络一般")
-            : t("桌面端在线");
+        : connKind === "stalled"
+          ? t("疑似断链 · 请求发出后无回应")
+          : connKind === "congested"
+            ? t("在线 · 网络拥挤")
+            : connKind === "fair"
+              ? t("在线 · 网络一般")
+              : t("桌面端在线");
 
   const [push, setPush] = useState<PushState>(pushState);
   // Sub-state below "granted": the user can turn notifications off even while
