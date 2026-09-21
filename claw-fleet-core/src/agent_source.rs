@@ -62,6 +62,37 @@ pub struct ResumeSpec {
     pub images: Vec<String>,
 }
 
+/// One forked side question — see [`AgentSource::fork_ask`].
+#[derive(Clone, Debug)]
+pub struct ForkAskSpec {
+    /// Session id of the conversation to fork.
+    pub session_id: String,
+    /// Workspace the session runs in — the fork must start there so the
+    /// harness finds the transcript and rebuilds the same project context.
+    pub workspace_path: String,
+    /// The complete prompt for the single answer turn (already framed by
+    /// `session_explain`; sources pass it through verbatim).
+    pub prompt: String,
+}
+
+/// What a forked side question produced.
+#[derive(Clone, Debug, Default)]
+pub struct ForkAskOutcome {
+    /// The answer text (authoritative; supersedes the streamed deltas).
+    pub text: String,
+    /// The model that answered, as the harness reported it.
+    pub model: Option<String>,
+    /// Token usage of the single turn when the harness reports it.
+    pub usage: Option<crate::model_cost::TurnUsage>,
+    /// Cost in USD when the harness reports it directly (Claude's
+    /// `total_cost_usd`); `None` means "price it from `usage` if you can".
+    pub cost_usd: Option<f64>,
+    /// The fork's own persisted identity, for sources whose fork must land on
+    /// disk (dsh child session, codex rollout copy). `None` when the fork left
+    /// nothing behind. Scanners use it to keep the fork out of session lists.
+    pub fork_session_id: Option<String>,
+}
+
 /// How a source should be monitored for changes.
 pub enum WatchStrategy {
     /// Watch filesystem paths with `notify` (Claude Code).
@@ -265,6 +296,25 @@ pub trait AgentSource: Send + Sync {
         _on_exit: Box<dyn FnOnce(bool) + Send>,
     ) -> Result<(), String> {
         Err(format!("{}: resume not supported", self.name()))
+    }
+
+    /// Ask one side question inside a **fork** of the session at `spec.path`,
+    /// blocking until the single answer turn is complete.
+    ///
+    /// The contract every implementation must honour (see
+    /// [`crate::session_explain`] for why each clause exists):
+    /// - the source session's own transcript gains no conversation record;
+    /// - the fork replays the session's history so the request prefix hits the
+    ///   provider's prompt cache (same model, same tool surface);
+    /// - exactly one model turn — the answer is text, tools are not run;
+    /// - `on_delta` receives text as it streams so the caller can show it
+    ///   progressively; the final `text` is authoritative.
+    fn fork_ask(
+        &self,
+        _spec: &ForkAskSpec,
+        _on_delta: &mut dyn FnMut(&str),
+    ) -> Result<ForkAskOutcome, String> {
+        Err(format!("{}: sessions cannot be forked for a side question", self.name()))
     }
 
     /// List memory files from this source.

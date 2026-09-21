@@ -168,6 +168,14 @@ impl AgentSource for ClaudeCodeSource {
             on_exit,
         )
     }
+
+    fn fork_ask(
+        &self,
+        spec: &crate::agent_source::ForkAskSpec,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<crate::agent_source::ForkAskOutcome, String> {
+        crate::session_explain::claude_fork_ask(spec, on_delta)
+    }
 }
 
 // ── Dead-process liveness reconciliation ─────────────────────────────────────

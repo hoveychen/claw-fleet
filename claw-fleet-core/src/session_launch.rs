@@ -370,7 +370,7 @@ pub fn spawn_claude_detached(
 /// the session's decision cards / `fleet plan` / `fleet handoff`) or mis-tag the
 /// agent source. Mirror of the codex side's env-stripping in
 /// [`crate::codex_launch::apply_codex_launch_env`].
-fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
+pub(crate) fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
     cmd.env_remove("FLEET_SESSION_ID");
     cmd.env_remove("FLEET_AGENT_SOURCE");
     cmd.env_remove(crate::codex_launch::FLEET_CODEX_LAUNCH_TOKEN_ENV);
@@ -382,7 +382,7 @@ fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
 /// `real_home_dir()`: the agent's credentials are not Fleet's state, so
 /// `FLEET_HOME` alone must not relocate them. Defaults to the same value, so
 /// this changes nothing until `FLEET_AGENT_HOME` is set.
-fn spawn_home_dir() -> Option<std::path::PathBuf> {
+pub(crate) fn spawn_home_dir() -> Option<std::path::PathBuf> {
     crate::session::agent_home_dir()
 }
 

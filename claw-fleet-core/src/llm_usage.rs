@@ -36,6 +36,10 @@ pub const SCENARIO_DAILY_REPORT_SUMMARY: &str = "daily_report_summary";
 pub const SCENARIO_DAILY_REPORT_LESSONS: &str = "daily_report_lessons";
 pub const SCENARIO_SESSION_ANALYZE: &str = "session_analyze";
 pub const SCENARIO_MASCOT_QUIPS: &str = "mascot_quips";
+/// A forked side question about a session's own transcript
+/// ([`crate::session_explain`]). Logged here because the fork persists no
+/// transcript of its own, so nothing else would ever account for the spend.
+pub const SCENARIO_SESSION_EXPLAIN: &str = "session_explain";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
