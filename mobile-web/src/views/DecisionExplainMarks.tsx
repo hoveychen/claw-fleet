@@ -39,6 +39,12 @@ export function useDecisionExplainMarks(
   enabled: boolean;
   busy: boolean;
   ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+  /**
+   * Continue a settled answer: same passage, the prior Q/A folded into a fresh
+   * fork of the *session* (the fork itself is never resumed). Threading it off
+   * `prev` is what keeps the follow-up aware of the answer it continues.
+   */
+  followUp: (prev: ExplainRecord, question: string) => void;
   answers: ExplainRecord[];
   dismiss: (id: string) => void;
 } {
@@ -67,19 +73,11 @@ export function useDecisionExplainMarks(
     };
   }, [sessionId]);
 
-  const ask = useCallback(
-    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
-      if (!client || !sessionId || !sessionPath) return;
-      const req: ExplainRequest = {
-        sessionId,
-        sessionPath,
-        workspacePath: workspacePath || undefined,
-        quote: sel.quote,
-        preset,
-        question: preset === "custom" ? question : undefined,
-        anchor: undefined,
-        thread: [],
-      };
+  /** Post a request, show the record (or a refusal stand-in), and follow it
+   *  until it settles. Shared by the first question and every follow-up. */
+  const submit = useCallback(
+    async (req: ExplainRequest) => {
+      if (!client) return;
       setBusy(true);
       let rec: ExplainRecord;
       try {
@@ -89,19 +87,53 @@ export function useDecisionExplainMarks(
       } finally {
         setBusy(false);
       }
-      window.getSelection()?.removeAllRanges();
       upsert(rec);
       if (rec.status === "running" && !pollers.current.has(rec.id)) {
         const ctl = new AbortController();
         pollers.current.set(rec.id, ctl);
-        pollExplanation(() => getExplanation(client, sessionId, rec.id), upsert, { signal: ctl.signal })
+        pollExplanation(() => getExplanation(client, req.sessionId, rec.id), upsert, { signal: ctl.signal })
           .catch((e) => console.error("explain poll failed:", e))
           .finally(() => {
             if (pollers.current.get(rec.id) === ctl) pollers.current.delete(rec.id);
           });
       }
     },
-    [client, sessionId, sessionPath, workspacePath, upsert],
+    [client, upsert],
+  );
+
+  const ask = useCallback(
+    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
+      if (!client || !sessionId || !sessionPath) return;
+      await submit({
+        sessionId,
+        sessionPath,
+        workspacePath: workspacePath || undefined,
+        quote: sel.quote,
+        preset,
+        question: preset === "custom" ? question : undefined,
+        anchor: undefined,
+        thread: [],
+      });
+      window.getSelection()?.removeAllRanges();
+    },
+    [client, sessionId, sessionPath, workspacePath, submit],
+  );
+
+  const followUp = useCallback(
+    async (prev: ExplainRecord, question: string) => {
+      if (!client || !sessionId || !sessionPath) return;
+      await submit({
+        sessionId,
+        sessionPath,
+        workspacePath: workspacePath || undefined,
+        quote: prev.quote,
+        preset: "custom",
+        question,
+        anchor: prev.anchor,
+        thread: [...(prev.thread ?? []), prev.id],
+      });
+    },
+    [client, sessionId, sessionPath, workspacePath, submit],
   );
 
   const dismiss = useCallback((id: string) => {
@@ -110,7 +142,7 @@ export function useDecisionExplainMarks(
     setAnswers((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  return { enabled: Boolean(client && sessionId && sessionPath), busy, ask, answers, dismiss };
+  return { enabled: Boolean(client && sessionId && sessionPath), busy, ask, followUp, answers, dismiss };
 }
 
 /** The answers asked from inside a card's question, under it. */
