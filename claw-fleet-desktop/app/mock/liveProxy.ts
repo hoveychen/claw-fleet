@@ -1732,6 +1732,15 @@ async function callProbeBlob(req: LiveReq): Promise<Blob> {
 }
 
 /**
+ * How far back `get_guard_context` reads looking for the last assistant text.
+ * Same window as [`startTailPoll`], which is the other place we decided how
+ * much recent transcript is "enough". A long run of tool calls can push the
+ * text further back than this, in which case the analysis degrades to `""` —
+ * the same value that function already returns for a session it can't read.
+ */
+const GUARD_CONTEXT_TAIL = 200;
+
+/**
  * Commands the desktop answers by *composing* other Backend calls rather than
  * by hitting one endpoint. There is no route to mirror, so the composition is
  * re-done here over the routes that do exist.
@@ -1843,7 +1852,13 @@ export const LIVE_COMPOSITES: Record<
       messages = await callProbe({
         method: "GET",
         path: "/messages",
-        query: { path: session.jsonlPath },
+        // Tailed, because the scan below only ever reads the LAST assistant
+        // text. Asking for the whole transcript made this the single largest
+        // egress source on the muvee host: 747 fetches averaging 344KB —
+        // 263MB in 45 minutes — on 2026-09-21. 200 rows matches
+        // startTailPoll's window and also buys the server-side trim of
+        // oversized tool output, which the untailed route skips.
+        query: { path: session.jsonlPath, tail: GUARD_CONTEXT_TAIL },
       });
     } catch {
       return "";
