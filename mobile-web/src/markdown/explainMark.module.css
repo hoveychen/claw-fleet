@@ -1,0 +1,30 @@
+/* The agent's own `[?text]` annotation (markdown/explainMarks.tsx). The text
+ * stays the text; a dotted accent rule under it says "tap me", and a small `?`
+ * rides after it — always visible on the phone, since there is no hover to
+ * reveal it. Mirrors the desktop's `.explain_mark` in markdown.module.css. */
+.mark {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  border-radius: 3px;
+  /* A larger hit area without changing the line height. */
+  padding: 0 1px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mark:active {
+  background: var(--color-accent-soft);
+}
+
+.mark::after {
+  content: "?";
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.72em;
+  line-height: 1;
+  vertical-align: super;
+  color: var(--color-accent);
+}

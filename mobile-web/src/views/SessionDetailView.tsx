@@ -42,6 +42,7 @@ import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
+import { ExplainMarksProvider, type ExplainMarksContext } from "../markdown/explainMarks";
 import { dateLocale, t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
@@ -96,7 +97,7 @@ import { filterMainRows } from "./mainRows";
 import { SelectionAskBar } from "./SelectionAskBar";
 import { SessionExplainsTab } from "./SessionExplainsTab";
 import { useSessionExplains } from "./useSessionExplains";
-import type { ExplainPreset, ExplainRecord } from "../sessionExplain";
+import type { ExplainAnchor, ExplainPreset, ExplainRecord } from "../sessionExplain";
 import {
   locateExplainRow,
   selectQuoteIn,
@@ -1279,6 +1280,44 @@ export function SessionDetailView({
     },
     [session.id, session.jsonlPath, session.workspacePath, askExplainRecord],
   );
+  /** A tap on one of the agent's own `[?text]` marks: the mark is the
+   *  selection, so this is the ask bar's 「解释」 with the quote and row read
+   *  off the mark. A mark this session has already asked about (and is not a
+   *  failed ask) opens that card in the 追问 pane instead of forking again. */
+  const explainsRef = useRef(explains);
+  explainsRef.current = explains;
+  const onExplainMark = useCallback(
+    async (quote: string, anchor: ExplainAnchor | undefined) => {
+      const prior = explainsRef.current.find((r) => r.quote === quote && r.status !== "error");
+      if (prior) {
+        setOpenExplain(prior.id);
+        setPane("explains");
+        return;
+      }
+      if (!session.jsonlPath) return;
+      setExplainBusy(true);
+      try {
+        const rec = await askExplainRecord({
+          sessionId: session.id,
+          sessionPath: session.jsonlPath,
+          workspacePath: session.workspacePath || undefined,
+          quote,
+          preset: "explain",
+          anchor,
+          thread: [],
+        });
+        setOpenExplain(rec.id);
+        setPane("explains");
+      } finally {
+        setExplainBusy(false);
+      }
+    },
+    [session.id, session.jsonlPath, session.workspacePath, askExplainRecord],
+  );
+  const explainMarks = useMemo<ExplainMarksContext | null>(
+    () => (client && session.jsonlPath ? { onMark: onExplainMark } : null),
+    [client, session.jsonlPath, onExplainMark],
+  );
   /** Continue a settled side question: the same passage, the prior Q/A folded
    *  into a fresh fork of the session (the fork itself is never resumed). */
   const followUpExplain = useCallback(
@@ -1582,6 +1621,7 @@ export function SessionDetailView({
 
   return (
     <AgentNavProvider nav={nav}>
+    <ExplainMarksProvider value={explainMarks}>
     <InFlightToolsContext.Provider value={inFlightTools}>
     <div className={styles.page}>
       {/* `seamless`: below the header comes either the status rail (which has its
@@ -1830,6 +1870,7 @@ export function SessionDetailView({
       )}
     </div>
     </InFlightToolsContext.Provider>
+    </ExplainMarksProvider>
     </AgentNavProvider>
   );
 }
