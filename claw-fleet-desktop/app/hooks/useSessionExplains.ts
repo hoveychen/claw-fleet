@@ -21,11 +21,18 @@ import {
  * `dismiss` only hides a card for this view: there is no delete on the store
  * (the records are the reader's notes on the run, "放着" was the ask), so a
  * dismissed question is back the next time the session is opened.
+ *
+ * `all` is the unfiltered list — what the library facet lists, so a question
+ * dismissed from the rail still has somewhere to be found and `restore` can
+ * put it back.
  */
 export function useSessionExplains(sessionId: string | undefined): {
   explains: ExplainRecord[];
+  all: ExplainRecord[];
+  hidden: ReadonlySet<string>;
   ask: (req: ExplainRequest) => Promise<ExplainRecord>;
   dismiss: (id: string) => void;
+  restore: (id: string) => void;
 } {
   const [records, setRecords] = useState<ExplainRecord[]>([]);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
@@ -133,6 +140,15 @@ export function useSessionExplains(sessionId: string | undefined): {
     });
   }, []);
 
+  const restore = useCallback((id: string) => {
+    setHidden((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
   const explains = useMemo(() => records.filter((r) => !hidden.has(r.id)), [records, hidden]);
-  return { explains, ask, dismiss };
+  return { explains, all: records, hidden, ask, dismiss, restore };
 }

@@ -14,10 +14,14 @@
  *    which is how a file / wiki doc / web page is read.
  *
  * 2. **The drawer** — an overlay panel that floats over the transcript and
- *    shows exactly one *session facet* (Skills, Decisions, Tokens, Tasks, Background Tasks,
- *    Scratchpad, Notes, Workflow) picked from the header menu. This is "go look
- *    something up" — singular, deliberate, dismissed when you are done.
- *    `active` is that one thing.
+ *    shows exactly one *session facet* (Library, Skills, Decisions, Tokens, Tasks,
+ *    Background Tasks, Scratchpad, Notes, Workflow) picked from the header menu.
+ *    This is "go look something up" — singular, deliberate, dismissed when you
+ *    are done. `active` is that one thing.
+ *
+ *    Library is the drawer's answer to the rail: everything the rail has ever
+ *    held for this session, so dismissing a card can mean "not now" instead of
+ *    "gone". See SessionLibraryPanel.
  *
  * Docs used to land in the drawer too, and that is the bug this split closes:
  * clicking a link in the transcript put the *same* name on screen twice (the
@@ -32,6 +36,7 @@
 
 /** A session facet — a panel scoped to this session, read in the drawer. */
 export type AuxFacet =
+  | "library"
   | "skills"
   | "decisions"
   | "tokens"
@@ -42,6 +47,7 @@ export type AuxFacet =
   | "workflow";
 
 const FACETS: readonly AuxFacet[] = [
+  "library",
   "skills",
   "decisions",
   "tokens",

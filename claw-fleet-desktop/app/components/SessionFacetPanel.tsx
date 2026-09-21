@@ -6,7 +6,10 @@ import type {
   TaskPlanDetail,
   WorkflowTree,
 } from "../types";
-import type { AuxFacet } from "../detailAux";
+import type { AuxDocKind, AuxFacet } from "../detailAux";
+import type { DocHistoryEntry } from "../docHistory";
+import type { ExplainRecord } from "../explainApi";
+import { SessionLibraryPanel } from "./SessionLibraryPanel";
 import { bgTaskDataType, bgTaskIcon } from "../bgTaskKinds";
 import { tokenPanelForAgentSource } from "../modelChoices";
 import { CodexTokenPanel } from "./CodexTokenPanel";
@@ -38,6 +41,7 @@ export function SessionFacetPanel({
   workflowTrees,
   sessions,
   onOpenAgent,
+  library,
 }: {
   facet: AuxFacet;
   session: SessionInfo;
@@ -50,10 +54,38 @@ export function SessionFacetPanel({
    *  last-Stop snapshot the task record carries. */
   sessions: SessionInfo[];
   onOpenAgent: (agentId: string) => void;
+  /** Everything the rail has held for this session — see SessionLibraryPanel.
+   *  Bundled because it is five props that only one facet reads. */
+  library: {
+    explains: ExplainRecord[];
+    hiddenExplains: ReadonlySet<string>;
+    docs: DocHistoryEntry[];
+    subagents: SessionInfo[];
+    onOpenExplain: (id: string) => void;
+    onOpenDoc: (kind: AuxDocKind, ref: string, label: string) => void;
+    onForgetDoc: (kind: AuxDocKind, ref: string) => void;
+    onForgetAllDocs: () => void;
+    onOpenAgentSession: (session: SessionInfo) => void;
+  };
 }) {
   const { t } = useTranslation();
 
   switch (facet) {
+    case "library":
+      return (
+        <SessionLibraryPanel
+          explains={library.explains}
+          hiddenExplains={library.hiddenExplains}
+          docs={library.docs}
+          subagents={library.subagents}
+          onOpenExplain={library.onOpenExplain}
+          onOpenDoc={library.onOpenDoc}
+          onForgetDoc={library.onForgetDoc}
+          onForgetAllDocs={library.onForgetAllDocs}
+          onOpenAgent={library.onOpenAgentSession}
+        />
+      );
+
     case "scratchpad":
       return <ScratchpadView workspace={session.workspacePath} sessionId={session.id} />;
 

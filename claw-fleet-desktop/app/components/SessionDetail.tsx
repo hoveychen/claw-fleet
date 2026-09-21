@@ -72,7 +72,7 @@ import {
   type AuxFacetItem,
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
-import { rememberDoc } from "../hooks/useDocHistory";
+import { rememberDoc, useDocHistory } from "../hooks/useDocHistory";
 import { useSessionExplains } from "../hooks/useSessionExplains";
 import { locateExplainRow, selectQuoteIn, type AssistantSelection } from "../selectionExplain";
 import type { ExplainPreset, ExplainRecord } from "../explainApi";
@@ -546,7 +546,15 @@ export function SessionDetail({
   const [railOverride, setRailOverride] = useState<boolean | null>(null);
   /* Side questions about this session's prose (选区追问), read from disk and
      polled while a fork is answering. Scoped to the session like `aux`. */
-  const { explains, ask: askExplainRecord, dismiss: dismissExplain } = useSessionExplains(
+  const {
+    explains,
+    all: allExplains,
+    hidden: hiddenExplains,
+    ask: askExplainRecord,
+    dismiss: dismissExplain,
+    restore: restoreExplain,
+  } = useSessionExplains(liveSession?.id);
+  const { docs: docHistory, forget: forgetDoc, forgetAll: forgetAllDocs } = useDocHistory(
     liveSession?.id,
   );
   const [explainBusy, setExplainBusy] = useState(false);
@@ -1020,6 +1028,32 @@ export function SessionDetail({
     },
     [dismissExplain],
   );
+  /** A library row for a side question: un-hide it if the rail had dropped it,
+   *  then expand it there. Same destination either way — the panel's job is to
+   *  hand things back to the rail, not to become a second reader. */
+  const reopenExplain = useCallback(
+    (id: string) => {
+      restoreExplain(id);
+      setAux((st) => ({ ...st, expanded: explainCardId(id) }));
+      setRailOverride((v) => (v === false ? null : v));
+    },
+    [restoreExplain],
+  );
+  /** A library row for a doc: the same call the transcript link makes, so a
+   *  doc recovered from the list is indistinguishable from one just opened. */
+  const reopenDoc = useCallback(
+    (kind: AuxDocKind, ref: string, label: string) => {
+      openAuxDoc(kind, ref, label);
+      setRailOverride((v) => (v === false ? null : v));
+    },
+    [openAuxDoc],
+  );
+  /** A library row for a subagent, live or long finished. Expanding pins it,
+   *  which is what puts a retired agent back on the rail (see `railAgents`). */
+  const reopenAgent = useCallback((s: SessionInfo) => {
+    setAux((st) => toggleAgent(st, s.id));
+    setRailOverride((v) => (v === false ? null : v));
+  }, []);
   /** Scroll the transcript back to the passage a side question quoted, flash
    *  its row, and re-select the passage itself. The uuid is the durable key;
    *  the index is the fallback for a record (or a row) without one. */
@@ -1290,6 +1324,19 @@ export function SessionDetail({
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   }, [liveSession, sessions]);
 
+  /** The same family, finished ones included — what the library facet lists.
+   *  The rail only ever shows the live ones (and one pinned leftover), so this
+   *  is the only place a subagent that ended an hour ago can be found again
+   *  without leaving the conversation. */
+  const allSubagents = useMemo((): SessionInfo[] => {
+    if (!liveSession) return [];
+    const parentId = liveSession.isSubagent ? liveSession.parentSessionId : liveSession.id;
+    if (!parentId) return [];
+    return sessions
+      .filter((s) => s.isSubagent && s.parentSessionId === parentId && s.id !== liveSession.id)
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  }, [liveSession, sessions]);
+
   const tabs = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
 
@@ -1343,6 +1390,8 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
+  const libraryCount = allExplains.length + docHistory.length + allSubagents.length;
+
   /* The session's facets—Skills, Decision, Token, Tasks, Background Tasks,
      Temp Files, Notes, Workflow—are things you go *look up*, one at a time, so
      they live in the header's overflow menu rather than as seven permanent tabs
@@ -1351,6 +1400,15 @@ export function SessionDetail({
      only what the session itself put there (see `auxTabs`). */
   const auxFacets = useMemo((): AuxFacetItem[] => {
     const list: AuxFacetItem[] = [];
+    // First in the menu, and unconditional: it is the one facet that answers
+    // "where did that card go", so it has to be findable even when the session
+    // has nothing in it yet (its empty state says as much).
+    list.push({
+      id: "library",
+      label: libraryCount > 0
+        ? `${t("detail.tab_library", "本会话资料")} (${libraryCount})`
+        : t("detail.tab_library", "本会话资料"),
+    });
     list.push({ id: "skills", label: t("detail.tab_skills") });
     list.push({ id: "decisions", label: t("detail.tab_decisions") });
     list.push({ id: "tokens", label: t("detail.tab_tokens") });
@@ -1376,6 +1434,7 @@ export function SessionDetail({
     return list;
   }, [
     t,
+    libraryCount,
     hasTaskPlans,
     hasBgTasks,
     bgTasks.length,
@@ -1848,6 +1907,17 @@ export function SessionDetail({
                     workflowTrees={workflowTrees}
                     sessions={sessions}
                     onOpenAgent={openAgentSession}
+                    library={{
+                      explains: allExplains,
+                      hiddenExplains,
+                      docs: docHistory,
+                      subagents: allSubagents,
+                      onOpenExplain: reopenExplain,
+                      onOpenDoc: reopenDoc,
+                      onForgetDoc: forgetDoc,
+                      onForgetAllDocs: forgetAllDocs,
+                      onOpenAgentSession: reopenAgent,
+                    }}
                   />
                 )}
               </SessionAuxPanel>

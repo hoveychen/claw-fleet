@@ -9,6 +9,7 @@ import {
   FileJson2,
   Folder,
   FolderOpen,
+  Library,
   ListChecks,
   type LucideIcon,
   MessageSquareQuote,
@@ -27,6 +28,7 @@ import type { AuxFacet, AuxFacetItem } from "../detailAux";
  *  a wall of text. Keyed by facet id — adding a facet without an icon still
  *  renders, just without one. */
 const FACET_ICONS: Record<AuxFacet, LucideIcon> = {
+  library: Library,
   skills: Sparkles,
   decisions: MessageSquareQuote,
   tokens: Coins,
