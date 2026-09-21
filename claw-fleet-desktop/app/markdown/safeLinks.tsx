@@ -6,6 +6,7 @@ import { isMermaidPre } from "./mermaidPre";
 import { PathChip, type PathLinkContext } from "./pathLinks";
 import { parsePathRef } from "./pathRef";
 import { localImageComponent } from "./localImages";
+import { ExplainMarkSpan } from "./explainMarks";
 import styles from "./markdown.module.css";
 
 // The plugin chain lives in ./plugins (Tauri-free, so tests can drive it) and is
@@ -111,6 +112,9 @@ function codeText(children: React.ReactNode): string {
 
 export const safeMarkdownComponents: Components = {
   a: safeLinkComponent(),
+  // `[?text]` marks arrive as `<span class="explain-mark">`; clickable inside
+  // an ExplainMarksProvider, plain text elsewhere. See ./explainMarks.
+  span: ExplainMarkSpan,
   // A host path in an image ref has to be fetched through the Backend; a bare
   // <img src="/Users/…"> resolves against the webview origin and 404s. See
   // ./localImages.

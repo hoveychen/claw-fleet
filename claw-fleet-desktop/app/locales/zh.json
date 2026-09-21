@@ -2787,7 +2787,8 @@
     }
   },
   "markdown": {
-    "render_rest": "展开剩余 {{n}} 段"
+    "render_rest": "展开剩余 {{n}} 段",
+    "explain_mark_hint": "点击解释这段话"
   },
   "env": {
     "subtitle": "三个 agent 环境(Claude Code / Codex / DeepSeek Harness)的安装、升级与登录状态。",
