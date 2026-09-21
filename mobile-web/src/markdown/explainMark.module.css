@@ -22,6 +22,10 @@
 .mark::after {
   content: "?";
   display: inline-block;
+  /* Same trap as the desktop's `.explain_mark::after`: an inline-block lays
+     out its own first line and inherits the 2em `text-indent` of a
+     `.cjk-indent` paragraph, leaving a two-character gap before the glyph. */
+  text-indent: 0;
   margin-left: 2px;
   font-size: 0.72em;
   line-height: 1;
