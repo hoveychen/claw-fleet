@@ -12,6 +12,7 @@
 // mocked unless `?mock` is in the URL.
 import { RelayClient, type RelayHandlers } from "../relay";
 import type { DecisionKind, PlanNode, ProcRecord } from "../types";
+import type { ExplainRecord, ExplainRequest } from "../generated/types";
 import {
   MOCK_ARTIFACTS,
   MOCK_ATTACHMENT_BYTES,
@@ -61,6 +62,16 @@ if (websiteScene) {
 // Logic moved to ../mockMode (zero-dependency); re-export here keeps existing imports working.
 export { isMockMode } from "../mockMode";
 
+/** What the canned side question asks when the preset carries no text, and
+ *  what the demo fork answers with — the same copy the desktop mock uses. */
+const MOCK_EXPLAIN_QUESTION: Record<string, string> = {
+  explain: "这段话是什么意思？",
+  translate: "把这段话翻译成中文。",
+  rationale: "为什么这么判断？有什么取舍？",
+};
+const MOCK_EXPLAIN_ANSWER =
+  "这句话说的是 fork 出的子会话复用了原会话的全部前缀，所以请求命中提示词缓存，只为新增的问题付费。换句话说，追问的成本取决于原会话有多「热」：刚跑完的会话几乎全部命中，放了一天的会话则要重新写入缓存。";
+
 export class MockRelayClient extends RelayClient {
   // The base class keeps `handlers` private, so hold our own reference.
   private mockHandlers: RelayHandlers;
@@ -71,6 +82,10 @@ export class MockRelayClient extends RelayClient {
   private mockProc: ProcRecord | null = null;
   /** 0 = first screen not yet sent. Real offset is byte count; here we just track whether data has been sent. */
   private mockProcOffset = 0;
+  /** Side questions asked in this demo run, by id. A fresh ask streams its
+   *  canned answer in over a couple of seconds so the pane's growing-text
+   *  path is exercised without a host to fork on. */
+  private mockExplains = new Map<string, ExplainRecord>();
 
   constructor(handlers: RelayHandlers) {
     super("mock-secret", handlers);
@@ -188,6 +203,72 @@ export class MockRelayClient extends RelayClient {
         return new Promise((resolve) =>
           setTimeout(() => resolve(MOCK_DSH_SESSION_COST), 900),
         );
+      // Selection explain: list / get read the demo store; ask seeds a running
+      // record and lets it grow word by word, then settles it with usage the
+      // card can label (a warm fork: nearly everything from cache).
+      case "session_explain_list":
+        return [...this.mockExplains.values()]
+          .filter((r) => r.sessionId === String(params?.sessionId ?? ""))
+          .sort((a, b) => a.createdMs - b.createdMs);
+      case "session_explain": {
+        const rec = this.mockExplains.get(String(params?.id ?? ""));
+        if (!rec) throw new Error("no such explanation");
+        return rec;
+      }
+      case "session_explain_ask": {
+        const req = params as unknown as ExplainRequest;
+        const now = Date.now();
+        const id = `mock-explain-${now}`;
+        const rec: ExplainRecord = {
+          id,
+          sessionId: req.sessionId,
+          source: "claude-code",
+          createdMs: now,
+          updatedMs: now,
+          preset: req.preset,
+          quote: req.quote,
+          question: req.question ?? MOCK_EXPLAIN_QUESTION[req.preset] ?? "",
+          anchor: req.anchor,
+          thread: req.thread ?? [],
+          status: "running",
+          text: "",
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          durationMs: 0,
+        };
+        this.mockExplains.set(id, rec);
+        const words = MOCK_EXPLAIN_ANSWER.match(/[^，。；、！？\s]+[，。；、！？\s]*/g) ?? [MOCK_EXPLAIN_ANSWER];
+        let n = 0;
+        const timer = setInterval(() => {
+          const cur = this.mockExplains.get(id);
+          if (!cur) {
+            clearInterval(timer);
+            return;
+          }
+          n += 1;
+          if (n < words.length) {
+            this.mockExplains.set(id, { ...cur, text: words.slice(0, n).join(""), updatedMs: Date.now() });
+            return;
+          }
+          clearInterval(timer);
+          this.mockExplains.set(id, {
+            ...cur,
+            text: MOCK_EXPLAIN_ANSWER,
+            status: "done",
+            updatedMs: Date.now(),
+            model: "claude-fable-5-1",
+            inputTokens: 1200,
+            outputTokens: 96,
+            cacheReadTokens: 58000,
+            cacheCreationTokens: 0,
+            costUsd: 0.06,
+            durationMs: Date.now() - now,
+          });
+        }, 160);
+        return rec;
+      }
       case "tail":
         return MOCK_MESSAGES[String(params?.path ?? "")] ?? [];
       case "tail_delta":

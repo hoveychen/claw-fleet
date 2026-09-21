@@ -72,7 +72,7 @@ import {
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
 import { useSessionExplains } from "../hooks/useSessionExplains";
-import { selectQuoteIn, type AssistantSelection } from "../selectionExplain";
+import { locateExplainRow, selectQuoteIn, type AssistantSelection } from "../selectionExplain";
 import type { ExplainPreset, ExplainRecord } from "../explainApi";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SessionAuxPanel } from "./SessionAuxPanel";
@@ -1018,22 +1018,8 @@ export function SessionDetail({
   const locateExplain = useCallback((rec: ExplainRecord) => {
     const root = scrollRef.current;
     if (!root) return;
-    let row: HTMLElement | null = null;
-    const uuid = rec.anchor?.msgUuid;
-    if (uuid && /^[\w-]+$/.test(uuid)) {
-      row = root.querySelector<HTMLElement>(`[data-msg-uuid="${uuid}"]`);
-    }
-    if (!row && rec.anchor?.msgIdx != null) {
-      row = root.querySelector<HTMLElement>(`[data-msg-idx="${rec.anchor.msgIdx}"]`);
-    }
-    if (!row) return;
-    row.scrollIntoView({ behavior: "smooth", block: "center" });
-    row.classList.remove(styles.explain_flash);
-    // Restart the animation even when the same row is located twice in a row.
-    void row.offsetWidth;
-    row.classList.add(styles.explain_flash);
-    window.setTimeout(() => row?.classList.remove(styles.explain_flash), 1700);
-    selectQuoteIn(row, rec.quote);
+    const row = locateExplainRow(root, rec.anchor, styles.explain_flash);
+    if (row) selectQuoteIn(row, rec.quote);
   }, []);
   /** Submit a question about a selected passage: fork the session and put the
    *  answer's card in the rail, expanded, with the rail shown if it was hidden. */

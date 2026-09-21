@@ -40,7 +40,9 @@ export type DetailPane =
   | "token"
   | "workflow"
   | "notes"
-  | "handoff";
+  | "handoff"
+  /** Side questions asked about passages of this session's transcript. */
+  | "explains";
 
 /** Which pane clicking a pill in the track below the header pushes open.
  *

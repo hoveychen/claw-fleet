@@ -1,0 +1,190 @@
+/* ── 追问 pane: one card per side question ── */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.presetIcon {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.question {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one value on the right: doing / done (cost) / failed. */
+.state {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--t-meta, 11px);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+.state[data-tone="live"] {
+  color: var(--color-accent);
+}
+.state[data-tone="bad"] {
+  color: var(--color-error);
+}
+
+/* Collapsed body: the passage's first line, then the answer clamped. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 20px;
+}
+.previewQuote {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  border-left: 2px solid var(--color-border-strong);
+  padding-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.previewAnswer {
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* Open body. */
+.quote {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-left: 2px solid var(--color-accent-soft);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 0 8px 8px 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.quote:active {
+  border-left-color: var(--color-accent);
+}
+.quoteText {
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.locate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-accent);
+}
+
+.answer {
+  font-size: var(--t-body, 16px);
+  line-height: 1.6;
+  color: var(--color-text);
+}
+/* A caret at the end of an answer still streaming in. */
+.answer[data-partial] > :last-child::after {
+  content: "▍";
+  color: var(--color-accent);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
+
+.error {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-error);
+  word-break: break-word;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--t-meta, 11px);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.follow {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+.followInput {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: inherit;
+  /* 16px keeps iOS from zooming the page onto the field. */
+  font-size: 16px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+.followInput:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.followSend {
+  flex-shrink: 0;
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+.followSend:disabled {
+  opacity: 0.5;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

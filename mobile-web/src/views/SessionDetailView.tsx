@@ -93,6 +93,15 @@ import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
 import { buildStatusPills, type DetailPane, type PillTarget } from "./sessionStatusPills";
 import { filterMainRows } from "./mainRows";
+import { SelectionAskBar } from "./SelectionAskBar";
+import { SessionExplainsTab } from "./SessionExplainsTab";
+import { useSessionExplains } from "./useSessionExplains";
+import type { ExplainPreset, ExplainRecord } from "../sessionExplain";
+import {
+  locateExplainRow,
+  selectQuoteIn,
+  type AssistantSelection,
+} from "../../../shared-ts/sessionExplain";
 import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
@@ -388,6 +397,7 @@ const PANE_TITLE: Record<DetailPane, string> = {
   workflow: "Workflow",
   notes: "笔记",
   handoff: "接力链",
+  explains: "追问",
 };
 
 interface Props {
@@ -919,6 +929,10 @@ interface MessageRowProps {
   msg: RawMessage;
   /** Record identity (`rowKeyOf`), not a list position. */
   rowKey: string;
+  /** Position in the rendered list. Stamped on the row as `data-msg-idx`
+   *  for the selection bar and as a side question's fallback anchor when the
+   *  record has no uuid; the uuid (`data-msg-uuid`) is the durable one. */
+  msgIdx: number;
   /** Set of open thinking-block keys (`<rowKey>#<blockIndex>`). Reference is
    *  stable across the 2.5s tail poll, so `memo` skips untouched rows then;
    *  it only changes on a user toggle, when re-rendering every row is fine. */
@@ -958,6 +972,7 @@ function toolMetaEqual(a?: Map<string, ToolMeta>, b?: Map<string, ToolMeta>): bo
 const MessageRow = memo(function MessageRow({
   msg,
   rowKey,
+  msgIdx,
   expandedThinking,
   onToggleThinking,
   toolMeta,
@@ -1058,7 +1073,15 @@ const MessageRow = memo(function MessageRow({
     .map((b) => b.text)
     .join("\n\n");
   return (
-    <div className={styles.assistantRow}>
+    // Role, position and record uuid on the row: the selection bar reads the
+    // first to tell agent prose from the user's, and a side question keeps the
+    // last as its durable anchor (positions shift as older history loads).
+    <div
+      className={styles.assistantRow}
+      data-role="assistant"
+      data-msg-idx={msgIdx}
+      data-msg-uuid={(msg as { uuid?: string }).uuid}
+    >
       <AssistantBlocks
         blocks={blocks}
         rowKey={rowKey}
@@ -1085,6 +1108,7 @@ const MessageRow = memo(function MessageRow({
 (prev, next) =>
   prev.msg === next.msg &&
   prev.rowKey === next.rowKey &&
+  prev.msgIdx === next.msgIdx &&
   prev.expandedThinking === next.expandedThinking &&
   prev.onToggleThinking === next.onToggleThinking &&
   prev.client === next.client &&
@@ -1112,6 +1136,11 @@ export function SessionDetailView({
   const [pane, setPane] = useState<DetailPane | null>(null);
   /** Session detail sheet — opened by tapping the title or the ⋮ button. */
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Side questions about passages of the transcript. The list is read over
+  // the relay per session; the one just asked opens in the 追问 pane.
+  const { explains, loaded: explainsLoaded, ask: askExplainRecord } = useSessionExplains(client, session.id);
+  const [openExplain, setOpenExplain] = useState<string | null>(null);
+  const [explainBusy, setExplainBusy] = useState(false);
   const openTarget = useCallback((target: PillTarget) => {
     if (target === "sheet") setSheetOpen(true);
     else setPane(target);
@@ -1179,6 +1208,7 @@ export function SessionDetailView({
     // from the previous session).
     setSheetOpen(false);
     setPane(null);
+    setOpenExplain(null);
     // Never carry one session's pending echo (or a stuck in-flight flag) over.
     setOptimisticSends([]);
     submitInFlightRef.current = false;
@@ -1221,6 +1251,70 @@ export function SessionDetailView({
   // the composer's own content changes; scrolling never touches it.
   const [composerHeight, setComposerHeight] = useState(0);
   const working = WORKING.includes(session.status);
+
+  // ── Side questions ("追问") ─────────────────────────────────────────────
+  /** Submit a question about a selected passage: fork the session and open
+   *  the answer's card in the 追问 pane, growing as the record is polled. */
+  const askExplain = useCallback(
+    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
+      if (!session.jsonlPath) return;
+      setExplainBusy(true);
+      try {
+        const rec = await askExplainRecord({
+          sessionId: session.id,
+          sessionPath: session.jsonlPath,
+          workspacePath: session.workspacePath || undefined,
+          quote: sel.quote,
+          preset,
+          question: preset === "custom" ? question : undefined,
+          anchor: { msgUuid: sel.msgUuid ?? undefined, msgIdx: sel.msgIdx },
+          thread: [],
+        });
+        window.getSelection()?.removeAllRanges();
+        setOpenExplain(rec.id);
+        setPane("explains");
+      } finally {
+        setExplainBusy(false);
+      }
+    },
+    [session.id, session.jsonlPath, session.workspacePath, askExplainRecord],
+  );
+  /** Continue a settled side question: the same passage, the prior Q/A folded
+   *  into a fresh fork of the session (the fork itself is never resumed). */
+  const followUpExplain = useCallback(
+    async (prev: ExplainRecord, question: string) => {
+      if (!session.jsonlPath) return;
+      setExplainBusy(true);
+      try {
+        const rec = await askExplainRecord({
+          sessionId: session.id,
+          sessionPath: session.jsonlPath,
+          workspacePath: session.workspacePath || undefined,
+          quote: prev.quote,
+          preset: "custom",
+          question,
+          anchor: prev.anchor ?? undefined,
+          thread: [...(prev.thread ?? []), prev.id],
+        });
+        setOpenExplain(rec.id);
+      } finally {
+        setExplainBusy(false);
+      }
+    },
+    [session.id, session.jsonlPath, session.workspacePath, askExplainRecord],
+  );
+  /** Leave the pane, scroll the transcript to the quoted passage, flash its
+   *  row and re-select the passage. The transcript stays mounted under the
+   *  pane, so the row is there to find as soon as the overlay is gone. */
+  const locateExplain = useCallback((rec: ExplainRecord) => {
+    setPane(null);
+    requestAnimationFrame(() => {
+      const root = scrollRef.current;
+      if (!root) return;
+      const row = locateExplainRow(root, rec.anchor, styles.explainFlash);
+      if (row) selectQuoteIn(row, rec.quote);
+    });
+  }, []);
 
   // ── Message polling (only while viewing messages) ──────────────
   //
@@ -1554,6 +1648,7 @@ export function SessionDetailView({
           family={family}
           pendingDecisions={pendingDecisions}
           client={client}
+          explainCount={explainsLoaded ? explains.length : undefined}
           onClose={() => setSheetOpen(false)}
           onOpenPane={setPane}
           onOpenSession={(s) => onOpenSessionId(s.id)}
@@ -1592,9 +1687,29 @@ export function SessionDetailView({
             {pane === "workflow" && <WorkflowTab session={session} client={client} />}
             {pane === "notes" && <NotesTab session={session} client={client} />}
             {pane === "handoff" && <HandoffTab session={session} client={client} />}
+            {pane === "explains" && (
+              <SessionExplainsTab
+                explains={explains}
+                loaded={explainsLoaded}
+                openId={openExplain}
+                busy={explainBusy}
+                onToggle={setOpenExplain}
+                onLocate={locateExplain}
+                onFollowUp={followUpExplain}
+              />
+            )}
           </div>
         </div>
       )}
+
+      {/* Floats over a long-press selection of agent prose; only while the
+          transcript itself is what is on screen and the session can be forked. */}
+      <SelectionAskBar
+        scroller={scrollRef}
+        enabled={!!client && !!session.jsonlPath && pane === null && !sheetOpen}
+        busy={explainBusy}
+        onAsk={askExplain}
+      />
 
       <div
         className={styles.scroll}
@@ -1668,6 +1783,7 @@ export function SessionDetailView({
                 key={rowKeyOf(unit.msg, unit.startLocal)}
                 msg={unit.msg}
                 rowKey={rowKeyOf(unit.msg, unit.startLocal)}
+                msgIdx={unit.startLocal}
                 expandedThinking={expandedThinking}
                 onToggleThinking={toggleThinking}
                 toolMeta={metaForMsg(unit.msg)}
