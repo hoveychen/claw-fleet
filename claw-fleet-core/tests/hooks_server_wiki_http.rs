@@ -31,6 +31,9 @@ fn encode(s: &str) -> String {
 struct Resp {
     status: u16,
     body: Vec<u8>,
+    /// Raw response head, kept so a test can assert on headers — the
+    /// conditional-GET contracts live there, not in the body.
+    head: String,
 }
 
 impl Resp {
@@ -41,6 +44,17 @@ impl Resp {
                 self.status,
                 String::from_utf8_lossy(&self.body)
             )
+        })
+    }
+
+    /// One response header, case-insensitively, or `None` if absent.
+    fn header(&self, name: &str) -> Option<String> {
+        let want = format!("{}:", name.to_ascii_lowercase());
+        self.head.lines().skip(1).find_map(|l| {
+            let lower = l.to_ascii_lowercase();
+            lower
+                .starts_with(&want)
+                .then(|| l[want.len()..].trim().to_string())
         })
     }
 
@@ -56,6 +70,17 @@ impl Resp {
 }
 
 fn request(port: u16, method: &str, path: &str, token: &str, body: Option<&str>) -> Resp {
+    request_with_headers(port, method, path, token, body, &[])
+}
+
+fn request_with_headers(
+    port: u16,
+    method: &str,
+    path: &str,
+    token: &str,
+    body: Option<&str>,
+    extra: &[(&str, &str)],
+) -> Resp {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("tcp connect");
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
@@ -69,6 +94,9 @@ fn request(port: u16, method: &str, path: &str, token: &str, body: Option<&str>)
             "Content-Type: application/json\r\nContent-Length: {}\r\n",
             b.len()
         ));
+    }
+    for (name, value) in extra {
+        req.push_str(&format!("{name}: {value}\r\n"));
     }
     req.push_str("\r\n");
     if let Some(b) = body {
@@ -97,7 +125,7 @@ fn request(port: u16, method: &str, path: &str, token: &str, body: Option<&str>)
     {
         body = dechunk(&body);
     }
-    Resp { status, body }
+    Resp { status, body, head }
 }
 
 fn dechunk(raw: &[u8]) -> Vec<u8> {
@@ -133,6 +161,10 @@ struct Fixture {
 impl Fixture {
     fn get(&self, path: &str) -> Resp {
         request(self.port, "GET", path, TOKEN, None)
+    }
+
+    fn get_with(&self, path: &str, extra: &[(&str, &str)]) -> Resp {
+        request_with_headers(self.port, "GET", path, TOKEN, None, extra)
     }
 
     fn post(&self, path: &str, body: Option<&Value>) -> Resp {
@@ -288,6 +320,127 @@ fn live_tail_image_result_uses_transport_trimming_contract() {
         .expect("trimmed base64 preview");
     assert!(data.len() < 8_192);
     assert!(data.contains("Fleet truncated"));
+}
+
+/// The untailed `/messages` fetch trims too. It did not until 2026-09-21,
+/// which made it the largest egress source on the muvee host — 747 requests
+/// averaging 344KB, 263MB in 45 minutes — for a caller that wanted one
+/// assistant string.
+///
+/// Both halves matter: the tool payload must shrink (that's the bandwidth),
+/// and the assistant text must survive whole (that's `get_guard_context`,
+/// the caller in question, which reads the last assistant text and would
+/// silently start analysing a 1KB preview if trimming reached it).
+#[test]
+fn untailed_messages_trims_tool_output_but_not_assistant_text() {
+    let fx = boot();
+    let path = fx.home.path().join("untailed.jsonl");
+    let long_text = "B".repeat(8_192);
+    let tool_line = json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "toolu_untailed",
+                "content": [{ "type": "text", "text": "A".repeat(8_192) }]
+            }]
+        }
+    });
+    let assistant_line = json!({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{ "type": "text", "text": long_text.clone() }]
+        }
+    });
+    std::fs::write(&path, format!("{tool_line}\n{assistant_line}\n")).unwrap();
+
+    let endpoint = format!(
+        "{}?path={}",
+        routes::MESSAGES,
+        encode(path.to_str().unwrap())
+    );
+    let resp = fx.get(&endpoint);
+    assert_eq!(resp.status, 200);
+    let messages = resp.json();
+
+    let tool = &messages[0];
+    assert_eq!(
+        tool["_fleetTruncated"], true,
+        "untailed fetch shipped full tool output"
+    );
+    let trimmed = tool["message"]["content"][0]["content"][0]["text"]
+        .as_str()
+        .expect("trimmed tool text");
+    assert!(trimmed.len() < 8_192);
+    assert!(trimmed.contains("Fleet truncated"));
+
+    let assistant = &messages[1];
+    assert!(
+        assistant.get("_fleetTruncated").is_none(),
+        "assistant message was flagged as trimmed"
+    );
+    assert_eq!(
+        assistant["message"]["content"][0]["text"]
+            .as_str()
+            .expect("assistant text"),
+        long_text,
+        "assistant text must cross the wire intact"
+    );
+}
+
+/// `/artifact_blob` revalidates. The web UI renders image artifacts as plain
+/// `<img src=…>` against the full-size blob, and the route shipped no validator
+/// at all, so every pane switch re-downloaded them: 78 requests averaging
+/// 952KB, 76MB in 45 minutes on the muvee host, 2026-09-21.
+///
+/// Also asserts the tag is stable across a ranged read — a client that seeks
+/// must not be told the resource changed — and that Range does not win over
+/// If-None-Match.
+#[test]
+fn artifact_blob_revalidates_and_keeps_one_tag_across_ranges() {
+    let fx = boot();
+    let src = fx.home.path().join("pic.png");
+    std::fs::write(&src, vec![7u8; 200_000]).unwrap();
+    let art =
+        claw_fleet_core::artifacts::add(&src, Some("pic"), None, fx.home.path(), None).unwrap();
+    let endpoint = format!("{}?id={}", routes::ARTIFACT_BLOB, encode(&art.id));
+
+    let first = fx.get(&endpoint);
+    assert_eq!(first.status, 200);
+    assert_eq!(first.body.len(), 200_000, "first fetch carries the blob");
+    let tag = first.header("etag").expect("no ETag to revalidate with");
+    assert_eq!(
+        first.header("cache-control").as_deref(),
+        Some("private, no-cache"),
+        "the browser must revalidate rather than serve a stale version"
+    );
+
+    let again = fx.get_with(&endpoint, &[("If-None-Match", &tag)]);
+    assert_eq!(again.status, 304, "repeat fetch re-sent the whole blob");
+    assert!(again.body.is_empty(), "304 carried a body");
+    assert_eq!(again.header("etag").as_deref(), Some(tag.as_str()));
+
+    // One tag per file, every range of it — and a conditional hit beats Range.
+    let ranged = fx.get_with(&endpoint, &[("Range", "bytes=0-99")]);
+    assert_eq!(ranged.status, 206);
+    assert_eq!(ranged.body.len(), 100);
+    assert_eq!(
+        ranged.header("etag").as_deref(),
+        Some(tag.as_str()),
+        "a ranged read reported a different tag than the whole file"
+    );
+    let ranged_hit = fx.get_with(&endpoint, &[("Range", "bytes=0-99"), ("If-None-Match", &tag)]);
+    assert_eq!(
+        ranged_hit.status, 304,
+        "Range must not override If-None-Match"
+    );
+
+    // A stranger's tag is not a hit.
+    let miss = fx.get_with(&endpoint, &[("If-None-Match", "\"not-this-one\"")]);
+    assert_eq!(miss.status, 200);
+    assert_eq!(miss.body.len(), 200_000);
 }
 
 // ── /wiki_move ──────────────────────────────────────────────────────────────

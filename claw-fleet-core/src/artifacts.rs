@@ -207,6 +207,11 @@ pub struct ArtifactBytes {
     /// Inclusive range actually served, or `None` when `bytes` is the whole
     /// file (caller answers 200 rather than 206).
     pub range: Option<(u64, u64)>,
+    /// Validator for the *resolved* blob file — size and mtime, so publishing
+    /// a new version under the same id changes it. Identical across every
+    /// range of one file, which is what the HTTP spec wants. The protocol
+    /// layer ships it as an `ETag`; see `route_artifact_blob`.
+    pub etag: String,
 }
 
 /// A folder the user made, which exists whether or not anything is filed in it.
@@ -860,6 +865,7 @@ pub fn read_version_bytes_in(
     let path = version_blob_path(root, &artifact, version)?;
     let meta = fs::metadata(&path).map_err(|e| format!("stat '{}': {e}", artifact.name))?;
     let total = meta.len();
+    let etag = blob_etag(&meta);
 
     let Some((start, want_end)) = range else {
         let bytes = fs::read(&path).map_err(|e| format!("read '{}': {e}", artifact.name))?;
@@ -868,6 +874,7 @@ pub fn read_version_bytes_in(
             mime: artifact.mime,
             total_size: total,
             range: None,
+            etag,
         });
     };
 
@@ -894,7 +901,23 @@ pub fn read_version_bytes_in(
         mime: artifact.mime,
         total_size: total,
         range: Some((start, end)),
+        etag,
     })
+}
+
+/// Size + mtime, the validator every static file server derives an ETag from.
+/// Cheap (the caller already holds the `stat`) and it changes when a new
+/// version lands under the same id, which is the only mutation an artifact
+/// blob has. A filesystem with no mtime degrades to size alone — weaker, but
+/// still correct for the append-never-rewrite way blobs are stored.
+fn blob_etag(meta: &fs::Metadata) -> String {
+    let stamp = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("\"{:x}-{:x}\"", meta.len(), stamp)
 }
 
 // ── Mutate ───────────────────────────────────────────────────────────────────

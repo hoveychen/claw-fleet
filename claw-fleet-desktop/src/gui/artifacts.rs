@@ -386,6 +386,9 @@ mod tests {
             mime: "video/mp4".into(),
             total_size: total,
             range,
+            // The desktop serves blobs over its own protocol handler, which
+            // has no conditional path; these tests are about range framing.
+            etag: String::new(),
         }
     }
 
