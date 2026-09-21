@@ -53,6 +53,36 @@ describe("explain marks on the mobile chain", () => {
     expect(html).not.toContain("explain-mark");
   });
 
+  // The run-level scan, on the phone's chain: a mark whose phrase contains
+  // inline code, bold or a soft line break used to come out as literal
+  // brackets on both sides of the formatted bit.
+  it("keeps a mark that wraps inline code", () => {
+    const html = render("这不是理论风险——[?`step-code-retire` 那条计划的 P1 就在敲救这个]：线上没有。");
+    expect(html).toContain('data-explain-quote="step-code-retire 那条计划的 P1 就在敲救这个"');
+    expect(html).toContain("<code>step-code-retire</code>");
+    expect(html).not.toContain("[?");
+  });
+
+  it("keeps a mark that wraps bold or a soft line break", () => {
+    const bold = render("风险在 [?**四条结论**全是同一类] 这里。");
+    expect(bold).toContain('data-explain-quote="四条结论全是同一类"');
+    expect(bold).toContain("<strong>四条结论</strong>");
+    const broken = render("风险在 [?四条结论\n全是同一类] 这里。");
+    expect(broken).toContain('class="explain-mark"');
+    expect(broken).not.toContain("[?");
+  });
+
+  it("leaves a range containing a link literal", () => {
+    const html = render("见 [?这里 [文档](https://a.b) 说了] 。");
+    expect(html).not.toContain("explain-mark");
+    expect(html).toContain("[?这里");
+  });
+
+  it("keeps a bracketed index inside the mark", () => {
+    const html = render("见 [?数组 a[0] 的值] 那里");
+    expect(html).toContain('data-explain-quote="数组 a[0] 的值"');
+  });
+
   it("renders all five probe-A marks", () => {
     const html = render(PROBE_A);
     expect(html.match(/class="explain-mark"/g)).toHaveLength(5);
