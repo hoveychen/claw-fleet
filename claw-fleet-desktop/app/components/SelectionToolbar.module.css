@@ -1,6 +1,8 @@
 /* The floating bar over a selection of agent prose. Sits above the selection's
    box (translated up by its own height), on the same raised layer as the rail
-   cards so it is never under one. */
+   cards so it is never under one. When the pane has no room above — a passage
+   on a decision card's first line — it sits below the box instead
+   (`data-place="below"`), so it is never over the selected text. */
 .toolbar {
   position: absolute;
   z-index: 6;
@@ -14,6 +16,9 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-float);
   white-space: nowrap;
+}
+.toolbar[data-place="below"] {
+  transform: translate(-50%, 0);
 }
 
 .btn {

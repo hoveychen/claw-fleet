@@ -121,7 +121,9 @@ export function mockQaElicitationRequest(): ElicitationRequest {
     timestamp: new Date().toISOString(),
     questions: [
       {
-        question: "选择这次发布的执行窗口。",
+        // `[?…]` is the agent's explain mark; the QA card carries one so the
+        // decision-card rendering of marks is on screen in `?mock&qa`.
+        question: "选择这次发布的执行窗口，注意 [?流量最低的时段] 与值班安排。",
         header: "发布窗口",
         multiSelect: false,
         options: [

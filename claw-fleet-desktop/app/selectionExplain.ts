@@ -7,6 +7,7 @@
  * desktop's import path for them.
  */
 export {
+  EXPLAIN_MARK_SELECT_EVENT,
   MAX_QUOTE_CHARS,
   MIN_QUOTE_CHARS,
   cacheHitRatio,
@@ -14,6 +15,7 @@ export {
   locateExplainRow,
   quoteSnippet,
   readAssistantSelection,
+  selectExplainMark,
   selectQuoteIn,
   type AssistantSelection,
 } from "../../shared-ts/sessionExplain";

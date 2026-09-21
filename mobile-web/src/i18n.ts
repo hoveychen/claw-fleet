@@ -992,5 +992,6 @@ const DICT: Record<string, string> = {
   继续追问: "Follow up",
   该会话还没有追问: "No side questions yet",
   "长按选中回复里的一段文字，就能对它追问": "Long-press a passage of the agent's reply to ask about it",
+  点击对这段话追问: "Tap to ask about this passage",
   "加载追问…": "Loading side questions…",
 };

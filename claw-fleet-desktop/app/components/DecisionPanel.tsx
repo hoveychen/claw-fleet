@@ -11,6 +11,9 @@ import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
+import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
+import explainStyles from "./DecisionExplainMarks.module.css";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { framePreviewSrcDoc } from "../decisionFrame";
 import { oneLineSnippet, shouldAutoExpand, useLastUserInput } from "../hooks/useLastUserInput";
 import type {
@@ -621,6 +624,11 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
+  // Side questions from inside the question — a drag, or a click on one of the
+  // agent's `[?text]` marks, brings up the same bar the transcript has; the
+  // answer lands under the question (see DecisionExplainMarks).
+  const explainMarks = useDecisionExplainMarks(decision.request.sessionId);
+  const questionBodyRef = useRef<HTMLDivElement>(null);
   const {
     submitElicitation,
     declineElicitation,
@@ -787,12 +795,27 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
       )}
 
       <div className={styles.elicitation_question}>
-        <div className={styles.elicitation_question_text}>
+        {/* Stamped like a transcript row so `readAssistantSelection` accepts a
+            selection here; the index is the question's, the anchor sent is empty. */}
+        <div
+          ref={questionBodyRef}
+          className={`${styles.elicitation_question_text} ${explainStyles.body}`}
+          data-role="assistant"
+          data-msg-idx={step}
+        >
+          <SelectionToolbar
+            pane={questionBodyRef}
+            scroller={questionBodyRef}
+            enabled={explainMarks.enabled}
+            busy={explainMarks.busy}
+            onAsk={explainMarks.ask}
+          />
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
+        <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
       </div>
       </div>
 
@@ -1472,6 +1495,11 @@ export function FleetAskCard({
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
+  // Side questions from inside the question — a drag, or a click on one of the
+  // agent's `[?text]` marks, brings up the same bar the transcript has; the
+  // answer lands under the question (see DecisionExplainMarks).
+  const explainMarks = useDecisionExplainMarks(decision.request.sessionId);
+  const questionBodyRef = useRef<HTMLDivElement>(null);
   // The preview iframe is cross-origin, so the theme has to travel into it as a
   // value rather than through CSS custom properties.
   const theme = useDocumentTheme();
@@ -1666,12 +1694,27 @@ export function FleetAskCard({
       )}
 
       <div className={styles.elicitation_question}>
-        <div className={styles.elicitation_question_text}>
+        {/* Stamped like a transcript row so `readAssistantSelection` accepts a
+            selection here; the index is the question's, the anchor sent is empty. */}
+        <div
+          ref={questionBodyRef}
+          className={`${styles.elicitation_question_text} ${explainStyles.body}`}
+          data-role="assistant"
+          data-msg-idx={step}
+        >
+          <SelectionToolbar
+            pane={questionBodyRef}
+            scroller={questionBodyRef}
+            enabled={explainMarks.enabled}
+            busy={explainMarks.busy}
+            onAsk={explainMarks.ask}
+          />
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
+        <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
 
         {q.images && q.images.length > 0 ? (
           // Image-bearing card: load the served index.html (agent html or auto

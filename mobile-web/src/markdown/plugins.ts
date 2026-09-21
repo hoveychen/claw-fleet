@@ -18,6 +18,11 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
 import { remarkCjkAutolinkFix } from "./cjkAutolinkFix";
 import { rehypeCjkIndent } from "./cjkIndent";
+import {
+  EXPLAIN_MARK_CLASS,
+  EXPLAIN_MARK_QUOTE_PROP,
+  remarkExplainMarks,
+} from "../../../shared-ts/explainMarks";
 import "katex/dist/katex.min.css";
 
 /**
@@ -66,7 +71,12 @@ const schema = {
     ...defaultSchema.attributes,
     span: [
       ...(defaultSchema.attributes?.span ?? []),
-      ["className", "math", "math-inline", "math-display"],
+      // `explain-mark` / `dataExplainQuote`: the `[?text]` annotation span
+      // `remarkExplainMarks` (shared-ts/explainMarks.ts) emits — sanitize
+      // scrubs every element, raw or not, so both have to be admitted here.
+      // Pinned in plugins.test.ts.
+      ["className", "math", "math-inline", "math-display", EXPLAIN_MARK_CLASS],
+      EXPLAIN_MARK_QUOTE_PROP,
     ],
     "*": [...(defaultSchema.attributes?.["*"] ?? []), ...SVG_ATTRS],
   },
@@ -91,6 +101,11 @@ export const mdRemarkPlugins: PluggableList = [
   // GFM's autolink literal doesn't stop at CJK, so `见 https://example.com，然后`
   // swallows the comma and everything after it into the href.
   remarkCjkAutolinkFix,
+  // `[?text]` → `<span class="explain-mark">`, the agent's own "this may need
+  // explaining" annotation (shared-ts/explainMarks.ts); mirrored from the
+  // desktop chain. Clickability is the `span` component's call (markdown/
+  // explainMarks.tsx). Pinned in explainMarks.test.ts.
+  remarkExplainMarks,
 ];
 
 /** raw → sanitize → katex: scrub the model's HTML, then emit KaTeX's trusted DOM. */

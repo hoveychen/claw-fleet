@@ -1,0 +1,95 @@
+/* Side questions from inside a card's question (DecisionExplainMarks.tsx). */
+
+/* The custom question, when there was one, above the answer. */
+.question {
+  margin-top: 4px;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.card {
+  border-left: 2px solid var(--color-accent-soft);
+  background: var(--color-bg-card);
+  border-radius: 0 8px 8px 0;
+  padding: 8px 10px 9px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quote {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: var(--t-meta, 11px);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+.state[data-tone="live"] {
+  color: var(--color-accent);
+}
+
+.spin {
+  animation: decision_explain_spin 0.9s linear infinite;
+}
+@keyframes decision_explain_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.close {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 11px);
+  line-height: 1;
+  padding: 4px 5px;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.answer {
+  margin-top: 6px;
+  font-size: var(--t-ui, 14px);
+  line-height: 1.55;
+}
+.answer :global(p) {
+  margin: 0 0 6px;
+}
+.answer :global(p:last-child) {
+  margin-bottom: 0;
+}
+
+.waiting,
+.error {
+  margin-top: 6px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
+.error {
+  color: var(--color-error);
+}

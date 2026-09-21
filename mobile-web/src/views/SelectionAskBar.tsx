@@ -1,7 +1,11 @@
 import { Languages, LoaderCircle, MessageCircleQuestion, PencilLine, Scale, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
-import { readAssistantSelection, type AssistantSelection } from "../../../shared-ts/sessionExplain";
+import {
+  EXPLAIN_MARK_SELECT_EVENT,
+  readAssistantSelection,
+  type AssistantSelection,
+} from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
 import type { ExplainPreset } from "../sessionExplain";
 import styles from "./SelectionAskBar.module.css";
@@ -30,7 +34,8 @@ export function SelectionAskBar({
   busy,
   onAsk,
 }: {
-  /** The transcript scroller; selections are read from inside it. */
+  /** The element selections are read from inside of: the transcript scroller,
+   *  or a decision card's question body (stamped like an assistant row). */
   scroller: RefObject<HTMLElement | null>;
   /** False when the session cannot be forked or another layer covers the transcript. */
   enabled: boolean;
@@ -88,11 +93,19 @@ export function SelectionAskBar({
       if (customRef.current) return;
       requestAnimationFrame(read);
     };
+    // A tap on one of the agent's `[?text]` marks selects the mark and
+    // announces it: read at once, no debounce — the selection is final.
+    const onMark = () => {
+      if (readTimer.current != null) window.clearTimeout(readTimer.current);
+      requestAnimationFrame(read);
+    };
     const root = scroller.current;
     document.addEventListener("selectionchange", onSelChange);
+    document.addEventListener(EXPLAIN_MARK_SELECT_EVENT, onMark);
     root?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       document.removeEventListener("selectionchange", onSelChange);
+      document.removeEventListener(EXPLAIN_MARK_SELECT_EVENT, onMark);
       root?.removeEventListener("scroll", onScroll);
       cancelHide();
       if (readTimer.current != null) window.clearTimeout(readTimer.current);

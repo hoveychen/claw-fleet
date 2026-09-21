@@ -10,10 +10,14 @@ import { createElement, Fragment } from "react";
 import type { Components } from "react-markdown";
 import { mermaidMarkdownComponents } from "./mermaidComponents";
 import { mdLinkComponents } from "./linkComponents";
+import { ExplainMarkSpan } from "./explainMarks";
 
 export const mdComponents: Components = {
   ...mermaidMarkdownComponents,
   ...mdLinkComponents,
+  // The agent's `[?text]` marks: tappable inside an ExplainMarksProvider,
+  // plain text elsewhere. See ./explainMarks.
+  span: ExplainMarkSpan,
 };
 
 // Variant for single-line surfaces (task rows, band titles, etc.): `p` flattens

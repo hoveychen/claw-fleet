@@ -54,6 +54,49 @@
   text-decoration-style: dotted;
 }
 
+/* ── Explain marks: the agent's own `[?text]` annotations (markdown/explainMarks.tsx) ── */
+
+/* The text stays the text — same colour, same weight — with a dotted rule
+   under it in the accent, the way the wiki link above signals "this goes
+   somewhere". The `?` only appears on hover / focus so a paragraph with five
+   marks does not read as a quiz. */
+.explain_mark {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  border-radius: var(--radius-xs);
+  transition: background-color 0.12s ease, text-decoration-color 0.12s ease;
+}
+
+.explain_mark:hover,
+.explain_mark:focus-visible {
+  background: var(--color-accent-soft);
+  text-decoration-style: solid;
+}
+
+.explain_mark::after {
+  content: "?";
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.72em;
+  line-height: 1;
+  vertical-align: super;
+  color: var(--color-accent);
+  /* Always present at low opacity: an invisible glyph still took its width, so
+     the transcript showed a blank gap after every mark until hovered. Keeping
+     it faintly visible also tells the reader the phrase is clickable. */
+  opacity: 0.45;
+  transition: opacity 0.12s ease;
+}
+
+.explain_mark:hover::after,
+.explain_mark:focus-visible::after {
+  opacity: 1;
+}
+
 /* ── Local images in agent markdown (markdown/localImages.tsx) ───────────── */
 
 /* Both states stay labeled and occupy space: an image that is loading, or one

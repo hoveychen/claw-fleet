@@ -14,6 +14,7 @@ import { useWikiLinks } from "../../markdown/wikiLinksContext";
 import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
 import { localImageComponent } from "../../markdown/localImages";
+import { ExplainMarkSpan } from "../../markdown/explainMarks";
 import { ProgressiveMarkdown } from "../../markdown/ProgressiveMarkdown";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
@@ -214,6 +215,10 @@ export const TextBlock = memo(function TextBlock({
           // so the Tauri webview never navigates (see markdown/safeLinks.ts).
           // Wiki docs upgrade slug refs to in-app navigation instead.
           a: wiki ? wikiLinkComponent(wiki) : safeLinkComponent(),
+          // The agent's `[?text]` marks: clickable when the transcript provides
+          // an ExplainMarksProvider (asks a side question about the marked
+          // text), plain text otherwise. See markdown/explainMarks.
+          span: ExplainMarkSpan,
           // Local image refs (`![](/Users/…/shot.png)`) are read through the
           // Backend and inlined; a bare <img> would resolve the path against
           // the webview origin and break. See markdown/localImages.

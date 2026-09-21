@@ -9,6 +9,7 @@
  * must not.
  */
 
+import { stripExplainMarks } from "../../shared-ts/explainMarks";
 import type { AskQuestion } from "./toolResults";
 import type { DecisionHistoryRecord } from "./types";
 
@@ -78,7 +79,9 @@ export function stripSpeechDivider(question: string): string {
 export function normalizeForSpeech(text: string): string {
   const isAscii = (c: string | undefined) => !!c && /[A-Za-z0-9]/.test(c);
 
-  let s = text;
+  // `[?text]` explain marks are a rendering affordance; spoken, the brackets
+  // are noise ("left bracket question mark").
+  let s = stripExplainMarks(text);
   // Links: speak the label, never the target.
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
   // Line-leading structure — bullets, ordered markers, headings, quotes.
@@ -99,7 +102,7 @@ export function normalizeForSpeech(text: string): string {
 
 /** One-line gist of a question, for a collapsed header. */
 export function summarizeQuestion(question: string, max = 80): string {
-  const head = stripSpeechDivider(question).replace(/\s+/g, " ").trim();
+  const head = stripExplainMarks(stripSpeechDivider(question)).replace(/\s+/g, " ").trim();
   return head.length > max ? `${head.slice(0, max - 1)}…` : head;
 }
 

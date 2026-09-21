@@ -2791,7 +2791,8 @@
     }
   },
   "markdown": {
-    "render_rest": "Render the remaining {{n}} sections"
+    "render_rest": "Render the remaining {{n}} sections",
+    "explain_mark_hint": "Click to ask about this passage"
   },
   "env": {
     "subtitle": "Install, upgrade and login state for the three agent harnesses (Claude Code / Codex / DeepSeek Harness).",

@@ -168,6 +168,32 @@ export function readAssistantSelection(
 }
 
 /**
+ * Fired (bubbling) on an explain mark right after `selectExplainMark` set the
+ * selection to it, so the ask bars can read the selection at once instead of
+ * waiting for a `mouseup` that a keyboard activation never produces.
+ */
+export const EXPLAIN_MARK_SELECT_EVENT = "fleet:explain-mark-select";
+
+/**
+ * Make one of the agent's `[?text]` marks the current selection, exactly as
+ * if the reader had dragged over it, then announce it. The ask bar that owns
+ * the surrounding transcript (or card) reads the selection through
+ * `readAssistantSelection` and shows its presets — clicking a mark is a
+ * shortcut to selecting, not to asking. Returns whether a selection was made.
+ */
+export function selectExplainMark(el: HTMLElement): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  const sel = window.getSelection();
+  if (!sel) return false;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  el.dispatchEvent(new CustomEvent(EXPLAIN_MARK_SELECT_EVENT, { bubbles: true }));
+  return true;
+}
+
+/**
  * Select `quote` inside `el` natively, so the passage a card was asked about
  * lights up the way the reader originally marked it. Matches the first
  * occurrence across text nodes (markdown splits a sentence over many spans);
