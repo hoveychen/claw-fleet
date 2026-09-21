@@ -81,6 +81,11 @@
   content: "?";
   display: inline-block;
   margin-left: 2px;
+  /* An inline-block lays out its own first line, so it inherits the 2em
+     `text-indent` a CJK paragraph carries (`.cjk-indent` in App.css) and
+     pushes the glyph two full-width characters to the right — a mid-sentence
+     gap before every `?`. */
+  text-indent: 0;
   font-size: 0.72em;
   line-height: 1;
   vertical-align: super;
