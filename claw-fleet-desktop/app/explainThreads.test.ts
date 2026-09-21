@@ -3,7 +3,7 @@
 // chain reads backwards and gets split apart by anything asked in between —
 // so the column groups by chain instead.
 import { describe, expect, it } from "vitest";
-import { groupExplainThreads, threadRootId } from "./explainThreads";
+import { groupExplainThreads, threadRootId } from "./selectionExplain";
 import type { ExplainRecord } from "./explainApi";
 
 function rec(id: string, createdMs: number, thread: string[] = []): ExplainRecord {

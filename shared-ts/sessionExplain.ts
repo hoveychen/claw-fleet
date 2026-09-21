@@ -64,6 +64,59 @@ export async function pollExplanation<T extends ExplainRecordLike>(
   return last;
 }
 
+// ── Threads ──────────────────────────────────────────────────────────────────
+//
+// A follow-up is not a second turn of the same conversation on the host side:
+// the fork is never resumable, so each follow-up is its own record carrying
+// the ids of the ones it continues in `thread` (oldest first), which the host
+// folds back into the prompt. Clients have to re-assemble the chain to show
+// it, which is what these two do.
+
+/** The fields of a record the grouping reads. */
+export interface ExplainThreadLike {
+  id: string;
+  thread?: string[] | null;
+  createdMs: number;
+}
+
+/** One chain: the root record's id, then its turns oldest-first. */
+export interface ExplainThreadOf<T> {
+  id: string;
+  records: T[];
+}
+
+/** The record that started `rec`'s chain — itself, if it started one. */
+export function threadRootId(rec: ExplainThreadLike): string {
+  return rec.thread?.[0] ?? rec.id;
+}
+
+/**
+ * Group side questions into chains for display: chains newest-first (a reader
+ * cares about what was just asked), records *within* a chain oldest-first (a
+ * follow-up only reads as an answer to the turn above it).
+ *
+ * A chain's position is decided by its newest record, not its root — asking a
+ * follow-up should pull that conversation back to the top rather than leave it
+ * buried under questions asked before it.
+ */
+export function groupExplainThreads<T extends ExplainThreadLike>(answers: T[]): ExplainThreadOf<T>[] {
+  const byRoot = new Map<string, T[]>();
+  for (const rec of answers) {
+    const root = threadRootId(rec);
+    const bucket = byRoot.get(root);
+    if (bucket) bucket.push(rec);
+    else byRoot.set(root, [rec]);
+  }
+  const threads: ExplainThreadOf<T>[] = [];
+  for (const [id, records] of byRoot) {
+    records.sort((a, b) => a.createdMs - b.createdMs);
+    threads.push({ id, records });
+  }
+  const newest = (th: ExplainThreadOf<T>) => th.records.reduce((max, r) => Math.max(max, r.createdMs), 0);
+  threads.sort((a, b) => newest(b) - newest(a));
+  return threads;
+}
+
 // ── Labels ───────────────────────────────────────────────────────────────────
 
 /** A chip-length preview of the quote: first line, ellipsised. */

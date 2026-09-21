@@ -3,8 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExplainRecord } from "../explainApi";
-import { groupExplainThreads } from "../explainThreads";
-import { cacheHitRatio, costLabel } from "../selectionExplain";
+import { cacheHitRatio, costLabel, groupExplainThreads } from "../selectionExplain";
 import type { DecisionExplain } from "./DecisionExplainMarks";
 import { TextBlock } from "./blocks/TextBlock";
 import styles from "./DecisionExplainColumn.module.css";
