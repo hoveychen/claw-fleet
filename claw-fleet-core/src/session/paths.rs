@@ -830,6 +830,73 @@ mod heal_workspace_path_tests {
     }
 }
 
+/// The memo in front of `read_level_dirs` must never outlive the truth it
+/// caches: the decode it feeds produces the `cwd` that `claude --resume` is
+/// launched with, so a stale listing is a session that resumes in the wrong
+/// directory — or, once the naive fallback kicks in, one that cannot resume at
+/// all. Each test here creates a real directory whose name only a filesystem-
+/// guided decode can recover (`_` encodes to `-`, so the naive one-dash-per-
+/// slash decode shreds `first_dir` into `first/dir`).
+#[cfg(test)]
+mod level_dirs_cache_tests {
+    use super::{clear_level_dirs_cache, decode_workspace_path, encode_workspace_path};
+
+    fn decode_of(path: &std::path::Path) -> String {
+        decode_workspace_path(&encode_workspace_path(&path.to_string_lossy()))
+    }
+
+    /// The regression this cache could have introduced: a directory listed
+    /// once, then a sibling created, and the sibling invisible forever after.
+    /// A new entry bumps the parent's mtime, which is what has to evict it.
+    #[test]
+    fn a_directory_created_after_the_first_listing_still_decodes() {
+        let parent =
+            std::env::temp_dir().join(format!("fleet-level-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        let first = parent.join("first_dir");
+        std::fs::create_dir_all(&first).unwrap();
+        clear_level_dirs_cache();
+
+        // Warms the cache for `parent` — and proves the fixture is meaningful,
+        // since only an fs-guided decode recovers the underscore.
+        assert_eq!(decode_of(&first), first.to_string_lossy());
+
+        let second = parent.join("second_dir");
+        std::fs::create_dir_all(&second).unwrap();
+        assert_eq!(
+            decode_of(&second),
+            second.to_string_lossy(),
+            "the cached listing of the parent outlived a newly created sibling"
+        );
+
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// The other direction: a removed directory must stop being decoded into,
+    /// or a deleted worktree keeps resolving to a path that no longer exists
+    /// and the session shows a Resume button that can never work.
+    #[test]
+    fn a_removed_directory_stops_being_decoded_into() {
+        let parent =
+            std::env::temp_dir().join(format!("fleet-level-cache-rm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        let gone = parent.join("gone_dir");
+        std::fs::create_dir_all(&gone).unwrap();
+        clear_level_dirs_cache();
+
+        assert_eq!(decode_of(&gone), gone.to_string_lossy());
+
+        std::fs::remove_dir_all(&gone).unwrap();
+        assert_eq!(
+            decode_of(&gone),
+            parent.join("gone").join("dir").to_string_lossy(),
+            "a listing cached before the removal kept the directory alive"
+        );
+
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+}
+
 #[cfg(test)]
 mod same_workspace_path_tests {
     use super::{same_workspace_path, workspace_path_key_with};
