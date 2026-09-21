@@ -658,13 +658,17 @@ pub(crate) fn route_messages(
         };
         match result {
             Ok(mut messages) => {
-                // Trim oversized tool output before it crosses the
-                // HTTP boundary, mirroring LocalBackend. Only the
-                // tail path (SessionDetail) is trimmed; a full
-                // `get_messages` fetch keeps everything intact.
-                if tail.is_some() {
-                    crate::message_trim::trim_messages_for_transport(&mut messages);
-                }
+                // Trim oversized tool output before it crosses the HTTP
+                // boundary, mirroring LocalBackend — on both paths, including
+                // the untailed one. The untailed fetch used to ship everything
+                // intact, which made it the largest egress source on the muvee
+                // host: 747 requests averaging 344KB, 263MB in 45 minutes on
+                // 2026-09-21, from a caller that wanted one assistant string.
+                // Only `tool_result` / `toolUseResult` payloads are rewritten
+                // (see message_trim) — assistant text blocks are untouched —
+                // and an expanded card refetches the full payload via
+                // `/tool-result`, so no consumer loses access to anything.
+                crate::message_trim::trim_messages_for_transport(&mut messages);
                 let body = serde_json::to_string(&messages).unwrap_or_default();
                 let _ = request
                     .respond(tiny_http::Response::from_string(body).with_header(json_header));
