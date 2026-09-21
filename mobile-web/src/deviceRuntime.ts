@@ -59,6 +59,11 @@ export interface DeviceRuntimeState {
   lastRttMs: number | null;
   /** Recent reconnects within the window. */
   recentReconnects: number[];
+  /** Requests that timed out since the last one that came back. The only
+   *  signal that sees a link which has stopped answering entirely — the other
+   *  two are derived from successful round trips and from browser-reported
+   *  closes, neither of which happens on a half-open socket. */
+  consecutiveTimeouts: number;
 }
 
 export function emptyDeviceState(): DeviceRuntimeState {
@@ -78,6 +83,7 @@ export function emptyDeviceState(): DeviceRuntimeState {
     answeredAt: new Map(),
     lastRttMs: null,
     recentReconnects: [],
+    consecutiveTimeouts: 0,
   };
 }
 
@@ -108,6 +114,11 @@ export type DeviceAction =
   | { type: "usage"; usage: TodayUsage }
   | { type: "rtt"; sample: { totalMs: number; phoneRelayMs: number | null; desktopHandleMs: number | null } }
   | { type: "reconnect"; now: number }
+  /** A request went out and never came back. */
+  | { type: "requestTimeout" }
+  /** The transport's own liveness probe condemned the socket. Not a guess from
+   *  a count of failures — the link was proven dead, so grade it directly. */
+  | { type: "deadLink" }
   | { type: "authError"; message: string };
 
 /** State transition for a single device. */
@@ -211,14 +222,32 @@ export function deviceReducer(
     case "usage":
       return { ...state, todayUsage: action.usage };
     case "rtt": {
+      // A reply arrived, so whatever was unanswered before is no longer
+      // evidence of anything: reset the run rather than letting one old
+      // timeout hold the light down over a link that plainly works.
       const lastRttMs = action.sample.totalMs;
       return {
         ...state,
         lastRttMs,
         rttSplit: splitRtt(action.sample),
-        congestion: computeCongestion(lastRttMs, state.recentReconnects.length),
+        consecutiveTimeouts: 0,
+        congestion: computeCongestion(lastRttMs, state.recentReconnects.length, 0),
       };
     }
+    case "requestTimeout": {
+      const consecutiveTimeouts = state.consecutiveTimeouts + 1;
+      return {
+        ...state,
+        consecutiveTimeouts,
+        congestion: computeCongestion(
+          state.lastRttMs,
+          state.recentReconnects.length,
+          consecutiveTimeouts,
+        ),
+      };
+    }
+    case "deadLink":
+      return { ...state, congestion: "stalled" };
     case "reconnect": {
       const recentReconnects = [...state.recentReconnects, action.now].filter(
         (ts) => action.now - ts < RECONNECT_WINDOW_MS,
@@ -226,7 +255,11 @@ export function deviceReducer(
       return {
         ...state,
         recentReconnects,
-        congestion: computeCongestion(state.lastRttMs, recentReconnects.length),
+        congestion: computeCongestion(
+          state.lastRttMs,
+          recentReconnects.length,
+          state.consecutiveTimeouts,
+        ),
       };
     }
     case "authError":
@@ -352,8 +385,9 @@ export function worstCongestion(states: DeviceStates, order: string[]): Congesti
   let level: Congestion = "good";
   for (const id of order) {
     const c = states[id]?.congestion ?? "good";
-    if (c === "congested") return "congested";
-    if (c === "fair") level = "fair";
+    if (c === "stalled") return "stalled";
+    if (c === "congested") level = "congested";
+    else if (c === "fair" && level === "good") level = "fair";
   }
   return level;
 }

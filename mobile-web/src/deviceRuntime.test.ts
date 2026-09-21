@@ -332,3 +332,43 @@ describe("header rollups", () => {
     expect(anyConnected({}, ORDER)).toBe(false);
   });
 });
+
+// ── Dead-link grading ───────────────────────────────────────────────────────
+describe("the header signal reflects requests that never came back", () => {
+  const sample = { totalMs: 120, phoneRelayMs: 40, desktopHandleMs: 20 };
+
+  it("stops claiming a healthy link once two requests go unanswered", () => {
+    // The reported symptom: one good round trip early on, then the link dies.
+    // Before this the light kept showing that first measurement forever.
+    const states = run([
+      { deviceId: A, type: "rtt", sample },
+      { deviceId: A, type: "requestTimeout" },
+      { deviceId: A, type: "requestTimeout" },
+    ]);
+    expect(states[A].congestion).toBe("stalled");
+  });
+
+  it("recovers as soon as a reply comes back", () => {
+    const states = run([
+      { deviceId: A, type: "requestTimeout" },
+      { deviceId: A, type: "requestTimeout" },
+      { deviceId: A, type: "rtt", sample },
+    ]);
+    expect(states[A].congestion).toBe("good");
+    expect(states[A].consecutiveTimeouts).toBe(0);
+  });
+
+  it("grades a condemned socket as stalled without waiting for two timeouts", () => {
+    // The probe proved the link dead, so this is evidence, not inference.
+    const states = run([{ deviceId: A, type: "deadLink" }]);
+    expect(states[A].congestion).toBe("stalled");
+  });
+
+  it("lets one stalled device dominate the header", () => {
+    const states = run([
+      { deviceId: A, type: "rtt", sample },
+      { deviceId: B, type: "deadLink" },
+    ]);
+    expect(worstCongestion(states, [A, B])).toBe("stalled");
+  });
+});

@@ -3,9 +3,9 @@
 // mapped to a 3-level rank, then combined by taking the worse of the two. Kept
 // as pure functions so the header signal light is unit-testable in isolation.
 
-export type Congestion = "good" | "fair" | "congested";
+export type Congestion = "good" | "fair" | "congested" | "stalled";
 
-const RANK: Record<Congestion, number> = { good: 0, fair: 1, congested: 2 };
+const RANK: Record<Congestion, number> = { good: 0, fair: 1, congested: 2, stalled: 3 };
 
 /** RTT thresholds (ms). A healthy link answers control-message round-trips well
  *  under 300ms; past ~1.2s the UI is visibly laggy. */
@@ -24,17 +24,38 @@ export function reconnectLevel(recentReconnects: number): Congestion {
   return "good";
 }
 
+/** Requests that went out and never came back, since the last one that did.
+ *
+ *  The third signal, and the only one that can see a link which has stopped
+ *  answering entirely. The other two are computed from *successful* round
+ *  trips and from closes the browser reported — on a half-open socket neither
+ *  ever fires again, so without this the light keeps displaying whatever the
+ *  last working request measured while nothing works at all.
+ *
+ *  One unanswered request is ordinary congestion: a desktop can genuinely take
+ *  longer than the 15s budget. Two in a row is 30s of silence, which no slow
+ *  handler explains — that is a link to stop trusting. */
+export function unansweredLevel(consecutiveTimeouts: number): Congestion {
+  if (consecutiveTimeouts >= 2) return "stalled";
+  if (consecutiveTimeouts >= 1) return "congested";
+  return "good";
+}
+
 /** The higher-severity of two levels. */
 export function worse(a: Congestion, b: Congestion): Congestion {
   return RANK[a] >= RANK[b] ? a : b;
 }
 
-/** Combine both weak-link signals into one level (the worse of the two). */
+/** Combine the weak-link signals into one level (the worst of them). */
 export function computeCongestion(
   rttMs: number | null,
   recentReconnects: number,
+  consecutiveTimeouts = 0,
 ): Congestion {
-  return worse(rttLevel(rttMs), reconnectLevel(recentReconnects));
+  return worse(
+    worse(rttLevel(rttMs), reconnectLevel(recentReconnects)),
+    unansweredLevel(consecutiveTimeouts),
+  );
 }
 
 /** Window over which reconnects count toward congestion. */

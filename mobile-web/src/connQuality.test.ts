@@ -5,6 +5,7 @@ import {
   reconnectLevel,
   rttLevel,
   splitRtt,
+  unansweredLevel,
   worse,
 } from "./connQuality";
 
@@ -81,5 +82,45 @@ describe("connQuality", () => {
     expect(computeCongestion(1500, 0)).toBe("congested"); // rtt dominates
     expect(computeCongestion(500, 3)).toBe("congested");
     expect(computeCongestion(null, 0)).toBe("good");
+  });
+});
+
+// ── Unanswered requests ─────────────────────────────────────────────────────
+//
+// The signal that exists because the other two are blind to a link that has
+// stopped answering: both are computed from events that stop happening when
+// the socket goes half-open (a successful round trip, a browser-reported
+// close), so the light used to freeze on the last healthy grade.
+describe("unansweredLevel", () => {
+  it("treats one timeout as congestion, not a dead link", () => {
+    // A desktop handler can genuinely overrun the 15s budget; condemning the
+    // link on that alone would cry wolf on a slow-but-working connection.
+    expect(unansweredLevel(1)).toBe("congested");
+  });
+
+  it("treats two in a row as stalled", () => {
+    expect(unansweredLevel(2)).toBe("stalled");
+    expect(unansweredLevel(7)).toBe("stalled");
+  });
+
+  it("is quiet with nothing outstanding", () => {
+    expect(unansweredLevel(0)).toBe("good");
+  });
+});
+
+describe("computeCongestion with unanswered requests", () => {
+  it("reports stalled even when the last successful round trip looked fast", () => {
+    // Exactly the reported symptom: the light sat on a good grade measured
+    // before the link died, because no later sample ever arrived to move it.
+    expect(computeCongestion(120, 0, 2)).toBe("stalled");
+  });
+
+  it("keeps grading normally when nothing is outstanding", () => {
+    expect(computeCongestion(120, 0, 0)).toBe("good");
+    expect(computeCongestion(600, 0, 0)).toBe("fair");
+  });
+
+  it("defaults the new signal off so existing two-argument callers are unchanged", () => {
+    expect(computeCongestion(120, 0)).toBe("good");
   });
 });

@@ -204,6 +204,7 @@ const DICT: Record<string, string> = {
   "切换设备（当前 {0}）": "Switch device (currently {0})",
   "在线 · 网络一般": "Online · slow",
   "在线 · 网络拥挤": "Online · congested",
+  "疑似断链 · 请求发出后无回应": "Link looks dead · requests go out unanswered",
   链路耗时: "Link timing",
   "等待样本…": "Awaiting sample…",
   分段不可用: "Breakdown unavailable",

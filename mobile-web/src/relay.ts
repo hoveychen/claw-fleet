@@ -629,6 +629,10 @@ export class RelayClient implements FleetTransport {
       }
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
+        // Report it before rejecting: this is the header signal's only
+        // evidence that the link has stopped answering. Without it the light
+        // keeps showing the last successful round trip's grade forever.
+        this.handlers.onRequestTimeout?.();
         reject(new TransportError(t("请求超时（桌面端可能离线）"), false));
       }, timeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(reqId, {
