@@ -1,19 +1,25 @@
-/* The side column holding a card's side questions (DecisionExplainColumn.tsx). */
+/* The side column holding a card's side questions (DecisionExplainColumn.tsx).
+   Sized for reading, unlike the inline strip in DecisionExplainMarks.module.css
+   which has to stay small under a question. */
 
 .column {
   display: flex;
   flex-direction: column;
   min-height: 0;
   width: 100%;
-  padding: 10px 12px 12px;
+  padding: 10px 4px 12px 14px;
   gap: 8px;
 }
 
 .head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   flex: 0 0 auto;
+  padding-right: 10px;
+}
+
+.head_title {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
@@ -34,4 +40,107 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  padding-right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.entry {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  padding: 10px 12px 11px;
+}
+
+.close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 4px;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.entry:hover .close,
+.close:focus-visible {
+  opacity: 1;
+}
+.close:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+/* The passage that was asked about: kept to three lines so a long drag cannot
+   push the answer itself out of view. */
+.quote {
+  margin: 0;
+  padding: 0 18px 0 8px;
+  border-left: 2px solid var(--color-accent-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.quote_icon {
+  color: var(--color-text-dim);
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+.question {
+  margin: 7px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-dim);
+}
+
+.answer {
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--color-text);
+}
+
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.spin {
+  animation: decision_explain_column_spin 0.9s linear infinite;
+}
+@keyframes decision_explain_column_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-error);
+}
+
+.meta {
+  margin: 9px 0 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
 }
