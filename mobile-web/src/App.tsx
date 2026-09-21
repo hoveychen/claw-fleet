@@ -22,6 +22,7 @@ import { formatRttSplit } from "./connQuality";
 import { ConnIcon, connIconKind } from "./views/ConnIcon";
 import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import { HIDDEN_DISCONNECT_MS, type VisibilityState } from "./connectionPolicy";
+import { setAppBadge } from "./appBadge";
 import {
   aggregateDecisions,
   aggregateSessions,
@@ -565,6 +566,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // their first snapshot yet**. Offline devices don't block (their snapshot never comes).
 
   const decisionsLoaded = allDecisionsLoaded(states, deviceOrder);
+  // Launcher icon badge (HarmonyOS shell only). Gated on decisionsLoaded: at
+  // cold start the merged list is empty because nothing has arrived yet, not
+  // because nothing is pending, and syncing then would wipe a badge a push had
+  // correctly set moments earlier.
+  useEffect(() => {
+    if (!decisionsLoaded) return;
+    setAppBadge(decisions.length);
+  }, [decisionsLoaded, decisions.length]);
   // Don't report this count for single-device setups: in that case "desktop offline"
   // is the terminal state of the entire page; reporting it again is just noise.
   const offlineDevices =

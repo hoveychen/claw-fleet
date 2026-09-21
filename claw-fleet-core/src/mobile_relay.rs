@@ -948,15 +948,39 @@ fn notify_url(tag: &str) -> String {
     format!("/#d={tag}")
 }
 
-fn build_notify_frame(title: &str, body: &str, tag: &str) -> String {
+fn build_notify_frame(title: &str, body: &str, tag: &str, badge: u32) -> String {
     json!({
         "type": "notify",
         "title": title,
         "body": body,
         "tag": tag,
         "url": notify_url(tag),
+        "badge": badge,
     })
     .to_string()
+}
+
+/// How many decision cards are waiting for an answer right now — the number the
+/// phone's launcher icon badges itself with.
+///
+/// Same set as [`serve_pending_snapshot`], counted from the id lists instead of
+/// the request bodies: the count is taken on every notification, and reading
+/// and parsing every pending request just to call `.len()` on the result would
+/// be work for nothing. Parked cards count too, for the same reason they appear
+/// in the snapshot — a parked card is still waiting on the user.
+pub fn pending_decision_count() -> u32 {
+    let parked = |kind: crate::parked::ParkedKind| crate::parked::ids_of(kind).len();
+    let n = crate::guard::list_pending_requests().len()
+        + crate::permission_prompt_ipc::list_pending_requests().len()
+        + crate::elicitation::list_pending_requests().len()
+        + parked(crate::parked::ParkedKind::Elicitation)
+        + crate::mcp_ipc::list_pending_requests().len()
+        + parked(crate::parked::ParkedKind::FleetAsk)
+        + crate::plan_approval::list_pending_requests().len()
+        + parked(crate::parked::ParkedKind::PlanApproval)
+        + crate::mcp_a2ui_ipc::list_pending_requests().len()
+        + parked(crate::parked::ParkedKind::A2uiRender);
+    n as u32
 }
 
 pub fn build_decision_created_payload(kind: &str, request: Value) -> Value {
@@ -979,7 +1003,15 @@ pub fn publish_decision_created(kind: &str, request: Value, notify_title: &str, 
     send_out(encode_payload(&build_decision_created_payload(
         kind, request,
     )));
-    send_raw(build_notify_frame(notify_title, notify_body, &tag));
+    // Counted after the card is on disk (every caller publishes from a poller
+    // that just read it), so the badge includes the card this notification is
+    // about rather than trailing it by one.
+    send_raw(build_notify_frame(
+        notify_title,
+        notify_body,
+        &tag,
+        pending_decision_count(),
+    ));
 }
 
 /// Tell mobile clients a decision disappeared (answered elsewhere / timed out).
@@ -6590,7 +6622,7 @@ mod tests {
         assert_eq!(payload["event"], "decision_resolved");
         assert_eq!(payload["id"], "e1");
 
-        let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "guard:g1")).unwrap();
+        let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "guard:g1", 3)).unwrap();
         assert_eq!(frame["type"], "notify");
         assert_eq!(frame["tag"], "guard:g1");
         // `url` is what every notification-click path routes on: the web service
@@ -6598,6 +6630,9 @@ mod tests {
         // HarmonyOS clickAction. It used to be a hardcoded "/", so clicking any
         // notification landed on the home screen no matter which card fired it.
         assert_eq!(frame["url"], "/#d=guard:g1");
+        // The launcher badge rides the same frame: the relay turns it into
+        // Push Kit's notification.badge.setNum for HarmonyOS.
+        assert_eq!(frame["badge"], 3);
     }
 
     #[test]
@@ -6605,7 +6640,7 @@ mod tests {
         // publish_decision_created degrades `tag` to the bare kind when the
         // request carries no id. A fragment is still fine, but an empty tag must
         // not produce a dangling "/#d=".
-        let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "")).unwrap();
+        let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "", 0)).unwrap();
         assert_eq!(frame["url"], "/");
     }
 

@@ -219,7 +219,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                     }
                 }
             }
-            InFrame::Notify { title, body, tag, url } if role == Role::Agent => {
+            InFrame::Notify { title, body, tag, url, badge } if role == Role::Agent => {
                 // Stamp which channel this notification came from. One phone can pair with
                 // multiple desktops, and each desktop's URL carries only the card id — but the
                 // card id is unique only within one machine. When two desktops both have a card,
@@ -237,6 +237,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                     body: body.clone(),
                     tag: tag.clone(),
                     url: stamped.clone(),
+                    badge,
                 };
                 state.registry.forward(&channel, role, &out);
                 let payload = PushPayload {
@@ -244,6 +245,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                     body: &body,
                     tag: tag.as_deref(),
                     url: stamped.as_deref(),
+                    badge,
                 };
                 state.push.notify(&channel, &payload, state.harmony.as_ref()).await;
             }

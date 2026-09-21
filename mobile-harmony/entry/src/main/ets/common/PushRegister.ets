@@ -45,6 +45,28 @@ async function ensureNotificationEnabled(context: common.UIAbilityContext): Prom
 /// Empty string return means this device can't get a token (emulator, Huawei
 /// account not logged in, push service not enabled); caller should skip reporting
 /// rather than send an empty token to relay.
+/// Largest number Push Kit / the launcher accept for the app badge; higher
+/// values are rejected. Mirrors the relay-side clamp in harmony_push.rs so both
+/// ends agree on what "a lot" looks like.
+const MAX_BADGE = 99;
+
+/// Set the launcher icon badge to `count` (0 clears it).
+///
+/// Push Kit does NOT clear the badge when the user opens the app, taps the
+/// notification, or dismisses it — the number a push set with `badge.setNum`
+/// stays until the app overwrites it. That makes this the other half of the
+/// feature, not a nicety: without it the badge only ever grows.
+///
+/// The web layer drives it (appBadge.ts), because the page is what knows how
+/// many cards are actually still waiting across every paired desktop, while a
+/// push only ever speaks for the one that sent it.
+export function setAppBadge(count: number): void {
+  const n = Math.max(0, Math.min(MAX_BADGE, Math.floor(count)));
+  notificationManager.setBadgeNumber(n).catch((e: BusinessError) => {
+    hilog.warn(DOMAIN, TAG, 'setBadgeNumber failed: %{public}d %{public}s', e.code, e.message);
+  });
+}
+
 export async function acquirePushToken(context: common.UIAbilityContext): Promise<string> {
   await ensureNotificationEnabled(context);
   try {
