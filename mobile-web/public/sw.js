@@ -16,6 +16,17 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : "" };
   }
+  // Launcher icon badge = how many decision cards are still waiting (the count
+  // the relay stamps on every notify). This is the only path that updates it
+  // while the app is closed; the page re-syncs it on open (src/appBadge.ts).
+  // Not to be confused with the `badge:` notification option below, which is
+  // the monochrome status-bar glyph.
+  if (typeof data.badge === "number" && self.navigator.setAppBadge) {
+    const n = Math.max(0, Math.floor(data.badge));
+    const pending =
+      n === 0 ? self.navigator.clearAppBadge?.() : self.navigator.setAppBadge(n);
+    if (pending) pending.catch(() => {});
+  }
   event.waitUntil(
     self.registration.showNotification(data.title || "Fleet", {
       body: data.body || "",
