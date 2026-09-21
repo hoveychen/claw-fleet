@@ -103,6 +103,20 @@ const HELLO_INTERVAL_MS = 15_000;
  *  the backoff on every such auth would busy-loop reconnects once per second
  *  on a weak link. Keeping the backoff growing across flaps is the fix. */
 const STABLE_CONNECTION_MS = 30_000;
+/** Give up on a socket that has produced nothing — no frame, no pong — for this
+ *  long, and reconnect.
+ *
+ *  A half-open socket (phone changed networks, the relay's side went away
+ *  without a FIN) keeps `readyState === OPEN` forever: `onclose` never fires,
+ *  so none of the reconnect machinery below ever runs. Every request then sits
+ *  out its full timeout and the header signal keeps showing whatever the last
+ *  *successful* round trip measured. This clock is what makes a dead link
+ *  detectable at all from this side.
+ *
+ *  Three probe intervals. Shorter than the relay's own 90s idle budget on
+ *  purpose — the phone is the side that suffers the wait, so it should be the
+ *  side that notices first. */
+const DEAD_LINK_MS = 45_000;
 
 export class RelayClient implements FleetTransport {
   private ws: WebSocket | null = null;
@@ -148,6 +162,14 @@ export class RelayClient implements FleetTransport {
   private authedAt = 0;
   private closed = false;
   private authed = false;
+  /** Epoch ms of the last frame of any kind from the relay. A pong counts —
+   *  that is what makes the probe useful on an otherwise idle connection. */
+  private lastInboundAt = 0;
+  /** Whether this relay answers `ping` (advertised in its `authed` frame).
+   *  Off against an older relay, which would drop the probe unparsed and make
+   *  every healthy link look dead. */
+  private pongSupported = false;
+  private probeSeq = 0;
   // End-to-end encryption keys derived from the pairing secret (Scheme A). The
   // relay only ever sees `channelToken` (what we auth with) and sealed
   // ciphertext; the raw secret and `encKey` never leave this device. Derivation
@@ -203,9 +225,35 @@ export class RelayClient implements FleetTransport {
   }
 
   private startHello() {
+    this.lastInboundAt = Date.now();
     this.sendHello();
     this.stopHello();
-    this.helloTimer = window.setInterval(() => this.sendHello(), HELLO_INTERVAL_MS);
+    this.helloTimer = window.setInterval(() => {
+      this.sendHello();
+      this.probeLink();
+    }, HELLO_INTERVAL_MS);
+  }
+
+  /** One liveness tick: prove the socket still round-trips, or tear it down.
+   *
+   *  Shares the hello timer rather than adding a second one — the two run at
+   *  the same cadence and a probe frame is a few dozen bytes.
+   *
+   *  The order matters: the deadline is checked *before* this tick's probe is
+   *  sent, so a socket is only condemned on the evidence of probes that have
+   *  already had a full interval to come back. */
+  private probeLink() {
+    if (!this.authed || !this.pongSupported) return;
+    if (Date.now() - this.lastInboundAt > DEAD_LINK_MS) {
+      // `close()` on a half-open socket does fire `onclose` (the browser
+      // resolves it locally, it needs no answer from the peer), which is what
+      // hands this over to the normal reconnect path — including failing the
+      // pending requests that would otherwise sit out their full timeouts.
+      this.handlers.onDeadLink?.();
+      this.ws?.close();
+      return;
+    }
+    this.sendRaw({ type: "ping", id: `probe-${++this.probeSeq}` });
   }
 
   private stopHello() {
@@ -244,6 +292,9 @@ export class RelayClient implements FleetTransport {
       ws.send(JSON.stringify({ type: "auth", role: "client", secret: this.channelToken }));
     };
     ws.onmessage = (ev) => {
+      // Before parsing: even a frame we go on to ignore proves the socket
+      // still carries bytes, which is the only thing this clock measures.
+      this.lastInboundAt = Date.now();
       let frame: Record<string, unknown>;
       try {
         frame = JSON.parse(String(ev.data));
@@ -287,6 +338,7 @@ export class RelayClient implements FleetTransport {
       case "authed":
         this.authed = true;
         this.authedAt = Date.now();
+        this.pongSupported = frame.pong === true;
         // NB: don't reset reconnectDelay here — a flapping socket auths every
         // cycle, so resetting on auth would defeat the backoff. The reset now
         // lives in onclose, gated on how long the connection actually held.
@@ -305,6 +357,10 @@ export class RelayClient implements FleetTransport {
         break;
       case "msg_ack":
         this.handleMsgAck(String(frame.ack_id ?? ""), String(frame.status ?? ""));
+        break;
+      case "pong":
+        // Nothing to do — its arrival already refreshed `lastInboundAt` in
+        // `onmessage`, which is the entire point of having sent the probe.
         break;
       default:
         break; // notify frames are handled by the service worker via Web Push

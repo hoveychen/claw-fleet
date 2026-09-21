@@ -79,11 +79,18 @@ pub enum OutFrame {
     /// `msg` payloads as raw bytes instead of base64-in-JSON. Older relays omit
     /// the field, so `#[serde(default)]` on the reader yields `false` and the
     /// agent falls back to text transport.
+    /// `pong` advertises that this relay answers `InFrame::Ping`. A phone must
+    /// not probe a relay that predates the frame: an older build fails to parse
+    /// it, logs, and drops it silently, so every probe would look like a dead
+    /// link and the phone would reconnect in a loop over a perfectly good
+    /// socket. Absent on old relays → `#[serde(default)]` on the reader yields
+    /// `false` and the phone leaves its probe off, behaving exactly as before.
     Authed {
         role: Role,
         clients: usize,
         agent_online: bool,
         binary: bool,
+        pong: bool,
     },
     Msg { payload: Value },
     Notify {

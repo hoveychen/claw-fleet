@@ -115,6 +115,11 @@ export interface TransportHandlers {
   /** Fires each time the connection drops and a reconnect is scheduled — the second weak-link
    *  signal (frequent reconnects ⇒ congestion). */
   onReconnect?: () => void;
+  /** The transport condemned a socket its own liveness probe found dead, rather than the
+   *  peer or the browser closing it. Distinct from `onReconnect` (which follows immediately)
+   *  because it is the one signal that says the link was *silently* broken — the state the UI
+   *  previously had no way to see, since a half-open socket reports itself open. */
+  onDeadLink?: () => void;
   onAuthError?: (message: string) => void;
 }
 

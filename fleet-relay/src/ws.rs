@@ -157,6 +157,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
         clients: joined.clients,
         agent_online: joined.agent_online,
         binary: true,
+        pong: true,
     };
     if send_frame(&mut socket, &authed).await.is_err() {
         state.registry.leave(&channel, role, joined.conn_id);
