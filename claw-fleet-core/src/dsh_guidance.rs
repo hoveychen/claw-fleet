@@ -461,9 +461,15 @@ successor never spawns; the note froze at registration, so the answer would be \
 dropped anyway. End the turn with one line of plain text.\n\
 - **Plan mode is the exception dsh already enforces:** when you are in plan \
 mode, present the plan through `exit_plan_mode`, not through \
-`ask_user_question`. Do not ask \"should I proceed?\" as a card there.",
+`ask_user_question`. Do not ask \"should I proceed?\" as a card there.\n\
+\n\
+{explain_marks}",
         title = title,
         ix_lang = ix_lang,
+        // The dsh block is English-only (locale only picks `ix_lang`), so the
+        // shared section is rendered in English too.
+        explain_marks =
+            crate::explain_marks_guidance::render_explain_marks_section(&title, "en"),
     )
 }
 
@@ -1251,6 +1257,14 @@ mod tests {
             "a per-session id must not reach the shared AGENTS.md"
         );
         assert!(sentinels_for(SECTION_SESSION_ID).is_none());
+    }
+
+    #[test]
+    fn interaction_block_embeds_the_explain_marks_section() {
+        let g = render_dsh_interaction_block("Boss", "en");
+        assert!(g.contains(crate::explain_marks_guidance::BEGIN_MARKER));
+        assert!(g.contains("## Inline marks `[?…]`"));
+        assert!(g.contains("lets Boss ask"));
     }
 
     #[test]

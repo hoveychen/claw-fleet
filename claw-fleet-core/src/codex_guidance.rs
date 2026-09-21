@@ -396,6 +396,8 @@ question. The one exception stays the session-end exemption below.\n\
 \n\
 {session_title}\
 \n\
+{explain_marks}\n\
+\n\
 ### Deferred-tool wait invariant\n\
 \n\
 Codex may execute this deferred MCP call inside its outer code-mode `exec`. \
@@ -493,6 +495,10 @@ toolset this turn (rare), respond with plain text as normal.",
             "en",
             crate::session_title_guidance::Harness::Codex,
         ),
+        // Same reasoning: English-only block, English section. Kept under 1 KiB
+        // by its own test because AGENTS.md sits close to the 32 KiB ceiling.
+        explain_marks =
+            crate::explain_marks_guidance::render_explain_marks_section(&title, "en"),
     )
 }
 
@@ -1017,6 +1023,15 @@ mod tests {
             g.contains("--root-reason"),
             "must teach the justification needed to leave the current plan's tree"
         );
+    }
+
+    #[test]
+    fn interaction_block_embeds_the_explain_marks_section() {
+        let g = render_codex_interaction_block("Boss", "en");
+        assert!(g.contains(crate::explain_marks_guidance::BEGIN_MARKER));
+        assert!(g.contains("## Inline marks `[?…]`"));
+        assert!(g.contains("At most 5 per reply"));
+        assert!(g.contains("lets Boss ask"));
     }
 
     #[test]

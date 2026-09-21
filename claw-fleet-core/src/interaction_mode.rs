@@ -106,6 +106,8 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 - **不要解释自己在遵守规则**（「按照交互模式我把这个包成决策卡」「为了简洁我只列三条」），也不要复述本文件的条款。做到就行。**但如实说出不确定、失败和没做到的事永远是允许的。**\n\
 - **人格只作用于你说的话，不渗进你产出的东西**：称呼、语气、语言默认只属于决策卡与对话文本。写进文件的东西（commit message、代码注释、README、wiki 文档、PR 描述）由那个产出物的场景和周边代码决定，除非另有规则明确要求（如 PRD 纪律要求 TASKS.md 用中文）。\n\
 \n\
+{explain_marks}\n\
+\n\
 ## 选项与任务终态\n\
 \n\
 每个 `label` 必须是具体的下一步动作或答案，不能是「Tell me more」这种元选择；`description` 补上取舍、范围或副作用，好让{title_zh}不必重读报告就能选。有强烈推荐就放第一并给 label 追加 \" (Recommended)\"。「Other」由系统自动提供，别自己造「让我自由输入」或「就继续用文本」的选项。\n\
@@ -145,6 +147,8 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
             title_zh = title_zh,
             language_line = language_line,
             thinking_line = thinking_line,
+            explain_marks =
+                crate::explain_marks_guidance::render_explain_marks_section(&title_zh, "zh"),
         );
     }
 
@@ -185,6 +189,8 @@ This applies to Cases A, B and C alike. Never omit the divider — even if the w
 - **Put file references in backticks** as `claw-fleet-core/src/session.rs:42`: the desktop renders them as clickable path chips. A directory is required (bare `session.rs` is not recognised) and line numbers only as `:42` (`#L42`, ranges and `file://` are not recognised). The phone does no path linking, so every reference must stand on its own — never \"the file above\".\n\
 - **Never explain that you are following the rules** (\"per the interaction mode I'm wrapping this in a card\", \"keeping it short, here are three points\") and never restate this file's clauses. Just comply. **Stating uncertainty, failures and what you did not get to is always allowed.**\n\
 - **The persona governs what you say, never what you produce**: the honorific, the voice and the language default belong to decision cards and conversational text. Anything written into a file (commit messages, code comments, READMEs, wiki docs, PR descriptions) takes its tone and language from that artefact's context, unless another rule says otherwise (e.g. PRD discipline requiring TASKS.md in Chinese).\n\
+\n\
+{explain_marks}\n\
 \n\
 ## Options & Task Terminal State\n\
 \n\
@@ -228,6 +234,8 @@ If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — n
         title_zh = title_zh,
         language_line = language_line,
         thinking_line = thinking_line,
+        explain_marks =
+            crate::explain_marks_guidance::render_explain_marks_section(&title_en, "en"),
     )
 }
 
@@ -587,6 +595,26 @@ mod tests {
         assert!(
             z.contains("被延迟列出不等于缺席"),
             "zh guidance must disambiguate a deferred fleet__ask from an absent one"
+        );
+    }
+
+    /// The inline `[?…]` marks section rides inside this file (老板's call:
+    /// share the interaction-mode switch rather than add a feature), in both
+    /// locales, with the user title interpolated.
+    #[test]
+    fn render_embeds_the_explain_marks_section_in_both_locales() {
+        let zh = render_guidance("", "zh");
+        assert!(zh.contains(crate::explain_marks_guidance::BEGIN_MARKER));
+        assert!(zh.contains("## 正文标注 `[?…]`"));
+        assert!(zh.contains("最多 5 处"));
+        assert!(zh.contains("老板一点"), "title defaulted to 老板");
+        let en = render_guidance("", "en");
+        assert!(en.contains(crate::explain_marks_guidance::BEGIN_MARKER));
+        assert!(en.contains("## Inline marks `[?…]`"));
+        assert!(en.contains("lets Boss ask"), "title defaulted to Boss");
+        assert!(
+            zh.find("## 正文标注").unwrap() < zh.find("## 选项与任务终态").unwrap(),
+            "the section sits with the report-body rules, before options"
         );
     }
 
