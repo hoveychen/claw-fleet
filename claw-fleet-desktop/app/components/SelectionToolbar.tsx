@@ -10,6 +10,15 @@ import {
 } from "../selectionExplain";
 import styles from "./SelectionToolbar.module.css";
 
+/** Which side of the selection the bar sits on. `above` is the default; `below`
+ *  when the pane has no room above (a passage on a card's first line). */
+type Place = "above" | "below";
+/** The bar's height as laid out (buttons 5px + 11px line + 5px, bar 3px padding
+ *  and a 1px border each side), used to decide whether it fits above. */
+const BAR_HEIGHT = 30;
+/** Space between the bar and the selection's box. */
+const BAR_GAP = 6;
+
 /**
  * The floating "ask about this" bar that appears over a selection of agent
  * prose.
@@ -45,7 +54,9 @@ export function SelectionToolbar({
   onAsk: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
 }) {
   const { t } = useTranslation();
-  const [shown, setShown] = useState<{ sel: AssistantSelection; x: number; y: number } | null>(null);
+  const [shown, setShown] = useState<{ sel: AssistantSelection; x: number; y: number; place: Place } | null>(
+    null,
+  );
   const [custom, setCustom] = useState(false);
   const [question, setQuestion] = useState("");
   const customRef = useRef(custom);
@@ -72,10 +83,16 @@ export function SelectionToolbar({
         Math.max(sel.rect.left + sel.rect.width / 2 - hostRect.left, margin + 120),
         hostRect.width - margin - 120,
       );
-      const y = Math.max(sel.rect.top - hostRect.top - 6, margin + 28);
+      // Above the selection when the pane has room for the bar there;
+      // otherwise below it. Never over the selected text: a clamp used to
+      // park the bar at the pane's top edge, which on a decision card's
+      // first line meant right on top of the passage being asked about.
+      const above = sel.rect.top - hostRect.top - BAR_GAP;
+      const place: Place = above >= margin + BAR_HEIGHT ? "above" : "below";
+      const y = place === "above" ? above : sel.rect.bottom - hostRect.top + BAR_GAP;
       setCustom(false);
       setQuestion("");
-      setShown({ sel, x, y });
+      setShown({ sel, x, y, place });
     };
     // Read after the browser has settled the selection for this gesture.
     const onUp = () => requestAnimationFrame(read);
@@ -132,6 +149,7 @@ export function SelectionToolbar({
     <div
       className={styles.toolbar}
       style={{ left: shown.x, top: shown.y }}
+      data-place={shown.place}
       role="toolbar"
       aria-label={t("detail.explain_toolbar", "对选中内容追问")}
       data-testid="selection-toolbar"

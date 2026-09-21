@@ -143,6 +143,37 @@ describe("ExplainMarkSpan in TextBlock", () => {
     expect(onAsk.mock.calls[0][0]).toMatchObject({ quote: "流量最低的时段", msgIdx: 0, msgUuid: null });
   });
 
+  describe("bar placement", () => {
+    // jsdom has no layout: every rect is zero, which is exactly "the selection
+    // is at the pane's top edge". The `above` case stubs a Range rect lower down.
+    const rangeRect = Range.prototype.getBoundingClientRect;
+    afterEach(() => {
+      Range.prototype.getBoundingClientRect = rangeRect;
+    });
+    const rect = (top: number, height: number): DOMRect =>
+      ({ top, bottom: top + height, left: 100, right: 200, width: 100, height, x: 100, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    it("sits below the selection when there is no room above it", async () => {
+      const el = mount(<Host role="assistant" idx={0} uuid={null} body={<TextBlock text={MD} />} onAsk={vi.fn()} />);
+      act(() => el.querySelector<HTMLElement>("[data-explain-quote]")!.click());
+      await nextFrame();
+      const bar = el.querySelector<HTMLElement>("[data-testid='selection-toolbar']")!;
+      expect(bar.getAttribute("data-place")).toBe("below");
+      // Below the (zero-height) box, not over it.
+      expect(parseFloat(bar.style.top)).toBeGreaterThan(0);
+    });
+
+    it("keeps sitting above the selection when the pane has room", async () => {
+      Range.prototype.getBoundingClientRect = () => rect(200, 18);
+      const el = mount(<Host role="assistant" idx={0} uuid={null} body={<TextBlock text={MD} />} onAsk={vi.fn()} />);
+      act(() => el.querySelector<HTMLElement>("[data-explain-quote]")!.click());
+      await nextFrame();
+      const bar = el.querySelector<HTMLElement>("[data-testid='selection-toolbar']")!;
+      expect(bar.getAttribute("data-place")).toBe("above");
+      expect(parseFloat(bar.style.top)).toBeLessThan(200);
+    });
+  });
+
   it("leaves KaTeX's own spans alone", () => {
     const el = mount(
       <div data-msg-idx={1} data-role="assistant">
