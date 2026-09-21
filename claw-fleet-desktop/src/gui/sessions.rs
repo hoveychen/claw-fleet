@@ -325,3 +325,14 @@ pub(crate) async fn list_explanations(
     let backend = state.backend.clone();
     run_blocking(move || backend.list_explanations(&session_id)).await
 }
+
+#[tauri::command]
+pub(crate) async fn dismiss_explanation(
+    session_id: String,
+    id: String,
+    dismissed: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let backend = state.backend.clone();
+    run_blocking_result(move || backend.dismiss_explanation(&session_id, &id, dismissed)).await
+}

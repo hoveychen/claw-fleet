@@ -2986,6 +2986,16 @@ impl LocalBackend {
         claw_fleet_core::session_explain::list(session_id)
     }
 
+    /// Take a side question out of the rail (or hand it back), for good.
+    pub fn dismiss_explanation(
+        &self,
+        session_id: &str,
+        id: &str,
+        dismissed: bool,
+    ) -> Result<(), String> {
+        claw_fleet_core::session_explain::set_dismissed(session_id, id, dismissed)
+    }
+
     pub fn git_status(
         &self,
         workspace: &str,

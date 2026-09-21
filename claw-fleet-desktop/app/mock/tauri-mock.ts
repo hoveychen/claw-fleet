@@ -730,6 +730,8 @@ async function handleIPC(
       return [];
     case "get_explanation":
       return null;
+    case "dismiss_explanation":
+      return null;
     case "explain_selection": {
       const req = args.request as {
         sessionId: string;
