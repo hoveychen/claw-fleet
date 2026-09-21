@@ -193,7 +193,10 @@ impl DshSource {
     /// the same outcome the call had before — the restart happens precisely
     /// because the server died under it — and the next call rebuilds its client
     /// off the new port.
-    fn with_client<T>(&self, f: impl FnOnce(&DshClient) -> Result<T, String>) -> Result<T, String> {
+    pub(crate) fn with_client<T>(
+        &self,
+        f: impl FnOnce(&DshClient) -> Result<T, String>,
+    ) -> Result<T, String> {
         let client = {
             let mut guard = lock(server_slot());
 
@@ -438,7 +441,7 @@ impl DshSource {
     /// process is cold to this server until something touches it, and
     /// `session/selectModel` loads it (verified against a session created by a
     /// different `dsh web` instance).
-    fn select_model(
+    pub(crate) fn select_model(
         client: &DshClient,
         session_id: &str,
         model: Option<&str>,
@@ -508,7 +511,7 @@ impl DshSource {
     /// refuses those images (a text-only model route, an over-limit batch) gets
     /// the prompt again as plain text rather than losing the turn — see
     /// [`crate::dsh_attachments::send_with_text_fallback`].
-    fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
+    pub(crate) fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
         crate::dsh_attachments::send_with_text_fallback(prompt, |content| {
             client
                 .call(
@@ -534,6 +537,62 @@ impl DshSource {
                 .map(|_| ())
         })
         .map_err(Into::into)
+    }
+
+    /// Receive every raw follow item of `session_id` until the handle drops
+    /// (see [`crate::dsh_events::LiveView::tap`]). Brings the server and its
+    /// follower up first: the tap registry lives on the watcher.
+    pub(crate) fn tap(
+        &self,
+        session_id: &str,
+        tap: crate::dsh_events::RawItemTap,
+    ) -> Result<crate::dsh_events::TapHandle, String> {
+        self.with_client(|_| Ok(()))?;
+        lock(watcher_slot())
+            .as_ref()
+            .map(|w| w.tap(session_id, tap))
+            .ok_or_else(|| "dsh: no event watcher to tap".to_string())
+    }
+
+    /// The route and effort the roster reports for `session_id` — what its
+    /// last request went out with — or `None` when the roster does not list
+    /// it. Falls back to what this process last read from the session's own
+    /// log, then to Fleet's launch note.
+    pub(crate) fn session_selection(&self, session_id: &str) -> RosterSelection {
+        let from_roster = self.roster().ok().and_then(|roster| {
+            roster
+                .get("items")
+                .and_then(Value::as_array)?
+                .iter()
+                .find(|item| item.get("sessionId").and_then(Value::as_str) == Some(session_id))
+                .and_then(|item| {
+                    roster_selection(item.get("projections").unwrap_or(&Value::Null))
+                })
+        });
+        let route = from_roster
+            .as_ref()
+            .and_then(|s| s.route.clone())
+            .or_else(|| known_model(session_id))
+            .or_else(|| crate::launch_spec::model_of(session_id));
+        let effort = from_roster
+            .as_ref()
+            .and_then(|s| s.effort.clone())
+            .or_else(|| known_effort(session_id))
+            .or_else(|| crate::launch_spec::effort_of(session_id));
+        RosterSelection { route, effort }
+    }
+
+    /// dsh's `agent-default-model` selection — the model a session mounts when
+    /// nobody names one — as `(provider/model, effort)`.
+    pub(crate) fn default_selection(client: &DshClient) -> Result<RosterSelection, String> {
+        let value = client
+            .call("session/modelCatalog", json!({}))
+            .map_err(String::from)?;
+        let cat = parse_model_catalog(&value);
+        Ok(RosterSelection {
+            route: cat.default_spec,
+            effort: cat.default_effort,
+        })
     }
 
     /// Arrange for `on_exit` to fire when `session_id`'s turn ends.
@@ -691,11 +750,11 @@ fn projection_u64(projections: &Value, key: &str, field: &str) -> u64 {
 }
 
 /// The route and effort a roster item names, if it names either.
-#[derive(Debug, Default, PartialEq)]
-struct RosterSelection {
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct RosterSelection {
     /// `provider/model`, on the same shape [`known_model`] produces.
-    route: Option<String>,
-    effort: Option<String>,
+    pub(crate) route: Option<String>,
+    pub(crate) effort: Option<String>,
 }
 
 /// Read `projections.values.modelSelection` off one roster item.
@@ -1147,6 +1206,12 @@ impl AgentSource for DshSource {
                         let Some(mut info) = session_info_from_list_item(item) else {
                             continue;
                         };
+                        // A child `session_explain` forked for one side
+                        // question persists like any session (dsh has no
+                        // ephemeral fork and no delete RPC) but is not one.
+                        if crate::session_explain::is_fork_session(&info.id) {
+                            continue;
+                        }
                         roster_updated.push(info.last_activity_ms as i64);
                         // The poll only knows running/not-running; the downlinks
                         // know which phase of the turn it is in.
@@ -1366,6 +1431,15 @@ impl AgentSource for DshSource {
     /// zstd-framed log the server owns. Nothing may hand out a path for it.
     fn resolve_file_path(&self, _path: &str) -> Option<PathBuf> {
         None
+    }
+
+    /// See [`crate::dsh_explain`].
+    fn fork_ask(
+        &self,
+        spec: &crate::agent_source::ForkAskSpec,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<crate::agent_source::ForkAskOutcome, String> {
+        crate::dsh_explain::dsh_fork_ask(self, spec, on_delta)
     }
 }
 

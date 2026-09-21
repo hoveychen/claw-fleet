@@ -933,6 +933,14 @@ fn dsh_session_calls_for_pricing(uri: &str) -> Result<Vec<PricedCall>, String> {
     session_calls_from(uri, crate::dsh_source::session_events_for_pricing(uri)?)
 }
 
+/// Price the calls in `events` as calls of the session at `uri`, without
+/// reading its history: for a caller that already holds the events (the
+/// `session_explain` fork tapped them off the follow stream) and must not
+/// price the fork-inherited prefix the history would also contain.
+pub(crate) fn price_events(uri: &str, events: &[serde_json::Value]) -> Vec<PricedCall> {
+    session_calls_from(uri, events.to_vec()).unwrap_or_default()
+}
+
 fn session_calls_from(
     uri: &str,
     events: Vec<serde_json::Value>,

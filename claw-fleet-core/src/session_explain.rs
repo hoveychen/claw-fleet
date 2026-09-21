@@ -233,9 +233,51 @@ pub fn list(session_id: &str) -> Vec<ExplainRecord> {
         .unwrap_or_default()
 }
 
+/// Marker files naming the fork identities sources had to leave on disk
+/// (`~/.fleet/explain/forks/<fork_session_id>`), so a scanner can ask about
+/// one id in O(1) instead of reading every record on every poll.
+///
+/// Written **before** the fork exists — a scan between the fork's creation and
+/// the record's completion would otherwise list it — and never removed: the
+/// dsh child session persists for good (no ephemeral fork, no delete RPC), so
+/// the marker has to outlive the record that explains it. Codex rollout copies
+/// use `codex_image::mark_internal_thread` for the same purpose.
+fn fork_marker_path_in(root: &Path, fork_session_id: &str) -> Option<PathBuf> {
+    if !safe_component(fork_session_id) {
+        return None;
+    }
+    Some(root.join("forks").join(fork_session_id))
+}
+
+fn fork_marker_path(fork_session_id: &str) -> Option<PathBuf> {
+    fork_marker_path_in(&explain_dir()?, fork_session_id)
+}
+
+/// Record that `fork_session_id` is a side-question fork, not a session.
+pub fn mark_fork_session(fork_session_id: &str) {
+    let Some(path) = fork_marker_path(fork_session_id) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            crate::log_debug(&format!("[session_explain] create fork marker dir: {e}"));
+            return;
+        }
+    }
+    if let Err(e) = fs::write(&path, b"") {
+        crate::log_debug(&format!(
+            "[session_explain] mark fork session {fork_session_id}: {e}"
+        ));
+    }
+}
+
+/// Whether `session_id` is a side-question fork that scanners must hide.
+pub fn is_fork_session(session_id: &str) -> bool {
+    fork_marker_path(session_id).is_some_and(|p| p.exists())
+}
+
 /// Every fork identity any explanation left on disk, across all sessions.
-/// Scanners consult this to keep dsh child sessions / codex rollout copies out
-/// of the session lists.
+/// The record-derived view of [`is_fork_session`]'s markers, for audits.
 pub fn fork_session_ids() -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     let Some(root) = explain_dir() else {
@@ -940,6 +982,11 @@ mod tests {
         assert!(record_path_in(dir.path(), "s", "a/b").is_none());
         assert!(record_path_in(dir.path(), "", "a").is_none());
         assert!(list_in(dir.path(), "../..").is_empty());
+        assert!(fork_marker_path_in(dir.path(), "../x").is_none());
+        assert_eq!(
+            fork_marker_path_in(dir.path(), "session-1").unwrap(),
+            dir.path().join("forks").join("session-1")
+        );
     }
 
     #[test]
