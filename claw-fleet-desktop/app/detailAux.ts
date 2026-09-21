@@ -82,6 +82,10 @@ export interface AuxDoc {
   ref: string;
   /** What the card shows. */
   label: string;
+  /** When it was opened. The rail orders docs and side questions together by
+   *  recency, so a doc needs a clock of its own to sort against a question's
+   *  `createdMs`. */
+  openedMs: number;
 }
 
 export interface AuxState {
@@ -103,6 +107,15 @@ export interface AuxState {
    *  reading. Expanding a card pins it here; the rail keeps rendering it from
    *  the last snapshot it saw until the reader dismisses it. */
   pinnedAgent: string | null;
+  /** Subagents the reader took out of the rail by hand.
+   *
+   *  Agent cards are derived from the live set, so without this a ✕ on a
+   *  running agent lasted until the next scan tick — which is why the live
+   *  cards had no ✕ at all, and why the rail's three card kinds each meant
+   *  something different by it. Held for the session only: it is "not in my
+   *  way right now", not a judgement about the agent, and the Library facet
+   *  lists it either way. */
+  dismissedAgents: readonly string[];
 }
 
 export const initialAux: AuxState = {
@@ -110,6 +123,7 @@ export const initialAux: AuxState = {
   active: null,
   expanded: null,
   pinnedAgent: null,
+  dismissedAgents: [],
 };
 
 /** Rail id for a subagent card. Prefixed like a doc's, so `expanded` can hold
@@ -212,8 +226,19 @@ export function auxDocMeta(kind: AuxDocKind, ref: string): string {
   }
 }
 
-export function makeAuxDoc(kind: AuxDocKind, ref: string, label?: string): AuxDoc {
-  return { id: docId(kind, ref), kind, ref, label: label || auxDocLabel(kind, ref) };
+export function makeAuxDoc(
+  kind: AuxDocKind,
+  ref: string,
+  label?: string,
+  openedMs: number = Date.now(),
+): AuxDoc {
+  return {
+    id: docId(kind, ref),
+    kind,
+    ref,
+    label: label || auxDocLabel(kind, ref),
+    openedMs,
+  };
 }
 
 /**
@@ -250,23 +275,39 @@ export function collapseDoc(state: AuxState): AuxState {
 export function toggleAgent(state: AuxState, sessionId: string): AuxState {
   const id = agentCardId(sessionId);
   if (state.expanded === id) return { ...state, expanded: null };
-  return { ...state, expanded: id, pinnedAgent: sessionId };
+  // Expanding an agent is also how the Library hands a dismissed one back.
+  return { ...restoreAgent(state, sessionId), expanded: id, pinnedAgent: sessionId };
 }
 
 /**
- * Dismiss a pinned subagent card — the ✕ on a card the rail is only still
- * showing because it was read after the agent finished.
+ * Take a subagent card out of the rail — the ✕, on a live card as much as on a
+ * pinned leftover.
  *
- * A live agent's card has no ✕: it is derived from the live set and dismissing
- * it would last until the next scan tick. Only the pin is dismissible.
+ * It used to work only on the pin, because a live agent's card is derived from
+ * the live set and dismissing it would have lasted until the next scan tick.
+ * That left the three card kinds disagreeing about what ✕ meant. Recording the
+ * dismissal in {@link AuxState.dismissedAgents} makes it stick for the
+ * session, which is the whole lifetime the rail has anyway, and the Library
+ * facet still lists the agent so nothing is lost by pressing it.
  */
 export function closeAgent(state: AuxState, sessionId: string): AuxState {
   const id = agentCardId(sessionId);
-  if (state.pinnedAgent !== sessionId && state.expanded !== id) return state;
+  const already = state.dismissedAgents.includes(sessionId);
+  if (already && state.pinnedAgent !== sessionId && state.expanded !== id) return state;
   return {
     ...state,
+    dismissedAgents: already ? state.dismissedAgents : [...state.dismissedAgents, sessionId],
     pinnedAgent: state.pinnedAgent === sessionId ? null : state.pinnedAgent,
     expanded: state.expanded === id ? null : state.expanded,
+  };
+}
+
+/** Undo a dismissal — the Library facet handing an agent back to the rail. */
+export function restoreAgent(state: AuxState, sessionId: string): AuxState {
+  if (!state.dismissedAgents.includes(sessionId)) return state;
+  return {
+    ...state,
+    dismissedAgents: state.dismissedAgents.filter((id) => id !== sessionId),
   };
 }
 
@@ -288,10 +329,13 @@ export function openDoc(
   label?: string,
 ): AuxState {
   const doc = makeAuxDoc(kind, ref, label);
-  const known = state.docs.some((d) => d.id === doc.id);
-  let docs = known ? state.docs : [...state.docs, doc];
+  // Re-opening a doc refreshes its clock rather than leaving it where it was:
+  // the rail orders by recency, and the thing you just clicked is the most
+  // recent thing you did regardless of when you first opened it.
+  let docs = [...state.docs.filter((d) => d.id !== doc.id), doc];
   // The doc we are about to open is last, so trimming from the front can never
-  // drop it.
+  // drop it. Nothing is lost by the trim — the reading list in docHistory.ts
+  // keeps every ref, and the Library facet offers them back.
   if (docs.length > MAX_AUX_DOCS) docs = docs.slice(docs.length - MAX_AUX_DOCS);
   return { ...state, docs, expanded: doc.id };
 }
@@ -321,6 +365,60 @@ export function closeOtherDocs(state: AuxState, id: string): AuxState {
   const keep = state.docs.find((d) => d.id === id);
   if (!keep || state.docs.length === 1) return state;
   return { ...state, docs: [keep], expanded: state.expanded === id ? id : null };
+}
+
+/**
+ * How many accrued cards the rail shows at once — docs and side questions
+ * together, not one budget each.
+ *
+ * The two used to be separate lanes with separate rules: docs capped at
+ * {@link MAX_AUX_DOCS} and dropped oldest-first, side questions uncapped and
+ * piling up until the column was a wall. Reading them as one recency-ordered
+ * stack is what makes the rail a viewfinder — "the last few things I did here"
+ * is one question, and the answer does not care which kind each was.
+ */
+export const RAIL_ITEM_CAP = 10;
+
+/** A doc or a side question, as the rail renders them: one interleaved list. */
+export type RailItem<D, E> = { type: "doc"; item: D } | { type: "explain"; item: E };
+
+/**
+ * Interleave docs and side questions, newest first, capped.
+ *
+ * The expanded card is always kept, however old: the cap exists to stop the
+ * column growing without bound, and dropping the thing being read to honour it
+ * would be the rail closing a reader the reader opened. Generic over the two
+ * record types so this module stays free of the explain API's types.
+ */
+export function orderRailItems<
+  D extends { id: string; openedMs: number },
+  E extends { id: string; createdMs: number },
+>(
+  docs: readonly D[],
+  explains: readonly E[],
+  expandedId: string | null,
+  cap: number = RAIL_ITEM_CAP,
+): RailItem<D, E>[] {
+  const all: { at: number; keep: boolean; entry: RailItem<D, E> }[] = [
+    ...docs.map((d) => ({
+      at: d.openedMs,
+      keep: d.id === expandedId,
+      entry: { type: "doc" as const, item: d },
+    })),
+    ...explains.map((e) => ({
+      at: e.createdMs,
+      keep: explainCardId(e.id) === expandedId,
+      entry: { type: "explain" as const, item: e },
+    })),
+  ];
+  all.sort((a, b) => b.at - a.at);
+  if (all.length <= cap) return all.map((x) => x.entry);
+  const shown = all.slice(0, cap);
+  // Pull a kept card that fell past the cap up into the last slot rather than
+  // widening the column past its budget.
+  const dropped = all.slice(cap).filter((x) => x.keep);
+  if (dropped.length > 0) shown.splice(cap - dropped.length, dropped.length, ...dropped);
+  return shown.map((x) => x.entry);
 }
 
 /** Clear the stack. Nothing is left expanded, because nothing is left. */

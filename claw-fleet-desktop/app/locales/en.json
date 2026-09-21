@@ -1797,6 +1797,7 @@
     "tab_tasks": "Tasks",
     "tab_bgtasks": "Background",
     "tab_library": "Library",
+    "rail_dismiss_card": "Take out of the rail (findable in Library)",
     "library_empty": "Nothing opened and nothing asked in this session yet. Whatever appears in the rail is kept here.",
     "library_explains": "Side questions",
     "library_docs": "Docs opened",

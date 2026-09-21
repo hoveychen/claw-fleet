@@ -1472,11 +1472,15 @@ export function SessionDetail({
      mid-paragraph. The pin is dropped by the card's ✕ (and by switching
      sessions, which resets the whole aux state). */
   const railAgents = useMemo((): SessionInfo[] => {
+    const dismissed = new Set(aux.dismissedAgents);
+    const live = dismissed.size > 0
+      ? liveSubagents.filter((s) => !dismissed.has(s.id))
+      : liveSubagents;
     const pinnedId = aux.pinnedAgent;
-    if (!pinnedId || liveSubagents.some((s) => s.id === pinnedId)) return liveSubagents;
+    if (!pinnedId || live.some((s) => s.id === pinnedId)) return live;
     const pinned = sessions.find((s) => s.id === pinnedId);
-    return pinned ? [pinned, ...liveSubagents] : liveSubagents;
-  }, [aux.pinnedAgent, liveSubagents, sessions]);
+    return pinned ? [pinned, ...live] : live;
+  }, [aux.pinnedAgent, aux.dismissedAgents, liveSubagents, sessions]);
   const railCards = railAgents.length + aux.docs.length + explains.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar

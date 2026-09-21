@@ -15,7 +15,7 @@ import type { TFunction } from "i18next";
 
 import { canRevealPath } from "../canReveal";
 import { agentCardId } from "../detailAux";
-import { isLiveMember, type SessionInfo } from "../types";
+import type { SessionInfo } from "../types";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { formatModel, StatusBadge } from "./SessionCard";
 import { timeAgo } from "./SessionRow";
@@ -172,8 +172,8 @@ export function SubagentLiveCards({
   expandedId: string | null;
   /** Expand this agent's transcript, or collapse the one already expanded. */
   onToggle: (session: SessionInfo) => void;
-  /** Dismiss the preview — and the card itself, when it is only still in the
-   *  rail because it was pinned. */
+  /** Take this card out of the rail (and collapse its preview). Live cards
+   *  included — the Library facet still lists the agent. */
   onClose: (session: SessionInfo) => void;
   /** Leave for the subagent's own session view. The escape hatch, not the
    *  default: everything the page adds over this pane is composer and chrome a
@@ -214,9 +214,6 @@ export function SubagentLiveCards({
     <>
       {shown.map((a) => {
         const isOpen = expandedId === agentCardId(a.id);
-        // A card the scan no longer lists as live is here only because the
-        // reader pinned it — so it, unlike a live one, is dismissible.
-        const pinned = !isLiveMember(a);
         const model = a.model ? formatModel(a.model) : "";
         const spend = a.totalCostUsd ?? 0;
         const head = (
@@ -273,30 +270,33 @@ export function SubagentLiveCards({
                 {spend > 0 && <span>${spend.toFixed(2)}</span>}
               </div>
             </button>
-            {(isOpen || pinned) && (
-              <div className={styles.agent_card_tools}>
-                {isOpen && (
-                  <button
-                    type="button"
-                    className={styles.agent_card_tool}
-                    onClick={() => onGoto(a)}
-                    title={t("detail.agent_card_goto", "在会话页打开")}
-                    aria-label={t("detail.agent_card_goto", "在会话页打开")}
-                  >
-                    <ExternalLink size={12} strokeWidth={1.8} aria-hidden="true" />
-                  </button>
-                )}
+            {/* Every card carries the ✕, live or pinned: dismissing one is
+                "not in my way right now", and the Library facet lists the
+                agent either way, so there is nothing to lose by pressing it.
+                It used to appear only on a pinned card, which made the rail's
+                three card kinds disagree about what ✕ meant. */}
+            <div className={styles.agent_card_tools}>
+              {isOpen && (
                 <button
                   type="button"
                   className={styles.agent_card_tool}
-                  onClick={() => onClose(a)}
-                  title={t("common.close", "关闭")}
-                  aria-label={t("common.close", "关闭")}
+                  onClick={() => onGoto(a)}
+                  title={t("detail.agent_card_goto", "在会话页打开")}
+                  aria-label={t("detail.agent_card_goto", "在会话页打开")}
                 >
-                  ✕
+                  <ExternalLink size={12} strokeWidth={1.8} aria-hidden="true" />
                 </button>
-              </div>
-            )}
+              )}
+              <button
+                type="button"
+                className={styles.agent_card_tool}
+                onClick={() => onClose(a)}
+                title={t("detail.rail_dismiss_card", "从边栏移出（可在「本会话资料」里找回）")}
+                aria-label={t("common.close", "关闭")}
+              >
+                ✕
+              </button>
+            </div>
           </>
         );
         if (!isOpen) {

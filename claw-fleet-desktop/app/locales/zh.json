@@ -1794,6 +1794,7 @@
     "tab_tasks": "任务",
     "tab_bgtasks": "后台任务",
     "tab_library": "本会话资料",
+    "rail_dismiss_card": "从边栏移出（可在「本会话资料」里找回）",
     "library_empty": "这个会话还没有打开过文档，也没有追问记录。边栏里出现过的东西都会留在这里。",
     "library_explains": "追问",
     "library_docs": "打开过的文档",

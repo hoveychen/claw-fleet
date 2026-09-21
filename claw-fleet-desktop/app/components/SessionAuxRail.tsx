@@ -6,7 +6,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { revealSlugInWikiPage } from "../hooks/useWikiDocs";
 import { useUIStore } from "../store";
-import { agentCardId, auxDocMeta, explainCardId, type AuxDoc, type AuxDocKind } from "../detailAux";
+import {
+  agentCardId,
+  auxDocMeta,
+  explainCardId,
+  orderRailItems,
+  type AuxDoc,
+  type AuxDocKind,
+} from "../detailAux";
 import type { ExplainRecord } from "../explainApi";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { SessionInfo } from "../types";
@@ -156,6 +163,7 @@ export function SessionAuxRail({
     null,
   );
   const expandedDoc = docs.find((d) => d.id === expandedId) ?? null;
+  const stack = orderRailItems(docs, explains, expandedId);
 
   if (!open) return null;
   const empty = agents.length === 0 && docs.length === 0 && explains.length === 0;
@@ -288,24 +296,28 @@ export function SessionAuxRail({
         onGripDown={onGripDown}
         renderPane={(a) => <SessionAuxAgent agent={a} paths={paths} />}
       />
-      {/* The reader's own questions sit between what is running and what was
-          opened: newest first, so the one just asked lands where the eye is. */}
-      {[...explains].reverse().map((r) => (
-        <SessionAuxExplain
-          key={r.id}
-          rec={r}
-          isOpen={explainCardId(r.id) === expandedId}
-          onToggle={() => onToggleExplain(r.id)}
-          onClose={() => onCloseExplain(r.id)}
-          onLocate={() => onLocateExplain(r)}
-          onFollowUp={(q) => onFollowUpExplain(r, q)}
-          onGripDown={onGripDown}
-          onHideRail={onHideRail}
-        />
-      ))}
-      {/* Newest first: the file the agent just named is the one you are most
-          likely to be reaching for, and it lands nearest the live agents. */}
-      {[...docs].reverse().map((d) => {
+      {/* Questions and docs in one recency-ordered stack below the live
+          agents, newest first — "the last few things I did here" is one
+          question, so it gets one answer rather than two lanes with two caps.
+          Anything past the cap is in the Library facet, not lost. */}
+      {stack.map((entry) => {
+        if (entry.type === "explain") {
+          const r = entry.item;
+          return (
+            <SessionAuxExplain
+              key={r.id}
+              rec={r}
+              isOpen={explainCardId(r.id) === expandedId}
+              onToggle={() => onToggleExplain(r.id)}
+              onClose={() => onCloseExplain(r.id)}
+              onLocate={() => onLocateExplain(r)}
+              onFollowUp={(q) => onFollowUpExplain(r, q)}
+              onGripDown={onGripDown}
+              onHideRail={onHideRail}
+            />
+          );
+        }
+        const d = entry.item;
         const Icon = DOC_ICON[d.kind];
         const isOpen = d.id === expandedId;
         const meta = auxDocMeta(d.kind, d.ref);
@@ -340,7 +352,7 @@ export function SessionAuxRail({
                 type="button"
                 className={styles.doc_card_close}
                 onClick={() => onCloseDoc(d.id)}
-                title={t("common.close", "关闭")}
+                title={t("detail.rail_dismiss_card", "从边栏移出（可在「本会话资料」里找回）")}
                 aria-label={t("common.close", "关闭")}
               >
                 ✕
