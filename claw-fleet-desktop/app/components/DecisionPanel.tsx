@@ -11,6 +11,8 @@ import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
+import { ExplainMarksProvider } from "../markdown/explainMarks";
+import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
 import { framePreviewSrcDoc } from "../decisionFrame";
 import { oneLineSnippet, shouldAutoExpand, useLastUserInput } from "../hooks/useLastUserInput";
 import type {
@@ -621,6 +623,9 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
+  // The agent's `[?text]` marks in the question ask the card's session; the
+  // answer lands under the question (see DecisionExplainMarks).
+  const explainMarks = useDecisionExplainMarks(decision.request.sessionId);
   const {
     submitElicitation,
     declineElicitation,
@@ -791,8 +796,11 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
+          <ExplainMarksProvider value={explainMarks.marks}>
+            <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
+          </ExplainMarksProvider>
         </div>
+        <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
       </div>
       </div>
 
@@ -1472,6 +1480,9 @@ export function FleetAskCard({
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
+  // The agent's `[?text]` marks in the question ask the card's session; the
+  // answer lands under the question (see DecisionExplainMarks).
+  const explainMarks = useDecisionExplainMarks(decision.request.sessionId);
   // The preview iframe is cross-origin, so the theme has to travel into it as a
   // value rather than through CSS custom properties.
   const theme = useDocumentTheme();
@@ -1670,8 +1681,11 @@ export function FleetAskCard({
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
+          <ExplainMarksProvider value={explainMarks.marks}>
+            <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
+          </ExplainMarksProvider>
         </div>
+        <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
 
         {q.images && q.images.length > 0 ? (
           // Image-bearing card: load the served index.html (agent html or auto

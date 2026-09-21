@@ -1,0 +1,85 @@
+/* Answers to a card's `[?text]` marks, under the question (DecisionExplainMarks.tsx). */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+
+.card {
+  border-left: 2px solid var(--color-accent-soft);
+  background: var(--color-bg-sunken);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 6px 8px 7px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quote {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.spin {
+  animation: decision_explain_spin 0.9s linear infinite;
+}
+@keyframes decision_explain_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.close {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 3px;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+.close:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+.answer {
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.waiting,
+.error {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-dim);
+}
+.error {
+  color: var(--color-error);
+}

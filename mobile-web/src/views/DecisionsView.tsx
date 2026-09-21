@@ -16,6 +16,8 @@ import { VoiceTextarea } from "./VoiceTextarea";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
+import { ExplainMarksProvider } from "../markdown/explainMarks";
+import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
 import { fetchDecisionAsset } from "../decisionAsset";
 import { splitContextFiles } from "../userAttachments";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
@@ -1068,6 +1070,9 @@ function QuestionsCard({
   session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
 }) {
+  // The agent's `[?text]` marks in the question ask the card's session; the
+  // answer lands under the question (see DecisionExplainMarks).
+  const explainMarks = useDecisionExplainMarks(client, session);
   // question text → selected option labels
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -1276,14 +1281,17 @@ function QuestionsCard({
         <div key={qi} className={styles.question}>
           {q.header && <div className={styles.questionHeader}>{q.header}</div>}
           <div className={styles.markdown}>
-            <ReactMarkdown
-              remarkPlugins={mdRemarkPlugins}
-            rehypePlugins={mdRehypePlugins}
-              components={mdComponents}
-            >
-              {stripTtsDivider(q.question)}
-            </ReactMarkdown>
+            <ExplainMarksProvider value={explainMarks.marks}>
+              <ReactMarkdown
+                remarkPlugins={mdRemarkPlugins}
+                rehypePlugins={mdRehypePlugins}
+                components={mdComponents}
+              >
+                {stripTtsDivider(q.question)}
+              </ReactMarkdown>
+            </ExplainMarksProvider>
           </div>
+          <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
           {isFleetAsk && (q as FleetAskQuestion).html && (
             <HtmlPreview
               html={(q as FleetAskQuestion).html!}
