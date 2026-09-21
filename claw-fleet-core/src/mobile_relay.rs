@@ -834,7 +834,24 @@ fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
 /// (the caller just reset [`SESSIONS_LAST_HASH`], so a phone that connected
 /// mid-idle still gets state even though nothing changed for existing clients).
 /// No-op when no provider is registered — see [`SESSIONS_PROVIDER`].
+///
+/// Handed to a blocking worker, never run on the ws runtime. The desktop's
+/// provider takes the `sessions` mutex that a rescan holds, and the body then
+/// clones the whole roster, serialises it and gzips it. Inline inside the
+/// `select!` arm that calls this, all of that froze the read loop, the ping and
+/// every outbound frame for as long as the rescan ran — and 90s of that is a
+/// heartbeat timeout, which reconnects, which lands right back here.
 fn push_snapshot_on_connect() {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn_blocking(push_snapshot_now);
+        }
+        // No runtime to hand it to (unit tests drive this directly).
+        Err(_) => push_snapshot_now(),
+    }
+}
+
+fn push_snapshot_now() {
     let Some(sessions) = provided_sessions() else {
         return;
     };
@@ -2328,15 +2345,51 @@ fn handle_request(payload: &Value) -> Value {
     }
 }
 
+/// How long the workspace access envelope is reused. It is a boundary list, not
+/// something the user reads, and it only ever widens when a new session starts,
+/// so a few seconds of staleness is invisible — while collapsing the six gated
+/// methods' repeated builds is not.
+const KNOWN_WORKSPACES_CACHE_TTL: Duration = Duration::from_secs(10);
+
 /// Workspace paths of every session the backend knows about — the access
 /// envelope the git/repo entry points validate against (same list the
 /// `/git_status` HTTP endpoint builds).
+///
+/// A projection of the session list, so it reads the host's warm copy like
+/// every other projection does ([`current_sessions`]). It used to call
+/// `build_sources().scan_sessions()` unconditionally, and six phone methods
+/// (`browse_dir`, `create_dir`, `repo_list`, `repo_detail`, `repo_push`,
+/// `repo_pull`) each paid a full walk of every transcript on disk — tens of
+/// seconds on a host with a few thousand of them, well past the phone's 15s
+/// request timeout, so the repository page simply spun until it gave up. The
+/// memo on top bounds the remaining cost for a headless host that has no
+/// provider registered and still falls back to a scan: one walk per window
+/// shared by all six, not one per call.
 fn known_workspaces() -> Vec<String> {
-    crate::agent_source::build_sources()
-        .iter()
-        .flat_map(|s| s.scan_sessions())
+    cached_by_key("known_workspaces", KNOWN_WORKSPACES_CACHE_TTL, || {
+        Ok(json!(build_known_workspaces()))
+    })
+    .ok()
+    .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+    .unwrap_or_default()
+}
+
+/// The envelope itself, ahead of [`known_workspaces`]'s memo.
+///
+/// Sessions are only half the set. A repo cloned from the repository page, or a
+/// directory the user added by hand, has no sessions by construction — so
+/// without [`crate::file_explorer::browsable_workspaces`] unioning in the
+/// server-side record of those, the phone answered "workspace is not a known
+/// session workspace" for a directory the desktop browses fine. The desktop's
+/// own `LocalBackend::known_workspaces` has always gone through it; this side
+/// was the odd one out.
+fn build_known_workspaces() -> Vec<String> {
+    let paths: Vec<String> = current_sessions()
+        .into_iter()
         .map(|s| s.workspace_path)
-        .collect()
+        .collect();
+    // Sorts and dedups for us.
+    crate::file_explorer::browsable_workspaces(&paths)
 }
 
 /// The phone's whole data surface, as one method-name → handler table.
@@ -4287,6 +4340,10 @@ where
         .or_else(|| payload.get("event").and_then(Value::as_str))
         .unwrap_or("?")
         .to_string();
+    // Kept out of the closure so a panicking handler can still be answered —
+    // the payload itself is moved into the blocking task. Absent on the
+    // unsolicited events the phone sends without expecting a reply.
+    let req_id = payload.get("req_id").cloned().filter(|v| !v.is_null());
     // Detached: the loop returns to `select!` immediately, so a slow handler can
     // no longer starve the ping or the frame reads. Replies go out through the
     // `OUT_TX` channel, which is already order-independent (every reply carries
@@ -4320,7 +4377,26 @@ where
             inflight_exit(inflight);
             (reply, queue_ms, t.elapsed().as_millis())
         });
-        let (reply, queue_ms, exec_ms) = blocking.await.unwrap_or((None, 0, 0));
+        let (reply, queue_ms, exec_ms) = match blocking.await {
+            Ok(measured) => measured,
+            // A panicking handler used to answer with nothing at all: the join
+            // error collapsed to `None`, no frame went out, and the phone had no
+            // way to tell that apart from a dead link — it just sat on the
+            // request until its own 15s timeout fired. Answer with an error
+            // frame instead, so the failure surfaces where it happened.
+            Err(e) => {
+                crate::log_debug(&format!("[relay] method={method} handler failed to join: {e}"));
+                let reply = req_id.map(|req_id| {
+                    json!({
+                        "event": "reply",
+                        "req_id": req_id,
+                        "ok": false,
+                        "error": format!("desktop handler for `{method}` panicked"),
+                    })
+                });
+                (reply, 0, 0)
+            }
+        };
         let handle_ms = started.elapsed().as_millis();
         // Whatever the two measured phases don't account for is time the finished
         // task spent waiting to be polled again.
@@ -7470,6 +7546,40 @@ mod tests {
         );
     }
 
+    /// A handler that panics must still produce a frame. Before this, the join
+    /// error collapsed to "no reply" and the phone could not tell a crashed
+    /// handler from a dead link — it sat on the request for its whole timeout.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_panicking_handler_answers_with_an_error_frame() {
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+
+        dispatch_inbound(
+            json!({ "event": "req", "method": "tail", "req_id": "r-panic" }),
+            |_| panic!("handler exploded"),
+        )
+        .await;
+
+        let out = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a panicking handler must answer, not go silent")
+            .expect("outbound channel stays open");
+        let Outbound::Text(text) = out;
+        let reply = decode_out(&text);
+        assert_eq!(reply["req_id"], "r-panic");
+        assert_eq!(reply["ok"], false);
+        assert!(
+            reply["error"].as_str().unwrap_or_default().contains("tail"),
+            "the error must name the method that panicked, got {:?}",
+            reply["error"]
+        );
+
+        *OUT_TX.lock().unwrap() = None;
+        *ENC_KEY.lock().unwrap() = None;
+    }
+
     /// The pure gzip-gate decision — no global state, safe to run alone.
     #[test]
     fn should_gzip_matrix() {
@@ -7620,6 +7730,69 @@ mod tests {
 
         *SESSIONS_PROVIDER.lock().unwrap() = None;
         *RESULT_CACHE.lock().unwrap() = None;
+    }
+
+    /// The on-connect push ran inline in the ws `select!` arm, so a slow
+    /// provider — the desktop's waits on the `sessions` mutex a rescan holds —
+    /// froze the read loop, the ping and every outbound frame along with it.
+    /// Long enough and the connection times its own heartbeat out, reconnects,
+    /// and lands right back here. It must hand the work off and return at once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_connect_push_does_not_block_the_ws_runtime() {
+        let _guard = fleet_home_lock();
+        set_sessions_provider(|| {
+            std::thread::sleep(Duration::from_millis(150));
+            Some(vec![crate::session::SessionInfo {
+                id: "slow-provider".to_string(),
+                ..Default::default()
+            }])
+        });
+
+        let started = std::time::Instant::now();
+        push_snapshot_on_connect();
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "the caller must not wait on the provider; it took {elapsed:?}"
+        );
+
+        // Takes the provider lock, so this also waits out the in-flight push
+        // rather than leaving it running into a sibling test.
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
+    }
+
+    /// The access envelope six phone methods gate on is a projection of the
+    /// session list too. Re-walking every transcript per call is what made the
+    /// repository page outlast the phone's 15s request timeout on a real host.
+    #[test]
+    fn known_workspaces_projects_the_provided_session_list_without_scanning() {
+        let _guard = fleet_home_lock();
+        let sentinel = crate::session::SessionInfo {
+            id: "warm-workspace-sentinel".to_string(),
+            workspace_path: "/tmp/fleet-known-workspaces-sentinel".to_string(),
+            ..Default::default()
+        };
+        set_sessions_provider(move || Some(vec![sentinel.clone()]));
+
+        // The pre-memo build, so this asserts the projection rather than
+        // racing whatever a sibling test left in the shared result cache.
+        // `known_workspaces` puts the same value behind `cached_by_key`, whose
+        // collapse is covered by `cached_by_key_collapses_callers_and_expires`.
+        let paths = build_known_workspaces();
+
+        // The provided list is the only session-derived input; the rest of the
+        // envelope is this host's hand-added browse paths, same as the desktop.
+        let expected = crate::file_explorer::browsable_workspaces(&[
+            "/tmp/fleet-known-workspaces-sentinel".to_string()
+        ]);
+        assert_eq!(
+            paths, expected,
+            "a rescan would report this host's real session workspaces, not the sentinel"
+        );
+        assert!(paths.contains(&"/tmp/fleet-known-workspaces-sentinel".to_string()));
+
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
     }
 
     /// Every host registers its provider before its first scan has filled the
