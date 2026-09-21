@@ -12,10 +12,13 @@ export {
   MIN_QUOTE_CHARS,
   cacheHitRatio,
   costLabel,
+  groupExplainThreads,
   locateExplainRow,
   quoteSnippet,
   readAssistantSelection,
   selectExplainMark,
   selectQuoteIn,
+  threadRootId,
   type AssistantSelection,
+  type ExplainThreadOf,
 } from "../../shared-ts/sessionExplain";

@@ -1760,6 +1760,7 @@
     "explain_cache_hit_short": "cache",
     "explain_follow_up_placeholder": "Ask a follow-up about this passage…",
     "explain_follow_up": "Follow up",
+    "explain_turns": "{{count}} turns",
     "rail_empty": "No running agents or opened docs yet",
     "agent_pane_empty": "This agent hasn't written any messages yet",
     "agent_card_goto": "Open in the sessions page",

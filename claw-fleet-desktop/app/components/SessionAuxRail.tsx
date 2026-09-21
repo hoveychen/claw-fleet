@@ -1,5 +1,5 @@
 import { ChevronsDownUp, FileText, Globe, NotebookText, Package, PanelRightClose, XCircle } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -15,6 +15,7 @@ import {
   type AuxDocKind,
 } from "../detailAux";
 import type { ExplainRecord } from "../explainApi";
+import { groupExplainThreads } from "../selectionExplain";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { SessionInfo } from "../types";
 import { buildChipMenu, type AuxCardTail } from "./auxDocMenu";
@@ -140,10 +141,12 @@ export function SessionAuxRail({
   onHideRail: () => void;
   /** A `[[slug]]` followed from inside a wiki doc opens the next one. */
   onOpenWiki: (slug: string) => void;
-  /** Expand a side-question card into the full exchange, or collapse it. */
+  /** Expand a side-question chain into the full exchange, or collapse it.
+   *  The id is the chain's root record — one card, one id. */
   onToggleExplain: (id: string) => void;
-  /** Hide a side-question card for this view; the record stays on disk. */
-  onCloseExplain: (id: string) => void;
+  /** Hide a side-question card for this view; the records stay on disk. Takes
+   *  every record in the chain, since the card is the whole chain. */
+  onCloseExplain: (ids: string[]) => void;
   /** Scroll back to and re-select the passage a side question quoted. */
   onLocateExplain: (rec: ExplainRecord) => void;
   /** Ask a follow-up on a settled side question. */
@@ -163,7 +166,20 @@ export function SessionAuxRail({
     null,
   );
   const expandedDoc = docs.find((d) => d.id === expandedId) ?? null;
-  const stack = orderRailItems(docs, explains, expandedId);
+  // One card per *chain*, not per record: a follow-up is its own record, so
+  // otherwise a three-turn conversation spent three of the rail's ten slots
+  // and read bottom-up. A chain's place in the stack is its newest turn, so
+  // following one up brings it back to the top.
+  const explainThreads = useMemo(
+    () =>
+      groupExplainThreads(explains).map((th) => ({
+        id: th.id,
+        createdMs: th.records.reduce((max, r) => Math.max(max, r.createdMs), 0),
+        records: th.records,
+      })),
+    [explains],
+  );
+  const stack = orderRailItems(docs, explainThreads, expandedId);
 
   if (!open) return null;
   const empty = agents.length === 0 && docs.length === 0 && explains.length === 0;
@@ -171,7 +187,7 @@ export function SessionAuxRail({
   // width a file does. Checked against the cards actually in hand, so a stale
   // id (its agent retired and unpinned) cannot widen the rail around nothing.
   const expandedAgent = agents.some((a) => agentCardId(a.id) === expandedId);
-  const expandedExplain = explains.some((r) => explainCardId(r.id) === expandedId);
+  const expandedExplain = explainThreads.some((th) => explainCardId(th.id) === expandedId);
   const wide = cardWidth > 0 && (expandedDoc != null || expandedAgent || expandedExplain);
 
   const tailFor = (d: AuxDoc): AuxCardTail => ({
@@ -302,16 +318,17 @@ export function SessionAuxRail({
           Anything past the cap is in the Library facet, not lost. */}
       {stack.map((entry) => {
         if (entry.type === "explain") {
-          const r = entry.item;
+          const th = entry.item;
+          const last = th.records[th.records.length - 1];
           return (
             <SessionAuxExplain
-              key={r.id}
-              rec={r}
-              isOpen={explainCardId(r.id) === expandedId}
-              onToggle={() => onToggleExplain(r.id)}
-              onClose={() => onCloseExplain(r.id)}
-              onLocate={() => onLocateExplain(r)}
-              onFollowUp={(q) => onFollowUpExplain(r, q)}
+              key={th.id}
+              records={th.records}
+              isOpen={explainCardId(th.id) === expandedId}
+              onToggle={() => onToggleExplain(th.id)}
+              onClose={() => onCloseExplain(th.records.map((r) => r.id))}
+              onLocate={() => onLocateExplain(th.records[0])}
+              onFollowUp={(q) => onFollowUpExplain(last, q)}
               onGripDown={onGripDown}
               onHideRail={onHideRail}
             />

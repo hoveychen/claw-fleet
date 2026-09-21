@@ -1757,6 +1757,7 @@
     "explain_cache_hit_short": "缓存",
     "explain_follow_up_placeholder": "继续追问这段话…",
     "explain_follow_up": "继续追问",
+    "explain_turns": "{{count}} 轮",
     "rail_empty": "暂无运行中的 Agent 或已打开的文档",
     "agent_pane_empty": "该 Agent 还没有写入任何消息",
     "agent_card_goto": "在会话页打开",
