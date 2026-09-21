@@ -23,8 +23,9 @@
 //! - **Nothing caps the turn at one step.** The prompt forbids tools; if the
 //!   model calls one anyway the first `tool/call` on the follow stream triggers
 //!   `session/cancel`, and the turn is reported as an error rather than an
-//!   answer. The plugin-side hard stop (`agent/pre-step` rejecting step ≥ 2)
-//!   is a separate task.
+//!   answer. Behind that sits the hard stop: `fleet dsh-context` answers
+//!   `oneShot: true` for a marked fork id, and the plugin's `agent/pre-step`
+//!   rejects every step after the first, so the tool never runs either way.
 //!
 //! The child's `session/follow` items are tapped raw off the shared mux socket
 //! ([`crate::dsh_events::LiveView::tap`]) and folded by [`DshFollowFold`] —

@@ -167,5 +167,20 @@ pub(crate) fn cmd_dsh_context(
         payload["sandboxMode"] = serde_json::Value::String(mode.to_string());
     }
 
+    // A side-question fork (`session_explain`) is a one-step turn by contract:
+    // the prompt forbids tools, and this flag is the hard stop behind it — the
+    // plugin rejects any step after the first, so a model that reaches for a
+    // tool anyway cannot run it. Sent as a sibling of `sandboxMode` rather than
+    // as a new required flag on purpose: an older `fleet` build never rejects
+    // the invocation, it just omits the field, and the plugin treats absence
+    // as "not a one-shot session". The marker is written by `dsh_fork_ask`
+    // before the child's prompt goes in, so the first step already sees it.
+    if session
+        .as_deref()
+        .is_some_and(claw_fleet_core::session_explain::is_fork_session)
+    {
+        payload["oneShot"] = serde_json::Value::Bool(true);
+    }
+
     println!("{payload}");
 }
