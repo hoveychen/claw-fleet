@@ -23,6 +23,14 @@
 //!   English-only, so they take the `en` variant. dsh chat sessions read the
 //!   chat brief instead (their preset drops the global AGENTS.md).
 //!
+//! The imperative heading ("you MUST do this in every prose reply") is
+//! load-bearing for codex: with the neutral heading, two real `AGENTS.md`
+//! spawns (gpt-5.6-luna low, gpt-5.6-sol medium) produced zero marks while
+//! obeying every other rule in the same file; strengthening only the heading,
+//! at the same position, produced 2–3 compliant marks. Claude and dsh followed
+//! the neutral wording when it sat in the prompt, so the stronger heading is
+//! applied uniformly rather than special-cased.
+//!
 //! Probe data behind the rules (2026-09-21, `design/explain-annotations.md`):
 //! a `[?…]` not followed by an ASCII `(` is plain text to remark-gfm; a mark
 //! containing inline code or emphasis is split into several mdast nodes, which
@@ -46,7 +54,7 @@ pub const END_MARKER: &str = "<!-- fleet:explain-marks:end -->";
 pub fn render_explain_marks_section(user_title: &str, locale: &str) -> String {
     let body = if locale == "zh" {
         format!(
-            "## 正文标注 `[?…]`\n\
+            "## 正文标注 `[?…]` —— 每条正文回复都必须做\n\
 \n\
 写给{title}看的正文里（决策卡的 question、对话回复），凡是**你做了取舍却没展开、\
 用了{title}未必熟的术语、给了结论没给推导**的地方，用 `[?` 和 `]` 把那个短语或那句话\
@@ -61,7 +69,7 @@ pub fn render_explain_marks_section(user_title: &str, locale: &str) -> String {
         )
     } else {
         format!(
-            "## Inline marks `[?…]`\n\
+            "## Inline marks `[?…]` — you MUST do this in every prose reply\n\
 \n\
 In prose written for {title} (a decision card's question, a conversational \
 reply), wrap the phrase or sentence where **you made a trade-off without \
@@ -91,7 +99,7 @@ what matters most.",
 /// the codex block takes this ~half-size rendering instead.
 pub fn render_explain_marks_section_compact(user_title: &str) -> String {
     let body = format!(
-        "## Inline marks `[?…]`\n\
+        "## Inline marks `[?…]` — you MUST do this in every prose reply\n\
 \n\
 In prose for {title}, wrap a phrase where you made a trade-off without unpacking \
 it, used a term {title} may not know, or gave a conclusion without its derivation \
