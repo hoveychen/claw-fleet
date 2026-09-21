@@ -7,11 +7,15 @@ import {
   closeDoc,
   collapseDoc,
   docId,
+  escapeTarget,
   initialAux,
   makeAuxDoc,
   MAX_AUX_DOCS,
   openDoc,
+  orderRailItems,
   pruneTab,
+  RAIL_ITEM_CAP,
+  restoreAgent,
   showFacet,
   toggleAgent,
   toggleDoc,
@@ -217,13 +221,87 @@ describe("subagent cards", () => {
     expect(st.expanded).toBeNull();
   });
 
-  it("dismissing an agent that is neither pinned nor expanded is a no-op", () => {
-    const st = toggleAgent(initialAux, "sub-1");
+  it("dismisses a live agent that was never pinned, and keeps it out", () => {
+    const st = closeAgent(initialAux, "sub-9");
+    expect(st.dismissedAgents).toEqual(["sub-9"]);
+    // Idempotent: a second ✕ on the same card changes nothing.
     expect(closeAgent(st, "sub-9")).toBe(st);
+  });
+
+  it("expanding a dismissed agent brings it back", () => {
+    const st = toggleAgent(closeAgent(initialAux, "sub-9"), "sub-9");
+    expect(st.dismissedAgents).toEqual([]);
+    expect(st.expanded).toBe(agentCardId("sub-9"));
+  });
+
+  it("restoreAgent undoes a dismissal and leaves an unknown id alone", () => {
+    const st = closeAgent(initialAux, "sub-9");
+    expect(restoreAgent(st, "sub-9").dismissedAgents).toEqual([]);
+    expect(restoreAgent(st, "other")).toBe(st);
   });
 
   it("gives an agent an id no doc can collide with", () => {
     expect(agentCardId("sub-1")).toBe("agent:sub-1");
     expect(docId("file", "sub-1")).not.toBe(agentCardId("sub-1"));
+  });
+});
+
+describe("orderRailItems", () => {
+  const d = (id: string, openedMs: number) => ({ id, openedMs });
+  const e = (id: string, createdMs: number) => ({ id, createdMs });
+
+  it("interleaves docs and questions by recency, newest first", () => {
+    const out = orderRailItems([d("doc-a", 10), d("doc-b", 30)], [e("q1", 20)], null);
+    expect(out.map((x) => x.item.id)).toEqual(["doc-b", "q1", "doc-a"]);
+  });
+
+  it("caps the stack across both kinds rather than per kind", () => {
+    const docs = Array.from({ length: RAIL_ITEM_CAP }, (_, i) => d(`doc-${i}`, i));
+    const explains = Array.from({ length: RAIL_ITEM_CAP }, (_, i) => e(`q-${i}`, i + 100));
+    const out = orderRailItems(docs, explains, null);
+    expect(out).toHaveLength(RAIL_ITEM_CAP);
+    // The questions are all newer, so they win the whole budget.
+    expect(out.every((x) => x.type === "explain")).toBe(true);
+  });
+
+  it("never caps out the card being read", () => {
+    const docs = [d("old-doc", 0)];
+    const explains = Array.from({ length: RAIL_ITEM_CAP + 3 }, (_, i) => e(`q-${i}`, i + 100));
+    const out = orderRailItems(docs, explains, "old-doc");
+    expect(out).toHaveLength(RAIL_ITEM_CAP);
+    expect(out.map((x) => x.item.id)).toContain("old-doc");
+  });
+
+  it("keeps an expanded question that fell past the cap", () => {
+    const explains = Array.from({ length: RAIL_ITEM_CAP + 2 }, (_, i) => e(`q-${i}`, i));
+    const out = orderRailItems([], explains, "explain:q-0");
+    expect(out).toHaveLength(RAIL_ITEM_CAP);
+    expect(out.map((x) => x.item.id)).toContain("q-0");
+  });
+
+  it("returns everything untouched when under the cap", () => {
+    expect(orderRailItems([d("a", 1)], [], null)).toHaveLength(1);
+    expect(orderRailItems([], [], null)).toEqual([]);
+  });
+});
+
+describe("escapeTarget", () => {
+  it("closes the drawer first — it is the more modal of the two", () => {
+    const st = showFacet(openDoc(initialAux, "file", "/a.rs"), "tokens");
+    expect(escapeTarget(st, false)).toBe("drawer");
+  });
+
+  it("collapses the expanded card when no drawer is open", () => {
+    expect(escapeTarget(openDoc(initialAux, "file", "/a.rs"), false)).toBe("card");
+  });
+
+  it("does nothing with neither open", () => {
+    expect(escapeTarget(initialAux, false)).toBeNull();
+  });
+
+  it("yields to a live selection — that Escape belongs to the ask bar", () => {
+    const st = showFacet(openDoc(initialAux, "file", "/a.rs"), "tokens");
+    expect(escapeTarget(st, true)).toBeNull();
+    expect(escapeTarget(openDoc(initialAux, "file", "/a.rs"), true)).toBeNull();
   });
 });

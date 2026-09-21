@@ -240,8 +240,13 @@ describe("SessionAuxRail", () => {
   // A live agent's chip is derived from the scan, so dismissing it would last
   // until the next tick. Only the expanded card (and a pinned leftover) offers
   // the ✕.
-  it("offers no ✕ on a live agent's collapsed chip", () => {
-    const el = render({ agents: [agent("sub-1", "Trace the watcher")] });
-    expect(el.textContent).not.toContain("✕");
+  it("offers the ✕ on a live agent's chip too — every card dismisses the same way", () => {
+    const onCloseAgent = vi.fn();
+    const live = agent("sub-1", "Trace the watcher");
+    const el = render({ agents: [live], onCloseAgent });
+    const close = [...el.querySelectorAll("button")].find((b) => b.textContent === "✕");
+    expect(close).toBeTruthy();
+    act(() => close!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onCloseAgent).toHaveBeenCalledWith(live);
   });
 });

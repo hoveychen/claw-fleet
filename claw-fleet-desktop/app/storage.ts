@@ -77,6 +77,11 @@ const ALL_KEYS = [
   // as a *fraction* of the pane rather than a pixel count: the same setting has
   // to mean the same thing on a 13" laptop and on a 3440px ultrawide.
   "detail-doc-card-ratio",
+  // Docs opened per session, as a JSON blob keyed by session id (see
+  // docHistory.ts). The rail itself holds 8 cards and clears on a session
+  // switch; this is what survives both so the session facet panel can offer
+  // them back. Refs only — never document content.
+  "session-doc-history",
   // File-tree columns inside a detail pane (SkillsView / FilesView / ScratchpadView).
   "skills-tree-width",
   "files-tree-width",

@@ -58,6 +58,8 @@ import {
   closeDoc,
   closeOtherDocs,
   collapseDoc,
+  auxDocLabel,
+  escapeTarget,
   isAuxFacet,
   openDoc,
   pruneTab,
@@ -71,6 +73,7 @@ import {
   type AuxFacetItem,
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
+import { rememberDoc, useDocHistory } from "../hooks/useDocHistory";
 import { useSessionExplains } from "../hooks/useSessionExplains";
 import { locateExplainRow, selectQuoteIn, type AssistantSelection } from "../selectionExplain";
 import type { ExplainPreset, ExplainRecord } from "../explainApi";
@@ -544,7 +547,15 @@ export function SessionDetail({
   const [railOverride, setRailOverride] = useState<boolean | null>(null);
   /* Side questions about this session's prose (选区追问), read from disk and
      polled while a fork is answering. Scoped to the session like `aux`. */
-  const { explains, ask: askExplainRecord, dismiss: dismissExplain } = useSessionExplains(
+  const {
+    explains,
+    all: allExplains,
+    hidden: hiddenExplains,
+    ask: askExplainRecord,
+    dismiss: dismissExplain,
+    restore: restoreExplain,
+  } = useSessionExplains(liveSession?.id);
+  const { docs: docHistory, forget: forgetDoc, forgetAll: forgetAllDocs } = useDocHistory(
     liveSession?.id,
   );
   const [explainBusy, setExplainBusy] = useState(false);
@@ -814,9 +825,15 @@ export function SessionDetail({
    *  the thing the transcript named opens beside the sentence that named it,
    *  instead of taking over the window (the Repo / Wiki pages) or landing in
    *  the window's tab strip, where reading it costs sight of the conversation. */
-  const openAuxDoc = useCallback((kind: AuxDocKind, ref: string, label?: string) => {
-    setAux((st) => openDoc(st, kind, ref, label));
-  }, []);
+  const openAuxDoc = useCallback(
+    (kind: AuxDocKind, ref: string, label?: string) => {
+      setAux((st) => openDoc(st, kind, ref, label));
+      // The rail keeps 8 and clears on a session switch; the reading list
+      // keeps every ref so the facet panel can offer this one back later.
+      if (sessionId) rememberDoc(sessionId, kind, ref, label || auxDocLabel(kind, ref));
+    },
+    [sessionId],
+  );
 
   /** What a transcript's ingest card (Artifacts / Wiki) does when clicked: open
    *  the thing in the rail, or—when it is already open there—hand it to its
@@ -1012,6 +1029,32 @@ export function SessionDetail({
     },
     [dismissExplain],
   );
+  /** A library row for a side question: un-hide it if the rail had dropped it,
+   *  then expand it there. Same destination either way — the panel's job is to
+   *  hand things back to the rail, not to become a second reader. */
+  const reopenExplain = useCallback(
+    (id: string) => {
+      restoreExplain(id);
+      setAux((st) => ({ ...st, expanded: explainCardId(id) }));
+      setRailOverride((v) => (v === false ? null : v));
+    },
+    [restoreExplain],
+  );
+  /** A library row for a doc: the same call the transcript link makes, so a
+   *  doc recovered from the list is indistinguishable from one just opened. */
+  const reopenDoc = useCallback(
+    (kind: AuxDocKind, ref: string, label: string) => {
+      openAuxDoc(kind, ref, label);
+      setRailOverride((v) => (v === false ? null : v));
+    },
+    [openAuxDoc],
+  );
+  /** A library row for a subagent, live or long finished. Expanding pins it,
+   *  which is what puts a retired agent back on the rail (see `railAgents`). */
+  const reopenAgent = useCallback((s: SessionInfo) => {
+    setAux((st) => toggleAgent(st, s.id));
+    setRailOverride((v) => (v === false ? null : v));
+  }, []);
   /** Scroll the transcript back to the passage a side question quoted, flash
    *  its row, and re-select the passage itself. The uuid is the durable key;
    *  the index is the fallback for a record (or a row) without one. */
@@ -1282,6 +1325,19 @@ export function SessionDetail({
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   }, [liveSession, sessions]);
 
+  /** The same family, finished ones included — what the library facet lists.
+   *  The rail only ever shows the live ones (and one pinned leftover), so this
+   *  is the only place a subagent that ended an hour ago can be found again
+   *  without leaving the conversation. */
+  const allSubagents = useMemo((): SessionInfo[] => {
+    if (!liveSession) return [];
+    const parentId = liveSession.isSubagent ? liveSession.parentSessionId : liveSession.id;
+    if (!parentId) return [];
+    return sessions
+      .filter((s) => s.isSubagent && s.parentSessionId === parentId && s.id !== liveSession.id)
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  }, [liveSession, sessions]);
+
   const tabs = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
 
@@ -1335,6 +1391,8 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
+  const libraryCount = allExplains.length + docHistory.length + allSubagents.length;
+
   /* The session's facets—Skills, Decision, Token, Tasks, Background Tasks,
      Temp Files, Notes, Workflow—are things you go *look up*, one at a time, so
      they live in the header's overflow menu rather than as seven permanent tabs
@@ -1343,6 +1401,15 @@ export function SessionDetail({
      only what the session itself put there (see `auxTabs`). */
   const auxFacets = useMemo((): AuxFacetItem[] => {
     const list: AuxFacetItem[] = [];
+    // First in the menu, and unconditional: it is the one facet that answers
+    // "where did that card go", so it has to be findable even when the session
+    // has nothing in it yet (its empty state says as much).
+    list.push({
+      id: "library",
+      label: libraryCount > 0
+        ? `${t("detail.tab_library", "本会话资料")} (${libraryCount})`
+        : t("detail.tab_library", "本会话资料"),
+    });
     list.push({ id: "skills", label: t("detail.tab_skills") });
     list.push({ id: "decisions", label: t("detail.tab_decisions") });
     list.push({ id: "tokens", label: t("detail.tab_tokens") });
@@ -1368,6 +1435,7 @@ export function SessionDetail({
     return list;
   }, [
     t,
+    libraryCount,
     hasTaskPlans,
     hasBgTasks,
     bgTasks.length,
@@ -1405,11 +1473,15 @@ export function SessionDetail({
      mid-paragraph. The pin is dropped by the card's ✕ (and by switching
      sessions, which resets the whole aux state). */
   const railAgents = useMemo((): SessionInfo[] => {
+    const dismissed = new Set(aux.dismissedAgents);
+    const live = dismissed.size > 0
+      ? liveSubagents.filter((s) => !dismissed.has(s.id))
+      : liveSubagents;
     const pinnedId = aux.pinnedAgent;
-    if (!pinnedId || liveSubagents.some((s) => s.id === pinnedId)) return liveSubagents;
+    if (!pinnedId || live.some((s) => s.id === pinnedId)) return live;
     const pinned = sessions.find((s) => s.id === pinnedId);
-    return pinned ? [pinned, ...liveSubagents] : liveSubagents;
-  }, [aux.pinnedAgent, liveSubagents, sessions]);
+    return pinned ? [pinned, ...live] : live;
+  }, [aux.pinnedAgent, aux.dismissedAgents, liveSubagents, sessions]);
   const railCards = railAgents.length + aux.docs.length + explains.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar
@@ -1449,6 +1521,37 @@ export function SessionDetail({
      it gives up the side-by-side and slides in over the rail instead, which is
      also what you expect a drawer entering from the right to do. */
   const railCovered = railOpen && auxOpen && bodyRowW > 0 && bodyRowW < railFitW;
+
+  /*
+   * Escape closes the drawer, then collapses the expanded rail card.
+   *
+   * These were the two surfaces on this page that swallowed the key — every
+   * modal here answers it (the reader, the lightbox, the handoff chain) and
+   * the drawer, which has a scrim and therefore reads as a modal, did not.
+   *
+   * Bubble phase, and deliberately last in line. The modals listen in capture
+   * and stop the event, so a key spent closing one never reaches here;
+   * ContextMenu does the same. The selection toolbar is the exception — it
+   * answers Escape on *keyup*, which cannot be ordered against a keydown — so
+   * a live selection is checked for directly: if the toolbar is up, the press
+   * is its.
+   */
+  useEffect(() => {
+    if (!activeFacet && aux.expanded == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed;
+      setAux((st) => {
+        const target = escapeTarget(st, hasSelection);
+        if (target === "drawer") return closeAux(st);
+        if (target === "card") return collapseDoc(st);
+        return st;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeFacet, aux.expanded]);
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
@@ -1840,6 +1943,17 @@ export function SessionDetail({
                     workflowTrees={workflowTrees}
                     sessions={sessions}
                     onOpenAgent={openAgentSession}
+                    library={{
+                      explains: allExplains,
+                      hiddenExplains,
+                      docs: docHistory,
+                      subagents: allSubagents,
+                      onOpenExplain: reopenExplain,
+                      onOpenDoc: reopenDoc,
+                      onForgetDoc: forgetDoc,
+                      onForgetAllDocs: forgetAllDocs,
+                      onOpenAgentSession: reopenAgent,
+                    }}
                   />
                 )}
               </SessionAuxPanel>

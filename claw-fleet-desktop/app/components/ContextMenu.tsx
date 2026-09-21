@@ -68,7 +68,13 @@ export function ContextMenu({
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // This Escape is spent closing the menu. Without stopping it, the same
+      // press also reached whatever else listens — the detail view collapses
+      // its expanded rail card on Escape — so dismissing a menu took a card
+      // down with it.
+      e.stopPropagation();
+      onClose();
     };
     // Capture phase: a card's own mousedown must not win the race to select.
     document.addEventListener("mousedown", onDown, true);
