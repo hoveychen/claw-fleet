@@ -430,7 +430,13 @@ pub fn execute(
         builder = builder.header(name, value);
     }
     builder = if req.is_edit() {
-        builder.multipart(edit_form(req)?)
+        match auth {
+            ImageAuth::ApiKey(_) => builder.multipart(edit_form(req)?),
+            // The plan backend rejects multipart outright with
+            // `400 {"detail":"Unsupported content type"}` (observed
+            // 2026-09-22); it only takes the JSON shape Codex sends.
+            ImageAuth::ChatGpt { .. } => builder.json(&edit_json_body(req)?),
+        }
     } else {
         builder.json(&generation_body(req))
     };
@@ -480,6 +486,57 @@ fn edit_form(req: &ImageRequest) -> Result<reqwest::blocking::multipart::Form, S
             .map_err(|e| format!("attach mask {}: {e}", mask.display()))?;
     }
     Ok(form)
+}
+
+/// JSON body for `images/edits` on the ChatGPT plan backend.
+///
+/// Same shape as codex-rs's `ImageEditRequest`: the generation fields plus
+/// `images: [{ image_url: "data:<mime>;base64,..." }]`. The mask goes in the
+/// same `{ image_url }` form the public API's JSON edits take; Codex never
+/// sends one, so the plan backend's handling of it is unverified.
+pub fn edit_json_body(req: &ImageRequest) -> Result<serde_json::Value, String> {
+    let mut body = generation_body(req);
+    let obj = body
+        .as_object_mut()
+        .expect("generation_body always builds an object");
+    let images = req
+        .images
+        .iter()
+        .map(|p| data_url(p).map(|url| serde_json::json!({ "image_url": url })))
+        .collect::<Result<Vec<_>, _>>()?;
+    obj.insert("images".into(), images.into());
+    if let Some(mask) = &req.mask {
+        obj.insert(
+            "mask".into(),
+            serde_json::json!({ "image_url": data_url(mask)? }),
+        );
+    }
+    Ok(body)
+}
+
+/// Read a file into a `data:` URL, typed by its magic bytes so a mislabelled
+/// extension still gets the right mime.
+fn data_url(path: &Path) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let mime = sniff_image_mime(&bytes)
+        .ok_or_else(|| format!("{} is not a png, jpeg, webp or gif", path.display()))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else {
+        None
+    }
 }
 
 /// What the backend says it actually used, as opposed to what we asked for.
@@ -933,6 +990,36 @@ mod tests {
         assert_eq!(endpoint_path(&req), "images/generations");
         req.images.push(PathBuf::from("/tmp/x.png"));
         assert_eq!(endpoint_path(&req), "images/edits");
+    }
+
+    #[test]
+    fn the_plan_backend_edit_body_inlines_images_as_typed_data_urls() {
+        // Multipart gets `400 Unsupported content type` from the plan backend;
+        // it wants codex-rs's JSON shape, with the mime taken from the bytes.
+        let dir = tempfile::tempdir().unwrap();
+        let jpg = dir.path().join("photo.png"); // mislabelled on purpose
+        std::fs::write(&jpg, [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3]).unwrap();
+        let mut req = ImageRequest::new("add a red hat");
+        req.quality = Some("low".into());
+        req.images.push(jpg);
+
+        let body = edit_json_body(&req).unwrap();
+        assert_eq!(body["prompt"], "add a red hat");
+        assert_eq!(body["quality"], "low");
+        assert_eq!(body["model"], DEFAULT_MODEL);
+        let url = body["images"][0]["image_url"].as_str().unwrap();
+        assert_eq!(url, "data:image/jpeg;base64,/9j/4AECAw==");
+        assert!(body.get("mask").is_none());
+    }
+
+    #[test]
+    fn a_non_image_input_is_refused_before_the_request_is_spent() {
+        let dir = tempfile::tempdir().unwrap();
+        let txt = dir.path().join("notes.png");
+        std::fs::write(&txt, b"hello").unwrap();
+        let mut req = ImageRequest::new("x");
+        req.images.push(txt);
+        assert!(edit_json_body(&req).unwrap_err().contains("not a png"));
     }
 
     #[test]
