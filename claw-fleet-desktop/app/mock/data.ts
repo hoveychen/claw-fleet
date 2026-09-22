@@ -3025,7 +3025,7 @@ export const MOCK_MODEL_CATALOG = [
     available: true,
     models: [
       m("gpt-6-astra", "GPT-6 Astra", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
-      m("gpt-6-sol", "GPT-6 Sol", "codex", "standard", CODEX_ULTRA_LADDER, "medium"),
+      m("gpt-6-sol", "GPT-6 Sol", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
       m("gpt-6-luna", "GPT-6 Luna", "codex", "fast", CODEX_LADDER, "medium"),
       m("gpt-5.6-sol", "GPT-5.6 Sol", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
       m("gpt-5.6-terra", "GPT-5.6 Terra", "codex", "standard", CODEX_ULTRA_LADDER, "medium"),
