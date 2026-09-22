@@ -126,3 +126,29 @@ fn a_nonsense_model_name_tells_us_whether_model_is_validated() {
         Ok(_) => println!(">>> model is IGNORED server-side: a bogus name still produced an image"),
     }
 }
+
+/// Reference-image edits go through a different request encoding per backend
+/// (multipart for an API key, JSON data URLs for the plan backend, which
+/// rejects multipart with `400 Unsupported content type`). This is the one
+/// check that the encoding actually reaches a picture.
+#[test]
+#[ignore = "spends real image quota; run manually"]
+fn a_reference_image_edit_produces_a_real_file() {
+    let auth = image_api::load_auth(None).expect("no usable credential");
+    println!("auth backend: {} ({})", auth.label(), auth.base_url());
+
+    let mut seed = ImageRequest::new("A single red circle on a white background.");
+    seed.quality = Some("low".to_string());
+    let seeded = image_api::run(&seed, Some("live-test"));
+    report("seed", &seeded);
+    let seeded = seeded.expect("seed generation failed");
+
+    let mut req = ImageRequest::new("Same picture, but make the circle blue.");
+    req.quality = Some("low".to_string());
+    req.images.push(seeded.images[0].path.clone().into());
+    let result = image_api::run(&req, Some("live-test"));
+    report("edit", &result);
+    let ok = result.expect("edit request failed");
+    assert_eq!(ok.images.len(), 1);
+    assert!(ok.images[0].bytes > 0, "empty image file");
+}
