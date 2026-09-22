@@ -898,13 +898,17 @@ describe("RelayClient detects a half-open socket", () => {
     const client = new RelayClient(SECRET, handlers);
     clients.push(client);
     client.connect();
-    // Key derivation is a WebCrypto promise, not a timer, and it does not
-    // always settle within one flush — advance repeatedly until the socket it
-    // gates actually exists rather than guessing at a number of ticks.
+    // Key derivation is a WebCrypto promise that runs off-thread in real time,
+    // not on the fake clock — so a budget of fake ticks is a budget of however
+    // few real milliseconds those ticks take, which a slow CI runner overran.
+    // `vi.waitFor` polls on the real clock, so the wait is bounded in real time.
     const base = FakeWs.instances.length;
-    for (let i = 0; i < 200 && FakeWs.instances.length === base; i++) {
-      await vi.advanceTimersByTimeAsync(1);
-    }
+    await vi.waitFor(
+      () => {
+        if (FakeWs.instances.length === base) throw new Error("socket not opened yet");
+      },
+      { timeout: 5_000, interval: 5 },
+    );
     const ws = FakeWs.instances[FakeWs.instances.length - 1];
     if (!ws) throw new Error("ws was never created under fake timers");
     let closes = 0;
