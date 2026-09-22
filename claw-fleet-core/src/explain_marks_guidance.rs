@@ -58,7 +58,7 @@ pub fn render_explain_marks_section(user_title: &str, locale: &str) -> String {
 \n\
 写给{title}看的正文里（决策卡的 question、对话回复），凡是**你做了取舍却没展开、\
 用了{title}未必熟的术语、给了结论没给推导**的地方，用 `[?` 和 `]` 把那个短语或那句话\
-包起来，例如 `[?AUROC 只动了 0.004]`。Fleet 会把它渲染成可点击的标注，{title}一点\
+包起来，例如 [?AUROC 只动了 0.004]——直接写进正文，外面不要再套反引号（套了就成了行内代码，不再是标注）。Fleet 会把它渲染成可点击的标注，{title}一点\
 就能就这段文字向你追问，不用自己打字；在纯文本里它只是多两个字符，无害。\n\
 \n\
 - 一条回复最多 5 处，宁缺毋滥；短回复可以一处都没有。\n\
@@ -74,7 +74,7 @@ pub fn render_explain_marks_section(user_title: &str, locale: &str) -> String {
 In prose written for {title} (a decision card's question, a conversational \
 reply), wrap the phrase or sentence where **you made a trade-off without \
 unpacking it, used a term {title} may not know, or stated a conclusion without \
-its derivation** in `[?` and `]`, e.g. `[?AUROC moved only 0.004]`. Fleet renders \
+its derivation** in `[?` and `]`, e.g. [?AUROC moved only 0.004]. Fleet renders \
 the mark as a clickable annotation: one click lets {title} ask you about exactly \
 that text without typing a question. In plain text it is just two extra \
 characters, harmless.\n\
@@ -103,7 +103,7 @@ pub fn render_explain_marks_section_compact(user_title: &str) -> String {
 \n\
 In prose for {title}, wrap a phrase where you made a trade-off without unpacking \
 it, used a term {title} may not know, or gave a conclusion without its derivation \
-in `[?` … `]`, e.g. `[?AUROC moved only 0.004]`. Fleet renders it clickable so \
+in `[?` … `]`, e.g. [?AUROC moved only 0.004]. Fleet renders it clickable so \
 {title} can ask about that text without typing. At most 5 per reply; one phrase \
 or sentence each; never in code, tables, headings or links; inline code and \
 emphasis inside are fine; no ASCII `(` right after `]`. It marks where {title} \

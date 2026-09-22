@@ -29,7 +29,9 @@
  *   `linkReference` subtrees are also never descended into, so a mark can
  *   never land inside link text either.
  * - Inline code and fenced code are leaves with no text children, so a mark
- *   written *inside* code is untouched.
+ *   written *inside* code is untouched — except inline code that is nothing
+ *   but one mark (`` `[?text]` ``), which is a mark in backticks and renders as
+ *   one (see `codeWrappedMark`).
  * - Brackets inside a mark pair up: `[?the a[0] slot]` marks `the a[0] slot`,
  *   and the `]` of an inner `[?` … `]` does not close the outer one (nesting
  *   is still unsupported — the inner `[?` stays literal text).
@@ -218,7 +220,22 @@ function sliceRun(units: Unit[], from: number, to: number): MdNode[] | null {
   return out.length ? out : null;
 }
 
+/** Inline code whose entire value is one mark — `` `[?text]` `` — is a mark the
+ *  agent wrapped in backticks, not code: agents copy the backticks off the
+ *  guidance's own example (about 3% of marks in real transcripts did). Returns
+ *  the mark node to put in its place, or null for genuine code. */
+function codeWrappedMark(node: MdNode): MdNode | null {
+  if (node.type !== "inlineCode" || typeof node.value !== "string") return null;
+  const value = node.value.trim();
+  const mark = nextMark(value, 0);
+  if (!mark || mark.open !== 0 || mark.close !== value.length - CLOSE.length) return null;
+  return markNode([{ type: "text", value: value.slice(mark.start, mark.close) }]);
+}
+
 function walk(node: MdNode): void {
+  if (node.children?.some((c) => codeWrappedMark(c))) {
+    node.children = node.children.map((c) => codeWrappedMark(c) ?? c);
+  }
   const children = node.children;
   if (!children) return;
   const { flat, units } = flattenRun(children);

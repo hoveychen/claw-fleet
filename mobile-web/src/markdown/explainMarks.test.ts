@@ -47,10 +47,16 @@ describe("explain marks on the mobile chain", () => {
   });
 
   it("leaves inline code and an unterminated [? alone", () => {
-    const html = render("`[?code]` 和 [?没有闭合");
-    expect(html).toContain("<code>[?code]</code>");
+    const html = render("`x = [?code]` 和 [?没有闭合");
+    expect(html).toContain("<code>x = [?code]</code>");
     expect(html).toContain("[?没有闭合");
     expect(html).not.toContain("explain-mark");
+  });
+
+  it("renders a backtick-wrapped mark as a mark, not code", () => {
+    const html = render("两条曲线，`[?最大回撤分别在各自曲线上算]`，没有先平均");
+    expect(html).toContain('data-explain-quote="最大回撤分别在各自曲线上算"');
+    expect(html).not.toContain("<code>");
   });
 
   // The run-level scan, on the phone's chain: a mark whose phrase contains
