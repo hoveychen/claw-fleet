@@ -107,12 +107,27 @@ describe("remarkExplainMarks: mdast rules", () => {
     expect(collect(tree, "text").map((t) => t.value).join("")).toBe("这里 [?没有闭合 的一句话");
   });
 
-  it("does not touch a mark written inside inline code", () => {
-    const tree = parse("代码 `[?not a mark]` 之外 [?a mark]");
+  it("does not touch a mark written inside a larger inline code span", () => {
+    const tree = parse("代码 `x = [?not a mark]` 之外 [?a mark]");
     const marks = collect(tree, "explainMark");
     expect(marks).toHaveLength(1);
     expect(quoteOf(marks[0])).toBe("a mark");
-    expect(collect(tree, "inlineCode")[0].value).toBe("[?not a mark]");
+    expect(collect(tree, "inlineCode")[0].value).toBe("x = [?not a mark]");
+  });
+
+  it("treats inline code that is exactly one mark as a backtick-wrapped mark", () => {
+    // Verbatim from a prediction-market decision card that rendered as code.
+    const tree = parse("漂到了 +8.78 张。`[?换句话说乐观的 +4.32 是靠一个风控根本不会放行的敞口赚的]`。要修");
+    const marks = collect(tree, "explainMark");
+    expect(marks).toHaveLength(1);
+    expect(quoteOf(marks[0])).toBe("换句话说乐观的 +4.32 是靠一个风控根本不会放行的敞口赚的");
+    expect(collect(tree, "inlineCode")).toHaveLength(0);
+  });
+
+  it("keeps inline code holding two marks, or text after the mark, as code", () => {
+    const tree = parse("`[?a] [?b]` 和 `[?a]x`");
+    expect(collect(tree, "explainMark")).toHaveLength(0);
+    expect(collect(tree, "inlineCode")).toHaveLength(2);
   });
 
   it("does not rewrite link text", () => {
