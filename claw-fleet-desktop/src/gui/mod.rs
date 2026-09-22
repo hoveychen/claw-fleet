@@ -48,6 +48,7 @@ mod plan_approval;
 mod plugins;
 mod proc_runner;
 mod process;
+mod preview_image;
 mod schedule;
 mod scratchpad;
 mod sessions;
@@ -78,6 +79,7 @@ use self::plan_approval::*;
 use self::plugins::*;
 use self::proc_runner::*;
 use self::process::*;
+use self::preview_image::*;
 use self::schedule::*;
 use self::scratchpad::*;
 use self::sessions::*;
@@ -1806,6 +1808,8 @@ pub fn run() {
             promote_memory,
             list_artifacts,
             list_session_images,
+            save_preview_image,
+            share_preview_image,
             get_artifact,
             add_artifact,
             update_artifact,

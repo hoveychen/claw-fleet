@@ -1,19 +1,25 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.78);
+  background: rgba(0, 0, 0, 0.88);
   z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
   backdrop-filter: blur(4px);
   cursor: zoom-out;
 }
 
+.stage {
+  position: absolute;
+  inset: 64px 24px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: default;
+}
+
 .image {
-  max-width: 90vw;
-  max-height: 90vh;
+  max-width: 100%;
+  max-height: 100%;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -21,24 +27,60 @@
   box-shadow: var(--shadow-modal);
   cursor: default;
   user-select: none;
+  touch-action: none;
 }
 
-.close {
+.toolbar {
   position: absolute;
+  z-index: 1;
   top: 16px;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(24, 24, 24, 0.92);
+  color: #fff;
+  cursor: default;
+}
+
+.toolbar button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
   padding: 0;
-  background: rgba(0, 0, 0, 0.45);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.toolbar button:disabled { opacity: 0.35; cursor: default; }
+.zoom { min-width: 42px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.divider { width: 1px; height: 20px; margin: 0 4px; background: rgba(255, 255, 255, 0.22); }
+.status { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 5px; background: rgba(24, 24, 24, 0.92); color: #fff; font-size: 12px; cursor: default; }
+
+.close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: rgba(24, 24, 24, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 50%;
   color: #fff;
-  font-size: 20px;
-  line-height: 1;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
