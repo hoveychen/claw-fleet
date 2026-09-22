@@ -927,9 +927,11 @@ fn equivalent_model(target_provider: &str, selected_model: &str, slot: ModelSlot
         ("claude", ModelTier::Fast) => "haiku",
         ("claude", ModelTier::Standard) => "sonnet",
         ("claude", ModelTier::Premium) => "opus",
-        ("codex", ModelTier::Fast) => "gpt-5.6-luna",
-        ("codex", ModelTier::Standard) => "gpt-5.6-terra",
-        ("codex", ModelTier::Premium) => "gpt-5.6-sol",
+        // GPT-6 has no Terra, so the standard slot shares Sol with premium —
+        // the same model `default_standard_model` already runs Codex analysis on.
+        ("codex", ModelTier::Fast) => "gpt-6-luna",
+        ("codex", ModelTier::Standard) => "gpt-6-sol",
+        ("codex", ModelTier::Premium) => "gpt-6-sol",
         // dsh's built-in route offers a single current model (V4.1 Flash),
         // standard tier; `deepseek-v4-pro` is retired (routed to Flash from
         // 2026-09-14). Every tier therefore maps onto Flash — there is no
@@ -943,12 +945,15 @@ fn equivalent_model(target_provider: &str, selected_model: &str, slot: ModelSlot
 }
 
 /// Compact tier label for a model id, for the cross-engine `Haiku / Luna`
-/// pairing shown in settings. Codex slugs (`gpt-5.6-luna`) collapse to their
+/// pairing shown in settings. Codex slugs (`gpt-6-luna`, `gpt-5.6-luna`) collapse to their
 /// tier word (`Luna`); Claude ids (`haiku`) title-case to their display name
 /// (`Haiku`). Deliberately not the full Codex `displayName` ("GPT-5.6-Luna"),
 /// which would be too verbose as a suffix.
 fn tier_label(id: &str) -> String {
-    let base = id.strip_prefix("gpt-5.6-").unwrap_or(id);
+    let base = id
+        .strip_prefix("gpt-6-")
+        .or_else(|| id.strip_prefix("gpt-5.6-"))
+        .unwrap_or(id);
     let mut chars = base.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
@@ -1264,15 +1269,24 @@ mod tests {
     fn equivalent_models_preserve_capability_tier() {
         assert_eq!(
             equivalent_model("codex", "haiku", ModelSlot::Fast),
-            "gpt-5.6-luna"
+            "gpt-6-luna"
         );
         assert_eq!(
             equivalent_model("codex", "sonnet", ModelSlot::Standard),
-            "gpt-5.6-terra"
+            "gpt-6-sol"
         );
         assert_eq!(
             equivalent_model("codex", "opus", ModelSlot::Standard),
-            "gpt-5.6-sol"
+            "gpt-6-sol"
+        );
+        // GPT-6 ids map back to Claude by tier like their 5.6 namesakes.
+        assert_eq!(
+            equivalent_model("claude", "gpt-6-luna", ModelSlot::Fast),
+            "haiku"
+        );
+        assert_eq!(
+            equivalent_model("claude", "gpt-6-sol", ModelSlot::Standard),
+            "opus"
         );
         assert_eq!(
             equivalent_model("claude", "gpt-5.6-luna", ModelSlot::Fast),
@@ -1305,7 +1319,7 @@ mod tests {
                 .clone()
         };
         assert_eq!(label("haiku"), Some("Luna".into()));
-        assert_eq!(label("sonnet"), Some("Terra".into()));
+        assert_eq!(label("sonnet"), Some("Sol".into()));
         assert_eq!(label("opus"), Some("Sol".into()));
         assert_eq!(label("fable"), Some("Sol".into()));
 
