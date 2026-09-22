@@ -453,6 +453,24 @@ pub(crate) fn strip_leading_system_reminder(text: &str) -> &str {
     }
 }
 
+/// Peel Fleet's prompt prefixes in the order they actually appear on a new
+/// Codex thread: recent sessions first, then the active-plans reminder.
+fn strip_leading_fleet_context(text: &str) -> &str {
+    let mut remaining = text;
+    for (open, close) in [
+        ("<fleet_recent_sessions>", "</fleet_recent_sessions>"),
+        ("<system-reminder>", "</system-reminder>"),
+    ] {
+        let trimmed = remaining.trim_start();
+        if trimmed.starts_with(open) {
+            if let Some(end) = trimmed.find(close) {
+                remaining = trimmed[end + close.len()..].trim_start();
+            }
+        }
+    }
+    remaining
+}
+
 /// Strip the composer's trailing attachment block from a prompt.
 ///
 /// The desktop and mobile composers append attachments as a trailing block:
@@ -481,8 +499,8 @@ fn strip_trailing_context_files(text: &str) -> &str {
 /// metadata already renders the relay-chain n/N chip, so repeating that preamble in
 /// the title adds noise rather than context.
 ///
-/// Non-handoff prompts remain byte-for-byte unchanged after the pre-existing
-/// system-reminder / attachment cleanup. A partial or hand-authored lookalike
+/// Non-handoff prompts remain byte-for-byte unchanged after Fleet-context and
+/// attachment cleanup. A partial or hand-authored lookalike
 /// is deliberately left alone: both Fleet-owned delimiters must be present.
 fn derive_codex_title(text: &str) -> Option<String> {
     const HANDOFF_PREFIX: &str = "你是一次接力开发的第 ";
@@ -490,7 +508,7 @@ fn derive_codex_title(text: &str) -> Option<String> {
     const NOTE_CLOSE: &str = "\n---\n";
     const MAX_TITLE_CHARS: usize = 48;
 
-    let cleaned = strip_trailing_context_files(strip_leading_system_reminder(text));
+    let cleaned = strip_trailing_context_files(strip_leading_fleet_context(text));
     if cleaned.is_empty() {
         return None;
     }
@@ -561,8 +579,7 @@ fn is_injected_codex_context(role: &str, text: &str) -> bool {
 
 /// The opening *authored* user prompt from a codex rollout, with codex's
 /// injected boilerplate skipped (see `is_injected_codex_context`) and Fleet's
-/// leading TASKS.md `<system-reminder>` block stripped
-/// (see `strip_leading_system_reminder`).
+/// leading Fleet context blocks stripped (see `strip_leading_fleet_context`).
 ///
 /// Used as a title/preview fallback: codex only flushes its SQLite `title` /
 /// `first_user_message` columns at turn boundaries, so during an in-flight first
@@ -3205,6 +3222,43 @@ mod tests {
             users[0].get("isMeta").is_none(),
             "a real prompt after the reminder must remain a normal user bubble, not folded"
         );
+    }
+
+    #[test]
+    fn recent_sessions_then_reminder_leave_only_the_authored_prompt() {
+        let prompt = "帮我研究电竞预测市场";
+        let full = format!(
+            "<fleet_recent_sessions>\nprevious sessions\n</fleet_recent_sessions>\n\n\
+             <system-reminder>\nactive plans\n</system-reminder>\n\n{prompt}"
+        );
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": full }]
+            }
+        })];
+        let out = normalize_messages(lines.clone());
+        assert_eq!(out[0]["message"]["content"][0]["text"], prompt);
+        assert!(out[0].get("isMeta").is_none());
+        assert_eq!(extract_first_user_prompt(&lines), Some(prompt.to_string()));
+        assert_eq!(derive_codex_title(&full), Some(prompt.to_string()));
+    }
+
+    #[test]
+    fn recent_sessions_only_folds_as_meta() {
+        let text = "<fleet_recent_sessions>\nprevious sessions\n</fleet_recent_sessions>";
+        let out = normalize_messages(vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": text }]
+            }
+        })]);
+        assert_eq!(out[0]["isMeta"], json!(true));
+        assert_eq!(derive_codex_title(text), None);
     }
 
     #[test]
@@ -6188,10 +6242,9 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             }
                         }
 
-                        // Strip Fleet's prepended active-plans reminder from the
-                        // bubble (see `strip_leading_system_reminder`); a
-                        // reminder-only turn folds into the meta lane.
-                        let stripped = strip_leading_system_reminder(&text);
+                        // Strip Fleet's prepended recent sessions and active
+                        // plans; an injection-only turn folds into the meta lane.
+                        let stripped = strip_leading_fleet_context(&text);
                         let mut msg = json!({
                             "type": "user",
                             "message": {
@@ -6580,15 +6633,11 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 msg["isMeta"] = json!(true);
                             }
 
-                            // Fleet prepends the TASKS.md active-plans
-                            // `<system-reminder>` block into the codex prompt
-                            // itself (no Claude-style hook channel; see
-                            // `strip_leading_system_reminder`). Strip that leading
-                            // block from the displayed bubble so the transcript
-                            // shows only the real prompt. A message that is *only*
-                            // the reminder collapses into the meta fold.
+                            // Fleet prepends recent sessions and active plans
+                            // into the prompt. Show only the real user text;
+                            // an injection-only message folds as meta.
                             if role == "user" {
-                                let stripped = strip_leading_system_reminder(&text);
+                                let stripped = strip_leading_fleet_context(&text);
                                 if stripped.len() != text.len() {
                                     if stripped.is_empty() {
                                         msg["isMeta"] = json!(true);
