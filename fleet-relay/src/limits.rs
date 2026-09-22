@@ -78,7 +78,10 @@ impl ConnLimiter {
             }
             *n += 1;
         }
-        Some(ConnGuard { limiter: Arc::clone(self), ip })
+        Some(ConnGuard {
+            limiter: Arc::clone(self),
+            ip,
+        })
     }
 
     #[cfg(test)]
@@ -159,7 +162,10 @@ impl ConnRateLimiter {
         if map.len() > RATE_PRUNE_THRESHOLD {
             map.retain(|_, b| b.tokens < self.burst);
         }
-        let b = map.entry(ip).or_insert(Bucket { tokens: self.burst, last: now });
+        let b = map.entry(ip).or_insert(Bucket {
+            tokens: self.burst,
+            last: now,
+        });
         let elapsed = now.saturating_duration_since(b.last).as_secs_f64();
         b.tokens = (b.tokens + elapsed * self.per_sec).min(self.burst);
         b.last = now;
@@ -191,9 +197,15 @@ mod tests {
         let a = lim.try_acquire(ip("1.2.3.4"));
         let b = lim.try_acquire(ip("1.2.3.4"));
         assert!(a.is_some() && b.is_some(), "first two from an IP admitted");
-        assert!(lim.try_acquire(ip("1.2.3.4")).is_none(), "third from same IP rejected");
+        assert!(
+            lim.try_acquire(ip("1.2.3.4")).is_none(),
+            "third from same IP rejected"
+        );
         // A different IP is unaffected.
-        assert!(lim.try_acquire(ip("5.6.7.8")).is_some(), "other IP still admitted");
+        assert!(
+            lim.try_acquire(ip("5.6.7.8")).is_some(),
+            "other IP still admitted"
+        );
     }
 
     #[test]
@@ -203,7 +215,10 @@ mod tests {
         assert!(g.is_some());
         assert!(lim.try_acquire(ip("1.2.3.4")).is_none(), "at per-IP cap");
         drop(g);
-        assert!(lim.try_acquire(ip("1.2.3.4")).is_some(), "slot freed after drop");
+        assert!(
+            lim.try_acquire(ip("1.2.3.4")).is_some(),
+            "slot freed after drop"
+        );
     }
 
     #[test]
@@ -213,7 +228,11 @@ mod tests {
         let b = lim.try_acquire(ip("2.2.2.2"));
         assert!(a.is_some() && b.is_some());
         assert!(lim.try_acquire(ip("3.3.3.3")).is_none(), "global cap hit");
-        assert_eq!(lim.live_total(), 2, "rejected acquire left no leaked global slot");
+        assert_eq!(
+            lim.live_total(),
+            2,
+            "rejected acquire left no leaked global slot"
+        );
     }
 
     #[test]
@@ -222,8 +241,15 @@ mod tests {
         // No IP → per-IP cap of 1 doesn't apply; both admitted.
         let a = lim.try_acquire(None);
         let b = lim.try_acquire(None);
-        assert!(a.is_some() && b.is_some(), "unkeyed connections bypass per-IP cap");
-        assert_eq!(lim.live_total(), 2, "but they still count toward the global total");
+        assert!(
+            a.is_some() && b.is_some(),
+            "unkeyed connections bypass per-IP cap"
+        );
+        assert_eq!(
+            lim.live_total(),
+            2,
+            "but they still count toward the global total"
+        );
     }
 
     #[test]
@@ -234,7 +260,10 @@ mod tests {
         assert!(rl.check_at(ipa("1.2.3.4"), now));
         assert!(rl.check_at(ipa("1.2.3.4"), now));
         assert!(rl.check_at(ipa("1.2.3.4"), now));
-        assert!(!rl.check_at(ipa("1.2.3.4"), now), "fourth in a burst is blocked");
+        assert!(
+            !rl.check_at(ipa("1.2.3.4"), now),
+            "fourth in a burst is blocked"
+        );
     }
 
     #[test]
@@ -255,6 +284,9 @@ mod tests {
         let now = Instant::now();
         assert!(rl.check_at(ipa("1.1.1.1"), now));
         assert!(!rl.check_at(ipa("1.1.1.1"), now), "same IP drained");
-        assert!(rl.check_at(ipa("2.2.2.2"), now), "different IP has its own bucket");
+        assert!(
+            rl.check_at(ipa("2.2.2.2"), now),
+            "different IP has its own bucket"
+        );
     }
 }

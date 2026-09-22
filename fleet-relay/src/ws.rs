@@ -89,7 +89,11 @@ pub async fn ws_handler(
     if let Some(ip) = ip {
         if !state.conn_rate.check(ip) {
             log::warn!("connection rejected: rate limit (ip={ip})");
-            return (StatusCode::TOO_MANY_REQUESTS, "too many connection attempts").into_response();
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many connection attempts",
+            )
+                .into_response();
         }
     }
     let Some(guard) = state.conn_limiter.try_acquire(ip) else {
@@ -143,11 +147,23 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
             // pairing secret it was derived from.
             Ok(InFrame::Auth { role, secret }) if secret.len() >= MIN_SECRET_LEN => (role, secret),
             Ok(InFrame::Auth { .. }) => {
-                let _ = send_frame(&mut socket, &OutFrame::Error { message: "secret too short".into() }).await;
+                let _ = send_frame(
+                    &mut socket,
+                    &OutFrame::Error {
+                        message: "secret too short".into(),
+                    },
+                )
+                .await;
                 return;
             }
             _ => {
-                let _ = send_frame(&mut socket, &OutFrame::Error { message: "expected auth frame".into() }).await;
+                let _ = send_frame(
+                    &mut socket,
+                    &OutFrame::Error {
+                        message: "expected auth frame".into(),
+                    },
+                )
+                .await;
                 return;
             }
         },
@@ -160,10 +176,20 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
     // `msg_ack` custody report) through the same write pump.
     let own_tx = tx.clone();
     let Some(joined) = state.registry.join(&channel, role, tx) else {
-        let _ = send_frame(&mut socket, &OutFrame::Error { message: "channel at capacity".into() }).await;
+        let _ = send_frame(
+            &mut socket,
+            &OutFrame::Error {
+                message: "channel at capacity".into(),
+            },
+        )
+        .await;
         return;
     };
-    log::info!("{role:?} joined channel {}… ({} client(s))", &channel[..12], joined.clients);
+    log::info!(
+        "{role:?} joined channel {}… ({} client(s))",
+        &channel[..12],
+        joined.clients
+    );
     let authed = OutFrame::Authed {
         role,
         clients: joined.clients,
@@ -216,10 +242,8 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
     // `interval_at`, not `interval`: the latter's first tick fires immediately,
     // which would put a ping on the wire before the connection has said
     // anything. A socket that just completed auth is self-evidently alive.
-    let mut ping = tokio::time::interval_at(
-        tokio::time::Instant::now() + PING_INTERVAL,
-        PING_INTERVAL,
-    );
+    let mut ping =
+        tokio::time::interval_at(tokio::time::Instant::now() + PING_INTERVAL, PING_INTERVAL);
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_inbound = std::time::Instant::now();
     loop {
@@ -290,8 +314,9 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                             Ok(s) => s,
                             Err(_) => continue,
                         };
-                        let delivery =
-                            state.registry.deliver_or_queue(&channel, OutMsg::Text(serialized));
+                        let delivery = state
+                            .registry
+                            .deliver_or_queue(&channel, OutMsg::Text(serialized));
                         if let Some(ack_id) = ack_id {
                             let status = match delivery {
                                 Delivery::Delivered(_) => MsgAckStatus::Delivered,
@@ -311,7 +336,13 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                     }
                 }
             }
-            InFrame::Notify { title, body, tag, url, badge } if role == Role::Agent => {
+            InFrame::Notify {
+                title,
+                body,
+                tag,
+                url,
+                badge,
+            } if role == Role::Agent => {
                 // Stamp which channel this notification came from. One phone can pair with
                 // multiple desktops, and each desktop's URL carries only the card id — but the
                 // card id is unique only within one machine. When two desktops both have a card,
@@ -339,7 +370,10 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                     url: stamped.as_deref(),
                     badge,
                 };
-                state.push.notify(&channel, &payload, state.harmony.as_ref()).await;
+                state
+                    .push
+                    .notify(&channel, &payload, state.harmony.as_ref())
+                    .await;
             }
             InFrame::PushSubscribe { subscription } if role == Role::Client => {
                 if let Err(e) = state.push.subscribe(&channel, subscription) {
@@ -399,8 +433,15 @@ mod tests {
 
     #[test]
     fn uses_rightmost_forwarded_for() {
-        let ip = client_ip(&headers(&[("x-forwarded-for", "1.1.1.1, 2.2.2.2, 3.3.3.3")]));
-        assert_eq!(ip.unwrap().to_string(), "3.3.3.3", "right-most (proxy-appended) entry wins");
+        let ip = client_ip(&headers(&[(
+            "x-forwarded-for",
+            "1.1.1.1, 2.2.2.2, 3.3.3.3",
+        )]));
+        assert_eq!(
+            ip.unwrap().to_string(),
+            "3.3.3.3",
+            "right-most (proxy-appended) entry wins"
+        );
     }
 
     #[test]
@@ -412,7 +453,11 @@ mod tests {
             ("x-real-ip", "9.9.9.9"),
             ("x-forwarded-for", "6.6.6.6, 4.4.4.4"),
         ]));
-        assert_eq!(ip.unwrap().to_string(), "4.4.4.4", "X-Real-Ip must not override XFF");
+        assert_eq!(
+            ip.unwrap().to_string(),
+            "4.4.4.4",
+            "X-Real-Ip must not override XFF"
+        );
     }
 
     #[test]

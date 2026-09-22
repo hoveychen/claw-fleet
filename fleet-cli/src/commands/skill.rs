@@ -33,7 +33,12 @@ pub(crate) fn cmd_skill_install() {
                 .and_then(|_| std::fs::write(&skill_path, skill.body))
             {
                 Ok(_) => {
-                    println!("  {b}✓{r}  {name}  {d}{}{r}", skill_path.display(), d = c_dim(), r = c_reset());
+                    println!(
+                        "  {b}✓{r}  {name}  {d}{}{r}",
+                        skill_path.display(),
+                        d = c_dim(),
+                        r = c_reset()
+                    );
                     any = true;
                 }
                 Err(e) => {
@@ -88,7 +93,11 @@ pub(crate) fn cmd_skill_unlink(slug: &str, target: SkillTarget, as_json: bool) {
         ),
         Ok(action) => println!(
             "{}✓{} {} {} from {}",
-            "\x1b[32m", c_reset(), action.action, action.slug, action.target
+            "\x1b[32m",
+            c_reset(),
+            action.action,
+            action.slug,
+            action.target
         ),
         Err(error) => fail(&error),
     }
@@ -109,7 +118,11 @@ fn print_report(report: &SkillSyncReport, as_json: bool, operation: &str) {
     for action in &report.actions {
         println!(
             "  {}✓{} {:<12} {:<11} {}",
-            "\x1b[32m", c_reset(), action.action, action.target, action.slug
+            "\x1b[32m",
+            c_reset(),
+            action.action,
+            action.target,
+            action.slug
         );
     }
     for conflict in &report.conflicts {
@@ -141,8 +154,20 @@ fn print_inventory(items: &[SkillSyncEntry], as_json: bool) {
             item.slug,
             enum_label(&item.state),
             enum_label(&item.compatibility),
-            if item.claude_managed { "managed" } else if item.claude_path.is_some() { "native" } else { "-" },
-            if item.codex_managed { "managed" } else if item.codex_path.is_some() { "native" } else { "-" },
+            if item.claude_managed {
+                "managed"
+            } else if item.claude_path.is_some() {
+                "native"
+            } else {
+                "-"
+            },
+            if item.codex_managed {
+                "managed"
+            } else if item.codex_path.is_some() {
+                "native"
+            } else {
+                "-"
+            },
         );
         for warning in &item.warnings {
             println!("  {}! {}{}", c_dim(), warning, c_reset());

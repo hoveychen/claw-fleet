@@ -33,7 +33,10 @@ pub(crate) fn list_guard_allow_rules(
 }
 
 #[tauri::command(async)]
-pub(crate) fn remove_guard_allow_rule(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+pub(crate) fn remove_guard_allow_rule(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
     state.backend.remove_guard_allow_rule(&id)
 }
 
@@ -45,11 +48,7 @@ pub(crate) async fn analyze_guard_command(
     lang: String,
 ) -> Result<String, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || {
-        backend
-            .analyze_guard_command(&command, &context, &lang)
-    })
-    .await
-    .map_err(|e| format!("task join error: {e}"))?
+    tokio::task::spawn_blocking(move || backend.analyze_guard_command(&command, &context, &lang))
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
 }
-

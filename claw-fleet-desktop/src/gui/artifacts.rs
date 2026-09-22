@@ -135,7 +135,9 @@ pub(crate) fn export_artifact_folder(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::artifacts::FolderZip, String> {
     let probe = crate::cmd_probe::CmdProbe::start("export_artifact_folder", &directory);
-    let result = state.backend.export_artifact_folder(&workspace_path, &directory, &dest);
+    let result = state
+        .backend
+        .export_artifact_folder(&workspace_path, &directory, &dest);
     probe.done(|| match &result {
         Ok(r) => format!("{} member(s) → {dest}", r.member_count),
         Err(e) => e.clone(),
@@ -150,7 +152,9 @@ pub(crate) fn artifact_folder_zip_plan(
     directory: String,
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::artifacts::FolderZip {
-    state.backend.artifact_folder_zip_plan(&workspace_path, &directory)
+    state
+        .backend
+        .artifact_folder_zip_plan(&workspace_path, &directory)
 }
 
 // ── Folders ──────────────────────────────────────────────────────────────────
@@ -194,14 +198,13 @@ pub(crate) fn rename_artifact_folder(
     to: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<usize, String> {
-    state.backend.rename_artifact_folder(&workspace_path, &from, &to)
+    state
+        .backend
+        .rename_artifact_folder(&workspace_path, &from, &to)
 }
 
 #[tauri::command(async)]
-pub(crate) fn delete_artifact(
-    id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub(crate) fn delete_artifact(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.delete_artifact(&id)
 }
 
@@ -251,8 +254,7 @@ fn export_artifact_inner(
     // reported, and for a 0-byte artifact even `start = 0` satisfies that.
     // Exporting an empty deliverable must still produce an empty file.
     let size = state.backend.get_artifact(id)?.size_bytes;
-    let mut file =
-        std::fs::File::create(&dest).map_err(|e| format!("create '{dest}': {e}"))?;
+    let mut file = std::fs::File::create(&dest).map_err(|e| format!("create '{dest}': {e}"))?;
     let mut offset: u64 = 0;
     while offset < size {
         let slice = {
@@ -263,7 +265,9 @@ fn export_artifact_inner(
         // A backend that answers a range with nothing would otherwise spin
         // here forever rather than failing.
         if read == 0 {
-            return Err(format!("artifact '{id}' returned no bytes at offset {offset}"));
+            return Err(format!(
+                "artifact '{id}' returned no bytes at offset {offset}"
+            ));
         }
         file.write_all(&slice.bytes)
             .map_err(|e| format!("write '{dest}': {e}"))?;
@@ -298,7 +302,10 @@ pub(crate) fn export_bytes(dest: String, bytes: Vec<u8>) -> Result<(), String> {
 /// so one slow or failed call erased both of them with nothing on screen to
 /// explain it. The buttons now decide on the host alone (`canRevealPath`) and
 /// pass an id, which is also the narrower thing to accept from a webview.
-fn blob_path_of(id: &str, state: &tauri::State<'_, AppState>) -> Result<std::path::PathBuf, String> {
+fn blob_path_of(
+    id: &str,
+    state: &tauri::State<'_, AppState>,
+) -> Result<std::path::PathBuf, String> {
     let artifact = state.backend.get_artifact(id)?;
     let root = claw_fleet_core::artifacts::artifacts_dir()
         .ok_or_else(|| "cannot determine home dir".to_string())?;
@@ -403,7 +410,10 @@ mod tests {
         // The header a media element checks before it will try to seek at all.
         assert_eq!(header(&resp, "Accept-Ranges"), Some("bytes"));
         assert_eq!(header(&resp, "Content-Type"), Some("video/mp4"));
-        assert!(resp.headers().get("Content-Range").is_none(), "a 200 must not claim a range");
+        assert!(
+            resp.headers().get("Content-Range").is_none(),
+            "a 200 must not claim a range"
+        );
         assert_eq!(resp.body().len(), 1024);
     }
 
@@ -414,7 +424,10 @@ mod tests {
         // to whatever chunk arrived first.
         let resp = artifact_response(Ok(blob(Some((1000, 1099)), 100, 5_000_000)), true);
         assert_eq!(resp.status(), 206);
-        assert_eq!(header(&resp, "Content-Range"), Some("bytes 1000-1099/5000000"));
+        assert_eq!(
+            header(&resp, "Content-Range"),
+            Some("bytes 1000-1099/5000000")
+        );
         assert_eq!(resp.body().len(), 100);
     }
 

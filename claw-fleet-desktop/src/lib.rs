@@ -10,8 +10,8 @@ mod cmd_probe;
 pub mod fleet_binary;
 mod gui;
 pub mod keep_awake;
-mod main_thread_probe;
 pub mod local_backend;
+mod main_thread_probe;
 pub mod rca_provision;
 pub mod traffic_lights;
 pub mod version_check;
@@ -93,13 +93,10 @@ pub mod desktop_pattern_update {
             let lv = local_version(&local);
             let bv = bundled_version(app_handle);
             if bv > lv {
-                if let Ok(bundled_path) = app_handle
-                    .path()
-                    .resolve(
-                        "resources/audit-patterns.json",
-                        tauri::path::BaseDirectory::Resource,
-                    )
-                {
+                if let Ok(bundled_path) = app_handle.path().resolve(
+                    "resources/audit-patterns.json",
+                    tauri::path::BaseDirectory::Resource,
+                ) {
                     if let Ok(content) = std::fs::read_to_string(&bundled_path) {
                         let _ = atomic_write(&local, &content);
                         audit::reload_patterns();
@@ -112,18 +109,13 @@ pub mod desktop_pattern_update {
             return;
         }
         // No local file — seed from bundled resource.
-        if let Ok(bundled_path) = app_handle
-            .path()
-            .resolve(
-                "resources/audit-patterns.json",
-                tauri::path::BaseDirectory::Resource,
-            )
-        {
+        if let Ok(bundled_path) = app_handle.path().resolve(
+            "resources/audit-patterns.json",
+            tauri::path::BaseDirectory::Resource,
+        ) {
             if let Ok(content) = std::fs::read_to_string(&bundled_path) {
                 let _ = atomic_write(&local, &content);
-                crate::log_debug(
-                    "pattern_update: seeded local patterns from bundled resource",
-                );
+                crate::log_debug("pattern_update: seeded local patterns from bundled resource");
             }
         }
     }
@@ -141,10 +133,7 @@ pub mod desktop_pattern_update {
     fn atomic_write(target: &std::path::Path, content: &str) -> Result<(), String> {
         let dir = target.parent().ok_or("no parent dir")?;
         std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
-        let tmp = dir.join(format!(
-            ".fleet-audit-patterns-{}.tmp",
-            std::process::id()
-        ));
+        let tmp = dir.join(format!(".fleet-audit-patterns-{}.tmp", std::process::id()));
         std::fs::write(&tmp, content).map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
             format!("write tmp: {e}")

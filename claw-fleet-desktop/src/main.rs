@@ -21,7 +21,10 @@ fn main() {
     {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            let thread = std::thread::current().name().unwrap_or("<unnamed>").to_string();
+            let thread = std::thread::current()
+                .name()
+                .unwrap_or("<unnamed>")
+                .to_string();
             claw_fleet_core::log_debug(&format!("PANIC on thread '{thread}': {info}"));
             default_hook(info);
         }));

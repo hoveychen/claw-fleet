@@ -21,7 +21,9 @@ use std::path::Path;
 /// Bodies of the commands that run inlined on the event loop, as
 /// `(file, fn name, body)`.
 fn sync_command_bodies() -> Vec<(String, String, String)> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("gui");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("gui");
     let mut out = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .expect("src/gui must exist")
@@ -40,8 +42,8 @@ fn sync_command_bodies() -> Vec<(String, String, String)> {
             }
             // The signature can sit a few lines down, behind doc comments or
             // other attributes.
-            let Some(sig_at) = (i + 1..(i + 8).min(lines.len()))
-                .find(|&j| lines[j].contains("fn "))
+            let Some(sig_at) =
+                (i + 1..(i + 8).min(lines.len())).find(|&j| lines[j].contains("fn "))
             else {
                 continue;
             };

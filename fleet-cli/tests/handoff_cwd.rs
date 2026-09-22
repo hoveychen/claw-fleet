@@ -35,7 +35,13 @@ const SID: &str = "sess-handoff-cwd-test";
 fn claude_encode(p: &Path) -> String {
     p.to_string_lossy()
         .chars()
-        .map(|c| if c == '/' || c == '.' || c == '_' { '-' } else { c })
+        .map(|c| {
+            if c == '/' || c == '.' || c == '_' {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -53,11 +59,7 @@ fn write_transcript(fleet_home: &Path, session_cwd: &Path) {
         "message": {"role": "user", "content": "hi"},
         "timestamp": "2026-07-11T00:00:00.000Z",
     });
-    std::fs::write(
-        projects.join(format!("{SID}.jsonl")),
-        format!("{line}\n"),
-    )
-    .unwrap();
+    std::fs::write(projects.join(format!("{SID}.jsonl")), format!("{line}\n")).unwrap();
 }
 
 /// The pending handoff record `fleet handoff` just wrote.
@@ -152,7 +154,10 @@ fn handoff_from_session_cwd_is_unchanged() {
     );
 
     let rec = pending(&home);
-    assert_eq!(Path::new(rec["workspacePath"].as_str().unwrap()), repo.as_path());
+    assert_eq!(
+        Path::new(rec["workspacePath"].as_str().unwrap()),
+        repo.as_path()
+    );
     assert!(
         rec["predecessorCwd"].is_null(),
         "no shell-cwd hint when the agent never left the session cwd: {rec:?}"

@@ -21,11 +21,7 @@ use super::*;
 /// `install_app_menu` is the one part that must stay on the main thread (it
 /// builds a native menu), so it is dispatched there explicitly.
 #[tauri::command(async)]
-pub(crate) fn set_locale(
-    app: tauri::AppHandle,
-    locale: String,
-    state: tauri::State<'_, AppState>,
-) {
+pub(crate) fn set_locale(app: tauri::AppHandle, locale: String, state: tauri::State<'_, AppState>) {
     let prev = std::mem::replace(&mut *state.locale.lock().unwrap(), locale.clone());
     let title = state.user_title.lock().unwrap().clone();
     // Refresh every installed guidance carrier on this startup sync, so
@@ -41,4 +37,3 @@ pub(crate) fn set_locale(
         let _ = app.run_on_main_thread(move || install_app_menu(&handle));
     }
 }
-

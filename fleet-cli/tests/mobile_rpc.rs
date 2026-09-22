@@ -260,11 +260,23 @@ fn token_gated_serve_allows_cross_origin_mobile_rpc() {
     let port = wait_for_port(&port_file, &mut serve);
 
     let (status, headers) = options(port, "/mobile_rpc");
-    assert_eq!(status, 204, "preflight must be answered before auth\n{headers}");
+    assert_eq!(
+        status, 204,
+        "preflight must be answered before auth\n{headers}"
+    );
     let lower = headers.to_ascii_lowercase();
-    assert!(lower.contains("access-control-allow-origin: *"), "got: {headers}");
-    assert!(lower.contains("access-control-allow-headers"), "got: {headers}");
-    assert!(lower.contains("authorization"), "token must be an allowed header\n{headers}");
+    assert!(
+        lower.contains("access-control-allow-origin: *"),
+        "got: {headers}"
+    );
+    assert!(
+        lower.contains("access-control-allow-headers"),
+        "got: {headers}"
+    );
+    assert!(
+        lower.contains("authorization"),
+        "token must be an allowed header\n{headers}"
+    );
 
     // The real request (with token) must also carry ACAO headers, otherwise the browser won't let the page read the response.
     let (status, body) = post(
@@ -275,7 +287,8 @@ fn token_gated_serve_allows_cross_origin_mobile_rpc() {
     );
     assert_eq!(status, 200, "{}", serve.logs());
     assert!(
-        body.to_ascii_lowercase().contains("access-control-allow-origin: *"),
+        body.to_ascii_lowercase()
+            .contains("access-control-allow-origin: *"),
         "got: {body}"
     );
 }
@@ -299,7 +312,8 @@ fn cross_origin_rejection_is_readable_by_the_page() {
     );
     assert_eq!(status, 403, "{}", serve.logs());
     assert!(
-        body.to_ascii_lowercase().contains("access-control-allow-origin: *"),
+        body.to_ascii_lowercase()
+            .contains("access-control-allow-origin: *"),
         "a rejected cross-origin request must still be readable\ngot: {body}"
     );
 }
@@ -325,8 +339,9 @@ fn no_auth_webui_does_not_open_cross_origin() {
     );
     assert_eq!(status, 200, "{}", serve.logs());
     assert!(
-        !body.to_ascii_lowercase().contains("access-control-allow-origin"),
+        !body
+            .to_ascii_lowercase()
+            .contains("access-control-allow-origin"),
         "an unauthenticated port must not advertise CORS\ngot: {body}"
     );
 }
-

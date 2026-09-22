@@ -2,10 +2,18 @@
 
 use crate::fmt::*;
 
-pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool, gen_lessons: bool, gen_summary: bool, as_json: bool, lang: &str) {
+pub(crate) fn cmd_report(
+    date: Option<String>,
+    backfill: bool,
+    regenerate: bool,
+    gen_lessons: bool,
+    gen_summary: bool,
+    as_json: bool,
+    lang: &str,
+) {
     use claw_fleet_core::daily_report::{
-        ReportStore, generate_report_from_sessions, local_tz_tag, scan_sessions_for_date,
-        generate_lessons_routed, generate_ai_summary_routed,
+        generate_ai_summary_routed, generate_lessons_routed, generate_report_from_sessions,
+        local_tz_tag, scan_sessions_for_date, ReportStore,
     };
     use claw_fleet_core::llm_provider::LlmConfig;
     let llm_cfg = LlmConfig::default();
@@ -83,9 +91,14 @@ pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool,
                 eprintln!("No report for {}. Use --regenerate first.", target_date);
                 std::process::exit(1);
             }
-            Err(e) => { eprintln!("Error: {}", e); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
         }
-        if !gen_lessons { return; }
+        if !gen_lessons {
+            return;
+        }
     }
 
     if gen_lessons {
@@ -112,7 +125,10 @@ pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool,
                 eprintln!("No report for {}. Use --regenerate first.", target_date);
                 std::process::exit(1);
             }
-            Err(e) => { eprintln!("Error: {}", e); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -152,7 +168,10 @@ fn print_lessons(lessons: &[claw_fleet_core::daily_report::Lesson]) {
     for (i, lesson) in lessons.iter().enumerate() {
         println!("{}. {b}{}{r}", i + 1, lesson.content);
         println!("   {d}Why:{r} {}", lesson.reason);
-        println!("   {d}From:{r} {} / {}", lesson.workspace_name, lesson.session_id);
+        println!(
+            "   {d}From:{r} {} / {}",
+            lesson.workspace_name, lesson.session_id
+        );
         println!();
     }
 }

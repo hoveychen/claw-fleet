@@ -3,7 +3,9 @@ use super::*;
 // ── Setup status check ───────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Result<ui_types::SetupStatus, String> {
+pub(crate) async fn check_setup_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<ui_types::SetupStatus, String> {
     // Only hold the backend lock briefly to get the cached session list,
     // then run the (potentially slow) subprocess checks outside the lock.
     let sessions = {
@@ -65,15 +67,20 @@ impl HarnessInstallProgress {
 pub(crate) async fn install_harness(
     source: String,
     app: tauri::AppHandle,
-) -> Result<claw_fleet_core::harness_status::HarnessStatus, claw_fleet_core::harness_install::InstallError>
-{
+) -> Result<
+    claw_fleet_core::harness_status::HarnessStatus,
+    claw_fleet_core::harness_install::InstallError,
+> {
     tauri::async_runtime::spawn_blocking(move || {
         let progress_source = source.clone();
         let emitter = app.clone();
         let progress = move |line: &str| {
             let _ = emitter.emit(
                 "harness-install-progress",
-                HarnessInstallProgress { source: progress_source.clone(), line: line.to_string() },
+                HarnessInstallProgress {
+                    source: progress_source.clone(),
+                    line: line.to_string(),
+                },
             );
         };
         let result = claw_fleet_core::harness_install::install_harness(&source, &progress);
@@ -95,15 +102,20 @@ pub(crate) async fn install_harness(
 pub(crate) async fn update_harness(
     source: String,
     app: tauri::AppHandle,
-) -> Result<claw_fleet_core::harness_install::UpdateReport, claw_fleet_core::harness_install::InstallError>
-{
+) -> Result<
+    claw_fleet_core::harness_install::UpdateReport,
+    claw_fleet_core::harness_install::InstallError,
+> {
     tauri::async_runtime::spawn_blocking(move || {
         let progress_source = source.clone();
         let emitter = app.clone();
         let progress = move |line: &str| {
             let _ = emitter.emit(
                 "harness-install-progress",
-                HarnessInstallProgress { source: progress_source.clone(), line: line.to_string() },
+                HarnessInstallProgress {
+                    source: progress_source.clone(),
+                    line: line.to_string(),
+                },
             );
         };
         let result = claw_fleet_core::harness_install::update_harness(&source, &progress);
@@ -134,7 +146,10 @@ pub(crate) async fn install_node_runtime(
         let progress = move |line: &str| {
             let _ = emitter.emit(
                 "harness-install-progress",
-                HarnessInstallProgress { source: "node".to_string(), line: line.to_string() },
+                HarnessInstallProgress {
+                    source: "node".to_string(),
+                    line: line.to_string(),
+                },
             );
         };
         claw_fleet_core::harness_install::install_node(&progress)
@@ -221,7 +236,11 @@ pub(crate) async fn claude_login_poll(
         claw_fleet_core::proc_runner::ProcStatus::Starting
             | claw_fleet_core::proc_runner::ProcStatus::Running
     );
-    Ok(ClaudeLoginPoll { parse, running, token_saved })
+    Ok(ClaudeLoginPoll {
+        parse,
+        running,
+        token_saved,
+    })
 }
 
 #[tauri::command]
@@ -276,13 +295,16 @@ pub(crate) async fn codex_login_start(
     let home = session::real_home_dir()
         .map(|h| h.to_string_lossy().into_owned())
         .ok_or("cannot resolve home directory")?;
-    let command = if device_auth { "codex login --device-auth" } else { "codex login" };
+    let command = if device_auth {
+        "codex login --device-auth"
+    } else {
+        "codex login"
+    };
     let backend = state.backend.clone();
-    let record = tokio::task::spawn_blocking(move || {
-        backend.spawn_proc(home, command.into(), 100, 30)
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))??;
+    let record =
+        tokio::task::spawn_blocking(move || backend.spawn_proc(home, command.into(), 100, 30))
+            .await
+            .map_err(|e| format!("join: {e}"))??;
     Ok(record.id)
 }
 
@@ -293,11 +315,9 @@ pub(crate) async fn codex_login_poll(
 ) -> Result<CodexLoginPoll, String> {
     use base64::Engine as _;
     let backend = state.backend.clone();
-    let chunk = tokio::task::spawn_blocking(move || {
-        backend.proc_output(id, Some(0))
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))??;
+    let chunk = tokio::task::spawn_blocking(move || backend.proc_output(id, Some(0)))
+        .await
+        .map_err(|e| format!("join: {e}"))??;
 
     let raw = base64::engine::general_purpose::STANDARD
         .decode(&chunk.data_b64)
@@ -314,7 +334,11 @@ pub(crate) async fn codex_login_poll(
         && claw_fleet_core::harness_status::probe_source("codex")
             .and_then(|s| s.logged_in)
             .unwrap_or(false);
-    Ok(CodexLoginPoll { parse, running, logged_in })
+    Ok(CodexLoginPoll {
+        parse,
+        running,
+        logged_in,
+    })
 }
 
 #[tauri::command]
@@ -350,17 +374,14 @@ pub(crate) async fn remote_codex_login_start(
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     let ssh_target = crate::rca_provision::ssh_target_for_workspace(&path)?;
-    let command =
-        claw_fleet_core::harness_login::codex_device_auth_ssh_command(&ssh_target)?;
+    let command = claw_fleet_core::harness_login::codex_device_auth_ssh_command(&ssh_target)?;
     let home = session::real_home_dir()
         .map(|h| h.to_string_lossy().into_owned())
         .ok_or("cannot resolve home directory")?;
     let backend = state.backend.clone();
-    let record = tokio::task::spawn_blocking(move || {
-        backend.spawn_proc(home, command, 100, 30)
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))??;
+    let record = tokio::task::spawn_blocking(move || backend.spawn_proc(home, command, 100, 30))
+        .await
+        .map_err(|e| format!("join: {e}"))??;
     Ok(record.id)
 }
 
@@ -372,11 +393,9 @@ pub(crate) async fn remote_codex_login_poll(
 ) -> Result<RemoteCodexLoginPoll, String> {
     use base64::Engine as _;
     let backend = state.backend.clone();
-    let chunk = tokio::task::spawn_blocking(move || {
-        backend.proc_output(id, Some(0))
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))??;
+    let chunk = tokio::task::spawn_blocking(move || backend.proc_output(id, Some(0)))
+        .await
+        .map_err(|e| format!("join: {e}"))??;
 
     let raw = base64::engine::general_purpose::STANDARD
         .decode(&chunk.data_b64)
@@ -405,7 +424,11 @@ pub(crate) async fn remote_codex_login_poll(
     } else {
         false
     };
-    Ok(RemoteCodexLoginPoll { parse, running, logged_in })
+    Ok(RemoteCodexLoginPoll {
+        parse,
+        running,
+        logged_in,
+    })
 }
 
 // ── dsh credential flow (wizard) ─────────────────────────────────────────────
@@ -426,18 +449,13 @@ pub(crate) async fn dsh_credential_refs() -> Result<Vec<String>, String> {
 pub(crate) async fn dsh_credentials_describe(
     refs: Vec<String>,
 ) -> Result<serde_json::Value, String> {
-    tokio::task::spawn_blocking(move || {
-        claw_fleet_core::dsh_source::dsh_credentials_describe(refs)
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))?
+    tokio::task::spawn_blocking(move || claw_fleet_core::dsh_source::dsh_credentials_describe(refs))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
-pub(crate) async fn dsh_credentials_set(
-    reference: String,
-    value: String,
-) -> Result<(), String> {
+pub(crate) async fn dsh_credentials_set(reference: String, value: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         claw_fleet_core::dsh_source::dsh_credentials_set(&reference, &value)
     })

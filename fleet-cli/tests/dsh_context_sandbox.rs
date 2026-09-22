@@ -17,7 +17,15 @@ use std::process::Command;
 
 fn dsh_context(fleet_home: &std::path::Path, session: &str) -> serde_json::Value {
     let out = Command::new(env!("CARGO_BIN_EXE_fleet-cli"))
-        .args(["dsh-context", "--session", session, "--title", "Boss", "--locale", "en"])
+        .args([
+            "dsh-context",
+            "--session",
+            session,
+            "--title",
+            "Boss",
+            "--locale",
+            "en",
+        ])
         .arg("--cwd")
         .arg(fleet_home)
         .env("FLEET_HOME", fleet_home)

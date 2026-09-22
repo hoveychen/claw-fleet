@@ -135,7 +135,9 @@ async fn main() {
 
     let data_dir = PathBuf::from(env_or("RELAY_DATA_DIR", "/data"));
     let static_dir = PathBuf::from(env_or("RELAY_STATIC_DIR", "./static"));
-    let port: u16 = env_or("RELAY_PORT", "8080").parse().expect("RELAY_PORT must be a port number");
+    let port: u16 = env_or("RELAY_PORT", "8080")
+        .parse()
+        .expect("RELAY_PORT must be a port number");
     let subject = env_or("RELAY_VAPID_SUBJECT", "mailto:fleet-relay@muveeai.com");
 
     let vapid_key = match std::env::var("RELAY_VAPID_KEY") {
@@ -173,16 +175,26 @@ async fn main() {
     let conn_limiter = ConnLimiter::new(max_total, max_per_ip);
     let conn_rate = ConnRateLimiter::new(rate_burst, rate_per_sec);
     let registry = Registry::new(max_channels, max_per_channel);
-    let max_ws_message_bytes =
-        env_usize("RELAY_MAX_WS_MESSAGE_BYTES", ws::DEFAULT_MAX_WS_MESSAGE_BYTES);
+    let max_ws_message_bytes = env_usize(
+        "RELAY_MAX_WS_MESSAGE_BYTES",
+        ws::DEFAULT_MAX_WS_MESSAGE_BYTES,
+    );
 
     let applinks = AppLinks::from_env();
     log::info!(
         "app association: iOS Universal Link {} (RELAY_IOS_APP_ID), Android App Link {} \
          (RELAY_ANDROID_PACKAGE + RELAY_ANDROID_SHA256) — unset sides 404, so the \
          native shell cannot pair by deep link",
-        if applinks.ios_configured() { "enabled" } else { "disabled" },
-        if applinks.android_configured() { "enabled" } else { "disabled" },
+        if applinks.ios_configured() {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        if applinks.android_configured() {
+            "enabled"
+        } else {
+            "disabled"
+        },
     );
 
     let state = Arc::new(AppState {

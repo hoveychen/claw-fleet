@@ -95,7 +95,11 @@ mod install_cli_tests {
     fn real_failure_carries_failed_code_and_raw_stderr_detail() {
         let payload = osascript_failure_code("ln: /usr/local/bin/fleet: Permission denied");
         let mut lines = payload.splitn(2, '\n');
-        assert_eq!(lines.next(), Some("failed"), "genuine failures use the `failed` code");
+        assert_eq!(
+            lines.next(),
+            Some("failed"),
+            "genuine failures use the `failed` code"
+        );
         assert_eq!(
             lines.next(),
             Some("ln: /usr/local/bin/fleet: Permission denied"),
@@ -112,7 +116,6 @@ mod install_cli_tests {
         );
     }
 }
-
 
 #[derive(Serialize, Clone)]
 pub(crate) struct DetectedTool {

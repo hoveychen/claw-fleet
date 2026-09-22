@@ -201,4 +201,3 @@ pub(crate) fn open_notification_settings() {
             .spawn();
     }
 }
-

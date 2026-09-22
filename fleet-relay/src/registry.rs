@@ -307,7 +307,10 @@ impl Registry {
                 self.max_pending
             );
         }
-        ch.pending.push_back(Pending { msg, at: Instant::now() });
+        ch.pending.push_back(Pending {
+            msg,
+            at: Instant::now(),
+        });
         Delivery::Queued(ch.pending.len())
     }
 
@@ -334,8 +337,12 @@ impl Registry {
     /// After `role`'s membership changed, tell the opposite role about it.
     fn broadcast_membership(ch: &Channel, changed: Role) {
         let frame = match changed {
-            Role::Client => OutFrame::Presence { clients: ch.clients.len() },
-            Role::Agent => OutFrame::AgentStatus { online: !ch.agents.is_empty() },
+            Role::Client => OutFrame::Presence {
+                clients: ch.clients.len(),
+            },
+            Role::Agent => OutFrame::AgentStatus {
+                online: !ch.agents.is_empty(),
+            },
         };
         let Ok(serialized) = serde_json::to_string(&frame) else {
             return;
@@ -392,7 +399,11 @@ mod tests {
 
         // No agent yet — the frame must be taken into custody, not dropped.
         let d = reg.deliver_or_queue("ch", text(json!({"answer": 1})));
-        assert_eq!(d, Delivery::Queued(1), "an offline agent must not lose the answer");
+        assert_eq!(
+            d,
+            Delivery::Queued(1),
+            "an offline agent must not lose the answer"
+        );
 
         // The agent arrives and receives the held frame.
         let (agent_tx, mut agent_rx) = test_channel();
@@ -408,7 +419,9 @@ mod tests {
     fn queue_outlives_the_client_that_handed_it_over() {
         let reg = Registry::default();
         let (client_tx, _client_rx) = test_channel();
-        let client = reg.join("ch", Role::Client, client_tx).expect("client joins");
+        let client = reg
+            .join("ch", Role::Client, client_tx)
+            .expect("client joins");
         reg.deliver_or_queue("ch", text(json!({"answer": 2})));
 
         // The phone drops off right after submitting — the usual case, since its
@@ -458,7 +471,11 @@ mod tests {
         drain(&mut agent_rx);
 
         let d = reg.deliver_or_queue("ch", text(json!({"answer": 3})));
-        assert_eq!(d, Delivery::Delivered(1), "an online agent is served directly");
+        assert_eq!(
+            d,
+            Delivery::Delivered(1),
+            "an online agent is served directly"
+        );
         assert_eq!(drain(&mut agent_rx), vec![json!({"answer": 3})]);
     }
 
@@ -481,7 +498,10 @@ mod tests {
             !got.contains(&json!({"answer": 1})),
             "the oldest frame is the one dropped at the cap"
         );
-        assert!(got.contains(&json!({"answer": 3})), "the newest frame is kept");
+        assert!(
+            got.contains(&json!({"answer": 3})),
+            "the newest frame is kept"
+        );
     }
 
     #[test]
@@ -536,13 +556,28 @@ mod tests {
         drain(&mut agent2_rx);
         drain(&mut client_rx);
 
-        let n = reg.forward("ch", Role::Client, &OutFrame::Msg { payload: json!({"x": 1}) });
+        let n = reg.forward(
+            "ch",
+            Role::Client,
+            &OutFrame::Msg {
+                payload: json!({"x": 1}),
+            },
+        );
         assert_eq!(n, 2, "client frame reaches both agents");
         assert_eq!(drain(&mut agent_rx).len(), 1);
         assert_eq!(drain(&mut agent2_rx).len(), 1);
-        assert!(drain(&mut client_rx).is_empty(), "sender's own role gets nothing");
+        assert!(
+            drain(&mut client_rx).is_empty(),
+            "sender's own role gets nothing"
+        );
 
-        let n = reg.forward("ch", Role::Agent, &OutFrame::Msg { payload: json!({"y": 2}) });
+        let n = reg.forward(
+            "ch",
+            Role::Agent,
+            &OutFrame::Msg {
+                payload: json!({"y": 2}),
+            },
+        );
         assert_eq!(n, 1, "agent frame reaches the one client");
         let got = drain(&mut client_rx);
         assert_eq!(got.len(), 1);
@@ -562,8 +597,15 @@ mod tests {
         let blob = vec![0x1f, 0x8b, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef];
         let n = reg.forward_binary("ch", Role::Agent, blob.clone());
         assert_eq!(n, 1, "agent binary frame reaches the one client");
-        assert_eq!(drain_binary(&mut client_rx), vec![blob], "bytes forwarded verbatim");
-        assert!(agent_rx.try_recv().is_err(), "sender's own role gets nothing");
+        assert_eq!(
+            drain_binary(&mut client_rx),
+            vec![blob],
+            "bytes forwarded verbatim"
+        );
+        assert!(
+            agent_rx.try_recv().is_err(),
+            "sender's own role gets nothing"
+        );
     }
 
     #[test]
@@ -577,7 +619,10 @@ mod tests {
 
         let n = reg.forward("ch-a", Role::Agent, &OutFrame::Msg { payload: json!(1) });
         assert_eq!(n, 0, "no client in ch-a");
-        assert!(drain(&mut c_rx).is_empty(), "ch-b client must not receive ch-a traffic");
+        assert!(
+            drain(&mut c_rx).is_empty(),
+            "ch-b client must not receive ch-a traffic"
+        );
     }
 
     #[test]
@@ -620,12 +665,21 @@ mod tests {
     fn channel_count_cap_rejects_new_channels_only() {
         let reg = Registry::new(1, 64); // room for exactly one channel
         let (a_tx, _a) = test_channel();
-        assert!(reg.join("ch-a", Role::Agent, a_tx).is_some(), "first channel admitted");
+        assert!(
+            reg.join("ch-a", Role::Agent, a_tx).is_some(),
+            "first channel admitted"
+        );
         let (b_tx, _b) = test_channel();
-        assert!(reg.join("ch-b", Role::Agent, b_tx).is_none(), "second channel over cap");
+        assert!(
+            reg.join("ch-b", Role::Agent, b_tx).is_none(),
+            "second channel over cap"
+        );
         // But another connection to the *existing* channel is fine (no new bucket).
         let (a2_tx, _a2) = test_channel();
-        assert!(reg.join("ch-a", Role::Client, a2_tx).is_some(), "existing channel still accepts");
+        assert!(
+            reg.join("ch-a", Role::Client, a2_tx).is_some(),
+            "existing channel still accepts"
+        );
     }
 
     #[test]
@@ -636,13 +690,22 @@ mod tests {
         assert!(reg.join("ch", Role::Agent, a1).is_some());
         assert!(reg.join("ch", Role::Agent, a2).is_some());
         let (a3, _r3) = test_channel();
-        assert!(reg.join("ch", Role::Agent, a3).is_none(), "third agent over per-channel cap");
+        assert!(
+            reg.join("ch", Role::Agent, a3).is_none(),
+            "third agent over per-channel cap"
+        );
         // The other role has its own budget in the same channel.
         let (c1, _rc1) = test_channel();
         let (c2, _rc2) = test_channel();
-        assert!(reg.join("ch", Role::Client, c1).is_some(), "client role has its own cap");
+        assert!(
+            reg.join("ch", Role::Client, c1).is_some(),
+            "client role has its own cap"
+        );
         assert!(reg.join("ch", Role::Client, c2).is_some());
         let (c3, _rc3) = test_channel();
-        assert!(reg.join("ch", Role::Client, c3).is_none(), "third client over per-channel cap");
+        assert!(
+            reg.join("ch", Role::Client, c3).is_none(),
+            "third client over per-channel cap"
+        );
     }
 }

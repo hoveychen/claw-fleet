@@ -10,10 +10,8 @@ pub(crate) struct TtsVoice {
     gender: String,
 }
 
-
 static VOICES_CACHE: std::sync::Mutex<Option<Vec<msedge_tts::voice::Voice>>> =
     std::sync::Mutex::new(None);
-
 
 fn cached_voices() -> Vec<msedge_tts::voice::Voice> {
     {
@@ -33,7 +31,6 @@ fn cached_voices() -> Vec<msedge_tts::voice::Voice> {
     }
 }
 
-
 struct VoiceMeta {
     zh_name: &'static str,
     en_name: &'static str,
@@ -41,59 +38,361 @@ struct VoiceMeta {
     gender_en: &'static str,
 }
 
-
 fn voice_display_map() -> &'static std::collections::HashMap<&'static str, VoiceMeta> {
     static MAP: OnceLock<std::collections::HashMap<&str, VoiceMeta>> = OnceLock::new();
     MAP.get_or_init(|| {
         let mut m = std::collections::HashMap::new();
         // zh-CN
-        m.insert("zh-CN-XiaoxiaoNeural", VoiceMeta { zh_name: "晓晓", en_name: "Xiaoxiao", gender_zh: "女", gender_en: "Female" });
-        m.insert("zh-CN-XiaoyiNeural", VoiceMeta { zh_name: "晓伊", en_name: "Xiaoyi", gender_zh: "女", gender_en: "Female" });
-        m.insert("zh-CN-YunjianNeural", VoiceMeta { zh_name: "云健", en_name: "Yunjian", gender_zh: "男", gender_en: "Male" });
-        m.insert("zh-CN-YunxiNeural", VoiceMeta { zh_name: "云希", en_name: "Yunxi", gender_zh: "男", gender_en: "Male" });
-        m.insert("zh-CN-YunxiaNeural", VoiceMeta { zh_name: "云夏", en_name: "Yunxia", gender_zh: "男", gender_en: "Male" });
-        m.insert("zh-CN-YunyangNeural", VoiceMeta { zh_name: "云扬", en_name: "Yunyang", gender_zh: "男", gender_en: "Male" });
-        m.insert("zh-CN-liaoning-XiaobeiNeural", VoiceMeta { zh_name: "晓北 (东北话)", en_name: "Xiaobei (Northeastern)", gender_zh: "女", gender_en: "Female" });
-        m.insert("zh-CN-shaanxi-XiaoniNeural", VoiceMeta { zh_name: "晓妮 (陕西话)", en_name: "Xiaoni (Shaanxi)", gender_zh: "女", gender_en: "Female" });
+        m.insert(
+            "zh-CN-XiaoxiaoNeural",
+            VoiceMeta {
+                zh_name: "晓晓",
+                en_name: "Xiaoxiao",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "zh-CN-XiaoyiNeural",
+            VoiceMeta {
+                zh_name: "晓伊",
+                en_name: "Xiaoyi",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "zh-CN-YunjianNeural",
+            VoiceMeta {
+                zh_name: "云健",
+                en_name: "Yunjian",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "zh-CN-YunxiNeural",
+            VoiceMeta {
+                zh_name: "云希",
+                en_name: "Yunxi",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "zh-CN-YunxiaNeural",
+            VoiceMeta {
+                zh_name: "云夏",
+                en_name: "Yunxia",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "zh-CN-YunyangNeural",
+            VoiceMeta {
+                zh_name: "云扬",
+                en_name: "Yunyang",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "zh-CN-liaoning-XiaobeiNeural",
+            VoiceMeta {
+                zh_name: "晓北 (东北话)",
+                en_name: "Xiaobei (Northeastern)",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "zh-CN-shaanxi-XiaoniNeural",
+            VoiceMeta {
+                zh_name: "晓妮 (陕西话)",
+                en_name: "Xiaoni (Shaanxi)",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
         // zh-HK
-        m.insert("zh-HK-HiuGaaiNeural", VoiceMeta { zh_name: "曉佳", en_name: "HiuGaai", gender_zh: "女", gender_en: "Female" });
-        m.insert("zh-HK-HiuMaanNeural", VoiceMeta { zh_name: "曉曼", en_name: "HiuMaan", gender_zh: "女", gender_en: "Female" });
-        m.insert("zh-HK-WanLungNeural", VoiceMeta { zh_name: "雲龍", en_name: "WanLung", gender_zh: "男", gender_en: "Male" });
+        m.insert(
+            "zh-HK-HiuGaaiNeural",
+            VoiceMeta {
+                zh_name: "曉佳",
+                en_name: "HiuGaai",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "zh-HK-HiuMaanNeural",
+            VoiceMeta {
+                zh_name: "曉曼",
+                en_name: "HiuMaan",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "zh-HK-WanLungNeural",
+            VoiceMeta {
+                zh_name: "雲龍",
+                en_name: "WanLung",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
         // zh-TW
-        m.insert("zh-TW-HsiaoChenNeural", VoiceMeta { zh_name: "曉臻", en_name: "HsiaoChen", gender_zh: "女", gender_en: "Female" });
-        m.insert("zh-TW-YunJheNeural", VoiceMeta { zh_name: "雲哲", en_name: "YunJhe", gender_zh: "男", gender_en: "Male" });
-        m.insert("zh-TW-HsiaoYuNeural", VoiceMeta { zh_name: "曉雨", en_name: "HsiaoYu", gender_zh: "女", gender_en: "Female" });
+        m.insert(
+            "zh-TW-HsiaoChenNeural",
+            VoiceMeta {
+                zh_name: "曉臻",
+                en_name: "HsiaoChen",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "zh-TW-YunJheNeural",
+            VoiceMeta {
+                zh_name: "雲哲",
+                en_name: "YunJhe",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "zh-TW-HsiaoYuNeural",
+            VoiceMeta {
+                zh_name: "曉雨",
+                en_name: "HsiaoYu",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
         // en-US
-        m.insert("en-US-AvaNeural", VoiceMeta { zh_name: "Ava", en_name: "Ava", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-AndrewNeural", VoiceMeta { zh_name: "Andrew", en_name: "Andrew", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-EmmaNeural", VoiceMeta { zh_name: "Emma", en_name: "Emma", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-BrianNeural", VoiceMeta { zh_name: "Brian", en_name: "Brian", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-AnaNeural", VoiceMeta { zh_name: "Ana", en_name: "Ana", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-AriaNeural", VoiceMeta { zh_name: "Aria", en_name: "Aria", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-ChristopherNeural", VoiceMeta { zh_name: "Christopher", en_name: "Christopher", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-EricNeural", VoiceMeta { zh_name: "Eric", en_name: "Eric", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-GuyNeural", VoiceMeta { zh_name: "Guy", en_name: "Guy", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-JennyNeural", VoiceMeta { zh_name: "Jenny", en_name: "Jenny", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-MichelleNeural", VoiceMeta { zh_name: "Michelle", en_name: "Michelle", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-RogerNeural", VoiceMeta { zh_name: "Roger", en_name: "Roger", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-SteffanNeural", VoiceMeta { zh_name: "Steffan", en_name: "Steffan", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-AndrewMultilingualNeural", VoiceMeta { zh_name: "Andrew (多语言)", en_name: "Andrew (Multilingual)", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-AvaMultilingualNeural", VoiceMeta { zh_name: "Ava (多语言)", en_name: "Ava (Multilingual)", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-US-BrianMultilingualNeural", VoiceMeta { zh_name: "Brian (多语言)", en_name: "Brian (Multilingual)", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-US-EmmaMultilingualNeural", VoiceMeta { zh_name: "Emma (多语言)", en_name: "Emma (Multilingual)", gender_zh: "女", gender_en: "Female" });
+        m.insert(
+            "en-US-AvaNeural",
+            VoiceMeta {
+                zh_name: "Ava",
+                en_name: "Ava",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-AndrewNeural",
+            VoiceMeta {
+                zh_name: "Andrew",
+                en_name: "Andrew",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-EmmaNeural",
+            VoiceMeta {
+                zh_name: "Emma",
+                en_name: "Emma",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-BrianNeural",
+            VoiceMeta {
+                zh_name: "Brian",
+                en_name: "Brian",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-AnaNeural",
+            VoiceMeta {
+                zh_name: "Ana",
+                en_name: "Ana",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-AriaNeural",
+            VoiceMeta {
+                zh_name: "Aria",
+                en_name: "Aria",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-ChristopherNeural",
+            VoiceMeta {
+                zh_name: "Christopher",
+                en_name: "Christopher",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-EricNeural",
+            VoiceMeta {
+                zh_name: "Eric",
+                en_name: "Eric",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-GuyNeural",
+            VoiceMeta {
+                zh_name: "Guy",
+                en_name: "Guy",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-JennyNeural",
+            VoiceMeta {
+                zh_name: "Jenny",
+                en_name: "Jenny",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-MichelleNeural",
+            VoiceMeta {
+                zh_name: "Michelle",
+                en_name: "Michelle",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-RogerNeural",
+            VoiceMeta {
+                zh_name: "Roger",
+                en_name: "Roger",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-SteffanNeural",
+            VoiceMeta {
+                zh_name: "Steffan",
+                en_name: "Steffan",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-AndrewMultilingualNeural",
+            VoiceMeta {
+                zh_name: "Andrew (多语言)",
+                en_name: "Andrew (Multilingual)",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-AvaMultilingualNeural",
+            VoiceMeta {
+                zh_name: "Ava (多语言)",
+                en_name: "Ava (Multilingual)",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-US-BrianMultilingualNeural",
+            VoiceMeta {
+                zh_name: "Brian (多语言)",
+                en_name: "Brian (Multilingual)",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-US-EmmaMultilingualNeural",
+            VoiceMeta {
+                zh_name: "Emma (多语言)",
+                en_name: "Emma (Multilingual)",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
         // en-GB
-        m.insert("en-GB-LibbyNeural", VoiceMeta { zh_name: "Libby", en_name: "Libby", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-GB-MaisieNeural", VoiceMeta { zh_name: "Maisie", en_name: "Maisie", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-GB-RyanNeural", VoiceMeta { zh_name: "Ryan", en_name: "Ryan", gender_zh: "男", gender_en: "Male" });
-        m.insert("en-GB-SoniaNeural", VoiceMeta { zh_name: "Sonia", en_name: "Sonia", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-GB-ThomasNeural", VoiceMeta { zh_name: "Thomas", en_name: "Thomas", gender_zh: "男", gender_en: "Male" });
+        m.insert(
+            "en-GB-LibbyNeural",
+            VoiceMeta {
+                zh_name: "Libby",
+                en_name: "Libby",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-GB-MaisieNeural",
+            VoiceMeta {
+                zh_name: "Maisie",
+                en_name: "Maisie",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-GB-RyanNeural",
+            VoiceMeta {
+                zh_name: "Ryan",
+                en_name: "Ryan",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
+        m.insert(
+            "en-GB-SoniaNeural",
+            VoiceMeta {
+                zh_name: "Sonia",
+                en_name: "Sonia",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-GB-ThomasNeural",
+            VoiceMeta {
+                zh_name: "Thomas",
+                en_name: "Thomas",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
         // en-AU
-        m.insert("en-AU-NatashaNeural", VoiceMeta { zh_name: "Natasha", en_name: "Natasha", gender_zh: "女", gender_en: "Female" });
-        m.insert("en-AU-WilliamMultilingualNeural", VoiceMeta { zh_name: "William (多语言)", en_name: "William (Multilingual)", gender_zh: "男", gender_en: "Male" });
+        m.insert(
+            "en-AU-NatashaNeural",
+            VoiceMeta {
+                zh_name: "Natasha",
+                en_name: "Natasha",
+                gender_zh: "女",
+                gender_en: "Female",
+            },
+        );
+        m.insert(
+            "en-AU-WilliamMultilingualNeural",
+            VoiceMeta {
+                zh_name: "William (多语言)",
+                en_name: "William (Multilingual)",
+                gender_zh: "男",
+                gender_en: "Male",
+            },
+        );
         m
     })
 }
-
 
 fn make_tts_voice(v: &msedge_tts::voice::Voice, locale: &str) -> TtsVoice {
     let short = v.short_name.clone().unwrap_or_else(|| v.name.clone());
@@ -102,7 +401,11 @@ fn make_tts_voice(v: &msedge_tts::voice::Voice, locale: &str) -> TtsVoice {
 
     let (display_name, gender) = if let Some(meta) = map.get(short.as_str()) {
         let name = if is_zh { meta.zh_name } else { meta.en_name };
-        let g = if is_zh { meta.gender_zh } else { meta.gender_en };
+        let g = if is_zh {
+            meta.gender_zh
+        } else {
+            meta.gender_en
+        };
         (name.to_string(), g.to_string())
     } else {
         // Fallback: extract name from ShortName (e.g. "en-IN-NeerjaNeural" → "Neerja")
@@ -114,7 +417,11 @@ fn make_tts_voice(v: &msedge_tts::voice::Voice, locale: &str) -> TtsVoice {
             .to_string();
         let g = v.gender.clone().unwrap_or_default();
         let gender = if is_zh {
-            match g.as_str() { "Female" => "女".to_string(), "Male" => "男".to_string(), _ => g }
+            match g.as_str() {
+                "Female" => "女".to_string(),
+                "Male" => "男".to_string(),
+                _ => g,
+            }
         } else {
             g
         };
@@ -128,7 +435,6 @@ fn make_tts_voice(v: &msedge_tts::voice::Voice, locale: &str) -> TtsVoice {
         gender,
     }
 }
-
 
 #[tauri::command]
 pub(crate) async fn get_tts_voices(locale: String) -> Vec<TtsVoice> {
@@ -152,15 +458,21 @@ pub(crate) async fn get_tts_voices(locale: String) -> Vec<TtsVoice> {
         .collect();
 
     if filtered.is_empty() {
-        filtered = voices.iter().map(|v| make_tts_voice(v, &ui_locale)).collect();
+        filtered = voices
+            .iter()
+            .map(|v| make_tts_voice(v, &ui_locale))
+            .collect();
     }
 
     filtered
 }
 
-
 /// Synthesize text via Edge TTS and return raw MP3 bytes.
-fn synthesize_tts(text: &str, voice: Option<&str>, locale: Option<&str>) -> Result<Vec<u8>, String> {
+fn synthesize_tts(
+    text: &str,
+    voice: Option<&str>,
+    locale: Option<&str>,
+) -> Result<Vec<u8>, String> {
     let voices = cached_voices();
 
     let voice_name = match voice {
@@ -195,55 +507,53 @@ fn synthesize_tts(text: &str, voice: Option<&str>, locale: Option<&str>) -> Resu
             volume: 0,
         });
 
-    log_debug(&format!("[tts] synthesizing with voice={voice_name}, text={:?}", truncate_for_log(text, 80)));
+    log_debug(&format!(
+        "[tts] synthesizing with voice={voice_name}, text={:?}",
+        truncate_for_log(text, 80)
+    ));
 
-    let mut client =
-        msedge_tts::tts::client::connect().map_err(|e| {
-            let msg = format!("TTS connect error: {e}");
-            log_debug(&format!("[tts] {msg}"));
-            msg
-        })?;
-    let audio = client
-        .synthesize(text, &speech_config)
-        .map_err(|e| {
-            let msg = format!("TTS synthesize error: {e}");
-            log_debug(&format!("[tts] {msg}"));
-            msg
-        })?;
+    let mut client = msedge_tts::tts::client::connect().map_err(|e| {
+        let msg = format!("TTS connect error: {e}");
+        log_debug(&format!("[tts] {msg}"));
+        msg
+    })?;
+    let audio = client.synthesize(text, &speech_config).map_err(|e| {
+        let msg = format!("TTS synthesize error: {e}");
+        log_debug(&format!("[tts] {msg}"));
+        msg
+    })?;
 
-    log_debug(&format!("[tts] synthesized {} bytes of audio", audio.audio_bytes.len()));
+    log_debug(&format!(
+        "[tts] synthesized {} bytes of audio",
+        audio.audio_bytes.len()
+    ));
     Ok(audio.audio_bytes)
 }
-
 
 /// Play raw MP3 bytes through the system audio output using rodio.
 fn play_mp3_bytes(bytes: &[u8]) -> Result<(), String> {
     use rodio::{Decoder, OutputStream, Sink};
     use std::io::Cursor;
 
-    let (_stream, stream_handle) = OutputStream::try_default()
-        .map_err(|e| {
-            let msg = format!("audio output error: {e}");
-            log_debug(&format!("[tts] {msg}"));
-            msg
-        })?;
-    let source = Decoder::new(Cursor::new(bytes.to_vec()))
-        .map_err(|e| {
-            let msg = format!("MP3 decode error: {e}");
-            log_debug(&format!("[tts] {msg}"));
-            msg
-        })?;
-    let sink = Sink::try_new(&stream_handle)
-        .map_err(|e| {
-            let msg = format!("audio sink error: {e}");
-            log_debug(&format!("[tts] {msg}"));
-            msg
-        })?;
+    let (_stream, stream_handle) = OutputStream::try_default().map_err(|e| {
+        let msg = format!("audio output error: {e}");
+        log_debug(&format!("[tts] {msg}"));
+        msg
+    })?;
+    let source = Decoder::new(Cursor::new(bytes.to_vec())).map_err(|e| {
+        let msg = format!("MP3 decode error: {e}");
+        log_debug(&format!("[tts] {msg}"));
+        msg
+    })?;
+    let sink = Sink::try_new(&stream_handle).map_err(|e| {
+        let msg = format!("audio sink error: {e}");
+        log_debug(&format!("[tts] {msg}"));
+        msg
+    })?;
     sink.append(source);
     sink.sleep_until_end();
     Ok(())
 }
-
 
 /// Fallback TTS via macOS `say` command.
 fn speak_with_say(text: &str, voice: Option<&str>, locale: Option<&str>) {
@@ -266,11 +576,9 @@ fn speak_with_say(text: &str, voice: Option<&str>, locale: Option<&str>) {
     }
 }
 
-
 /// Global lock to serialize TTS playback — prevents overlapping audio when
 /// multiple notifications arrive at the same time.
 static TTS_PLAYBACK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 
 /// Synthesize and play text, with automatic fallback to macOS `say`.
 /// This is the core function used by both the Tauri command and backend notifications.
@@ -291,7 +599,6 @@ pub(crate) fn speak_text_blocking(text: &str, voice: Option<&str>, locale: Optio
     }
 }
 
-
 #[tauri::command]
 pub(crate) async fn speak_text(
     text: String,
@@ -305,14 +612,12 @@ pub(crate) async fn speak_text(
     .map_err(|e| format!("TTS task failed: {e}"))
 }
 
-
 #[tauri::command]
 pub(crate) fn speak_text_say(text: String, voice: Option<String>, locale: Option<String>) {
     std::thread::spawn(move || {
         speak_with_say(&text, voice.as_deref(), locale.as_deref());
     });
 }
-
 
 fn truncate_for_log(s: &str, max_chars: usize) -> String {
     let mut chars = s.chars();
@@ -323,7 +628,6 @@ fn truncate_for_log(s: &str, max_chars: usize) -> String {
         truncated
     }
 }
-
 
 /// Read TTS settings from the Tauri store and play TTS for a notification summary.
 /// Should be called from a background thread (blocks until playback finishes).
@@ -338,7 +642,8 @@ pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
         }
     };
 
-    let tts_mode = store.get("tts-mode")
+    let tts_mode = store
+        .get("tts-mode")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "off".to_string());
 
@@ -346,7 +651,8 @@ pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
         return;
     }
 
-    let muted = store.get("tts-muted")
+    let muted = store
+        .get("tts-muted")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "false".to_string());
 
@@ -357,23 +663,37 @@ pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
 
     // Skip fallback/generic summaries
     const FALLBACK_SUMMARIES: &[&str] = &[
-        "Status update", "Bug fixed", "Feature added", "Agent is stuck",
-        "Agent ran into an issue", "Task completed", "Potential issues detected",
-        "Agent is confused", "Task completed successfully", "Quick fix applied",
-        "Extensive changes made", "Planning next steps", "Waiting for input",
+        "Status update",
+        "Bug fixed",
+        "Feature added",
+        "Agent is stuck",
+        "Agent ran into an issue",
+        "Task completed",
+        "Potential issues detected",
+        "Agent is confused",
+        "Task completed successfully",
+        "Quick fix applied",
+        "Extensive changes made",
+        "Planning next steps",
+        "Waiting for input",
     ];
     if FALLBACK_SUMMARIES.contains(&summary) {
         return;
     }
 
-    let voice = store.get("tts-voice")
+    let voice = store
+        .get("tts-voice")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
-    let locale = store.get("lang")
+    let locale = store
+        .get("lang")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
-    let locale_ref = locale.as_deref().map(|l| if l.starts_with("zh") { "zh" } else { "en" });
+    let locale_ref = locale
+        .as_deref()
+        .map(|l| if l.starts_with("zh") { "zh" } else { "en" });
 
-    log_debug(&format!("[tts] playing notification TTS for: {:?}", truncate_for_log(summary, 80)));
+    log_debug(&format!(
+        "[tts] playing notification TTS for: {:?}",
+        truncate_for_log(summary, 80)
+    ));
     speak_text_blocking(summary, voice.as_deref(), locale_ref);
 }
-
-

@@ -33,7 +33,12 @@ pub struct InstallProgress {
 fn emit_install_progress(app: &AppHandle, step: &str, done: bool) {
     let _ = app.emit(
         "rca-install-progress",
-        InstallProgress { step: step.to_string(), done, error: None, update_last: false },
+        InstallProgress {
+            step: step.to_string(),
+            done,
+            error: None,
+            update_last: false,
+        },
     );
 }
 
@@ -94,8 +99,9 @@ fn provision_rca(
     // Fail fast if the installed rca predates the stdio transport — the
     // published release can lag `rca serve --stdio` landing on rca main.
     emit_install_progress(app, "Verifying serve --stdio support…", false);
-    let probe =
-        format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
+    let probe = format!(
+        "{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING"
+    );
     let cap = ssh(&probe).unwrap_or_default();
     if !cap.contains("STDIO_OK") {
         return Err(format!(
@@ -117,7 +123,11 @@ fn provision_rca(
 /// undo that choice.
 fn ensure_local_rca(app: &AppHandle) -> Result<(), String> {
     if let Some(existing) = remote_workspace::find_local_rca() {
-        emit_install_progress(app, &format!("Local rca already present ({existing})."), false);
+        emit_install_progress(
+            app,
+            &format!("Local rca already present ({existing})."),
+            false,
+        );
         return Ok(());
     }
     emit_install_progress(app, "Installing rca on this machine…", false);
@@ -320,9 +330,13 @@ pub async fn install_harness_remote(
     path: String,
     source: String,
     app: AppHandle,
-) -> Result<Vec<claw_fleet_core::harness_status::HarnessStatus>, claw_fleet_core::harness_install::InstallError>
-{
-    use claw_fleet_core::harness_install::{InstallError, InstallErrorCode, REMOTE_NODE_MISSING_EXIT};
+) -> Result<
+    Vec<claw_fleet_core::harness_status::HarnessStatus>,
+    claw_fleet_core::harness_install::InstallError,
+> {
+    use claw_fleet_core::harness_install::{
+        InstallError, InstallErrorCode, REMOTE_NODE_MISSING_EXIT,
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let structured = |code: InstallErrorCode, message: String| InstallError { code, message };
         let ssh_target = ssh_target_for_workspace(&path)
@@ -347,7 +361,8 @@ pub async fn install_harness_remote(
         .map_err(|e| {
             // The dsh remote script exits 42 for "no npm" — surface it as the
             // same structured NodeMissing the local path uses.
-            if e.message.contains(&format!("exit status: {REMOTE_NODE_MISSING_EXIT}"))
+            if e.message
+                .contains(&format!("exit status: {REMOTE_NODE_MISSING_EXIT}"))
                 || e.message.contains("npm not found on the remote host")
             {
                 structured(InstallErrorCode::NodeMissing, e.message)
@@ -525,7 +540,12 @@ mod tests {
 
         let mut profiles = vec![];
         let mut visited = std::collections::HashSet::new();
-        collect_ssh_hosts(&ssh.join("config"), home.path(), &mut profiles, &mut visited);
+        collect_ssh_hosts(
+            &ssh.join("config"),
+            home.path(),
+            &mut profiles,
+            &mut visited,
+        );
         assert_eq!(profiles, vec!["alpha", "gamma"]);
     }
 }

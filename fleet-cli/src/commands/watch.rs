@@ -17,7 +17,10 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
         WatchCommands::List { json } => {
             let watches = watch::list();
             if json {
-                println!("{}", serde_json::to_string_pretty(&watches).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&watches).unwrap_or_default()
+                );
                 return;
             }
             if watches.is_empty() {
@@ -25,7 +28,10 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                 return;
             }
             let now = now_ms_wall();
-            println!("{:<10}  {:<12}  {:<10}  {:<16}  UNTIL", "ID", "SESSION", "TIMEOUT", "LAST POLL");
+            println!(
+                "{:<10}  {:<12}  {:<10}  {:<16}  UNTIL",
+                "ID", "SESSION", "TIMEOUT", "LAST POLL"
+            );
             for w in watches {
                 let left = w.deadline_at.saturating_sub(now);
                 let timeout = if w.is_expired(now) {
@@ -302,7 +308,10 @@ fn explicit_sid(session: Option<&str>) -> Option<String> {
 /// a live scan. Returns `None` when the session isn't found (allow — never
 /// false-refuse a headless session that hasn't been scanned yet) or when its
 /// `ide_name` is `None` (a headless / Fleet-owned session, safe to resume).
-fn ide_block_reason(sid: &str, sessions: &[claw_fleet_core::session::SessionInfo]) -> Option<String> {
+fn ide_block_reason(
+    sid: &str,
+    sessions: &[claw_fleet_core::session::SessionInfo],
+) -> Option<String> {
     sessions
         .iter()
         .find(|s| s.id == sid)
@@ -325,7 +334,10 @@ mod tests {
     #[test]
     fn ide_attached_session_is_blocked() {
         let sessions = vec![sess("s1", Some("Visual Studio Code"))];
-        assert_eq!(ide_block_reason("s1", &sessions).as_deref(), Some("Visual Studio Code"));
+        assert_eq!(
+            ide_block_reason("s1", &sessions).as_deref(),
+            Some("Visual Studio Code")
+        );
     }
 
     #[test]
@@ -339,7 +351,10 @@ mod tests {
     fn blank_session_flag_falls_back_to_the_env() {
         assert_eq!(explicit_sid(None), None);
         assert_eq!(explicit_sid(Some("   ")), None);
-        assert_eq!(explicit_sid(Some(" dsh-uuid-1 ")).as_deref(), Some("dsh-uuid-1"));
+        assert_eq!(
+            explicit_sid(Some(" dsh-uuid-1 ")).as_deref(),
+            Some("dsh-uuid-1")
+        );
     }
 
     #[test]

@@ -177,7 +177,12 @@ fn webui_serves_the_bundle_and_data_routes_still_win() {
     // to *its* index, not the desktop one — a bundle-relative index fallback
     // would hand a phone the desktop app instead.
     let (status, body) = get(port, "/m/index.html", None);
-    assert_eq!(status, 200, "mobile index should be served\n{}", serve.logs());
+    assert_eq!(
+        status,
+        200,
+        "mobile index should be served\n{}",
+        serve.logs()
+    );
     assert!(body.contains("fleet mobile"), "got: {body}");
 
     let (status, body) = get(port, "/m/assets/app.js", None);
@@ -189,7 +194,12 @@ fn webui_serves_the_bundle_and_data_routes_still_win() {
     // index the same way `/` does. Nothing else in the bundle needs this, which
     // is why it was missing.
     let (status, body) = get(port, "/m/", None);
-    assert_eq!(status, 200, "/m/ should serve m/index.html\n{}", serve.logs());
+    assert_eq!(
+        status,
+        200,
+        "/m/ should serve m/index.html\n{}",
+        serve.logs()
+    );
     assert!(body.contains("fleet mobile"), "got: {body}");
 
     // A data route must not be shadowed by the bundle — the UI would receive
@@ -257,7 +267,10 @@ fn webui_without_a_bundle_refuses_to_start() {
         .expect("run fleet-cli webui");
     assert!(!out.status.success(), "must exit non-zero");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("--web-root"), "should say how to fix it: {err}");
+    assert!(
+        err.contains("--web-root"),
+        "should say how to fix it: {err}"
+    );
 }
 
 /// An explicit `--web-root` is a demand: a path that holds no bundle is a typo
@@ -267,7 +280,13 @@ fn explicit_web_root_without_a_bundle_still_refuses_to_start() {
     let home = tempfile::TempDir::new().unwrap();
     let missing = home.path().join("nope");
     let out = Command::new(env!("CARGO_BIN_EXE_fleet-cli"))
-        .args(["webui", "--port", "0", "--web-root", missing.to_str().unwrap()])
+        .args([
+            "webui",
+            "--port",
+            "0",
+            "--web-root",
+            missing.to_str().unwrap(),
+        ])
         .env("FLEET_HOME", home.path())
         .env_remove("FLEET_WEB_ROOT")
         .output()
@@ -306,13 +325,24 @@ fn webui_falls_back_to_the_builtin_ui_when_the_env_path_holds_no_bundle() {
 
     let mut serve = spawn(
         home.path(),
-        &["webui", "--port", "0", "--port-file", port_file.to_str().unwrap()],
+        &[
+            "webui",
+            "--port",
+            "0",
+            "--port-file",
+            port_file.to_str().unwrap(),
+        ],
         &[("FLEET_WEB_ROOT", missing.to_str().unwrap())],
     );
     let port = wait_for_port(&port_file, &mut serve);
 
     let (status, body) = get(port, "/", None);
-    assert_eq!(status, 200, "/ must serve the built-in UI, logs:\n{}", serve.logs());
+    assert_eq!(
+        status,
+        200,
+        "/ must serve the built-in UI, logs:\n{}",
+        serve.logs()
+    );
     assert!(
         body.contains("<title>Claw Fleet</title>"),
         "expected the real embedded index.html, got: {}",
@@ -341,7 +371,13 @@ fn webui_accepts_the_bundle_from_the_env() {
 
     let mut serve = spawn(
         home.path(),
-        &["webui", "--port", "0", "--port-file", port_file.to_str().unwrap()],
+        &[
+            "webui",
+            "--port",
+            "0",
+            "--port-file",
+            port_file.to_str().unwrap(),
+        ],
         &[("FLEET_WEB_ROOT", bundle.to_str().unwrap())],
     );
     let port = wait_for_port(&port_file, &mut serve);

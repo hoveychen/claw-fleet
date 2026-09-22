@@ -23,12 +23,18 @@ pub(crate) async fn read_live_thinking(
 }
 
 #[tauri::command(async)]
-pub(crate) fn get_memory_content(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+pub(crate) fn get_memory_content(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
     state.backend.get_memory_content(&path)
 }
 
 #[tauri::command(async)]
-pub(crate) fn get_memory_history(path: String, state: tauri::State<'_, AppState>) -> Vec<memory::MemoryHistoryEntry> {
+pub(crate) fn get_memory_history(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Vec<memory::MemoryHistoryEntry> {
     state.backend.get_memory_history(&path)
 }
 
@@ -68,7 +74,10 @@ pub(crate) fn get_claude_md_content(workspace_path: String) -> Result<String, St
 /// today, and a single append is milliseconds, so the trade the rest of this
 /// sweep makes (leave the loop, accept concurrency) is the wrong one here.
 #[tauri::command]
-pub(crate) fn promote_memory(memory_path: String, target: String, workspace_path: String) -> Result<(), String> {
+pub(crate) fn promote_memory(
+    memory_path: String,
+    target: String,
+    workspace_path: String,
+) -> Result<(), String> {
     memory::promote_memory(&memory_path, &target, &workspace_path)
 }
-

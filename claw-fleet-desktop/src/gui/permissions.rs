@@ -34,4 +34,3 @@ pub(crate) fn set_permissions_config(
     }
     Ok(cfg)
 }
-

@@ -42,7 +42,11 @@ fn now_ms() -> u128 {
 /// argv, so a shell script (which would report as `sh`) can't stand in here.
 fn build_fake_claude(dir: &Path) -> PathBuf {
     let src = dir.join("fake_claude.c");
-    std::fs::write(&src, "#include <unistd.h>\nint main(void){for(;;)pause();return 0;}\n").unwrap();
+    std::fs::write(
+        &src,
+        "#include <unistd.h>\nint main(void){for(;;)pause();return 0;}\n",
+    )
+    .unwrap();
     let bin = dir.join("claude");
     let out = Command::new("cc")
         .args(["-o", bin.to_str().unwrap(), src.to_str().unwrap()])
@@ -220,14 +224,18 @@ fn timed_out_fleet_ask_parks_the_card_interrupts_the_turn_and_resumes_with_the_a
     let ask_dir = fleet_dir.join("fleet-ask");
     assert!(
         wait_until(Duration::from_secs(10), || {
-            std::fs::read_dir(&ask_dir).map(|d| d.count() > 0).unwrap_or(false)
+            std::fs::read_dir(&ask_dir)
+                .map(|d| d.count() > 0)
+                .unwrap_or(false)
         }),
         "the ask should have been queued as a live card first"
     );
 
     // ── Assert 1: the tool comes back telling the agent to stop, not to retry ─
     let mut line = String::new();
-    stdout.read_line(&mut line).expect("MCP must answer the call");
+    stdout
+        .read_line(&mut line)
+        .expect("MCP must answer the call");
     let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
     let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
     assert_eq!(resp["result"]["isError"], serde_json::json!(true), "{resp}");
@@ -271,7 +279,9 @@ fn timed_out_fleet_ask_parks_the_card_interrupts_the_turn_and_resumes_with_the_a
 
     // ── Assert 3: the turn that asked was actually stopped ──────────────────
     assert!(
-        wait_until(Duration::from_secs(10), || !still_running(&mut session_proc.0)),
+        wait_until(Duration::from_secs(10), || !still_running(
+            &mut session_proc.0
+        )),
         "the session's claude process should have been SIGINT'd, not left running"
     );
     let status = session_proc.0.wait().unwrap();

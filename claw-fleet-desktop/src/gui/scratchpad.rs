@@ -25,4 +25,3 @@ pub(crate) fn read_scratchpad_file(
         .backend
         .read_scratchpad_file(&workspace, &session_id, &rel_path)
 }
-

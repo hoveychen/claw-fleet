@@ -111,9 +111,21 @@ fn fixture() -> Fixture {
     fake_repo(&other);
     fake_linked_worktree(&worktree, &repo, "feat");
 
-    std::fs::write(repo.join("perf.md"), "# Perf notes\n\n吞吐率 improved by caching.\n").unwrap();
-    std::fs::write(other.join("misc.md"), "# Other doc\n\nunrelated caching text\n").unwrap();
-    std::fs::write(ancestor.join("home.md"), "# Home doc\n\nstray caching note\n").unwrap();
+    std::fs::write(
+        repo.join("perf.md"),
+        "# Perf notes\n\n吞吐率 improved by caching.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        other.join("misc.md"),
+        "# Other doc\n\nunrelated caching text\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ancestor.join("home.md"),
+        "# Home doc\n\nstray caching note\n",
+    )
+    .unwrap();
 
     wiki(home.path(), &repo, &["publish", "perf.md"]);
     wiki(home.path(), &other, &["publish", "misc.md"]);
@@ -174,7 +186,10 @@ fn list_all_spans_every_workspace() {
 #[test]
 fn list_workspace_substring_still_selects_across_workspaces() {
     let f = fixture();
-    assert_eq!(list_slugs(&f.home, &f.repo, &["--workspace", "other"]), ["misc"]);
+    assert_eq!(
+        list_slugs(&f.home, &f.repo, &["--workspace", "other"]),
+        ["misc"]
+    );
 }
 
 #[test]
@@ -206,5 +221,8 @@ fn search_reports_a_miss_without_failing() {
     // Exit 0 (asserted inside `wiki`) with no hits — greppable, not an error.
     assert!(search_slugs(&f.home, &f.repo, "zzz-no-such-term", &["--all"]).is_empty());
     let human = wiki(&f.home, &f.repo, &["search", "zzz-no-such-term"]);
-    assert!(human.contains("No doc matches"), "unexpected miss output: {human}");
+    assert!(
+        human.contains("No doc matches"),
+        "unexpected miss output: {human}"
+    );
 }

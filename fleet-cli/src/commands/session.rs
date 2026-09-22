@@ -120,7 +120,11 @@ pub(crate) fn cmd_session_idle() {
     // app closed — same rationale as the handoff relay above.
     let rearmed = claw_fleet_core::agent_loop::reconcile();
     if !rearmed.is_empty() {
-        println!("loop: re-armed {} stranded timer(s): {}", rearmed.len(), rearmed.join(", "));
+        println!(
+            "loop: re-armed {} stranded timer(s): {}",
+            rearmed.len(),
+            rearmed.join(", ")
+        );
     }
     timing.phase("loop_reconcile");
 
@@ -249,8 +253,8 @@ fn forward_user_notify(payload: &[String]) {
         return;
     };
     let (prog, fixed) = cmd.split_first().unwrap(); // read_user_codex_notify never returns empty
-    // Window-suppressed on Windows: this relay can run under a GUI-spawned
-    // detached session, where a raw spawn would flash a conhost box.
+                                                    // Window-suppressed on Windows: this relay can run under a GUI-spawned
+                                                    // detached session, where a raw spawn would flash a conhost box.
     let _ = claw_fleet_core::process_util::command(prog)
         .args(fixed)
         .args(payload)
@@ -374,7 +378,10 @@ mod workspace_flag_tests {
     fn absent_or_blank_flag_inherits_the_session_workspace() {
         let c = ctx("/repos/alpha");
         assert_eq!(resolve_workspace_flag(None, &c).unwrap(), "/repos/alpha");
-        assert_eq!(resolve_workspace_flag(Some("   "), &c).unwrap(), "/repos/alpha");
+        assert_eq!(
+            resolve_workspace_flag(Some("   "), &c).unwrap(),
+            "/repos/alpha"
+        );
     }
 
     #[test]
@@ -387,8 +394,8 @@ mod workspace_flag_tests {
 
     #[test]
     fn a_path_that_is_not_a_directory_is_rejected() {
-        let err = resolve_workspace_flag(Some("/definitely/not/here"), &ctx("/repos/alpha"))
-            .unwrap_err();
+        let err =
+            resolve_workspace_flag(Some("/definitely/not/here"), &ctx("/repos/alpha")).unwrap_err();
         assert!(err.contains("not a directory"), "{err}");
     }
 }
@@ -399,7 +406,10 @@ mod session_id_tests {
 
     #[test]
     fn explicit_id_is_trimmed_and_blank_falls_through() {
-        assert_eq!(resolve_session_id(Some(" dsh-uuid-1 ")).as_deref(), Some("dsh-uuid-1"));
+        assert_eq!(
+            resolve_session_id(Some(" dsh-uuid-1 ")).as_deref(),
+            Some("dsh-uuid-1")
+        );
         // A blank flag must not register anything under an empty id; it means
         // "not given", so the env decides (None here in a test process).
         assert_eq!(resolve_session_id(Some("   ")), resolve_session_id(None));

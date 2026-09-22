@@ -19,18 +19,12 @@ pub(crate) fn list_schedules(
 }
 
 #[tauri::command(async)]
-pub(crate) fn cancel_loop(
-    id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub(crate) fn cancel_loop(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.cancel_loop(id)
 }
 
 #[tauri::command(async)]
-pub(crate) fn cancel_schedule(
-    id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub(crate) fn cancel_schedule(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.cancel_schedule(id)
 }
 

@@ -15,22 +15,36 @@ pub(crate) fn get_audit_rules(state: tauri::State<'_, AppState>) -> Vec<audit::A
 }
 
 #[tauri::command(async)]
-pub(crate) fn set_audit_rule_enabled(state: tauri::State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
+pub(crate) fn set_audit_rule_enabled(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
     state.backend.set_audit_rule_enabled(&id, enabled)
 }
 
 #[tauri::command(async)]
-pub(crate) fn save_custom_audit_rule(state: tauri::State<'_, AppState>, rule: audit::AuditRuleInfo) -> Result<(), String> {
+pub(crate) fn save_custom_audit_rule(
+    state: tauri::State<'_, AppState>,
+    rule: audit::AuditRuleInfo,
+) -> Result<(), String> {
     state.backend.save_custom_audit_rule(rule)
 }
 
 #[tauri::command(async)]
-pub(crate) fn delete_custom_audit_rule(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+pub(crate) fn delete_custom_audit_rule(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
     state.backend.delete_custom_audit_rule(&id)
 }
 
 #[tauri::command(async)]
-pub(crate) fn suggest_audit_rules(state: tauri::State<'_, AppState>, concern: String, lang: String) -> Result<Vec<audit::SuggestedRule>, String> {
+pub(crate) fn suggest_audit_rules(
+    state: tauri::State<'_, AppState>,
+    concern: String,
+    lang: String,
+) -> Result<Vec<audit::SuggestedRule>, String> {
     state.backend.suggest_audit_rules(&concern, &lang)
 }
 
@@ -57,9 +71,9 @@ pub(crate) async fn generate_daily_report(
     state: tauri::State<'_, AppState>,
 ) -> Result<daily_report::DailyReport, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || {
-        backend.generate_daily_report(&date)
-    }).await.map_err(|e| format!("join: {e}"))?
+    tokio::task::spawn_blocking(move || backend.generate_daily_report(&date))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
@@ -68,9 +82,9 @@ pub(crate) async fn generate_daily_report_ai_summary(
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || {
-        backend.generate_daily_report_ai_summary(&date)
-    }).await.map_err(|e| format!("join: {e}"))?
+    tokio::task::spawn_blocking(move || backend.generate_daily_report_ai_summary(&date))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
@@ -79,9 +93,9 @@ pub(crate) async fn generate_daily_report_lessons(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<crate::daily_report::Lesson>, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || {
-        backend.generate_daily_report_lessons(&date)
-    }).await.map_err(|e| format!("join: {e}"))?
+    tokio::task::spawn_blocking(move || backend.generate_daily_report_lessons(&date))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
@@ -97,7 +111,9 @@ pub(crate) async fn append_lesson_to_claude_md(
         // Mirror onto codex AGENTS.md too (no-op when codex isn't in use).
         let _ = backend.reconcile_codex_guidance(&title, &locale);
         Ok(())
-    }).await.map_err(|e| format!("join: {e}"))?
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }
 
 /// The day's per-task retrospectives, for the report's task-review card.
@@ -109,9 +125,9 @@ pub(crate) async fn list_task_reviews(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<crate::task_review::TaskReview>, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || {
-        backend.list_task_reviews(&date)
-    }).await.map_err(|e| format!("join: {e}"))
+    tokio::task::spawn_blocking(move || backend.list_task_reviews(&date))
+        .await
+        .map_err(|e| format!("join: {e}"))
 }
 
 #[tauri::command]
@@ -119,9 +135,9 @@ pub(crate) async fn list_managed_lessons(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || {
-        backend.list_managed_lessons()
-    }).await.map_err(|e| format!("join: {e}"))?
+    tokio::task::spawn_blocking(move || backend.list_managed_lessons())
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
@@ -137,7 +153,9 @@ pub(crate) async fn remove_managed_lesson(
         // Re-sync codex AGENTS.md so the removed lesson drops there too.
         let _ = backend.reconcile_codex_guidance(&title, &locale);
         Ok(())
-    }).await.map_err(|e| format!("join: {e}"))?
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }
 
 // Threadpool, not the main thread: `check_update_now` does a blocking HTTP
@@ -191,4 +209,3 @@ pub(crate) fn stop_watching_session(state: tauri::State<'_, AppState>) {
     backend.stop_watch();
     probe.done(|| "stopped".into());
 }
-

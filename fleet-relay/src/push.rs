@@ -16,8 +16,8 @@ use base64::Engine;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use serde_json::Value;
 use web_push::{
-    ContentEncoding, HyperWebPushClient, SubscriptionInfo, VapidSignatureBuilder,
-    WebPushClient, WebPushError, WebPushMessageBuilder,
+    ContentEncoding, HyperWebPushClient, SubscriptionInfo, VapidSignatureBuilder, WebPushClient,
+    WebPushError, WebPushMessageBuilder,
 };
 
 use crate::frames::PushPayload;
@@ -48,15 +48,10 @@ impl Push {
             .map_err(|e| format!("RELAY_VAPID_KEY is not base64url: {e}"))?;
         let secret = p256::SecretKey::from_slice(&raw)
             .map_err(|e| format!("RELAY_VAPID_KEY is not a valid P-256 scalar: {e}"))?;
-        let public_b64 = URL_SAFE_NO_PAD.encode(
-            secret
-                .public_key()
-                .to_encoded_point(false)
-                .as_bytes(),
-        );
+        let public_b64 =
+            URL_SAFE_NO_PAD.encode(secret.public_key().to_encoded_point(false).as_bytes());
         let subs_dir = data_dir.join("subs");
-        fs::create_dir_all(&subs_dir)
-            .map_err(|e| format!("create {}: {e}", subs_dir.display()))?;
+        fs::create_dir_all(&subs_dir).map_err(|e| format!("create {}: {e}", subs_dir.display()))?;
         Ok(Self {
             private_b64: private_b64.trim().to_string(),
             public_b64,
@@ -201,7 +196,11 @@ impl Push {
         if !Self::is_harmony(sub) {
             return None;
         }
-        if let Some(t) = sub.get("token").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        if let Some(t) = sub
+            .get("token")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             return Some(format!("token:{t}"));
         }
         sub.get("openId")
@@ -265,7 +264,9 @@ impl Push {
                 return match sent {
                     Ok(()) => SendOutcome::Ok,
                     Err(SendError::DeadRecipient(detail)) => {
-                        log::info!("harmony recipient dead on channel {channel}, pruning: {detail}");
+                        log::info!(
+                            "harmony recipient dead on channel {channel}, pruning: {detail}"
+                        );
                         SendOutcome::DeadHarmony(key)
                     }
                     Err(SendError::Transient(detail)) => {
@@ -274,7 +275,9 @@ impl Push {
                     }
                 };
             }
-            let Some(body) = web_body else { return SendOutcome::Ok };
+            let Some(body) = web_body else {
+                return SendOutcome::Ok;
+            };
             let info: SubscriptionInfo = match serde_json::from_value(sub.clone()) {
                 Ok(i) => i,
                 Err(_) => return SendOutcome::Ok,
@@ -348,11 +351,7 @@ impl Push {
             .collect()
     }
 
-    async fn send_one(
-        &self,
-        info: &SubscriptionInfo,
-        body: &[u8],
-    ) -> Result<(), WebPushError> {
+    async fn send_one(&self, info: &SubscriptionInfo, body: &[u8]) -> Result<(), WebPushError> {
         let mut sig = VapidSignatureBuilder::from_base64(&self.private_b64, info)?;
         sig.add_claim("sub", self.subject.as_str());
         let mut msg = WebPushMessageBuilder::new(info);
@@ -377,7 +376,12 @@ mod tests {
     use serde_json::json;
 
     fn mk_push(dir: &Path) -> Push {
-        Push::new(Push::generate_private_key(), "mailto:t@example.com".into(), dir).unwrap()
+        Push::new(
+            Push::generate_private_key(),
+            "mailto:t@example.com".into(),
+            dir,
+        )
+        .unwrap()
     }
 
     fn mk_sub(endpoint: &str) -> Value {
@@ -416,7 +420,12 @@ mod tests {
         assert_eq!(push.subscription_count("ch2"), 0);
 
         // fresh instance re-reads from disk
-        let push2 = Push::new(Push::generate_private_key(), "mailto:t@example.com".into(), dir.path()).unwrap();
+        let push2 = Push::new(
+            Push::generate_private_key(),
+            "mailto:t@example.com".into(),
+            dir.path(),
+        )
+        .unwrap();
         assert_eq!(push2.subscription_count("ch1"), 2);
     }
 
@@ -425,7 +434,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
         assert!(push.subscribe("ch", json!({"keys": {}})).is_err());
-        assert!(push.subscribe("ch", json!({"endpoint": "https://x"})).is_err());
+        assert!(push
+            .subscribe("ch", json!({"endpoint": "https://x"}))
+            .is_err());
     }
 
     #[test]
@@ -451,7 +462,9 @@ mod tests {
     fn subscribe_rejects_harmony_without_open_id() {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
-        assert!(push.subscribe("ch", json!({ "platform": "harmony" })).is_err());
+        assert!(push
+            .subscribe("ch", json!({ "platform": "harmony" }))
+            .is_err());
     }
 
     #[test]
@@ -464,9 +477,12 @@ mod tests {
         assert_eq!(push.subscription_count("ch"), 1);
 
         // survives a fresh instance re-reading from disk
-        let push2 =
-            Push::new(Push::generate_private_key(), "mailto:t@example.com".into(), dir.path())
-                .unwrap();
+        let push2 = Push::new(
+            Push::generate_private_key(),
+            "mailto:t@example.com".into(),
+            dir.path(),
+        )
+        .unwrap();
         assert_eq!(push2.subscription_count("ch"), 1);
     }
 
@@ -479,7 +495,7 @@ mod tests {
         push.subscribe("ch", mk_sub("https://push/a")).unwrap();
         push.unsubscribe("ch", &mk_harmony("OID-A")).unwrap();
         assert_eq!(push.subscription_count("ch"), 2); // OID-B + web survive
-        // the surviving harmony sub is OID-B, and the web sub is untouched
+                                                      // the surviving harmony sub is OID-B, and the web sub is untouched
         let subs = push.load_subs("ch");
         assert!(subs
             .iter()
@@ -494,7 +510,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
         push.subscribe("ch", mk_sub("https://push/a")).unwrap();
-        push.unsubscribe("ch", &mk_sub("https://push/gone")).unwrap();
+        push.unsubscribe("ch", &mk_sub("https://push/gone"))
+            .unwrap();
         push.unsubscribe("ch", &mk_harmony("OID-gone")).unwrap();
         assert_eq!(push.subscription_count("ch"), 1);
     }
@@ -506,7 +523,10 @@ mod tests {
         push.subscribe("ch", mk_sub("https://push/a")).unwrap();
         push.unsubscribe("ch", &mk_sub("https://push/a")).unwrap();
         assert_eq!(push.subscription_count("ch"), 0);
-        assert!(!push.subs_path("ch").exists(), "empty channel file is removed");
+        assert!(
+            !push.subs_path("ch").exists(),
+            "empty channel file is removed"
+        );
     }
 
     #[test]
@@ -514,7 +534,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
         assert!(push.unsubscribe("ch", &json!({})).is_err());
-        assert!(push.unsubscribe("ch", &json!({ "platform": "harmony" })).is_err());
+        assert!(push
+            .unsubscribe("ch", &json!({ "platform": "harmony" }))
+            .is_err());
     }
 
     fn open_ids(subs: &[Value]) -> Vec<String> {
@@ -525,7 +547,11 @@ mod tests {
 
     #[test]
     fn retain_live_prunes_only_dead_harmony_open_ids() {
-        let subs = vec![mk_harmony("OID-A"), mk_harmony("OID-B"), mk_sub("https://push/a")];
+        let subs = vec![
+            mk_harmony("OID-A"),
+            mk_harmony("OID-B"),
+            mk_sub("https://push/a"),
+        ];
         let kept = Push::retain_live(subs, &[], &["openid:OID-A".to_string()]);
         assert_eq!(kept.len(), 2);
         assert_eq!(open_ids(&kept), vec!["OID-B"]); // OID-B kept
@@ -586,7 +612,8 @@ mod tests {
         let push = mk_push(dir.path());
         push.subscribe("chan", mk_harmony_token("TOK-A")).unwrap();
         push.subscribe("chan", mk_harmony("OID-A")).unwrap();
-        push.unsubscribe("chan", &mk_harmony_token("TOK-A")).unwrap();
+        push.unsubscribe("chan", &mk_harmony_token("TOK-A"))
+            .unwrap();
         assert_eq!(open_ids(&push.load_subs("chan")), vec!["OID-A"]);
     }
 

@@ -53,7 +53,9 @@ async fn spawn_server_with(max_ws_message_bytes: usize) -> String {
 async fn connect(url: &str, role: &str, secret: &str) -> (Client, Value) {
     let (mut ws, _) = connect_async(url).await.unwrap();
     ws.send(Message::Text(
-        json!({"type": "auth", "role": role, "secret": secret}).to_string().into(),
+        json!({"type": "auth", "role": role, "secret": secret})
+            .to_string()
+            .into(),
     ))
     .await
     .unwrap();
@@ -114,15 +116,24 @@ async fn client_answer_is_acked_and_held_while_the_agent_is_away() {
         .unwrap();
 
     let ack = recv_json(&mut client).await;
-    assert_eq!(ack["type"], "msg_ack", "an acked client msg must get a custody report");
+    assert_eq!(
+        ack["type"], "msg_ack",
+        "an acked client msg must get a custody report"
+    );
     assert_eq!(ack["ack_id"], "a1");
-    assert_eq!(ack["status"], "queued", "no agent online → the relay holds it");
+    assert_eq!(
+        ack["status"], "queued",
+        "no agent online → the relay holds it"
+    );
 
     // The desktop comes back and inherits the answer.
     let (mut agent, _) = connect(&url, "agent", SECRET).await;
     let got = recv_json(&mut agent).await;
     assert_eq!(got["type"], "msg");
-    assert_eq!(got["payload"]["answer"], "allow", "the joining agent inherits the held answer");
+    assert_eq!(
+        got["payload"]["answer"], "allow",
+        "the joining agent inherits the held answer"
+    );
 
     // With the agent online the same frame is now reported as delivered. The
     // client's stream also carries the `agent_status` bump from that join, so
@@ -151,7 +162,11 @@ async fn msg_without_ack_id_gets_no_ack_frame() {
     let _presence = recv_json(&mut agent).await;
 
     client
-        .send(Message::Text(json!({"type": "msg", "payload": {"x": 1}}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": {"x": 1}})
+                .to_string()
+                .into(),
+        ))
         .await
         .unwrap();
 
@@ -170,7 +185,10 @@ async fn auth_then_forward_between_roles() {
     let (mut agent, authed) = connect(&url, "agent", SECRET).await;
     assert_eq!(authed["type"], "authed");
     assert_eq!(authed["clients"], 0);
-    assert_eq!(authed["binary"], true, "relay must advertise binary forwarding");
+    assert_eq!(
+        authed["binary"], true,
+        "relay must advertise binary forwarding"
+    );
 
     let (mut client, authed) = connect(&url, "client", SECRET).await;
     assert_eq!(authed["type"], "authed");
@@ -183,7 +201,11 @@ async fn auth_then_forward_between_roles() {
 
     // client -> agent
     client
-        .send(Message::Text(json!({"type": "msg", "payload": {"hello": "agent"}}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": {"hello": "agent"}})
+                .to_string()
+                .into(),
+        ))
         .await
         .unwrap();
     let got = recv_json(&mut agent).await;
@@ -192,7 +214,11 @@ async fn auth_then_forward_between_roles() {
 
     // agent -> client
     agent
-        .send(Message::Text(json!({"type": "msg", "payload": {"hello": "client"}}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": {"hello": "client"}})
+                .to_string()
+                .into(),
+        ))
         .await
         .unwrap();
     let got = recv_json(&mut client).await;
@@ -200,7 +226,11 @@ async fn auth_then_forward_between_roles() {
 
     // notify from agent is forwarded to clients
     agent
-        .send(Message::Text(json!({"type": "notify", "title": "t", "body": "b"}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "notify", "title": "t", "body": "b"})
+                .to_string()
+                .into(),
+        ))
         .await
         .unwrap();
     let got = recv_json(&mut client).await;
@@ -259,12 +289,18 @@ async fn binary_frame_forwarded_verbatim_between_roles() {
     let _ = recv_json(&mut agent).await;
 
     let blob = vec![0x1f, 0x8b, 0x08, 0x00, 0x00, 0x11, 0x22, 0x33, 0xff];
-    agent.send(Message::Binary(blob.clone().into())).await.unwrap();
+    agent
+        .send(Message::Binary(blob.clone().into()))
+        .await
+        .unwrap();
     let got = recv_binary(&mut client).await;
     assert_eq!(got, blob, "agent binary frame reaches client byte-for-byte");
 
     // and the reverse direction
-    client.send(Message::Binary(blob.clone().into())).await.unwrap();
+    client
+        .send(Message::Binary(blob.clone().into()))
+        .await
+        .unwrap();
     let got = recv_binary(&mut agent).await;
     assert_eq!(got, blob, "client binary frame reaches agent byte-for-byte");
 }
@@ -292,17 +328,26 @@ async fn wrong_secret_is_isolated_and_short_secret_rejected() {
     let (mut other, _) = connect(&url, "client", "ffffffffffffffffffffffffffffffff").await;
 
     other
-        .send(Message::Text(json!({"type": "msg", "payload": 1}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": 1}).to_string().into(),
+        ))
         .await
         .unwrap();
     // agent must not receive traffic from a different channel
     let res = tokio::time::timeout(std::time::Duration::from_millis(300), agent.next()).await;
-    assert!(res.is_err(), "agent unexpectedly received cross-channel frame: {res:?}");
+    assert!(
+        res.is_err(),
+        "agent unexpectedly received cross-channel frame: {res:?}"
+    );
 
     let (mut ws, _) = connect_async(&url).await.unwrap();
-    ws.send(Message::Text(json!({"type": "auth", "role": "client", "secret": "short"}).to_string().into()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(
+        json!({"type": "auth", "role": "client", "secret": "short"})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["type"], "error");
 }
@@ -332,14 +377,20 @@ async fn sealed_payload_round_trips_through_relay() {
     // --- desktop -> phone --------------------------------------------------
     const DOWN_MARKER: &str = "TOP-SECRET-WORKSPACE-机密";
     let downlink = json!({"event": "sessions", "sessions": [{"id": "s1", "name": DOWN_MARKER}]});
-    let sealed = serde_json::to_value(seal(&keys.enc_key, downlink.to_string().as_bytes())).unwrap();
+    let sealed =
+        serde_json::to_value(seal(&keys.enc_key, downlink.to_string().as_bytes())).unwrap();
     agent
-        .send(Message::Text(json!({"type": "msg", "payload": sealed}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": sealed}).to_string().into(),
+        ))
         .await
         .unwrap();
     let got = recv_json(&mut client).await;
     assert_eq!(got["type"], "msg");
-    assert_eq!(got["payload"]["enc"], "box", "relay forwards a sealed envelope");
+    assert_eq!(
+        got["payload"]["enc"], "box",
+        "relay forwards a sealed envelope"
+    );
     assert!(
         !got.to_string().contains(DOWN_MARKER),
         "plaintext must not appear in the frame the relay forwarded: {got}"
@@ -353,7 +404,9 @@ async fn sealed_payload_round_trips_through_relay() {
     let uplink = json!({"event": "answer", "kind": "guard", "id": "req-42", "note": UP_MARKER});
     let sealed = serde_json::to_value(seal(&keys.enc_key, uplink.to_string().as_bytes())).unwrap();
     client
-        .send(Message::Text(json!({"type": "msg", "payload": sealed}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": sealed}).to_string().into(),
+        ))
         .await
         .unwrap();
     let got = recv_json(&mut agent).await;
@@ -390,7 +443,11 @@ async fn oversized_message_is_rejected_not_forwarded() {
     // Agent sends a msg far over the 1 KiB cap.
     let big = "x".repeat(8 * 1024);
     let _ = agent
-        .send(Message::Text(json!({"type": "msg", "payload": {"blob": big}}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "msg", "payload": {"blob": big}})
+                .to_string()
+                .into(),
+        ))
         .await;
 
     // The relay must not forward it: the client sees no `msg` frame.
@@ -417,7 +474,10 @@ async fn oversized_message_is_rejected_not_forwarded() {
     // And the offending sender's connection is torn down by the transport.
     let after = tokio::time::timeout(Duration::from_secs(2), agent.next()).await;
     assert!(
-        matches!(after, Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_))))),
+        matches!(
+            after,
+            Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_))))
+        ),
         "the oversized frame should close the sender's connection, got {after:?}"
     );
 }
@@ -433,17 +493,25 @@ async fn ping_is_answered_with_pong_on_the_same_socket() {
     let _presence = recv_json(&mut agent).await;
 
     client
-        .send(Message::Text(json!({"type": "ping", "id": "p1"}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "ping", "id": "p1"}).to_string().into(),
+        ))
         .await
         .unwrap();
 
     let pong = recv_json(&mut client).await;
     assert_eq!(pong["type"], "pong");
-    assert_eq!(pong["id"], "p1", "the probe's id must be echoed so a stale pong can't match");
+    assert_eq!(
+        pong["id"], "p1",
+        "the probe's id must be echoed so a stale pong can't match"
+    );
 
     // A ping is a property of one connection, so it must not reach the peer.
     let quiet = tokio::time::timeout(std::time::Duration::from_millis(300), agent.next()).await;
-    assert!(quiet.is_err(), "a liveness probe must not be forwarded to the opposite role");
+    assert!(
+        quiet.is_err(),
+        "a liveness probe must not be forwarded to the opposite role"
+    );
 }
 
 #[tokio::test]
@@ -453,9 +521,15 @@ async fn agent_ping_is_also_answered() {
     let url = spawn_server().await;
     let (mut agent, _) = connect(&url, "agent", SECRET).await;
 
-    agent.send(Message::Text(json!({"type": "ping"}).to_string().into())).await.unwrap();
+    agent
+        .send(Message::Text(json!({"type": "ping"}).to_string().into()))
+        .await
+        .unwrap();
 
     let pong = recv_json(&mut agent).await;
     assert_eq!(pong["type"], "pong");
-    assert!(pong.get("id").is_none(), "an idless probe gets an idless pong, not null");
+    assert!(
+        pong.get("id").is_none(),
+        "an idless probe gets an idless pong, not null"
+    );
 }
