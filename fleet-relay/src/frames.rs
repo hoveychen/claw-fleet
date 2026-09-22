@@ -98,7 +98,9 @@ pub enum OutFrame {
         binary: bool,
         pong: bool,
     },
-    Msg { payload: Value },
+    Msg {
+        payload: Value,
+    },
     Notify {
         title: String,
         body: String,
@@ -120,9 +122,13 @@ pub enum OutFrame {
         status: MsgAckStatus,
     },
     /// Sent to agents when the number of connected clients changes.
-    Presence { clients: usize },
+    Presence {
+        clients: usize,
+    },
     /// Sent to clients when agent connectivity changes.
-    AgentStatus { online: bool },
+    AgentStatus {
+        online: bool,
+    },
     /// Answer to an `InFrame::Ping`, echoing its `id`. Goes straight back down
     /// the socket it arrived on — it proves *this* connection round-trips, so
     /// forwarding it to the opposite role would prove nothing.
@@ -130,7 +136,9 @@ pub enum OutFrame {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 /// What the relay did with an acked client `msg`.
@@ -177,13 +185,19 @@ mod tests {
 
     #[test]
     fn pong_serializes_with_echoed_id() {
-        let s = serde_json::to_string(&OutFrame::Pong { id: Some("p7".into()) }).unwrap();
+        let s = serde_json::to_string(&OutFrame::Pong {
+            id: Some("p7".into()),
+        })
+        .unwrap();
         assert_eq!(s, r#"{"type":"pong","id":"p7"}"#);
     }
 
     #[test]
     fn pong_omits_absent_id() {
         let s = serde_json::to_string(&OutFrame::Pong { id: None }).unwrap();
-        assert_eq!(s, r#"{"type":"pong"}"#, "an absent id must not serialize as null");
+        assert_eq!(
+            s, r#"{"type":"pong"}"#,
+            "an absent id must not serialize as null"
+        );
     }
 }

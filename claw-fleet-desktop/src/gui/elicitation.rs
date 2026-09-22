@@ -47,12 +47,12 @@ pub(crate) fn remove_model_guidance(state: tauri::State<'_, AppState>) -> Result
 }
 
 #[tauri::command(async)]
-pub(crate) fn apply_session_title_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub(crate) fn apply_session_title_guidance(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
-    state
-        .backend
-        .apply_session_title_guidance(&title, &locale)
+    state.backend.apply_session_title_guidance(&title, &locale)
 }
 
 #[tauri::command(async)]
@@ -80,7 +80,8 @@ pub(crate) fn test_decision_frontend_only(
     Ok(claw_fleet_core::interaction_mode_test::TestRunResult {
         kind: "frontend_only".into(),
         request_id: Some(req.id),
-        message: "Synthetic event emitted directly to the Tauri listener — no file or SSE involved".into(),
+        message: "Synthetic event emitted directly to the Tauri listener — no file or SSE involved"
+            .into(),
         claude_output: None,
     })
 }
@@ -144,9 +145,7 @@ pub(crate) fn remove_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), S
 pub(crate) fn reconcile_codex_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
-    state
-        .backend
-        .reconcile_codex_guidance(&title, &locale)
+    state.backend.reconcile_codex_guidance(&title, &locale)
 }
 
 #[tauri::command(async)]
@@ -206,10 +205,11 @@ pub(crate) fn respond_to_a2ui_render(
 /// located so the frontend can surface a useful hint.
 #[tauri::command(async)]
 pub(crate) fn apply_mcp_injector(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let p = crate::fleet_binary::resolve_fleet_binary()
-        .ok_or("Fleet sibling binary not found near this Fleet desktop process — \
+    let p = crate::fleet_binary::resolve_fleet_binary().ok_or(
+        "Fleet sibling binary not found near this Fleet desktop process — \
                  build fleet-cli or install the production sidecar so the MCP \
-                 injector can point at a real `command` path")?;
+                 injector can point at a real `command` path",
+    )?;
     let fleet_path = p.to_string_lossy().to_string();
     state.backend.apply_mcp_injector(&fleet_path)
 }
@@ -292,4 +292,3 @@ pub(crate) fn read_local_file_bytes(path: String) -> Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
-

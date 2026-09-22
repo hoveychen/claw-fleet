@@ -3,7 +3,8 @@ use super::*;
 // ── Decision panel timeouts ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn get_decision_panel_config() -> claw_fleet_core::decision_panel_config::DecisionPanelConfig {
+pub(crate) fn get_decision_panel_config(
+) -> claw_fleet_core::decision_panel_config::DecisionPanelConfig {
     claw_fleet_core::decision_panel_config::load()
 }
 
@@ -26,4 +27,3 @@ pub(crate) fn read_review_doc(
 ) -> Result<claw_fleet_core::mcp_ipc::ReviewDocContent, String> {
     state.backend.read_review_doc(&doc)
 }
-

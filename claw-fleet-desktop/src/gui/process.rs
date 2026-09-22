@@ -29,7 +29,10 @@ pub(crate) fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Resul
 }
 
 #[tauri::command(async)]
-pub(crate) fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub(crate) fn kill_workspace_sessions(
+    workspace_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     state.backend.kill_workspace(workspace_path)
 }
 
@@ -80,9 +83,7 @@ pub(crate) fn cancel_session_pending_message(
     index: usize,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .backend
-        .cancel_pending_message(session_id, index)
+    state.backend.cancel_pending_message(session_id, index)
 }
 
 /// Async so the spawn never blocks the UI thread. The codex path
@@ -104,8 +105,7 @@ pub(crate) async fn spawn_new_claude_session(
 ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
-        backend
-            .spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
+        backend.spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
     })
     .await
     .map_err(|e| format!("join: {e}"))?

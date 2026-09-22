@@ -119,7 +119,10 @@ fn non_fleet_session_sees_only_ui_tools_and_control_call_is_refused() {
         "non-Fleet session must see only the always-on tools: {names:?}"
     );
     for c in CONTROL_TOOLS {
-        assert!(!names.contains(&c.to_string()), "{c} must be hidden from non-Fleet sessions");
+        assert!(
+            !names.contains(&c.to_string()),
+            "{c} must be hidden from non-Fleet sessions"
+        );
     }
     // Even a direct call is refused (defense in depth), as a structured error.
     assert_eq!(resps[1]["result"]["isError"], true);
@@ -155,12 +158,18 @@ fn fleet_session_sees_control_tools_and_plan_mutates_tasks_md() {
         "Fleet session must see always-on + control tools: {names:?}"
     );
     for c in CONTROL_TOOLS {
-        assert!(names.contains(&c.to_string()), "{c} must be advertised to Fleet sessions");
+        assert!(
+            names.contains(&c.to_string()),
+            "{c} must be advertised to Fleet sessions"
+        );
     }
 
     // 2. The create/add/check calls all succeed over the wire.
     for id in 2..=4 {
-        let r = resps.iter().find(|r| r["id"] == id).expect("response present");
+        let r = resps
+            .iter()
+            .find(|r| r["id"] == id)
+            .expect("response present");
         assert_eq!(r["result"]["isError"], false, "call {id} errored: {r}");
     }
 
@@ -179,12 +188,18 @@ fn fleet_session_handoff_register_persists_a_pending_record() {
         home.path(),
         ws.path(),
         true,
-        &[json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+        &[
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
             "name":"fleet__handoff",
-            "arguments":{"action":"register","note":"P2 done, continue at P3"}}})],
+            "arguments":{"action":"register","note":"P2 done, continue at P3"}}}),
+        ],
     );
 
-    assert_eq!(resps[0]["result"]["isError"], false, "handoff register errored: {}", resps[0]);
+    assert_eq!(
+        resps[0]["result"]["isError"], false,
+        "handoff register errored: {}",
+        resps[0]
+    );
     let text = resps[0]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("handoff registered"), "handoff text: {text}");
 
@@ -195,7 +210,11 @@ fn fleet_session_handoff_register_persists_a_pending_record() {
         .join("handoffs")
         .join("pending")
         .join(format!("{SID}.json"));
-    assert!(pending.exists(), "pending handoff record must be written to {}", pending.display());
+    assert!(
+        pending.exists(),
+        "pending handoff record must be written to {}",
+        pending.display()
+    );
     let rec: Value = serde_json::from_str(&std::fs::read_to_string(&pending).unwrap()).unwrap();
     assert_eq!(rec["note"], "P2 done, continue at P3");
 }
@@ -246,26 +265,46 @@ fn fleet_session_notes_and_history_roundtrip_over_the_wire() {
     );
 
     let text = |id: u64| -> String {
-        let r = resps.iter().find(|r| r["id"] == id).expect("response present");
+        let r = resps
+            .iter()
+            .find(|r| r["id"] == id)
+            .expect("response present");
         assert_eq!(r["result"]["isError"], false, "call {id} errored: {r}");
-        r["result"]["content"][0]["text"].as_str().unwrap().to_string()
+        r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
 
     assert_eq!(text(3), "goal: ship notes\nnext: history\n");
-    assert!(text(4).contains("checkpoint.md:2  next: history"), "{}", text(4));
+    assert!(
+        text(4).contains("checkpoint.md:2  next: history"),
+        "{}",
+        text(4)
+    );
     let note_file = home
         .path()
         .join(".fleet")
         .join("notes")
         .join(SID)
         .join("checkpoint.md");
-    assert!(note_file.is_file(), "note must land at {}", note_file.display());
+    assert!(
+        note_file.is_file(),
+        "note must land at {}",
+        note_file.display()
+    );
 
     let hits = text(5);
-    assert!(hits.contains("line 3"), "history hit must point at line 3: {hits}");
+    assert!(
+        hits.contains("line 3"),
+        "history hit must point at line 3: {hits}"
+    );
     let record = text(6);
     assert!(record.starts_with("[assistant]"), "{record}");
-    assert!(record.contains("the zqe2e tokenizer fix landed"), "{record}");
+    assert!(
+        record.contains("the zqe2e tokenizer fix landed"),
+        "{record}"
+    );
     assert!(
         record.contains("<tool_use name=\"Bash\">{\"command\":\"cargo test\"}</tool_use>"),
         "read must expand tool inputs: {record}"
@@ -289,12 +328,12 @@ fn fleet_session_artifact_add_really_stores_the_file() {
         true,
         &[
             json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-                "name":"fleet__artifact","arguments":{
-                    "action":"add",
-                    "path": src.to_str().unwrap(),
-                    "title":"Q3 deck",
-                    "note":"for the board"
-                }}}),
+            "name":"fleet__artifact","arguments":{
+                "action":"add",
+                "path": src.to_str().unwrap(),
+                "title":"Q3 deck",
+                "note":"for the board"
+            }}}),
             json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
                 "name":"fleet__artifact","arguments":{"action":"list"}}}),
         ],
@@ -320,7 +359,10 @@ fn fleet_session_artifact_add_really_stores_the_file() {
     assert_eq!(meta["title"], "Q3 deck");
     assert_eq!(meta["note"], "for the board");
     assert_eq!(meta["kind"], "slides");
-    assert_eq!(meta["sessionId"], SID, "the producing session must be recorded");
+    assert_eq!(
+        meta["sessionId"], SID,
+        "the producing session must be recorded"
+    );
     assert_eq!(
         std::fs::read(ids[0].join("blob").join("deck.pptx")).unwrap(),
         b"PK\x03\x04 pretend deck",

@@ -58,7 +58,10 @@ pub(crate) fn set_skill_autosync(
 }
 
 #[tauri::command(async)]
-pub(crate) fn get_skill_content(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+pub(crate) fn get_skill_content(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
     state.backend.get_skill_content(&path)
 }
 
@@ -71,6 +74,9 @@ pub(crate) fn list_skill_files(
 }
 
 #[tauri::command(async)]
-pub(crate) fn delete_skill(skill_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub(crate) fn delete_skill(
+    skill_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     state.backend.delete_skill(&skill_path)
 }

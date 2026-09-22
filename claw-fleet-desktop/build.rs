@@ -41,7 +41,11 @@ fn ensure_sidecar_placeholders() {
     let dir = std::path::Path::new(&manifest).join("binaries");
     let _ = std::fs::create_dir_all(&dir);
 
-    let ext = if target.contains("windows") { ".exe" } else { "" };
+    let ext = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
 
     // Sidecar for externalBin (all platforms)
     let sidecar = dir.join(format!("fleet-{target}{ext}"));

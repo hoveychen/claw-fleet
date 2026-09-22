@@ -11,8 +11,8 @@
 //! matching hook and passes them to the model together — so this block gets
 //! its own byte budget instead of competing with the notes summary for one.
 
-use std::path::PathBuf;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 /// Emit the recent-sessions block for the workspace this session opened in.
 ///

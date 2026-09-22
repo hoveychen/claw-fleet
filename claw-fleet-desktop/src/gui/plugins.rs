@@ -14,18 +14,22 @@ pub(crate) fn set_plugin_enabled(
     plugin_id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .backend
-        .set_plugin_enabled(&plugin_id, enabled)
+    state.backend.set_plugin_enabled(&plugin_id, enabled)
 }
 
 #[tauri::command(async)]
-pub(crate) fn install_plugin(state: tauri::State<'_, AppState>, plugin_id: String) -> Result<(), String> {
+pub(crate) fn install_plugin(
+    state: tauri::State<'_, AppState>,
+    plugin_id: String,
+) -> Result<(), String> {
     state.backend.install_plugin(&plugin_id)
 }
 
 #[tauri::command(async)]
-pub(crate) fn uninstall_plugin(state: tauri::State<'_, AppState>, plugin_id: String) -> Result<(), String> {
+pub(crate) fn uninstall_plugin(
+    state: tauri::State<'_, AppState>,
+    plugin_id: String,
+) -> Result<(), String> {
     state.backend.uninstall_plugin(&plugin_id)
 }
 
@@ -37,12 +41,17 @@ pub(crate) fn list_marketplaces(
 }
 
 #[tauri::command(async)]
-pub(crate) fn add_marketplace(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
+pub(crate) fn add_marketplace(
+    state: tauri::State<'_, AppState>,
+    source: String,
+) -> Result<(), String> {
     state.backend.add_marketplace(&source)
 }
 
 #[tauri::command(async)]
-pub(crate) fn remove_marketplace(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
+pub(crate) fn remove_marketplace(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
     state.backend.remove_marketplace(&name)
 }
-

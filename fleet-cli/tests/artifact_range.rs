@@ -110,7 +110,11 @@ fn spawn_serve(fleet_home: &Path, port_file: &Path, token: &str) -> ServeGuard {
         .stderr(Stdio::from(stderr_file))
         .spawn()
         .expect("spawn fleet-cli serve");
-    ServeGuard { child, stdout_log, stderr_log }
+    ServeGuard {
+        child,
+        stdout_log,
+        stderr_log,
+    }
 }
 
 fn wait_for_port_file(path: &Path, timeout: Duration, serve: &mut ServeGuard) -> u16 {
@@ -193,7 +197,14 @@ fn dechunk(raw: &[u8]) -> Vec<u8> {
 /// `Connection: close` so the body ends at EOF, plus [`dechunk`] for the
 /// responses tiny_http frames — the point here is the headers and the bytes,
 /// not reimplementing HTTP.
-fn request(port: u16, method: &str, path: &str, token: &str, extra: &[(&str, &str)], body: Option<&str>) -> Resp {
+fn request(
+    port: u16,
+    method: &str,
+    path: &str,
+    token: &str,
+    extra: &[(&str, &str)],
+    body: Option<&str>,
+) -> Resp {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("tcp connect");
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
@@ -245,7 +256,11 @@ fn request(port: u16, method: &str, path: &str, token: &str, extra: &[(&str, &st
         body = dechunk(&body);
     }
 
-    Resp { status, headers, body }
+    Resp {
+        status,
+        headers,
+        body,
+    }
 }
 
 fn get(port: u16, path: &str, token: &str, extra: &[(&str, &str)]) -> Resp {
@@ -286,7 +301,10 @@ fn serve_with_one_artifact(label: &str) -> (ServeGuard, u16, String, String) {
     );
     let json: serde_json::Value =
         serde_json::from_slice(&added.body).expect("artifact_add returns json");
-    let id = json["id"].as_str().expect("added artifact has an id").to_string();
+    let id = json["id"]
+        .as_str()
+        .expect("added artifact has an id")
+        .to_string();
 
     (serve, port, token.to_string(), id)
 }
@@ -319,11 +337,18 @@ fn an_unranged_blob_request_is_a_plain_200_that_advertises_seeking() {
 
     let r = get(port, &format!("/artifact_blob?id={id}"), &token, &[]);
     assert_eq!(r.status, 200, "{}", serve.logs());
-    assert_eq!(r.body, expected_body(), "the whole blob must come back intact");
+    assert_eq!(
+        r.body,
+        expected_body(),
+        "the whole blob must come back intact"
+    );
     assert_eq!(r.header("Content-Type"), Some("video/mp4"));
     // Without this header a media element will not even try to seek.
     assert_eq!(r.header("Accept-Ranges"), Some("bytes"));
-    assert!(r.header("Content-Range").is_none(), "a 200 must not claim a range");
+    assert!(
+        r.header("Content-Range").is_none(),
+        "a 200 must not claim a range"
+    );
 }
 
 #[test]
@@ -337,14 +362,23 @@ fn a_ranged_request_answers_206_with_exactly_those_bytes() {
         &token,
         &[("Range", "bytes=1000-1099")],
     );
-    assert_eq!(r.status, 206, "a satisfiable range must be 206\n{}", serve.logs());
+    assert_eq!(
+        r.status,
+        206,
+        "a satisfiable range must be 206\n{}",
+        serve.logs()
+    );
     assert_eq!(
         r.header("Content-Range"),
         Some(format!("bytes 1000-1099/{BLOB_LEN}").as_str()),
         "Content-Range must name the slice AND the full size"
     );
     assert_eq!(r.body.len(), 100);
-    assert_eq!(r.body, full[1000..1100], "wrong offset would still be 100 bytes");
+    assert_eq!(
+        r.body,
+        full[1000..1100],
+        "wrong offset would still be 100 bytes"
+    );
 }
 
 #[test]
@@ -392,7 +426,12 @@ fn an_unknown_id_is_404_even_with_a_range_header() {
         &token,
         &[("Range", "bytes=0-99")],
     );
-    assert_eq!(r.status, 404, "a missing artifact is not a range problem\n{}", serve.logs());
+    assert_eq!(
+        r.status,
+        404,
+        "a missing artifact is not a range problem\n{}",
+        serve.logs()
+    );
 }
 
 #[test]
@@ -419,5 +458,8 @@ fn update_and_delete_reach_the_store_through_the_probe() {
 
     let listed = get(port, "/artifacts", &token, &[]);
     let docs: serde_json::Value = serde_json::from_slice(&listed.body).unwrap();
-    assert!(docs.as_array().unwrap().is_empty(), "delete must actually remove it");
+    assert!(
+        docs.as_array().unwrap().is_empty(),
+        "delete must actually remove it"
+    );
 }

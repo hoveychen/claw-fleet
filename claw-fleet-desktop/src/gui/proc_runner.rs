@@ -82,4 +82,3 @@ pub(crate) fn clear_workspace_procs(
 ) -> Result<u32, String> {
     state.backend.clear_procs(id, workspace_path)
 }
-

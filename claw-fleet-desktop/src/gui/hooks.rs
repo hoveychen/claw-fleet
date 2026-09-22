@@ -17,4 +17,3 @@ pub(crate) fn apply_hooks_setup(state: tauri::State<'_, AppState>) -> Result<(),
 pub(crate) fn remove_hooks(state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.remove_hooks()
 }
-

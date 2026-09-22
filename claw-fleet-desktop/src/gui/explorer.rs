@@ -98,4 +98,3 @@ pub(crate) fn resolve_prose_path(
 ) -> claw_fleet_core::file_explorer::PathResolution {
     state.backend.resolve_prose_path(&workspace, &path)
 }
-

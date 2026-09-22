@@ -559,9 +559,7 @@ pub(crate) fn read_level_dirs(parent: &str) -> LevelDirs {
     }
     // Stat only AFTER the TCC check — the whole point of that check is to avoid
     // touching a protected directory at all.
-    let mtime = std::fs::metadata(dir_path)
-        .and_then(|m| m.modified())
-        .ok();
+    let mtime = std::fs::metadata(dir_path).and_then(|m| m.modified()).ok();
     if let Some(mtime) = mtime {
         if let Some(hit) = cache_lookup(dir, mtime) {
             return hit;
@@ -569,11 +567,41 @@ pub(crate) fn read_level_dirs(parent: &str) -> LevelDirs {
     }
     let listed = LevelDirs::new(list_level_dirs_uncached(dir_path));
     // No mtime means no invalidation signal, so such a directory is re-listed
-    // every time rather than cached forever.
+    // every time rather than cached forever. Neither is one whose mtime is too
+    // fresh to be trusted as a key yet — see `mtime_is_too_fresh_to_cache`.
     if let Some(mtime) = mtime {
-        cache_store(dir, mtime, &listed);
+        if !mtime_is_too_fresh_to_cache(mtime, std::time::SystemTime::now()) {
+            cache_store(dir, mtime, &listed);
+        }
     }
     listed
+}
+
+/// A filesystem's mtime granularity is coarser than the rate at which
+/// directories change, so a listing taken within one tick of the directory's
+/// own mtime cannot be keyed by that mtime: an entry created later in the same
+/// tick leaves the mtime untouched, and the stale listing then survives every
+/// subsequent lookup — not for one tick, but until the directory happens to
+/// change again.
+///
+/// Measured 2026-09-21: on Linux/ext4 the directory mtime comes from the coarse
+/// real clock, so 200 back-to-back `mkdir`s produced only 5 distinct mtimes
+/// (1 ms steps, 195 of the 199 consecutive pairs identical). The same probe on
+/// macOS/APFS produced 200 distinct mtimes, which is why this hazard was
+/// invisible locally and only failed on CI.
+///
+/// The window is deliberately far wider than the 1 ms observed there — Windows'
+/// system clock ticks at ~15.6 ms, and `CONFIG_HZ=250` kernels at 4 ms. The cost
+/// of erring wide is one extra `read_dir` of a directory that changed moments
+/// ago; the cost of erring narrow is a permanently wrong decode.
+const LEVEL_DIRS_MTIME_SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
+
+fn mtime_is_too_fresh_to_cache(mtime: std::time::SystemTime, now: std::time::SystemTime) -> bool {
+    // An mtime in the future (clock skew, or a network filesystem stamping with
+    // the server's clock) is no more trustworthy than a fresh one.
+    now.duration_since(mtime)
+        .map(|age| age < LEVEL_DIRS_MTIME_SETTLE)
+        .unwrap_or(true)
 }
 
 /// An `encoded name → real name` listing of one directory level, shared rather
@@ -839,19 +867,42 @@ mod heal_workspace_path_tests {
 /// slash decode shreds `first_dir` into `first/dir`).
 #[cfg(test)]
 mod level_dirs_cache_tests {
-    use super::{clear_level_dirs_cache, decode_workspace_path, encode_workspace_path};
+    use super::{
+        cache_lookup, cache_store, clear_level_dirs_cache, decode_workspace_path,
+        encode_workspace_path, mtime_is_too_fresh_to_cache, LevelDirs, LEVEL_DIRS_MTIME_SETTLE,
+    };
 
     fn decode_of(path: &std::path::Path) -> String {
         decode_workspace_path(&encode_workspace_path(&path.to_string_lossy()))
     }
 
+    /// Long enough for any of the granularities named on
+    /// `LEVEL_DIRS_MTIME_SETTLE` to have elapsed, so a directory touched before
+    /// the wait is genuinely cacheable after it.
+    fn wait_out_the_settle_window() {
+        std::thread::sleep(LEVEL_DIRS_MTIME_SETTLE + std::time::Duration::from_millis(20));
+    }
+
+    /// Every test here clears and inspects one process-global cache, so they
+    /// cannot run concurrently with each other: one test's `clear` is another's
+    /// unexplained miss.
+    static SERIALIZE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn exclusively() -> std::sync::MutexGuard<'static, ()> {
+        SERIALIZE.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The regression this cache could have introduced: a directory listed
     /// once, then a sibling created, and the sibling invisible forever after.
-    /// A new entry bumps the parent's mtime, which is what has to evict it.
+    ///
+    /// Nothing here sleeps, so on a coarse-mtime filesystem both `mkdir`s land
+    /// in the same mtime tick and the mtime key alone cannot evict anything —
+    /// what has to save the decode is the freshness gate refusing to cache that
+    /// first listing at all.
     #[test]
     fn a_directory_created_after_the_first_listing_still_decodes() {
-        let parent =
-            std::env::temp_dir().join(format!("fleet-level-cache-{}", std::process::id()));
+        let _guard = exclusively();
+        let parent = std::env::temp_dir().join(format!("fleet-level-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&parent);
         let first = parent.join("first_dir");
         std::fs::create_dir_all(&first).unwrap();
@@ -877,6 +928,7 @@ mod level_dirs_cache_tests {
     /// and the session shows a Resume button that can never work.
     #[test]
     fn a_removed_directory_stops_being_decoded_into() {
+        let _guard = exclusively();
         let parent =
             std::env::temp_dir().join(format!("fleet-level-cache-rm-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&parent);
@@ -894,6 +946,93 @@ mod level_dirs_cache_tests {
         );
 
         let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// The freshness gate could hide a cache that never invalidates at all, so
+    /// this one lets the parent settle first — the listing IS cached here, and
+    /// only a real mtime comparison can evict it.
+    #[test]
+    fn a_settled_listing_is_still_evicted_when_the_directory_changes() {
+        let _guard = exclusively();
+        let parent =
+            std::env::temp_dir().join(format!("fleet-level-cache-settled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        let first = parent.join("first_dir");
+        std::fs::create_dir_all(&first).unwrap();
+        clear_level_dirs_cache();
+        wait_out_the_settle_window();
+
+        assert_eq!(decode_of(&first), first.to_string_lossy());
+
+        let second = parent.join("second_dir");
+        std::fs::create_dir_all(&second).unwrap();
+        assert_eq!(
+            decode_of(&second),
+            second.to_string_lossy(),
+            "a cached listing survived the mtime bump of its own directory"
+        );
+
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// And the cache does have to actually hit, or the measurement that
+    /// motivated it is undone silently.
+    #[test]
+    fn a_stored_listing_is_returned_for_the_same_mtime_only() {
+        let _guard = exclusively();
+        clear_level_dirs_cache();
+        let mtime = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let dirs: LevelDirs = LevelDirs::new(
+            [("sub-dir".to_string(), "sub_dir".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        cache_store("/some/dir", mtime, &dirs);
+
+        assert_eq!(
+            cache_lookup("/some/dir", mtime).as_deref(),
+            Some(&*dirs),
+            "the listing just stored did not come back"
+        );
+        assert!(
+            cache_lookup("/some/dir", mtime + std::time::Duration::from_secs(1)).is_none(),
+            "a changed mtime must miss"
+        );
+        assert!(
+            cache_lookup("/another/dir", mtime).is_none(),
+            "an unrelated directory must miss"
+        );
+        clear_level_dirs_cache();
+    }
+
+    /// The gate itself, without a filesystem in the way: a directory stamped
+    /// moments ago is uncacheable, one stamped long ago is fine, and a
+    /// future-dated one (clock skew, NFS server clock) is treated as fresh
+    /// rather than as infinitely old.
+    #[test]
+    fn only_a_settled_mtime_is_cacheable() {
+        let now = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        assert!(mtime_is_too_fresh_to_cache(now, now));
+        assert!(mtime_is_too_fresh_to_cache(
+            now - std::time::Duration::from_millis(1),
+            now
+        ));
+        assert!(mtime_is_too_fresh_to_cache(
+            now - LEVEL_DIRS_MTIME_SETTLE + std::time::Duration::from_millis(1),
+            now
+        ));
+        assert!(!mtime_is_too_fresh_to_cache(
+            now - LEVEL_DIRS_MTIME_SETTLE,
+            now
+        ));
+        assert!(!mtime_is_too_fresh_to_cache(
+            now - std::time::Duration::from_secs(3600),
+            now
+        ));
+        assert!(mtime_is_too_fresh_to_cache(
+            now + std::time::Duration::from_secs(60),
+            now
+        ));
     }
 }
 

@@ -270,11 +270,12 @@ pub(crate) async fn get_session_todos(
     let backend = state.backend.clone();
     run_blocking_result(move || {
         let messages = backend.get_messages(&jsonl_path)?;
-        Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))
+        Ok(claw_fleet_core::session_todos::extract_latest_todos(
+            &messages,
+        ))
     })
     .await
 }
-
 
 /// Images a Codex session generated, for the session detail's thumbnail strip.
 ///

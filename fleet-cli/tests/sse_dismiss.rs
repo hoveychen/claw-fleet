@@ -129,12 +129,7 @@ fn connect_sse(port: u16, token: &str) -> TcpStream {
 /// Drain SSE frames looking for one whose `event:` line matches `event` and
 /// whose parsed `data:` JSON satisfies `matcher`. Returns `true` if found
 /// before the deadline.
-fn wait_for_frame<F>(
-    stream: &mut TcpStream,
-    event: &str,
-    timeout: Duration,
-    mut matcher: F,
-) -> bool
+fn wait_for_frame<F>(stream: &mut TcpStream, event: &str, timeout: Duration, mut matcher: F) -> bool
 where
     F: FnMut(&str) -> bool,
 {
@@ -145,8 +140,9 @@ where
         match stream.read(&mut scratch) {
             Ok(0) => return false,
             Ok(n) => buffer.extend_from_slice(&scratch[..n]),
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) => panic!("read sse: {e}"),
         }
         let text = String::from_utf8_lossy(&buffer);
@@ -238,25 +234,19 @@ fn run_dismiss_roundtrip(
 
 #[test]
 fn guard_dismissed_broadcasts_when_request_file_removed() {
-    run_dismiss_roundtrip(
-        "guard",
-        "guard",
-        "guard-request",
-        "guard-dismissed",
-        |id| {
-            serde_json::json!({
-                "id": id,
-                "sessionId": "test-session",
-                "workspaceName": "test-workspace",
-                "aiTitle": null,
-                "toolName": "Bash",
-                "command": "echo integration-test",
-                "commandSummary": "echo integration-test",
-                "riskTags": [],
-                "timestamp": "2024-01-01T00:00:00Z",
-            })
-        },
-    );
+    run_dismiss_roundtrip("guard", "guard", "guard-request", "guard-dismissed", |id| {
+        serde_json::json!({
+            "id": id,
+            "sessionId": "test-session",
+            "workspaceName": "test-workspace",
+            "aiTitle": null,
+            "toolName": "Bash",
+            "command": "echo integration-test",
+            "commandSummary": "echo integration-test",
+            "riskTags": [],
+            "timestamp": "2024-01-01T00:00:00Z",
+        })
+    });
 }
 
 #[test]

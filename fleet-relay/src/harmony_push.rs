@@ -196,8 +196,8 @@ impl HarmonyPush {
         let project_id = nonblank("RELAY_HARMONY_PROJECT_ID")?;
         let app_id = nonblank("RELAY_HARMONY_APP_ID")?;
         let template_id = nonblank("RELAY_HARMONY_TEMPLATE_ID")?;
-        let category = nonblank("RELAY_HARMONY_CATEGORY")
-            .unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
+        let category =
+            nonblank("RELAY_HARMONY_CATEGORY").unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
         let key_id = nonblank("RELAY_HARMONY_KEY_ID")?;
         let sub_account = nonblank("RELAY_HARMONY_SUB_ACCOUNT")?;
         // The PEM is multi-line; docker/compose commonly delivers it with the
@@ -206,9 +206,17 @@ impl HarmonyPush {
             .ok()
             .map(|s| s.replace("\\n", "\n"))
             .filter(|s| !s.trim().is_empty())?;
-        Self::new(project_id, app_id, template_id, category, key_id, sub_account, &private_key)
-            .map_err(|e| log::warn!("HarmonyOS Push Kit disabled — bad private key: {e}"))
-            .ok()
+        Self::new(
+            project_id,
+            app_id,
+            template_id,
+            category,
+            key_id,
+            sub_account,
+            &private_key,
+        )
+        .map_err(|e| log::warn!("HarmonyOS Push Kit disabled — bad private key: {e}"))
+        .ok()
     }
 
     /// Build from explicit values (env parsing lives in [`from_env`]; tests use
@@ -303,9 +311,9 @@ impl HarmonyPush {
             .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string));
         match code.as_deref() {
             Some(SUCCESS_CODE) => Ok(()),
-            Some(c) if is_dead(c) => {
-                Err(SendError::DeadRecipient(format!("code {c}: {text} (http {status})")))
-            }
+            Some(c) if is_dead(c) => Err(SendError::DeadRecipient(format!(
+                "code {c}: {text} (http {status})"
+            ))),
             Some(c) => Err(SendError::Transient(format!(
                 "{what} code {c}: {text} (http {status})"
             ))),
@@ -317,7 +325,10 @@ impl HarmonyPush {
 
     /// Send one service notification to a Huawei-account OpenID (元服务 channel).
     pub async fn send(&self, open_id: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
-        let url = format!("{SVC_API_BASE}/{}/service_notification/send", self.project_id);
+        let url = format!(
+            "{SVC_API_BASE}/{}/service_notification/send",
+            self.project_id
+        );
         let body = build_service_notification(
             &gen_msg_id(),
             &self.app_id,
@@ -325,7 +336,8 @@ impl HarmonyPush {
             open_id,
             payload,
         );
-        self.post("service_notification", url, body, None, is_dead_openid_code).await
+        self.post("service_notification", url, body, None, is_dead_openid_code)
+            .await
     }
 
     /// Send one notification to a device push token (普通应用 channel).
@@ -333,11 +345,21 @@ impl HarmonyPush {
     /// This is the channel the HarmonyOS **app** build and the Android shell
     /// both use — same endpoint, same body, only the token differs — which is
     /// why there is one implementation rather than one per platform.
-    pub async fn send_token(&self, token: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
+    pub async fn send_token(
+        &self,
+        token: &str,
+        payload: &PushPayload<'_>,
+    ) -> Result<(), SendError> {
         let url = format!("{APP_API_BASE}/{}/messages:send", self.project_id);
         let body = build_app_notification(&self.category, token, payload);
-        self.post("messages:send", url, body, Some(PUSH_TYPE_NOTIFICATION), is_dead_token_code)
-            .await
+        self.post(
+            "messages:send",
+            url,
+            body,
+            Some(PUSH_TYPE_NOTIFICATION),
+            is_dead_token_code,
+        )
+        .await
     }
 }
 
@@ -352,7 +374,11 @@ fn unix_secs() -> u64 {
 /// A unique message id in `[1,64]` chars (Push Kit requires the sender to mint
 /// it). 32 hex chars of 128-bit entropy is unique in practice and well-formed.
 fn gen_msg_id() -> String {
-    format!("{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+    format!(
+        "{:016x}{:016x}",
+        rand::random::<u64>(),
+        rand::random::<u64>()
+    )
 }
 
 /// Build the `service_notification/send` request body from a relay payload.
@@ -511,7 +537,10 @@ cHMuOFehtqcSyMaY3z552xNj
         // rides in clickAction.data, which the UIAbility reads back out of the
         // want. Without this the notification opens the app on its home screen
         // no matter which card fired it.
-        assert_eq!(body["payload"]["notification"]["clickAction"]["actionType"], 0);
+        assert_eq!(
+            body["payload"]["notification"]["clickAction"]["actionType"],
+            0
+        );
         assert_eq!(
             body["payload"]["notification"]["clickAction"]["data"]["fleetUrl"],
             "/#d=fleet-ask:42"
@@ -523,9 +552,18 @@ cHMuOFehtqcSyMaY3z552xNj
         // `url` is Option on the wire; an older desktop may not send one. An
         // empty `data` object is worse than none — the shell would hand the web
         // an empty target and it would look like a failed route.
-        let payload = PushPayload { title: "t", body: "b", tag: None, url: None, badge: None };
+        let payload = PushPayload {
+            title: "t",
+            body: "b",
+            tag: None,
+            url: None,
+            badge: None,
+        };
         let body = build_app_notification("WORK", "TOK-A", &payload);
-        assert_eq!(body["payload"]["notification"]["clickAction"]["actionType"], 0);
+        assert_eq!(
+            body["payload"]["notification"]["clickAction"]["actionType"],
+            0
+        );
         assert!(body["payload"]["notification"]["clickAction"]["data"].is_null());
     }
 
@@ -534,8 +572,13 @@ cHMuOFehtqcSyMaY3z552xNj
         // setNum, not addNum: a phone that slept through two notifications must
         // still land on the true pending count rather than accumulate one
         // increment per delivered message.
-        let payload =
-            PushPayload { title: "t", body: "b", tag: None, url: None, badge: Some(4) };
+        let payload = PushPayload {
+            title: "t",
+            body: "b",
+            tag: None,
+            url: None,
+            badge: Some(4),
+        };
         let body = build_app_notification("WORK", "TOK-A", &payload);
         assert_eq!(body["payload"]["notification"]["badge"]["setNum"], 4);
         assert!(body["payload"]["notification"]["badge"]["addNum"].is_null());
@@ -545,8 +588,13 @@ cHMuOFehtqcSyMaY3z552xNj
     fn app_notification_clamps_the_badge_to_push_kits_ceiling() {
         // Push Kit rejects setNum >= 100 as an illegal payload, which would
         // lose the whole notification, not just the badge.
-        let payload =
-            PushPayload { title: "t", body: "b", tag: None, url: None, badge: Some(1881) };
+        let payload = PushPayload {
+            title: "t",
+            body: "b",
+            tag: None,
+            url: None,
+            badge: Some(1881),
+        };
         let body = build_app_notification("WORK", "TOK-A", &payload);
         assert_eq!(body["payload"]["notification"]["badge"]["setNum"], 99);
     }
@@ -555,7 +603,13 @@ cHMuOFehtqcSyMaY3z552xNj
     fn app_notification_omits_the_badge_when_absent() {
         // An older desktop sends no count; emitting `setNum: 0` instead would
         // actively clear a badge the user still has pending work behind.
-        let payload = PushPayload { title: "t", body: "b", tag: None, url: None, badge: None };
+        let payload = PushPayload {
+            title: "t",
+            body: "b",
+            tag: None,
+            url: None,
+            badge: None,
+        };
         let body = build_app_notification("WORK", "TOK-A", &payload);
         assert!(body["payload"]["notification"]["badge"].is_null());
     }
@@ -611,7 +665,10 @@ cHMuOFehtqcSyMaY3z552xNj
             minted_at: Instant::now(),
             ttl: Duration::from_secs(100), // < JWT_SKEW (300)
         };
-        assert!(!stale.is_valid(), "ttl inside skew window counts as expired");
+        assert!(
+            !stale.is_valid(),
+            "ttl inside skew window counts as expired"
+        );
         let fresh = CachedJwt {
             token: "x".into(),
             minted_at: Instant::now(),

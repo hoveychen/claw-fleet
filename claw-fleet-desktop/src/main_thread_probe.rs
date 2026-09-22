@@ -44,9 +44,8 @@ const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// Split from the loop so the threshold is testable without an event loop.
 fn stall_line(latency_ms: u128) -> Option<String> {
-    (latency_ms >= STALL_MS).then(|| {
-        format!("main-thread probe: event loop answered after {latency_ms}ms")
-    })
+    (latency_ms >= STALL_MS)
+        .then(|| format!("main-thread probe: event loop answered after {latency_ms}ms"))
 }
 
 /// Start the heartbeat. Runs until the app handle stops accepting work.
@@ -58,7 +57,12 @@ pub(crate) fn spawn(app: tauri::AppHandle) {
             let (tx, rx) = mpsc::channel();
             let started = Instant::now();
             // Err means the app is on its way out; stop rather than spin.
-            if app.run_on_main_thread(move || { let _ = tx.send(()); }).is_err() {
+            if app
+                .run_on_main_thread(move || {
+                    let _ = tx.send(());
+                })
+                .is_err()
+            {
                 return;
             }
             match rx.recv_timeout(RECV_TIMEOUT) {

@@ -151,7 +151,10 @@ mod tests {
 
     #[test]
     fn csp_without_frame_ancestors_does_not_restrict_framing() {
-        assert_eq!(embed_verdict(None, Some("default-src 'self'; img-src *")), None);
+        assert_eq!(
+            embed_verdict(None, Some("default-src 'self'; img-src *")),
+            None
+        );
     }
 
     #[test]

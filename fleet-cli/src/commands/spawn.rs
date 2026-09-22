@@ -75,10 +75,10 @@ pub(crate) fn cmd_spawn(
     // A title given up front saves the new session from having to name itself,
     // and more importantly labels it in the task list from the first second —
     // before it has produced any output to name it by.
-    if let (Some(t), Some(new_sid)) = (title.map(str::trim).filter(|t| !t.is_empty()), resp
-        .session_id
-        .as_deref())
-    {
+    if let (Some(t), Some(new_sid)) = (
+        title.map(str::trim).filter(|t| !t.is_empty()),
+        resp.session_id.as_deref(),
+    ) {
         if let Err(e) =
             claw_fleet_core::session_title::set_title(new_sid, &workspace_path, Some(t.to_string()))
         {

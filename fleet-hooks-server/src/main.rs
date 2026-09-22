@@ -14,7 +14,11 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "fleet-hooks-server", version, about = "Hook endpoints for Claude Code (guard / elicitation / plan-approval / etc.)")]
+#[command(
+    name = "fleet-hooks-server",
+    version,
+    about = "Hook endpoints for Claude Code (guard / elicitation / plan-approval / etc.)"
+)]
 struct Cli {
     /// Port to listen on. 0 = ephemeral (default).
     #[arg(long, default_value_t = 0)]

@@ -54,10 +54,8 @@ struct ChinaManifest {
     china: serde_json::Value,
 }
 
-const REQUIRED_DESKTOP_ASSETS: [&str; 2] = [
-    "claw-fleet-macos.pkg",
-    "claw-fleet-windows-x64-setup.exe",
-];
+const REQUIRED_DESKTOP_ASSETS: [&str; 2] =
+    ["claw-fleet-macos.pkg", "claw-fleet-windows-x64-setup.exe"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReleaseSource {
@@ -420,6 +418,9 @@ mod tests {
         });
         let hop = joined.expect("the command's thread must not panic inside a tokio worker");
         let inner = hop.expect("off_runtime's helper thread must not panic");
-        assert!(inner.is_err(), "a closed port must surface as Err, not a panic");
+        assert!(
+            inner.is_err(),
+            "a closed port must surface as Err, not a panic"
+        );
     }
 }

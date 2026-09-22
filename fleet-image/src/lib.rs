@@ -73,7 +73,9 @@ pub fn downscale_image(
     let mut best: Option<Vec<u8>> = None;
     loop {
         for &quality in &DECISION_ASSET_QUALITY_LADDER {
-            let Some(encoded) = encode_jpeg(&work, quality) else { continue };
+            let Some(encoded) = encode_jpeg(&work, quality) else {
+                continue;
+            };
             if best.as_ref().map_or(true, |b| encoded.len() < b.len()) {
                 best = Some(encoded.clone());
             }
@@ -107,12 +109,15 @@ pub fn downscale_image(
 fn encode_jpeg(img: &image::DynamicImage, quality: u8) -> Option<Vec<u8>> {
     let rgb = img.to_rgb8();
     let mut out = Vec::new();
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-        std::io::Cursor::new(&mut out),
-        quality,
-    );
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::Cursor::new(&mut out), quality);
     encoder
-        .encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)
+        .encode(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
         .ok()?;
     Some(out)
 }

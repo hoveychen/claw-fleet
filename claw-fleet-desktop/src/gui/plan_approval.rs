@@ -152,4 +152,3 @@ pub(crate) fn get_guard_context(state: tauri::State<'_, AppState>, session_id: S
 
     String::new()
 }
-

@@ -196,10 +196,7 @@ fn registry_servers(fleet_home: &Path) -> Vec<(u32, bool)> {
                         .and_then(|s| s.get("pid"))
                         .and_then(|p| p.as_u64())
                         .unwrap_or(0) as u32;
-                    let has_token = r
-                        .get("launchToken")
-                        .map(|t| !t.is_null())
-                        .unwrap_or(false);
+                    let has_token = r.get("launchToken").map(|t| !t.is_null()).unwrap_or(false);
                     (pid, has_token)
                 })
                 .collect()
@@ -218,7 +215,11 @@ fn a_terminated_serve_leaves_its_dsh_web_for_the_next_fleet_to_adopt() {
     let token = "orphan-test-token";
 
     let mut serve = spawn_serve_with_sigint_ignored(&fleet_home, &fleet_home.join("port"), token);
-    let port = wait_for_port_file(&fleet_home.join("port"), Duration::from_secs(20), &mut serve);
+    let port = wait_for_port_file(
+        &fleet_home.join("port"),
+        Duration::from_secs(20),
+        &mut serve,
+    );
     let serve_pid = serve.child.id();
 
     // A scan is what starts `dsh web`; nothing spawns it before the first call.

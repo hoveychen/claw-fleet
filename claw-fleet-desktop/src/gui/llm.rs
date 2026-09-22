@@ -3,7 +3,9 @@ use super::*;
 // ── LLM provider commands ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn list_llm_providers(state: tauri::State<AppState>) -> Vec<llm_provider::LlmProviderInfo> {
+pub(crate) fn list_llm_providers(
+    state: tauri::State<AppState>,
+) -> Vec<llm_provider::LlmProviderInfo> {
     state.cached_llm_providers.lock().unwrap().clone()
 }
 
@@ -13,7 +15,10 @@ pub(crate) fn get_llm_config(state: tauri::State<'_, AppState>) -> llm_provider:
 }
 
 #[tauri::command(async)]
-pub(crate) fn set_llm_config(state: tauri::State<'_, AppState>, config: llm_provider::LlmConfig) -> Result<(), String> {
+pub(crate) fn set_llm_config(
+    state: tauri::State<'_, AppState>,
+    config: llm_provider::LlmConfig,
+) -> Result<(), String> {
     // Update both AppState (for background threads) and LocalBackend.
     *state.llm_config.lock().unwrap() = config.clone();
     state.backend.set_llm_config(config)
@@ -25,9 +30,7 @@ pub(crate) fn list_fleet_llm_usage_daily(
     to_ms: u64,
     state: tauri::State<'_, AppState>,
 ) -> Vec<llm_usage::FleetLlmUsageDailyBucket> {
-    state
-        .backend
-        .list_fleet_llm_usage_daily(from_ms, to_ms)
+    state.backend.list_fleet_llm_usage_daily(from_ms, to_ms)
 }
 
 #[tauri::command(async)]
@@ -45,8 +48,5 @@ pub(crate) fn get_codex_usage_history(
     to_ms: i64,
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint> {
-    state
-        .backend
-        .codex_usage_history(from_ms, to_ms)
+    state.backend.codex_usage_history(from_ms, to_ms)
 }
-

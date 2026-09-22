@@ -4385,7 +4385,9 @@ where
             // request until its own 15s timeout fired. Answer with an error
             // frame instead, so the failure surfaces where it happened.
             Err(e) => {
-                crate::log_debug(&format!("[relay] method={method} handler failed to join: {e}"));
+                crate::log_debug(&format!(
+                    "[relay] method={method} handler failed to join: {e}"
+                ));
                 let reply = req_id.map(|req_id| {
                     json!({
                         "event": "reply",
@@ -7784,7 +7786,7 @@ mod tests {
         // The provided list is the only session-derived input; the rest of the
         // envelope is this host's hand-added browse paths, same as the desktop.
         let expected = crate::file_explorer::browsable_workspaces(&[
-            "/tmp/fleet-known-workspaces-sentinel".to_string()
+            "/tmp/fleet-known-workspaces-sentinel".to_string(),
         ]);
         assert_eq!(
             paths, expected,
@@ -8028,7 +8030,10 @@ mod tests {
         publish_sessions(&json!([
             {"id": "s1", "isSubagent": false, "lastActivityMs": 2, "entrypoint": ep},
         ]));
-        assert!(rx.try_recv().is_err(), "a throttled push must not go out immediately");
+        assert!(
+            rx.try_recv().is_err(),
+            "a throttled push must not go out immediately"
+        );
         assert!(
             SESSIONS_PENDING.lock().unwrap().is_some(),
             "a throttled push must be held for the trailing edge, not dropped"
@@ -8053,7 +8058,10 @@ mod tests {
             "a published snapshot must be cleared, or it would be replayed"
         );
         flush_pending_sessions();
-        assert!(rx.try_recv().is_err(), "nothing is held, so nothing is republished");
+        assert!(
+            rx.try_recv().is_err(),
+            "nothing is held, so nothing is republished"
+        );
 
         clear_clients();
         reset_sessions_dedup();

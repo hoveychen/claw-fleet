@@ -43,36 +43,34 @@ pub(crate) fn cmd_memory(file: Option<String>, as_json: bool) {
         }
 
         match found {
-            Some(f) => {
-                match memory::read_memory_file(&f.path) {
-                    Ok(content) => {
-                        if as_json {
-                            let obj = serde_json::json!({
-                                "workspace": found_ws.unwrap_or(""),
-                                "name": f.name,
-                                "path": f.path,
-                                "content": content,
-                            });
-                            println!("{}", serde_json::to_string_pretty(&obj).unwrap());
-                        } else {
-                            println!(
-                                "{}{}  {}/{}{}",
-                                c_bold(),
-                                "\x1b[36m",
-                                found_ws.unwrap_or(""),
-                                f.name,
-                                c_reset()
-                            );
-                            println!("{}{}{}", c_dim(), "─".repeat(60), c_reset());
-                            println!("{}", content);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
-                        std::process::exit(1);
+            Some(f) => match memory::read_memory_file(&f.path) {
+                Ok(content) => {
+                    if as_json {
+                        let obj = serde_json::json!({
+                            "workspace": found_ws.unwrap_or(""),
+                            "name": f.name,
+                            "path": f.path,
+                            "content": content,
+                        });
+                        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+                    } else {
+                        println!(
+                            "{}{}  {}/{}{}",
+                            c_bold(),
+                            "\x1b[36m",
+                            found_ws.unwrap_or(""),
+                            f.name,
+                            c_reset()
+                        );
+                        println!("{}{}{}", c_dim(), "─".repeat(60), c_reset());
+                        println!("{}", content);
                     }
                 }
-            }
+                Err(e) => {
+                    eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                    std::process::exit(1);
+                }
+            },
             None => {
                 eprintln!(
                     "{}Error:{} no memory file matching '{}'",
@@ -107,12 +105,7 @@ pub(crate) fn cmd_memory(file: Option<String>, as_json: bool) {
     );
 
     for ws in &memories {
-        print!(
-            "{}{}{}",
-            c_bold(),
-            ws.workspace_name,
-            c_reset()
-        );
+        print!("{}{}{}", c_bold(), ws.workspace_name, c_reset());
         if ws.has_claude_md {
             print!("  {}\x1b[33mCLAUDE.md\x1b[0m{}", "", c_reset());
         }
@@ -125,22 +118,18 @@ pub(crate) fn cmd_memory(file: Option<String>, as_json: bool) {
                 format!("{:.1}K", f.size_bytes as f64 / 1024.0)
             };
             let age = format_age_ms(f.modified_ms);
-            let name_style = if f.name == "MEMORY.md" {
-                c_bold()
-            } else {
-                ""
-            };
-            let name_reset = if f.name == "MEMORY.md" {
-                c_reset()
-            } else {
-                ""
-            };
+            let name_style = if f.name == "MEMORY.md" { c_bold() } else { "" };
+            let name_reset = if f.name == "MEMORY.md" { c_reset() } else { "" };
             println!(
                 "  {}{}{}{} {:>6}  {}{}{}",
-                name_style, f.name, name_reset,
+                name_style,
+                f.name,
+                name_reset,
                 "",
                 size,
-                c_dim(), age, c_reset()
+                c_dim(),
+                age,
+                c_reset()
             );
         }
         println!();

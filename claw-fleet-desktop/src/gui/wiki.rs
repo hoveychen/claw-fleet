@@ -3,7 +3,9 @@ use super::*;
 // ── Wiki knowledge base ───────────────────────────────────────────────────────
 
 #[tauri::command(async)]
-pub(crate) fn list_wiki_docs(state: tauri::State<'_, AppState>) -> Vec<claw_fleet_core::wiki::WikiDoc> {
+pub(crate) fn list_wiki_docs(
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::wiki::WikiDoc> {
     state.backend.list_wiki_docs()
 }
 
@@ -77,7 +79,10 @@ pub(crate) fn search_wiki_docs(
 }
 
 #[tauri::command(async)]
-pub(crate) fn delete_wiki_doc(slug: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub(crate) fn delete_wiki_doc(
+    slug: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     state.backend.delete_wiki_doc(&slug)
 }
 
@@ -112,7 +117,9 @@ pub(crate) fn move_wiki_folder(
 
 /// Delete every doc under a folder. Returns how many were removed.
 #[tauri::command(async)]
-pub(crate) fn delete_wiki_folder(prefix: String, state: tauri::State<'_, AppState>) -> Result<usize, String> {
+pub(crate) fn delete_wiki_folder(
+    prefix: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
     state.backend.delete_wiki_folder(&prefix)
 }
-

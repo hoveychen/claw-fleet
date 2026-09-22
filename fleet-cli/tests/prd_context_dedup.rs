@@ -110,7 +110,10 @@ fn second_prompt_with_unchanged_tasks_injects_nothing() {
     );
 
     // Prompt 3: a ticked box changes the text, so it enters again.
-    write_tasks(&ws, "- [x] **P1** — 第一个任务\n- [ ] **P2** — 第二个任务\n");
+    write_tasks(
+        &ws,
+        "- [x] **P1** — 第一个任务\n- [ ] **P2** — 第二个任务\n",
+    );
     let third = injected_text(&prd_context(&home, &ws, Some(&transcript)));
     assert!(
         third.contains("**P2**"),

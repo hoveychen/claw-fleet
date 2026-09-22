@@ -6,10 +6,10 @@
 //! sources that require it.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::fs;
+use std::future::Future;
 use std::io::{Read, Seek, SeekFrom};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -43,7 +43,9 @@ type IndexRequest = Vec<(String, String)>; // Vec<(jsonl_path, session_id)>
 pub(crate) struct ScanGate(AtomicBool);
 
 impl ScanGate {
-    pub(crate) fn new() -> Self { Self(AtomicBool::new(false)) }
+    pub(crate) fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
 
     /// Returns `Some(guard)` if this caller now owns the scan slot.
     /// Returns `None` when another scan is in flight — the caller should
@@ -65,7 +67,9 @@ impl ScanGate {
 pub(crate) struct ScanGuard<'a>(&'a AtomicBool);
 
 impl<'a> Drop for ScanGuard<'a> {
-    fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); }
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 pub struct LocalBackend {
@@ -208,8 +212,7 @@ impl LocalBackend {
         let watch = Arc::new(crate::WatchState::new());
         let waiting_alerts: Arc<Mutex<HashMap<String, WaitingAlert>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let turn_cards =
-            Arc::new(claw_fleet_core::turn_completion_card::TurnCardBroker::start());
+        let turn_cards = Arc::new(claw_fleet_core::turn_completion_card::TurnCardBroker::start());
         let session_outcomes: Arc<Mutex<HashMap<String, Vec<String>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let audit_cache: Arc<Mutex<HashMap<String, (u64, Vec<crate::audit::AuditEvent>)>>> =
@@ -220,16 +223,14 @@ impl LocalBackend {
         step!("allocs done");
 
         // Open (or create) the full-text search index.
-        let search_index = Arc::new(Mutex::new(
-            SearchIndex::open().unwrap_or_else(|e| {
-                log_debug(&format!("search index open failed, retrying fresh: {e}"));
-                // If the DB is corrupt, delete and retry.
-                if let Some(home) = crate::session::real_home_dir() {
-                    let _ = fs::remove_file(home.join(".fleet").join("fleet-search.db"));
-                }
-                SearchIndex::open().expect("search index open failed twice")
-            }),
-        ));
+        let search_index = Arc::new(Mutex::new(SearchIndex::open().unwrap_or_else(|e| {
+            log_debug(&format!("search index open failed, retrying fresh: {e}"));
+            // If the DB is corrupt, delete and retry.
+            if let Some(home) = crate::session::real_home_dir() {
+                let _ = fs::remove_file(home.join(".fleet").join("fleet-search.db"));
+            }
+            SearchIndex::open().expect("search index open failed twice")
+        })));
 
         // Open (or create) the daily report store.
         let report_store = Arc::new(Mutex::new(
@@ -252,7 +253,6 @@ impl LocalBackend {
         claw_fleet_core::mobile_relay::set_desktop_agent();
         claw_fleet_core::mobile_relay::ensure_ws_client();
         step!("zombie recovery done");
-
 
         // Dedicated indexer thread — receives session lists via channel,
         // coalesces rapid requests, and runs indexing off the scan threads.
@@ -314,7 +314,9 @@ impl LocalBackend {
                 let _slot = match gate_bg.try_enter() {
                     Some(g) => g,
                     None => {
-                        log_debug("[BACKEND-INIT] initial scan skipped (another scan already in flight)");
+                        log_debug(
+                            "[BACKEND-INIT] initial scan skipped (another scan already in flight)",
+                        );
                         return;
                     }
                 };
@@ -533,8 +535,7 @@ impl LocalBackend {
                 // otherwise delay the fallback by up to a minute.
                 let timeout = if codex_source_idx.is_some() {
                     timeout.min(
-                        codex_mtime_probe_interval
-                            .saturating_sub(last_codex_mtime_probe.elapsed()),
+                        codex_mtime_probe_interval.saturating_sub(last_codex_mtime_probe.elapsed()),
                     )
                 } else {
                     timeout
@@ -642,9 +643,7 @@ impl LocalBackend {
                     if codex_source_idx.is_some_and(|i| dirty_sources.contains(&i)) {
                         codex_probe_flushes += 1;
                     }
-                    incremental_rescan_and_emit(
-                        &sources2, &app2, &sess2, &so2, &dirty_sources,
-                    );
+                    incremental_rescan_and_emit(&sources2, &app2, &sess2, &so2, &dirty_sources);
                     detect_waiting_transitions(
                         &sess2,
                         &mut prev_statuses,
@@ -697,9 +696,7 @@ impl LocalBackend {
                                 ));
                             }
                             Ok(_) => {}
-                            Err(e) => {
-                                log_debug(&format!("[SKILL-AUTOSYNC] reconcile failed: {e}"))
-                            }
+                            Err(e) => log_debug(&format!("[SKILL-AUTOSYNC] reconcile failed: {e}")),
                         }
                     }
                     last_skills_reconcile = Instant::now();
@@ -730,7 +727,9 @@ impl LocalBackend {
         });
 
         // Polling thread for sources with WatchStrategy::Poll.
-        let has_poll_sources = sources.iter().any(|s| matches!(s.watch_strategy(), WatchStrategy::Poll(_)));
+        let has_poll_sources = sources
+            .iter()
+            .any(|s| matches!(s.watch_strategy(), WatchStrategy::Poll(_)));
         if has_poll_sources {
             let app3 = app.clone();
             let sess3 = sessions.clone();
@@ -795,15 +794,17 @@ impl LocalBackend {
                     let _slot = match gate_poll.try_enter() {
                         Some(g) => g,
                         None => {
-                            log_debug(
-                                "[POLL] skip tick: previous scan still in flight",
-                            );
+                            log_debug("[POLL] skip tick: previous scan still in flight");
                             continue;
                         }
                     };
                     let started = Instant::now();
                     incremental_rescan_and_emit(
-                        &sources3, &app3, &sess3, &so3, &poll_source_indices,
+                        &sources3,
+                        &app3,
+                        &sess3,
+                        &so3,
+                        &poll_source_indices,
                     );
                     if !emitted_scan_ready {
                         let _ = app3.emit("scan-ready", true);
@@ -811,10 +812,7 @@ impl LocalBackend {
                     }
                     let elapsed = started.elapsed();
                     if elapsed > Duration::from_secs(30) {
-                        log_debug(&format!(
-                            "[POLL] scan slow: took {}s",
-                            elapsed.as_secs()
-                        ));
+                        log_debug(&format!("[POLL] scan slow: took {}s", elapsed.as_secs()));
                     }
                     detect_waiting_transitions(
                         &sess3,
@@ -1047,7 +1045,10 @@ impl LocalBackend {
                                 publish_mobile_decision(
                                     "guard",
                                     &req,
-                                    format!("{} · 命令待审批", notify_workspace(&req.workspace_name)),
+                                    format!(
+                                        "{} · 命令待审批",
+                                        notify_workspace(&req.workspace_name)
+                                    ),
                                     notify_preview(&req.command_summary),
                                 );
                             }
@@ -1108,9 +1109,13 @@ impl LocalBackend {
                     }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = crate::elicitation::read_request(id).or_else(|| {
-                                claw_fleet_core::parked::request_of::<crate::elicitation::ElicitationRequest>(id)
-                            }) {
+                            if let Some(mut req) =
+                                crate::elicitation::read_request(id).or_else(|| {
+                                    claw_fleet_core::parked::request_of::<
+                                        crate::elicitation::ElicitationRequest,
+                                    >(id)
+                                })
+                            {
                                 let (ws, ai) =
                                     resolve_session_display(&sess_elicit, &req.session_id);
                                 if req.workspace_name.is_empty() {
@@ -1128,9 +1133,15 @@ impl LocalBackend {
                                 publish_mobile_decision(
                                     "elicitation",
                                     &req,
-                                    format!("{} · 有问题请示", notify_workspace(&req.workspace_name)),
+                                    format!(
+                                        "{} · 有问题请示",
+                                        notify_workspace(&req.workspace_name)
+                                    ),
                                     notify_preview(
-                                        req.questions.first().map(|q| q.question.as_str()).unwrap_or(""),
+                                        req.questions
+                                            .first()
+                                            .map(|q| q.question.as_str())
+                                            .unwrap_or(""),
                                     ),
                                 );
                             }
@@ -1193,11 +1204,14 @@ impl LocalBackend {
                     }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = claw_fleet_core::mcp_ipc::read_request(id).or_else(|| {
-                                claw_fleet_core::parked::request_of::<claw_fleet_core::mcp_ipc::FleetAskRequest>(id)
-                            }) {
-                                let (ws, ai) =
-                                    resolve_session_display(&sess_ask, &req.session_id);
+                            if let Some(mut req) = claw_fleet_core::mcp_ipc::read_request(id)
+                                .or_else(|| {
+                                    claw_fleet_core::parked::request_of::<
+                                        claw_fleet_core::mcp_ipc::FleetAskRequest,
+                                    >(id)
+                                })
+                            {
+                                let (ws, ai) = resolve_session_display(&sess_ask, &req.session_id);
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = ws;
                                 }
@@ -1213,15 +1227,16 @@ impl LocalBackend {
                                 publish_mobile_decision(
                                     "fleet-ask",
                                     &req,
-                                    format!("{} · 决策卡待处理", notify_workspace(&req.workspace_name)),
-                                    notify_preview(
-                                        req.ai_title.as_deref().unwrap_or_else(|| {
-                                            req.questions
-                                                .first()
-                                                .map(|q| q.question.as_str())
-                                                .unwrap_or("")
-                                        }),
+                                    format!(
+                                        "{} · 决策卡待处理",
+                                        notify_workspace(&req.workspace_name)
                                     ),
+                                    notify_preview(req.ai_title.as_deref().unwrap_or_else(|| {
+                                        req.questions
+                                            .first()
+                                            .map(|q| q.question.as_str())
+                                            .unwrap_or("")
+                                    })),
                                 );
                             }
                         }
@@ -1253,7 +1268,8 @@ impl LocalBackend {
                     if !running_a2ui.load(Ordering::SeqCst) {
                         break;
                     }
-                    let pending = match claw_fleet_core::mcp_a2ui_ipc::list_pending_requests_checked() {
+                    let pending = match claw_fleet_core::mcp_a2ui_ipc::list_pending_requests_checked(
+                    ) {
                         Ok(v) => v,
                         Err(e) => {
                             crate::log_debug(&format!(
@@ -1281,27 +1297,32 @@ impl LocalBackend {
                     }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = claw_fleet_core::mcp_a2ui_ipc::read_request(id).or_else(|| {
-                                claw_fleet_core::parked::request_of::<claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest>(id)
-                            }) {
-                                let (ws, ai) =
-                                    resolve_session_display(&sess_a2ui, &req.session_id);
+                            if let Some(mut req) = claw_fleet_core::mcp_a2ui_ipc::read_request(id)
+                                .or_else(|| {
+                                    claw_fleet_core::parked::request_of::<
+                                        claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest,
+                                    >(id)
+                                })
+                            {
+                                let (ws, ai) = resolve_session_display(&sess_a2ui, &req.session_id);
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = ws;
                                 }
                                 if req.ai_title.is_none() {
                                     req.ai_title = ai;
                                 }
-                                crate::log_debug(&format!(
-                                    "[a2ui-render] new request: {}",
-                                    id
-                                ));
+                                crate::log_debug(&format!("[a2ui-render] new request: {}", id));
                                 let _ = app_a2ui.emit("a2ui-render-request", &req);
                                 publish_mobile_decision(
                                     "a2ui-render",
                                     &req,
-                                    format!("{} · Agent 界面", notify_workspace(&req.workspace_name)),
-                                    notify_preview(req.ai_title.as_deref().unwrap_or("A2UI 自定义界面")),
+                                    format!(
+                                        "{} · Agent 界面",
+                                        notify_workspace(&req.workspace_name)
+                                    ),
+                                    notify_preview(
+                                        req.ai_title.as_deref().unwrap_or("A2UI 自定义界面"),
+                                    ),
                                 );
                             }
                         }
@@ -1331,22 +1352,23 @@ impl LocalBackend {
                     if !running_pp.load(Ordering::SeqCst) {
                         break;
                     }
-                    let pending = match claw_fleet_core::permission_prompt_ipc::list_pending_requests_checked() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            crate::log_debug(&format!(
+                    let pending =
+                        match claw_fleet_core::permission_prompt_ipc::list_pending_requests_checked(
+                        ) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                crate::log_debug(&format!(
                                 "[permission-prompt watcher] read_dir failed (skipping dismissal step): {e}"
                             ));
-                            continue;
-                        }
-                    };
+                                continue;
+                            }
+                        };
                     for id in &pending {
                         if known.insert(id.clone()) {
                             if let Some(mut req) =
                                 claw_fleet_core::permission_prompt_ipc::read_request(id)
                             {
-                                let (ws, ai) =
-                                    resolve_session_display(&sess_pp, &req.session_id);
+                                let (ws, ai) = resolve_session_display(&sess_pp, &req.session_id);
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = ws;
                                 }
@@ -1369,7 +1391,10 @@ impl LocalBackend {
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_pp.emit("permission-prompt-dismissed", id.clone());
-                        claw_fleet_core::mobile_relay::publish_decision_resolved("permission-prompt", id);
+                        claw_fleet_core::mobile_relay::publish_decision_resolved(
+                            "permission-prompt",
+                            id,
+                        );
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -1419,11 +1444,14 @@ impl LocalBackend {
                     }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = crate::plan_approval::read_request(id).or_else(|| {
-                                claw_fleet_core::parked::request_of::<crate::plan_approval::PlanApprovalRequest>(id)
-                            }) {
-                                let (ws, ai) =
-                                    resolve_session_display(&sess_plan, &req.session_id);
+                            if let Some(mut req) =
+                                crate::plan_approval::read_request(id).or_else(|| {
+                                    claw_fleet_core::parked::request_of::<
+                                        crate::plan_approval::PlanApprovalRequest,
+                                    >(id)
+                                })
+                            {
+                                let (ws, ai) = resolve_session_display(&sess_plan, &req.session_id);
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = ws;
                                 }
@@ -1439,15 +1467,23 @@ impl LocalBackend {
                                 publish_mobile_decision(
                                     "plan-approval",
                                     &req,
-                                    format!("{} · 计划待审批", notify_workspace(&req.workspace_name)),
-                                    notify_preview(req.ai_title.as_deref().unwrap_or("ExitPlanMode 计划审批")),
+                                    format!(
+                                        "{} · 计划待审批",
+                                        notify_workspace(&req.workspace_name)
+                                    ),
+                                    notify_preview(
+                                        req.ai_title.as_deref().unwrap_or("ExitPlanMode 计划审批"),
+                                    ),
                                 );
                             }
                         }
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_plan.emit("plan-approval-dismissed", id.clone());
-                        claw_fleet_core::mobile_relay::publish_decision_resolved("plan-approval", id);
+                        claw_fleet_core::mobile_relay::publish_decision_resolved(
+                            "plan-approval",
+                            id,
+                        );
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -1505,7 +1541,10 @@ impl LocalBackend {
 
 /// Convert a session list into an index request (list of (path, id) pairs).
 fn sessions_to_index_request(sessions: &[SessionInfo]) -> IndexRequest {
-    sessions.iter().map(|s| (s.jsonl_path.clone(), s.id.clone())).collect()
+    sessions
+        .iter()
+        .map(|s| (s.jsonl_path.clone(), s.id.clone()))
+        .collect()
 }
 
 /// Mirror a sessions snapshot onto the mobile relay channel. The relay side
@@ -1866,14 +1905,18 @@ fn emit_tail_lines(
     app: &AppHandle,
     watch: &crate::WatchState,
 ) {
-    let Some(source) = source_for_real_path(sources, path) else { return };
+    let Some(source) = source_for_real_path(sources, path) else {
+        return;
+    };
     let path_str = path.to_string_lossy();
     let mut guard = watch.offset.lock().unwrap();
     // Source-aware incremental follow: Claude uses the default byte-offset raw
     // tail (each line is a self-contained message); Codex re-normalizes its
     // folded rollout so the emitted `session-tail` rows are renderable messages
     // (the desktop store dedups them by their stable `uuid`).
-    let Ok((mut lines, new_offset)) = source.tail_incremental(&path_str, *guard) else { return };
+    let Ok((mut lines, new_offset)) = source.tail_incremental(&path_str, *guard) else {
+        return;
+    };
     *guard = new_offset;
     // Collapse oversized tool output (e.g. a Claude `Read` of an image → huge
     // base64) to a marked preview before it reaches the webview, matching the
@@ -1914,7 +1957,9 @@ fn watch_start_target(
         .and_then(|s| s.resolve_file_path(path))
         .unwrap_or_else(|| std::path::PathBuf::from(path));
 
-    let size = std::fs::metadata(&real_path).map(|m| m.len()).map_err(|e| e.to_string())?;
+    let size = std::fs::metadata(&real_path)
+        .map(|m| m.len())
+        .map_err(|e| e.to_string())?;
     Ok(Some((real_path.to_string_lossy().into_owned(), size)))
 }
 
@@ -1947,7 +1992,7 @@ pub fn resume_session_impl(
             model: model.map(str::to_string),
             effort: effort.map(str::to_string),
             permission_mode: permission_mode.map(str::to_string),
-        images: Vec::new(),
+            images: Vec::new(),
         },
         Box::new(|_| {}),
     )
@@ -1967,10 +2012,7 @@ pub fn resume_session_impl(
 /// without this the freeze persisted for tens of minutes. See
 /// [`claw_fleet_core::codex_source::refresh_dead_codex_liveness`] and
 /// [`claw_fleet_core::claude_source::refresh_dead_claude_liveness`].
-fn refresh_dead_codex_liveness_and_emit(
-    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
-    app: &AppHandle,
-) {
+fn refresh_dead_codex_liveness_and_emit(sessions: &Arc<Mutex<Vec<SessionInfo>>>, app: &AppHandle) {
     // Lock wait is the load-bearing number here: this reconcile is what clears a
     // stale `proc_alive`, and it can only run once whoever is scanning lets go of
     // `sessions`. A long wait logged here is the proof that a rescan starved the
@@ -2068,15 +2110,23 @@ impl LocalBackend {
     /// fleet__ask depth-2 test: write a fake `FleetAskRequest` so the
     /// MCP-side watcher emits `fleet-ask-request` and the frontend renders
     /// a composite (html + form + options) test card. Cleanup auto-runs.
-    pub fn test_fleet_ask_end_to_end(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
-        crate::interaction_mode_test::run_fleet_ask_end_to_end_test(std::time::Duration::from_secs(10))
+    pub fn test_fleet_ask_end_to_end(
+        &self,
+    ) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_fleet_ask_end_to_end_test(std::time::Duration::from_secs(
+            10,
+        ))
     }
 
     /// fleet__ask depth-3 test: spawn `claude -p "<prompt>"` with
     /// `--allowed-tools "mcp__fleet__ask"` so the Agent actually invokes
     /// the MCP tool. Mirrors `test_decision_via_claude_cli`.
-    pub fn test_fleet_ask_via_claude_cli(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
-        crate::interaction_mode_test::run_fleet_ask_claude_cli_test(std::time::Duration::from_secs(60))
+    pub fn test_fleet_ask_via_claude_cli(
+        &self,
+    ) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_fleet_ask_claude_cli_test(std::time::Duration::from_secs(
+            60,
+        ))
     }
 
     pub fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
@@ -2275,7 +2325,10 @@ impl LocalBackend {
         claw_fleet_core::remote_host::browse_remote_dir(&ssh_target, path.as_deref())
     }
 
-    pub fn remote_host_health(&self, ssh_target: String) -> claw_fleet_core::remote_host::HostHealth {
+    pub fn remote_host_health(
+        &self,
+        ssh_target: String,
+    ) -> claw_fleet_core::remote_host::HostHealth {
         claw_fleet_core::remote_host::host_health(&ssh_target)
     }
 
@@ -2318,7 +2371,9 @@ impl LocalBackend {
         )
     }
 
-    pub fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
+    pub fn list_remote_workspaces(
+        &self,
+    ) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
         claw_fleet_core::remote_workspace::load()
     }
 
@@ -2356,7 +2411,7 @@ impl LocalBackend {
             permission_mode,
             session_id: None,
             entrypoint: String::new(),
-        images: Vec::new(),
+            images: Vec::new(),
         };
         let resp = claw_fleet_core::agent_source::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
@@ -2442,7 +2497,11 @@ impl LocalBackend {
         claw_fleet_core::proc_runner::proc_resize(&id, cols, rows)
     }
 
-    pub fn clear_procs(&self, id: Option<String>, workspace_path: Option<String>) -> Result<u32, String> {
+    pub fn clear_procs(
+        &self,
+        id: Option<String>,
+        workspace_path: Option<String>,
+    ) -> Result<u32, String> {
         match id {
             Some(id) => claw_fleet_core::proc_runner::clear_proc(&id).map(|()| 1),
             None => claw_fleet_core::proc_runner::clear_finished_procs(workspace_path.as_deref()),
@@ -2664,7 +2723,11 @@ impl LocalBackend {
         session_id: Option<&str>,
     ) -> Result<crate::artifacts::Artifact, String> {
         fn opt(s: &str) -> Option<&str> {
-            if s.trim().is_empty() { None } else { Some(s) }
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         }
         crate::artifacts::add(
             std::path::Path::new(source_path),
@@ -2788,7 +2851,11 @@ impl LocalBackend {
         crate::wiki::move_doc(from, to)
     }
 
-    pub fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
+    pub fn move_wiki_folder(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<crate::wiki::WikiDoc>, String> {
         crate::wiki::move_folder(from, to)
     }
 
@@ -2800,7 +2867,11 @@ impl LocalBackend {
         crate::wiki::search_docs(query)
     }
 
-    pub fn export_wiki_doc(&self, slug: &str, version: &str) -> Result<crate::wiki::WikiExport, String> {
+    pub fn export_wiki_doc(
+        &self,
+        slug: &str,
+        version: &str,
+    ) -> Result<crate::wiki::WikiExport, String> {
         crate::wiki::export_doc(slug, version)
     }
 
@@ -2813,7 +2884,13 @@ impl LocalBackend {
         mode: crate::wiki::TextPublishMode,
     ) -> Result<crate::wiki::WikiDoc, String> {
         let title = (!title.trim().is_empty()).then_some(title);
-        crate::wiki::publish_text(slug, title, text, std::path::Path::new(workspace_path), mode)
+        crate::wiki::publish_text(
+            slug,
+            title,
+            text,
+            std::path::Path::new(workspace_path),
+            mode,
+        )
     }
 
     pub fn get_task_plans(
@@ -2821,10 +2898,16 @@ impl LocalBackend {
         workspace_path: &str,
         session_id: Option<&str>,
     ) -> Vec<crate::prd_tasks::TaskPlanDetail> {
-        crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path), session_id)
+        crate::prd_tasks::list_workspace_task_plans(
+            std::path::Path::new(workspace_path),
+            session_id,
+        )
     }
 
-    pub fn get_plan_forest(&self, workspace_path: &str) -> claw_fleet_core::plan_forest::PlanForest {
+    pub fn get_plan_forest(
+        &self,
+        workspace_path: &str,
+    ) -> claw_fleet_core::plan_forest::PlanForest {
         // Chains are stored per-machine, not per-workspace, so scope them here
         // before the join — otherwise another repo's relays would show up on a
         // same-named plan id.
@@ -3060,7 +3143,10 @@ impl LocalBackend {
         crate::skill_sync::sync(true)
     }
 
-    pub fn skill_sync_adopt(&self, path: &str) -> Result<crate::skill_sync::SkillSyncReport, String> {
+    pub fn skill_sync_adopt(
+        &self,
+        path: &str,
+    ) -> Result<crate::skill_sync::SkillSyncReport, String> {
         crate::skill_sync::adopt(std::path::Path::new(path))
     }
 
@@ -3135,7 +3221,9 @@ impl LocalBackend {
         for sub in skill_history::subagent_jsonl_paths(main_path) {
             let sub_str = sub.to_string_lossy().to_string();
             // Best-effort: a single broken subagent file shouldn't lose the rest.
-            let Ok(msgs) = self.get_messages(&sub_str) else { continue };
+            let Ok(msgs) = self.get_messages(&sub_str) else {
+                continue;
+            };
             out.extend(skill_history::extract_from_messages(&msgs, true));
         }
 
@@ -3193,7 +3281,12 @@ impl LocalBackend {
     }
 
     pub fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
-        self.waiting_alerts.lock().unwrap().values().cloned().collect()
+        self.waiting_alerts
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub fn get_hooks_plan(&self) -> crate::hooks::HookSetupPlan {
@@ -3254,7 +3347,12 @@ impl LocalBackend {
         result
     }
 
-    pub fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
+    pub fn analyze_guard_command(
+        &self,
+        command: &str,
+        context: &str,
+        lang: &str,
+    ) -> Result<String, String> {
         use crate::audit;
         use crate::guard;
         use crate::llm_provider;
@@ -3321,7 +3419,11 @@ impl LocalBackend {
         crate::model_guidance::remove_model_guidance()
     }
 
-    pub fn apply_session_title_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+    pub fn apply_session_title_guidance(
+        &self,
+        user_title: &str,
+        locale: &str,
+    ) -> Result<(), String> {
         crate::session_title_guidance::apply_session_title_guidance(user_title, locale)
     }
 
@@ -3556,9 +3658,15 @@ impl LocalBackend {
     pub fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String> {
         let cleaned = path.and_then(|p| {
             let trimmed = p.trim().to_string();
-            if trimmed.is_empty() { None } else { Some(trimmed) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
         });
-        let config = crate::claude_binary::ClaudeBinaryConfig { override_path: cleaned };
+        let config = crate::claude_binary::ClaudeBinaryConfig {
+            override_path: cleaned,
+        };
         config.save()
     }
 
@@ -3606,10 +3714,8 @@ impl LocalBackend {
             if is_plain_path {
                 // Incremental scan: only read bytes added since last scan.
                 let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-                let (prev_offset, prev_events) = cache
-                    .get(&session.id)
-                    .cloned()
-                    .unwrap_or((0, Vec::new()));
+                let (prev_offset, prev_events) =
+                    cache.get(&session.id).cloned().unwrap_or((0, Vec::new()));
 
                 if file_size <= prev_offset {
                     // File unchanged (or truncated) — reuse cached events.
@@ -3683,7 +3789,11 @@ impl LocalBackend {
         crate::audit::delete_custom_rule(id)
     }
 
-    pub fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<crate::audit::SuggestedRule>, String> {
+    pub fn suggest_audit_rules(
+        &self,
+        concern: &str,
+        lang: &str,
+    ) -> Result<Vec<crate::audit::SuggestedRule>, String> {
         let existing_tags: Vec<String> = crate::audit::get_all_rules()
             .iter()
             .map(|r| r.tag.clone())
@@ -3712,18 +3822,29 @@ impl LocalBackend {
             .map_err(|e| format!("Failed to parse LLM response: {e}"))
     }
 
-    pub fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
+    pub fn search_sessions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Vec<crate::search_index::SearchHit> {
         match self.search_index.lock() {
             Ok(idx) => idx.search(query, limit).unwrap_or_default(),
             Err(_) => vec![],
         }
     }
 
-    pub fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
+    pub fn get_daily_report(
+        &self,
+        date: &str,
+    ) -> Result<Option<crate::daily_report::DailyReport>, String> {
         self.report_store.lock().unwrap().get_report(date)
     }
 
-    pub fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<crate::daily_report::DailyReportStats> {
+    pub fn list_daily_report_stats(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Vec<crate::daily_report::DailyReportStats> {
         self.report_store
             .lock()
             .unwrap()
@@ -3731,7 +3852,10 @@ impl LocalBackend {
             .unwrap_or_default()
     }
 
-    pub fn generate_daily_report(&self, date: &str) -> Result<crate::daily_report::DailyReport, String> {
+    pub fn generate_daily_report(
+        &self,
+        date: &str,
+    ) -> Result<crate::daily_report::DailyReport, String> {
         // Try in-memory session cache first (covers last 7 days)
         let cached: Vec<SessionInfo> = {
             let all = self.sessions.lock().unwrap();
@@ -3754,8 +3878,7 @@ impl LocalBackend {
 
         let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
         let tz = crate::daily_report::local_tz_tag(date);
-        let report =
-            crate::daily_report::generate_report_from_sessions(date, &tz, &session_refs);
+        let report = crate::daily_report::generate_report_from_sessions(date, &tz, &session_refs);
 
         self.report_store
             .lock()
@@ -3789,7 +3912,10 @@ impl LocalBackend {
         Ok(summary)
     }
 
-    pub fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<crate::daily_report::Lesson>, String> {
+    pub fn generate_daily_report_lessons(
+        &self,
+        date: &str,
+    ) -> Result<Vec<crate::daily_report::Lesson>, String> {
         let report = self
             .report_store
             .lock()
@@ -3812,7 +3938,10 @@ impl LocalBackend {
         Ok(lessons)
     }
 
-    pub fn append_lesson_to_claude_md(&self, lesson: &crate::daily_report::Lesson) -> Result<(), String> {
+    pub fn append_lesson_to_claude_md(
+        &self,
+        lesson: &crate::daily_report::Lesson,
+    ) -> Result<(), String> {
         crate::daily_report::append_lesson_to_claude_md(lesson)
     }
 
@@ -3820,9 +3949,7 @@ impl LocalBackend {
         claw_fleet_core::daily_report::task_reviews_for_date(date)
     }
 
-    pub fn list_managed_lessons(
-        &self,
-    ) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
+    pub fn list_managed_lessons(&self) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
         Ok(crate::lessons_store::list_lessons())
     }
 
@@ -3940,12 +4067,13 @@ impl LocalBackend {
     pub fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
         claw_fleet_core::mobile_relay::pairing_url_text(lang)
     }
-
 }
 
 /// Fetch usage summaries from all available sources via trait dispatch.
 /// All network I/O happens here, outside any Mutex guard.
-pub fn fetch_usage_summaries_from_sources(sources: &[Box<dyn AgentSource>]) -> Vec<crate::ui_types::SourceUsageSummary> {
+pub fn fetch_usage_summaries_from_sources(
+    sources: &[Box<dyn AgentSource>],
+) -> Vec<crate::ui_types::SourceUsageSummary> {
     sources
         .iter()
         .filter(|s| s.is_available())
@@ -4068,7 +4196,10 @@ fn detect_waiting_transitions(
             }
 
             let session_id = sess.id.clone();
-            let display_name = sess.ai_title.clone().unwrap_or_else(|| sess.workspace_name.clone());
+            let display_name = sess
+                .ai_title
+                .clone()
+                .unwrap_or_else(|| sess.workspace_name.clone());
             let jsonl_path = sess.jsonl_path.clone();
             let last_text = sess.last_message_preview.clone().unwrap_or_default();
             let agent_source = sess.agent_source.clone();
@@ -4081,20 +4212,27 @@ fn detect_waiting_transitions(
             let cfg = llm_config.lock().unwrap().clone();
 
             std::thread::spawn(move || {
-                let analysis_text = extract_last_assistant_text(&jsonl_path, 1000)
-                    .unwrap_or(last_text);
+                let analysis_text =
+                    extract_last_assistant_text(&jsonl_path, 1000).unwrap_or(last_text);
 
                 let result = crate::claude_analyze::analyze_session_outcome_routed(
-                    &cfg, &analysis_text, &lang, &session_id, &title,
+                    &cfg,
+                    &analysis_text,
+                    &lang,
+                    &session_id,
+                    &title,
                 );
                 an.lock().unwrap().remove(&session_id);
 
                 // Always store outcome tags for the mascot.
                 if let Some(ref result) = result {
-                    so.lock().unwrap().insert(session_id.clone(), result.tags.clone());
+                    so.lock()
+                        .unwrap()
+                        .insert(session_id.clone(), result.tags.clone());
                 }
 
-                let has_needs_input = result.as_ref()
+                let has_needs_input = result
+                    .as_ref()
                     .map_or(false, |r| r.tags.contains(&"needs_input".to_string()));
                 let mode = get_notification_mode(&app_bg);
 
@@ -4103,10 +4241,14 @@ fn detect_waiting_transitions(
                 let should_os_notify = mode != "none" && (mode == "all" || has_needs_input);
 
                 if should_alert {
-                    let summary = result.as_ref().and_then(|r| r.summary.clone())
-                        .unwrap_or_else(|| fallback_summary_for_tags(
-                            result.as_ref().map(|r| r.tags.as_slice()).unwrap_or(&[])
-                        ));
+                    let summary = result
+                        .as_ref()
+                        .and_then(|r| r.summary.clone())
+                        .unwrap_or_else(|| {
+                            fallback_summary_for_tags(
+                                result.as_ref().map(|r| r.tags.as_slice()).unwrap_or(&[]),
+                            )
+                        });
                     let alert = WaitingAlert {
                         session_id: session_id.clone(),
                         workspace_name: display_name.clone(),
@@ -4119,8 +4261,7 @@ fn detect_waiting_transitions(
                         source: agent_source.clone(),
                     };
                     wa.lock().unwrap().insert(session_id, alert);
-                    let alerts: Vec<WaitingAlert> =
-                        wa.lock().unwrap().values().cloned().collect();
+                    let alerts: Vec<WaitingAlert> = wa.lock().unwrap().values().cloned().collect();
                     let _ = app_bg.emit("waiting-alerts-updated", &alerts);
                     if should_os_notify {
                         send_os_notification(&app_bg, &display_name, &summary);
@@ -4168,8 +4309,7 @@ fn detect_waiting_transitions(
     }
 
     if alerts_changed {
-        let alerts: Vec<WaitingAlert> =
-            waiting_alerts.lock().unwrap().values().cloned().collect();
+        let alerts: Vec<WaitingAlert> = waiting_alerts.lock().unwrap().values().cloned().collect();
         let _ = app.emit("waiting-alerts-updated", &alerts);
     }
 
@@ -4194,8 +4334,14 @@ fn extract_last_assistant_text(jsonl_path: &str, max_chars: usize) -> Option<Str
         for block in content.iter().rev() {
             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                 if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                    let preview: String = text.chars().rev().take(max_chars).collect::<String>()
-                        .chars().rev().collect();
+                    let preview: String = text
+                        .chars()
+                        .rev()
+                        .take(max_chars)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect();
                     return Some(preview);
                 }
             }
@@ -4209,20 +4355,20 @@ fn extract_last_assistant_text(jsonl_path: &str, max_chars: usize) -> Option<Str
 pub(crate) fn fallback_summary_for_tags(tags: &[String]) -> String {
     let first = tags.first().map(|s| s.as_str()).unwrap_or("reporting");
     match first {
-        "needs_input"   => "Waiting for input".to_string(),
-        "bug_fixed"     => "Bug fixed".to_string(),
+        "needs_input" => "Waiting for input".to_string(),
+        "bug_fixed" => "Bug fixed".to_string(),
         "feature_added" => "Feature added".to_string(),
-        "stuck"         => "Agent is stuck".to_string(),
-        "apologizing"   => "Agent ran into an issue".to_string(),
-        "show_off"      => "Task completed".to_string(),
-        "concerned"     => "Potential issues detected".to_string(),
-        "confused"      => "Agent is confused".to_string(),
-        "celebrating"   => "Task completed successfully".to_string(),
-        "quick_fix"     => "Quick fix applied".to_string(),
-        "overwhelmed"   => "Extensive changes made".to_string(),
-        "scheming"      => "Planning next steps".to_string(),
-        "reporting"     => "Status update".to_string(),
-        _               => "Status update".to_string(),
+        "stuck" => "Agent is stuck".to_string(),
+        "apologizing" => "Agent ran into an issue".to_string(),
+        "show_off" => "Task completed".to_string(),
+        "concerned" => "Potential issues detected".to_string(),
+        "confused" => "Agent is confused".to_string(),
+        "celebrating" => "Task completed successfully".to_string(),
+        "quick_fix" => "Quick fix applied".to_string(),
+        "overwhelmed" => "Extensive changes made".to_string(),
+        "scheming" => "Planning next steps".to_string(),
+        "reporting" => "Status update".to_string(),
+        _ => "Status update".to_string(),
     }
 }
 
@@ -4244,11 +4390,7 @@ pub(crate) fn get_user_title(app: &AppHandle) -> String {
 
 pub(crate) fn send_os_notification(app: &AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
-    if let Err(e) = app.notification().builder()
-        .title(title)
-        .body(body)
-        .show()
-    {
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
         log_debug(&format!("[notify] tauri notification failed: {e}"));
     } else {
         log_debug("[notify] tauri notification sent");
@@ -4331,7 +4473,8 @@ mod tests {
         );
         // Sanity: the trailing record after it also arrives.
         assert!(
-            seen.iter().any(|v| v.get("i").and_then(|i| i.as_i64()) == Some(3)),
+            seen.iter()
+                .any(|v| v.get("i").and_then(|i| i.as_i64()) == Some(3)),
             "record following the recovered block must also arrive, got {seen:?}"
         );
     }
@@ -4375,7 +4518,10 @@ mod tests {
 
         // Nothing appended yet: a read from the cursor returns nothing at all.
         let (idle, off_idle) = source.tail_incremental(&path_str, cursor).unwrap();
-        assert!(idle.is_empty(), "idle poll must return nothing, got {idle:?}");
+        assert!(
+            idle.is_empty(),
+            "idle poll must return nothing, got {idle:?}"
+        );
         assert_eq!(off_idle, cursor, "an idle poll must not move the cursor");
 
         // Two records land.
@@ -4389,11 +4535,17 @@ mod tests {
         assert_eq!(fresh.len(), 2, "only the appended records, got {fresh:?}");
         assert_eq!(fresh[0]["i"], json!(200));
         assert_eq!(fresh[1]["i"], json!(201));
-        assert!(off_fresh > cursor, "the cursor must advance past what was read");
+        assert!(
+            off_fresh > cursor,
+            "the cursor must advance past what was read"
+        );
 
         // And the follower stays caught up rather than re-reading.
         let (again, _) = source.tail_incremental(&path_str, off_fresh).unwrap();
-        assert!(again.is_empty(), "a caught-up poll must return nothing, got {again:?}");
+        assert!(
+            again.is_empty(),
+            "a caught-up poll must return nothing, got {again:?}"
+        );
 
         fs::remove_file(&path).ok();
     }
@@ -4593,8 +4745,7 @@ mod tests {
                 ..MockSource::new("dsh", "dsh", "dsh://")
             }),
         ];
-        let out =
-            build_incremental_sessions(&sources, &[dsh_sess], &HashSet::from([0]), now_ms);
+        let out = build_incremental_sessions(&sources, &[dsh_sess], &HashSet::from([0]), now_ms);
 
         match prev {
             Some(v) => std::env::set_var("FLEET_HOME", v),
@@ -4658,7 +4809,13 @@ mod tests {
             .push(mk_session("claude-new", "claude-code"));
 
         // Only now does the dsh tick publish its result.
-        let out = commit_rescan(&sources, &sessions, scanned.clone(), &dirty, &HashMap::new());
+        let out = commit_rescan(
+            &sources,
+            &sessions,
+            scanned.clone(),
+            &dirty,
+            &HashMap::new(),
+        );
 
         // The shape the old code produced, kept here so this test provably
         // covers the defect rather than merely passing: merging against the
@@ -4677,8 +4834,14 @@ mod tests {
             "a session committed during the scan was rolled back by the write-back \
              (ids: {ids:?}) — this is the 找不到这个会话 blink",
         );
-        assert!(ids.contains(&"claude-old"), "existing clean-source rows must survive");
-        assert!(ids.contains(&"dsh-1"), "the dirty source's fresh rows must be spliced in");
+        assert!(
+            ids.contains(&"claude-old"),
+            "existing clean-source rows must survive"
+        );
+        assert!(
+            ids.contains(&"dsh-1"),
+            "the dirty source's fresh rows must be spliced in"
+        );
         assert_eq!(
             sessions.lock().unwrap().len(),
             out.len(),
@@ -4748,7 +4911,9 @@ mod tests {
     impl MockSource {
         fn new(name: &'static str, api_name: &'static str, prefix: &'static str) -> Self {
             Self {
-                name, api_name, prefix,
+                name,
+                api_name,
+                prefix,
                 available: true,
                 account: Err("n/a".into()),
                 usage: Err("n/a".into()),
@@ -4761,12 +4926,24 @@ mod tests {
     }
 
     impl AgentSource for MockSource {
-        fn name(&self) -> &'static str { self.name }
-        fn api_name(&self) -> &'static str { self.api_name }
-        fn uri_prefix(&self) -> &'static str { self.prefix }
-        fn is_available(&self) -> bool { self.available }
-        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> { self.sessions.clone() }
-        fn get_messages(&self, _: &str) -> Result<Vec<serde_json::Value>, String> { Ok(vec![]) }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn api_name(&self) -> &'static str {
+            self.api_name
+        }
+        fn uri_prefix(&self) -> &'static str {
+            self.prefix
+        }
+        fn is_available(&self) -> bool {
+            self.available
+        }
+        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> {
+            self.sessions.clone()
+        }
+        fn get_messages(&self, _: &str) -> Result<Vec<serde_json::Value>, String> {
+            Ok(vec![])
+        }
         fn watch_strategy(&self) -> WatchStrategy {
             if self.watch_fs {
                 WatchStrategy::Filesystem
@@ -4780,9 +4957,15 @@ mod tests {
                 None => Some(PathBuf::from(path)),
             }
         }
-        fn fetch_account(&self) -> Result<serde_json::Value, String> { self.account.clone() }
-        fn fetch_usage(&self) -> Result<serde_json::Value, String> { self.usage.clone() }
-        fn usage_summary(&self) -> Option<SourceUsageSummary> { self.summary.clone() }
+        fn fetch_account(&self) -> Result<serde_json::Value, String> {
+            self.account.clone()
+        }
+        fn fetch_usage(&self) -> Result<serde_json::Value, String> {
+            self.usage.clone()
+        }
+        fn usage_summary(&self) -> Option<SourceUsageSummary> {
+            self.summary.clone()
+        }
     }
 
     /// Codex sessions store a `codex://…` URI as `jsonl_path` and report
@@ -4808,7 +4991,11 @@ mod tests {
             .expect("codex-like filesystem source must resolve, not error on the URI");
         let (real_path, size) =
             out.expect("filesystem source should yield a tail target, not None");
-        assert_eq!(real_path, real.to_string_lossy(), "must store the resolved real path");
+        assert_eq!(
+            real_path,
+            real.to_string_lossy(),
+            "must store the resolved real path"
+        );
         assert_eq!(size, 6, "size must be read from the resolved file");
     }
 
@@ -4821,7 +5008,10 @@ mod tests {
             ..MockSource::new("poll", "poll", "poll://")
         })];
         let out = watch_start_target(&sources, "poll://whatever").unwrap();
-        assert!(out.is_none(), "polling source must not produce a filesystem tail target");
+        assert!(
+            out.is_none(),
+            "polling source must not produce a filesystem tail target"
+        );
     }
 
     #[test]
@@ -4831,7 +5021,11 @@ mod tests {
                 summary: Some(SourceUsageSummary {
                     source: "a".into(),
                     plan: Some("pro".into()),
-                    bars: vec![UsageBar { label: "5h".into(), utilization: 0.3, resets_at: None }],
+                    bars: vec![UsageBar {
+                        label: "5h".into(),
+                        utilization: 0.3,
+                        resets_at: None,
+                    }],
                     balances: vec![],
                     usage_source: None,
                     email: None,
@@ -4900,7 +5094,9 @@ mod tests {
     #[test]
     fn notify_busy_to_waiting_fires_for_all_busy_statuses() {
         // Canonical "task just completed" transitions — all must notify.
-        for busy in &[Thinking, Executing, Streaming, Processing, Delegating, Active] {
+        for busy in &[
+            Thinking, Executing, Streaming, Processing, Delegating, Active,
+        ] {
             assert!(
                 should_notify_waiting_transition(Some(busy), &WaitingInput, false),
                 "{:?} → WaitingInput should notify",
@@ -4913,7 +5109,11 @@ mod tests {
     fn notify_cold_start_waiting_does_not_fire() {
         // Fleet just started / session was previously absent. We have no
         // evidence the agent was busy, so we must NOT claim "task completed".
-        assert!(!should_notify_waiting_transition(None, &WaitingInput, false));
+        assert!(!should_notify_waiting_transition(
+            None,
+            &WaitingInput,
+            false
+        ));
     }
 
     #[test]
@@ -4921,19 +5121,29 @@ mod tests {
         // `--resume` of a session that had aged out to Idle: opening it can
         // re-touch the JSONL and flip it to WaitingInput, but no task was
         // actually completed right now — suppress the notification.
-        assert!(!should_notify_waiting_transition(Some(&Idle), &WaitingInput, false));
+        assert!(!should_notify_waiting_transition(
+            Some(&Idle),
+            &WaitingInput,
+            false
+        ));
     }
 
     #[test]
     fn notify_waiting_to_waiting_does_not_fire() {
         // Already in WaitingInput — the user hasn't done anything new.
-        assert!(!should_notify_waiting_transition(Some(&WaitingInput), &WaitingInput, false));
+        assert!(!should_notify_waiting_transition(
+            Some(&WaitingInput),
+            &WaitingInput,
+            false
+        ));
     }
 
     #[test]
     fn notify_non_waiting_target_never_fires() {
         // Only transitions *to* WaitingInput are notification triggers.
-        for target in &[Thinking, Executing, Streaming, Processing, Delegating, Active, Idle] {
+        for target in &[
+            Thinking, Executing, Streaming, Processing, Delegating, Active, Idle,
+        ] {
             assert!(
                 !should_notify_waiting_transition(Some(&Streaming), target, false),
                 "Streaming → {:?} should not notify",
@@ -4947,14 +5157,21 @@ mod tests {
         }
     }
 
-
     #[test]
     fn notify_skips_a_session_whose_process_is_still_alive() {
         // A live process at WaitingInput is parked on a decision card or a
         // permission prompt, not finished: the card raises its own notification,
         // and the analysis this would kick off costs an LLM call per card.
-        assert!(!should_notify_waiting_transition(Some(&Executing), &WaitingInput, true));
-        assert!(should_notify_waiting_transition(Some(&Executing), &WaitingInput, false));
+        assert!(!should_notify_waiting_transition(
+            Some(&Executing),
+            &WaitingInput,
+            true
+        ));
+        assert!(should_notify_waiting_transition(
+            Some(&Executing),
+            &WaitingInput,
+            false
+        ));
     }
 
     // ── ScanGate ────────────────────────────────────────────────────────────
@@ -5001,7 +5218,14 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-        assert_eq!(peak.load(Ordering::SeqCst), 1, "gate let two scans run at once");
-        assert!(gate.try_enter().is_some(), "gate must be free after all contenders exit");
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            1,
+            "gate let two scans run at once"
+        );
+        assert!(
+            gate.try_enter().is_some(),
+            "gate must be free after all contenders exit"
+        );
     }
 }

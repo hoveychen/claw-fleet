@@ -233,7 +233,10 @@ mod tests {
 
         super::platform::apply(true).expect("acquire assertion");
         let held = pmset_assertions();
-        assert!(ours(&held), "our assertion not visible in pmset output:\n{held}");
+        assert!(
+            ours(&held),
+            "our assertion not visible in pmset output:\n{held}"
+        );
 
         super::platform::apply(false).expect("release assertion");
         let released = pmset_assertions();

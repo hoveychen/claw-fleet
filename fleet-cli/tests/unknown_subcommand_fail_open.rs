@@ -106,7 +106,10 @@ fn every_blocking_hook_event_survives_a_stale_binary() {
     ] {
         let json = format!(r#"{{"session_id":"s1","hook_event_name":"{event}"}}"#);
         let (code, _) = run_with_piped_stdin(&[sub], &json);
-        assert_eq!(code, 0, "{event} hook `fleet {sub}` exited {code}, which blocks the event");
+        assert_eq!(
+            code, 0,
+            "{event} hook `fleet {sub}` exited {code}, which blocks the event"
+        );
     }
 }
 

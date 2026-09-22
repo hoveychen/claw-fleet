@@ -32,7 +32,10 @@ pub struct AppLinks {
 }
 
 fn env_nonempty(name: &str) -> Option<String> {
-    std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 impl AppLinks {
@@ -72,9 +75,11 @@ impl AppLinks {
 
 fn json_or_404(body: Option<&str>) -> Response {
     match body {
-        Some(json) => {
-            ([(header::CONTENT_TYPE, "application/json")], json.to_owned()).into_response()
-        }
+        Some(json) => (
+            [(header::CONTENT_TYPE, "application/json")],
+            json.to_owned(),
+        )
+            .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -124,13 +129,14 @@ mod tests {
 
     #[test]
     fn assetlinks_is_a_list_with_the_url_handling_relation() {
-        let v: Value = serde_json::from_str(&render_assetlinks(
-            "com.hoveychen.clawfleet",
-            "71:B9:7B:E8",
-        ))
-        .expect("valid json");
+        let v: Value =
+            serde_json::from_str(&render_assetlinks("com.hoveychen.clawfleet", "71:B9:7B:E8"))
+                .expect("valid json");
         assert!(v.is_array(), "assetlinks.json must be a JSON array");
-        assert_eq!(v[0]["relation"][0], "delegate_permission/common.handle_all_urls");
+        assert_eq!(
+            v[0]["relation"][0],
+            "delegate_permission/common.handle_all_urls"
+        );
         assert_eq!(v[0]["target"]["namespace"], "android_app");
         assert_eq!(v[0]["target"]["package_name"], "com.hoveychen.clawfleet");
         assert_eq!(v[0]["target"]["sha256_cert_fingerprints"][0], "71:B9:7B:E8");

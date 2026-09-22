@@ -58,4 +58,3 @@ pub(crate) fn start_git_clone(
 ) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
     state.backend.start_git_clone(&url, &dest)
 }
-

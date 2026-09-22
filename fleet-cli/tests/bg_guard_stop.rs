@@ -67,7 +67,9 @@ fn run_idle(home: &std::path::Path, sid: Option<&str>, stdin_json: &str) -> std:
             .write_all(stdin_json.as_bytes())
             .unwrap();
     }
-    child.wait_with_output().expect("wait for fleet session idle")
+    child
+        .wait_with_output()
+        .expect("wait for fleet session idle")
 }
 
 /// The load-bearing safety property. No live `claude -p` process names this
@@ -93,7 +95,10 @@ fn does_not_block_when_the_session_is_not_a_live_headless_process() {
     );
     // And the turn really ended, so the card must flip to idle.
     assert!(
-        home.join(".fleet").join("idle").join(format!("{SID}.json")).exists(),
+        home.join(".fleet")
+            .join("idle")
+            .join(format!("{SID}.json"))
+            .exists(),
         "a non-blocked stop must still mark the session idle"
     );
 }
@@ -111,7 +116,11 @@ fn clean_stop_marks_idle_and_exits_zero() {
     );
 
     assert!(out.status.success(), "clean stop must exit 0");
-    assert!(home.join(".fleet").join("idle").join(format!("{SID}.json")).exists());
+    assert!(home
+        .join(".fleet")
+        .join("idle")
+        .join(format!("{SID}.json"))
+        .exists());
 }
 
 /// Hooks must never fail a session over a payload they can't read — an older CLI
