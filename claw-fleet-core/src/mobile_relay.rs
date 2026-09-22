@@ -3747,16 +3747,23 @@ const ATTACHMENT_FULL_MAX_BYTES: usize = 12 * 1024 * 1024;
 /// verbatim — a client can only ever name a file inside one store key.
 fn serve_user_attachment(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let key = params
-        .get("key")
-        .and_then(Value::as_str)
-        .ok_or("missing key")?;
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or("missing name")?;
     let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
-    let asset = crate::user_attachments::read_user_attachment(key, name)?;
+    // `path` names a file the user picked, which keeps its own host path rather
+    // than landing in the store; `key`/`name` address the store.
+    let asset = match params.get("path").and_then(Value::as_str) {
+        Some(path) => crate::user_attachments::read_host_image(path)?,
+        None => {
+            let key = params
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or("missing key")?;
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("missing name")?;
+            crate::user_attachments::read_user_attachment(key, name)?
+        }
+    };
     // Images only. The store also holds the PDFs and archives a user picked, and
     // this endpoint's entire contract is "give me something an <img> can show" —
     // shipping arbitrary stored bytes under that name buys nothing the client
