@@ -3420,7 +3420,7 @@ mod range_breakdown_tests {
 
     /// A turn that mixes both TTLs must bill each portion at its own rate:
     /// 1M input + 1M output on Sonnet 5, with 1M of cache writes split evenly,
-    /// = $3 + $15 + 0.5M×$3.75 + 0.5M×$6.00 = $22.875.
+    /// = $2 + $10 + 0.5M×$2.50 + 0.5M×$4.00 = $15.25.
     #[test]
     fn mixed_ttl_cache_writes_split_by_rate() {
         let jsonl = concat!(
@@ -3431,10 +3431,7 @@ mod range_breakdown_tests {
         );
         let cells = fold_claude_session_cells(jsonl);
         let cost: f64 = cells.values().map(|a| a.cost).sum();
-        assert!(
-            (cost - 22.875).abs() < 1e-9,
-            "expected $22.875, got ${cost}"
-        );
+        assert!((cost - 15.25).abs() < 1e-9, "expected $15.25, got ${cost}");
     }
 
     /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int
