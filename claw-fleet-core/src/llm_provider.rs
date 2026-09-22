@@ -556,7 +556,10 @@ impl LlmProvider for CodexCliProvider {
         let bin = self.bin_path.as_deref()?;
         // exec: non-interactive mode (stdout = final message only)
         // --ephemeral: don't persist session
-        // --full-auto: auto-approve (no interactive prompts)
+        // (no `--full-auto`: codex 0.155 removed it and rejects the whole
+        // command line with "unexpected argument"; `exec` never prompts anyway,
+        // and its replacement `--approve-for-me` forces a workspace-write
+        // sandbox, which would undo `--sandbox read-only` below)
         // --skip-git-repo-check: we're not in a repo context
         // --sandbox read-only: prevent file writes (pure text generation)
         // CODEX_HOME=<clean home>: keep the global AGENTS.md guidance out of
@@ -569,7 +572,6 @@ impl LlmProvider for CodexCliProvider {
                 "-m",
                 model,
                 "--ephemeral",
-                "--full-auto",
                 "--skip-git-repo-check",
                 "--sandbox",
                 "read-only",
