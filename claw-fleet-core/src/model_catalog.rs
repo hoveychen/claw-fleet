@@ -825,6 +825,7 @@ mod tests {
         for id in [
             "claude-fable-5-1",
             "claude-fable-5",
+            "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
             "claude-sonnet-5",
@@ -854,6 +855,7 @@ mod tests {
         // gpt-5.5 is the one whose ceiling equals its default window.
         assert_eq!(entry("gpt-5.5").unwrap().max_context, Some(272_000));
 
+        assert_eq!(context_window("claude-opus-5-5"), None);
         assert_eq!(context_window("claude-opus-5"), None);
         assert_eq!(context_window("claude-haiku-4-5-20251001"), None);
     }
@@ -969,6 +971,9 @@ mod tests {
             .iter()
             .flat_map(|h| h.models.iter().map(|m| m.id.as_str()))
             .collect();
+        assert!(all.contains(&"claude-opus-5-5"));
+        // Opus 5 is *not* superseded — it is a full price tier cheaper on 5.5,
+        // so both stay listed rather than folding into one "same price" row.
         assert!(all.contains(&"claude-opus-5"));
         assert!(!all.contains(&"opus"), "bare alias leaked into the menu");
         assert!(

@@ -58,6 +58,19 @@ pub const COST_TIER_15_75: ModelCosts = ModelCosts {
     web_search: 0.01,
 };
 
+// Opus 5.5: $4 / $20 per Mtok. Cache reads are $0.20, i.e. input/20 rather
+// than the input/10 every other tier here uses — the Claude Code catalog names
+// this tier `tier_4_20_cache_read_0_20` for exactly that reason (read from the
+// 2.1.280 binary, 2026-09-22). Do not "normalise" it to 0.40.
+pub const COST_TIER_4_20: ModelCosts = ModelCosts {
+    input: 4.0,
+    output: 20.0,
+    cache_write: 5.0,
+    cache_write_1h: 8.0,
+    cache_read: 0.20,
+    web_search: 0.01,
+};
+
 // Opus 4.5 / 4.6 / 4.7 / 4.8 and Opus 5: $5 / $25 per Mtok.
 pub const COST_TIER_5_25: ModelCosts = ModelCosts {
     input: 5.0,
@@ -244,6 +257,23 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         return COST_TIER_15_75;
     }
 
+    // Opus 5.x minor routing, which has to run *before* the major-digit branch
+    // below: `claude-opus-5-5` contains `opus-5` and would otherwise be priced
+    // at the $5/$25 tier Opus 5 uses, silently overcharging by 25%. Parsed the
+    // same way as `opus-4-` above, so the dated `claude-opus-5-5-20260901`
+    // still matches while `claude-opus-5-20260801` (where `-2` is a year, not
+    // a minor) falls through to the major-digit branch.
+    if let Some(start) = m.find("opus-5-") {
+        let rest = &m.as_bytes()[start + "opus-5-".len()..];
+        if let Some((&first, tail)) = rest.split_first() {
+            let is_single_digit =
+                first.is_ascii_digit() && tail.first().map_or(true, |c| !c.is_ascii_digit());
+            if is_single_digit && first == b'5' {
+                return COST_TIER_4_20;
+            }
+        }
+    }
+
     // Opus 5 and later majors: the modern $5/$25 tier (`claude-opus-5` is
     // $5/$25, same as the 4.5+ minors). Matched on the major digit so a future
     // `opus-6` is priced deliberately instead of landing on the unknown-model
@@ -359,6 +389,7 @@ mod tests {
         for c in [
             COST_TIER_3_15,
             COST_TIER_15_75,
+            COST_TIER_4_20,
             COST_TIER_5_25,
             COST_TIER_30_150,
             COST_TIER_10_50,
@@ -495,6 +526,39 @@ mod tests {
                 "model {model} priced wrong: {cost} (expected 30.0 @ $5/$25 tier)"
             );
         }
+    }
+
+    #[test]
+    fn opus_5_5_is_cheaper_than_opus_5() {
+        // Opus 5.5 is $4/$20, a 20% cut from Opus 5's $5/$25. The regression
+        // this pins: `claude-opus-5-5` contains `opus-5`, so without the minor
+        // branch it lands on the $5/$25 tier and every turn is overcharged.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        for model in [
+            "claude-opus-5-5",
+            "Claude-Opus-5-5",
+            "claude-opus-5-5[1m]",
+            "claude-opus-5-5-20260901",
+        ] {
+            let cost = turn_cost_usd(model, &usage);
+            assert!(
+                (cost - 24.0).abs() < 1e-9,
+                "model {model} priced wrong: {cost} (expected 24.0 @ $4/$20 tier)"
+            );
+        }
+
+        // Cache reads are input/20 on this tier, not the input/10 every other
+        // Claude tier uses.
+        let reads = TurnUsage {
+            cache_read_tokens: 1_000_000,
+            ..Default::default()
+        };
+        let cost = turn_cost_usd("claude-opus-5-5", &reads);
+        assert!((cost - 0.20).abs() < 1e-9, "cache read priced wrong: {cost}");
     }
 
     #[test]

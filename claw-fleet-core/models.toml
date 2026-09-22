@@ -69,6 +69,16 @@ legacy_note_zh = "5.1 上强制 tool_choice `any`/`tool` 会 400，5 没这限�
 legacy_note_en = "forced `tool_choice` `any`/`tool` returns 400 on 5.1; 5 has no such restriction"
 
 [[model]]
+id = "claude-opus-5-5"
+label = "Opus 5.5"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+# Opus 5 **没有**写 superseded_by：5.5 比它便宜（$4/$20 对 $5/$25），而折行的
+# 渲染文案写死的是「前代同价仍可选」，折进去那句就成了假话。价格不同的两代各占
+# 一行，读表的人才看得出这是一次降价而不是单纯换代。
+[[model]]
 id = "claude-opus-5"
 label = "Opus 5"
 family = "claude-code"

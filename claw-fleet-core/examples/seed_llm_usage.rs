@@ -75,7 +75,7 @@ fn append_backdated(
     let canonical = match model {
         "haiku" => "claude-haiku-4-5",
         "sonnet" => "claude-sonnet-5",
-        "opus" => "claude-opus-4-8",
+        "opus" => "claude-opus-5-5",
         other => other,
     };
     let cost_usd = turn_cost_usd(canonical, &usage);
