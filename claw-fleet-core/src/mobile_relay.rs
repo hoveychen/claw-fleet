@@ -637,13 +637,15 @@ fn deliver_decision_answer_deduped(payload: &Value) -> Result<(), String> {
 
 /// Record (or refresh) a client from its `client_hello` payload. First sighting
 /// stamps `connected_at_ms`; later ones only bump `last_seen_ms` and metadata.
-fn upsert_client(payload: &Value) {
+/// Record a `client_hello`. Returns whether this client was not in the registry
+/// before (first hello, or its entry had been pruned or cleared).
+fn upsert_client(payload: &Value) -> bool {
     let Some(client_id) = payload
         .get("clientId")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
     else {
-        return;
+        return false;
     };
     let now = now_ms();
     let label = payload
@@ -682,6 +684,10 @@ fn upsert_client(payload: &Value) {
         .map(str::to_string);
     let mut guard = CLIENTS_REGISTRY.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
+    // A stale entry `live_devices` has not pruned yet counts as gone.
+    let is_new = map
+        .get(client_id)
+        .is_none_or(|e| now.saturating_sub(e.last_seen_ms) > CLIENT_STALE_MS);
     let entry = map
         .entry(client_id.to_string())
         .or_insert_with(|| MobileClientInfo {
@@ -704,6 +710,7 @@ fn upsert_client(payload: &Value) {
     entry.supports_delta = supports_delta;
     entry.app_commit = app_commit;
     entry.last_seen_ms = now;
+    is_new
 }
 
 /// Forget a client that said goodbye (best-effort — mobile `pagehide` is
@@ -780,6 +787,11 @@ enum Outbound {
     Text(String),
 }
 static SESSIONS_LAST_SENT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// Set when a client joined (or the socket reconnected with clients on it); the
+/// next `client_hello` consumes it and pushes the full snapshot. Needed besides
+/// `upsert_client`'s "new client" verdict because a page reload rejoins under a
+/// `clientId` whose registry entry is still fresh.
+static SNAPSHOT_AWAITS_HELLO: AtomicBool = AtomicBool::new(false);
 
 /// Host-supplied source for the *current* session list, kept off the request
 /// path. Two consumers:
@@ -841,6 +853,13 @@ fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
 /// `select!` arm that calls this, all of that froze the read loop, the ping and
 /// every outbound frame for as long as the rescan ran — and 90s of that is a
 /// heartbeat timeout, which reconnects, which lands right back here.
+///
+/// Called on a client's first `client_hello`, not on the relay's `presence`
+/// bump. Presence arrives before the hello, when the registry has no record of
+/// the joining client — or none at all right after a reconnect clears it — and
+/// `all_clients_support_gzip` is false for an empty registry. The full snapshot
+/// then went out uncompressed: 1.06MB on the wire on 2026-09-22 against ~230KB
+/// gzipped, head-of-line blocking every reply behind it on a phone's link.
 fn push_snapshot_on_connect() {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
@@ -1135,6 +1154,11 @@ use fleet_image::{
 /// client would otherwise render (fields are whitelisted + previews truncated,
 /// so even 500 rows stay a small payload).
 const SNAPSHOT_MAX_SESSIONS: usize = 500;
+/// Subagent rows ride along only for this many most-recent main sessions. They
+/// are uncapped otherwise and scale with history, not with what is live: on
+/// 2026-09-22 this host's snapshot carried 256 subagent rows (a third of its
+/// 930KB), 220 of them under tasks ranked past 100th and idle for days.
+const SNAPSHOT_SUBAGENT_PARENTS: usize = 100;
 /// `lastMessagePreview` cap (chars) — the list row clamps to two lines anyway.
 const SNAPSHOT_PREVIEW_CHARS: usize = 160;
 
@@ -1174,13 +1198,15 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     });
     mains.truncate(SNAPSHOT_MAX_SESSIONS);
 
-    // Append subagent rows whose parent survived the cap, so the phone can drill
-    // into them (`agent-<uuid>` lookup) without them ever leaking into the task
-    // list. `scan.rs` flattens direct + workflow-fanout subagents to point their
+    // Append subagent rows whose parent is among the most recent
+    // [`SNAPSHOT_SUBAGENT_PARENTS`] kept mains, so the phone can drill into them
+    // (`agent-<uuid>` lookup) without them ever leaking into the task list.
+    // `scan.rs` flattens direct + workflow-fanout subagents to point their
     // `parentSessionId` at the owning main session, so matching against kept
     // main ids covers every subagent — there is no deeper nesting to chase.
     let kept_ids: std::collections::HashSet<&str> = mains
         .iter()
+        .take(SNAPSHOT_SUBAGENT_PARENTS)
         .filter_map(|s| s.get("id").and_then(Value::as_str))
         .collect();
     let subagents = list.iter().filter(is_subagent).filter(|s| {
@@ -1985,6 +2011,11 @@ pub fn publish_sessions(sessions: &Value) {
     if !CONNECTED.load(Ordering::SeqCst) || CLIENTS.load(Ordering::SeqCst) == 0 {
         return;
     }
+    // Nobody has said hello yet, so nobody's gzip support is known and this would
+    // ship uncompressed. Their hello pushes a full snapshot anyway.
+    if live_devices().is_empty() {
+        return;
+    }
     {
         let mut last = SESSIONS_LAST_SENT.lock().unwrap();
         if let Some(t) = *last {
@@ -2144,8 +2175,14 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
         }
         // Presence announcements — kept in a local registry surfaced via
         // `status().devices`; no reply needed.
+        // The first hello from a client is also when it gets its full snapshot:
+        // only now is its `supportsGzip` on record (see `SNAPSHOT_AWAITS_HELLO`).
         Some("client_hello") => {
-            upsert_client(payload);
+            let is_new = upsert_client(payload);
+            if SNAPSHOT_AWAITS_HELLO.swap(false, Ordering::SeqCst) || is_new {
+                reset_sessions_dedup();
+                push_snapshot_on_connect();
+            }
             None
         }
         Some("client_bye") => {
@@ -4476,26 +4513,27 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         clear_clients();
                         reset_sessions_dedup();
                         crate::log_debug("[mobile-relay] connected");
-                        // Reconnected with clients already on the channel: push
-                        // the current state now instead of waiting for the next
-                        // scan-driven change (which may be minutes away when
-                        // every session is idle). No-op when no provider is set.
+                        // Reconnected with clients already on the channel: they
+                        // get the current state on their next hello (≤15s)
+                        // instead of the next scan-driven change, which may be
+                        // minutes away when every session is idle. Not now: the
+                        // registry was just cleared, so it would ship unzipped.
                         if frame.get("clients").and_then(Value::as_u64).unwrap_or(0) > 0 {
-                            push_snapshot_on_connect();
+                            SNAPSHOT_AWAITS_HELLO.store(true, Ordering::SeqCst);
                         }
                     }
                     Some("presence") => {
                         if let Some(n) = frame.get("clients").and_then(Value::as_u64) {
                             let prev = CLIENTS.swap(n as usize, Ordering::SeqCst);
-                            // A client just joined: drop the dedup hash and push
-                            // the current state to it right away, even when
-                            // nothing changed for existing clients. Without this
-                            // active push a phone connecting mid-idle would sit
-                            // on a blank task list until some session file next
-                            // changed (see push_snapshot_on_connect).
+                            // A client just joined: drop the dedup hash so the next
+                            // push is a full snapshot, and send it on the client's
+                            // hello, even when nothing changed for existing
+                            // clients. Without this a phone connecting mid-idle
+                            // would sit on a blank task list until some session
+                            // file next changed (see `SNAPSHOT_AWAITS_HELLO`).
                             if n as usize > prev {
                                 reset_sessions_dedup();
-                                push_snapshot_on_connect();
+                                SNAPSHOT_AWAITS_HELLO.store(true, Ordering::SeqCst);
                             }
                             // Everyone's gone: forget the device list immediately
                             // rather than waiting out the stale timeout.
@@ -6565,6 +6603,43 @@ mod tests {
         assert_eq!(sub["jsonlPath"], "/p/subagents/agent-abc.jsonl");
     }
 
+    /// Subagent rows ride along only for the most recent mains: past the
+    /// window the main row stays in the task list but its subagents are dropped.
+    #[test]
+    fn slim_snapshot_caps_subagents_to_recent_parents() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let n = SNAPSHOT_SUBAGENT_PARENTS as u64 + 1;
+        let mut rows = Vec::new();
+        for i in 0..n {
+            // Main `m0` is the most recent; `m{n-1}` falls just past the window.
+            let activity = 10_000 - i;
+            rows.push(json!({
+                "id": format!("m{i}"), "isSubagent": false,
+                "lastActivityMs": activity, "entrypoint": NEW_SESSION_ENTRYPOINT
+            }));
+            rows.push(json!({
+                "id": format!("agent-{i}"), "isSubagent": true,
+                "parentSessionId": format!("m{i}"),
+                "lastActivityMs": activity, "entrypoint": NEW_SESSION_ENTRYPOINT
+            }));
+        }
+        let slim = slim_sessions_snapshot(&Value::Array(rows));
+        let ids: Vec<&str> = slim
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["id"].as_str())
+            .collect();
+        let last = n - 1;
+        assert!(ids.contains(&format!("m{last}").as_str()), "the main row stays");
+        assert!(ids.contains(&"agent-0"), "a recent parent keeps its subagent");
+        assert!(
+            !ids.contains(&format!("agent-{last}").as_str()),
+            "a parent past the window loses its subagent rows"
+        );
+        assert_eq!(ids.len() as u64, n + SNAPSHOT_SUBAGENT_PARENTS as u64);
+    }
+
     #[test]
     fn tool_result_digest_carries_agent_id() {
         // The Agent toolUseResult shape: status + the subagent's agentId, which
@@ -7837,24 +7912,56 @@ mod tests {
             "no provider → no on-connect push (pre-fix state)"
         );
 
-        // With a provider registered (the desktop LocalBackend path), connecting
-        // emits the current snapshot immediately, no scan tick required.
+        // With a provider registered (the desktop LocalBackend path), a joining
+        // phone gets the current snapshot on its hello, no scan tick required.
+        // Big enough to cross the gzip threshold.
         set_sessions_provider(|| {
-            Some(vec![crate::session::SessionInfo {
-                id: "s1".to_string(),
-                workspace_name: "w".to_string(),
-                last_activity_ms: 1,
-                entrypoint: Some(NEW_SESSION_ENTRYPOINT.to_string()),
-                ..Default::default()
-            }])
+            Some(
+                (0..40)
+                    .map(|i| crate::session::SessionInfo {
+                        id: format!("s{i}"),
+                        workspace_name: "w".to_string(),
+                        last_activity_ms: i,
+                        last_message_preview: Some("preview text ".repeat(10)),
+                        entrypoint: Some(NEW_SESSION_ENTRYPOINT.to_string()),
+                        ..Default::default()
+                    })
+                    .collect(),
+            )
         });
-        push_snapshot_on_connect();
-        let out = rx.try_recv().expect("on-connect push emitted a frame");
+        clear_clients();
+        SNAPSHOT_AWAITS_HELLO.store(true, Ordering::SeqCst);
+
+        // Presence alone pushes nothing: nobody's gzip support is known yet.
+        push_snapshot_now();
+        assert!(
+            rx.try_recv().is_err(),
+            "no hello yet → nothing ships (it would ship uncompressed)"
+        );
+
+        handle_client_payload(&hello_gzip("p1", true));
+        let out = rx.try_recv().expect("the joining client's hello pushes a frame");
         let Outbound::Text(text) = out;
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            frame["payload"]["z"], true,
+            "the full snapshot is gzipped once the client's hello is on record"
+        );
         // The payload crosses the relay sealed; a paired peer opens it.
-        assert_eq!(decode_out(&text)["event"], "sessions");
+        let payload = decode_out(&text);
+        assert_eq!(payload["event"], "sessions");
+        assert_eq!(payload["sessions"].as_array().unwrap().len(), 40);
+        assert!(
+            !SNAPSHOT_AWAITS_HELLO.load(Ordering::SeqCst),
+            "the hello consumed the pending push"
+        );
+
+        // A later heartbeat from the same, still-fresh client pushes nothing more.
+        handle_client_payload(&hello_gzip("p1", true));
+        assert!(rx.try_recv().is_err(), "a routine heartbeat is not a join");
 
         // Reset shared globals so sibling tests start from a known state.
+        clear_clients();
         *SESSIONS_PROVIDER.lock().unwrap() = None;
         *OUT_TX.lock().unwrap() = None;
         *ENC_KEY.lock().unwrap() = None;
@@ -8019,6 +8126,7 @@ mod tests {
         reset_sessions_dedup();
         *SESSIONS_LAST_SENT.lock().unwrap() = None;
         *SESSIONS_PENDING.lock().unwrap() = None;
+        upsert_client(&hello_delta("d1", true));
 
         // First push goes out and arms the throttle.
         publish_sessions(&json!([
