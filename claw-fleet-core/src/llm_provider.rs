@@ -539,14 +539,17 @@ impl LlmProvider for CodexCliProvider {
         codex_fallback_models()
     }
 
-    // Luna is Codex's fast/cheap tier; Terra the balanced one. The previous
-    // defaults (`gpt-5.1-codex-mini` / `gpt-5.3-codex`) 400 under a ChatGPT
-    // account, so any scenario using Codex as its analysis provider failed.
+    // GPT-6 Luna for the fast slot, GPT-6 Sol for the standard one: both are
+    // cheaper than the 5.6 Luna / Terra they replace ($0.10/$0.50 and $2/$10)
+    // and both answered a live `codex exec` under a ChatGPT login (2026-09-22).
+    // That login check matters: the defaults before 5.6 (`gpt-5.1-codex-mini` /
+    // `gpt-5.3-codex`) 400 under a ChatGPT account, so any scenario using Codex
+    // as its analysis provider failed.
     fn default_fast_model(&self) -> &str {
-        "gpt-5.6-luna"
+        "gpt-6-luna"
     }
     fn default_standard_model(&self) -> &str {
-        "gpt-5.6-terra"
+        "gpt-6-sol"
     }
 
     fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
