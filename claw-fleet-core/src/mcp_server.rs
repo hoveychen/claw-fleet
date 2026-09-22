@@ -472,13 +472,14 @@ fn result_thumbnails(result: &crate::codex_image::GenerateImageResult) -> Vec<Va
             let bytes = std::fs::read(&img.path).ok()?;
             let mime = crate::wiki::mime_for_path(std::path::Path::new(&img.path));
             let (small, mime) = fleet_image::downscale_decision_asset(bytes, mime);
+            // MCP's ImageContent shape — flat `data` + `mimeType`, not the
+            // Messages API's `source.{media_type,data}`. Claude Code rejects
+            // the whole result with "failed schema validation" otherwise, so
+            // the agent loses the handle and paths of an image that was made.
             Some(json!({
                 "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": mime,
-                    "data": base64::engine::general_purpose::STANDARD.encode(&small),
-                }
+                "data": base64::engine::general_purpose::STANDARD.encode(&small),
+                "mimeType": mime,
             }))
         })
         .collect()
@@ -1792,6 +1793,31 @@ mod tests {
         assert!(text.contains("/d/a.png (42 bytes)"), "{text}");
         assert!(text.contains("[command] sips -z 1024 1024 a.png"), "{text}");
         assert!(text.contains("saved it"), "{text}");
+    }
+
+    #[test]
+    fn thumbnails_are_mcp_image_content_blocks() {
+        // Claude Code validates tool results against the MCP schema; a
+        // Messages-API-style `source` object fails it and drops the result.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.png");
+        let img = image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 0]));
+        img.save(&path).unwrap();
+        let result = crate::codex_image::GenerateImageResult {
+            thread_id: "img-x".into(),
+            images: vec![crate::codex_image::GeneratedImage {
+                path: path.to_string_lossy().into_owned(),
+                bytes: 1,
+            }],
+            agent_message: String::new(),
+            timeline: vec![],
+        };
+        let rendered = render_image_result(&result);
+        let block = &rendered["content"][1];
+        assert_eq!(block["type"], "image");
+        assert!(block["data"].as_str().is_some_and(|d| !d.is_empty()));
+        assert!(block["mimeType"].as_str().is_some_and(|m| m.starts_with("image/")));
+        assert!(block.get("source").is_none(), "{block}");
     }
 
     #[test]
