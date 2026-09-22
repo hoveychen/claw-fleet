@@ -2664,7 +2664,7 @@ mod tests {
     /// The stored per-day cost is what the 30d/All receipt shows as its
     /// subtotal, so it has to bill 1-hour cache writes at 2× input, and it has
     /// to persist the 1h subset so the receipt can itemise the two write rates.
-    /// Sonnet 5: 1M input ($3) + 1M output ($15) + 1M 1h writes ($6) = $24.
+    /// Sonnet 5: 1M input ($2) + 1M output ($10) + 1M 1h writes ($4) = $16.
     #[test]
     fn report_metrics_price_one_hour_cache_writes_at_2x() {
         let line = concat!(
@@ -2679,8 +2679,8 @@ mod tests {
             "1h subset must persist"
         );
         assert!(
-            (m.cost_usd - 24.0).abs() < 1e-9,
-            "expected $24.00 at the 1h rate, got ${}",
+            (m.cost_usd - 16.0).abs() < 1e-9,
+            "expected $16.00 at the 1h rate, got ${}",
             m.cost_usd
         );
     }

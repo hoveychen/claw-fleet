@@ -2672,8 +2672,8 @@ mod tests {
     #[test]
     fn incremental_event_cost_prices_last_token_usage_not_the_running_total() {
         use super::codex_event_incremental_cost;
-        // gpt-5.6-sol: $5/Mtok input, $30/Mtok output, $0.50/Mtok cache read.
-        // 60k full-price input ($0.30) + 40k cached ($0.02) + 10k output ($0.30).
+        // gpt-5.6-sol: $4/Mtok input, $20/Mtok output, $0.40/Mtok cache read.
+        // 60k full-price input ($0.24) + 40k cached ($0.016) + 10k output ($0.20).
         // The caller hands over the incremental block itself; the cumulative
         // `total_token_usage` never reaches this function, because pricing it
         // would re-bill the whole session on every event.
@@ -2685,8 +2685,8 @@ mod tests {
         let cost = codex_event_incremental_cost(&last_token_usage, Some("gpt-5.6-sol"))
             .expect("a priced turn must yield a cost");
         assert!(
-            (cost - 0.62).abs() < 1e-9,
-            "expected $0.62 for the incremental turn, got {cost}"
+            (cost - 0.456).abs() < 1e-9,
+            "expected $0.456 for the incremental turn, got {cost}"
         );
     }
 
@@ -2717,13 +2717,13 @@ mod tests {
         let cost = codex_event_incremental_cost(&last_token_usage, Some("gpt-5.6-sol"))
             .expect("clamped usage still prices");
         assert!(
-            (cost - 0.50).abs() < 1e-9,
-            "1M tokens all billed at the cache-read rate = $0.50, got {cost}"
+            (cost - 0.40).abs() < 1e-9,
+            "1M tokens all billed at the cache-read rate = $0.40, got {cost}"
         );
     }
 
     /// Two turns 20s apart, each billing 10k output tokens on gpt-5.6-sol
-    /// ($30/Mtok → $0.30 a turn, $0.60 total). The window runs from the first
+    /// ($20/Mtok → $0.20 a turn, $0.40 total). The window runs from the first
     /// sample to *now*, so both rates must fall as the session idles instead of
     /// holding the burst value until the sample ages out.
     fn two_turn_burst() -> Vec<serde_json::Value> {
@@ -2759,7 +2759,7 @@ mod tests {
     #[test]
     fn cost_speed_is_measured_over_the_window() {
         use super::compute_token_stats_at;
-        // Measured right at the second sample: $0.60 over 20s = $1.80/min, and
+        // Measured right at the second sample: $0.40 over 20s = $1.20/min, and
         // 20k output tokens over 20s = 1000 tok/s.
         let stats = compute_token_stats_at(
             &two_turn_burst(),
@@ -2767,8 +2767,8 @@ mod tests {
             burst_start_secs() + 20.0,
         );
         assert!(
-            (stats.cost_speed_usd_per_min - 1.80).abs() < 1e-6,
-            "expected $1.80/min, got {}",
+            (stats.cost_speed_usd_per_min - 1.20).abs() < 1e-6,
+            "expected $1.20/min, got {}",
             stats.cost_speed_usd_per_min
         );
         assert!(
@@ -2793,7 +2793,7 @@ mod tests {
             burst_start_secs() + 260.0,
         );
         assert!(
-            (stats.cost_speed_usd_per_min - 1.80 / 13.0).abs() < 1e-6,
+            (stats.cost_speed_usd_per_min - 1.20 / 13.0).abs() < 1e-6,
             "cost rate must decay with the idle tail, got {}",
             stats.cost_speed_usd_per_min
         );
@@ -4000,8 +4000,8 @@ mod tests {
         ];
         let (cost, input) = codex_cost_and_input(&lines, Some("gpt-5.6-sol"));
         assert_eq!(input, 136970, "reports cumulative input");
-        // (136970-123392)/1M*$5 + 123392/1M*$0.50 + 565/1M*$30
-        let expected = 13578.0 / 1e6 * 5.0 + 123392.0 / 1e6 * 0.50 + 565.0 / 1e6 * 30.0;
+        // (136970-123392)/1M*$4 + 123392/1M*$0.40 + 565/1M*$20
+        let expected = 13578.0 / 1e6 * 4.0 + 123392.0 / 1e6 * 0.40 + 565.0 / 1e6 * 20.0;
         assert!(
             (cost - expected).abs() < 1e-9,
             "cost {cost} != expected {expected}"
@@ -4010,7 +4010,7 @@ mod tests {
 
     #[test]
     fn codex_cost_and_input_absent_model_uses_gpt_sol() {
-        // No model -> "gpt" -> Sol tier. 1M full-price input = $5.
+        // No model -> "gpt" -> 5.6 Sol tier. 1M full-price input = $4.
         let lines = vec![json!({
             "type": "event_msg",
             "payload": { "type": "token_count", "info": { "total_token_usage": {
@@ -4020,8 +4020,8 @@ mod tests {
         let (cost, input) = codex_cost_and_input(&lines, None);
         assert_eq!(input, 1_000_000);
         assert!(
-            (cost - 5.0).abs() < 1e-9,
-            "gpt sol input = $5/M, got {cost}"
+            (cost - 4.0).abs() < 1e-9,
+            "gpt sol input = $4/M, got {cost}"
         );
     }
 
@@ -4075,7 +4075,7 @@ mod tests {
             b.total_tokens
         );
         // Same cost math as the header's codex_cost_and_input.
-        let expected = 13578.0 / 1e6 * 5.0 + 123392.0 / 1e6 * 0.50 + 565.0 / 1e6 * 30.0;
+        let expected = 13578.0 / 1e6 * 4.0 + 123392.0 / 1e6 * 0.40 + 565.0 / 1e6 * 20.0;
         assert!((b.cost_usd - expected).abs() < 1e-9, "cost {}", b.cost_usd);
     }
 
