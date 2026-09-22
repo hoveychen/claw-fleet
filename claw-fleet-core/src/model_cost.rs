@@ -296,7 +296,8 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
     // Fable 5.1 / Mythos 5.1 keep the $10/$50 rates but read cache at $0.25.
     // Minor parsed like `opus-5-` below, so a dated `claude-fable-5-20260601`
     // (where `-2` is a year) stays on the 5.0 tier.
-    if single_digit_minor(&m, "fable-5-") == Some(1) || single_digit_minor(&m, "mythos-5-") == Some(1)
+    if single_digit_minor(&m, "fable-5-") == Some(1)
+        || single_digit_minor(&m, "mythos-5-") == Some(1)
     {
         return COST_TIER_10_50_READ_0_25;
     }
@@ -523,7 +524,12 @@ mod tests {
             output_tokens: 1_000_000,
             ..Default::default()
         };
-        for model in ["claude-sonnet-5", "Claude-Sonnet-5", "claude-sonnet-5[1m]", "claude-sonnet-5-20260601"] {
+        for model in [
+            "claude-sonnet-5",
+            "Claude-Sonnet-5",
+            "claude-sonnet-5[1m]",
+            "claude-sonnet-5-20260601",
+        ] {
             let cost = turn_cost_usd(model, &usage);
             assert!((cost - 12.0).abs() < 1e-9, "{model} -> {cost}, want 12.0");
         }
@@ -601,12 +607,20 @@ mod tests {
             cache_read_tokens: 1_000_000,
             ..Default::default()
         };
-        for model in ["claude-fable-5-1", "claude-fable-5-1[1m]", "claude-mythos-5-1"] {
+        for model in [
+            "claude-fable-5-1",
+            "claude-fable-5-1[1m]",
+            "claude-mythos-5-1",
+        ] {
             let cost = turn_cost_usd(model, &reads);
             assert!((cost - 0.25).abs() < 1e-9, "{model} -> {cost}, want 0.25");
         }
         // The 5.0 generation (and a dated 5.0 id) still reads at $1.
-        for model in ["claude-fable-5", "claude-fable-5-20260601", "claude-mythos-5"] {
+        for model in [
+            "claude-fable-5",
+            "claude-fable-5-20260601",
+            "claude-mythos-5",
+        ] {
             let cost = turn_cost_usd(model, &reads);
             assert!((cost - 1.0).abs() < 1e-9, "{model} -> {cost}, want 1.0");
         }
@@ -683,7 +697,10 @@ mod tests {
             ..Default::default()
         };
         let cost = turn_cost_usd("claude-opus-5-5", &reads);
-        assert!((cost - 0.20).abs() < 1e-9, "cache read priced wrong: {cost}");
+        assert!(
+            (cost - 0.20).abs() < 1e-9,
+            "cache read priced wrong: {cost}"
+        );
     }
 
     #[test]

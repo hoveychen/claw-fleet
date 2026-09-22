@@ -3431,10 +3431,7 @@ mod range_breakdown_tests {
         );
         let cells = fold_claude_session_cells(jsonl);
         let cost: f64 = cells.values().map(|a| a.cost).sum();
-        assert!(
-            (cost - 15.25).abs() < 1e-9,
-            "expected $15.25, got ${cost}"
-        );
+        assert!((cost - 15.25).abs() < 1e-9, "expected $15.25, got ${cost}");
     }
 
     /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int
