@@ -210,9 +210,75 @@ fn read_legacy_pasted(name: &str) -> Result<DecisionAssetBytes, String> {
     })
 }
 
+/// Read an image a user *picked* from disk, by the host path the transcript
+/// froze. A picked file is never copied into the store (the agent runs on this
+/// machine and its path already means something), so history's only handle on
+/// it is that path — and without this the phone could replay it only as a
+/// filename chip while the desktop showed the picture.
+///
+/// Images only, decided by extension before anything is read: this backs a
+/// relay method whose whole contract is "something an `<img>` can show", and
+/// it must not become a way to pull arbitrary bytes off the host. A leading
+/// `~/` expands against this machine's home, as in
+/// [`crate::file_explorer::read_external_file`].
+pub fn read_host_image(path: &str) -> Result<DecisionAssetBytes, String> {
+    let expanded = match path.strip_prefix("~/") {
+        Some(rest) => crate::session::real_home_dir()
+            .ok_or_else(|| "home directory unknown".to_string())?
+            .join(rest),
+        None => PathBuf::from(path),
+    };
+    if !expanded.is_absolute() {
+        return Err("attachment path must be absolute".to_string());
+    }
+    let canon = expanded
+        .canonicalize()
+        .map_err(|e| format!("attachment path: {e}"))?;
+    let mime = crate::wiki::mime_for_path(&canon);
+    if !mime.starts_with("image/") {
+        return Err(format!("not an image: {mime}"));
+    }
+    let meta = fs::metadata(&canon).map_err(|e| format!("attachment path: {e}"))?;
+    if !meta.is_file() {
+        return Err("attachment path is not a file".to_string());
+    }
+    if meta.len() > crate::ui_types::MAX_ATTACHMENT_BYTES {
+        return Err(format!("attachment too large: {} bytes", meta.len()));
+    }
+    let bytes = fs::read(&canon).map_err(|e| format!("read attachment: {e}"))?;
+    Ok(DecisionAssetBytes {
+        bytes,
+        mime: mime.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_host_image_serves_images_and_refuses_the_rest() {
+        let tmp = fresh_tmp_dir("host");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let img = tmp.join("wife_1.jpg");
+        std::fs::write(&img, b"\xff\xd8\xff").unwrap();
+        let txt = tmp.join("notes.txt");
+        std::fs::write(&txt, b"secret").unwrap();
+
+        let got = read_host_image(img.to_str().unwrap()).unwrap();
+        assert_eq!(got.mime, "image/jpeg");
+        assert_eq!(got.bytes, b"\xff\xd8\xff");
+
+        assert!(read_host_image(txt.to_str().unwrap()).is_err());
+        assert!(read_host_image("relative/wife_1.jpg").is_err());
+        assert!(read_host_image(tmp.join("missing.png").to_str().unwrap()).is_err());
+        // A directory named like an image is still not a file.
+        let dir = tmp.join("dir.png");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(read_host_image(dir.to_str().unwrap()).is_err());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     fn fresh_tmp_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

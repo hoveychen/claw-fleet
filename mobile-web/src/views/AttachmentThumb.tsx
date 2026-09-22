@@ -15,19 +15,20 @@ import type { FleetTransport } from "../transport";
 import {
   attachmentDataUrl,
   attachmentName,
-  attachmentRef,
   fetchAttachmentImage,
-  isRenderableImage,
+  imageAttachmentRef,
   type AttachmentRef,
 } from "../userAttachments";
 import { useLightbox } from "./Lightbox";
 import styles from "./AttachmentThumb.module.css";
 
 /**
- * Fetched images, keyed by `<key>/<name>#<full>`. A message row re-renders on
- * every 2.5s poll and a user scrolls back and forth through history; without
- * this, each pass re-pulls bytes that cannot have changed (store paths are
- * content-addressed, so a given key/name is immutable by construction).
+ * Fetched images, keyed by `<key>/<name>#<full>` (or `path:<path>#<full>` for a
+ * picked file). A message row re-renders on every 2.5s poll and a user scrolls
+ * back and forth through history; without this, each pass re-pulls bytes that
+ * cannot have changed (store paths are content-addressed, so a given key/name
+ * is immutable by construction; a picked file could change on disk, but only a
+ * reload notices, which is fine for a thumbnail).
  *
  * Bounded and cleared wholesale on overflow — same shape as the relay's own
  * thumbnail memo. Thumbnails are ~16 KB, so this caps out around 3 MB.
@@ -36,7 +37,8 @@ const CACHE_MAX = 180;
 const cache = new Map<string, string>();
 
 function cacheKey(ref: AttachmentRef, full: boolean): string {
-  return `${ref.key}/${ref.name}#${full ? 1 : 0}`;
+  const id = "path" in ref ? `path:${ref.path}` : `${ref.key}/${ref.name}`;
+  return `${id}#${full ? 1 : 0}`;
 }
 
 function cacheGet(ref: AttachmentRef, full: boolean): string | undefined {
@@ -71,10 +73,9 @@ export interface PendingAttachmentUpload {
 }
 
 /**
- * The attachments on one turn. Images in the store become thumbnails; anything
- * else becomes a filename chip carrying the full path in its tooltip — a file
- * the user *picked* keeps its own path, and the desktop has no license to read
- * arbitrary paths off its disk just so a phone can preview them.
+ * The attachments on one turn. Images become thumbnails — store images by their
+ * coordinates, picked ones by their host path; anything else becomes a filename
+ * chip carrying the full path in its tooltip.
  */
 export function AttachmentThumbs({
   paths,
@@ -103,7 +104,7 @@ export function AttachmentThumbs({
     <div className={compact ? `${styles.row} ${styles.compact}` : styles.row}>
       {paths.map((path) => {
         const name = attachmentName(path);
-        const ref = isRenderableImage(name) ? attachmentRef(path) : null;
+        const ref = imageAttachmentRef(path);
         const remove = onRemove ? () => onRemove(path) : undefined;
         if (ref && client) {
           return (

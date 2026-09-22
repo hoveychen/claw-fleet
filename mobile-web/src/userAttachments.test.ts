@@ -3,6 +3,7 @@ import {
   attachmentName,
   attachmentRef,
   fetchAttachmentImage,
+  imageAttachmentRef,
   isRenderableImage,
   splitAnswerAttachments,
   splitContextFiles,
@@ -122,5 +123,40 @@ describe("fetchAttachmentImage", () => {
     await fetchAttachmentImage(client, { key: "k", name: "a.png" }, true);
     expect(calls[0].method).toBe("user_attachment");
     expect(calls[0].timeoutMs ?? 0).toBeGreaterThan(DEFAULT_CONTROL_TIMEOUT_MS);
+  });
+});
+
+// A picked file never enters the store, so history holds only its host path.
+describe("imageAttachmentRef", () => {
+  it("prefers store coordinates when the path is in the store", () => {
+    expect(imageAttachmentRef("/Users/x/.fleet/user-attachments/ab12/shot.png")).toEqual({
+      key: "ab12",
+      name: "shot.png",
+    });
+  });
+
+  it("addresses a picked image by its host path", () => {
+    expect(imageAttachmentRef("/Users/x/Pictures/wife_1.jpg")).toEqual({
+      path: "/Users/x/Pictures/wife_1.jpg",
+    });
+    expect(imageAttachmentRef("C:\\Users\\x\\a.png")).toEqual({ path: "C:\\Users\\x\\a.png" });
+  });
+
+  it("refuses non-images and relative paths", () => {
+    expect(imageAttachmentRef("/etc/passwd")).toBeNull();
+    expect(imageAttachmentRef("/Users/x/spec.pdf")).toBeNull();
+    expect(imageAttachmentRef("pics/a.png")).toBeNull();
+  });
+
+  it("sends only the path to the relay for a picked image", async () => {
+    const calls: unknown[] = [];
+    const client = {
+      request: (_m: string, params?: unknown) => {
+        calls.push(params);
+        return Promise.resolve({ mime: "image/jpeg", base64: "" });
+      },
+    } as unknown as RelayClient;
+    await fetchAttachmentImage(client, { path: "/Users/x/Pictures/wife_1.jpg" });
+    expect(calls[0]).toEqual({ path: "/Users/x/Pictures/wife_1.jpg", full: false });
   });
 });

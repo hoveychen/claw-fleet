@@ -1,10 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Paperclip } from "lucide-react";
-import {
-  attachmentName,
-  isRenderableImage,
-  userAttachmentUrl,
-} from "../../userAttachments";
+import { attachmentName } from "../../userAttachments";
+import { useAttachmentThumb } from "../../attachmentThumb";
 import { ImageThumbSrc } from "./ImageThumb";
 import styles from "./AttachmentRow.module.css";
 
@@ -12,11 +9,13 @@ import styles from "./AttachmentRow.module.css";
  * The attachments on a user turn, shown wherever that turn is replayed: the
  * chat bubble and the decision-history record.
  *
- * An image in the persistent store renders as a thumbnail — the point of the
- * store is that its bytes are still there weeks later, on whichever host the
- * agent runs on. Everything else renders as a filename chip carrying the full
- * path in its tooltip: a file the user *picked* keeps its own path, and we have
- * no license to read arbitrary paths off the agent's disk just to preview them.
+ * An image renders as a thumbnail through the same `useAttachmentThumb` the
+ * composer uses: a store path is served over `fleet-attachment://`, and a file
+ * the user *picked* (which keeps its own path) is read via `read_external_file`.
+ * The composer already showed the picked image before send, so replaying it as
+ * a bare chip afterwards read as the image having been lost. Anything that is
+ * not an image, or whose file is gone, stays a filename chip carrying the full
+ * path in its tooltip.
  */
 export function AttachmentRow({ paths }: { paths: string[] }) {
   const { t } = useTranslation();
@@ -24,22 +23,26 @@ export function AttachmentRow({ paths }: { paths: string[] }) {
 
   return (
     <div className={styles.row}>
-      {paths.map((path) => {
-        const name = attachmentName(path);
-        const url = isRenderableImage(name) ? userAttachmentUrl(path) : null;
-        if (url) {
-          return <ImageThumbSrc key={path} src={url} alt={name} />;
-        }
-        return (
-          <span key={path} className={styles.chip} title={path}>
-            <Paperclip size={12} className={styles.chip_icon} />
-            <span className={styles.chip_name}>{name}</span>
-          </span>
-        );
-      })}
+      {paths.map((path) => (
+        <AttachmentItem key={path} path={path} />
+      ))}
       <span className={styles.sr_only}>
         {t("detail.attachments", { defaultValue: "Attachments" })}
       </span>
     </div>
+  );
+}
+
+function AttachmentItem({ path }: { path: string }) {
+  const name = attachmentName(path);
+  const src = useAttachmentThumb({ path, name });
+  if (src) {
+    return <ImageThumbSrc src={src} alt={name} />;
+  }
+  return (
+    <span className={styles.chip} title={path}>
+      <Paperclip size={12} className={styles.chip_icon} />
+      <span className={styles.chip_name}>{name}</span>
+    </span>
   );
 }

@@ -32,26 +32,40 @@ const STORE_RE = /(?:^|[\\/])\.fleet[\\/]user-attachments[\\/]([^\\/]+)[\\/]([^\
 const LEGACY_PASTED_RE = /(?:^|[\\/])fleet-pasted[\\/]([^\\/]+)$/;
 const LEGACY_PASTED_KEY = "_pasted";
 
-/** Store coordinates of an attachment, as the relay's `user_attachment` wants
- *  them. A path (not these) is what history froze, so every render site starts
- *  from a path and resolves it here. */
-export interface AttachmentRef {
-  key: string;
-  name: string;
-}
+/** How the relay's `user_attachment` should find an attachment: by store
+ *  coordinates, or — for a file the user picked, which keeps its own path and
+ *  never enters the store — by that host path. A path is what history froze,
+ *  so every render site starts from one and resolves it here. */
+export type AttachmentRef = { key: string; name: string } | { path: string };
 
 /**
  * Store coordinates for `path`, or null when the path is neither in the store
- * nor a legacy paste — a file the user *picked* keeps its own path, and the
- * desktop has no license to read arbitrary paths off its disk just to preview
- * them. Those render as a filename chip on both sides.
+ * nor a legacy paste. Callers that want to preview a picked image fall back to
+ * `{ path }` (see `imageAttachmentRef`).
  */
-export function attachmentRef(path: string): AttachmentRef | null {
+export function attachmentRef(path: string): { key: string; name: string } | null {
   const stored = path.match(STORE_RE);
   if (stored) return { key: stored[1], name: stored[2] };
   const legacy = path.match(LEGACY_PASTED_RE);
   if (legacy) return { key: LEGACY_PASTED_KEY, name: legacy[1] };
   return null;
+}
+
+/** A host path the relay can resolve on the desktop: POSIX-absolute,
+ *  home-relative, or a Windows drive path. */
+const HOST_ABS_RE = /^(?:\/|~\/|[A-Za-z]:[\\/])/;
+
+/**
+ * How to fetch `path` as an image thumbnail, or null when it is not an image.
+ * A picked file (outside the store) is fetched by its host path — the desktop
+ * shows it as a picture, so replaying it here as a bare chip read as the image
+ * having been lost. The desktop only serves image files for that form.
+ */
+export function imageAttachmentRef(path: string): AttachmentRef | null {
+  if (!isRenderableImage(attachmentName(path))) return null;
+  const stored = attachmentRef(path);
+  if (stored) return stored;
+  return HOST_ABS_RE.test(path) ? { path } : null;
 }
 
 /** True when the name looks like an image we can show inline. */
@@ -140,9 +154,10 @@ export function fetchAttachmentImage(
   ref: AttachmentRef,
   full = false,
 ): Promise<AttachmentImage> {
+  const addr = "path" in ref ? { path: ref.path } : { key: ref.key, name: ref.name };
   return client.request<AttachmentImage>(
     "user_attachment",
-    { key: ref.key, name: ref.name, full },
+    { ...addr, full },
     ASSET_REQUEST_TIMEOUT_MS,
   );
 }
