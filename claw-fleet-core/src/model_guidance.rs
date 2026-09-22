@@ -207,6 +207,8 @@ mod tests {
             );
             // Codex family model IDs
             assert!(g.contains("gpt-6-astra"), "{locale} must list GPT-6 Astra");
+            assert!(g.contains("gpt-6-sol"), "{locale} must list GPT-6 Sol");
+            assert!(g.contains("gpt-6-luna"), "{locale} must list GPT-6 Luna");
             assert!(g.contains("gpt-5.6-sol"), "{locale} must list Codex Sol");
             assert!(
                 g.contains("gpt-5.6-terra"),

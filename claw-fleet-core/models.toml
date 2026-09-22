@@ -169,6 +169,30 @@ default_effort = "medium"
 context = 272000
 max_context = 872000
 
+# GPT-6 Sol 与 Luna：梯子、默认档、窗口读自 client 0.155.1 的 `codex debug models`
+# （2026-09-22）。Codex 自己把 gpt-6-sol 排在 priority 0（列表第一）。
+# 档位按价格定而不是按名字：6 代的 Sol 是 $2/$10，跟 5.6 Terra、Sonnet 5 同一
+# 价位，本代的 premium 是 Astra；所以它记 standard，不照搬 5.6 Sol 的 premium。
+[[model]]
+id = "gpt-6-sol"
+label = "GPT-6 Sol"
+family = "codex"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+
+[[model]]
+id = "gpt-6-luna"
+label = "GPT-6 Luna"
+family = "codex"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+
 [[model]]
 id = "gpt-5.6-sol"
 label = "GPT-5.6 Sol"
