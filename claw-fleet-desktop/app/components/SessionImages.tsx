@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { imageFileName, sessionImageUrl } from "../sessionImages";
+import { ImageLightbox } from "./ImageLightbox";
 import styles from "./SessionImages.module.css";
 
 interface GeneratedImage {
@@ -26,7 +27,7 @@ interface Props {
 export function SessionImages({ sessionId }: Props) {
   const { t } = useTranslation();
   const [images, setImages] = useState<GeneratedImage[]>([]);
-  const [zoomed, setZoomed] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState<{ src: string; name: string } | null>(null);
 
   useEffect(() => {
     // Guarded against a late reply for a session the user already navigated
@@ -45,15 +46,6 @@ export function SessionImages({ sessionId }: Props) {
     };
   }, [sessionId]);
 
-  useEffect(() => {
-    if (!zoomed) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setZoomed(null);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [zoomed]);
-
   if (images.length === 0) return null;
 
   return (
@@ -70,18 +62,14 @@ export function SessionImages({ sessionId }: Props) {
               key={img.path}
               className={styles.thumb}
               title={img.path}
-              onClick={() => setZoomed(url)}
+              onClick={() => setZoomed({ src: url, name })}
             >
               <img src={url} alt={name} loading="lazy" />
             </button>
           );
         })}
       </div>
-      {zoomed && (
-        <div className={styles.overlay} onClick={() => setZoomed(null)}>
-          <img src={zoomed} alt="" />
-        </div>
-      )}
+      {zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}
     </div>
   );
 }
