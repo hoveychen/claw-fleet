@@ -700,6 +700,13 @@ pub(crate) enum WatchCommands {
         /// `2h` (default 2h, max 7d).
         #[arg(long)]
         timeout: Option<String>,
+        /// When you expect the condition to hold: a duration from now (`8h`) or
+        /// a local time (`"2026-09-23 14:30"`, `14:30`). If it still has not
+        /// held by then, the session is woken once to check whether the
+        /// `until` is wrong; the watch keeps running. Must fall before the
+        /// timeout.
+        #[arg(long)]
+        expect_by: Option<String>,
     },
     /// List all registered watches.
     #[command(alias = "ls")]

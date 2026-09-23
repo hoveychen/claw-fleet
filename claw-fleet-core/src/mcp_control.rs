@@ -206,7 +206,7 @@ fn handoff_tool_def() -> Value {
 fn watch_tool_def() -> Value {
     json!({
         "name": "fleet__watch",
-        "description": "Register a one-shot condition wait that resumes THIS session when a shell condition succeeds — the survivable replacement for Monitor / background Bash / ScheduleWakeup. Use this instead of the `fleet watch` CLI. Actions: create (--until required; --capture/--note/--poll/--timeout optional), stop, list.",
+        "description": "Register a one-shot condition wait that resumes THIS session when a shell condition succeeds — the survivable replacement for Monitor / background Bash / ScheduleWakeup. Use this instead of the `fleet watch` CLI. Actions: create (--until required; --capture/--note/--poll/--timeout/--expect_by optional), stop, list.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -216,6 +216,7 @@ fn watch_tool_def() -> Value {
                 "note": {"type": "string", "description": "What you're waiting for."},
                 "poll": {"type": "string", "description": "Poll interval, e.g. 30s / 5m (default 30s)."},
                 "timeout": {"type": "string", "description": "Give-up deadline, e.g. 2h (default 2h)."},
+                "expect_by": {"type": "string", "description": "When you expect the condition to hold: a duration from now (8h) or a local time (\"2026-09-23 14:30\", 14:30). If it still has not held by then, this session is woken ONCE to check whether the until is wrong; the watch keeps running. Must fall before the timeout. Pass it whenever you know roughly when the event should happen (a match start time, a CI run's usual length)."},
                 "id": {"type": "string", "description": "Watch id. Required for stop."}
             },
             "required": ["action"],
@@ -863,6 +864,13 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 Some(s) => watch::parse_timeout(&s).map_err(|e| format!("timeout: {e}"))?,
                 None => watch::DEFAULT_TIMEOUT_SECS,
             };
+            let expect_by = match arg(args, "expect_by") {
+                Some(s) => Some(
+                    watch::parse_expect_by(&s, now_ms())
+                        .map_err(|e| format!("expect_by: {e}"))?,
+                ),
+                None => None,
+            };
             let ctx = crate::session::inherit_launch_context(Some(sid));
             let (rec, probe) = watch::create(
                 sid,
@@ -875,7 +883,7 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 ctx.model.as_deref(),
                 ctx.effort.as_deref(),
                 ctx.source.as_deref(),
-                None,
+                expect_by,
             )?;
             let armed = match watch::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
@@ -883,11 +891,12 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
             };
             Ok(format!(
                 "ok: watch {} created — polling, resumes session {}. {armed}。\
-                 {}\
+                 {}{}\
                  现在可以正常结束这个 turn。停止用 action=stop id={}。",
                 rec.id,
                 rec.session_id,
                 watch::preflight_note(&probe),
+                watch::expect_by_note(&rec),
                 rec.id
             ))
         }

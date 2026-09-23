@@ -288,6 +288,18 @@ pub fn preflight_note(probe: &crate::process_util::GateOutcome) -> String {
     String::new()
 }
 
+/// The line a successful registration adds about its expect-by check-in.
+/// Empty without one.
+pub fn expect_by_note(rec: &WatchRecord) -> String {
+    match rec.expect_by {
+        Some(t) => format!(
+            "预期 {} 前成立；过点仍未成立会唤醒本会话自查一次，watch 继续跑。",
+            fmt_local(t)
+        ),
+        None => String::new(),
+    }
+}
+
 /// Run the `until` command **once, at registration**, and rule on it.
 ///
 /// Why this exists: `create` used to accept any string and arm a timer, so a
@@ -897,7 +909,7 @@ pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: boo
 }
 
 /// Local wall-clock rendering of an epoch-ms instant for a resume prompt.
-fn fmt_local(ms: u64) -> String {
+pub fn fmt_local(ms: u64) -> String {
     use chrono::{Local, TimeZone};
     Local
         .timestamp_millis_opt(ms as i64)
