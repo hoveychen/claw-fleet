@@ -1261,6 +1261,8 @@ struct HookTail {
     /// `HOME` mid-process must not have its offset applied to a different file.
     path: Option<PathBuf>,
     states: HashMap<String, SessionHookState>,
+    /// Rewrite the file to its tail once it grows past this many bytes.
+    truncate_above: u64,
 }
 
 static HOOK_TAIL: std::sync::LazyLock<std::sync::Mutex<HookTail>> =
@@ -1269,6 +1271,7 @@ static HOOK_TAIL: std::sync::LazyLock<std::sync::Mutex<HookTail>> =
             offset: None,
             path: None,
             states: HashMap::new(),
+            truncate_above: EVENTS_MAX_BYTES,
         })
     });
 
@@ -1296,14 +1299,30 @@ pub fn read_hook_snapshot() -> HookSnapshot {
 impl HookTail {
     /// Consume whatever was appended since the last call and fold it in.
     fn follow(&mut self, path: &Path, now_ms: u64) {
-        let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let mut len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        // Every scan tick lands here, in the desktop and in `fleet serve`
+        // alike, so this is what keeps the file bounded for a long-lived
+        // process — startup alone let it grow for as long as the app stayed up.
+        // The shrink then reseeds below like any other truncation.
+        if len > self.truncate_above {
+            match truncate_to_tail(
+                path,
+                self.truncate_above,
+                EVENTS_KEEP_LINES,
+                EVENTS_KEEP_MAX_BYTES,
+            ) {
+                Ok(true) => len = fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+                Ok(false) => {}
+                Err(e) => crate::log_debug(&format!("[hooks] truncate {}: {e}", path.display())),
+            }
+        }
         if self.path.as_deref() != Some(path) {
             self.offset = None;
             self.path = Some(path.to_path_buf());
         }
         match self.offset {
             // First read of this process, or the file shrank under us
-            // (`maybe_truncate_events_file` rewrites it to its last 2000 lines):
+            // (`truncate_to_tail` rewrites it to its last 2000 lines):
             // seed from the tail and follow forward from there.
             None => self.seed(path, len, now_ms),
             Some(prev) if len < prev => self.seed(path, len, now_ms),
@@ -3180,7 +3199,11 @@ mod tests {
             .flat_map(|i| format!("{{\"n\":{i}}}\n").into_bytes())
             .collect();
         assert_eq!(got, want, "last 100 records, byte-for-byte");
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temp file left");
+        assert_eq!(
+            fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "no temp file left"
+        );
     }
 
     #[test]
@@ -3204,10 +3227,7 @@ mod tests {
         fs::write(&p, &data).unwrap();
         assert!(truncate_to_tail(&p, 100, 1_000, 50).unwrap());
         let got = String::from_utf8(fs::read(&p).unwrap()).unwrap();
-        assert_eq!(
-            got,
-            format!("{{\"n\":{:012}}}\n{{\"n\":{:012}}}\n", 98, 99)
-        );
+        assert_eq!(got, format!("{{\"n\":{:012}}}\n{{\"n\":{:012}}}\n", 98, 99));
     }
 
     #[test]
@@ -3252,6 +3272,7 @@ mod tests {
             offset: None,
             path: None,
             states: HashMap::new(),
+            truncate_above: EVENTS_MAX_BYTES,
         }
     }
 
@@ -3291,6 +3312,42 @@ mod tests {
             snap.states.get("quiet"),
             Some(&HookState::ToolExecuting),
             "a session 2000 events deep must still be remembered"
+        );
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn hook_tail_truncates_an_oversized_file_and_keeps_following_it() {
+        // A long-lived process must bound the file itself: truncating only at
+        // desktop startup let it grow for as long as the app stayed up, and
+        // never at all under `fleet serve`.
+        let p = write_tmp("follow-trunc.jsonl", &pre_tool("old", "Bash"));
+        let mut tail = empty_tail();
+        tail.truncate_above = 4 * 1024;
+        tail.follow(&p, 1_000);
+
+        for i in 0..EVENTS_KEEP_LINES + 500 {
+            append(&p, &pre_tool(&format!("busy-{i}"), "Read"));
+        }
+        append(&p, &pre_tool("latest", "Bash"));
+        tail.follow(&p, 2_000);
+
+        let lines = fs::read_to_string(&p).unwrap().lines().count();
+        assert_eq!(lines, EVENTS_KEEP_LINES, "rewritten to its tail");
+        let snap = tail.snapshot(2_000);
+        assert_eq!(snap.states.get("latest"), Some(&HookState::ToolExecuting));
+        assert_eq!(
+            snap.states.get("old"),
+            Some(&HookState::ToolExecuting),
+            "state ingested before the truncation is kept"
+        );
+
+        append(&p, "{\"session_id\":\"latest\",\"hook_event_name\":\"Stop\"}\n");
+        tail.follow(&p, 3_000);
+        assert_eq!(
+            tail.snapshot(3_000).states.get("latest"),
+            Some(&HookState::Stopped),
+            "appends after the rewrite are followed"
         );
         let _ = fs::remove_file(&p);
     }
