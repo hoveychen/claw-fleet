@@ -105,6 +105,36 @@ pub(crate) fn clear_in(dir: &std::path::Path, session_id: &str) {
     let _ = fs::remove_file(dir.join(format!("{session_id}.json")));
 }
 
+/// Every session's focus record, as `(session_id, record)`. Soft: unreadable
+/// files are skipped.
+pub fn all_records() -> Vec<(String, TaskProgressRecord)> {
+    progress_dir()
+        .map(|d| all_records_in(&d))
+        .unwrap_or_default()
+}
+
+pub(crate) fn all_records_in(dir: &std::path::Path) -> Vec<(String, TaskProgressRecord)> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let path = e.path();
+        let Some(sid) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        let Ok(s) = fs::read_to_string(&path) else { continue };
+        if let Ok(rec) = serde_json::from_str::<TaskProgressRecord>(&s) {
+            out.push((sid.to_string(), rec));
+        }
+    }
+    out
+}
+
 /// Newest focus timestamp per plan id, over every session's record.
 ///
 /// "Which plans is somebody actually on" — the injection uses it to put those

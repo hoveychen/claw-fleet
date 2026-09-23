@@ -257,6 +257,22 @@ fn read_registrations(dir: &Path) -> Vec<SessionRegistration> {
     out
 }
 
+/// Session ids whose CLI self-registration names a live pid. Covers interactive
+/// terminal sessions, whose argv carries no session id for
+/// [`crate::session::scan_cli_processes`] to match. A recycled pid can make a
+/// dead session look alive here; callers use this only where "alive" is the
+/// safe answer (the plan reviver then simply does not spawn).
+pub(crate) fn live_registered_session_ids() -> std::collections::HashSet<String> {
+    let Some(dir) = sessions_dir() else {
+        return Default::default();
+    };
+    read_registrations(&dir)
+        .into_iter()
+        .filter(|r| crate::session::is_process_alive(r.pid))
+        .map(|r| r.session_id)
+        .collect()
+}
+
 /// Find the live process serving `session_id`, or `None` when it is not running,
 /// is not a Claude session, or left a stale registration behind.
 ///
