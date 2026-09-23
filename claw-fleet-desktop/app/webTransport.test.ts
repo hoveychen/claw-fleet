@@ -222,6 +222,11 @@ const KNOWN_WEB_GAPS = [
   // Same gap and same escape hatch: `exportMemberBytes` hands the tab an
   // <a download> instead of asking for a path it cannot write to.
   "export_bytes",
+  // The relay-chain `.flt` debug bundle: a save dialog on the caller's
+  // filesystem plus a scan of the host's logs. Both entry points (the chain
+  // modal and the session header menu) are hidden behind `isWebBuild()`.
+  "chain_bundle_file_name",
+  "export_chain_bundle",
   // The image lightbox's save/share hand bytes to the host. In a tab, save
   // downloads the blob instead and share uses `navigator.share`; only a browser
   // without Web Share falls through to `share_preview_image`, which fails and
