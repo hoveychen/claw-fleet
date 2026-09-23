@@ -2665,6 +2665,20 @@ impl LocalBackend {
         Ok(crate::handoff::chain_containing(session_id))
     }
 
+    /// Write the debug bundle for the chain containing `session_id` to `dest`.
+    pub fn export_chain_bundle(
+        &self,
+        session_id: &str,
+        dest: &str,
+    ) -> Result<crate::chain_export::ChainExportSummary, String> {
+        crate::chain_export::export_chain(session_id, std::path::Path::new(dest))
+    }
+
+    /// Save-dialog default name for that bundle.
+    pub fn chain_bundle_file_name(&self, session_id: &str) -> String {
+        crate::chain_export::default_file_name(session_id)
+    }
+
     pub fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
         crate::wiki::get_doc(slug)
     }

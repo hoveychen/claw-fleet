@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -8,6 +10,9 @@ import {
   safeRemarkPlugins,
   safeRehypePlugins,
 } from "../markdown/safeLinks";
+import { canRevealPath } from "../canReveal";
+import { formatBytes } from "../formatBytes";
+import { isWebBuild } from "../hostEnv";
 import { useSessionsStore } from "../store";
 import type { HandoffChain } from "../types";
 import { AgentSourceIcon, formatModel } from "./SessionCard";
@@ -92,9 +97,12 @@ export function HandoffChainModal({
           <span className={styles.title}>
             🔗 {t("card.handoff_chip", { hop, len })}
           </span>
-          <button className={styles.close_btn} onClick={close}>
-            ✕
-          </button>
+          <span className={styles.header_actions}>
+            {!isWebBuild() && <ExportBundleButton sessionId={currentSessionId} />}
+            <button className={styles.close_btn} onClick={close}>
+              ✕
+            </button>
+          </span>
         </div>
         <div className={styles.scroll_area}>
           {loading && <div className={styles.handoff_note}>{t("card.handoff_loading")}</div>}
@@ -239,5 +247,88 @@ function RelayNote({ note }: { note: string }) {
         </button>
       )}
     </div>
+  );
+}
+
+/** Result of `export_chain_bundle` (`ChainExportSummary` in core). */
+interface ChainExportSummary {
+  path: string;
+  bytes: number;
+  members: number;
+  sessions: number;
+  missing: string[];
+  elapsedMs: number;
+}
+
+/**
+ * "Export debug bundle": packs every hop's transcript, Fleet's records for
+ * the chain and the relevant log slices into one `.flt` zip
+ * (`claw-fleet-core/src/chain_export.rs`). Desktop only — the save dialog and
+ * the multi-GB log scan both need the host.
+ */
+function ExportBundleButton({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<ChainExportSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setError(null);
+    try {
+      const defaultPath = await invoke<string>("chain_bundle_file_name", { sessionId });
+      const dest = await save({
+        defaultPath,
+        filters: [{ name: "Fleet debug bundle", extensions: ["flt"] }],
+      });
+      if (!dest) return;
+      setBusy(true);
+      setDone(null);
+      setDone(await invoke<ChainExportSummary>("export_chain_bundle", { sessionId, dest }));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className={styles.export_wrap}>
+      {done && (
+        <span className={styles.export_status} title={[done.path, ...done.missing].join("\n")}>
+          {t("card.handoff_export_done", {
+            count: done.members,
+            size: formatBytes(done.bytes),
+            defaultValue: "已导出 {{count}} 个文件（{{size}}）",
+          })}
+          {done.missing.length > 0 &&
+            t("card.handoff_export_missing", {
+              count: done.missing.length,
+              defaultValue: "，{{count}} 项缺失",
+            })}
+          {canRevealPath() && (
+            <button
+              className={styles.export_reveal}
+              onClick={(e) => {
+                e.stopPropagation();
+                void invoke("reveal_path", { path: done.path }).catch(() => {});
+              }}
+            >
+              {t("card.handoff_export_reveal", { defaultValue: "显示" })}
+            </button>
+          )}
+        </span>
+      )}
+      {error && (
+        <span className={styles.export_error} title={error}>
+          {t("card.handoff_export_failed", { defaultValue: "导出失败" })}
+        </span>
+      )}
+      <button className={styles.close_btn} onClick={run} disabled={busy}>
+        {busy
+          ? t("card.handoff_export_busy", { defaultValue: "导出中…" })
+          : t("card.handoff_export", { defaultValue: "导出调试包" })}
+      </button>
+    </span>
   );
 }

@@ -18,6 +18,38 @@ pub(crate) fn get_handoff_chain(
     state.backend.get_handoff_chain(&session_id)
 }
 
+/// Pack the chain containing `session_id` into a `.flt` debug bundle at
+/// `dest`. Reads every hop's transcript and streams the multi-GB shared hook
+/// log, so the body runs on the blocking pool.
+#[tauri::command]
+pub(crate) async fn export_chain_bundle(
+    session_id: String,
+    dest: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::chain_export::ChainExportSummary, String> {
+    let backend = state.backend.clone();
+    super::blocking::run_blocking_result(move || {
+        let probe = crate::cmd_probe::CmdProbe::start("export_chain_bundle", &session_id);
+        let result = backend.export_chain_bundle(&session_id, &dest);
+        probe.done(|| match &result {
+            Ok(r) => format!("{} member(s), {} bytes → {dest}", r.members, r.bytes),
+            Err(e) => e.clone(),
+        });
+        result
+    })
+    .await
+}
+
+/// Default file name for [`export_chain_bundle`]'s save dialog.
+#[tauri::command]
+pub(crate) async fn chain_bundle_file_name(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let backend = state.backend.clone();
+    super::blocking::run_blocking(move || backend.chain_bundle_file_name(&session_id)).await
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_wiki_doc(
     slug: String,
