@@ -95,7 +95,8 @@ RUN FLEET_WEBUI_DIR=/webui \
 # ── Runtime: node (for the agent CLIs) + git/ssh ────────────────────────────
 FROM node:22-bookworm-slim
 
-# Pins match the versions verified in the fleet-cloud work. Bump deliberately.
+# Fallback pins for local builds. CI (cloud-image.yml) overrides both with
+# npm's `latest` at build time, so release images always ship the newest CLIs.
 ARG CLAUDE_CODE_VERSION=2.1.280
 ARG CODEX_VERSION=0.156.0
 
