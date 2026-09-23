@@ -336,6 +336,16 @@ server.on('upgrade', (req, socket) => {
   socket.on('error', () => socket.destroy());
 });
 
+// Die with the test that started us. Fleet deliberately lets a real `dsh web`
+// outlive its owner, so nothing on the Rust side kills this one when a test
+// binary is interrupted (Ctrl-C, a timeout, `kill -9`): the fixture was
+// reparented to launchd and kept listening — 26 of them were found alive on
+// 2026-09-23, the oldest six hours old. A changed ppid means the parent is gone.
+const PARENT_PID = process.ppid;
+setInterval(() => {
+  if (process.ppid !== PARENT_PID) process.exit(0);
+}, 1000).unref();
+
 server.listen(PORT, '127.0.0.1', () => {
   process.stdout.write(
     `dsh web: http://127.0.0.1:${server.address().port}/?token=${LAUNCH_TOKEN}\n`,
