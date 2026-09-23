@@ -49,6 +49,10 @@ pub struct PlanNode {
     /// parent means someone deleted or renamed a plan block, and the view should
     /// be able to say so.
     pub orphaned_parent: Option<String>,
+    /// Active snooze (`fleet plan snooze`, or the reviver's own), so the view
+    /// can say why nobody is being woken for this plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snooze: Option<crate::plan_snooze::PlanSnooze>,
 }
 
 impl PlanNode {
@@ -84,7 +88,25 @@ pub fn build(cwd: &Path, chains: Vec<HandoffChain>) -> PlanForest {
     // `false` = keep completed plans: the whole chain includes finished work.
     let (raw, _) = pt::collect_from_sources(&sources, false);
     let blocks = pt::dedup_blocks_keep_latest_mtime(raw);
-    build_from(&blocks, chains, main_root.as_deref())
+    let mut forest = build_from(&blocks, chains, main_root.as_deref());
+    // Snoozes are keyed by the main checkout, the same key `plan_ops::snooze`
+    // writes under.
+    let ws = main_root.as_deref().unwrap_or(cwd);
+    let snoozes = crate::plan_snooze::active_for_workspace(&ws.to_string_lossy());
+    if !snoozes.is_empty() {
+        attach_snoozes(&mut forest.roots, &snoozes);
+    }
+    forest
+}
+
+fn attach_snoozes(
+    nodes: &mut [PlanNode],
+    snoozes: &HashMap<String, crate::plan_snooze::PlanSnooze>,
+) {
+    for n in nodes {
+        n.snooze = snoozes.get(&n.id).cloned();
+        attach_snoozes(&mut n.children, snoozes);
+    }
 }
 
 /// Pure core of [`build`]: assemble the forest from already-loaded blocks.
@@ -137,6 +159,7 @@ pub fn build_from(
                 chains: chains_by_plan.remove(id).unwrap_or_default(),
                 children: Vec::new(),
                 orphaned_parent: None,
+                snooze: None,
             },
         );
     }
@@ -387,6 +410,29 @@ mod tests {
         assert_eq!(forest.roots[0].id, "done");
         assert_eq!(forest.roots[0].pending(), 0);
         assert_eq!(forest.anonymous, 2);
+    }
+
+    /// A snooze lands on its own plan wherever it sits in the tree, and on
+    /// no other node.
+    #[test]
+    fn snoozes_attach_to_nested_plans_by_id() {
+        let blocks = [
+            block(Some("root"), "- [ ] **P1** — a\n", None),
+            block(Some("kid"), "- [ ] **P1** — k\n", Some("root")),
+        ];
+        let mut forest = build_from(&blocks, vec![], None);
+        let snooze = crate::plan_snooze::PlanSnooze {
+            workspace_path: "/ws".into(),
+            plan_id: "kid".into(),
+            until_ms: Some(1),
+            reason: "blocked on upstream".into(),
+            set_by: "s1".into(),
+            created_ms: 0,
+        };
+        let map = HashMap::from([("kid".to_string(), snooze.clone())]);
+        attach_snoozes(&mut forest.roots, &map);
+        assert_eq!(forest.roots[0].snooze, None);
+        assert_eq!(forest.roots[0].children[0].snooze, Some(snooze));
     }
 
     /// Roots and children preserve TASKS.md order, so the view reads like the

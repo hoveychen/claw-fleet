@@ -316,6 +316,61 @@ fn resolve_tree_position<'a>(
     ))
 }
 
+/// Snooze a plan so the orphan reviver ([`crate::plan_revive`]) leaves it
+/// alone for `duration` (e.g. `8h`, `3d`). The reason is shown to the boss in
+/// the plan view, so it must name what the plan is blocked on.
+pub fn snooze(
+    cwd: &Path,
+    plan_id: &str,
+    duration: &str,
+    reason: &str,
+    session_id: Option<&str>,
+) -> Result<PlanOutcome, String> {
+    if pt::find_plan_source(cwd, plan_id).is_none() {
+        return Err(format!("plan '{plan_id}' not found in any TASKS.md"));
+    }
+    let ms = crate::plan_snooze::parse_duration_ms(duration)?;
+    let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let rec = crate::plan_snooze::snooze(
+        &ws.to_string_lossy(),
+        plan_id,
+        ms,
+        reason,
+        session_id.unwrap_or("unknown"),
+    )?;
+    let until = rec
+        .until_ms
+        .and_then(|u| chrono::DateTime::from_timestamp_millis(u as i64))
+        .map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+        .unwrap_or_default();
+    let capped = if ms > crate::plan_snooze::MAX_SNOOZE_MS {
+        " (capped at 14d)"
+    } else {
+        ""
+    };
+    Ok(PlanOutcome {
+        message: format!(
+            "snoozed plan '{plan_id}' until {until}{capped}: Fleet will not wake a session \
+             for it before then. Tell the boss what it is blocked on."
+        ),
+        warnings: Vec::new(),
+    })
+}
+
+/// Lift a plan's snooze (the agent's own, or one Fleet set).
+pub fn unsnooze(cwd: &Path, plan_id: &str) -> Result<PlanOutcome, String> {
+    let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let message = if crate::plan_snooze::unsnooze(&ws.to_string_lossy(), plan_id) {
+        format!("plan '{plan_id}' is no longer snoozed")
+    } else {
+        format!("plan '{plan_id}' was not snoozed")
+    };
+    Ok(PlanOutcome {
+        message,
+        warnings: Vec::new(),
+    })
+}
+
 /// Append a pending task. Deliberately does NOT claim focus: `add` edits a
 /// plan's structure and says nothing about who is executing it — a master
 /// appending a P-item to another session's plan must not repoint its own card.

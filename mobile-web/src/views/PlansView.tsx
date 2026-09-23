@@ -6,7 +6,7 @@
 // list with no parent relationships, done/total, or handoff chains.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, GitBranch, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
+import { ChevronRight, GitBranch, ListTree, Moon, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { useHistoryLayer } from "../useNavStack";
@@ -254,6 +254,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
                       <span className={styles.title} data-done={pending === 0}>
                         {row.node.title || row.node.id}
                       </span>
+                      {row.node.snooze && <Moon size={10} className={styles.snooze} />}
                     </div>
                     <span className={styles.count} data-live={pending > 0}>
                       {row.node.done}/{row.node.total}
@@ -338,6 +339,17 @@ function PlanSheet({
         </span>
       </div>
       {node.source && <div className={styles.source}>{node.source}</div>}
+      {node.snooze && (
+        <div className={styles.snoozeNote}>
+          <Moon size={11} />
+          <span>
+            {node.snooze.untilMs != null
+              ? t("静默至 {0}", formatSnoozeUntil(node.snooze.untilMs))
+              : t("已停止自动唤醒")}
+            {node.snooze.reason && ` · ${node.snooze.reason}`}
+          </span>
+        </div>
+      )}
 
       <div className={styles.sheetBody}>
         {pendingItems.map(({ item, i }, n) => (
@@ -372,3 +384,8 @@ function PlanSheet({
   );
 }
 
+function formatSnoozeUntil(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

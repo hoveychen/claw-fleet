@@ -480,6 +480,17 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: a.config,
   }),
 
+  get_plan_revive_config: () => ({
+    method: "GET",
+    path: "/plan_revive_config",
+  }),
+
+  set_plan_revive_config: (a) => ({
+    method: "POST",
+    path: "/plan_revive_config",
+    body: a.config,
+  }),
+
   get_permissions_config: () => ({
     method: "GET",
     path: "/permissions_config",

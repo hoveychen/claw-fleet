@@ -214,6 +214,8 @@ pub mod paths {
 pub mod plan_approval;
 pub mod plan_forest;
 pub mod plan_gate;
+pub mod plan_revive;
+pub mod plan_snooze;
 pub mod plan_ops;
 pub mod plugins;
 pub mod prd_context_dedup;

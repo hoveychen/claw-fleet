@@ -900,6 +900,9 @@ impl LocalBackend {
                         &sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar,
                     );
                     claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess_ar);
+                    // Wake a fresh session for plans nobody is responsible for
+                    // any more. Self-throttled and off-thread; see `plan_revive`.
+                    claw_fleet_core::plan_revive::maybe_tick_in_background();
 
                     // Reclaim the dev servers / persistent browsers finished
                     // sessions left running. Deliberately after the liveness
@@ -2434,6 +2437,17 @@ impl LocalBackend {
     pub fn set_auto_resume_config(
         &self,
         config: claw_fleet_core::auto_resume::AutoResumeConfig,
+    ) -> Result<(), String> {
+        config.save()
+    }
+
+    pub fn get_plan_revive_config(&self) -> claw_fleet_core::plan_revive::PlanReviveConfig {
+        claw_fleet_core::plan_revive::PlanReviveConfig::load()
+    }
+
+    pub fn set_plan_revive_config(
+        &self,
+        config: claw_fleet_core::plan_revive::PlanReviveConfig,
     ) -> Result<(), String> {
         config.save()
     }

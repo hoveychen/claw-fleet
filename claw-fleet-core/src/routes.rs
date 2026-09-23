@@ -55,6 +55,9 @@ pub const AUDIT: &str = "/audit";
 /// these three govern the machine the desktop runs on (its injector lock, its
 /// decision-panel hooks, its resume scheduler).
 pub const AUTO_RESUME_CONFIG: &str = "/auto_resume_config";
+/// The plan reviver's on/off switch (`plan_revive::PlanReviveConfig`), same
+/// GET/POST shape as the three above.
+pub const PLAN_REVIVE_CONFIG: &str = "/plan_revive_config";
 pub const PERMISSIONS_CONFIG: &str = "/permissions_config";
 pub const DECISION_PANEL_CONFIG: &str = "/decision_panel_config";
 pub const AUDIT_CHECK_UPDATE: &str = "/audit/check-update";

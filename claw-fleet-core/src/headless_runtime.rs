@@ -369,6 +369,9 @@ impl TickState {
             &self.server_errors,
         );
         maybe_drain_pending_messages(&self.sessions);
+        // Wake a fresh session for plans nobody is responsible for any more.
+        // Self-throttled and off-thread; see `plan_revive`.
+        crate::plan_revive::maybe_tick_in_background();
     }
 }
 

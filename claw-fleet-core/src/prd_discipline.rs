@@ -113,6 +113,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 - `fleet plan check <id> <P>` / `uncheck` —— 勾选/取消，并把焦点刷新到该计划。
 - `fleet plan resume <id> [P]` —— 接手一个你没创建、也没被交接给你的现存计划。
 - `fleet plan add <id> <P> --text "..."` / `migrate` / `list` / `get <id>`。
+- `fleet plan snooze <id> --for <8h|3d> --reason "..."` / `unsnooze <id>` —— **计划还有未完成的 P、却连续 30 分钟没有任何会话在负责它**（没有活进程、没挂 watch/schedule、没有等答复的卡、没登记接力），Fleet 会自动起一个新会话来接手。计划确实被卡住（等老板、等登录、等真机、等部署窗口）而又没法用 `fleet watch` 等时，停手前用 snooze 设静默期并写清卡在哪，reason 会显示给老板。
 
 ### explore 计划与 exec 计划
 
@@ -323,6 +324,7 @@ Hand-editing TASKS.md still works (the file is the source of truth for checkboxe
 - `fleet plan check <id> <P>` / `uncheck` — tick or untick, and refresh your focus onto that plan.
 - `fleet plan resume <id> [P]` — take over an existing plan you neither created nor were handed off into.
 - `fleet plan add <id> <P> --text "..."` / `migrate` / `list` / `get <id>`.
+- `fleet plan snooze <id> --for <8h|3d> --reason "..."` / `unsnooze <id>` — **when a plan has pending P-tasks but no session has been responsible for it for 30 minutes** (no live process, no watch/schedule, no card awaiting an answer, no registered handoff), Fleet wakes a fresh session to take it over. If the plan is genuinely blocked (waiting on the boss, a login, a real device, a deploy window) and a `fleet watch` cannot wait for it, snooze it before you stop and say what it is blocked on — the reason is shown to the boss.
 
 ### Explore plans vs exec plans
 

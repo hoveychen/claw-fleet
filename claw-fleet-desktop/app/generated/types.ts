@@ -323,11 +323,18 @@ chainLen: number, };
 
 export type PlanKind = "exec" | "explore";
 
+export type PlanSnooze = { workspacePath: string, planId: string, 
+untilMs?: number | null, reason: string, 
+setBy: string, createdMs: number, };
+
+export type PlanReviveConfig = { enabled: boolean, };
+
 export type PlanNode = { 
 id: string, title: string | null, 
 source: string | null, kind: PlanKind, items: Array<TaskItem>, done: number, total: number, 
 chains: Array<HandoffChain>, children: Array<PlanNode>, 
-orphanedParent: string | null, };
+orphanedParent: string | null, 
+snooze?: PlanSnooze | null, };
 
 export type PlanForest = { roots: Array<PlanNode>, 
 unattachedChains: Array<HandoffChain>, 

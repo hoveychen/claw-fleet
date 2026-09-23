@@ -192,6 +192,10 @@ neither flag is needed.\n\
   - `fleet plan resume <id> [P]` — take over an existing plan you did not \
 create and were not handed.\n\
   - `fleet plan add <id> <P> --text \"...\"` — append a pending task.\n\
+  - `fleet plan snooze <id> --for <8h|3d> --reason \"...\"` / `unsnooze <id>` — \
+Fleet wakes a fresh session for a plan with pending tasks that nobody has been \
+responsible for in 30 minutes. If the plan is genuinely blocked and a watch \
+cannot wait for it, snooze it before you stop and say what it is blocked on.\n\
   - `fleet plan list` / `get <id>` — read.\n\
 - **Pass `--session <your session id>` to every `fleet` command that acts on \
 \"this session\"** — `plan`, `watch`, `handoff`, `loop`, `schedule`, `notes`. \

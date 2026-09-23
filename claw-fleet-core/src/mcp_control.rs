@@ -159,12 +159,12 @@ fn history_tool_def() -> Value {
 fn plan_tool_def() -> Value {
     json!({
         "name": "fleet__plan",
-        "description": "Manage this workspace's TASKS.md PRD plans (the durable macro plan) and record which session works which plan/P. Use this instead of the `fleet plan` CLI. Actions: check/uncheck (tick a P's checkbox), create (new plan block), add (append a task), resume (claim focus on an existing plan), migrate (v1→v2), list, get.",
+        "description": "Manage this workspace's TASKS.md PRD plans (the durable macro plan) and record which session works which plan/P. Use this instead of the `fleet plan` CLI. Actions: check/uncheck (tick a P's checkbox), create (new plan block), add (append a task), resume (claim focus on an existing plan), migrate (v1→v2), list, get, snooze (tell Fleet's orphan reviver to leave a genuinely blocked plan alone for `duration`, with a `reason` the boss will read), unsnooze.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["check", "uncheck", "create", "add", "resume", "migrate", "list", "get"]},
-                "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/get."},
+                "action": {"type": "string", "enum": ["check", "uncheck", "create", "add", "resume", "migrate", "list", "get", "snooze", "unsnooze"]},
+                "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/get/snooze/unsnooze."},
                 "task": {"type": "string", "description": "P-task id like \"P2\". Required for check/uncheck/add; optional for resume."},
                 "title": {"type": "string", "description": "Plan title. Required for create."},
                 "parent": {"type": "string", "description": "Parent plan id (create only). Usually unnecessary: a plan authored while you are executing another plan already defaults to being that plan's child, and Fleet points you back at the parent once this plan completes. Pass this only to attach it somewhere other than the plan you are currently on."},
@@ -172,6 +172,8 @@ fn plan_tool_def() -> Value {
                 "root_reason": {"type": "string", "description": "Why this work does not belong under the plan you are currently executing (create only). Required alongside root while you are on a plan, so leaving its tree costs a moment's thought instead of being the path of least resistance. Never valid with parent."},
                 "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
                 "text": {"type": "string", "description": "Task text. Required for add."},
+                "duration": {"type": "string", "description": "snooze only: how long, one unit — `30m`, `8h`, `3d` (max 14d). Pick the time by which the blocker could plausibly clear."},
+                "reason": {"type": "string", "description": "snooze only: what the plan is blocked on (waiting for the boss's decision, a login, a deploy window, a real device...). Shown to the boss."},
                 "workspace": workspace_arg_schema("whose TASKS.md to act on")
             },
             "required": ["action"],
@@ -703,6 +705,15 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
         )
         .map(render_plan_outcome),
         "migrate" => po::migrate(cwd, None).map(render_plan_outcome),
+        "snooze" => po::snooze(
+            cwd,
+            &req(args, "plan_id")?,
+            &req(args, "duration")?,
+            &req(args, "reason")?,
+            sid,
+        )
+        .map(render_plan_outcome),
+        "unsnooze" => po::unsnooze(cwd, &req(args, "plan_id")?).map(render_plan_outcome),
         "list" => {
             let plans = crate::prd_tasks::list_workspace_task_plans(cwd, None);
             if plans.is_empty() {

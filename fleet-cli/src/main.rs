@@ -1023,6 +1023,26 @@ pub(crate) enum PlanCommands {
     List,
     /// Print one plan's tasks.
     Get { plan_id: String },
+    /// Tell Fleet's orphan reviver to leave a genuinely blocked plan alone for
+    /// a while. Without it, a plan with pending P-tasks and no responsible
+    /// session gets a fresh session woken for it after 30 minutes.
+    Snooze {
+        plan_id: String,
+        /// How long, one unit: `30m`, `8h`, `3d` (max 14d).
+        #[arg(long = "for")]
+        duration: String,
+        /// What the plan is blocked on. Shown to the boss in the plan view.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Lift a plan's snooze.
+    Unsnooze { plan_id: String },
+    /// Show what the orphan reviver would conclude right now for every
+    /// recently claimed plan with pending work (read-only).
+    Orphans {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]

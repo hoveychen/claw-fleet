@@ -110,6 +110,8 @@ describe("host facts", () => {
     "set_decision_panel_config",
     "get_auto_resume_config",
     "set_auto_resume_config",
+    "get_plan_revive_config",
+    "set_plan_revive_config",
   ])("%s is left to the probe rather than answered locally", (cmd) => {
     expect(localCommand(cmd, {}).handled).toBe(false);
   });

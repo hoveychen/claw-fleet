@@ -1061,6 +1061,14 @@ export const MOCK_PLAN_FOREST: PlanForest = {
       chains: [MOCK_HANDOFF_CHAINS["chain-payments"]],
       children: [],
       orphanedParent: "search-index-rebuild",
+      snooze: {
+        workspacePath: "/Users/me/projects/payments",
+        planId: "webhook-reconcile",
+        untilMs: Date.now() + 8 * 3600 * 1000,
+        reason: "Waiting on the provider to replay the missing events",
+        setBy: "fleet",
+        createdMs: Date.now(),
+      },
     },
     {
       id: "search-facets",

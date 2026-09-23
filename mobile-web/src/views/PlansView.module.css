@@ -130,6 +130,26 @@
   flex-shrink: 0;
   color: var(--color-warning, #d97706);
 }
+.snooze {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+.snoozeNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-secondary, rgba(128, 128, 128, 0.12));
+  color: var(--color-text-muted, var(--color-text-dim));
+  font-size: var(--t-meta, 11px);
+  flex-shrink: 0;
+}
+.snoozeNote svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
 .kindDot {
   flex-shrink: 0;
   width: 5px;
