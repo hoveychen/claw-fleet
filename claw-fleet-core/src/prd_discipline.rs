@@ -167,17 +167,18 @@ git worktree add -b prd/<task-id> .worktrees/<task-id> main
 上下文在计划中途拉长时，不要死磕到窗口耗尽、不要悄悄提前收尾、也不要留下没人执行的「交给下一个会话」的便条：
 
 ```
-fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文件、坑、下一个具体步骤>" [--goal <本链目标>] [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]
+fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的坑、进度、在飞的事、关键文件、下一个具体步骤>" [--goal <本链目标>] [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]
 ```
 
 - `--note` 强制。`--plan/--next` 让 Fleet 把后继者自动归属到该计划和 P。`--model/--effort` 可选，不传就继承当前会话。
+- **`--note` 是整条链共用的交接文档，不是一次性留言。**每一棒在上一版上改写出新一版，旧版本全部留存。第一棒从零写；之后每一棒都以开场收到的那一版为底稿：与{title}对齐过的结论、踩过的坑原样保留（确已失效的写明为什么再删），进度、在飞的事和下一步按实际情况重写。你没带过去的内容，后面每一棒都看不到。上下文压缩后要找回当前版本，`fleet__handoff` 传 `action="show"`，末一版就是。
 - **第一棒交接时用 `--goal` 写下这条链的目标**——一句话的「什么做完了这条链才算完」。你是在回合*末尾*登记的，所以哪怕这活是聊到一半才定下来的，此刻你也已经知道{title}要什么了。它会被每轮注入到后继者眼前，并成为**收工的判据**：计划树全勾了、只要 goal 没达成，就不该把决策卡标成 `taskComplete: true`。
 - **目标变了是正常的**（{title}中途改路线、或原目标已不成立），改就是了——但要用 `--goal <新目标> --goal-reason <为什么>` 显式改，并在卡里告诉{title}。没有理由的改动会被拒：那条规则挡的不是「目标变了」，而是把链的目标**悄悄缩成你手上那个 plan**，然后宣布达成。纯探索、本来就没有终点的链，不写 goal 也完全可以。
 - 登记后**干净地结束回合**（先按 Rule 3 提交 worktree 进度）。Stop hook 消费登记并 spawn 后继者，开场 prompt 就是你的便条。
 - **叙述一次交接不等于登记一次。**在回复文本里写「接下来我起下一棒」什么都不做：没真的调用工具就没有后继者，计划在你交出的那一刻悄然死掉。结束这样一个回合前的最后一件事就是那个调用本身，等 `ok: handoff registered` 回来才停。
 - **登记就是把便条定稿了，也是本回合最后一个动作。之后一张决策卡都不要再发**（连不带决策的收尾卡也不要）：接力靠回合*结束*触发，卡会把回合挂住等人点，后继者就起不来；卡上的答案也进不了已冻结的 note，会被静默丢弃。要问就先问、拿到答案、再按答案写 note 去登记。
 - 收到 `[Fleet] 上下文已用 250K` 提示就该准备交接了——超过 250K 模型开始变钝。接力换回来的是一个清醒的头脑，不是一次损失。
-- 整条链可读：`fleet__handoff` 传 `action="show"` 列出每一棒的 session id 与 note 全文。**{title}问「最开始的问题」指的是第 1 棒的起点，不是你手上的 plan**，先 `show` 再答。
+- 整条链可读：`fleet__handoff` 传 `action="show"` 列出每一棒的 session id 与交接文档每一版的全文。**{title}问「最开始的问题」指的是第 1 棒的起点，不是你手上的 plan**，先 `show` 再答。
 - 你挂的 `fleet watch` 会跟着棒一起转给后继者（含条件、deadline 与 model/effort）。交接前不用停它；作为后继者读到「你继承了 watch X」时，也别再创建条件相同的第二个。
 
 ### 增量笔记：`fleet__notes` 与 `fleet__history`
@@ -384,17 +385,18 @@ Two mechanisms now enforce this rhythm. **Focused injection**: once you are attr
 When your context window grows long mid-plan, do not grind it to exhaustion, do not quietly wrap up early, and do not leave a "for the next session" note nobody will execute:
 
 ```
-fleet handoff --note "<shift briefing: what is done, what is in flight, key files, traps, the next concrete step>" [--goal <chain goal>] [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <tier>]
+fleet handoff --note "<the chain's handoff brief: conclusions aligned with {title}, known traps, progress, what is in flight, key files, the next concrete step>" [--goal <chain goal>] [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <tier>]
 ```
 
 - `--note` is mandatory. `--plan/--next` let Fleet attribute the successor to that plan and P. `--model/--effort` are optional and otherwise inherited.
+- **`--note` is the chain's shared handoff brief, not a one-off message.** Every baton revises the previous version into a new one, and all versions are kept. Baton 1 writes it from scratch; every later baton starts from the version it opened with: conclusions aligned with {title} and known traps carry over verbatim (delete one only when it no longer holds, and say why), while progress, in-flight work and the next step are rewritten to match reality. Whatever you do not carry forward, no later baton will see. After a compaction, recover the current version with `fleet__handoff` `action="show"` — it is the last one.
 - **On the first baton, state the chain's goal with `--goal`** — one sentence of "this chain is done when …". You register at the *end* of your turn, so even when the work only took shape mid-conversation you already know what {title} settled on. It is injected in front of every later baton and becomes **the test for finishing**: with the goal unmet, a fully ticked plan tree is still not grounds for `taskComplete: true`.
 - **A goal changing is normal** ({title} changes course, or the original no longer holds) — just change it explicitly with `--goal <new> --goal-reason <why>`, and tell {title} on a card. A change with no reason is refused: the rule does not forbid the goal moving, it forbids **quietly shrinking it down to the plan in your hands** and then declaring victory. A purely exploratory chain with no finish line can leave the goal unset.
 - Then **end the turn cleanly** (commit worktree progress first, per Rule 3). The Stop hook consumes the registration and spawns a successor whose opening prompt is your note.
 - **Narrating a handoff is not registering one.** Writing "I'll start the next baton" in your reply does nothing: with no actual tool call there is no successor and the plan dies the moment you stop. So the last thing you do in such a turn is that call itself — wait for `ok: handoff registered` before stopping.
 - **Registering freezes the note, and it is the last action of the turn. Afterwards raise **no decision card at all** — not even a decision-free closing card. Here is why: the relay fires when the turn *ends*; a card holds the turn open waiting to be clicked, so the successor never starts, and an answer on that card cannot reach the already-frozen note — it is silently dropped. Ask first, get the answer, then write the note and register.
 - Once you see `[Fleet] context used 250K`, start preparing a handoff — past 250K the model dulls. A fresh head is what you get back, not a loss.
-- The whole chain is readable: `fleet__handoff` with `action="show"` lists every baton's session id and full note. **When {title} asks about "the original question", they mean baton 1's starting point, not the plan in your hands** — run `show` before answering.
+- The whole chain is readable: `fleet__handoff` with `action="show"` lists every baton's session id and every version of the brief in full. **When {title} asks about "the original question", they mean baton 1's starting point, not the plan in your hands** — run `show` before answering.
 - A `fleet watch` you armed **moves to the successor with the baton** (conditions, deadline, model/effort included). Do not stop it before handing off; and if you are the successor reading "you inherited watch X", do not create a second one with the same condition.
 
 ### Incremental notes: `fleet__notes` and `fleet__history`

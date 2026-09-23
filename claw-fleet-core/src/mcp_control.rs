@@ -191,7 +191,7 @@ fn handoff_tool_def() -> Value {
             "properties": {
                 "action": {"type": "string", "enum": ["register", "show", "cancel", "list"], "default": "register"},
                 "session": {"type": "string", "description": "Session whose chain to show (show only; defaults to this session)."},
-                "note": {"type": "string", "description": "Handoff briefing — what's done, what's next, key files, gotchas. Required for register."},
+                "note": {"type": "string", "description": "The chain's handoff brief — conclusions aligned with the user, gotchas, what's done, what's next, key files. It is one document every hop revises: start from the version you opened with (or `show`), keep the alignment and gotchas, rewrite progress and next step. Required for register."},
                 "plan": {"type": "string", "description": "Plan id to attribute the successor to."},
                 "next": {"type": "string", "description": "P-task the successor resumes at (requires plan)."},
                 "model": {"type": "string", "description": "Override the successor's model (else inherits this session's). Naming another harness's model relays on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
