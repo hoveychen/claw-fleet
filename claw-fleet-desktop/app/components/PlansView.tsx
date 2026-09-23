@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, GitBranch, Link2, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
+import { ChevronRight, GitBranch, Link2, ListTree, Moon, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { HandoffChainModal } from "./HandoffChainModal";
@@ -419,6 +419,11 @@ function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: Ro
         <span className={pending === 0 ? styles.title_done : styles.title}>
           {node.title || node.id}
         </span>
+        {node.snooze && (
+          <span className={styles.snooze} title={node.snooze.reason}>
+            <Moon size={10} strokeWidth={2} />
+          </span>
+        )}
       </button>
 
       <span className={styles.chain_slot}>
@@ -446,6 +451,12 @@ function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: Ro
       </span>
     </div>
   );
+}
+
+function formatSnoozeUntil(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ── Detail drawer ────────────────────────────────────────────────────────────
@@ -507,6 +518,21 @@ function PlanDrawer({
             parent: node.orphanedParent,
             defaultValue: "父计划 {{parent}} 不存在,已提升为根",
           })}
+        </div>
+      )}
+
+      {node.snooze && (
+        <div className={styles.snooze_note}>
+          <Moon size={11} strokeWidth={2} />
+          <span>
+            {node.snooze.untilMs != null
+              ? t("plans.snooze_until", {
+                  until: formatSnoozeUntil(node.snooze.untilMs),
+                  defaultValue: "静默至 {{until}}",
+                })
+              : t("plans.snooze_forever", "已停止自动唤醒")}
+            {node.snooze.reason && ` · ${node.snooze.reason}`}
+          </span>
         </div>
       )}
 

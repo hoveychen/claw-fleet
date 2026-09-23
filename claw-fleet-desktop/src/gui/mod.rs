@@ -1749,6 +1749,8 @@ pub fn run() {
             remove_remote_workspace,
             get_auto_resume_config,
             set_auto_resume_config,
+            get_plan_revive_config,
+            set_plan_revive_config,
             set_session_mark,
             set_session_title,
             host_features,

@@ -67,6 +67,21 @@ pub(crate) fn route_auto_resume_config(
     );
 }
 
+pub(crate) fn route_plan_revive_config(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    config_pair(
+        request,
+        json_header,
+        crate::plan_revive::PlanReviveConfig::load,
+        |cfg| cfg.save().map(|()| cfg),
+    );
+}
+
 pub(crate) fn route_permissions_config(
     ctx: &ServeCtx,
     request: tiny_http::Request,

@@ -251,6 +251,11 @@
   flex-shrink: 0;
   color: var(--color-warning);
 }
+.snooze {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--color-text-dim);
+}
 
 .chain_slot {
   flex-shrink: 0;
@@ -385,6 +390,21 @@
   font-size: 10.5px;
   color: var(--color-text-muted);
   word-break: break-all;
+}
+.snooze_note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.snooze_note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 .orphan_note {
   display: flex;

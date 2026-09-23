@@ -1134,6 +1134,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     [],
   );
 
+  // ── Plan reviver ────────────────────────────────────────────────────────
+  const [planRevive, setPlanRevive] = useState(true);
+
+  useEffect(() => {
+    invoke<{ enabled: boolean }>("get_plan_revive_config")
+      .then((c) => setPlanRevive(c.enabled))
+      .catch(() => {});
+  }, []);
+
+  const handlePlanReviveChange = useCallback((enabled: boolean) => {
+    setPlanRevive(enabled);
+    invoke("set_plan_revive_config", { config: { enabled } }).catch(() => {});
+  }, []);
+
   // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
 
@@ -1307,6 +1321,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     />
                   </div>
                 )}
+
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.plan_revive")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.plan_revive_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={planRevive}
+                      onChange={(e) => handlePlanReviveChange(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
 
                 {keepAwakeSupported && (
                   <div className={styles.row}>

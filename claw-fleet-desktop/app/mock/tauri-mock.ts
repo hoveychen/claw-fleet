@@ -899,6 +899,9 @@ async function handleIPC(
     case "get_auto_resume_config":
       return { enabled: true, maxWaitHours: 12 };
 
+    case "get_plan_revive_config":
+      return { enabled: true };
+
     case "list_llm_providers":
       return [
         {

@@ -241,6 +241,21 @@ pub(crate) fn set_auto_resume_config(
     state.backend.set_auto_resume_config(config)
 }
 
+#[tauri::command(async)]
+pub(crate) fn get_plan_revive_config(
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::plan_revive::PlanReviveConfig {
+    state.backend.get_plan_revive_config()
+}
+
+#[tauri::command(async)]
+pub(crate) fn set_plan_revive_config(
+    config: claw_fleet_core::plan_revive::PlanReviveConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.set_plan_revive_config(config)
+}
+
 /// Set (or clear, when `mark` is null) the human's manual review mark for a
 /// session. Written to the local side-channel file.
 #[tauri::command(async)]

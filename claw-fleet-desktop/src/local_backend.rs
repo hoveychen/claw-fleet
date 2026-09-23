@@ -2441,6 +2441,17 @@ impl LocalBackend {
         config.save()
     }
 
+    pub fn get_plan_revive_config(&self) -> claw_fleet_core::plan_revive::PlanReviveConfig {
+        claw_fleet_core::plan_revive::PlanReviveConfig::load()
+    }
+
+    pub fn set_plan_revive_config(
+        &self,
+        config: claw_fleet_core::plan_revive::PlanReviveConfig,
+    ) -> Result<(), String> {
+        config.save()
+    }
+
     pub fn set_session_mark(
         &self,
         session_id: String,

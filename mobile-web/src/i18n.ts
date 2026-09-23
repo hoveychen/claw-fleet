@@ -850,6 +850,8 @@ const DICT: Record<string, string> = {
   "{0} 个计划有待办": "{0} plans with work left",
   "已完成 {0} 个": "{0} completed",
   "已完成 {0} 条": "{0} done",
+  "静默至 {0}": "Snoozed until {0}",
+  "已停止自动唤醒": "Auto-revive turned off",
 
   // ── Artifacts (mobile version of desktop artifact library, primary nav tab) ──
   产出: "Artifacts",

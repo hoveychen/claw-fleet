@@ -182,6 +182,7 @@ mod tests {
             // for every session on the host, so a customer token reaching it
             // could disarm the guard gate outright.
             routes::AUTO_RESUME_CONFIG,
+            routes::PLAN_REVIVE_CONFIG,
             routes::PERMISSIONS_CONFIG,
             routes::DECISION_PANEL_CONFIG,
         ] {

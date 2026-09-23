@@ -1276,6 +1276,10 @@ fn handle_request(
                 route_auto_resume_config(ctx, request, &query, json_header, path)
             }
 
+            crate::routes::PLAN_REVIVE_CONFIG => {
+                route_plan_revive_config(ctx, request, &query, json_header, path)
+            }
+
             crate::routes::PERMISSIONS_CONFIG => {
                 route_permissions_config(ctx, request, &query, json_header, path)
             }
