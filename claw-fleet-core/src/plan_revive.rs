@@ -222,6 +222,7 @@ pub fn collect_views(
                 }
             }
         }
+        let mut borrowed: HashSet<&str> = HashSet::new();
         for b in &blocks {
             let Some(id) = b.id.as_deref() else { continue };
             if !pending.contains(id) || has_pending_descendant.contains(id) {
@@ -245,6 +246,30 @@ pub fn collect_views(
                 .copied()
                 .filter(|r| family.contains(r.1.plan_id.as_str()))
                 .collect();
+            if claims.is_empty() {
+                // Never claimed: a child plan written down but not started yet.
+                // Its parent is skipped above (it has a pending descendant), so
+                // borrow the nearest ancestor's own claims or the tree would be
+                // invisible. One child per ancestor, in file order, so an
+                // ancestor never fans out into several revived sessions.
+                let mut cur = id;
+                let mut hops = 0;
+                while let Some(p) = parent.get(cur) {
+                    let own: Vec<_> =
+                        recs.iter().copied().filter(|r| r.1.plan_id == *p).collect();
+                    if !own.is_empty() {
+                        if borrowed.insert(*p) {
+                            claims = own;
+                        }
+                        break;
+                    }
+                    cur = p;
+                    hops += 1;
+                    if hops > 64 {
+                        break;
+                    }
+                }
+            }
             claims.sort_by(|a, b| b.1.updated.cmp(&a.1.updated));
             let Some(newest) = claims.first() else { continue };
             if now.saturating_sub(newest.1.updated) >= RECENCY_MS {
@@ -1212,6 +1237,48 @@ mod tests {
         assert_eq!(v[0].plan_id, "parent");
         assert_eq!(v[0].owners, vec!["s-child".to_string(), "s-parent".to_string()]);
         assert_eq!(v[0].newest_owner, "s-child");
+    }
+
+    #[test]
+    fn unclaimed_pending_child_inherits_the_nearest_claimed_ancestor() {
+        // Nobody ever claimed `c1`/`c2`, so they have no owners of their own,
+        // and `parent` is skipped because it has a pending descendant. Without
+        // the fallback the whole tree is invisible to the reviver.
+        let now = 10 * H;
+        let records = vec![("s-parent".to_string(), rec("/w", "parent", now - H))];
+        let v = views(
+            &records,
+            vec![
+                block("parent", None, PENDING),
+                block("c1", Some("parent"), PENDING),
+                block("c2", Some("parent"), PENDING),
+            ],
+            now,
+        );
+        // Only the first unclaimed child borrows the claim, so one ancestor
+        // never fans out into several revived sessions at once.
+        let ids: Vec<_> = v.iter().map(|v| v.plan_id.as_str()).collect();
+        assert_eq!(ids, vec!["c1"]);
+        assert_eq!(v[0].owners, vec!["s-parent".to_string()]);
+        assert_eq!(v[0].newest_owner, "s-parent");
+
+        // A child with a claim of its own keeps it; its unclaimed sibling
+        // still falls back to the parent.
+        let records = vec![
+            ("s-parent".to_string(), rec("/w", "parent", now - 2 * H)),
+            ("s-c1".to_string(), rec("/w", "c1", now - H)),
+        ];
+        let v = views(
+            &records,
+            vec![
+                block("parent", None, PENDING),
+                block("c1", Some("parent"), PENDING),
+                block("c2", Some("parent"), PENDING),
+            ],
+            now,
+        );
+        let got: Vec<_> = v.iter().map(|v| (v.plan_id.as_str(), v.newest_owner.as_str())).collect();
+        assert_eq!(got, vec![("c1", "s-c1"), ("c2", "s-parent")]);
     }
 
     #[test]
