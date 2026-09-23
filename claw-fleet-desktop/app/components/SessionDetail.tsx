@@ -45,7 +45,7 @@ import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel, OutOfCreditsNotice } from "./SessionCard";
-import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
+import { inlinePendingFleetAsk, withCodexDecisionHistory } from "./codexDecision";
 import { useChromeYield } from "../hooks/useChromeYield";
 import { useDocCardWidth } from "../hooks/useDocCardWidth";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
@@ -129,7 +129,7 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
 }
 
 // DecisionPanel already embeds SessionDetail for its history sidecar. Keep the
-// reverse dependency lazy so projecting a pending Codex card into the dialogue
+// reverse dependency lazy so projecting a pending card into the dialogue
 // does not create an eager ESM cycle between the two modules.
 const InlineDecisionCard = lazy(() =>
   import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
@@ -484,7 +484,7 @@ export function SessionDetail({
     [timelineMessages, pendingOptimistic],
   );
   const inlineFleetAsk = useMemo(
-    () => inlineCodexFleetAsk(liveSession, pendingDecisions, decisionRecords),
+    () => inlinePendingFleetAsk(liveSession, pendingDecisions, decisionRecords),
     [liveSession, pendingDecisions, decisionRecords],
   );
   const reasoningPercent =
@@ -1873,7 +1873,7 @@ export function SessionDetail({
                       </div>
                     ))}
                     {!simplifiedMode && inlineFleetAsk && (
-                      <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
+                      <div className={styles.inline_fleet_ask} data-testid="inline-pending-fleet-ask">
                         <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
                           <InlineFleetAskCard decision={inlineFleetAsk} compact />
                         </Suspense>

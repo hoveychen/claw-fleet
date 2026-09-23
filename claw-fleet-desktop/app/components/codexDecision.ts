@@ -7,17 +7,21 @@ import type {
 } from "../types";
 
 /**
- * Codex runs deferred MCP tools inside its outer code-mode `exec` call, so a
- * pending fleet__ask has no top-level transcript block. Select the authoritative
- * store decision for the open Codex session; other sources keep their existing
- * direct-tool rendering path.
+ * The pending fleet__ask the open session is waiting on, answerable in place
+ * at the end of the dialogue.
+ *
+ * Every source gets it. Codex needs it most — it runs deferred MCP tools inside
+ * its outer code-mode `exec` call, so a pending fleet__ask has no top-level
+ * transcript block at all — but a Claude Code transcript only carries the
+ * tool_use, which renders as a read-only "unanswered" row; without this the
+ * card was answerable only from the side DecisionPanel.
  */
-export function inlineCodexFleetAsk(
+export function inlinePendingFleetAsk(
   session: SessionInfo | null,
   decisions: PendingDecision[],
   records: DecisionHistoryRecord[] = [],
 ): FleetAskDecision | null {
-  if (!session || session.agentSource !== "codex") return null;
+  if (!session) return null;
   const resolvedIds = new Set(
     records
       .filter((record) => record.kind === "fleet-ask" && record.sessionId === session.id)
