@@ -96,8 +96,8 @@ RUN FLEET_WEBUI_DIR=/webui \
 FROM node:22-bookworm-slim
 
 # Pins match the versions verified in the fleet-cloud work. Bump deliberately.
-ARG CLAUDE_CODE_VERSION=2.1.261
-ARG CODEX_VERSION=0.153.4
+ARG CLAUDE_CODE_VERSION=2.1.280
+ARG CODEX_VERSION=0.156.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates git openssh-client curl gosu tini \
