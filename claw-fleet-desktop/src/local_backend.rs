@@ -900,6 +900,9 @@ impl LocalBackend {
                         &sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar,
                     );
                     claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess_ar);
+                    // Wake a fresh session for plans nobody is responsible for
+                    // any more. Self-throttled and off-thread; see `plan_revive`.
+                    claw_fleet_core::plan_revive::maybe_tick_in_background();
 
                     // Reclaim the dev servers / persistent browsers finished
                     // sessions left running. Deliberately after the liveness

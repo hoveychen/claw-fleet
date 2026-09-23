@@ -502,7 +502,7 @@ fn workspace_label(ws: &str) -> String {
 }
 
 fn transcript_of(sid: &str) -> Option<String> {
-    let projects = crate::session::real_home_dir()?.join(".claude").join("projects");
+    let projects = crate::session::get_claude_dir()?.join("projects");
     for dir in std::fs::read_dir(projects).ok()?.flatten() {
         let p = dir.path().join(format!("{sid}.jsonl"));
         if p.exists() {
@@ -661,6 +661,39 @@ fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
 }
 
 // ── The tick ────────────────────────────────────────────────────────────────
+
+/// How often a host actually runs a pass. One pass reads every recently used
+/// workspace's TASKS.md and scans the process table (measured 2026-09-23:
+/// ~5 s wall in a debug build over 18 candidate plans), and the grace window
+/// is 30 minutes, so the 30 s ticker cadence would be pure waste.
+const PASS_INTERVAL_MS: u64 = 5 * 60 * 1000;
+
+static LAST_PASS_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PASS_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Called from the hosts' 30 s tickers. Runs a pass at most every
+/// [`PASS_INTERVAL_MS`], on its own thread so the ticker's other jobs are not
+/// held up. Never blocks.
+pub fn maybe_tick_in_background() {
+    use std::sync::atomic::Ordering;
+    let now = plan_snooze::now_ms();
+    if now.saturating_sub(LAST_PASS_MS.load(Ordering::Relaxed)) < PASS_INTERVAL_MS {
+        return;
+    }
+    if PASS_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    LAST_PASS_MS.store(now, Ordering::Relaxed);
+    let spawned = std::thread::Builder::new()
+        .name("plan-revive".into())
+        .spawn(|| {
+            tick();
+            PASS_RUNNING.store(false, Ordering::Release);
+        });
+    if spawned.is_err() {
+        PASS_RUNNING.store(false, Ordering::Release);
+    }
+}
 
 /// Run one reviver pass. Cheap when nothing is pending; safe to call from
 /// several processes at once (see the module docs).
