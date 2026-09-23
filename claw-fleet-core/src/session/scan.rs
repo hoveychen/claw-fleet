@@ -326,6 +326,8 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     let Ok(workspace_entries) = fs::read_dir(&projects_dir) else {
         return sessions;
     };
+    // Every slug below decodes against the filesystem; list each level once.
+    let _sweep = super::paths::DecodeSweep::begin();
 
     for workspace_entry in workspace_entries.flatten() {
         let workspace_dir = workspace_entry.path();
