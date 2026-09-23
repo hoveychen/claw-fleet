@@ -1509,7 +1509,7 @@ pub fn maybe_truncate_events_file() {
 /// one bounded copy wide.
 ///
 /// Returns whether the file was rewritten.
-fn truncate_to_tail(
+pub(crate) fn truncate_to_tail(
     path: &Path,
     max_bytes: u64,
     keep_lines: usize,
