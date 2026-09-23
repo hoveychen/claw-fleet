@@ -557,15 +557,20 @@ pub(crate) fn read_level_dirs(parent: &str) -> LevelDirs {
     if crate::tcc::is_tcc_protected(dir_path) {
         return LevelDirs::default();
     }
+    if let Some(hit) = sweep_lookup(dir) {
+        return hit;
+    }
     // Stat only AFTER the TCC check — the whole point of that check is to avoid
     // touching a protected directory at all.
     let mtime = std::fs::metadata(dir_path).and_then(|m| m.modified()).ok();
     if let Some(mtime) = mtime {
         if let Some(hit) = cache_lookup(dir, mtime) {
+            sweep_store(dir, &hit);
             return hit;
         }
     }
     let listed = LevelDirs::new(list_level_dirs_uncached(dir_path));
+    sweep_store(dir, &listed);
     // No mtime means no invalidation signal, so such a directory is re-listed
     // every time rather than cached forever. Neither is one whose mtime is too
     // fresh to be trusted as a key yet — see `mtime_is_too_fresh_to_cache`.
@@ -650,6 +655,62 @@ fn cache_store(dir: &str, mtime: std::time::SystemTime, dirs: &LevelDirs) {
         guard.clear();
     }
     guard.insert(dir.to_string(), (mtime, dirs.clone()));
+}
+
+thread_local! {
+    /// Listings taken during the current [`DecodeSweep`] on this thread, keyed
+    /// by directory. `None` outside a sweep.
+    static SWEEP_LISTINGS: std::cell::RefCell<Option<std::collections::HashMap<String, LevelDirs>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Scope in which [`read_level_dirs`] lists each directory at most once.
+///
+/// The mtime cache cannot help a directory that changes faster than it is
+/// read. `/private/tmp` is one: on a box with builds and agents running its
+/// mtime moves many times a second, so every one of the ~180 slugs under it
+/// missed the cache and re-listed its ~4600 entries — measured 2026-09-23 as
+/// ~77% of the desktop's Claude rescan. Within one sweep a single listing per
+/// directory is as good as a snapshot; the next sweep (seconds later) lists
+/// again, so a directory created mid-sweep is picked up then instead of never.
+///
+/// Nested sweeps are harmless: only the outermost one clears the memo.
+pub(crate) struct DecodeSweep {
+    outermost: bool,
+}
+
+impl DecodeSweep {
+    pub(crate) fn begin() -> Self {
+        let outermost = SWEEP_LISTINGS.with(|m| {
+            let mut m = m.borrow_mut();
+            let fresh = m.is_none();
+            if fresh {
+                *m = Some(std::collections::HashMap::new());
+            }
+            fresh
+        });
+        DecodeSweep { outermost }
+    }
+}
+
+impl Drop for DecodeSweep {
+    fn drop(&mut self) {
+        if self.outermost {
+            SWEEP_LISTINGS.with(|m| *m.borrow_mut() = None);
+        }
+    }
+}
+
+fn sweep_lookup(dir: &str) -> Option<LevelDirs> {
+    SWEEP_LISTINGS.with(|m| m.borrow().as_ref()?.get(dir).cloned())
+}
+
+fn sweep_store(dir: &str, dirs: &LevelDirs) {
+    SWEEP_LISTINGS.with(|m| {
+        if let Some(m) = m.borrow_mut().as_mut() {
+            m.insert(dir.to_string(), dirs.clone());
+        }
+    });
 }
 
 /// Drop every memoized listing. For tests that create directories and then
@@ -890,6 +951,67 @@ mod level_dirs_cache_tests {
 
     fn exclusively() -> std::sync::MutexGuard<'static, ()> {
         SERIALIZE.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A sweep is a snapshot: a directory created mid-sweep is invisible until
+    /// the sweep ends, and visible to the very next decode after it.
+    #[test]
+    fn decode_sweep_lists_once_and_forgets_on_drop() {
+        let _g = exclusively();
+        let parent =
+            std::env::temp_dir().join(format!("fleet-decode-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        let parent = parent.canonicalize().unwrap();
+        let target = parent.join("one-two");
+        let shredded = parent.join("one").join("two").to_string_lossy().into_owned();
+
+        {
+            let _sweep = super::DecodeSweep::begin();
+            assert_eq!(decode_of(&target), shredded);
+            std::fs::create_dir(&target).unwrap();
+            assert_eq!(decode_of(&target), shredded, "sweep must reuse its listing");
+        }
+        assert_eq!(decode_of(&target), target.to_string_lossy());
+
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// Times one decode sweep over this machine's real `~/.claude/projects`
+    /// while a helper thread keeps churning `/private/tmp`'s mtime, which is
+    /// what defeats the mtime-keyed cache on a busy box.
+    #[test]
+    #[ignore = "measures the real ~/.claude/projects; run manually with --ignored --nocapture"]
+    fn measure_decode_sweep_under_tmp_churn() {
+        let _g = exclusively();
+        let projects = dirs::home_dir().unwrap().join(".claude/projects");
+        let slugs: Vec<String> = std::fs::read_dir(&projects)
+            .unwrap()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let churn = {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let f = std::path::PathBuf::from(format!("/private/tmp/fleet-churn-{}", std::process::id()));
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = std::fs::write(&f, b"x");
+                    let _ = std::fs::remove_file(&f);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            })
+        };
+        for round in 0..3 {
+            let started = std::time::Instant::now();
+            let _sweep = super::DecodeSweep::begin();
+            for slug in &slugs {
+                let _ = decode_workspace_path(slug);
+            }
+            println!("round {round}: {} slugs in {:?}", slugs.len(), started.elapsed());
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        churn.join().unwrap();
     }
 
     /// The regression this cache could have introduced: a directory listed
