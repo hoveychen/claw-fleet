@@ -841,6 +841,8 @@ function HandoffLinkCard({
           style={{ transform: open ? "rotate(90deg)" : "none" }}
         />
         <span className={styles.hopBadge}>{t("第 {0} → {1} 棒", index + 1, index + 2)}</span>
+        {/* The note is the chain's living brief: link i carries version i+1. */}
+        <span className={styles.dimNote}>{t("交接文档第 {0} 版", index + 1)}</span>
         <span className={styles.recordTime}>
           {new Date(link.handedAt).toLocaleString(dateLocale(), {
             month: "2-digit",
