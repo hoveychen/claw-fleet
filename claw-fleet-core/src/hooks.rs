@@ -1449,20 +1449,113 @@ fn read_events_from(path: &Path, from: u64, to: u64) -> (Vec<HookEvent>, u64) {
     (events, from + last_nl as u64 + 1)
 }
 
-/// Truncate the hooks events file if it exceeds a threshold (e.g. 10000 lines).
-/// Keeps the last 2000 lines.
+/// `hooks.jsonl` is rewritten once it grows past this many bytes.
+const EVENTS_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// Records kept after a rewrite (fewer if they exceed [`EVENTS_KEEP_MAX_BYTES`]).
+const EVENTS_KEEP_LINES: usize = 2_000;
+/// Upper bound on what a rewrite keeps, and so on what it reads: single records
+/// run past a megabyte (a `PostToolUse` carrying a large tool result).
+const EVENTS_KEEP_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Cut the hooks events file back to its newest records once it passes
+/// [`EVENTS_MAX_BYTES`].
+///
+/// The previous version did `fs::read_to_string` on the whole file and returned
+/// silently on error. Concurrent `cat >>` appends of records larger than
+/// `PIPE_BUF` interleave, so a record can be split mid-UTF-8-sequence; from the
+/// first such split on, `read_to_string` failed on every call and the file grew
+/// without bound (3.5 GB / 428k lines by 2026-09-23). This version never decodes
+/// and never reads more than the tail it keeps.
 pub fn maybe_truncate_events_file() {
     let Some(path) = hooks_events_path() else {
         return;
     };
-    let Ok(content) = fs::read_to_string(&path) else {
-        return;
-    };
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.len() > 10_000 {
-        let keep = &lines[lines.len() - 2000..];
-        let _ = fs::write(&path, keep.join("\n") + "\n");
+    if let Err(e) = truncate_to_tail(
+        &path,
+        EVENTS_MAX_BYTES,
+        EVENTS_KEEP_LINES,
+        EVENTS_KEEP_MAX_BYTES,
+    ) {
+        crate::log_debug(&format!("[hooks] truncate {}: {e}", path.display()));
     }
+}
+
+/// When `path` is larger than `max_bytes`, replace it with its last
+/// `keep_lines` lines, capped at `keep_max_bytes` and always starting on a
+/// line boundary. Bytes are copied verbatim — no decoding, no reformatting.
+///
+/// The replacement is written to a sibling temp file and renamed over the
+/// original, so a reader never sees a half-written file. An append landing on
+/// the old inode between the tail read and the rename is lost; that window is
+/// one bounded copy wide.
+///
+/// Returns whether the file was rewritten.
+fn truncate_to_tail(
+    path: &Path,
+    max_bytes: u64,
+    keep_lines: usize,
+    keep_max_bytes: u64,
+) -> std::io::Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    const CHUNK: u64 = 64 * 1024;
+
+    let len = fs::metadata(path)?.len();
+    if len <= max_bytes {
+        return Ok(false);
+    }
+    let mut f = fs::File::open(path)?;
+
+    // Walk backwards counting record separators. A trailing newline ends the
+    // last record rather than starting a new one, so it is not counted.
+    let floor = len.saturating_sub(keep_max_bytes);
+    let mut pos = len;
+    let mut newlines = 0usize;
+    let mut earliest_nl: Option<u64> = None;
+    let mut start: Option<u64> = None;
+    let mut buf = vec![0u8; CHUNK as usize];
+    while pos > floor && start.is_none() {
+        let n = CHUNK.min(pos - floor);
+        pos -= n;
+        f.seek(SeekFrom::Start(pos))?;
+        f.read_exact(&mut buf[..n as usize])?;
+        for i in (0..n as usize).rev() {
+            let abs = pos + i as u64;
+            if buf[i] != b'\n' || abs + 1 == len {
+                continue;
+            }
+            earliest_nl = Some(abs);
+            newlines += 1;
+            if newlines == keep_lines {
+                start = Some(abs + 1);
+                break;
+            }
+        }
+    }
+    // Byte cap hit first: keep from the first full line inside the window. At
+    // the very start of the file there is no partial line to drop.
+    let start = start.unwrap_or(match earliest_nl {
+        _ if floor == 0 => 0,
+        Some(nl) => nl + 1,
+        None => len,
+    });
+
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{file_name}.truncate-{}", std::process::id()));
+    let result = (|| {
+        let mut out = fs::File::create(&tmp)?;
+        f.seek(SeekFrom::Start(start))?;
+        std::io::copy(&mut (&mut f).take(len - start), &mut out)?;
+        out.sync_all()?;
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result.map(|()| true)
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -3054,6 +3147,76 @@ mod tests {
         let _ = fs::remove_file(&p);
 
         assert!(read_tail_lines(Path::new("/nonexistent/hooks.jsonl"), 500).is_empty());
+    }
+
+    /// Lines `0..n` as `{"n":i}` records, with a UTF-8 sequence split across
+    /// two records near the front, the way interleaved `cat >>` appends leave it.
+    fn jsonl_with_split_utf8(n: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        for i in 0..n {
+            if i == 3 {
+                out.extend_from_slice(b"{\"t\":\"\xe9\x80");
+                out.push(b'\n');
+                out.extend_from_slice(b"\x89\"}\n");
+            }
+            out.extend_from_slice(format!("{{\"n\":{i}}}\n").as_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn truncate_keeps_exact_tail_bytes_despite_invalid_utf8() {
+        // The regression: `read_to_string` refused the whole file once a record
+        // held a split UTF-8 sequence, so truncation never ran again.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("hooks.jsonl");
+        let data = jsonl_with_split_utf8(5_000);
+        fs::write(&p, &data).unwrap();
+        assert!(std::str::from_utf8(&data).is_err());
+
+        assert!(truncate_to_tail(&p, 1024, 100, 1 << 20).unwrap());
+        let got = fs::read(&p).unwrap();
+        let want: Vec<u8> = (4_900..5_000)
+            .flat_map(|i| format!("{{\"n\":{i}}}\n").into_bytes())
+            .collect();
+        assert_eq!(got, want, "last 100 records, byte-for-byte");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temp file left");
+    }
+
+    #[test]
+    fn truncate_leaves_small_files_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("hooks.jsonl");
+        let data = jsonl_with_split_utf8(50);
+        fs::write(&p, &data).unwrap();
+        assert!(!truncate_to_tail(&p, data.len() as u64, 10, 1 << 20).unwrap());
+        assert_eq!(fs::read(&p).unwrap(), data);
+    }
+
+    #[test]
+    fn truncate_byte_cap_starts_on_a_line_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("hooks.jsonl");
+        // 19-byte records; a 50-byte cap fits two whole ones plus a partial.
+        let data: Vec<u8> = (0..100)
+            .flat_map(|i| format!("{{\"n\":{i:012}}}\n").into_bytes())
+            .collect();
+        fs::write(&p, &data).unwrap();
+        assert!(truncate_to_tail(&p, 100, 1_000, 50).unwrap());
+        let got = String::from_utf8(fs::read(&p).unwrap()).unwrap();
+        assert_eq!(
+            got,
+            format!("{{\"n\":{:012}}}\n{{\"n\":{:012}}}\n", 98, 99)
+        );
+    }
+
+    #[test]
+    fn truncate_without_trailing_newline_keeps_the_partial_last_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("hooks.jsonl");
+        fs::write(&p, b"a\nb\nc\nd\n{\"partial\"").unwrap();
+        assert!(truncate_to_tail(&p, 4, 2, 1 << 20).unwrap());
+        assert_eq!(fs::read(&p).unwrap(), b"d\n{\"partial\"");
     }
 
     #[test]
