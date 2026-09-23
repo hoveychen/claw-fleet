@@ -860,13 +860,19 @@ fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
 /// `all_clients_support_gzip` is false for an empty registry. The full snapshot
 /// then went out uncompressed: 1.06MB on the wire on 2026-09-22 against ~230KB
 /// gzipped, head-of-line blocking every reply behind it on a phone's link.
-fn push_snapshot_on_connect() {
+///
+/// Returns the handle of the handed-off push, if there was a runtime to hand it
+/// to. Production ignores it; a test must await it before releasing
+/// `fleet_home_lock`, or the push runs into the next test and reads *its*
+/// provider and channel.
+fn push_snapshot_on_connect() -> Option<tokio::task::JoinHandle<()>> {
     match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            handle.spawn_blocking(push_snapshot_now);
-        }
+        Ok(handle) => Some(handle.spawn_blocking(push_snapshot_now)),
         // No runtime to hand it to (unit tests drive this directly).
-        Err(_) => push_snapshot_now(),
+        Err(_) => {
+            push_snapshot_now();
+            None
+        }
     }
 }
 
@@ -2181,7 +2187,7 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
             let is_new = upsert_client(payload);
             if SNAPSHOT_AWAITS_HELLO.swap(false, Ordering::SeqCst) || is_new {
                 reset_sessions_dedup();
-                push_snapshot_on_connect();
+                let _ = push_snapshot_on_connect();
             }
             None
         }
@@ -7833,7 +7839,7 @@ mod tests {
         });
 
         let started = std::time::Instant::now();
-        push_snapshot_on_connect();
+        let push = push_snapshot_on_connect();
         let elapsed = started.elapsed();
 
         assert!(
@@ -7841,8 +7847,14 @@ mod tests {
             "the caller must not wait on the provider; it took {elapsed:?}"
         );
 
-        // Takes the provider lock, so this also waits out the in-flight push
-        // rather than leaving it running into a sibling test.
+        // Wait the handed-off push out while still holding the lock. Clearing
+        // the provider is not enough: the blocking task may not have started
+        // yet, and the runtime is only dropped after `_guard` is released, so
+        // the push used to run inside the next test — reading its provider,
+        // arming its throttle and swallowing its frame.
+        push.expect("a runtime is present, so the push is handed off")
+            .await
+            .expect("the handed-off push completes");
         *SESSIONS_PROVIDER.lock().unwrap() = None;
     }
 
