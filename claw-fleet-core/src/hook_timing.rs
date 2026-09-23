@@ -32,9 +32,11 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 /// Cap and post-truncation retention, mirroring [`crate::hooks::hooks_events_path`]'s
-/// own truncation policy so this file can't grow without bound either.
-const MAX_LINES: usize = 10_000;
+/// own truncation policy so this file can't grow without bound either. Records
+/// run ~300 bytes, so the cap sits near 14k of them.
+const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const KEEP_LINES: usize = 2_000;
+const KEEP_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 pub fn hook_timing_path() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("hook-timing.jsonl"))
@@ -147,20 +149,15 @@ impl HookTiming {
     }
 }
 
-/// Trim the timing log when it grows past [`MAX_LINES`], keeping the newest
-/// [`KEEP_LINES`]. Same policy as [`crate::hooks::maybe_truncate_events_file`].
+/// Trim the timing log when it grows past [`MAX_BYTES`], keeping the newest
+/// [`KEEP_LINES`]. Same mechanism as [`crate::hooks::maybe_truncate_events_file`]:
+/// a whole-file `read_to_string` gives up for good on the first invalid UTF-8
+/// byte, which is how `hooks.jsonl` reached 3.5 GB.
 pub fn maybe_truncate_timing_file() {
     let Some(path) = hook_timing_path() else {
         return;
     };
-    let Ok(content) = fs::read_to_string(&path) else {
-        return;
-    };
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.len() > MAX_LINES {
-        let keep = &lines[lines.len() - KEEP_LINES..];
-        let _ = fs::write(&path, keep.join("\n") + "\n");
-    }
+    let _ = crate::hooks::truncate_to_tail(&path, MAX_BYTES, KEEP_LINES, KEEP_MAX_BYTES);
 }
 
 #[cfg(test)]
@@ -274,8 +271,10 @@ mod tests {
             let dir = home.join(".fleet");
             let _ = fs::create_dir_all(&dir);
             let path = dir.join("hook-timing.jsonl");
-            let body: String = (0..MAX_LINES + 500)
-                .map(|i| format!("{{\"n\":{i}}}\n"))
+            let pad = "x".repeat(300);
+            let count = (MAX_BYTES as usize / 300) + 500;
+            let body: String = (0..count)
+                .map(|i| format!("{{\"n\":{i},\"pad\":\"{pad}\"}}\n"))
                 .collect();
             fs::write(&path, body).unwrap();
 
@@ -286,7 +285,7 @@ mod tests {
             assert_eq!(lines.len(), KEEP_LINES);
             // Newest kept, oldest dropped.
             let last: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
-            assert_eq!(last["n"], (MAX_LINES + 500 - 1) as i64);
+            assert_eq!(last["n"], (count - 1) as i64);
         });
     }
 
