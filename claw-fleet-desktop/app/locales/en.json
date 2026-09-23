@@ -822,7 +822,6 @@
     "range_30d": "30 days",
     "range_all": "All",
     "trend_title": "Daily spend",
-    "trend_scale_hint": "√ scale",
     "codex_note": "A Codex rollout had turns with no timestamp; those were placed on the session's start day, so the trend is approximate",
     "provider_priced": "This line's spend comes from the provider's invoice or its published list price, not Fleet's $/M reference rate, so rows are not itemised. What is actually deducted is in the account's own currency",
     "unpriced_calls": "{{count}} further call(s) could not be priced yet — their tokens are counted, their money is not",

@@ -279,12 +279,8 @@ export function TokenReceiptModal({ onClose }: Props) {
 function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
   const { t } = useTranslation();
   const max = Math.max(...daily.map((d) => d.costUsd), 0.0001);
-  // √-scale the bar heights. Spend spans two orders of magnitude across a long
-  // window (early days at a few $, recent days at thousands), so a linear scale
-  // crushes every older day to a sub-pixel sliver — the whole reason history
-  // looked "empty". sqrt lifts small days into a visible band while preserving
-  // ordering; the exact figure stays in each bar's tooltip.
-  const sqrtMax = Math.sqrt(max);
+  // Linear scale: bar height ratios equal spend ratios. Tiny days bottom out at
+  // the 1px floor below; the exact figure stays in each bar's tooltip.
   const W = 424;
   const H = 92;
   const pad = 4;
@@ -296,9 +292,6 @@ function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
     <div className={styles.chart}>
       <div className={styles.chart_title}>
         {t("token_receipt.trend_title", "每日花费")}
-        <span className={styles.chart_scale_hint}>
-          {t("token_receipt.trend_scale_hint", "√ 刻度")}
-        </span>
       </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -308,7 +301,7 @@ function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
         {daily.map((d, i) => {
           const h = Math.max(
             1,
-            (Math.sqrt(Math.max(d.costUsd, 0)) / sqrtMax) * (H - pad * 2),
+            (Math.max(d.costUsd, 0) / max) * (H - pad * 2),
           );
           const x = pad + i * (barW + gap);
           const y = H - pad - h;
