@@ -220,6 +220,12 @@ const KNOWN_WEB_GAPS = [
   // Same gap and same escape hatch: `exportMemberBytes` hands the tab an
   // <a download> instead of asking for a path it cannot write to.
   "export_bytes",
+  // The image lightbox's save/share hand bytes to the host. In a tab, save
+  // downloads the blob instead and share uses `navigator.share`; only a browser
+  // without Web Share falls through to `share_preview_image`, which fails and
+  // says so in the lightbox status rather than faking success.
+  "save_preview_image",
+  "share_preview_image",
   // Act on the host shell — open the blob with its default application, show
   // it in the file manager. Never reached in a tab: both buttons sit behind
   // `canRevealPath()`, which is false in the browser build, so it offers the
