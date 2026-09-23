@@ -15,6 +15,7 @@ import {
   MessageSquareQuote,
   MoreHorizontal,
   NotebookPen,
+  Package,
   Sparkles,
   Terminal,
   Workflow,
@@ -22,6 +23,8 @@ import {
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionHeaderMenu.module.css";
 import { canRevealPath } from "../canReveal";
+import { exportChainBundle } from "../chainBundle";
+import { isWebBuild } from "../hostEnv";
 import type { AuxFacet, AuxFacetItem } from "../detailAux";
 
 /** One icon per facet, so the menu reads as a list of destinations rather than
@@ -82,6 +85,26 @@ export function SessionHeaderMenu({
       setFailed(true);
       setTimeout(() => setFailed(false), 2000);
     });
+  };
+
+  // The export outlives the menu, so its progress and failure show on the
+  // button; success opens the file manager on the bundle.
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportBundle = () => {
+    setExportError(null);
+    exportChainBundle(sessionId, () => setExporting(true))
+      .then((summary) => {
+        if (summary && canRevealPath()) {
+          void invoke("reveal_path", { path: summary.path }).catch(() => {});
+        }
+      })
+      .catch((e) => {
+        setExportError(String(e));
+        setFailed(true);
+        setTimeout(() => setFailed(false), 4000);
+      })
+      .finally(() => setExporting(false));
   };
 
   const revealKey =
@@ -146,13 +169,33 @@ export function SessionHeaderMenu({
     });
   }
 
+  // The same bundle the relay-chain modal exports; for a session on no chain
+  // it holds just this session.
+  if (!isWebBuild()) {
+    items.push({
+      id: "export-bundle",
+      dividerBefore: true,
+      label: exporting ? t("card.handoff_export_busy") : t("card.handoff_export"),
+      icon: <Package size={13} />,
+      onSelect: () => {
+        if (!exporting) exportBundle();
+      },
+    });
+  }
+
   return (
     <>
       <button
         ref={btnRef}
         type="button"
-        className={`${styles.btn} ${anchor ? styles.btn_open : ""} ${failed ? styles.btn_failed : ""}`}
-        title={t("detail.more")}
+        className={`${styles.btn} ${anchor || exporting ? styles.btn_open : ""} ${failed ? styles.btn_failed : ""}`}
+        title={
+          exporting
+            ? t("card.handoff_export_busy")
+            : exportError
+              ? `${t("card.handoff_export_failed")}: ${exportError}`
+              : t("detail.more")
+        }
         aria-label={t("detail.more")}
         aria-haspopup="menu"
         aria-expanded={anchor != null}
