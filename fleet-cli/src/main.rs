@@ -1274,6 +1274,35 @@ pub(crate) enum SessionTitleGuidanceCommands {
     Status,
 }
 
+/// Subcommands an agent drives on purpose (the CLI twins of the `fleet__*`
+/// MCP tools, plus steering other sessions). Hook entry points (`guard`,
+/// `hook-event`, `prd-context`, …) are deliberately absent: they fire on every
+/// tool call and `hooks.jsonl` / `hook-timing.jsonl` already record them.
+const TRACED_SUBCOMMANDS: &[&str] = &[
+    "plan", "spawn", "handoff", "loop", "cron", "watch", "schedule", "notes", "history", "wiki",
+    "artifact", "send", "interrupt", "stop", "agents", "agent", "search", "memory",
+];
+
+/// Record a `start` [`claw_fleet_core::call_trace`] entry for an agent-facing
+/// invocation made from inside a session. Only `start`: the command's many
+/// `process::exit` paths skip any epilogue.
+fn trace_agent_facing_invocation() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let Some(sub) = argv.first() else { return };
+    if !TRACED_SUBCOMMANDS.contains(&sub.as_str()) {
+        return;
+    }
+    let Some(sid) = claw_fleet_core::codex_launch::resolve_fleet_session_id_from_env() else {
+        return;
+    };
+    let _ = claw_fleet_core::call_trace::CallTrace::begin(
+        &sid,
+        "cli",
+        sub,
+        &serde_json::json!({ "argv": argv }),
+    );
+}
+
 fn main() {
     claw_fleet_core::console::init_utf8();
 
@@ -1286,6 +1315,8 @@ fn main() {
             claw_fleet_core::proc_runner::host_main(&args[2]);
         }
     }
+
+    trace_agent_facing_invocation();
 
     let cli = Cli::parse();
 

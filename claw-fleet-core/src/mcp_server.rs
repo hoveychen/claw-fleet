@@ -265,8 +265,22 @@ fn heartbeat_window() -> std::time::Duration {
     crate::decision_panel_config::load().heartbeat_window()
 }
 
+/// Every `tools/call` is bracketed by a [`crate::call_trace`] record, so the
+/// chain debug bundle can show what each Fleet tool was asked, what it
+/// answered and how long it took — including a call that never returned.
 fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let trace = crate::call_trace::CallTrace::begin(&current_session_id(), "mcp", name, &args);
+    let result = dispatch_tool_call(name, params);
+    match &result {
+        Ok(v) => trace.end(v.get("isError").and_then(Value::as_bool).unwrap_or(false), v),
+        Err(e) => trace.end(true, &json!({ "jsonrpc_error": { "code": e.code, "message": e.message } })),
+    }
+    result
+}
+
+fn dispatch_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpcError> {
     match name {
         "fleet__ask" => handle_fleet_ask_call(params),
         "fleet__render_a2ui" => handle_a2ui_render_call(params),
