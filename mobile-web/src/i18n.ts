@@ -603,6 +603,7 @@ const DICT: Record<string, string> = {
   "，理由：{0}": " — reason: {0}",
   "（未说明）": "(not stated)",
   "第 {0} → {1} 棒": "Leg {0} → {1}",
+  "交接文档第 {0} 版": "Brief v{0}",
   "计划 {0}": "Plan {0}",
   "下一步 {0}": "next {0}",
 

@@ -269,7 +269,7 @@ pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
         250_000 => {
             "超过 250K 之后模型开始变钝——记不住早先的约束、重复已经做过的调查、把摘要当原话。\
 接力换回来的是一个清醒的头脑，不是一次损失：手上这段做完就跑 \
-`fleet handoff --note \"<做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`。\
+`fleet handoff --note \"<在上一版交接文档上改：对齐结论/坑/做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`。\
 如果确实马上就收尾，至少先用 fleet__notes 落一份 checkpoint。"
         }
         500_000 => {
@@ -280,7 +280,7 @@ pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
         _ => {
             "别再往上爬了。硬扛到自动压缩不会让你更省事——压缩把宏观状态摘成摘要，计划常在那里悄悄死掉，\
 而接力是把它完整交出去。立刻提交 worktree 进度，然后跑 \
-`fleet handoff --note \"<做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`，\
+`fleet handoff --note \"<在上一版交接文档上改：对齐结论/坑/做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`，\
 等它回 `ok: handoff registered` 再干净地结束回合。"
         }
     };

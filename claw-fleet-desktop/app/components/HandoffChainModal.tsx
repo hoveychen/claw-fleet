@@ -139,6 +139,10 @@ export function HandoffChainModal({
                 <div className={styles.handoff_link}>
                   <span className={styles.handoff_arrow} aria-hidden>↓</span>
                   <div className={styles.handoff_link_body}>
+                    {/* The note is the chain's living brief: link i carries version i+1. */}
+                    <span className={styles.handoff_next}>
+                      {t("card.handoff_note_version", { v: i + 1 })}
+                    </span>
                     {chain.links[i].nextTask && (
                       <span className={styles.handoff_next}>
                         {chain.links[i].planId} · {chain.links[i].nextTask}

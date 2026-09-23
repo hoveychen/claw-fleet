@@ -377,8 +377,9 @@ enum Commands {
     /// work, opening with your --note. Use when your context is running long
     /// mid-plan. Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
     Handoff {
-        /// Relay note for the successor (required): what's done, what's next,
-        /// key files, gotchas.
+        /// The chain's handoff brief (required): conclusions aligned with the
+        /// user, gotchas, what's done, what's next, key files. Revise the
+        /// version you opened with rather than writing from scratch.
         #[arg(long)]
         note: Option<String>,
         /// TASKS.md plan id the successor should continue (optional).

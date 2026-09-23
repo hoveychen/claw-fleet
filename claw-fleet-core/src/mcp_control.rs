@@ -191,7 +191,7 @@ fn handoff_tool_def() -> Value {
             "properties": {
                 "action": {"type": "string", "enum": ["register", "show", "cancel", "list"], "default": "register"},
                 "session": {"type": "string", "description": "Session whose chain to show (show only; defaults to this session)."},
-                "note": {"type": "string", "description": "Handoff briefing — what's done, what's next, key files, gotchas. Required for register."},
+                "note": {"type": "string", "description": "The chain's handoff brief — conclusions aligned with the user, gotchas, what's done, what's next, key files. It is one document every hop revises: start from the version you opened with (or `show`), keep the alignment and gotchas, rewrite progress and next step. Required for register."},
                 "plan": {"type": "string", "description": "Plan id to attribute the successor to."},
                 "next": {"type": "string", "description": "P-task the successor resumes at (requires plan)."},
                 "model": {"type": "string", "description": "Override the successor's model (else inherits this session's). Naming another harness's model relays on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
@@ -825,7 +825,7 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 // Notes in full: this action *is* the "read the whole chain"
                 // entry point, so clipping here would leave no way to reach the
                 // predecessors' briefings.
-                Some(c) => Ok(handoff::render_chain(&c, Some(&target), None)),
+                Some(c) => Ok(handoff::render_chain(&c, Some(&target), handoff::NoteView::Full)),
                 None => Err(format!(
                     "session {target} is not on any relay chain (it was not handed off to, and \
                      has not handed off yet)"

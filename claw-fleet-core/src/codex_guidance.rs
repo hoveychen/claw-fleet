@@ -292,6 +292,11 @@ fleet handoff --note \"<shift-change briefing>\" [--plan <plan-id>] [--next <P>]
 - `--note` is mandatory: what's done, what's in flight, key files, gotchas, \
 the next concrete step. Pass `--plan`/`--next` for a TASKS.md plan so the \
 successor is attributed automatically.\n\
+- The note is the chain's shared brief, not a one-off message: every baton \
+revises the version it opened with into the next one. Keep conclusions aligned \
+with the user and known gotchas (drop one only when it no longer holds, and say \
+why); rewrite progress and the next step. What you do not carry forward, no \
+later baton sees.\n\
 - Commit worktree progress first, run the `fleet handoff` command, wait for \
 `ok: handoff registered`, then end the turn. **Narrating a handoff in prose \
 does nothing** — only the actual command spawns a successor. Never use \

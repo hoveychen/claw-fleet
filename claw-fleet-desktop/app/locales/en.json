@@ -1042,6 +1042,7 @@
     "handoff_export_reveal": "Reveal",
     "handoff_export_failed": "Export failed",
     "handoff_hop": "Leg {{n}}",
+    "handoff_note_version": "Brief v{{v}}",
     "handoff_goal": "Chain goal",
     "handoff_goal_revision": "Changed at leg {{hop}}: “{{from}}” → “{{to}}”",
     "handoff_goal_reason": " — reason: {{reason}}",

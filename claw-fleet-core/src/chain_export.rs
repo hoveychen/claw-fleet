@@ -452,7 +452,7 @@ fn write_bundle<W: Write>(seed: &str, sink: W, scratch: &Path) -> io::Result<(us
     let fleet = crate::session::get_fleet_dir();
 
     if let Some(c) = &chain {
-        b.add_bytes("chain.txt", crate::handoff::render_chain(c, Some(seed), None).as_bytes(), "handoff::render_chain")?;
+        b.add_bytes("chain.txt", crate::handoff::render_chain(c, Some(seed), crate::handoff::NoteView::Full).as_bytes(), "handoff::render_chain")?;
     }
 
     // Transcripts, and the time window they span.
