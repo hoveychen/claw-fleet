@@ -229,19 +229,30 @@ pub fn render_chain_list(chains: &[HandoffChain]) -> String {
     out
 }
 
+/// How much of each hop's note [`render_chain`] prints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteView {
+    /// Every version in full — the `show` action and the debug bundle.
+    Full,
+    /// Every version clipped to this many chars.
+    Clipped(usize),
+    /// Only version 1 (the chain's origin), clipped to this many chars; later
+    /// versions are omitted. Used in the successor's opening prompt, which
+    /// already carries the latest version in full — the versions in between
+    /// are superseded by it.
+    OriginOnly(usize),
+}
+
 /// Render a chain as agent-readable text: one block per hop, each carrying the
 /// note that hop wrote when it handed the baton on.
 ///
+/// The note is the chain's living brief: hop N writes version N by revising
+/// version N-1, so the links double as its version history.
+///
 /// This is the affordance a relayed session needs to answer "what did the boss
 /// originally ask?" — the chain's hop 1 is the origin of the work, which is not
-/// necessarily the plan the current hop happens to be executing. `note_limit`
-/// clips each note (for the successor's opening prompt, where the full chain
-/// would crowd out the briefing); `None` renders every note in full.
-pub fn render_chain(
-    chain: &HandoffChain,
-    viewer: Option<&str>,
-    note_limit: Option<usize>,
-) -> String {
+/// necessarily the plan the current hop happens to be executing.
+pub fn render_chain(chain: &HandoffChain, viewer: Option<&str>, notes: NoteView) -> String {
     let ids = chain.session_ids();
     let mut out = format!(
         "接力链 {}（{} 棒，plan={}，workspace={}）\n",
@@ -286,11 +297,17 @@ pub fn render_chain(
                 (Some(p), None) => format!("（plan={p}）"),
                 _ => String::new(),
             };
-            let note = match note_limit {
-                Some(n) => clip_note(&link.note, n),
-                None => link.note.trim().to_string(),
+            let note = match notes {
+                NoteView::Full => link.note.trim().to_string(),
+                NoteView::Clipped(n) => clip_note(&link.note, n),
+                NoteView::OriginOnly(n) if i == 0 => clip_note(&link.note, n),
+                NoteView::OriginOnly(_) => continue,
             };
-            out.push_str(&format!("  交给第 {} 棒时留下的 note{plan}：\n", i + 2));
+            out.push_str(&format!(
+                "  第 {} 版交接文档（交给第 {} 棒时写）{plan}：\n",
+                i + 1,
+                i + 2
+            ));
             for line in note.lines() {
                 out.push_str("  ");
                 out.push_str(line);
@@ -749,6 +766,19 @@ pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>
     out.push_str("\n---\n\n");
     // Placed *after* the note delimiters so `codex_source::derive_codex_title`
     // still finds the note between them.
+    //
+    // The note is the chain's living brief, not a one-off message: whatever the
+    // successor does not carry into its own `--note` is gone for every later
+    // hop, so the revise-don't-rewrite instruction rides on every relay.
+    out.push_str(&format!(
+        "上面是这条链共用的**交接文档**（第 {v} 版，由第 {v} 棒写成），不是一次性留言。\
+         你若再交棒，`--note` 要在这一版上改写出第 {next} 版，而不是从零写：\
+         与老板对齐过的结论、踩过的坑原样保留（确已失效的写明为什么再删），\
+         进度和下一步按你的实际情况重写。你没带过去的内容，后面每一棒都看不到。\
+         上下文被压缩后要找回这份全文，调 `fleet__handoff` 传 action=\"show\"，末一版就是它。\n\n",
+        v = p.hop,
+        next = p.hop + 1
+    ));
     if let Some(chain) = prior.filter(|c| !c.links.is_empty()) {
         let ran = chain.session_ids().len();
         out.push_str(&format!(
@@ -757,9 +787,9 @@ pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>
              不是你手上的 plan——链中段常派生出新 plan，别拿它当原始诉求。\n\n",
             ran + 1
         ));
-        out.push_str(&render_chain(chain, None, Some(200)));
+        out.push_str(&render_chain(chain, None, NoteView::OriginOnly(200)));
         out.push_str(
-            "\n每一棒 note 的全文：调 `fleet__handoff` 传 action=\"show\"（CLI 等价 \
+            "\n交接文档的每一个历史版本：调 `fleet__handoff` 传 action=\"show\"（CLI 等价 \
              `fleet handoff show <session id>`）。",
         );
         if p.agent_source == "claude-code" {
@@ -1356,7 +1386,7 @@ mod tests {
                 handed_at: 1,
             }],
         };
-        let out = render_chain(&chain, None, None);
+        let out = render_chain(&chain, None, NoteView::Full);
         assert!(out.contains("本链目标：新目标"), "{out}");
         assert!(
             out.contains("改于第 2 棒"),
@@ -2162,6 +2192,10 @@ mod tests {
         assert!(prompt.contains("P1-P3 已完成；P4 卡在 X"));
         assert!(prompt.contains("auth-refactor"));
         assert!(prompt.contains("P4"));
+        // The note is the chain's living brief: hop 2 wrote version 2, and the
+        // successor is told to revise it into version 3 rather than start over.
+        assert!(prompt.contains("第 2 版"), "{prompt}");
+        assert!(prompt.contains("第 3 版") && prompt.contains("从零写"), "{prompt}");
         // The relay must not trust the predecessor's *claimed* verification: a
         // "tests pass / build green" line in the note could be fabricated (or
         // simply stale after the handoff), and blindly continuing would
@@ -2245,7 +2279,7 @@ mod tests {
         // (Anchor on the roster's own header — the standing prompt text already
         // contains the term "handoff chain" in an unrelated sentence.)
         let first = compose_successor_prompt(&taken, chain_containing_in(&cdir, "s1").as_ref());
-        assert!(!first.contains("第 1 棒"), "{first}");
+        assert!(!first.contains("第 1 棒  "), "{first}");
         record_link_in(&cdir, &taken, "s2", 1002).unwrap();
 
         register_simple(&pdir, &cdir, "s2", "维度改 1024", 2000).unwrap();
@@ -2259,6 +2293,9 @@ mod tests {
         assert!(prompt.contains("第 1 棒  s1"), "{prompt}");
         assert!(prompt.contains("链的起点"), "{prompt}");
         assert!(prompt.contains("老板原话：我要独立的文档库"), "{prompt}");
+        // Versions between the origin and the latest are superseded by the
+        // latest (carried in full above) and stay out of the opening prompt.
+        assert!(!prompt.contains("维度改 1024"), "{prompt}");
         assert!(prompt.contains("action=\"show\""), "{prompt}");
         assert!(prompt.contains("~/.claude/projects"), "{prompt}");
         // The immediate briefing must still be the note, ahead of the roster.
@@ -2307,7 +2344,7 @@ mod tests {
         record_link_in(&cdir, &taken, "s3", 2002).unwrap();
 
         let chain = chain_containing_in(&cdir, "s3").unwrap();
-        let full = render_chain(&chain, Some("s3"), None);
+        let full = render_chain(&chain, Some("s3"), NoteView::Full);
         assert!(full.contains("第 1 棒  s1"), "{full}");
         assert!(full.contains("链的起点"), "{full}");
         assert!(full.contains("你自己"), "{full}");
@@ -2328,7 +2365,7 @@ mod tests {
 
         // Clipping keeps the lead-in and marks the elision, on a char boundary
         // (the notes are CJK — a byte slice would panic).
-        let clipped = render_chain(&chain, Some("s3"), Some(4));
+        let clipped = render_chain(&chain, Some("s3"), NoteView::Clipped(4));
         assert!(clipped.contains("老板原话…"), "{clipped}");
         assert!(!clipped.contains("独立的文档库"), "{clipped}");
         let _ = fs::remove_dir_all(&root);

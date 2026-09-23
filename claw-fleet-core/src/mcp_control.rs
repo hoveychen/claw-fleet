@@ -825,7 +825,7 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 // Notes in full: this action *is* the "read the whole chain"
                 // entry point, so clipping here would leave no way to reach the
                 // predecessors' briefings.
-                Some(c) => Ok(handoff::render_chain(&c, Some(&target), None)),
+                Some(c) => Ok(handoff::render_chain(&c, Some(&target), handoff::NoteView::Full)),
                 None => Err(format!(
                     "session {target} is not on any relay chain (it was not handed off to, and \
                      has not handed off yet)"

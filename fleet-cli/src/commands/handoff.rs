@@ -45,7 +45,7 @@ pub(crate) fn cmd_handoff(
             match claw_fleet_core::handoff::chain_containing(&session_id) {
                 Some(c) => print!(
                     "{}",
-                    claw_fleet_core::handoff::render_chain(&c, Some(&session_id), None)
+                    claw_fleet_core::handoff::render_chain(&c, Some(&session_id), claw_fleet_core::handoff::NoteView::Full)
                 ),
                 None => {
                     eprintln!("no chain contains session {session_id}");
