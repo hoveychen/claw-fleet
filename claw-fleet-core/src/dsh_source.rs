@@ -125,6 +125,37 @@ static ROSTER: OnceLock<Mutex<Option<(std::time::Instant, Value)>>> = OnceLock::
 /// on that one flight instead of each starting its own.
 static ROSTER_FETCH: OnceLock<Mutex<()>> = OnceLock::new();
 
+/// How long a roster scan stays off `dsh web` after failing to start it.
+///
+/// A dsh that cannot boot does not fail fast: on 2026-09-23 an orphaned
+/// `~/.dsh/.credentials.yaml.lock` (its writer long dead, and dsh never breaks
+/// a lock it did not take) made every `dsh web` wait out its lock timeout and
+/// exit, and `connect_or_start` tries twice (remembered port, then port 0) —
+/// about 70s per scan. The desktop rescans every source on one thread, so
+/// every Claude rescan queued behind that and a freshly spawned session took
+/// 30s+ to appear. Backing off turns the failing source into a cheap error for
+/// the scans in between; interactive calls still go through and retry.
+const START_FAILURE_BACKOFF: Duration = Duration::from_secs(120);
+
+/// When [`DshSource::with_client`] last failed to bring `dsh web` up, and why.
+static START_FAILURE: OnceLock<Mutex<Option<(std::time::Instant, String)>>> = OnceLock::new();
+
+fn start_failure_slot() -> &'static Mutex<Option<(std::time::Instant, String)>> {
+    START_FAILURE.get_or_init(|| Mutex::new(None))
+}
+
+/// The error a roster scan reports while `failure` is inside the backoff window.
+fn start_backoff_message(failure: Option<&(std::time::Instant, String)>) -> Option<String> {
+    failure
+        .filter(|(at, _)| at.elapsed() < START_FAILURE_BACKOFF)
+        .map(|(at, e)| {
+            format!(
+                "dsh web failed to start {}s ago, not retrying yet: {e}",
+                at.elapsed().as_secs()
+            )
+        })
+}
+
 fn server_slot() -> &'static Mutex<Option<DshServer>> {
     SERVER.get_or_init(|| Mutex::new(None))
 }
@@ -200,26 +231,17 @@ impl DshSource {
         let client = {
             let mut guard = lock(server_slot());
 
-            match guard.as_mut() {
-                Some(server) => server.ensure_alive()?,
-                None => {
-                    let binary = crate::dsh_server::discover().ok_or_else(|| {
-                        "dsh is not installed (npm i -g @deepseek-ai/dsh)".to_string()
-                    })?;
-                    // Root the server at the harness home rather than a project:
-                    // observation spans every workspace, and a server rooted in a
-                    // directory that later disappears would fail to restart.
-                    let cwd = crate::session::real_home_dir()
-                        .ok_or_else(|| "cannot determine home dir".to_string())?;
-                    let server = DshServer::connect_or_start(&binary, &cwd)?;
-                    crate::log_debug(&format!(
-                        "dsh source: connected persistent dsh web pid={} port={}",
-                        server.pid(),
-                        server.port()
-                    ));
-                    *guard = Some(server);
+            let started = match guard.as_mut() {
+                Some(server) => server.ensure_alive(),
+                None => Self::start_server().map(|server| *guard = Some(server)),
+            };
+            match &started {
+                Ok(()) => *lock(start_failure_slot()) = None,
+                Err(e) => {
+                    *lock(start_failure_slot()) = Some((std::time::Instant::now(), e.clone()))
                 }
             }
+            started?;
 
             let server = guard.as_ref().expect("server started above");
             Self::ensure_watcher(server.port(), server.launch_token());
@@ -227,6 +249,30 @@ impl DshSource {
         };
 
         f(&client)
+    }
+
+    /// Adopt or launch the process-global `dsh web`.
+    fn start_server() -> Result<DshServer, String> {
+        let binary = crate::dsh_server::discover()
+            .ok_or_else(|| "dsh is not installed (npm i -g @deepseek-ai/dsh)".to_string())?;
+        // Root the server at the harness home rather than a project:
+        // observation spans every workspace, and a server rooted in a
+        // directory that later disappears would fail to restart.
+        let cwd = crate::session::real_home_dir()
+            .ok_or_else(|| "cannot determine home dir".to_string())?;
+        let server = DshServer::connect_or_start(&binary, &cwd)?;
+        crate::log_debug(&format!(
+            "dsh source: connected persistent dsh web pid={} port={}",
+            server.pid(),
+            server.port()
+        ));
+        Ok(server)
+    }
+
+    /// The recent start failure a roster scan should report instead of trying
+    /// again, if one is younger than [`START_FAILURE_BACKOFF`].
+    fn backed_off_start_failure() -> Option<String> {
+        start_backoff_message(lock(start_failure_slot()).as_ref())
     }
 
     /// One `session/page` of a session's log.
@@ -349,6 +395,9 @@ impl DshSource {
         // Another scan's flight may have landed while this one queued for it.
         if let Some(fresh) = Self::fresh_roster() {
             return Ok(fresh);
+        }
+        if let Some(e) = Self::backed_off_start_failure() {
+            return Err(e);
         }
 
         let value = self.with_client(|client| {
@@ -2617,6 +2666,23 @@ mod spend_refresh_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_backoff_holds_off_only_inside_the_window() {
+        assert_eq!(start_backoff_message(None), None);
+
+        let recent = (std::time::Instant::now(), "lock timed out".to_string());
+        let msg = start_backoff_message(Some(&recent)).expect("recent failure backs off");
+        assert!(msg.contains("lock timed out"), "{msg}");
+
+        let Some(old_at) =
+            std::time::Instant::now().checked_sub(START_FAILURE_BACKOFF + Duration::from_secs(1))
+        else {
+            return; // monotonic clock too young to rewind that far
+        };
+        let old = (old_at, "lock timed out".to_string());
+        assert_eq!(start_backoff_message(Some(&old)), None);
+    }
 
     #[test]
     fn collect_api_key_envs_walks_namespace_values() {
