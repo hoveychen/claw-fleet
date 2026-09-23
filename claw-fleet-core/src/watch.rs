@@ -136,6 +136,23 @@ pub struct WatchRecord {
     /// Reset by any evaluation that fails normally.
     #[serde(default)]
     pub structural_fail_streak: u64,
+    /// Epoch ms by which the agent expected the condition to hold. Past it, a
+    /// still-unmet watch wakes the session **once** to self-check, without
+    /// retiring the watch. `None` = no check-in.
+    ///
+    /// Why: the registration preflight cannot catch an `until` that will never
+    /// become true — every poll of it looks exactly like "not yet". In
+    /// prediction-market session 38656240 (2026-09-23) such a watch polled
+    /// 1881 times across all eight matches it existed to catch, and only the
+    /// boss asking "shouldn't it be done by now?" surfaced it, nine hours
+    /// late. The agent knew when the first match started; this turns that
+    /// knowledge into a wake-up at the moment the silence becomes suspicious.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_by: Option<u64>,
+    /// Set once the expect-by check-in has been delivered, so it fires at most
+    /// once per watch.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub checked_in: bool,
 }
 
 impl WatchRecord {
@@ -148,6 +165,34 @@ impl WatchRecord {
     pub fn is_expired(&self, now: u64) -> bool {
         now >= self.deadline_at
     }
+
+    /// Past `expect_by` with the check-in not yet delivered.
+    pub fn check_in_due(&self, now: u64) -> bool {
+        !self.checked_in && self.expect_by.is_some_and(|t| now >= t)
+    }
+}
+
+/// Parse an `--expect-by` value into epoch ms: a duration from now (`8h`,
+/// `90m`, same grammar as `--timeout`) or an absolute local time (same grammar
+/// as `fleet schedule --at`: `2026-09-23 14:30`, or a bare `14:30`).
+pub fn parse_expect_by(spec: &str, now: u64) -> Result<u64, String> {
+    let s = spec.trim();
+    if s.is_empty() {
+        return Err("expect-by is empty (e.g. 8h, or \"2026-09-23 14:30\")".to_string());
+    }
+    if let Ok(secs) = parse_duration_secs(s) {
+        if secs == 0 {
+            return Err("expect-by must be in the future".to_string());
+        }
+        return Ok(now + secs * 1000);
+    }
+    let at = crate::schedule::parse_at(s, now).map_err(|_| {
+        format!("cannot parse expect-by '{s}' (use a duration like 8h, or a local time like \"2026-09-23 14:30\")")
+    })?;
+    if at <= now {
+        return Err(format!("expect-by '{s}' is already in the past"));
+    }
+    Ok(at)
 }
 
 /// `5m`, `90s`, `2h`, `1d` → seconds. Bare digits are read as seconds. Shared by
@@ -294,8 +339,11 @@ pub fn create(
     model: Option<&str>,
     effort: Option<&str>,
     agent_source: Option<&str>,
+    expect_by: Option<u64>,
 ) -> Result<(WatchRecord, crate::process_util::GateOutcome), String> {
     let dir = watches_dir().ok_or("cannot determine home dir")?;
+    let now = now_ms();
+    check_expect_by(expect_by, now, timeout_secs)?;
     // Preflight before anything is written: a rejected watch must leave no
     // record and no timer behind.
     let probe = preflight(until_cmd.trim())?;
@@ -312,15 +360,34 @@ pub fn create(
         effort,
         agent_source,
         &uuid::Uuid::new_v4().to_string()[..8],
-        now_ms(),
+        now,
     )?;
     // Seed the diagnostic fields from the preflight, so a watch shows what its
     // very first evaluation said even before the timer's first poll lands.
     let mut rec = rec;
     rec.last_exit = probe.exit_code;
     rec.last_stderr = probe.stderr.clone();
+    rec.expect_by = expect_by;
     write_record(&dir, &rec)?;
     Ok((rec, probe))
+}
+
+/// An `expect_by` at or past the deadline could never fire before the timeout
+/// resume does, so it is a mistake worth saying out loud rather than a no-op.
+fn check_expect_by(expect_by: Option<u64>, now: u64, timeout_secs: u64) -> Result<(), String> {
+    let Some(t) = expect_by else { return Ok(()) };
+    if t <= now {
+        return Err("expect-by is already in the past".to_string());
+    }
+    let deadline = now + timeout_secs.min(MAX_TIMEOUT_SECS) * 1000;
+    if t >= deadline {
+        return Err(
+            "expect-by is at or after the watch's timeout, so the check-in could never fire; \
+             pick an earlier expect-by or a longer timeout"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -372,6 +439,8 @@ fn create_in(
         last_exit: None,
         last_stderr: String::new(),
         structural_fail_streak: 0,
+        expect_by: None,
+        checked_in: false,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -704,6 +773,9 @@ pub enum TimerStep {
     Exit,
     /// Fire now. `timed_out` distinguishes "condition met" from "deadline passed".
     Fire { timed_out: bool },
+    /// Not yet, and past `expect_by`: wake the session once to self-check,
+    /// then keep polling.
+    CheckIn,
     /// Not yet — nap this many milliseconds and re-check.
     Nap { ms: u64 },
 }
@@ -726,7 +798,15 @@ fn decide(
     if condition_met() {
         return TimerStep::Fire { timed_out: false };
     }
-    let remaining = rec.deadline_at.saturating_sub(now);
+    if rec.check_in_due(now) {
+        return TimerStep::CheckIn;
+    }
+    // Never nap past a pending check-in either, so it lands on time.
+    let wake_at = match rec.expect_by {
+        Some(t) if !rec.checked_in => t.min(rec.deadline_at),
+        _ => rec.deadline_at,
+    };
+    let remaining = wake_at.saturating_sub(now);
     // Nap at most one poll interval, never past POLL_CAP_MS, and never past the
     // deadline (so the timeout fire lands on time rather than a poll-cap late).
     let nap = rec
@@ -814,6 +894,95 @@ pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: boo
          不是用户消息。请据此向老板汇报结果，别再重复注册 Monitor/后台任务。）",
     );
     out
+}
+
+/// Local wall-clock rendering of an epoch-ms instant for a resume prompt.
+fn fmt_local(ms: u64) -> String {
+    use chrono::{Local, TimeZone};
+    Local
+        .timestamp_millis_opt(ms as i64)
+        .single()
+        .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| ms.to_string())
+}
+
+/// The prompt an expect-by check-in wakes the session with: the condition is
+/// overdue, here is the evidence, go check whether the `until` itself is wrong.
+pub fn compose_check_in_prompt(rec: &WatchRecord) -> String {
+    let mut out = format!(
+        "你注册的 Fleet watch `{}` 已过你预期条件成立的时间（{}），但条件仍未成立。\
+         watch **没有**取消，仍在每 {} 秒轮询一次，{} 超时。",
+        rec.id,
+        rec.expect_by.map(fmt_local).unwrap_or_default(),
+        rec.poll_secs,
+        fmt_local(rec.deadline_at),
+    );
+    if let Some(note) = &rec.note {
+        out.push_str(&format!("\n\n等待的是：{note}"));
+    }
+    out.push_str(&format!("\n\nuntil 命令：{}", rec.until_cmd));
+    out.push_str(&format!(
+        "\n已轮询 {} 次，最后一次 exit {}",
+        rec.poll_count,
+        rec.last_exit
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "?".into())
+    ));
+    if !rec.last_stderr.is_empty() {
+        out.push_str(&format!("\n最后一次 stderr：{}", rec.last_stderr));
+    }
+    out.push_str(
+        "\n\n请自查：是等的事确实还没发生，还是 until 写错了、永远不会成立？\
+         先确认那件事现在的真实状态；如果它已经发生了，就说明 until 写错了。\
+         找一个条件已满足的真实样本手跑一遍 until，确认它会退 0。\
+         条件没问题就直接结束回合，watch 会继续等；写错了就 stop 掉这个 watch，修好后重新注册。\
+         \n\n---\n（这是 Fleet watch 的预期时间自查唤醒，只会发生这一次，不是用户消息。）",
+    );
+    out
+}
+
+/// Deliver the one expect-by check-in: mark it delivered on the record (so a
+/// re-armed timer never sends a second one), then resume the session with the
+/// check-in prompt. Unlike [`fire_in`] the record stays — the watch keeps
+/// waiting. Returns `Ok(false)` when there was nothing to do (already checked
+/// in, or no `expect_by`).
+fn check_in_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    interrupt_if_live: &dyn Fn(&str) -> bool,
+    resume: &ResumeFn<'_>,
+) -> Result<bool, ClaimError> {
+    let mut rec = get_in(dir, id).ok_or(ClaimError::Gone)?;
+    if rec.generation != generation {
+        return Err(ClaimError::StaleGeneration {
+            expected: generation,
+            found: rec.generation,
+        });
+    }
+    if rec.checked_in || rec.expect_by.is_none() {
+        return Ok(false);
+    }
+    // Persist the flag before resuming: a lost check-in is cheap, a repeated
+    // one wakes the agent twice for the same question.
+    rec.checked_in = true;
+    write_record(dir, &rec).map_err(|_| ClaimError::Gone)?;
+    let prompt = compose_check_in_prompt(&rec);
+    // Same single-writer rule as `fire_in`: never resume on top of a live turn.
+    if interrupt_if_live(&rec.session_id) {
+        crate::log_debug(&format!(
+            "watch {id}: session {} still live at check-in; interrupted it before resuming",
+            rec.session_id
+        ));
+    }
+    match resume(&rec, &prompt) {
+        Ok(()) => crate::log_debug(&format!(
+            "watch {id}: expect-by check-in -> resumed session {}",
+            rec.session_id
+        )),
+        Err(e) => crate::log_debug(&format!("watch {id}: check-in resume failed: {e}")),
+    }
+    Ok(true)
 }
 
 /// Signature of the resume side-effect — injected so the fire path is testable
@@ -948,6 +1117,27 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                     crate::log_debug(&format!("watch {id}: fire refused ({e})"));
                 }
                 return;
+            }
+            TimerStep::CheckIn => {
+                // Record this poll first so the check-in prompt carries its
+                // exit code and the up-to-date count.
+                if let Some(dir) = watches_dir() {
+                    touch_in(&dir, id, generation, now_ms(), probed.borrow().as_ref());
+                    if let Err(e) = check_in_in(
+                        &dir,
+                        id,
+                        generation,
+                        &interrupt_if_live,
+                        &|rec, prompt| spawn_resume(rec, prompt),
+                    ) {
+                        crate::log_debug(&format!("watch {id}: check-in refused ({e})"));
+                    }
+                }
+                // Nap like any other unmet poll; also keeps a failed check-in
+                // write from spinning the probe in a tight loop.
+                std::thread::sleep(std::time::Duration::from_millis(
+                    rec.poll_secs.saturating_mul(1000).min(POLL_CAP_MS),
+                ));
             }
             TimerStep::Nap { ms } => {
                 // Heartbeat: record that a live timer just polled, so reconcile
@@ -1598,6 +1788,127 @@ mod tests {
     /// liveness gate: the session is dead, so nothing is interrupted.
     fn dead(_session_id: &str) -> bool {
         false
+    }
+
+    /// A watch with `expect_by` set, written to disk — `create_in` has no
+    /// parameter for it (only `create` does, after validating it).
+    fn make_expecting(d: &Path, id: &str, now: u64, expect_by: u64) -> WatchRecord {
+        let mut rec = make(d, id, now);
+        rec.expect_by = Some(expect_by);
+        write_record(d, &rec).unwrap();
+        rec
+    }
+
+    #[test]
+    fn decide_checks_in_once_past_expect_by_and_never_before() {
+        let d = dir();
+        let rec = make_expecting(d.path(), "w1", 0, 60_000);
+        // Before expect_by: an ordinary nap, cut short so the check-in lands on time.
+        assert_eq!(
+            decide(&rec, 0, 50_000, || false),
+            TimerStep::Nap { ms: 10_000 }
+        );
+        // Past it and still unmet: check in.
+        assert_eq!(decide(&rec, 0, 60_000, || false), TimerStep::CheckIn);
+        // A met condition still wins over the check-in.
+        assert_eq!(
+            decide(&rec, 0, 60_000, || true),
+            TimerStep::Fire { timed_out: false }
+        );
+        // Once delivered, never again.
+        let mut done = rec.clone();
+        done.checked_in = true;
+        assert_eq!(
+            decide(&done, 0, 70_000, || false),
+            TimerStep::Nap { ms: 30_000 }
+        );
+        // No expect_by: never checks in.
+        let plain = make(d.path(), "w2", 0);
+        assert_eq!(
+            decide(&plain, 0, 7_000_000, || false),
+            TimerStep::Nap { ms: 30_000 }
+        );
+    }
+
+    /// The check-in resumes once with the evidence, keeps the watch alive, and a
+    /// second attempt (a re-armed timer) resumes nothing.
+    #[test]
+    fn check_in_resumes_once_and_keeps_the_watch() {
+        let d = dir();
+        let mut rec = make_expecting(d.path(), "w1", 0, 60_000);
+        rec.poll_count = 42;
+        rec.last_exit = Some(1);
+        write_record(d.path(), &rec).unwrap();
+        let seen: RefCell<Vec<String>> = RefCell::new(Vec::new());
+        let resume = |_r: &WatchRecord, prompt: &str| {
+            seen.borrow_mut().push(prompt.to_string());
+            Ok(())
+        };
+        assert_eq!(check_in_in(d.path(), "w1", 0, &dead, &resume), Ok(true));
+        let after = get_in(d.path(), "w1").expect("check-in must not retire the watch");
+        assert!(after.checked_in);
+        assert_eq!(check_in_in(d.path(), "w1", 0, &dead, &resume), Ok(false));
+
+        let seen = seen.into_inner();
+        assert_eq!(seen.len(), 1, "checked in exactly once");
+        let p = &seen[0];
+        assert!(p.contains("已过你预期条件成立的时间"));
+        assert!(p.contains("没有**取消"));
+        assert!(p.contains(&rec.until_cmd), "carries the until command");
+        assert!(p.contains("已轮询 42 次，最后一次 exit 1"));
+        assert!(p.contains("CI run 123"), "carries the note");
+        assert!(p.contains("手跑一遍 until"));
+    }
+
+    #[test]
+    fn check_in_refuses_a_stale_timer() {
+        let d = dir();
+        make_expecting(d.path(), "w1", 0, 60_000);
+        let resume = |_r: &WatchRecord, _p: &str| -> Result<(), String> {
+            panic!("a stale timer must not resume")
+        };
+        assert!(matches!(
+            check_in_in(d.path(), "w1", 3, &dead, &resume),
+            Err(ClaimError::StaleGeneration { .. })
+        ));
+    }
+
+    #[test]
+    fn check_in_flag_survives_a_round_trip_and_old_records_parse() {
+        let d = dir();
+        let mut rec = make_expecting(d.path(), "w1", 0, 60_000);
+        rec.checked_in = true;
+        write_record(d.path(), &rec).unwrap();
+        assert_eq!(get_in(d.path(), "w1").unwrap(), rec);
+        // A record written before these fields existed still loads, with no check-in.
+        let old = r#"{"id":"w9","sessionId":"s","workspacePath":"/ws","untilCmd":"false",
+            "pollSecs":30,"deadlineAt":10,"generation":0,"created":0}"#;
+        let parsed: WatchRecord = serde_json::from_str(old).unwrap();
+        assert_eq!(parsed.expect_by, None);
+        assert!(!parsed.checked_in);
+    }
+
+    #[test]
+    fn parse_expect_by_takes_durations_and_local_times() {
+        let now = 1_790_000_000_000;
+        assert_eq!(parse_expect_by("8h", now), Ok(now + 8 * 3600 * 1000));
+        assert_eq!(parse_expect_by("90m", now), Ok(now + 90 * 60 * 1000));
+        // A bare time-of-day is always in the future (today or tomorrow).
+        let t = parse_expect_by("14:30", now).unwrap();
+        assert!(t > now && t <= now + 24 * 3600 * 1000);
+        assert!(parse_expect_by("2000-01-01 00:00", now).is_err(), "past time");
+        assert!(parse_expect_by("0s", now).is_err());
+        assert!(parse_expect_by("soon", now).is_err());
+        assert!(parse_expect_by("", now).is_err());
+    }
+
+    #[test]
+    fn expect_by_must_fall_before_the_deadline() {
+        let now = 1_000_000;
+        assert!(check_expect_by(None, now, 3600).is_ok());
+        assert!(check_expect_by(Some(now + 60_000), now, 3600).is_ok());
+        assert!(check_expect_by(Some(now), now, 3600).is_err());
+        assert!(check_expect_by(Some(now + 3600 * 1000), now, 3600).is_err());
     }
 
     /// A fire claims the slot, composes the prompt, and resumes exactly once; the

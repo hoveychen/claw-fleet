@@ -206,6 +206,7 @@ fn create(
         ctx.model.as_deref(),
         ctx.effort.as_deref(),
         ctx.source.as_deref(),
+        None,
     ) {
         Ok((rec, probe)) => {
             // The preflight's verdict, when it has one to give (already true /

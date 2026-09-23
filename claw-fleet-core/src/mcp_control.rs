@@ -875,6 +875,7 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 ctx.model.as_deref(),
                 ctx.effort.as_deref(),
                 ctx.source.as_deref(),
+                None,
             )?;
             let armed = match watch::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
