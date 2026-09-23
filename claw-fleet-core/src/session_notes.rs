@@ -202,18 +202,37 @@ pub fn write_in(root: &Path, session_id: &str, path: &str, text: &str) -> Result
 }
 
 /// Append text exactly as provided to a note file, creating it if absent.
+///
+/// When the calling session has no file at `path` yet but a handoff
+/// predecessor does, the new file is seeded with the nearest predecessor's
+/// content first. Reads resolve own-file-first, so without the seed a
+/// successor's first `append checkpoint.md` would create a file holding only
+/// the appended fragment and hide the predecessor's whole checkpoint.
 pub fn append(session_id: &str, path: &str, text: &str) -> Result<NoteFile, String> {
     let root = notes_root().ok_or("cannot determine home dir")?;
-    append_in(&root, session_id, path, text)
+    append_in(&root, &readable_sessions(session_id), path, text)
 }
 
+/// `readable` is [`readable_sessions`] for the writer: the writer itself
+/// first, then its predecessors nearest-first.
 pub fn append_in(
     root: &Path,
-    session_id: &str,
+    readable: &[String],
     path: &str,
     text: &str,
 ) -> Result<NoteFile, String> {
+    let session_id = readable.first().ok_or("no session to append as")?.as_str();
     let full = resolve(root, session_id, path)?;
+    if !full.is_file() {
+        for sid in &readable[1..] {
+            let inherited = resolve(root, sid, path)?;
+            if inherited.is_file() {
+                let seed = fs::read_to_string(&inherited)
+                    .map_err(|e| format!("read {}: {e}", inherited.display()))?;
+                return write_in(root, session_id, path, &(seed + text));
+            }
+        }
+    }
     let existing = fs::metadata(&full).map(|m| m.len() as usize).unwrap_or(0);
     if existing + text.len() > MAX_NOTE_FILE_BYTES {
         return Err(format!(
@@ -698,7 +717,7 @@ mod tests {
         let root = fresh_root("rw");
         let own = vec!["s1".to_string()];
         write_in(&root, "s1", "progress.md", "goal: x\n").unwrap();
-        append_in(&root, "s1", "progress.md", "next: y\n").unwrap();
+        append_in(&root, &["s1".to_string()], "progress.md", "next: y\n").unwrap();
         assert_eq!(
             read_in(&root, &own, "progress.md", None, None).unwrap(),
             "goal: x\nnext: y\n"
@@ -755,8 +774,8 @@ mod tests {
         assert!(write_in(&root, "s1", "big.md", &big).is_err());
         let almost = "x".repeat(MAX_NOTE_FILE_BYTES - 1);
         write_in(&root, "s1", "big.md", &almost).unwrap();
-        assert!(append_in(&root, "s1", "big.md", "yy").is_err());
-        append_in(&root, "s1", "big.md", "y").unwrap();
+        assert!(append_in(&root, &["s1".to_string()], "big.md", "yy").is_err());
+        append_in(&root, &["s1".to_string()], "big.md", "y").unwrap();
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -778,6 +797,32 @@ mod tests {
         assert_eq!(readable_sessions_with("a", Some(&c)), vec!["a"]);
         assert_eq!(readable_sessions_with("zzz", Some(&c)), vec!["zzz"]);
         assert_eq!(readable_sessions_with("solo", None), vec!["solo"]);
+    }
+
+    /// A successor's first append to an inherited path must extend the
+    /// predecessor's file, not start a fragment that shadows it on read.
+    #[test]
+    fn successor_append_seeds_from_the_nearest_predecessor() {
+        let root = fresh_root("append-seed");
+        write_in(&root, "a", "checkpoint.md", "hop a\n").unwrap();
+        write_in(&root, "b", "checkpoint.md", "hop a\nhop b\n").unwrap();
+        let readable = readable_sessions_with("c", Some(&chain(&["a", "b", "c"])));
+        append_in(&root, &readable, "checkpoint.md", "hop c\n").unwrap();
+        assert_eq!(
+            read_in(&root, &readable, "checkpoint.md", None, None).unwrap(),
+            "hop a\nhop b\nhop c\n"
+        );
+        // Predecessors' files are never written through.
+        assert_eq!(read_owned_in(&root, "b", "checkpoint.md").unwrap(), "hop a\nhop b\n");
+        // Once seeded, further appends extend the successor's own file only.
+        append_in(&root, &readable, "checkpoint.md", "more\n").unwrap();
+        assert_eq!(
+            read_owned_in(&root, "c", "checkpoint.md").unwrap(),
+            "hop a\nhop b\nhop c\nmore\n"
+        );
+        // A path no predecessor has is created from the appended text alone.
+        append_in(&root, &readable, "fresh.md", "x").unwrap();
+        assert_eq!(read_owned_in(&root, "c", "fresh.md").unwrap(), "x");
     }
 
     #[test]
