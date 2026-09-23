@@ -61,6 +61,19 @@ pub(crate) fn cmd_plan(action: PlanCommands, workspace: Option<&str>, session: O
             text,
         } => emit(plan_ops::add(&cwd, &plan_id, &task, &text)),
         PlanCommands::Migrate { path } => emit(plan_ops::migrate(&cwd, path)),
+        PlanCommands::Snooze {
+            plan_id,
+            duration,
+            reason,
+        } => emit(plan_ops::snooze(
+            &cwd,
+            &plan_id,
+            &duration,
+            &reason,
+            sid.as_deref(),
+        )),
+        PlanCommands::Unsnooze { plan_id } => emit(plan_ops::unsnooze(&cwd, &plan_id)),
+        PlanCommands::Orphans { json } => plan_orphans(json),
         PlanCommands::List => plan_list(&cwd),
         PlanCommands::Get { plan_id } => plan_get(&cwd, &plan_id),
     };
@@ -109,6 +122,35 @@ fn plan_get(cwd: &std::path::Path, plan_id: &str) -> Result<(), String> {
         .ok_or_else(|| format!("plan '{plan_id}' not found"))?;
     for it in &p.items {
         println!("{} {}", if it.done { "[x]" } else { "[ ]" }, it.text);
+    }
+    Ok(())
+}
+
+/// `fleet plan orphans`: the reviver's verdict for every candidate plan, across
+/// all workspaces. Read-only.
+fn plan_orphans(json: bool) -> Result<(), String> {
+    let report = claw_fleet_core::plan_revive::dry_run();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    if report.is_empty() {
+        println!("(no recently claimed plan has pending work)");
+        return Ok(());
+    }
+    for r in report {
+        println!(
+            "{} {} [{}/{}] owner={} — {}",
+            r.workspace_path,
+            r.plan_id,
+            r.done,
+            r.total,
+            &r.newest_owner[..r.newest_owner.len().min(8)],
+            r.verdict
+        );
     }
     Ok(())
 }
