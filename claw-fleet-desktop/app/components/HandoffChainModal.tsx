@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -11,6 +10,7 @@ import {
   safeRehypePlugins,
 } from "../markdown/safeLinks";
 import { canRevealPath } from "../canReveal";
+import { exportChainBundle, type ChainExportSummary } from "../chainBundle";
 import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { useSessionsStore } from "../store";
@@ -250,16 +250,6 @@ function RelayNote({ note }: { note: string }) {
   );
 }
 
-/** Result of `export_chain_bundle` (`ChainExportSummary` in core). */
-interface ChainExportSummary {
-  path: string;
-  bytes: number;
-  members: number;
-  sessions: number;
-  missing: string[];
-  elapsedMs: number;
-}
-
 /**
  * "Export debug bundle": packs every hop's transcript, Fleet's records for
  * the chain and the relevant log slices into one `.flt` zip
@@ -276,15 +266,11 @@ function ExportBundleButton({ sessionId }: { sessionId: string }) {
     e.stopPropagation();
     setError(null);
     try {
-      const defaultPath = await invoke<string>("chain_bundle_file_name", { sessionId });
-      const dest = await save({
-        defaultPath,
-        filters: [{ name: "Fleet debug bundle", extensions: ["flt"] }],
+      const summary = await exportChainBundle(sessionId, () => {
+        setBusy(true);
+        setDone(null);
       });
-      if (!dest) return;
-      setBusy(true);
-      setDone(null);
-      setDone(await invoke<ChainExportSummary>("export_chain_bundle", { sessionId, dest }));
+      if (summary) setDone(summary);
     } catch (err) {
       setError(String(err));
     } finally {
