@@ -89,10 +89,12 @@ function pasteEvent({ html, text, files = [] }: Flavors): Event {
 
 /** The attach path base64-encodes the file through a `FileReader`, which
  *  resolves on a task rather than a microtask — awaiting promises alone never
- *  reaches `onAddAttachment`. */
-async function flushAttach() {
+ *  reaches `onAddAttachment`. Nor does one `setTimeout(0)`: jsdom's reader
+ *  can land a few tasks later under a loaded full-suite run, so poll until the
+ *  callback fires instead of guessing a tick count. */
+async function flushAttach(onAddAttachment: ReturnType<typeof vi.fn>) {
   await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(onAddAttachment).toHaveBeenCalled());
   });
 }
 
@@ -182,7 +184,7 @@ describe("ChatComposer paste — spreadsheet selection", () => {
       textarea.dispatchEvent(ev);
     });
 
-    await flushAttach();
+    await flushAttach(onAddAttachment);
 
     expect(ev.defaultPrevented).toBe(true);
     expect(onChange).not.toHaveBeenCalled();
@@ -234,7 +236,7 @@ describe("ChatComposer paste — spreadsheet selection", () => {
     await act(async () => {
       textarea.dispatchEvent(ev);
     });
-    await flushAttach();
+    await flushAttach(onAddAttachment);
 
     expect(onAddAttachment).toHaveBeenCalledTimes(1);
   });

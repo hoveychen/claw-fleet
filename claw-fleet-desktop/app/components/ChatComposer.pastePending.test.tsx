@@ -107,10 +107,12 @@ async function mount(props: Partial<Parameters<typeof ChatComposer>[0]> = {}) {
 }
 
 /** Let the `FileReader` that base64-encodes the paste run — it resolves on a
- *  task, not a microtask, so awaiting promises alone never reaches `invoke`. */
+ *  task, not a microtask, so awaiting promises alone never reaches `invoke`.
+ *  Nor does one `setTimeout(0)`: under a loaded full-suite run jsdom's reader
+ *  can land a few tasks later, so poll until the staging call is made. */
 async function flushFileReader() {
   await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalled());
   });
 }
 

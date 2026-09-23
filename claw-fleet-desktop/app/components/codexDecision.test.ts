@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DecisionHistoryRecord, FleetAskDecision, RawMessage, SessionInfo } from "../types";
-import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
+import { inlinePendingFleetAsk, withCodexDecisionHistory } from "./codexDecision";
 
 const session = (id: string, agentSource: string): SessionInfo =>
   ({ id, agentSource }) as SessionInfo;
@@ -40,27 +40,31 @@ const historicalAsk = (
   answers: { "采用哪种方案？": "方案 A" },
 });
 
-describe("inlineCodexFleetAsk", () => {
+describe("inlinePendingFleetAsk", () => {
   it("selects only the pending fleet ask belonging to the open Codex session", () => {
     const matching = ask("ask-2", "codex-session");
     expect(
-      inlineCodexFleetAsk(session("codex-session", "codex"), [
+      inlinePendingFleetAsk(session("codex-session", "codex"), [
         ask("ask-1", "another-session"),
         matching,
       ]),
     ).toBe(matching);
   });
 
-  it("leaves direct-tool sources and unrelated sessions on their existing path", () => {
+  it("also inlines the pending ask of a direct-tool source like Claude Code", () => {
+    const pending = ask("ask-1", "claude-session");
+    expect(inlinePendingFleetAsk(session("claude-session", "claude-code"), [pending])).toBe(pending);
+  });
+
+  it("ignores unrelated sessions and a missing session", () => {
     const pending = ask("ask-1", "same-session");
-    expect(inlineCodexFleetAsk(session("same-session", "claude-code"), [pending])).toBeNull();
-    expect(inlineCodexFleetAsk(session("different-session", "codex"), [pending])).toBeNull();
-    expect(inlineCodexFleetAsk(null, [pending])).toBeNull();
+    expect(inlinePendingFleetAsk(session("different-session", "codex"), [pending])).toBeNull();
+    expect(inlinePendingFleetAsk(null, [pending])).toBeNull();
   });
 
   it("hides a stale pending copy once the same decision is durable history", () => {
     const pending = ask("ask-1", "codex-session");
-    expect(inlineCodexFleetAsk(
+    expect(inlinePendingFleetAsk(
       session("codex-session", "codex"),
       [pending],
       [historicalAsk("ask-1", "codex-session", "2026-09-06T12:00:01.000Z")],
