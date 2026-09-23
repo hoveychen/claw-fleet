@@ -23,6 +23,9 @@
 //!   pre-attributes it to the plan.
 //! - A plan whose newest session was closed by the boss's terminal button is
 //!   not revived directly: Fleet raises a card and asks first.
+//! - Pressing 「结束任务」 on a session whose plan is fully done continues the
+//!   tree at once, in DFS order ([`continue_after_finish`]); a plan with boxes
+//!   still open keeps the ask-first path above.
 //! - [`MAX_FRUITLESS`] revivals in a row without a checkbox ticked snooze the
 //!   plan and raise a card, so a plan that keeps failing cannot burn sessions.
 //!
@@ -554,8 +557,14 @@ pub fn revive_prompt(view: &PlanView, boss_note: Option<&str>, previous: Option<
 }
 
 fn spawn_revival(view: &PlanView, boss_note: Option<&str>) -> Result<String, String> {
-    let sid = uuid::Uuid::new_v4().to_string();
     let prompt = revive_prompt(view, boss_note, transcript_of(&view.newest_owner).as_deref());
+    spawn_for_plan(view, prompt, "唤醒")
+}
+
+/// Spawn a fresh Claude session on `view`'s plan and attribute it there.
+/// `title_prefix` labels it in the session list (`唤醒：…`, `接续：…`).
+fn spawn_for_plan(view: &PlanView, prompt: String, title_prefix: &str) -> Result<String, String> {
+    let sid = uuid::Uuid::new_v4().to_string();
     // Continue on the model the plan was being worked on, when it is a Claude
     // one: the reviver pre-assigns a Claude session id so it can attribute the
     // spawn to the plan, which Codex (self-minted thread ids) cannot take.
@@ -582,9 +591,167 @@ fn spawn_revival(view: &PlanView, boss_note: Option<&str>) -> Result<String, Str
     {
         crate::log_debug(&format!("plan revive: attribute {sid}: {e}"));
     }
-    let title = format!("唤醒：{}", view.title.as_deref().unwrap_or(&view.plan_id));
+    let title = format!("{title_prefix}：{}", view.title.as_deref().unwrap_or(&view.plan_id));
     let _ = crate::session_title::set_title(&sid, &view.workspace_path, Some(title));
     Ok(sid)
+}
+
+// ── Finish-button continuation ──────────────────────────────────────────────
+//
+// When the boss presses 「结束任务」 on a session whose plan is fully done, the
+// plan tree may still have work elsewhere. Rather than wait out the orphan
+// grace and then ask (the boss just closed that session, so `boss_closed`
+// would hold the reviver back), continue the tree right away: the button *is*
+// the boss's go-ahead. Only 「结束任务」 does this; 「放弃任务」 means stop.
+
+/// The plan where the tree's work continues once `finished` is done, in DFS
+/// order: the first pending plan below `finished`, else below its nearest
+/// ancestor that still has pending work anywhere in its subtree, descending to
+/// the deepest pending plan (children before their parent, file order among
+/// siblings). `None` when `finished` itself still has pending tasks — the boss
+/// decided that case keeps the existing ask-first behaviour — or when the whole
+/// tree is done.
+pub fn next_plan_after(blocks: &[pt::SourcedBlock], finished: &str) -> Option<String> {
+    let mut parent: HashMap<&str, &str> = HashMap::new();
+    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut pending: HashSet<&str> = HashSet::new();
+    for b in blocks {
+        let Some(id) = b.id.as_deref() else { continue };
+        if let Some(p) = b.parent.as_deref() {
+            parent.insert(id, p);
+            children.entry(p).or_default().push(id);
+        }
+        if b.body.lines().any(pt::is_pending_task_line) {
+            pending.insert(id);
+        }
+    }
+    if pending.contains(finished) {
+        return None;
+    }
+    // `depth` bounds both recursions against parent cycles.
+    fn subtree_pending(
+        id: &str,
+        children: &HashMap<&str, Vec<&str>>,
+        pending: &HashSet<&str>,
+        depth: u32,
+    ) -> bool {
+        depth < 64
+            && (pending.contains(id)
+                || children.get(id).is_some_and(|cs| {
+                    cs.iter().any(|c| subtree_pending(c, children, pending, depth + 1))
+                }))
+    }
+    fn descend(
+        id: &str,
+        children: &HashMap<&str, Vec<&str>>,
+        pending: &HashSet<&str>,
+        depth: u32,
+    ) -> Option<String> {
+        if depth >= 64 {
+            return None;
+        }
+        for c in children.get(id).into_iter().flatten() {
+            if subtree_pending(c, children, pending, depth + 1) {
+                return descend(c, children, pending, depth + 1);
+            }
+        }
+        pending.contains(id).then(|| id.to_string())
+    }
+    let mut cursor = finished;
+    for _ in 0..64 {
+        if let Some(t) = descend(cursor, &children, &pending, 0) {
+            return Some(t);
+        }
+        cursor = parent.get(cursor)?;
+    }
+    None
+}
+
+/// Opening prompt for a session started by the finish button. Product text.
+pub fn finish_prompt(view: &PlanView, finished_plan: &str, previous: Option<&str>) -> String {
+    let pending = view.total.saturating_sub(view.done);
+    let next = view.next_task.as_deref().unwrap_or("第一个未完成的 P");
+    let mut s = format!(
+        "（Fleet 自动接续 —— 这是 Fleet 发起的接手，不是老板刚打的字）\n\n\
+         老板刚在计划 '{finished_plan}' 的会话上按了「结束任务」，那个计划已全部完成。\
+         按计划树的顺序，下一个要做的是计划 {label}：还有 {pending} 个 P-task 没完成（{done}/{total}），\
+         下一个是：{next}。你是 Fleet 为它起的新会话，已经归属到这个计划。\n\n\
+         先恢复上下文：读 TASKS.md 里这个计划块（含子 bullet 备注）和它的父计划，看 git log 和 `.worktrees/` \
+         下对应的 worktree 分支有没有未合并的进度。",
+        label = plan_label(view),
+        done = view.done,
+        total = view.total,
+    );
+    if let Some(path) = previous {
+        s.push_str(&format!(
+            "刚结束的会话是 `{}`，转录在 `{path}`，需要时从尾部往前读它的结论。",
+            view.newest_owner
+        ));
+    }
+    s.push_str(
+        "\n\n然后按 Rule 4 的节奏直接做下一个 P，不用先问。被真实阻塞（等老板拍板、等外部条件、\
+         缺登录/权限、需要真机）就不要硬干：能等的外部条件挂 `fleet__watch`，否则用 `fleet__plan` 的 \
+         `snooze` 写清卡在哪，再用决策卡报给老板。",
+    );
+    s
+}
+
+/// Called when the boss presses 「结束任务」 on `session_id`'s card: if the
+/// plan that session (or the newest hop of its handoff chain) was focused on is
+/// done and the tree has a next plan in DFS order that nobody is on, spawn a
+/// session for it now. Best-effort — every failure is logged, never raised,
+/// because the caller is unblocking an agent waiting on the card.
+pub fn continue_after_finish(session_id: &str) {
+    if !PlanReviveConfig::load().enabled {
+        return;
+    }
+    let Some(focus) = crate::task_review::task_sessions(session_id)
+        .iter()
+        .rev()
+        .find_map(|s| crate::task_progress::read(s))
+    else {
+        return;
+    };
+    let ws = focus.workspace_path.trim_end_matches('/').to_string();
+    let blocks = load_workspace_blocks(&ws);
+    let Some(target) = next_plan_after(&blocks, &focus.plan_id) else { return };
+    let Some(block) = blocks.iter().find(|b| b.id.as_deref() == Some(target.as_str())) else {
+        return;
+    };
+    if plan_snooze::active(&ws, &target).is_some() {
+        return;
+    }
+    let owners: HashSet<String> = crate::task_progress::all_records()
+        .into_iter()
+        .filter(|(_, r)| r.plan_id == target && r.workspace_path.trim_end_matches('/') == ws)
+        .map(|(sid, _)| sid)
+        .filter(|sid| sid != session_id)
+        .collect();
+    let owner_list: Vec<String> = owners.iter().cloned().collect();
+    if let Some(why) = gather_coverage(&owners).reason(&owner_list) {
+        crate::log_debug(&format!("finish continuation: {target} already covered ({why})"));
+        return;
+    }
+    let (done, total) = pt::count_tasks(&block.body);
+    let view = PlanView {
+        workspace_path: ws,
+        plan_id: target.clone(),
+        title: pt::extract_plan_name(&block.body),
+        done,
+        total,
+        next_task: pt::first_pending_task(&block.body),
+        owners: owner_list,
+        newest_owner: session_id.to_string(),
+        boss_closed: false,
+    };
+    let prompt = finish_prompt(&view, &focus.plan_id, transcript_of(session_id).as_deref());
+    match spawn_for_plan(&view, prompt, "接续") {
+        Ok(sid) => crate::log_debug(&format!(
+            "finish continuation: {sid} picks up {target} after {}",
+            focus.plan_id
+        )),
+        Err(e) => crate::log_debug(&format!("finish continuation: spawn for {target}: {e}")),
+    }
 }
 
 fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
@@ -974,6 +1141,43 @@ mod tests {
         );
         let ids: Vec<_> = v.iter().map(|v| v.plan_id.as_str()).collect();
         assert_eq!(ids, vec!["fresh"]);
+    }
+
+    #[test]
+    fn finish_continues_the_tree_in_dfs_order() {
+        // root ── a (done) ── a1 (done)
+        //      ├─ b (done) ── b1 (pending) ── b1x (pending)
+        //      └─ c (pending)
+        let tree = vec![
+            block("root", None, PENDING),
+            block("a", Some("root"), DONE),
+            block("a1", Some("a"), DONE),
+            block("b", Some("root"), DONE),
+            block("b1", Some("b"), PENDING),
+            block("b1x", Some("b1"), PENDING),
+            block("c", Some("root"), PENDING),
+        ];
+        // Climbs past a finished parent, descends into the first pending
+        // sibling subtree, deepest plan first.
+        assert_eq!(next_plan_after(&tree, "a1").as_deref(), Some("b1x"));
+        // A finished plan's own pending children come before anything above it.
+        assert_eq!(next_plan_after(&tree, "b").as_deref(), Some("b1x"));
+        // A plan with boxes still open does not continue anywhere.
+        assert_eq!(next_plan_after(&tree, "c"), None);
+
+        // Only the root's own tasks left: continue on the root.
+        let rest = vec![block("root", None, PENDING), block("a", Some("root"), DONE)];
+        assert_eq!(next_plan_after(&rest, "a").as_deref(), Some("root"));
+        // Whole tree done, and an unrelated top-level plan is not "next".
+        let done = vec![
+            block("root", None, DONE),
+            block("a", Some("root"), DONE),
+            block("other", None, PENDING),
+        ];
+        assert_eq!(next_plan_after(&done, "a"), None);
+        // Parent cycle terminates.
+        let cyc = vec![block("x", Some("y"), DONE), block("y", Some("x"), DONE)];
+        assert_eq!(next_plan_after(&cyc, "x"), None);
     }
 
     #[test]
