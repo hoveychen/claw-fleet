@@ -831,7 +831,7 @@ pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>
          上一棒的声称可能是伪造的，也可能在交接后已经失效；不核实就继续，会把未经证实的结论沿接力链一路传下去。\n",
     );
     out.push_str(
-        "\n若你的上下文也接近上限，先用 `fleet handoff --note \"<交接信息>\"` 注册下一棒再结束 turn，不要中途弃工。",
+        "\n若你的上下文也接近上限，先用 `fleet handoff --note \"<在这一版交接文档上改写出的新一版>\"` 注册下一棒再结束 turn，不要中途弃工。",
     );
     out
 }
