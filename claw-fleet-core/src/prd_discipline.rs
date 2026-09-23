@@ -196,6 +196,9 @@ fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文
 - **周期性重复跑一件事（cron 语义）→ `fleet loop`**（CLI 别名 `fleet cron`）。Fleet 托管、durable，每个 interval spawn 一个全新的本地 detached 会话，不随本会话消亡。
 - **未来某个绝对时刻只跑一次 → `fleet schedule`**（`--at` / `--in`）。
 - **等一个外部条件满足后继续*本*会话 → `fleet watch`**：`fleet watch create --until '<完成时退出 0 的命令>' --capture '<其 stdout 你想被报告的命令>' --note '<你在等什么>'`，然后结束回合；条件触发时 Fleet 会 `claude --resume` 这个会话，把捕获的结果喂给你的下一回合。`fleet watch stop <id>` 取消。
+  - **注册前把 until 的两个分支都手跑一遍**：在当前状态下跑，应退非 0；再找一个条件**已满足**的真实样本（一场正在进行的比赛、一个已经跑完的 CI run）跑，应退 0。只验了「还没到」等于没验——写错的条件永远不成立，每次轮询都和「还没到」一模一样，Fleet 注册时的首跑也分辨不出来。
+  - **until 只做判断，不带副作用**：别在 until 里拉起录制、下载这类动作。需要先动手就在注册前自己起好，until 只断言它的产物。
+  - **知道条件大概什么时候该成立，就传 `--expect-by`**（时长如 `8h`，或本地时间如 `"2026-09-23 14:30"`）：过了这个点还没成立，Fleet 会唤醒你一次去自查，watch 本身继续跑。
 - **把工作交给全新后继者 → `fleet handoff`**。
 - **现在就在另一个 workspace 起一个会话干活 → `fleet spawn`**（MCP 工具 `fleet__spawn`）：`fleet spawn --workspace <项目目录> --prompt '<完整简报>' --title <几个字>`。当场 spawn 一个 detached 会话并把它的 session id 回给你（之后用 `fleet send <id>` 转达、`fleet interrupt <id>` 打断）。刚写完一个属于别的项目的计划、想立刻交给那个项目的会话去执行，就用它——别拿 `fleet schedule --in 60s` 当「立刻」使。
 
@@ -409,6 +412,9 @@ A handoff changes *who*; this section covers one session crossing context window
 - **Run something repeatedly on an interval (cron semantics) → `fleet loop`** (CLI alias `fleet cron`). Fleet-managed and durable; each interval spawns a fresh local detached session that outlives this one.
 - **Run once at an absolute future time → `fleet schedule`** (`--at` / `--in`).
 - **Wait for an external condition and then continue *this* session → `fleet watch`**: `fleet watch create --until '<command that exits 0 when done>' --capture '<command whose stdout you want reported>' --note '<what you are waiting for>'`, then end the turn. Fleet polls in the background and `claude --resume`s this session with the captured result. `fleet watch stop <id>` cancels it.
+  - **Run both branches of the `until` by hand before registering**: in the current state it should exit non-zero; then run it against a real sample where the condition **is** met (a match in progress, a CI run that already finished) and it should exit 0. Checking only "not yet" checks nothing — a wrong condition never becomes true, every poll looks exactly like "not yet", and Fleet's first run at registration cannot tell the two apart.
+  - **The `until` only tests; it has no side effects**: do not start a recording or a download from inside it. If something has to be kicked off, start it yourself before registering and let the `until` assert on its output.
+  - **When you know roughly when the condition should hold, pass `--expect-by`** (a duration like `8h`, or a local time like `"2026-09-23 14:30"`): if it still has not held by then, Fleet wakes you once to check, and the watch keeps running.
 - **Hand the work to a fresh successor → `fleet handoff`**.
 - **Start a session working in another workspace right now → `fleet spawn`** (MCP tool `fleet__spawn`): `fleet spawn --workspace <project dir> --prompt '<full briefing>' --title <a few words>`. It spawns a detached session immediately and hands you its session id (then `fleet send <id>` to relay, `fleet interrupt <id>` to interrupt). Reach for it when you have just written a plan that belongs to another project and want that project's session on it now — do not use `fleet schedule --in 60s` as a stand-in for "now".
 
@@ -687,6 +693,32 @@ mod tests {
                 g.contains("跟着棒一起转给后继者")
                     || g.contains("moves to the successor with the baton"),
                 "[{locale}] it must say a watch transfers with the baton"
+            );
+        }
+    }
+
+    /// prediction-market session 38656240 (2026-09-23): a watch's `until`
+    /// was checked only in the "no match live" state, never against a live
+    /// match, so it never flipped and all eight WSCI games were missed. The
+    /// registration preflight cannot catch a never-true condition, so the
+    /// guidance has to demand the positive-branch run, keep the `until` free
+    /// of side effects, and point at `--expect-by` — in both locales.
+    #[test]
+    fn watch_guidance_demands_both_branches_and_expect_by_in_both_locales() {
+        for locale in ["zh", "en"] {
+            let g = render_guidance("Boss", locale);
+            assert!(
+                g.contains("两个分支都手跑一遍") || g.contains("Run both branches of the `until`"),
+                "[{locale}] watch guidance must demand running both branches of the until"
+            );
+            assert!(
+                g.contains("until 只做判断，不带副作用")
+                    || g.contains("The `until` only tests; it has no side effects"),
+                "[{locale}] watch guidance must keep side effects out of the until"
+            );
+            assert!(
+                g.contains("--expect-by"),
+                "[{locale}] watch guidance must mention --expect-by"
             );
         }
     }

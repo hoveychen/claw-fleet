@@ -326,6 +326,15 @@ THIS session and hands the captured output to your next turn. `fleet watch \
 stop <id>` cancels. `--session` is what makes the resume land on dsh: the id \
 tells Fleet which harness owns the session, so it inherits this session's \
 model / effort / source instead of being resumed as claude.\n\
+- Before registering, run the `until` by hand on BOTH branches: in the \
+current state it must exit non-zero, and against a real sample where the \
+condition already holds (a match in progress, a finished CI run) it must exit \
+0. A wrong condition never becomes true and looks exactly like \"not yet\" on \
+every poll. Keep the `until` side-effect free — start any recording or \
+download yourself before registering and let the `until` assert on its output. \
+If you know roughly when it should hold, pass `--expect-by <8h | \"2026-09-23 \
+14:30\">`: past that point Fleet wakes you once to check while the watch keeps \
+running.\n\
 - Pick the scheduling relay by *need*: **repeat periodically (cron) → \
 `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns a fresh \
 session each interval); **fire once at a future time → `fleet schedule`** \
@@ -1103,6 +1112,10 @@ mod tests {
         assert!(
             g.contains("fleet watch create"),
             "must teach the Rule 6 watch"
+        );
+        assert!(
+            g.contains("on BOTH branches") && g.contains("side-effect free") && g.contains("--expect-by"),
+            "Rule 6 must demand a positive-branch run of the until, no side effects, and --expect-by"
         );
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),

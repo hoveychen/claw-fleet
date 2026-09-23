@@ -61,6 +61,14 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                 // The whole point of keeping stderr: a watch that has only ever
                 // failed structurally is broken, not waiting, and the operator
                 // should not have to read a debug log to find that out.
+                if let Some(t) = w.expect_by {
+                    println!(
+                        "{:<10}  expect-by {}{}",
+                        "",
+                        watch::fmt_local(t),
+                        if w.checked_in { "（已唤醒自查）" } else { "" }
+                    );
+                }
                 if w.structural_fail_streak > 0 {
                     println!(
                         "{:<10}  ⚠️ 连续 {} 次跑不起来（不是条件没满足）：{}",
@@ -83,7 +91,8 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
             note,
             poll,
             timeout,
-        } => create(until, capture, note, poll, timeout, session),
+            expect_by,
+        } => create(until, capture, note, poll, timeout, expect_by, session),
     }
 }
 
@@ -93,6 +102,7 @@ fn create(
     note: Option<String>,
     poll: Option<String>,
     timeout: Option<String>,
+    expect_by: Option<String>,
     session: Option<&str>,
 ) {
     use claw_fleet_core::watch;
@@ -121,6 +131,16 @@ fn create(
             }
         },
         None => watch::DEFAULT_TIMEOUT_SECS,
+    };
+    let expect_by = match expect_by.as_deref() {
+        Some(s) => match watch::parse_expect_by(s, now_ms_wall()) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("Error: --expect-by: {e}");
+                std::process::exit(2);
+            }
+        },
+        None => None,
     };
 
     // A watch resumes the session that registered it, so it MUST know which
@@ -206,12 +226,17 @@ fn create(
         ctx.model.as_deref(),
         ctx.effort.as_deref(),
         ctx.source.as_deref(),
+        expect_by,
     ) {
         Ok((rec, probe)) => {
             // The preflight's verdict, when it has one to give (already true /
             // too slow to pre-judge). A structurally broken `until` never gets
             // here — `create` refuses it.
             let note = watch::preflight_note(&probe);
+            if !note.is_empty() {
+                println!("{note}");
+            }
+            let note = watch::expect_by_note(&rec);
             if !note.is_empty() {
                 println!("{note}");
             }

@@ -22,7 +22,7 @@ import styles from "./FleetToolCard.module.css";
  *  (artifact / inspect / control / notes / history) add. */
 const PARAM_ORDER = [
   "plan_id", "plan", "task", "title", "text", "parent", "note", "next",
-  "until", "capture", "poll", "timeout", "prompt", "interval", "max",
+  "until", "capture", "poll", "timeout", "expect_by", "prompt", "interval", "max",
   "at", "in", "slug", "path", "query", "version", "file", "id", "model", "effort",
   "all", "level", "filter", "limit", "prefix", "start_line", "stop_line",
   "max_files", "max_matches_per_file", "session", "line_no", "offset_chars",
