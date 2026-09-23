@@ -105,6 +105,24 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      # The agent CLIs track npm's `latest` dist-tag at build time instead of
+      # the Dockerfile's ARG defaults, so every release image ships the newest
+      # claude/codex without a pin bump. The resolved versions are fixed per
+      # image (passed as build args, printed to the job summary), so a given
+      # image stays reproducible. The Dockerfile defaults remain the fallback for
+      # local `docker build`. A failed lookup fails the build rather than quietly
+      # shipping the stale defaults.
+      - name: Resolve agent CLI versions
+        id: agents
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLAUDE="$(npm view @anthropic-ai/claude-code@latest version)"
+          CODEX="$(npm view @openai/codex@latest version)"
+          echo "claude=${CLAUDE}" >> "$GITHUB_OUTPUT"
+          echo "codex=${CODEX}" >> "$GITHUB_OUTPUT"
+          echo "Agent CLIs: claude-code ${CLAUDE}, codex ${CODEX}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -162,5 +180,7 @@ jobs:
             FLEET_GIT_COMMIT=${{ github.sha }}
             APP_COMMIT=${{ github.sha }}
             FLEET_VERSION=${{ steps.ver.outputs.version }}
+            CLAUDE_CODE_VERSION=${{ steps.agents.outputs.claude }}
+            CODEX_VERSION=${{ steps.agents.outputs.codex }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
