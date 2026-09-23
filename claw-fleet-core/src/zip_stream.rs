@@ -13,9 +13,11 @@
 //!   `u32::MAX`, or more than 65534 members), and stays a plain zip when it
 //!   does not, so small archives keep opening in the oldest tools.
 //!
-//! Store-only (method 0) on purpose, same as the wiki's: deliverables are
+//! Store-only (method 0) by default, same as the wiki's: deliverables are
 //! already-compressed formats — mp4, xlsx, pdf, zip — and deflating them
-//! spends CPU to grow the output by a fraction of a percent.
+//! spends CPU to grow the output by a fraction of a percent. Text-heavy
+//! callers (the chain debug bundle's jsonl transcripts and logs, which shrink
+//! ~10x) use [`ZipStream::add_deflated`] instead.
 //!
 //! ## Why a data descriptor
 //!
@@ -54,7 +56,12 @@ const FLAG_UTF8_NAME: u16 = 1 << 11;
 struct Entry {
     name: String,
     crc: u32,
+    /// Uncompressed size.
     size: u64,
+    /// Bytes actually stored; equals `size` for a stored member.
+    csize: u64,
+    /// 0 = stored, 8 = deflate.
+    method: u16,
     offset: u64,
     /// Whether this entry's local header used zip64 sizes.
     zip64: bool,
@@ -110,6 +117,28 @@ impl<W: Write> ZipStream<W> {
         declared_size: u64,
         source: &mut R,
     ) -> io::Result<()> {
+        self.add_member(name, declared_size, source, false)
+    }
+
+    /// [`ZipStream::add`], but deflate-compressed (method 8). Still streaming:
+    /// each chunk is compressed and flushed to the sink as it is read.
+    pub fn add_deflated<R: Read>(
+        &mut self,
+        name: &str,
+        declared_size: u64,
+        source: &mut R,
+    ) -> io::Result<()> {
+        self.add_member(name, declared_size, source, true)
+    }
+
+    fn add_member<R: Read>(
+        &mut self,
+        name: &str,
+        declared_size: u64,
+        source: &mut R,
+        deflate: bool,
+    ) -> io::Result<()> {
+        let method: u16 = if deflate { 8 } else { 0 };
         let zip64 = declared_size > self.zip64_threshold || self.written > self.zip64_threshold;
         let name_bytes = name.as_bytes();
         let offset = self.written;
@@ -119,7 +148,7 @@ impl<W: Write> ZipStream<W> {
         // 4.5 when zip64 fields are present, 2.0 otherwise.
         self.put(&(if zip64 { 45u16 } else { 20u16 }).to_le_bytes())?;
         self.put(&(FLAG_DATA_DESCRIPTOR | FLAG_UTF8_NAME).to_le_bytes())?;
-        self.put(&0u16.to_le_bytes())?; // method: stored
+        self.put(&method.to_le_bytes())?;
         self.put(&0u32.to_le_bytes())?; // dos time+date
                                         // With bit 3 set these three are zero here and real in the descriptor.
         self.put(&0u32.to_le_bytes())?; // crc
@@ -141,25 +170,43 @@ impl<W: Write> ZipStream<W> {
         let mut hasher = crc32fast::Hasher::new();
         let mut buf = vec![0u8; COPY_BUF];
         let mut size: u64 = 0;
+        let data_start = self.written;
+        // Deflate into a scratch Vec that is drained to the sink after every
+        // chunk, so peak memory stays one chunk's worth of output.
+        let mut encoder = deflate.then(|| {
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default())
+        });
         loop {
             let n = source.read(&mut buf)?;
             if n == 0 {
                 break;
             }
             hasher.update(&buf[..n]);
-            self.put(&buf[..n])?;
+            match encoder.as_mut() {
+                Some(enc) => {
+                    enc.write_all(&buf[..n])?;
+                    let out = std::mem::take(enc.get_mut());
+                    self.put(&out)?;
+                }
+                None => self.put(&buf[..n])?,
+            }
             size += n as u64;
         }
+        if let Some(enc) = encoder {
+            let tail = enc.finish()?;
+            self.put(&tail)?;
+        }
+        let csize = self.written - data_start;
         let crc = hasher.finalize();
 
         // ── Data descriptor ──────────────────────────────────────────────
         self.put(&SIG_DESCRIPTOR.to_le_bytes())?;
         self.put(&crc.to_le_bytes())?;
         if zip64 {
-            self.put(&size.to_le_bytes())?; // compressed
+            self.put(&csize.to_le_bytes())?; // compressed
             self.put(&size.to_le_bytes())?; // uncompressed
         } else {
-            self.put(&(size as u32).to_le_bytes())?;
+            self.put(&(csize as u32).to_le_bytes())?;
             self.put(&(size as u32).to_le_bytes())?;
         }
 
@@ -167,6 +214,8 @@ impl<W: Write> ZipStream<W> {
             name: name.to_string(),
             crc,
             size,
+            csize,
+            method,
             offset,
             zip64,
         });
@@ -179,14 +228,16 @@ impl<W: Write> ZipStream<W> {
 
         for i in 0..self.entries.len() {
             // Cloned out of the loop's borrow so `put` can take &mut self.
-            let (name, crc, size, offset, entry_zip64) = {
+            let (name, crc, size, csize, method, offset, entry_zip64) = {
                 let e = &self.entries[i];
-                (e.name.clone(), e.crc, e.size, e.offset, e.zip64)
+                (e.name.clone(), e.crc, e.size, e.csize, e.method, e.offset, e.zip64)
             };
             // A central entry needs zip64 if *its* numbers do not fit, which
             // can be true even when the local header did not need it: a small
             // member sitting past the 4 GiB mark.
-            let big_size = size > self.zip64_threshold;
+            // Deflate output can exceed its input, so either size overflowing
+            // moves both into the zip64 extra (the spec pairs them).
+            let big_size = size > self.zip64_threshold || csize > self.zip64_threshold;
             let big_offset = offset > self.zip64_threshold;
             let zip64 = entry_zip64 || big_size || big_offset;
             let extra_len: u16 = if zip64 {
@@ -202,12 +253,12 @@ impl<W: Write> ZipStream<W> {
             self.put(&(if zip64 { 45u16 } else { 20u16 }).to_le_bytes())?; // made by
             self.put(&(if zip64 { 45u16 } else { 20u16 }).to_le_bytes())?; // needed
             self.put(&(FLAG_DATA_DESCRIPTOR | FLAG_UTF8_NAME).to_le_bytes())?;
-            self.put(&0u16.to_le_bytes())?; // method
+            self.put(&method.to_le_bytes())?;
             self.put(&0u32.to_le_bytes())?; // dos time+date
             self.put(&crc.to_le_bytes())?;
-            let stored_size = if big_size { u32::MAX } else { size as u32 };
-            self.put(&stored_size.to_le_bytes())?; // compressed
-            self.put(&stored_size.to_le_bytes())?; // uncompressed
+            let (c32, u32_) = if big_size { (u32::MAX, u32::MAX) } else { (csize as u32, size as u32) };
+            self.put(&c32.to_le_bytes())?; // compressed
+            self.put(&u32_.to_le_bytes())?; // uncompressed
             self.put(&(name_bytes.len() as u16).to_le_bytes())?;
             self.put(&extra_len.to_le_bytes())?;
             self.put(&0u16.to_le_bytes())?; // comment len
@@ -221,7 +272,7 @@ impl<W: Write> ZipStream<W> {
                 self.put(&(extra_len - 4).to_le_bytes())?;
                 if big_size {
                     self.put(&size.to_le_bytes())?; // uncompressed
-                    self.put(&size.to_le_bytes())?; // compressed
+                    self.put(&csize.to_le_bytes())?; // compressed
                 }
                 if big_offset {
                     self.put(&offset.to_le_bytes())?;
@@ -497,6 +548,39 @@ print(json.dumps(out))
         assert_eq!(got.len(), 2);
         assert_eq!(got[0], ("after.txt".to_string(), b"hello".to_vec()));
         assert_eq!(got[1].1.len(), 300);
+        unzip_accepts_structure(&bytes);
+    }
+
+    #[test]
+    fn deflated_members_round_trip_and_shrink() {
+        // Larger than one copy buffer, so the per-chunk drain path runs.
+        let text: Vec<u8> = (0..20_000)
+            .flat_map(|i| format!("{{\"line\":{i},\"type\":\"assistant\"}}\n").into_bytes())
+            .collect();
+        let mut z = ZipStream::new(Vec::new());
+        z.add_deflated("t.jsonl", text.len() as u64, &mut Cursor::new(&text[..]))
+            .unwrap();
+        z.add("raw.txt", 5, &mut Cursor::new(&b"hello"[..])).unwrap();
+        let bytes = z.finish().unwrap();
+        assert!(bytes.len() < text.len() / 4, "deflate should shrink jsonl");
+        let got = extract(&bytes);
+        assert_eq!(got[0], ("raw.txt".to_string(), b"hello".to_vec()));
+        assert_eq!(got[1], ("t.jsonl".to_string(), text));
+        unzip_accepts_structure(&bytes);
+    }
+
+    #[test]
+    fn deflated_members_take_the_zip64_branches_too() {
+        let big = vec![b'y'; 300];
+        let mut z = ZipStream::new(Vec::new()).with_zip64_threshold(64);
+        z.add_deflated("big.txt", big.len() as u64, &mut Cursor::new(&big[..]))
+            .unwrap();
+        z.add_deflated("after.txt", 5, &mut Cursor::new(&b"hello"[..]))
+            .unwrap();
+        let bytes = z.finish().unwrap();
+        let got = extract(&bytes);
+        assert_eq!(got[0], ("after.txt".to_string(), b"hello".to_vec()));
+        assert_eq!(got[1].1, big);
         unzip_accepts_structure(&bytes);
     }
 

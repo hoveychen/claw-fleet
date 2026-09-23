@@ -1829,6 +1829,8 @@ pub fn run() {
             list_wiki_docs,
             get_wiki_doc,
             get_handoff_chain,
+            export_chain_bundle,
+            chain_bundle_file_name,
             get_wiki_file_text,
             delete_wiki_doc,
             delete_wiki_version,

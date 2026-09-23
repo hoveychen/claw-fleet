@@ -53,6 +53,42 @@
   font-size: 12px;
 }
 .close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
+.close_btn:disabled { opacity: 0.6; cursor: progress; }
+
+.header_actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.export_wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.export_status,
+.export_error {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.export_status { color: var(--color-text-dim); }
+.export_error { color: var(--color-error-fg); }
+
+.export_reveal {
+  margin-left: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: 11px;
+}
 
 /* Scroll area — the whole point of the modal: a long chain scrolls here. */
 .scroll_area {
