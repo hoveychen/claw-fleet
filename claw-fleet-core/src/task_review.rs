@@ -369,6 +369,9 @@ pub fn terminate_task(
         return;
     }
     let workspace = stamp_terminal_chain(session_id, outcome, card_id, agent_claimed_complete);
+    if outcome == TaskOutcome::Completed {
+        crate::plan_revive::continue_after_finish(session_id);
+    }
     // Per-task retrospective. Returns immediately; the LLM pass runs detached,
     // because this path is unblocking an agent that is waiting on the card.
     on_task_terminated(session_id, &workspace, outcome);
