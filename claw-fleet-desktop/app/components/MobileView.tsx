@@ -244,7 +244,12 @@ export function MobileView() {
                     <span className={styles.deviceIcon}>
                       {PLATFORM_ICON[d.platform] ?? PLATFORM_ICON.unknown}
                     </span>
-                    <span className={styles.deviceLabel}>{d.label || d.platform}</span>
+                    <span className={styles.deviceLabel}>
+                      {/* The phone sends "未知设备" as a fixed token for an unrecognised
+                          UA (mobile-web deviceLabel.ts); localise it here, where the
+                          reader's language is known. */}
+                      {(d.label || d.platform).replace(/^未知设备/, t("mobile_device_unknown", "未知设备"))}
+                    </span>
                     <span
                       className={styles.devicePush}
                       data-on={d.pushSubscribed ? "yes" : "no"}

@@ -323,6 +323,7 @@
   "mobile_disconnected": "未连接 relay（检查 relay 地址或网络）",
   "mobile_clients": "{{count}} 台手机在线",
   "mobile_devices_title": "已接入设备",
+  "mobile_device_unknown": "未知设备",
   "mobile_device_push_on": "已开通知",
   "mobile_device_push_off": "未开通知",
   "mobile_device_since": "接入于",

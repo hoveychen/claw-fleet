@@ -18,6 +18,7 @@ import { HttpFleetCloudClient, type FleetCloudClient } from "./client";
 import { applyTaskEvent, initialCloudTaskState, type CloudTaskState } from "./reducer";
 import type { Decision, Task, TaskDetail, TaskStatus } from "./types";
 import styles from "./CloudApp.module.css";
+import { t, useI18n } from "../i18n";
 
 type CloudTab = "tasks" | "decisions";
 
@@ -30,9 +31,10 @@ function cloudConnKind(s: SyncState): ConnIconKind {
 }
 
 function cloudConnText(s: SyncState): string {
-  return s === "online" ? "Cloud 在线" : s === "syncing" ? "同步中" : "连接失败";
+  return s === "online" ? t("Cloud 在线") : s === "syncing" ? t("同步中") : t("连接失败");
 }
 
+/** Values are i18n keys; translate at the use site with `t()`. */
 const STATUS_LABEL: Record<TaskStatus, string> = {
   queued: "排队中",
   assigned: "已分配",
@@ -56,20 +58,20 @@ function defaultClient(): FleetCloudClient {
 }
 
 function taskTitle(task: Task): string {
-  return task.title?.trim() || task.prompt.split("\n")[0]?.slice(0, 88) || "Untitled task";
+  return task.title?.trim() || task.prompt.split("\n")[0]?.slice(0, 88) || t("未命名任务");
 }
 
 function timeAgo(timestamp: string): string {
   const elapsed = Math.max(0, Date.now() - new Date(timestamp).getTime());
-  if (elapsed < 60_000) return "刚刚";
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} 小时前`;
-  return `${Math.floor(elapsed / 86_400_000)} 天前`;
+  if (elapsed < 60_000) return t("刚刚");
+  if (elapsed < 3_600_000) return t("{0} 分钟前", Math.floor(elapsed / 60_000));
+  if (elapsed < 86_400_000) return t("{0} 小时前", Math.floor(elapsed / 3_600_000));
+  return t("{0} 天前", Math.floor(elapsed / 86_400_000));
 }
 
 function decisionQuestion(decision: Decision): string {
   const value = decision.presentation.question ?? decision.presentation.title ?? decision.presentation.prompt;
-  return typeof value === "string" ? value : "Agent 正在等待你的决定";
+  return typeof value === "string" ? value : t("Agent 正在等待你的决定");
 }
 
 interface CloudAppProps {
@@ -77,6 +79,7 @@ interface CloudAppProps {
 }
 
 export function CloudApp({ client: suppliedClient }: CloudAppProps) {
+  useI18n();
   const client = useMemo(() => suppliedClient ?? defaultClient(), [suppliedClient]);
   const embedTaskId = suppliedClient ? null : import.meta.env.VITE_FLEET_CLOUD_EMBED_TASK_ID || null;
   const [tab, setTab] = useState<CloudTab>("tasks");
@@ -223,9 +226,9 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
         <div className={styles.brandMark}>F</div>
         <div>
           <div className={appStyles.title}>Fleet Cloud</div>
-          <div className={styles.projectLabel}>Hosted workspace</div>
+          <div className={styles.projectLabel}>{t("托管工作区")}</div>
         </div>
-        <button className={styles.refresh} onClick={() => void refresh()} aria-label="刷新" disabled={loading}>
+        <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")} disabled={loading}>
           <RefreshCw size={15} className={loading ? styles.spinning : undefined} />
         </button>
         <span className={appStyles.connIcon} data-kind={cloudConnKind(syncState)} role="img" aria-label={cloudConnText(syncState)} title={cloudConnText(syncState)}>
@@ -236,10 +239,10 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
       <main className={`${appStyles.main} ${styles.main}`}>
         <div className={styles.rail}>
           <button data-active={tab === "tasks"} onClick={() => setTab("tasks")}>
-            <ListTodo size={16} />任务 <span>{tasks.length}</span>
+            <ListTodo size={16} />{t("任务")} <span>{tasks.length}</span>
           </button>
           <button data-active={tab === "decisions"} onClick={() => setTab("decisions")}>
-            <Inbox size={16} />决策 <span>{openDecisions.length}</span>
+            <Inbox size={16} />{t("决策")} <span>{openDecisions.length}</span>
           </button>
         </div>
 
@@ -247,14 +250,14 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
           <div className={styles.sectionHead}>
             <div>
               <div className={styles.eyebrow}>{tab === "tasks" ? "RUN QUEUE" : "HUMAN LOOP"}</div>
-              <h1>{tab === "tasks" ? "云任务" : "待处理决策"}</h1>
+              <h1>{tab === "tasks" ? t("云任务") : t("待处理决策")}</h1>
             </div>
             <Cloud size={20} aria-hidden="true" />
           </div>
 
           {error && <ErrorBanner message={error} onRetry={() => void refresh()} />}
           {loading && tasks.length === 0 ? (
-            <div className={styles.loading}><Loader2 size={18} className={styles.spinning} />正在读取控制面…</div>
+            <div className={styles.loading}><Loader2 size={18} className={styles.spinning} />{t("正在读取控制面…")}</div>
           ) : tab === "tasks" ? (
             <TaskList tasks={tasks} onOpen={setSelectedId} />
           ) : (
@@ -274,7 +277,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
 
 function TaskList({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => void }) {
   if (tasks.length === 0) {
-    return <EmptyState icon={ListTodo} title="还没有云任务" description="通过公开 Task API 创建的工作会出现在这里。" />;
+    return <EmptyState icon={ListTodo} title={t("还没有云任务")} description={t("通过公开 Task API 创建的工作会出现在这里。")} />;
   }
   return (
     <div className={styles.taskList}>
@@ -286,7 +289,7 @@ function TaskList({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => vo
             <span className={styles.taskPrompt}>{task.prompt}</span>
           </span>
           <span className={styles.taskMeta}>
-            <span className={styles.statusText} data-status={task.status}>{STATUS_LABEL[task.status]}</span>
+            <span className={styles.statusText} data-status={task.status}>{t(STATUS_LABEL[task.status])}</span>
             <span>{timeAgo(task.updated_at)}</span>
           </span>
           <ChevronRight size={16} className={styles.chevron} />
@@ -298,7 +301,7 @@ function TaskList({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => vo
 
 function DecisionList({ client, decisions, details, onOpenTask, onResolved }: { client: FleetCloudClient; decisions: Decision[]; details: Record<string, TaskDetail>; onOpenTask: (id: string) => void; onResolved: (decision: Decision) => void }) {
   if (decisions.length === 0) {
-    return <EmptyState icon={CheckCircle2} title="没有待处理的决策" description="Agent 请求人工输入时，会连同所属 Attempt 出现在这里。" />;
+    return <EmptyState icon={CheckCircle2} title={t("没有待处理的决策")} description={t("Agent 请求人工输入时，会连同所属 Attempt 出现在这里。")} />;
   }
   return (
     <div className={styles.decisionList}>
@@ -308,7 +311,7 @@ function DecisionList({ client, decisions, details, onOpenTask, onResolved }: { 
             <CircleAlert size={17} />
             <span>
               <strong>{decisionQuestion(decision)}</strong>
-              <small>{taskTitle(details[decision.task_id] ?? ({ title: null, prompt: "Cloud task" } as Task))} · {decision.kind.replaceAll("_", " ")}</small>
+              <small>{taskTitle(details[decision.task_id] ?? ({ title: null, prompt: t("云任务") } as Task))} · {decision.kind.replaceAll("_", " ")}</small>
             </span>
             <ChevronRight size={16} />
           </button>
@@ -324,8 +327,8 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
   return (
     <div className={appStyles.app}>
       <header className={`${appStyles.header} ${styles.detailHeader}`}>
-        <button className={styles.back} onClick={onBack}><ArrowLeft size={18} />返回</button>
-        <div className={styles.detailHeaderTitle}>{detail ? taskTitle(detail) : "读取任务"}</div>
+        <button className={styles.back} onClick={onBack}><ArrowLeft size={18} />{t("返回")}</button>
+        <div className={styles.detailHeaderTitle}>{detail ? taskTitle(detail) : t("读取任务")}</div>
         <span className={appStyles.connIcon} data-kind={cloudConnKind(syncState)} role="img" aria-label={cloudConnText(syncState)} title={cloudConnText(syncState)}>
           <ConnIcon kind={cloudConnKind(syncState)} />
         </span>
@@ -333,7 +336,7 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
       <main className={`${appStyles.main} ${styles.detailMain}`}>
         {error && <ErrorBanner message={error} />}
         {!state || !detail ? (
-          <div className={styles.loading}><Loader2 size={18} className={styles.spinning} />同步 Task event log…</div>
+          <div className={styles.loading}><Loader2 size={18} className={styles.spinning} />{t("正在同步任务事件…")}</div>
         ) : (
           <>
             <section className={styles.detailIntro}>
@@ -341,17 +344,17 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
               <h1>{taskTitle(detail)}</h1>
               <p>{detail.prompt}</p>
               <div className={styles.detailFacts}>
-                <span data-status={detail.status}>{STATUS_LABEL[detail.status]}</span>
-                <span>{state.attempts.length} Attempts</span>
+                <span data-status={detail.status}>{t(STATUS_LABEL[detail.status])}</span>
+                <span>{t("{0} 次尝试", state.attempts.length)}</span>
                 <span>Event #{detail.event_cursor}</span>
               </div>
             </section>
 
             <div className={styles.detailGrid}>
               <section className={styles.transcript}>
-                <h2>会话记录</h2>
+                <h2>{t("会话记录")}</h2>
                 {state.messages.length === 0 ? (
-                  <div className={styles.muted}>还没有 transcript.message 事件。</div>
+                  <div className={styles.muted}>{t("还没有会话消息。")}</div>
                 ) : state.messages.map((message) => (
                   <article key={message.id} data-role={message.role}>
                     <div><Bot size={14} />{message.role}<time>{new Date(message.occurredAt).toLocaleTimeString()}</time></div>
@@ -361,8 +364,8 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
               </section>
 
               <aside className={styles.attempts}>
-                <h2>Attempt 链</h2>
-                {state.attempts.length === 0 ? <div className={styles.muted}>等待 Runner 接单</div> : state.attempts.map((attempt) => (
+                <h2>{t("尝试链")}</h2>
+                {state.attempts.length === 0 ? <div className={styles.muted}>{t("等待 Runner 接单")}</div> : state.attempts.map((attempt) => (
                   <div key={attempt.id} className={styles.attemptRow}>
                     <span className={styles.attemptOrdinal}>{attempt.ordinal}</span>
                     <span><strong>{attempt.agent_source}</strong><small>{attempt.reason} · {attempt.status}</small></span>
@@ -386,7 +389,7 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
 }
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return <div className={styles.errorBanner} role="alert"><CircleAlert size={16} /><span>{message}</span>{onRetry && <button onClick={onRetry}>重试</button>}</div>;
+  return <div className={styles.errorBanner} role="alert"><CircleAlert size={16} /><span>{message}</span>{onRetry && <button onClick={onRetry}>{t("重试")}</button>}</div>;
 }
 
 function DecisionResponder({ client, decision, onResolved, compact = false }: { client: FleetCloudClient; decision: Decision; onResolved: (decision: Decision) => void; compact?: boolean }) {
@@ -437,11 +440,11 @@ function DecisionResponder({ client, decision, onResolved, compact = false }: { 
           ))}
         </div>
       ) : (
-        <input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="输入答复" aria-label="决策答复" />
+        <input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={t("输入答复")} aria-label={t("决策答复")} />
       )}
       <div className={styles.responseActions}>
-        <button onClick={() => void submit("decline")} disabled={submitting}>拒绝</button>
-        <button data-primary onClick={() => void submit("answer")} disabled={submitting || !answer.trim()}>{submitting ? "提交中…" : "提交答复"}</button>
+        <button onClick={() => void submit("decline")} disabled={submitting}>{t("拒绝")}</button>
+        <button data-primary onClick={() => void submit("answer")} disabled={submitting || !answer.trim()}>{submitting ? t("提交中…") : t("提交答复")}</button>
       </div>
       {submitError && <small className={styles.submitError}>{submitError}</small>}
     </div>
