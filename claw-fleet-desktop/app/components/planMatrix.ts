@@ -150,3 +150,69 @@ export function cellStates(node: PlanNode): CellState[] {
     return "next";
   });
 }
+
+// ── Who is on it ─────────────────────────────────────────────────────────────
+
+/**
+ * - `active`: a session is working the plan (running, or parked on a watch /
+ *   schedule / card / handoff).
+ * - `orphan`: work left, claimed recently, and nobody on it — the reviver's case.
+ * - `stale`: work left, but the newest claim is past the reviver's window, or
+ *   nobody ever claimed it; Fleet will not wake anyone for it.
+ * - `snoozed`: nobody on it, on purpose.
+ * - `none`: nothing to say (no work left, or the live edge is further down).
+ */
+export type Presence = "active" | "orphan" | "stale" | "snoozed" | "none";
+
+const COVERED = new Set(["running", "watching", "scheduled", "waitingCard", "handingOff"]);
+
+export function isCovered(node: PlanNode): boolean {
+  return node.attendance != null && COVERED.has(node.attendance.state);
+}
+
+/** One plan's own presence dot. A plan with pending children is not the live
+ *  edge — its session moved down to the child — so only a live session on it
+ *  is worth a dot; the children carry the rest. */
+export function nodePresence(node: PlanNode): Presence {
+  if (isCovered(node)) return "active";
+  if (pendingOf(node) === 0) return "none";
+  if (node.children.some(subtreeHasPending)) return "none";
+  if (node.snooze) return "snoozed";
+  const a = node.attendance;
+  if (!a) return "none";
+  return a.state === "stale" ? "stale" : "orphan";
+}
+
+export interface TreeRollup {
+  presence: Presence;
+  /** Plans in the tree someone is on, root first. */
+  active: PlanNode[];
+  /** The live-edge plan the reviver will act on first, when nobody is on the tree. */
+  next: PlanNode | null;
+}
+
+/**
+ * The whole tree at a glance: anyone on any plan in it makes it `active`;
+ * otherwise it is as bad as its worst live edge. A tree whose pending plans
+ * were never claimed at all counts as `stale` — nobody is coming for it.
+ */
+export function treeRollup(root: PlanNode): TreeRollup {
+  const all: PlanNode[] = [];
+  const walk = (n: PlanNode) => {
+    all.push(n);
+    n.children.forEach(walk);
+  };
+  walk(root);
+  const active = all.filter(isCovered);
+  if (active.length > 0) return { presence: "active", active, next: null };
+  if (!subtreeHasPending(root)) return { presence: "none", active, next: null };
+  const edges = all.filter((n) => pendingOf(n) > 0 && !n.children.some(subtreeHasPending));
+  const reviveAt = (n: PlanNode) =>
+    n.revive?.kind === "revive" ? n.revive.at : Number.MAX_SAFE_INTEGER;
+  const orphans = edges
+    .filter((n) => nodePresence(n) === "orphan")
+    .sort((a, b) => reviveAt(a) - reviveAt(b));
+  if (orphans.length > 0) return { presence: "orphan", active, next: orphans[0] };
+  if (edges.some((n) => n.snooze)) return { presence: "snoozed", active, next: null };
+  return { presence: "stale", active, next: null };
+}
