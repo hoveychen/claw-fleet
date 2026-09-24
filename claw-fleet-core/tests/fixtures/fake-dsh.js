@@ -19,6 +19,8 @@
 //   FAKE_DSH_LIST_DELAY_MS      delay before answering session/list   (default 3000)
 //   FAKE_DSH_HISTORY_DELAY_MS   delay before answering session/page   (default 50)
 //   FAKE_DSH_LOG                append one line per request to this file
+//   FAKE_DSH_OWNER_PID          exit once this pid is gone (default: exit when
+//                               the parent changes)
 //
 // Fleet learns the port *and the launch token* by parsing one stdout line, so
 // the URL line below must keep the exact
@@ -341,9 +343,23 @@ server.on('upgrade', (req, socket) => {
 // binary is interrupted (Ctrl-C, a timeout, `kill -9`): the fixture was
 // reparented to launchd and kept listening — 26 of them were found alive on
 // 2026-09-23, the oldest six hours old. A changed ppid means the parent is gone.
+//
+// A test that kills the fixture's parent on purpose (serve_dsh_orphan asserts
+// the dsh web *survives* its serve) names the test process in
+// FAKE_DSH_OWNER_PID instead, so the fixture outlives serve but not the test.
+const OWNER_PID = Number(process.env.FAKE_DSH_OWNER_PID || 0);
 const PARENT_PID = process.ppid;
+function ownerGone() {
+  if (!OWNER_PID) return process.ppid !== PARENT_PID;
+  try {
+    process.kill(OWNER_PID, 0);
+    return false;
+  } catch (e) {
+    return e.code === 'ESRCH';
+  }
+}
 setInterval(() => {
-  if (process.ppid !== PARENT_PID) process.exit(0);
+  if (ownerGone()) process.exit(0);
 }, 1000).unref();
 
 server.listen(PORT, '127.0.0.1', () => {
