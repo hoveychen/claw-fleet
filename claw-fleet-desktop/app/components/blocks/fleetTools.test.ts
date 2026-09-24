@@ -178,6 +178,35 @@ describe("registry parity with claw-fleet-core", () => {
       expect(missing, `${lang}.json fleet.kind`).toEqual([]);
     }
   });
+
+  // `plan snooze`, `wiki mv`, `control send` … were added to the Rust schemas
+  // without locale entries, so the card header fell back to the bare action
+  // (`计划 snooze`) and the expanded params to their raw names. Read every
+  // control tool's schema and require a summary per action (or `unknown` for an
+  // action-less tool like spawn) and a label per param, in both locales.
+  it("every control tool action and param has a label in both locales", () => {
+    const src = ["mcp_control.rs", "mcp_inspect.rs"].map((f) => readFileSync(join(CORE_SRC, f), "utf8")).join("\n");
+    const defs = [...src.matchAll(/"name":\s*"fleet__(\w+)"([\s\S]*?)"additionalProperties"/g)];
+    expect(defs.length).toBeGreaterThanOrEqual(FLEET_CONTROL_TOOLS.length);
+    for (const lang of ["en", "zh"]) {
+      const fleet = JSON.parse(readFileSync(resolve(__dirname, `../../locales/${lang}.json`), "utf8")).fleet;
+      const missing: string[] = [];
+      for (const [, tool, body] of defs) {
+        const enumM = /"action":\s*\{"type":\s*"string",\s*"enum":\s*\[([^\]]*)\]/.exec(body);
+        const actions = enumM ? [...enumM[1].matchAll(/"(\w+)"/g)].map((x) => x[1]) : ["unknown"];
+        for (const a of actions) if (typeof fleet.summary?.[tool]?.[a] !== "string") missing.push(`summary.${tool}.${a}`);
+        const params = [...body.matchAll(/^\s*"(\w+)":\s*(?:\{|workspace_arg_schema)/gm)]
+          .map((x) => x[1])
+          .filter((p) => !["inputSchema", "properties", "items", "action"].includes(p));
+        for (const p of params) {
+          if (typeof fleet.param_for?.[tool]?.[p] !== "string" && typeof fleet.param?.[p] !== "string") {
+            missing.push(`param.${p} (${tool})`);
+          }
+        }
+      }
+      expect(missing, `${lang}.json fleet.*`).toEqual([]);
+    }
+  });
 });
 
 describe("friendlyToolName", () => {

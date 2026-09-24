@@ -69,7 +69,16 @@
       "offset_chars": "字符偏移",
       "limit_chars": "字符上限",
       "force": "强制",
-      "workspace": "仓库"
+      "workspace": "仓库",
+      "duration": "时长",
+      "kind": "类型",
+      "reason": "原因",
+      "root": "顶层",
+      "root_reason": "顶层原因",
+      "goal": "目标",
+      "goalReason": "改目标原因",
+      "expect_by": "预期时间",
+      "to": "目标位置"
     },
     "param_for": {
       "handoff": {
@@ -94,12 +103,15 @@
         "resume": "接手计划 {{plan}}",
         "migrate": "迁移 TASKS.md",
         "list": "列出计划",
-        "get": "查看计划 {{plan}}"
+        "get": "查看计划 {{plan}}",
+        "snooze": "静默计划 {{plan}}",
+        "unsnooze": "取消静默 {{plan}}"
       },
       "handoff": {
         "register": "登记接力",
         "cancel": "取消待定接力",
-        "list": "列出接力链"
+        "list": "列出接力链",
+        "show": "查看接力链"
       },
       "watch": {
         "create": "创建守望",
@@ -126,7 +138,9 @@
         "publish": "发布 {{slug}}",
         "cat": "查看 {{slug}}",
         "list": "列出知识库",
-        "search": "搜索 {{query}}"
+        "search": "搜索 {{query}}",
+        "show": "查看 {{slug}} 的版本",
+        "mv": "移动 {{slug}}"
       },
       "artifact": {
         "add": "存入产出 {{title}}",
@@ -144,7 +158,8 @@
       },
       "control": {
         "stop": "停止 agent {{id}}",
-        "interrupt": "打断 agent {{id}}"
+        "interrupt": "打断 agent {{id}}",
+        "send": "给 agent {{id}} 发消息"
       },
       "notes": {
         "write": "写入笔记 {{path}}",

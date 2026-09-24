@@ -69,7 +69,16 @@
       "offset_chars": "Char offset",
       "limit_chars": "Char limit",
       "force": "Force",
-      "workspace": "Workspace"
+      "workspace": "Workspace",
+      "duration": "Duration",
+      "kind": "Kind",
+      "reason": "Reason",
+      "root": "Top-level",
+      "root_reason": "Why top-level",
+      "goal": "Goal",
+      "goalReason": "Why the goal changed",
+      "expect_by": "Expected by",
+      "to": "Target"
     },
     "param_for": {
       "handoff": {
@@ -94,12 +103,15 @@
         "resume": "Resume plan {{plan}}",
         "migrate": "Migrate TASKS.md",
         "list": "List plans",
-        "get": "View plan {{plan}}"
+        "get": "View plan {{plan}}",
+        "snooze": "Snooze plan {{plan}}",
+        "unsnooze": "Unsnooze plan {{plan}}"
       },
       "handoff": {
         "register": "Register handoff",
         "cancel": "Cancel pending handoff",
-        "list": "List handoff chains"
+        "list": "List handoff chains",
+        "show": "View handoff chain"
       },
       "watch": {
         "create": "Create watch",
@@ -126,7 +138,9 @@
         "publish": "Publish {{slug}}",
         "cat": "View {{slug}}",
         "list": "List wiki",
-        "search": "Search {{query}}"
+        "search": "Search {{query}}",
+        "show": "View versions of {{slug}}",
+        "mv": "Move {{slug}}"
       },
       "artifact": {
         "add": "Stored artifact {{title}}",
@@ -144,7 +158,8 @@
       },
       "control": {
         "stop": "Stopped agent {{id}}",
-        "interrupt": "Interrupted agent {{id}}"
+        "interrupt": "Interrupted agent {{id}}",
+        "send": "Message agent {{id}}"
       },
       "notes": {
         "write": "Wrote note {{path}}",
