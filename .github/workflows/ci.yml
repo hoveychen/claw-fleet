@@ -466,32 +466,47 @@ jobs:
         run: git ls-files '*.sh' | xargs -r shellcheck
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Tag push only — Linux CLI binaries, built TWICE per architecture.
+  # Tag push only — Linux CLI binaries, two jobs per architecture.
   #
   # The two builds differ only in the `embed-webui` feature, and they exist
   # because the same binary serves two audiences with opposite needs:
   #
-  #   dist/       (artifact `fleet-linux-*`)  the public Linux download. Linux
-  #               has no desktop bundle, so this binary IS the app: the web UI
-  #               is compiled in (+~7 MB) and `fleet webui` needs no second
-  #               file and no --web-root.
-  #   dist-probe/ (artifact `probe-linux-*`)  the `fleet` probe every
+  #   probe-linux (artifact `probe-linux-*`)  the `fleet` probe every
   #               macOS/Windows desktop bundle embeds — twice, x64 + arm64 —
   #               as a resource for remote SSH deployment. It serves the HTTP
   #               API to a desktop app that already has its own UI, so
   #               embedding the bundle there would add ~14 MB to every
   #               installer to ship a UI nothing loads. Stays lean.
+  #   cli-linux   (artifact `fleet-linux-*`)  the public Linux download. Linux
+  #               has no desktop bundle, so this binary IS the app: the web UI
+  #               is compiled in (+~7 MB) and `fleet webui` needs no second
+  #               file and no --web-root.
+  #
+  # They are separate jobs, not two builds in one, because desktop-build waits
+  # on the probes and only the probes. As one job behind webui-bundle, the
+  # Windows desktop build — the release's critical path — sat idle for the web
+  # UI build plus the embedded build it never uses (~9 min in run 36017010492).
+  # probe-linux has no `needs`, so it starts at t=0.
   #
   # The artifact names differ but the FILE inside each keeps the name the
   # desktop resources dir expects (`fleet-linux-x64` / `fleet-linux-arm64`), so
   # nothing on the Rust side has to know this split exists. `probe-*` also
   # falls outside release.yml's `fleet-*` download pattern, which is what keeps
   # the lean copies out of the published release.
+  #
+  # No apt step: fleet-cli links no system library (TLS is rustls, sqlite /
+  # zstd / libgit2 are vendored), and zigbuild targets glibc 2.17 anyway. The
+  # webkit2gtk/gtk install that used to be here was left over from the removed
+  # Linux desktop build and cost 0.5-1.5 min per job.
+  #
+  # Both jobs restore the cache the cache-warm job saves on main (same
+  # shared-key). Tag-scoped caches are unreadable from every later tag, so
+  # these jobs never save one — before this every release compiled all ~290
+  # crates cold ("No cache found").
   # ═══════════════════════════════════════════════════════════════════════════
-  cli-linux:
+  probe-linux:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: webui-bundle
-    name: CLI — ${{ matrix.name }}
+    name: Probe — ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -501,12 +516,14 @@ jobs:
             rust_target: x86_64-unknown-linux-gnu
             artifact: fleet-linux-x64
             probe_artifact: probe-linux-x64
+            cache_key: cli-linux-x64
 
           - name: Linux ARM64
             runner: ubuntu-22.04-arm
             rust_target: aarch64-unknown-linux-gnu
             artifact: fleet-linux-arm64
             probe_artifact: probe-linux-arm64
+            cache_key: cli-linux-arm64
 
     runs-on: ${{ matrix.runner }}
 
@@ -523,21 +540,10 @@ jobs:
             rm -f "${toml}.bak"
           done
 
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev
-
-      - name: Setup protoc
+      - name: Setup protoc and cargo-zigbuild
         uses: taiki-e/install-action@v2
         with:
-          tool: protoc
+          tool: protoc,cargo-zigbuild
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -549,11 +555,84 @@ jobs:
         with:
           version: 0.13.0
 
-      - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Must match the Linux entries of cache-warm exactly.
+          shared-key: ${{ matrix.cache_key }}-e1-${{ hashFiles('Cargo.toml') }}
+          save-if: false
+
+      - name: Build lean fleet-cli
+        shell: bash
+        run: |
+          mkdir -p dist-probe
+          cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
+          cp "target/${{ matrix.rust_target }}/release/fleet-cli" "dist-probe/${{ matrix.artifact }}"
+          ls -lh dist-probe
+
+      - name: Upload probe artifact (desktop resource, lean)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.probe_artifact }}
+          path: dist-probe/
+          if-no-files-found: error
+
+  cli-linux:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: webui-bundle
+    name: CLI — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            artifact: fleet-linux-x64
+            cache_key: cli-linux-x64
+
+          - name: Linux ARM64
+            runner: ubuntu-22.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            artifact: fleet-linux-arm64
+            cache_key: cli-linux-arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do
+            sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$toml"
+            rm -f "${toml}.bak"
+          done
+
+      - name: Setup protoc and cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: protoc,cargo-zigbuild
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
+        with:
+          # Same key as probe-linux — see the comment above it.
+          shared-key: ${{ matrix.cache_key }}-e1-${{ hashFiles('Cargo.toml') }}
+          save-if: false
 
       # The bundle is built once, by webui-bundle, and reused by both
       # architectures — a second vite build here would produce the same bytes.
@@ -567,35 +646,21 @@ jobs:
         shell: bash
         run: tar -xzf webui-tar/claw-fleet-webui.tar.gz
 
-      - name: Build fleet-cli (lean probe + embedded release)
+      - name: Build fleet-cli (web UI embedded)
         shell: bash
         run: |
-          mkdir -p dist dist-probe
-          BUILT="target/${{ matrix.rust_target }}/release/fleet-cli"
-
-          # Lean first, and copied out before the second build overwrites it.
-          cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
-          cp "$BUILT" "dist-probe/${{ matrix.artifact }}"
-
+          mkdir -p dist
           FLEET_WEBUI_DIR="$PWD/claw-fleet-webui" \
             cargo zigbuild --release -p fleet-cli --features embed-webui \
               --target ${{ matrix.rust_target }}.2.17
-          cp "$BUILT" "dist/${{ matrix.artifact }}"
-
-          ls -lh dist-probe dist
+          cp "target/${{ matrix.rust_target }}/release/fleet-cli" "dist/${{ matrix.artifact }}"
+          ls -lh dist
 
       - name: Upload CLI artifact (public download, web UI embedded)
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/
-          if-no-files-found: error
-
-      - name: Upload probe artifact (desktop resource, lean)
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.probe_artifact }}
-          path: dist-probe/
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -672,15 +737,17 @@ jobs:
   # (fleet-macos / fleet-windows-x64).
   #
   # macOS and Windows only — Linux ships the CLI plus the webui-bundle above.
-  # The cli-linux dependency stays: every desktop bundle embeds the Linux CLI
-  # binaries as resources for remote SSH deployment.
+  # The probe-linux dependency stays: every desktop bundle embeds the lean
+  # Linux CLI binaries as resources for remote SSH deployment. It is
+  # probe-linux, not cli-linux, so this job does not also wait on the web UI
+  # build and the embedded Linux build.
   #
   # Tag-time signing (macOS) and publishing happen in release.yml, which
   # downloads these artifacts.
   # ═══════════════════════════════════════════════════════════════════════════
   desktop-build:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: cli-linux
+    needs: probe-linux
     name: Desktop — ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -689,7 +756,10 @@ jobs:
           - name: macOS (Universal)
             runner: macos-latest
             rust_target: universal-apple-darwin
-            tauri_args: --target universal-apple-darwin --features vendored-ssl
+            # `--bundles app`: only the .app is collected below; release.yml
+            # signs it and wraps it in a .pkg, so the DMG tauri made was thrown
+            # away (~40s).
+            tauri_args: --target universal-apple-darwin --features vendored-ssl --bundles app
             sidecar_name: fleet-universal-apple-darwin
             cli_artifact: fleet-macos
             fixed_suffix: macos
@@ -698,7 +768,9 @@ jobs:
           - name: Windows (x64)
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
-            tauri_args: --target x86_64-pc-windows-msvc
+            # `--bundles nsis`: only the NSIS installer is collected below; the
+            # MSI (WiX candle + light) was built and discarded (~25s).
+            tauri_args: --target x86_64-pc-windows-msvc --bundles nsis
             sidecar_name: fleet-x86_64-pc-windows-msvc.exe
             cli_artifact: fleet-windows-x64
             fixed_suffix: windows-x64
@@ -803,7 +875,7 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-      # ── Download cross-platform binaries from cli-linux ───────────────────
+      # ── Download cross-platform binaries from probe-linux ─────────────────
       # The `probe-*` artifacts, not `fleet-linux-*`: those carry the embedded
       # web UI for the public Linux download, which this bundle has no use for.
       # The files inside keep the names the resources dir expects.
@@ -872,7 +944,7 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # main-branch only — warm the desktop Rust cache.
+  # main-branch only — warm the desktop and Linux CLI Rust caches.
   #
   # The tag-time desktop-build jobs above otherwise run with a stone-cold cache:
   # GitHub Actions caches are readable only from the creating ref + the default
@@ -882,7 +954,8 @@ jobs:
   #
   # This job runs on main, compiles the same crates/targets/features with the
   # same env, and saves a Swatinem cache under the same `shared-key` the
-  # desktop-build jobs restore from. A release tag cut from that main commit
+  # desktop-build jobs restore from (and the Linux entries, the key probe-linux
+  # and cli-linux restore from). A release tag cut from that main commit
   # then hits a warm dependency cache. It only does the expensive compile when
   # the dependency set (Cargo.lock / any Cargo.toml) changed, since that is the
   # only thing the cache preserves across the workspace recompile a tag does.
@@ -924,6 +997,23 @@ jobs:
               cargo build --release -p fleet-cli --target x86_64-pc-windows-msvc
               cargo build --release -p claw-fleet-desktop --target x86_64-pc-windows-msvc
 
+          # Linux entries: only fleet-cli, built exactly as probe-linux builds
+          # it (zigbuild, glibc 2.17 suffix). cli-linux's `embed-webui` build
+          # differs only in fleet-cli itself, so it reuses the same deps.
+          - name: Linux x64
+            runner: ubuntu-22.04
+            cache_key: cli-linux-x64
+            targets: x86_64-unknown-linux-gnu
+            build: |
+              cargo zigbuild --release -p fleet-cli --target x86_64-unknown-linux-gnu.2.17
+
+          - name: Linux ARM64
+            runner: ubuntu-22.04-arm
+            cache_key: cli-linux-arm64
+            targets: aarch64-unknown-linux-gnu
+            build: |
+              cargo zigbuild --release -p fleet-cli --target aarch64-unknown-linux-gnu.2.17
+
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -943,13 +1033,13 @@ jobs:
               - '**/Cargo.toml'
 
       - name: Setup pnpm
-        if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'
+        if: runner.os != 'Linux' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true')
         uses: pnpm/action-setup@v6
         with:
           version: 10
 
       - name: Setup Node.js
-        if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'
+        if: runner.os != 'Linux' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true')
         uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -968,11 +1058,25 @@ jobs:
         with:
           targets: ${{ matrix.targets }}
 
+      # Same Zig version as probe-linux / cli-linux: zig is the C compiler for
+      # every -sys crate there, so a different one would rebuild them all.
+      - name: Setup Zig
+        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true')
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Setup cargo-zigbuild
+        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
       - name: Cache Rust
         if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          # Same key as desktop-build — see the comment there.
+          # Same key as desktop-build / probe-linux — see the comments there.
           shared-key: ${{ matrix.cache_key }}-e1-${{ hashFiles('Cargo.toml') }}
           # rust-cache never saves on an exact key hit, whatever save-if says
           # ("Cache up-to-date"), so this job only refreshes the cache when the
@@ -983,7 +1087,7 @@ jobs:
       # claw-fleet-desktop's tauri build script requires the frontend dist to
       # exist (frontendDist: ./dist), so build it before compiling the crate.
       - name: Build frontend
-        if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'
+        if: runner.os != 'Linux' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true')
         working-directory: claw-fleet-desktop
         run: |
           pnpm install --frozen-lockfile

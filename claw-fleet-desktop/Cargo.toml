@@ -6,7 +6,12 @@ publish = false
 
 [lib]
 name = "claw_fleet_desktop"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only. The Tauri template's `staticlib` + `cdylib` exist for Tauri's
+# iOS/Android targets, which this app does not build (the phone apps are
+# separate web shells). Each was a full thin-LTO link of the whole dependency
+# graph on every release build, per target: on the Windows CI runner the lib
+# step took 3.6 min on top of the 4 min exe link.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
