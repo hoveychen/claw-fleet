@@ -406,6 +406,12 @@ unsafe fn print_with_margins(
 /// the reader's `@media print` rules decide the artifact, not this command.
 #[tauri::command]
 fn print_webview(window: tauri::WebviewWindow) -> Result<(), String> {
+    print_window(&window)
+}
+
+/// Body of [`print_webview`], shared with `print_wiki_doc`'s dedicated print
+/// window. Must be called on the main thread for the macOS path to take effect.
+pub(crate) fn print_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         // Carried as an address because `with_webview` wants a Send closure and
@@ -1843,6 +1849,7 @@ pub fn run() {
             export_wiki_doc,
             publish_wiki_text,
             print_webview,
+            print_wiki_doc,
             list_browse_paths,
             add_browse_path,
             remove_browse_path,

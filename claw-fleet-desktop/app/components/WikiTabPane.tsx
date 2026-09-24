@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { BookOpen, NotebookText } from "lucide-react";
 
 import { useUIStore } from "../store";
+import { isWebBuild } from "../hostEnv";
 import {
   refetchWikiDocsForMissingSlug,
   revealSlugInWikiPage,
@@ -12,6 +13,7 @@ import type { AuxDoc } from "../detailAux";
 import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildWikiMenu, type AuxCardTail } from "./auxDocMenu";
 import { exportWikiDoc, WikiDocBody } from "./WikiView";
+import { printWikiDoc } from "./wikiPrint";
 import { timeAgo } from "./SessionRow";
 import styles from "./TabPanes.module.css";
 
@@ -93,6 +95,14 @@ export function WikiTabPane({
       doc && version
         ? () => {
             exportWikiDoc(doc, version).catch((e) =>
+              setError(t("wiki.export_failed", "导出失败：{{error}}", { error: String(e) })),
+            );
+          }
+        : undefined,
+    onExportPdf:
+      doc && version && !isWebBuild()
+        ? () => {
+            printWikiDoc(doc, version, wikiLinks).catch((e) =>
               setError(t("wiki.export_failed", "导出失败：{{error}}", { error: String(e) })),
             );
           }

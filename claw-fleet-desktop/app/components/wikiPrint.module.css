@@ -1,0 +1,20 @@
+/* Off screen, on paper. Parked out of view rather than `display: none` so
+   blocks that measure themselves while rendering (mermaid) get a real box.
+   App.css's `@media print` un-fixes any `[data-reader-overlay]`, and
+   ReaderModal.module.css's print rules restyle the paper inside it. */
+.sheet {
+  position: fixed;
+  top: 0;
+  left: -20000px;
+  width: 860px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+@media print {
+  .sheet {
+    left: auto;
+    width: auto;
+    visibility: visible;
+  }
+}

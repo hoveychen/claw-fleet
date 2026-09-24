@@ -194,6 +194,9 @@ describe("plugin:window family", () => {
  * through of every view would find.
  */
 const KNOWN_WEB_GAPS = [
+  // Opens a second native window to print a wiki HTML doc top-level. The
+  // browser build hides the wiki's "Export PDF" entries, so nothing offers it.
+  "print_wiki_doc",
   // Reach a workspace file through `memory::` instead of the Backend trait, so
   // there is no HTTP shape to mirror.
   "get_claude_md_content",

@@ -29,6 +29,7 @@ import {
   FolderInput,
   FolderOutput,
   Library,
+  Printer,
   RefreshCw,
   Trash2,
   type LucideIcon,
@@ -42,6 +43,7 @@ import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./Con
 import { PageShell } from "./PageShell";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { useUIStore } from "../store";
+import { printWikiDoc } from "./wikiPrint";
 import styles from "./WikiView.module.css";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
@@ -613,6 +615,20 @@ export function WikiView() {
         exportWikiDoc(doc, doc.currentVersion).catch((e) => console.error("wiki export failed:", e));
       },
     },
+    ...(isWebBuild()
+      ? []
+      : [
+          {
+            id: "export-pdf",
+            label: t("wiki.export_pdf_short", "导出 PDF"),
+            icon: <Printer size={13} strokeWidth={1.7} />,
+            onSelect: () => {
+              printWikiDoc(doc, doc.currentVersion, wikiLinks).catch((e) =>
+                console.error("wiki pdf export failed:", e),
+              );
+            },
+          },
+        ]),
     {
       id: "delete",
       label: t("wiki.delete_doc", "删除文档"),
@@ -1047,6 +1063,9 @@ function WikiDetail({
       setExporting(false);
     }
   };
+  const handleExportPdf = () => {
+    printWikiDoc(doc, effectiveVersion, wikiLinks).catch((e) => console.error("wiki pdf export failed:", e));
+  };
 
   return (
     <>
@@ -1103,6 +1122,16 @@ function WikiDetail({
             <Download size={12} strokeWidth={1.7} />
             {t("wiki.export_short", "Export")}
           </button>
+          {!isWebBuild() && (
+            <button
+              className={styles.action_btn}
+              onClick={handleExportPdf}
+              title={t("wiki.export_pdf", "Export this version as PDF (print panel → Save as PDF)")}
+            >
+              <Printer size={12} strokeWidth={1.7} />
+              {t("wiki.export_pdf_short", "PDF")}
+            </button>
+          )}
           {effectiveVersion !== doc.currentVersion && (
             <button
               className={styles.action_btn}
