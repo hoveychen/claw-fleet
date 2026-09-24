@@ -11,15 +11,25 @@ import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { useHistoryLayer } from "../useNavStack";
 import type { FleetTransport } from "../transport";
-import type { PlanForest, PlanNode, SessionInfo } from "../types";
+import type {
+  AttendanceState,
+  PlanAttendance,
+  PlanForest,
+  PlanNode,
+  ReviveOutlook,
+  SessionInfo,
+} from "../types";
 import {
   cellStates,
   matrixMetrics,
   matrixRows,
   nodeKey,
+  nodePresence,
   pendingOf,
   subtreeHasPending,
+  treeRollup,
 } from "./planMatrix";
+import type { Presence } from "./planMatrix";
 import { TaskItemLine } from "./TaskItemLine";
 import styles from "./PlansView.module.css";
 import { AppHeader } from "./AppHeader";
@@ -64,6 +74,45 @@ function subtreeSize(node: PlanNode): number {
   return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
 }
 
+/** Attendance is live state; re-read it on the reviver's own tick. */
+const LIVE_REFRESH_MS = 30_000;
+
+const STATE_LABEL: Record<AttendanceState, string> = {
+  running: "运行中",
+  watching: "挂着 watch 等条件",
+  scheduled: "已定时",
+  waitingCard: "等您回复决策卡",
+  handingOff: "正在接力",
+  idle: "已停止",
+  bossClosed: "已被您结束",
+  stale: "超过 7 天没人认领",
+};
+
+function outlookLabel(outlook: ReviveOutlook | null | undefined): string | null {
+  if (!outlook) return null;
+  switch (outlook.kind) {
+    case "revive": {
+      const mins = Math.ceil((outlook.at - Date.now()) / 60_000);
+      return mins <= 0 ? t("Fleet 即将起新会话接手") : t("约 {0} 分钟后 Fleet 起新会话接手", String(mins));
+    }
+    case "askBoss":
+      return t("Fleet 会先发卡问您要不要接着做");
+    case "asked":
+      return t("Fleet 已发卡，等您决定");
+    case "disabled":
+      return t("自动唤醒已关闭，不会有人接手");
+  }
+}
+
+function sessionLabel(sessions: SessionInfo[], id: string): string {
+  const s = sessions.find((x) => x.id === id);
+  return s?.titleOverride ?? s?.aiTitle ?? id.slice(0, 8);
+}
+
+function PresenceDot({ presence }: { presence: Presence }) {
+  return <i className={styles.presence} data-presence={presence} />;
+}
+
 export function PlansView({ sessions, client, onBack }: Props) {
   const repos = useMemo(() => distinctRepos(sessions), [sessions]);
   const [repo, setRepo] = useState<string | null>(null);
@@ -82,24 +131,35 @@ export function PlansView({ sessions, client, onBack }: Props) {
     if (!repo && repos.length > 0) setRepo(repos[0].path);
   }, [repo, repos]);
 
-  const load = useCallback(async () => {
-    if (!client || !repo) return;
-    setLoading(true);
-    setError(null);
-    try {
-      setForest(await client.request<PlanForest>("plan_forest", { workspacePath: repo }));
-    } catch (e) {
-      setForest(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [client, repo]);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!client || !repo) return;
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        setForest(await client.request<PlanForest>("plan_forest", { workspacePath: repo }));
+      } catch (e) {
+        if (!silent) {
+          setForest(null);
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [client, repo],
+  );
 
   useEffect(() => {
     setSelectedKey(null);
     void load();
+    const timer = setInterval(() => void load(true), LIVE_REFRESH_MS);
+    return () => clearInterval(timer);
   }, [load]);
+
+  const [unattendedOnly, setUnattendedOnly] = useState(false);
 
   const { liveRoots, doneRoots, donePlanCount } = useMemo(() => {
     const roots = forest?.roots ?? [];
@@ -108,10 +168,24 @@ export function PlansView({ sessions, client, onBack }: Props) {
     return { liveRoots: live, doneRoots: done, donePlanCount: done.reduce((n, r) => n + subtreeSize(r), 0) };
   }, [forest]);
 
-  const shownRoots = useMemo(
-    () => (showDone ? [...liveRoots, ...doneRoots] : liveRoots),
-    [liveRoots, doneRoots, showDone],
+  const rollups = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof treeRollup>>();
+    for (const r of forest?.roots ?? []) m.set(nodeKey(r), treeRollup(r));
+    return m;
+  }, [forest]);
+  const unattended = useMemo(
+    () =>
+      liveRoots.filter((r) => {
+        const p = rollups.get(nodeKey(r))?.presence;
+        return p === "orphan" || p === "stale";
+      }),
+    [liveRoots, rollups],
   );
+
+  const shownRoots = useMemo(() => {
+    if (unattendedOnly) return unattended;
+    return showDone ? [...liveRoots, ...doneRoots] : liveRoots;
+  }, [liveRoots, doneRoots, showDone, unattendedOnly, unattended]);
 
   // Same default as desktop: a branch with no pending tasks collapses by default.
   const collapsed = useMemo(() => {
@@ -203,7 +277,17 @@ export function PlansView({ sessions, client, onBack }: Props) {
                 {t("{0} 个计划有待办", String(flatten(shownRoots).filter((n) => pendingOf(n) > 0).length))}
               </span>
               <span className={styles.statDim}>{`${pendingTasks} / ${totalTasks} P`}</span>
-              {doneRoots.length > 0 && (
+              {(unattended.length > 0 || unattendedOnly) && (
+                <button
+                  className={styles.chip}
+                  data-warn={!unattendedOnly}
+                  data-on={unattendedOnly}
+                  onClick={() => setUnattendedOnly((v) => !v)}
+                >
+                  {t("无人负责 {0} 棵", String(unattended.length))}
+                </button>
+              )}
+              {doneRoots.length > 0 && !unattendedOnly && (
                 <button
                   className={styles.chip}
                   data-on={showDone}
@@ -218,6 +302,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
               {rows.map((row) => {
                 const cells = cellStates(row.node);
                 const pending = pendingOf(row.node);
+                const rollup = row.depth === 0 ? rollups.get(row.key) : undefined;
                 return (
                   <div
                     key={row.key}
@@ -249,12 +334,18 @@ export function PlansView({ sessions, client, onBack }: Props) {
                       {row.node.orphanedParent ? (
                         <TriangleAlert size={10} className={styles.orphan} />
                       ) : (
-                        row.node.kind === "explore" && <i className={styles.kindDot} />
+                        <PresenceDot presence={nodePresence(row.node)} />
                       )}
                       <span className={styles.title} data-done={pending === 0}>
                         {row.node.title || row.node.id}
                       </span>
                       {row.node.snooze && <Moon size={10} className={styles.snooze} />}
+                      {rollup?.presence === "orphan" && (
+                        <span className={styles.badge} data-kind="orphan">{t("无人负责")}</span>
+                      )}
+                      {rollup?.presence === "stale" && (
+                        <span className={styles.badge} data-kind="stale">{t("久未认领")}</span>
+                      )}
                     </div>
                     <span className={styles.count} data-live={pending > 0}>
                       {row.node.done}/{row.node.total}
@@ -287,6 +378,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
           <div className={styles.scrim} onClick={() => setSelectedKey(null)} />
           <PlanSheet
             node={selected}
+            sessions={sessions}
             focusItem={focusItem}
             onClose={() => setSelectedKey(null)}
           />
@@ -299,10 +391,12 @@ export function PlansView({ sessions, client, onBack }: Props) {
 /** The only place P-task prose appears: one plan, slid up from the bottom, on demand. */
 function PlanSheet({
   node,
+  sessions,
   focusItem,
   onClose,
 }: {
   node: PlanNode;
+  sessions: SessionInfo[];
   focusItem: number | null;
   onClose: () => void;
 }) {
@@ -339,6 +433,9 @@ function PlanSheet({
         </span>
       </div>
       {node.source && <div className={styles.source}>{node.source}</div>}
+      {node.attendance && (
+        <OwnerNote node={node} attendance={node.attendance} sessions={sessions} />
+      )}
       {node.snooze && (
         <div className={styles.snoozeNote}>
           <Moon size={11} />
@@ -380,6 +477,29 @@ function PlanSheet({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function OwnerNote({
+  node,
+  attendance,
+  sessions,
+}: {
+  node: PlanNode;
+  attendance: PlanAttendance;
+  sessions: SessionInfo[];
+}) {
+  const presence = nodePresence(node);
+  const outlook = outlookLabel(node.revive);
+  return (
+    <div className={styles.ownerNote} data-active={presence === "active"}>
+      <PresenceDot presence={presence} />
+      <span>
+        {`${sessionLabel(sessions, attendance.sessionId)} · ${t(STATE_LABEL[attendance.state])}`}
+        {outlook && <br />}
+        {outlook}
+      </span>
     </div>
   );
 }
