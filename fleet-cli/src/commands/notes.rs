@@ -25,6 +25,11 @@ fn run(tool: &str, args: Value, session: Option<&str>) {
 pub(crate) fn cmd_notes(action: NotesCommands, session: Option<&str>) {
     let args = match action {
         NotesCommands::Write { path, text } => json!({"action":"write","path":path,"text":text}),
+        NotesCommands::Edit {
+            path,
+            old_text,
+            new_text,
+        } => json!({"action":"edit","path":path,"old_text":old_text,"new_text":new_text}),
         NotesCommands::Append { path, text } => json!({"action":"append","path":path,"text":text}),
         NotesCommands::Read {
             path,

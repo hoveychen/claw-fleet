@@ -185,8 +185,10 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 
 交接是换人；本节管的是同一个会话跨上下文窗口。
 
-- **边做边记，别等到最后。**从一开始就用 `fleet__notes`（CLI：`fleet notes`）维护一份 checkpoint（目标、已定决策、进展、教训、下一步，以及能回捞细节的指针），每完成一个 P-task 或撞上一个值得记的坑就 `append`。笔记不受压缩影响，handoff 后继者也读得到。
-- 压缩后新窗口开头会注入 `<fleet_notes>`：先读它恢复宏观状态；缺细节就用 `fleet__history search`（CLI：`fleet history`）搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 `read` 那一条。
+- **笔记是为了多轮接力后不丢{title}的要求。**用 `fleet__notes`（CLI：`fleet notes`）在 `checkpoint.md` 里只记两类东西，一出现就记，别等到最后：① {title}提过的要求、偏好和对齐过的结论（尽量保留{title}原话）；② 踩过、以后还会再踩的坑（现象、原因、怎么绕开）。笔记不受压缩影响，handoff 后继者也读得到。
+- **不记流水账。**进度、做了什么、下一步、TODO 一律不写——那些归 TASKS.md、git 和 handoff note。
+- **改写，不追加。**{title}改了某条要求，就用 `edit` 改那一条，别在末尾再追加一条互相矛盾的；重复的合并；只有{title}明确撤回的才删。控制在约 5000 字节以内——压缩后和接力开场注入的就是它，超出只剩尾巴。
+- 压缩后新窗口开头会注入 `<fleet_notes>`：先读它找回{title}的要求和已知的坑；缺细节就用 `fleet__history search`（CLI：`fleet history`）搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 `read` 那一条。
 - 它们是**内部记账**，不要在给{title}的回复里复述笔记或提这两个工具。
 
 ### 绝不用 Claude Code 自带的跨回合调度器
@@ -403,8 +405,10 @@ fleet handoff --note "<the chain's handoff brief: conclusions aligned with {titl
 
 A handoff changes *who*; this section covers one session crossing context windows.
 
-- **Take notes as you go**, not at the end. From the start, keep a checkpoint with `fleet__notes` (CLI: `fleet notes`) (goal, decisions taken, progress, lessons, next steps, and pointers for recovering detail), appending after each P-task or each trap worth recording. Notes survive compression, and a handoff successor can read them.
-- After a compression the new window opens with a `<fleet_notes>` injection: read it to restore the macro state, then use `fleet__history search` (CLI: `fleet history`) to find the verbatim text in your (or a predecessor's) transcript and `read` that `line_no` for the details.
+- **Notes exist so {title}'s requirements survive a long relay.** With `fleet__notes` (CLI: `fleet notes`), keep exactly two kinds of entry in `checkpoint.md`, recorded as they come up, not at the end: (1) requirements, preferences and conclusions {title} stated or agreed to (keep {title}'s own words where you can); (2) traps you hit that are likely to bite again (symptom, cause, how to avoid it). Notes survive compression, and a handoff successor can read them.
+- **No log.** Never record progress, what you did, next steps or TODOs — those belong in TASKS.md, git and the handoff note.
+- **Rewrite, do not append.** When {title} changes a requirement, `edit` that entry instead of appending a contradicting one; merge duplicates; delete only what {title} explicitly withdrew. Keep it under about 5,000 bytes — it is what gets re-injected after a compression and at the start of a relay hop, and past that only its tail survives.
+- After a compression the new window opens with a `<fleet_notes>` injection: read it to recover {title}'s requirements and the known traps, then use `fleet__history search` (CLI: `fleet history`) to find the verbatim text in your (or a predecessor's) transcript and `read` that `line_no` for the details.
 - These are **internal bookkeeping** — do not narrate the notes or these tools back to {title}.
 
 ### Never use Claude Code's built-in cross-turn schedulers
@@ -759,7 +763,9 @@ mod tests {
 
     /// Notes are the layer between TASKS.md (checkboxes) and a handoff note
     /// (one-shot briefing): same session, across context windows. The section
-    /// has to teach the three moves — append as you go, read the injected hint
+    /// has to teach the three moves — record the boss's requirements and
+    /// recurring traps as they come up (edited in place, never a progress
+    /// log), read the injected hint
     /// after a compaction, recover detail via history — and mark all of it as
     /// internal bookkeeping, in both locales.
     #[test]
@@ -792,8 +798,23 @@ mod tests {
                 "[{locale}] must mark notes as internal, not for the user"
             );
             assert!(
-                g.contains("边做边记") || g.contains("as you go"),
+                g.contains("一出现就记") || g.contains("as they come up"),
                 "[{locale}] must say notes are incremental, not end-of-task"
+            );
+            // Append-only, progress-logging guidance grew checkpoints into
+            // 20 KB relay diaries whose injected tail dropped the requirements
+            // the boss had stated hops earlier — the one thing notes exist for.
+            assert!(
+                g.contains("不记流水账") || g.contains("No log."),
+                "[{locale}] must forbid progress logs in notes"
+            );
+            assert!(
+                g.contains("提过的要求、偏好") || g.contains("requirements, preferences"),
+                "[{locale}] must say notes hold the boss's requirements and recurring traps"
+            );
+            assert!(
+                g.contains("`edit`") && (g.contains("5000") || g.contains("5,000")),
+                "[{locale}] must teach in-place edits and the size budget"
             );
         }
     }

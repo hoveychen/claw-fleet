@@ -224,13 +224,8 @@ pub fn append_in(
     let session_id = readable.first().ok_or("no session to append as")?.as_str();
     let full = resolve(root, session_id, path)?;
     if !full.is_file() {
-        for sid in &readable[1..] {
-            let inherited = resolve(root, sid, path)?;
-            if inherited.is_file() {
-                let seed = fs::read_to_string(&inherited)
-                    .map_err(|e| format!("read {}: {e}", inherited.display()))?;
-                return write_in(root, session_id, path, &(seed + text));
-            }
+        if let Some(seed) = inherited_text(root, readable, path)? {
+            return write_in(root, session_id, path, &(seed + text));
         }
     }
     let existing = fs::metadata(&full).map(|m| m.len() as usize).unwrap_or(0);
@@ -251,6 +246,88 @@ pub fn append_in(
     f.write_all(text.as_bytes())
         .map_err(|e| format!("append {}: {e}", full.display()))?;
     stat(root, session_id, path, &full)
+}
+
+/// The nearest predecessor's copy of `path`, if any (`readable[0]` is the
+/// writer itself and is skipped).
+fn inherited_text(root: &Path, readable: &[String], path: &str) -> Result<Option<String>, String> {
+    for sid in readable.iter().skip(1) {
+        let inherited = resolve(root, sid, path)?;
+        if inherited.is_file() {
+            return fs::read_to_string(&inherited)
+                .map(Some)
+                .map_err(|e| format!("read {}: {e}", inherited.display()));
+        }
+    }
+    Ok(None)
+}
+
+/// Replace exactly one occurrence of `old` with `new` in a note file.
+///
+/// This is what makes a checkpoint maintainable in place: without it the only
+/// way to correct one stale line was a full `write` of the whole file, so
+/// agents appended instead and checkpoints grew into logs. A successor editing
+/// an inherited path edits a copy seeded from the nearest predecessor, as
+/// [`append_in`] does. `old` must match exactly once — zero or several matches
+/// are refused rather than guessed at.
+pub fn edit(session_id: &str, path: &str, old: &str, new: &str) -> Result<NoteFile, String> {
+    let root = notes_root().ok_or("cannot determine home dir")?;
+    edit_in(&root, &readable_sessions(session_id), path, old, new)
+}
+
+pub fn edit_in(
+    root: &Path,
+    readable: &[String],
+    path: &str,
+    old: &str,
+    new: &str,
+) -> Result<NoteFile, String> {
+    let session_id = readable.first().ok_or("no session to edit as")?.as_str();
+    if old.is_empty() {
+        return Err("`old_text` must not be empty".to_string());
+    }
+    let full = resolve(root, session_id, path)?;
+    let text = if full.is_file() {
+        fs::read_to_string(&full).map_err(|e| format!("read {}: {e}", full.display()))?
+    } else {
+        inherited_text(root, readable, path)?
+            .ok_or_else(|| format!("no note at `{}`", path.trim()))?
+    };
+    match text.matches(old).count() {
+        1 => write_in(root, session_id, path, &text.replacen(old, new, 1)),
+        0 => Err(format!(
+            "`old_text` does not occur in `{}` — read the note and copy the text exactly",
+            path.trim()
+        )),
+        n => Err(format!(
+            "`old_text` occurs {n} times in `{}` — include more surrounding text so it matches once",
+            path.trim()
+        )),
+    }
+}
+
+/// The conventional current-state note; the post-compaction hint prefers it
+/// over whatever was written last.
+pub const CHECKPOINT_PATH: &str = "checkpoint.md";
+
+/// Size a checkpoint should stay under so the post-compaction hint can carry
+/// it whole ([`MAX_HINT_BYTES`] minus the roster and framing).
+pub const CHECKPOINT_BUDGET_BYTES: usize = 5_000;
+
+/// A nudge appended to a write result when the checkpoint has outgrown
+/// [`CHECKPOINT_BUDGET_BYTES`]; `None` while it still fits and for any other
+/// path (reference notes may be as long as they need — they are read on
+/// demand, not injected).
+pub fn over_budget_warning(file: &NoteFile) -> Option<String> {
+    (file.path == CHECKPOINT_PATH && file.bytes as usize > CHECKPOINT_BUDGET_BYTES).then(|| {
+        format!(
+            "warning: {} is {} bytes, over the {CHECKPOINT_BUDGET_BYTES}-byte budget the \
+             post-compaction hint carries whole — only its tail will be re-injected. Rewrite it \
+             (action=write): drop progress and log entries, merge duplicate requirements and \
+             traps, and keep every requirement the user has not withdrawn.",
+            file.path, file.bytes
+        )
+    })
 }
 
 fn stat(_root: &Path, session_id: &str, path: &str, full: &Path) -> Result<NoteFile, String> {
@@ -494,10 +571,11 @@ pub fn search_in(
 
 // ── Hint (post-compaction re-injection) ──────────────────────────────────────
 
-/// Byte ceiling for the hint injected after a compaction — Codex's
-/// `MAX_THREAD_HINT_BYTES`. A hint is a pointer back into the notes, not the
-/// notes themselves.
-pub const MAX_HINT_BYTES: usize = 4_000;
+/// Byte ceiling for the hint injected after a compaction. Codex's
+/// `MAX_THREAD_HINT_BYTES` is 4,000; ours is larger because the checkpoint
+/// carries the user's accumulated requirements, which must arrive whole —
+/// losing them across a relay is the failure notes exist to prevent.
+pub const MAX_HINT_BYTES: usize = 6_000;
 
 /// How many note files the roster names before collapsing the rest into a
 /// count. A long handoff chain makes every predecessor's notes readable, and an
@@ -519,8 +597,8 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
         return None;
     }
     let mut out = String::from(
-        "<fleet_notes>\nPrivate checkpoint notes from before this context window (own session \
-         first, then handoff predecessors). Read the rest with fleet__notes read, and use \
+        "<fleet_notes>\nPrivate notes (the user's requirements and recurring traps) from before this \
+         context window (own session first, then handoff predecessors). Read the rest with fleet__notes read, and use \
          fleet__history search to recover details a compaction dropped. Internal bookkeeping — \
          do not narrate to the user.\n",
     );
@@ -540,12 +618,19 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
     {
         out.push_str(&format!("  … and {hidden} more (fleet__notes list)\n"));
     }
-    // Most recent write overall — a checkpoint written right before the
-    // compaction is exactly what the next window needs first.
-    if let Some(latest) = files.iter().max_by_key(|f| f.updated_ms) {
+    // The checkpoint (own copy first — `files` is ordered own session first)
+    // is the current-state document the next window needs; a reference note
+    // written after it must not displace it. Without one, the most recent
+    // write overall.
+    let shown = files
+        .iter()
+        .find(|f| f.path == CHECKPOINT_PATH)
+        .map(|f| (f, "checkpoint"))
+        .or_else(|| files.iter().max_by_key(|f| f.updated_ms).map(|f| (f, "latest")));
+    if let Some((latest, why)) = shown {
         if let Ok(full) = resolve(root, &latest.session_id, &latest.path) {
             if let Ok(text) = fs::read_to_string(&full) {
-                out.push_str(&format!("--- {} (latest) ---\n", latest.path));
+                out.push_str(&format!("--- {} ({why}) ---\n", latest.path));
                 let budget =
                     MAX_HINT_BYTES.saturating_sub(out.len() + "</fleet_notes>\n".len() + 64);
                 out.push_str(&clip_bytes(&text, budget));
@@ -562,11 +647,11 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
 /// Clip to `budget` bytes on a char boundary, keeping the **tail** and marking
 /// the elision at the top.
 ///
-/// Keeping the tail rather than the head is the whole point: the guidance tells
-/// agents to `append` a line per finished task, so the newest state — the one a
-/// fresh context window needs — lives at the end of the file. Clipping the head
-/// off a 38 KB checkpoint used to hand the next window the oldest entries and
-/// drop everything since.
+/// The guidance now asks for a checkpoint of requirements and traps that fits
+/// the budget whole, so clipping only bites a note that grew into a log anyway
+/// (older ones were written append-only). For those the newest state lives at the
+/// end: clipping the head off a 38 KB checkpoint used to hand the next window
+/// the oldest entries and drop everything since.
 fn clip_bytes(text: &str, budget: usize) -> String {
     if text.len() <= budget {
         return text.to_string();
@@ -602,7 +687,7 @@ mod tests {
         assert!(hint.ends_with("</fleet_notes>\n"));
         assert!(hint.contains("Files (2):"));
         assert!(hint.contains("old.md  9 bytes  [own]"));
-        assert!(hint.contains("--- checkpoint.md (latest) ---"), "{hint}");
+        assert!(hint.contains("--- checkpoint.md (checkpoint) ---"), "{hint}");
         assert!(hint.contains("[clipped;"));
         let _ = fs::remove_dir_all(&root);
     }
@@ -823,6 +908,68 @@ mod tests {
         // A path no predecessor has is created from the appended text alone.
         append_in(&root, &readable, "fresh.md", "x").unwrap();
         assert_eq!(read_owned_in(&root, "c", "fresh.md").unwrap(), "x");
+    }
+
+    #[test]
+    fn edit_replaces_exactly_one_match_and_seeds_from_predecessor() {
+        let root = fresh_root("edit");
+        write_in(&root, "a", "checkpoint.md", "next: P2\nstatus: open\n").unwrap();
+        let readable = readable_sessions_with("b", Some(&chain(&["a", "b"])));
+
+        // First edit on an inherited path copies the predecessor's file.
+        edit_in(&root, &readable, "checkpoint.md", "next: P2", "next: P3").unwrap();
+        assert_eq!(
+            read_owned_in(&root, "b", "checkpoint.md").unwrap(),
+            "next: P3\nstatus: open\n"
+        );
+        assert_eq!(
+            read_owned_in(&root, "a", "checkpoint.md").unwrap(),
+            "next: P2\nstatus: open\n"
+        );
+
+        write_in(&root, "b", "dup.md", "x\nx\n").unwrap();
+        let err = edit_in(&root, &readable, "dup.md", "x", "y").unwrap_err();
+        assert!(err.contains("2 times"), "{err}");
+        let err = edit_in(&root, &readable, "dup.md", "zzz", "y").unwrap_err();
+        assert!(err.contains("does not occur"), "{err}");
+        assert!(edit_in(&root, &readable, "dup.md", "", "y").is_err());
+        assert!(edit_in(&root, &readable, "missing.md", "x", "y").is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn over_budget_warning_only_fires_for_an_oversized_checkpoint() {
+        let root = fresh_root("budget");
+        let small = write_in(&root, "s1", CHECKPOINT_PATH, "goal: x\n").unwrap();
+        assert!(over_budget_warning(&small).is_none());
+        let big_text = "x".repeat(CHECKPOINT_BUDGET_BYTES + 1);
+        let big = write_in(&root, "s1", CHECKPOINT_PATH, &big_text).unwrap();
+        assert!(over_budget_warning(&big).unwrap().contains("action=write"));
+        let reference = write_in(&root, "s1", "refs/log.md", &big_text).unwrap();
+        assert!(over_budget_warning(&reference).is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A reference note written after the checkpoint must not displace it
+    /// from the post-compaction hint.
+    #[test]
+    fn hint_prefers_the_checkpoint_over_a_later_reference_note() {
+        let root = fresh_root("hint-prefers");
+        let own = vec!["s1".to_string()];
+        write_in(&root, "s1", CHECKPOINT_PATH, "CURRENT_STATE").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_in(&root, "s1", "refs/raw.md", "RAW_DUMP").unwrap();
+        let hint = render_hint_in(&root, "s1", &own).unwrap();
+        assert!(hint.contains("--- checkpoint.md (checkpoint) ---"), "{hint}");
+        assert!(hint.contains("CURRENT_STATE"));
+        assert!(!hint.contains("RAW_DUMP"));
+
+        // Without a checkpoint the latest write is shown.
+        let other = vec!["s2".to_string()];
+        write_in(&root, "s2", "a.md", "A").unwrap();
+        let hint = render_hint_in(&root, "s2", &other).unwrap();
+        assert!(hint.contains("--- a.md (latest) ---"), "{hint}");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

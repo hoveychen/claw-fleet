@@ -115,13 +115,15 @@ pub fn control_tool_defs() -> Vec<Value> {
 fn notes_tool_def() -> Value {
     json!({
         "name": "fleet__notes",
-        "description": "Private incremental checkpoint notes that survive context compaction and handoff relays (Fleet's local analogue of Codex's `notes` tool). For any task that may outlive one context window, append as you go — goal, decisions, progress, learnings, next steps, and pointers (file paths, `fleet__history` line numbers) — so a compaction or relay does not lose them; after a compaction Fleet re-injects a summary of these notes. Paths are virtual (relative, `/`-separated, no `.`/`..`); every file stays ≤ 1,000,000 bytes. Reads see this session's notes plus its handoff predecessors'; writes go to this session only. Internal bookkeeping: do not narrate notes to the user. Actions: write (replace), append, read (optional start_line/stop_line, 1-based inclusive, negative counts from the end), list (optional prefix), search (case-sensitive literal substring).",
+        "description": "Private notes that survive context compaction and handoff relays (Fleet's local analogue of Codex's `notes` tool). They exist so what the user asked for is not lost across a long relay. Keep `checkpoint.md` to exactly two kinds of entry, recorded as they come up: (1) requirements, preferences and conclusions the user stated or agreed to (keep their own words where you can); (2) traps you hit that are likely to bite again (symptom, cause, how to avoid). Never record progress, what you did, next steps or TODOs — TASKS.md, git and the handoff note hold those. Rewrite, do not append: when a requirement changes, `edit` that entry instead of appending a contradicting one; merge duplicates; delete only what the user explicitly withdrew. Keep it under ~5,000 bytes: after a compaction and at the start of each relay hop Fleet re-injects checkpoint.md, and only that much fits whole. Other paths are for reference material read on demand. Paths are virtual (relative, `/`-separated, no `.`/`..`); every file stays ≤ 1,000,000 bytes. Reads see this session's notes plus its handoff predecessors'; writes go to this session only (a successor's first edit/append of an inherited path starts from the predecessor's copy). Internal bookkeeping: do not narrate notes to the user. Actions: write (replace whole file), edit (replace one exact occurrence of old_text with new_text), append, read (optional start_line/stop_line, 1-based inclusive, negative counts from the end), list (optional prefix), search (case-sensitive literal substring).",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["write", "append", "read", "list", "search"]},
-                "path": {"type": "string", "description": "Virtual note path, e.g. `checkpoint.md` or `bugs/tokenizer.md`. Required for write/append/read."},
+                "action": {"type": "string", "enum": ["write", "edit", "append", "read", "list", "search"]},
+                "path": {"type": "string", "description": "Virtual note path, e.g. `checkpoint.md` or `bugs/tokenizer.md`. Required for write/edit/append/read."},
                 "text": {"type": "string", "description": "Text to write or append, exactly as provided. Required for write/append."},
+                "old_text": {"type": "string", "description": "edit: exact text to replace; must occur exactly once in the note."},
+                "new_text": {"type": "string", "description": "edit: replacement text (empty string deletes old_text)."},
                 "start_line": {"type": "integer", "description": "read: first line to return (1-based, inclusive; negative = from the end)."},
                 "stop_line": {"type": "integer", "description": "read: last line to return (1-based, inclusive; negative = from the end)."},
                 "prefix": {"type": "string", "description": "list/search: only paths starting with this prefix."},
@@ -406,6 +408,15 @@ pub fn render_note_matches(matches: &[crate::session_notes::NoteMatch], query: &
     out.trim_end().to_string()
 }
 
+fn note_write_result(action: &str, file: &crate::session_notes::NoteFile) -> String {
+    let mut out = format!("ok: {} {} ({} bytes)", action, file.path, file.bytes);
+    if let Some(warning) = crate::session_notes::over_budget_warning(file) {
+        out.push('\n');
+        out.push_str(&warning);
+    }
+    out
+}
+
 fn handle_notes(args: &Value, sid: Option<&str>) -> Result<String, String> {
     use crate::session_notes as notes;
     let sid = sid.ok_or(NO_SESSION_ID)?;
@@ -422,10 +433,17 @@ fn handle_notes(args: &Value, sid: Option<&str>) -> Result<String, String> {
             } else {
                 notes::append(sid, &path, text)?
             };
-            Ok(format!(
-                "ok: {} {} ({} bytes)",
-                action, file.path, file.bytes
-            ))
+            Ok(note_write_result(&action, &file))
+        }
+        "edit" => {
+            let path = req(args, "path")?;
+            let text_of = |key: &str| {
+                args.get(key)
+                    .and_then(Value::as_str)
+                    .ok_or(format!("`{key}` is required for edit"))
+            };
+            let file = notes::edit(sid, &path, text_of("old_text")?, text_of("new_text")?)?;
+            Ok(note_write_result(&action, &file))
         }
         "read" => {
             let path = req(args, "path")?;
