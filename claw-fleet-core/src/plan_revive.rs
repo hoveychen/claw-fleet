@@ -275,28 +275,7 @@ pub fn collect_views(
             if now.saturating_sub(newest.1.updated) >= RECENCY_MS {
                 continue;
             }
-            let mut owners: Vec<String> = Vec::new();
-            let mut seen: HashSet<String> = HashSet::new();
-            let mut newest_owner = newest.0.clone();
-            for (i, c) in claims.iter().enumerate() {
-                let mut sid = c.0.clone();
-                let mut hops = 0;
-                loop {
-                    if seen.insert(sid.clone()) {
-                        owners.push(sid.clone());
-                    }
-                    match successor(&sid) {
-                        Some(next) if hops < 64 => {
-                            sid = next;
-                            hops += 1;
-                        }
-                        _ => break,
-                    }
-                }
-                if i == 0 {
-                    newest_owner = sid;
-                }
-            }
+            let (owners, newest_owner) = follow_owners(&claims, successor);
             let (done, total) = pt::count_tasks(&b.body);
             out.push(PlanView {
                 workspace_path: ws.clone(),
@@ -329,27 +308,263 @@ pub struct Coverage {
 impl Coverage {
     /// Why the plan is covered, or `None` when nobody is on it.
     pub fn reason(&self, owners: &[String]) -> Option<String> {
+        let (sid, state) = self.covering(owners)?;
+        let short = &sid[..sid.len().min(8)];
+        Some(match state {
+            AttendanceState::Running => format!("session {short} is running"),
+            AttendanceState::Watching => format!("session {short} owns a live watch"),
+            AttendanceState::Scheduled => format!("session {short} owns a pending schedule/loop"),
+            AttendanceState::WaitingCard => format!("session {short} has a decision card waiting"),
+            _ => format!("session {short} registered a handoff"),
+        })
+    }
+
+    /// The first owner that covers the plan and how, or `None` when nobody is
+    /// on it. Owners are checked in order, each against every kind of cover.
+    pub fn covering<'a>(&self, owners: &'a [String]) -> Option<(&'a str, AttendanceState)> {
         for sid in owners {
             let s = sid.as_str();
-            let short = &s[..s.len().min(8)];
-            if self.alive.contains(s) {
-                return Some(format!("session {short} is running"));
-            }
-            if self.watching.contains(s) {
-                return Some(format!("session {short} owns a live watch"));
-            }
-            if self.scheduled.contains(s) {
-                return Some(format!("session {short} owns a pending schedule/loop"));
-            }
-            if self.carded.contains(s) {
-                return Some(format!("session {short} has a decision card waiting"));
-            }
-            if self.handing_off.contains(s) {
-                return Some(format!("session {short} registered a handoff"));
-            }
+            let state = if self.alive.contains(s) {
+                AttendanceState::Running
+            } else if self.watching.contains(s) {
+                AttendanceState::Watching
+            } else if self.scheduled.contains(s) {
+                AttendanceState::Scheduled
+            } else if self.carded.contains(s) {
+                AttendanceState::WaitingCard
+            } else if self.handing_off.contains(s) {
+                AttendanceState::HandingOff
+            } else {
+                continue;
+            };
+            return Some((s, state));
         }
         None
     }
+}
+
+// ── Attendance for the plan-tree view ───────────────────────────────────────
+
+/// How a plan's responsible session stands. The first five mean somebody is on
+/// the plan (the reviver's "covered"); the last three mean nobody is.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum AttendanceState {
+    Running,
+    Watching,
+    Scheduled,
+    WaitingCard,
+    HandingOff,
+    /// Claimed recently, but the session is gone and left nothing armed.
+    Idle,
+    /// Like `Idle`, and the boss closed that session with the terminal button.
+    BossClosed,
+    /// Newest claim is older than [`RECENCY_MS`]; the reviver ignores it.
+    Stale,
+}
+
+impl AttendanceState {
+    pub fn is_covered(self) -> bool {
+        !matches!(self, Self::Idle | Self::BossClosed | Self::Stale)
+    }
+}
+
+/// Who is responsible for a plan right now.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PlanAttendance {
+    /// The covering session when there is one, otherwise the newest claimant
+    /// (after following its handoff successors).
+    pub session_id: String,
+    pub state: AttendanceState,
+    /// Epoch ms of the newest claim on the plan.
+    pub claimed_at: u64,
+}
+
+/// What the reviver will do about a plan nobody is on. Only set on plans the
+/// reviver actually tracks (pending, recently claimed, no pending descendant).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ReviveOutlook {
+    /// A fresh session will be spawned at about `at` (epoch ms).
+    Revive { at: u64 },
+    /// The boss closed the last session; Fleet will raise a card first.
+    AskBoss,
+    /// A card of Fleet's about this plan is already waiting for the boss.
+    Asked,
+    /// The reviver is switched off in settings.
+    Disabled,
+}
+
+/// Attendance for every plan of one workspace.
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct WorkspaceAttendance {
+    pub plans: HashMap<String, PlanAttendance>,
+    pub outlook: HashMap<String, ReviveOutlook>,
+}
+
+/// Direct claimants of each plan: the sessions whose focus record names it,
+/// each followed down its handoff successors. Newest claim first.
+fn direct_claims(
+    records: &[(String, TaskProgressRecord)],
+    successor: &dyn Fn(&str) -> Option<String>,
+) -> HashMap<String, (Vec<String>, String, u64)> {
+    let mut by_plan: HashMap<&str, Vec<&(String, TaskProgressRecord)>> = HashMap::new();
+    for r in records {
+        by_plan.entry(r.1.plan_id.as_str()).or_default().push(r);
+    }
+    let mut out = HashMap::new();
+    for (plan, mut claims) in by_plan {
+        claims.sort_by(|a, b| b.1.updated.cmp(&a.1.updated));
+        let (owners, newest) = follow_owners(&claims, successor);
+        out.insert(plan.to_string(), (owners, newest, claims[0].1.updated));
+    }
+    out
+}
+
+/// Every session reachable from `claims` through handoff links, deduplicated,
+/// plus where the newest claim's chain ends up.
+fn follow_owners(
+    claims: &[&(String, TaskProgressRecord)],
+    successor: &dyn Fn(&str) -> Option<String>,
+) -> (Vec<String>, String) {
+    let mut owners: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut newest_owner = claims.first().map(|c| c.0.clone()).unwrap_or_default();
+    for (i, c) in claims.iter().enumerate() {
+        let mut sid = c.0.clone();
+        let mut hops = 0;
+        loop {
+            if seen.insert(sid.clone()) {
+                owners.push(sid.clone());
+            }
+            match successor(&sid) {
+                Some(next) if hops < 64 => {
+                    sid = next;
+                    hops += 1;
+                }
+                _ => break,
+            }
+        }
+        if i == 0 {
+            newest_owner = sid;
+        }
+    }
+    (owners, newest_owner)
+}
+
+/// Is a focus record's workspace the workspace rooted at `main_root`? Records
+/// name the main checkout, but a session started inside a worktree may name
+/// that instead.
+fn in_workspace(record_ws: &str, main_root: &str) -> bool {
+    let r = record_ws.trim_end_matches('/');
+    r == main_root || r.starts_with(&format!("{main_root}/.worktrees/"))
+}
+
+/// Pure core of [`workspace_attendance`]: every store is passed in.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_attendance(
+    records: &[(String, TaskProgressRecord)],
+    blocks: &[pt::SourcedBlock],
+    now: u64,
+    successor: &dyn Fn(&str) -> Option<String>,
+    closed: &dyn Fn(&str) -> bool,
+    coverage: &dyn Fn(&HashSet<String>) -> Coverage,
+    revive_state: &dyn Fn(&str) -> Option<PlanReviveState>,
+    snoozed: &dyn Fn(&str) -> bool,
+    enabled: bool,
+) -> WorkspaceAttendance {
+    let direct = direct_claims(records, successor);
+    let views = collect_views(records, now, successor, closed, &|_| blocks.to_vec());
+    let owners: HashSet<String> = direct
+        .values()
+        .flat_map(|d| d.0.iter().cloned())
+        .chain(views.iter().flat_map(|v| v.owners.iter().cloned()))
+        .collect();
+    let cov = coverage(&owners);
+
+    let attend = |owners: &[String], newest: &str, claimed_at: u64| {
+        if let Some((sid, state)) = cov.covering(owners) {
+            return PlanAttendance { session_id: sid.to_string(), state, claimed_at };
+        }
+        let state = if now.saturating_sub(claimed_at) >= RECENCY_MS {
+            AttendanceState::Stale
+        } else if closed(newest) {
+            AttendanceState::BossClosed
+        } else {
+            AttendanceState::Idle
+        };
+        PlanAttendance { session_id: newest.to_string(), state, claimed_at }
+    };
+
+    let mut out = WorkspaceAttendance::default();
+    for (plan, (owners, newest, at)) in &direct {
+        out.plans.insert(plan.clone(), attend(owners, newest, *at));
+    }
+    // The reviver's view of a live-edge plan is wider (descendant claimants,
+    // a borrowed ancestor claim), and it is the one the reviver acts on, so it
+    // wins for those plans.
+    for v in &views {
+        let at = records
+            .iter()
+            .filter(|r| v.owners.contains(&r.0))
+            .map(|r| r.1.updated)
+            .max()
+            .unwrap_or(0);
+        let a = attend(&v.owners, &v.newest_owner, at);
+        let covered = a.state.is_covered();
+        out.plans.insert(v.plan_id.clone(), a);
+        if covered || snoozed(&v.plan_id) {
+            continue;
+        }
+        let outlook = if !enabled {
+            ReviveOutlook::Disabled
+        } else {
+            let st = revive_state(&v.plan_id).unwrap_or_default();
+            if st.ask_card_id.is_some() {
+                ReviveOutlook::Asked
+            } else if v.boss_closed && !st.boss_approved {
+                ReviveOutlook::AskBoss
+            } else {
+                let since = st.orphan_since_ms.unwrap_or(now);
+                ReviveOutlook::Revive { at: since + ORPHAN_GRACE_MS }
+            }
+        };
+        out.outlook.insert(v.plan_id.clone(), outlook);
+    }
+    out
+}
+
+/// Attendance for the workspace rooted at `main_root`, from the real stores.
+/// `blocks` are the workspace's already-loaded plan blocks.
+pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> WorkspaceAttendance {
+    let ws = main_root.trim_end_matches('/');
+    let records: Vec<(String, TaskProgressRecord)> = crate::task_progress::all_records()
+        .into_iter()
+        .filter(|(_, r)| in_workspace(&r.workspace_path, ws))
+        .map(|(sid, mut r)| {
+            r.workspace_path = ws.to_string();
+            (sid, r)
+        })
+        .collect();
+    if records.is_empty() {
+        return WorkspaceAttendance::default();
+    }
+    let state = state_path().and_then(|p| load_state(&p)).unwrap_or_default();
+    resolve_attendance(
+        &records,
+        blocks,
+        plan_snooze::now_ms(),
+        &|sid| crate::handoff::successor_session_of(sid),
+        &|sid| crate::task_outcome::read(sid).is_some(),
+        &gather_coverage,
+        &|plan| state.plans.get(&plan_snooze::plan_key(ws, plan)).cloned(),
+        &|plan| plan_snooze::active(ws, plan).is_some(),
+        PlanReviveConfig::load().enabled,
+    )
 }
 
 /// Gather [`Coverage`] for `owners` from the real stores.
@@ -1307,6 +1522,81 @@ mod tests {
         assert_eq!(c.reason(&owners).unwrap(), "session bbbbbbbb owns a live watch");
         c.alive.insert("aaaaaaaa-1".into());
         assert_eq!(c.reason(&owners).unwrap(), "session aaaaaaaa is running");
+    }
+
+    fn attendance(
+        records: &[(String, TaskProgressRecord)],
+        blocks: &[pt::SourcedBlock],
+        now: u64,
+        cov: impl Fn(&mut Coverage),
+        state: Option<PlanReviveState>,
+        closed: &[&str],
+    ) -> WorkspaceAttendance {
+        resolve_attendance(
+            records,
+            blocks,
+            now,
+            &|_| None,
+            &|sid| closed.contains(&sid),
+            &|_| {
+                let mut c = Coverage::default();
+                cov(&mut c);
+                c
+            },
+            &|_| state.clone(),
+            &|_| false,
+            true,
+        )
+    }
+
+    #[test]
+    fn attendance_names_the_covering_session_and_its_cover() {
+        let now = 100 * H;
+        let records = vec![
+            ("s-parent".to_string(), rec("/w", "root", now - 2 * H)),
+            ("s-child".to_string(), rec("/w", "child", now - H)),
+        ];
+        let blocks = [block("root", None, PENDING), block("child", Some("root"), PENDING)];
+        let a = attendance(&records, &blocks, now, |c| {
+            c.watching.insert("s-child".into());
+        }, None, &[]);
+        let child = &a.plans["child"];
+        assert_eq!((child.session_id.as_str(), child.state), ("s-child", AttendanceState::Watching));
+        // The parent's own claimant is gone, but the parent is not the live
+        // edge, so the reviver has no outlook for it.
+        assert_eq!(a.plans["root"].state, AttendanceState::Idle);
+        assert!(a.outlook.is_empty());
+    }
+
+    #[test]
+    fn uncovered_live_edge_gets_a_revive_outlook() {
+        let now = 100 * H;
+        let records = vec![("s1".to_string(), rec("/w", "p", now - H))];
+        let blocks = [block("p", None, PENDING)];
+        let since = PlanReviveState { orphan_since_ms: Some(now - 60_000), ..Default::default() };
+        let a = attendance(&records, &blocks, now, |_| {}, Some(since), &[]);
+        assert_eq!(a.plans["p"].state, AttendanceState::Idle);
+        assert_eq!(a.outlook["p"], ReviveOutlook::Revive { at: now - 60_000 + ORPHAN_GRACE_MS });
+
+        let a = attendance(&records, &blocks, now, |_| {}, None, &["s1"]);
+        assert_eq!(a.plans["p"].state, AttendanceState::BossClosed);
+        assert_eq!(a.outlook["p"], ReviveOutlook::AskBoss);
+    }
+
+    #[test]
+    fn old_claims_are_stale_and_get_no_outlook() {
+        let now = 100 * 24 * H;
+        let records = vec![("s1".to_string(), rec("/w", "p", now - 8 * 24 * H))];
+        let a = attendance(&records, &[block("p", None, PENDING)], now, |_| {}, None, &[]);
+        assert_eq!(a.plans["p"].state, AttendanceState::Stale);
+        assert!(a.outlook.is_empty());
+    }
+
+    #[test]
+    fn worktree_records_count_for_their_main_checkout() {
+        assert!(in_workspace("/w/", "/w"));
+        assert!(in_workspace("/w/.worktrees/x", "/w"));
+        assert!(!in_workspace("/w2", "/w"));
     }
 
     fn view(done: u32, boss_closed: bool) -> PlanView {
