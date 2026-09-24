@@ -761,6 +761,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p claw-fleet-desktop/binaries dist
+          # Same deployment target the tauri CLI exports for the app build (see
+          # the cache-warm job for why every macOS cargo call must agree on it).
+          export MACOSX_DEPLOYMENT_TARGET="$(jq -r .bundle.macOS.minimumSystemVersion claw-fleet-desktop/tauri.conf.json)"
           cargo build --release -p fleet-cli --target aarch64-apple-darwin
           cargo build --release -p fleet-cli --target x86_64-apple-darwin
           lipo -create \
@@ -892,7 +895,14 @@ jobs:
             runner: macos-latest
             cache_key: desktop-macos
             targets: aarch64-apple-darwin,x86_64-apple-darwin
+            # `tauri build` exports MACOSX_DEPLOYMENT_TARGET from the bundle's
+            # minimumSystemVersion, and every cc-built -sys crate (ring,
+            # openssl-sys, objc2, libsqlite3-sys, curl-sys, ...) reruns its build
+            # script when that variable changes. Warming without it made the
+            # release rebuild those crates and everything above them (tauri,
+            # wry, ...) for both architectures, ~5 min each, despite a cache hit.
             build: |
+              export MACOSX_DEPLOYMENT_TARGET="$(jq -r .bundle.macOS.minimumSystemVersion claw-fleet-desktop/tauri.conf.json)"
               cargo build --release -p fleet-cli --target aarch64-apple-darwin
               cargo build --release -p fleet-cli --target x86_64-apple-darwin
               OPENSSL_STATIC=1 cargo build --release -p claw-fleet-desktop --features vendored-ssl --target aarch64-apple-darwin
