@@ -53,6 +53,13 @@ pub struct PlanNode {
     /// can say why nobody is being woken for this plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snooze: Option<crate::plan_snooze::PlanSnooze>,
+    /// Who is responsible for this plan right now; `None` when no session has
+    /// ever claimed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attendance: Option<crate::plan_revive::PlanAttendance>,
+    /// What the reviver will do about it when nobody is on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revive: Option<crate::plan_revive::ReviveOutlook>,
 }
 
 impl PlanNode {
@@ -93,19 +100,21 @@ pub fn build(cwd: &Path, chains: Vec<HandoffChain>) -> PlanForest {
     // writes under.
     let ws = main_root.as_deref().unwrap_or(cwd);
     let snoozes = crate::plan_snooze::active_for_workspace(&ws.to_string_lossy());
-    if !snoozes.is_empty() {
-        attach_snoozes(&mut forest.roots, &snoozes);
-    }
+    let mut attendance = crate::plan_revive::workspace_attendance(&ws.to_string_lossy(), &blocks);
+    attach_live_state(&mut forest.roots, &snoozes, &mut attendance);
     forest
 }
 
-fn attach_snoozes(
+fn attach_live_state(
     nodes: &mut [PlanNode],
     snoozes: &HashMap<String, crate::plan_snooze::PlanSnooze>,
+    attendance: &mut crate::plan_revive::WorkspaceAttendance,
 ) {
     for n in nodes {
         n.snooze = snoozes.get(&n.id).cloned();
-        attach_snoozes(&mut n.children, snoozes);
+        n.attendance = attendance.plans.remove(&n.id);
+        n.revive = attendance.outlook.remove(&n.id);
+        attach_live_state(&mut n.children, snoozes, attendance);
     }
 }
 
@@ -160,6 +169,8 @@ pub fn build_from(
                 children: Vec::new(),
                 orphaned_parent: None,
                 snooze: None,
+                attendance: None,
+                revive: None,
             },
         );
     }
@@ -412,8 +423,8 @@ mod tests {
         assert_eq!(forest.anonymous, 2);
     }
 
-    /// A snooze lands on its own plan wherever it sits in the tree, and on
-    /// no other node.
+    /// A snooze and an attendance land on their own plan wherever it sits in
+    /// the tree, and on no other node.
     #[test]
     fn snoozes_attach_to_nested_plans_by_id() {
         let blocks = [
@@ -430,9 +441,20 @@ mod tests {
             created_ms: 0,
         };
         let map = HashMap::from([("kid".to_string(), snooze.clone())]);
-        attach_snoozes(&mut forest.roots, &map);
+        let mut attendance = crate::plan_revive::WorkspaceAttendance::default();
+        attendance.plans.insert(
+            "kid".into(),
+            crate::plan_revive::PlanAttendance {
+                session_id: "s1".into(),
+                state: crate::plan_revive::AttendanceState::Running,
+                claimed_at: 5,
+            },
+        );
+        attach_live_state(&mut forest.roots, &map, &mut attendance);
         assert_eq!(forest.roots[0].snooze, None);
         assert_eq!(forest.roots[0].children[0].snooze, Some(snooze));
+        assert_eq!(forest.roots[0].attendance, None);
+        assert_eq!(forest.roots[0].children[0].attendance.as_ref().unwrap().session_id, "s1");
     }
 
     /// Roots and children preserve TASKS.md order, so the view reads like the

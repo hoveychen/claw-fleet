@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PlanNode, TaskItem } from "../types";
+import type { AttendanceState, PlanNode, TaskItem } from "../types";
 import {
   PITCH_MAX,
   PITCH_MIN,
@@ -10,6 +10,8 @@ import {
   matrixMetrics,
   matrixRows,
   nodeKey,
+  nodePresence,
+  treeRollup,
 } from "./planMatrix";
 
 function plan(
@@ -126,5 +128,45 @@ describe("matrixMetrics", () => {
 
   it("falls back to the roomy title when there are no cells at all", () => {
     expect(matrixMetrics(300, 0).titleW).toBe(TITLE_MAX);
+  });
+});
+
+const claimed = (node: PlanNode, state: AttendanceState, sessionId = "s1"): PlanNode => ({
+  ...node,
+  attendance: { sessionId, state, claimedAt: 0 },
+});
+
+describe("presence", () => {
+  it("dots only the live edge when nobody is on a plan", () => {
+    const kid = claimed(plan("kid", { items: [item(false)] }), "idle");
+    const root = claimed(plan("root", { items: [item(false)], children: [kid] }), "idle");
+    expect(nodePresence(root)).toBe("none");
+    expect(nodePresence(kid)).toBe("orphan");
+    expect(treeRollup(root)).toMatchObject({ presence: "orphan", next: kid });
+  });
+
+  it("any live session anywhere makes the tree active", () => {
+    const kid = claimed(plan("kid", { items: [item(false)] }), "watching", "s2");
+    const root = claimed(plan("root", { items: [item(false)], children: [kid] }), "idle");
+    expect(nodePresence(kid)).toBe("active");
+    const r = treeRollup(root);
+    expect(r.presence).toBe("active");
+    expect(r.active.map((n) => n.id)).toEqual(["kid"]);
+  });
+
+  it("never-claimed and stale work is stale, snoozed work is snoozed", () => {
+    expect(treeRollup(plan("never", { items: [item(false)] })).presence).toBe("stale");
+    const old = claimed(plan("old", { items: [item(false)] }), "stale");
+    expect(nodePresence(old)).toBe("stale");
+    expect(treeRollup(old).presence).toBe("stale");
+    const quiet = {
+      ...claimed(plan("quiet", { items: [item(false)] }), "idle"),
+      snooze: { workspacePath: "/w", planId: "quiet", untilMs: null, reason: "r", setBy: "s", createdMs: 0 },
+    };
+    expect(treeRollup(quiet).presence).toBe("snoozed");
+  });
+
+  it("finished trees say nothing", () => {
+    expect(treeRollup(claimed(plan("done", { items: [item(true)] }), "idle")).presence).toBe("none");
   });
 });

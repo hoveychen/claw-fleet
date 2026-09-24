@@ -11,12 +11,23 @@ import {
   matrixMetrics,
   matrixRows,
   nodeKey,
+  nodePresence,
   pendingOf,
   subtreeHasPending,
+  treeRollup,
 } from "./planMatrix";
-import type { MatrixMetrics, MatrixRow } from "./planMatrix";
+import type { MatrixMetrics, MatrixRow, Presence, TreeRollup } from "./planMatrix";
 import { useDetailStore, useSessionsStore, useUIStore } from "../store";
-import type { HandoffChain, PlanForest, PlanNode } from "../types";
+import { preferredSessionTitle } from "../types";
+import type {
+  AttendanceState,
+  HandoffChain,
+  PlanAttendance,
+  PlanForest,
+  PlanNode,
+  ReviveOutlook,
+  SessionInfo,
+} from "../types";
 import { TaskLine, taskTip } from "./TaskLine";
 import styles from "./PlansView.module.css";
 
@@ -36,6 +47,63 @@ function chainLegCount(chain: HandoffChain): number {
 /** Total plans in a subtree, for the "Completed N" fold's count. */
 function subtreeSize(node: PlanNode): number {
   return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
+}
+
+/** Attendance is live state, so the board re-reads it on this cadence — the
+ *  reviver's own tick. */
+const LIVE_REFRESH_MS = 30_000;
+
+type TFn = ReturnType<typeof useTranslation>["t"];
+
+/** What a session is called on the board: its title, else a short id. */
+function sessionLabel(sessions: SessionInfo[], id: string): string {
+  const s = sessions.find((x) => x.id === id);
+  return (s && preferredSessionTitle(s)) ?? id.slice(0, 8);
+}
+
+function stateLabel(t: TFn, state: AttendanceState): string {
+  const labels: Record<AttendanceState, [string, string]> = {
+    running: ["plans.att_running", "运行中"],
+    watching: ["plans.att_watching", "挂着 watch 等条件"],
+    scheduled: ["plans.att_scheduled", "已定时"],
+    waitingCard: ["plans.att_waiting_card", "等您回复决策卡"],
+    handingOff: ["plans.att_handing_off", "正在接力"],
+    idle: ["plans.att_idle", "已停止"],
+    bossClosed: ["plans.att_boss_closed", "已被您结束"],
+    stale: ["plans.att_stale", "超过 7 天没人认领"],
+  };
+  const [key, fallback] = labels[state];
+  return t(key, fallback);
+}
+
+function outlookLabel(t: TFn, outlook: ReviveOutlook | null | undefined, now: number): string | null {
+  if (!outlook) return null;
+  switch (outlook.kind) {
+    case "revive": {
+      const mins = Math.ceil((outlook.at - now) / 60_000);
+      return mins <= 0
+        ? t("plans.revive_soon", "Fleet 即将起新会话接手")
+        : t("plans.revive_in", { count: mins, defaultValue: "约 {{count}} 分钟后 Fleet 起新会话接手" });
+    }
+    case "askBoss":
+      return t("plans.revive_ask", "Fleet 会先发卡问您要不要接着做");
+    case "asked":
+      return t("plans.revive_asked", "Fleet 已发卡，等您决定");
+    case "disabled":
+      return t("plans.revive_disabled", "自动唤醒已关闭，不会有人接手");
+  }
+}
+
+/** One line on who is (or was) on a plan, for tooltips and the drawer. */
+function attendanceLine(
+  t: TFn,
+  sessions: SessionInfo[],
+  a: PlanAttendance,
+  outlook: ReviveOutlook | null | undefined,
+): string {
+  const head = `${sessionLabel(sessions, a.sessionId)} · ${stateLabel(t, a.state)}`;
+  const tail = outlookLabel(t, outlook, Date.now());
+  return tail ? `${head}\n${tail}` : head;
 }
 
 /** Every node in the forest, flat — resolves a selection back to its plan. */
@@ -116,23 +184,32 @@ export function PlansView() {
     }
   }, []);
 
-  const load = useCallback(async () => {
-    if (!selectedWorkspace) return;
-    setLoading(true);
-    try {
-      setForest(await invoke<PlanForest>("get_plan_forest", { workspacePath: selectedWorkspace }));
-      setError(null);
-    } catch (e) {
-      setForest(null);
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedWorkspace]);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!selectedWorkspace) return;
+      if (!silent) setLoading(true);
+      try {
+        setForest(await invoke<PlanForest>("get_plan_forest", { workspacePath: selectedWorkspace }));
+        setError(null);
+      } catch (e) {
+        if (!silent) {
+          setForest(null);
+          setError(String(e));
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [selectedWorkspace],
+  );
 
   useEffect(() => {
     void load();
+    const timer = setInterval(() => void load(true), LIVE_REFRESH_MS);
+    return () => clearInterval(timer);
   }, [load]);
+
+  const [unattendedOnly, setUnattendedOnly] = useState(false);
 
   // Dropping the selection on a repo switch keeps the drawer from showing a
   // plan that is no longer on the board.
@@ -164,10 +241,29 @@ export function PlansView() {
     };
   }, [forest]);
 
-  const shownRoots = useMemo(
-    () => (showCompletedRoots ? [...liveRoots, ...doneRoots] : liveRoots),
-    [liveRoots, doneRoots, showCompletedRoots],
+  const rollups = useMemo(() => {
+    const m = new Map<string, TreeRollup>();
+    for (const r of forest?.roots ?? []) m.set(nodeKey(r), treeRollup(r));
+    return m;
+  }, [forest]);
+  const isUnattended = useCallback(
+    (r: PlanNode) => {
+      const p = rollups.get(nodeKey(r))?.presence;
+      return p === "orphan" || p === "stale";
+    },
+    [rollups],
   );
+  const unattendedCount = useMemo(() => liveRoots.filter(isUnattended).length, [liveRoots, isUnattended]);
+  const activeSessionCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rollups.values()) for (const n of r.active) ids.add(n.attendance!.sessionId);
+    return ids.size;
+  }, [rollups]);
+
+  const shownRoots = useMemo(() => {
+    if (unattendedOnly) return liveRoots.filter(isUnattended);
+    return showCompletedRoots ? [...liveRoots, ...doneRoots] : liveRoots;
+  }, [liveRoots, doneRoots, showCompletedRoots, unattendedOnly, isUnattended]);
 
   // A subtree stays open unless the user said otherwise; the default folds away
   // branches with nothing left to do.
@@ -275,7 +371,27 @@ export function PlansView() {
                     defaultValue: "{{pending}} / {{total}} 个 P 待办",
                   })}
                 </span>
-                {doneRoots.length > 0 && (
+                {activeSessionCount > 0 && (
+                  <span className={styles.stat_dim}>
+                    {t("plans.stat_sessions", {
+                      count: activeSessionCount,
+                      defaultValue: "{{count}} 个会话在做",
+                    })}
+                  </span>
+                )}
+                {(unattendedCount > 0 || unattendedOnly) && (
+                  <button
+                    className={`${styles.chip} ${styles.chip_warn} ${unattendedOnly ? styles.chip_on : ""}`}
+                    onClick={() => setUnattendedOnly((v) => !v)}
+                    title={t("plans.unattended_filter_tip", "只看没有会话在负责的计划树")}
+                  >
+                    {t("plans.unattended_filter", {
+                      count: unattendedCount,
+                      defaultValue: "无人负责 {{count}} 棵",
+                    })}
+                  </button>
+                )}
+                {doneRoots.length > 0 && !unattendedOnly && (
                   <button
                     className={`${styles.chip} ${showCompletedRoots ? styles.chip_on : ""}`}
                     onClick={() => updatePlansView({ showCompletedRoots: !showCompletedRoots })}
@@ -288,6 +404,11 @@ export function PlansView() {
                 )}
                 <span className={styles.spacer} />
                 <span className={styles.legend}>
+                  <i className={styles.presence_active} />
+                  {t("plans.legend_active", "有人在做")}
+                  <i className={styles.presence_orphan} />
+                  {t("plans.legend_orphan", "无人负责")}
+                  <span className={styles.legend_gap} />
                   <i className={styles.dot_done} />
                   {t("plans.legend_cell_done", "已完成")}
                   <i className={styles.dot_next} />
@@ -302,6 +423,9 @@ export function PlansView() {
                   <PlanMatrixRow
                     key={row.key}
                     row={row}
+                    rollup={row.depth === 0 ? rollups.get(row.key) : undefined}
+                    sessions={sessions}
+                    onOpenSession={openSession}
                     metrics={metrics}
                     selected={row.key === selectedKey}
                     onSelect={select}
@@ -340,6 +464,8 @@ export function PlansView() {
             doneShown={doneItemsShown.includes(nodeKey(selected))}
             onToggleDone={() => toggleDoneItems(nodeKey(selected))}
             onOpenChain={setOpenChain}
+            sessions={sessions}
+            onOpenSession={openSession}
             onClose={() => setSelectedKey(null)}
           />
         )}
@@ -364,17 +490,50 @@ export function PlansView() {
 
 interface RowProps {
   row: MatrixRow;
+  /** Whole-tree summary; only on root rows. */
+  rollup?: TreeRollup;
+  sessions: SessionInfo[];
+  onOpenSession: (sessionId: string) => void;
   metrics: MatrixMetrics;
   selected: boolean;
   onSelect: (key: string, item: number | null) => void;
   onToggleSubtree: (key: string, open: boolean) => void;
 }
 
-function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: RowProps) {
+function PlanMatrixRow({
+  row,
+  rollup,
+  sessions,
+  onOpenSession,
+  metrics,
+  selected,
+  onSelect,
+  onToggleSubtree,
+}: RowProps) {
   const { t } = useTranslation();
   const { node } = row;
   const pending = pendingOf(node);
   const cells = cellStates(node);
+  const presence = nodePresence(node);
+  const att = node.attendance;
+  // A tree nobody is on says so on its root, even when the dot sits further
+  // down on a collapsed child.
+  const treeBadge =
+    rollup?.presence === "orphan"
+      ? {
+          text: t("plans.badge_orphan", "无人负责"),
+          tip: rollup.next?.attendance
+            ? attendanceLine(t, sessions, rollup.next.attendance, rollup.next.revive)
+            : "",
+          cls: styles.badge_orphan,
+        }
+      : rollup?.presence === "stale"
+        ? {
+            text: t("plans.badge_stale", "久未认领"),
+            tip: t("plans.badge_stale_tip", "有待办，但最近 7 天没有会话认领过，Fleet 不会自动唤醒"),
+            cls: styles.badge_stale,
+          }
+        : null;
 
   return (
     <div className={`${styles.row} ${selected ? styles.row_selected : ""}`}>
@@ -414,7 +573,7 @@ function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: Ro
         {node.orphanedParent ? (
           <TriangleAlert size={11} strokeWidth={2} className={styles.orphan} />
         ) : (
-          node.kind === "explore" && <i className={styles.kind_dot} />
+          <PresenceDot presence={presence} />
         )}
         <span className={pending === 0 ? styles.title_done : styles.title}>
           {node.title || node.id}
@@ -422,6 +581,25 @@ function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: Ro
         {node.snooze && (
           <span className={styles.snooze} title={node.snooze.reason}>
             <Moon size={10} strokeWidth={2} />
+          </span>
+        )}
+        {treeBadge && (
+          <span className={`${styles.badge} ${treeBadge.cls}`} title={treeBadge.tip || undefined}>
+            {treeBadge.text}
+          </span>
+        )}
+        {att && (presence === "active" || presence === "orphan") && (
+          <span
+            className={presence === "active" ? styles.owner : styles.owner_gone}
+            role="button"
+            tabIndex={-1}
+            title={attendanceLine(t, sessions, att, node.revive)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenSession(att.sessionId);
+            }}
+          >
+            {sessionLabel(sessions, att.sessionId)}
           </span>
         )}
       </button>
@@ -453,6 +631,18 @@ function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: Ro
   );
 }
 
+function PresenceDot({ presence }: { presence: Presence }) {
+  const cls = {
+    active: styles.presence_active,
+    orphan: styles.presence_orphan,
+    stale: styles.presence_stale,
+    snoozed: null,
+    none: null,
+  }[presence];
+  // Keep the slot when there is no dot, so titles stay aligned.
+  return <i className={cls ?? styles.presence_none} />;
+}
+
 function formatSnoozeUntil(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -468,6 +658,8 @@ interface DrawerProps {
   doneShown: boolean;
   onToggleDone: () => void;
   onOpenChain: (chain: HandoffChain) => void;
+  sessions: SessionInfo[];
+  onOpenSession: (sessionId: string) => void;
   onClose: () => void;
 }
 
@@ -478,6 +670,8 @@ function PlanDrawer({
   doneShown,
   onToggleDone,
   onOpenChain,
+  sessions,
+  onOpenSession,
   onClose,
 }: DrawerProps) {
   const { t } = useTranslation();
@@ -519,6 +713,16 @@ function PlanDrawer({
             defaultValue: "父计划 {{parent}} 不存在,已提升为根",
           })}
         </div>
+      )}
+
+      {node.attendance && (
+        <button
+          className={nodePresence(node) === "active" ? styles.owner_note : styles.owner_note_gone}
+          onClick={() => onOpenSession(node.attendance!.sessionId)}
+        >
+          <PresenceDot presence={nodePresence(node)} />
+          <span>{attendanceLine(t, sessions, node.attendance, node.revive)}</span>
+        </button>
       )}
 
       {node.snooze && (

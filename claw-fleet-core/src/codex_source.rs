@@ -5440,7 +5440,22 @@ fn codex_proc_alive(processes: &[CodexProcess], thread_id: &str) -> bool {
 /// note is accepted only while that pid is still in the scanned Codex process
 /// set, so pid reuse cannot target an unrelated process.
 pub fn codex_session_pid(thread_id: &str) -> Option<u32> {
+    codex_session_pid_in(&scan_codex_processes(), thread_id)
+}
+
+/// [`codex_session_pid`] for many threads against a single process scan, for
+/// callers checking hundreds of ids at once. Only the live ones are returned.
+pub fn codex_session_pids<'a>(
+    thread_ids: impl IntoIterator<Item = &'a str>,
+) -> std::collections::HashMap<String, u32> {
     let processes = scan_codex_processes();
+    thread_ids
+        .into_iter()
+        .filter_map(|id| codex_session_pid_in(&processes, id).map(|pid| (id.to_string(), pid)))
+        .collect()
+}
+
+fn codex_session_pid_in(processes: &[CodexProcess], thread_id: &str) -> Option<u32> {
     if let Some(process) = processes
         .iter()
         .find(|p| p.thread_id.as_deref() == Some(thread_id))

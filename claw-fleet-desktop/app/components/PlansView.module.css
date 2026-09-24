@@ -94,10 +94,15 @@
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   flex-shrink: 0;
   padding: 0 16px 10px;
+}
+/* Items wrap to a second line as a whole rather than breaking mid-word. */
+.toolbar > * {
+  white-space: nowrap;
 }
 .stat {
   display: inline-flex;
@@ -240,12 +245,95 @@
 .title_done {
   color: var(--color-text-dim);
 }
-.kind_dot {
+/* Presence dot: who is on this plan. Filled = a session is on it, hollow =
+   work left and nobody is. The slot is kept when empty so titles align. */
+.presence_active,
+.presence_orphan,
+.presence_stale,
+.presence_none {
   flex-shrink: 0;
-  width: 6px;
-  height: 6px;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--color-teal);
+}
+.presence_active {
+  background: var(--color-success);
+}
+.presence_orphan {
+  border: 1.5px solid var(--color-warning);
+}
+.presence_stale {
+  border: 1.5px solid var(--color-border-strong);
+}
+.legend i.presence_active,
+.legend i.presence_orphan {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.legend_gap {
+  width: 6px;
+}
+/* Whole-tree badge on a root nobody is on. */
+.badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+.badge_orphan {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+.badge_stale {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+}
+/* Responsible session, at the end of the title column. */
+.owner,
+.owner_gone {
+  flex-shrink: 1;
+  min-width: 36px;
+  max-width: 150px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.owner {
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: var(--color-success);
+}
+.owner_gone {
+  border: 1px dashed var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+.owner:hover,
+.owner_gone:hover {
+  text-decoration: underline;
+}
+/* The title outranks the session chip: once the title column is squeezed (a
+   narrow window, the drawer open), the chip goes and the tooltip/drawer keep
+   the information. */
+.row_head {
+  container-type: inline-size;
+}
+@container (max-width: 300px) {
+  .owner,
+  .owner_gone {
+    display: none;
+  }
+}
+.chip_warn:not(.chip_on) {
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border));
+  color: var(--color-warning);
 }
 .orphan {
   flex-shrink: 0;
@@ -405,6 +493,29 @@
 .snooze_note svg {
   flex-shrink: 0;
   margin-top: 2px;
+}
+.owner_note,
+.owner_note_gone {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 7px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  text-align: left;
+  white-space: pre-line;
+  cursor: pointer;
+}
+.owner_note {
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  color: var(--color-text);
+}
+.owner_note_gone {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 .orphan_note {
   display: flex;

@@ -329,12 +329,22 @@ setBy: string, createdMs: number, };
 
 export type PlanReviveConfig = { enabled: boolean, };
 
+export type AttendanceState = "running" | "watching" | "scheduled" | "waitingCard" | "handingOff" | "idle" | "bossClosed" | "stale";
+
+export type PlanAttendance = { 
+sessionId: string, state: AttendanceState, 
+claimedAt: number, };
+
+export type ReviveOutlook = { "kind": "revive", at: number, } | { "kind": "askBoss" } | { "kind": "asked" } | { "kind": "disabled" };
+
 export type PlanNode = { 
 id: string, title: string | null, 
 source: string | null, kind: PlanKind, items: Array<TaskItem>, done: number, total: number, 
 chains: Array<HandoffChain>, children: Array<PlanNode>, 
 orphanedParent: string | null, 
-snooze?: PlanSnooze | null, };
+snooze?: PlanSnooze | null, 
+attendance?: PlanAttendance | null, 
+revive?: ReviveOutlook | null, };
 
 export type PlanForest = { roots: Array<PlanNode>, 
 unattachedChains: Array<HandoffChain>, 
