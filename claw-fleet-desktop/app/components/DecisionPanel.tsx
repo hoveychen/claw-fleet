@@ -634,7 +634,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   // agent's `[?text]` marks, brings up the same bar the transcript has. In the
   // panel the answers go to its side column; inline (SessionDetail's compact
   // card) they stay under the question (see DecisionExplainMarks).
-  const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId);
+  const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId, decision.request.timestamp);
   const questionBodyRef = useRef<HTMLDivElement>(null);
   const {
     submitElicitation,
@@ -1508,7 +1508,7 @@ export function FleetAskCard({
   // agent's `[?text]` marks, brings up the same bar the transcript has. In the
   // panel the answers go to its side column; inline (SessionDetail's compact
   // card) they stay under the question (see DecisionExplainMarks).
-  const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId);
+  const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId, decision.request.timestamp);
   const questionBodyRef = useRef<HTMLDivElement>(null);
   // The preview iframe is cross-origin, so the theme has to travel into it as a
   // value rather than through CSS custom properties.
@@ -2160,7 +2160,7 @@ export function DecisionPanel() {
     [sessionsList, activeSessionId],
   );
 
-  const explain = useDecisionExplainMarks(activeSessionId);
+  const explain = useDecisionExplainMarks(activeSessionId, active?.request.timestamp);
   const answerCount = explain.answers.length;
 
   // Review docs attached to the active fleet__ask card (empty for other kinds).
