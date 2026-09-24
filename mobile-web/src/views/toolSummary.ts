@@ -44,6 +44,7 @@ export function patchToolSummary(command: string, tr: Translate = t): string | n
 const FLEET_TOOL_LABELS: Record<string, string> = {
   ask: "决策卡",
   render_a2ui: "富交互卡",
+  spawn: "起会话",
   plan: "计划",
   handoff: "交接",
   watch: "守望",
