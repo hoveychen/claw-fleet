@@ -1151,10 +1151,13 @@ fn tick_locked(path: &Path) {
     let Some(mut state) = load_state(path) else { return };
     let now = plan_snooze::now_ms();
     let records = crate::task_progress::all_records();
+    // One pass over the chain store: a per-claim lookup re-reads every chain
+    // file, and there are thousands of claims.
+    let successors = crate::handoff::successor_index();
     let views = collect_views(
         &records,
         now,
-        &|sid| crate::handoff::successor_session_of(sid),
+        &|sid| successors.get(sid).cloned(),
         &|sid| crate::task_outcome::read(sid).is_some(),
         &load_workspace_blocks,
     );
@@ -1317,10 +1320,13 @@ pub struct OrphanReport {
 pub fn dry_run() -> Vec<OrphanReport> {
     let now = plan_snooze::now_ms();
     let records = crate::task_progress::all_records();
+    // One pass over the chain store: a per-claim lookup re-reads every chain
+    // file, and there are thousands of claims.
+    let successors = crate::handoff::successor_index();
     let views = collect_views(
         &records,
         now,
-        &|sid| crate::handoff::successor_session_of(sid),
+        &|sid| successors.get(sid).cloned(),
         &|sid| crate::task_outcome::read(sid).is_some(),
         &load_workspace_blocks,
     );
