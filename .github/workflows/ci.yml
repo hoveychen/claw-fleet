@@ -751,7 +751,15 @@ jobs:
           # the creating ref + the default branch; since desktop builds only run
           # on tags, the warm cache populated on main is the only one a release
           # can restore. See the cache-warm job below.
-          shared-key: ${{ matrix.cache_key }}
+          #
+          # The root Cargo.toml hash is part of the key because rust-cache only
+          # hashes the dependency tables: a [profile.release] change (e.g. the
+          # switch to thin LTO) kept the old key, so the warm job's exact hit
+          # skipped saving ("Cache up-to-date") and releases kept restoring
+          # artifacts built with the old profile. The `e1` is the same kind of
+          # knob for build env set in this file (MACOSX_DEPLOYMENT_TARGET, ...):
+          # bump it when that env changes. Must match cache-warm exactly.
+          shared-key: ${{ matrix.cache_key }}-e1-${{ hashFiles('Cargo.toml') }}
 
       # ── Build own-platform sidecar CLI (macOS / Windows) ──────────────────
       # Runs before the Tauri build so the shared target/ dir warms core for it.
@@ -964,9 +972,12 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.cache_key }}
-          # Save on main even though cargo exits "successful with nothing to do"
-          # on a warm cache — this also refreshes the cache's 7-day TTL.
+          # Same key as desktop-build — see the comment there.
+          shared-key: ${{ matrix.cache_key }}-e1-${{ hashFiles('Cargo.toml') }}
+          # rust-cache never saves on an exact key hit, whatever save-if says
+          # ("Cache up-to-date"), so this job only refreshes the cache when the
+          # key moves; a key-only change here needs a workflow_dispatch run
+          # to warm, since the dependency filter above will not fire.
           save-if: true
 
       # claw-fleet-desktop's tauri build script requires the frontend dist to
