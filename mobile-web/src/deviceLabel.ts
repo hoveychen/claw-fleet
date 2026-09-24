@@ -31,6 +31,8 @@ function detectPlatform(ua: string): { platform: DevicePlatform; name: string } 
   if (/windows/i.test(ua)) return { platform: "windows", name: "Windows" };
   if (/macintosh|mac os x/i.test(ua)) return { platform: "macos", name: "macOS" };
   if (/linux/i.test(ua)) return { platform: "linux", name: "Linux" };
+  // Fixed wire token, not display copy: the desktop swaps it for its own
+  // locale's "unknown device" (MobileView.tsx), so do not translate it here.
   return { platform: "unknown", name: "未知设备" };
 }
 

@@ -323,6 +323,7 @@
   "mobile_disconnected": "Not connected to relay (check relay URL or network)",
   "mobile_clients": "{{count}} phone(s) online",
   "mobile_devices_title": "Connected devices",
+  "mobile_device_unknown": "Unknown device",
   "mobile_device_push_on": "Notifications on",
   "mobile_device_push_off": "Notifications off",
   "mobile_device_since": "joined",
