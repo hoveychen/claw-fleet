@@ -97,6 +97,9 @@ fn spawn_serve_with_sigint_ignored(fleet_home: &Path, port_file: &Path, token: &
     .env("FAKE_DSH_LIST_DELAY_MS", "0")
     .env("FAKE_DSH_HISTORY_DELAY_MS", "0")
     .env("FAKE_DSH_SESSION_CWD", fleet_home)
+    // The fixture exits when its parent changes, and this test kills that
+    // parent on purpose. Tie its lifetime to the test process instead.
+    .env("FAKE_DSH_OWNER_PID", std::process::id().to_string())
     .stdout(Stdio::from(log_file.try_clone().expect("clone log")))
     .stderr(Stdio::from(log_file));
     // Between fork and exec, so the exec'd serve starts with it already ignored —
