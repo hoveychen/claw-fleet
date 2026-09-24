@@ -12,7 +12,7 @@ import {
   useUIStore,
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
-import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, SCHEDULE_ENTRYPOINT } from "../types";
+import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
@@ -477,7 +477,10 @@ export function SessionDetail({
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const timelineMessages = useMemo(
-    () => settlePending(withCodexDecisionHistory(liveSession, messages, decisionRecords)),
+    () => settlePending(
+      withCodexDecisionHistory(liveSession, messages, decisionRecords),
+      liveSession ? LIVE_STATUSES.has(liveSession.status) : true,
+    ),
     [liveSession, messages, decisionRecords],
   );
   // Durable transcript/history rows first; optimistic user bubbles always stay

@@ -14,6 +14,11 @@ describe("settlePending", () => {
     expect(settlePending(rows)).toEqual(rows);
   });
 
+  it("marks a still-unread message stale once the session is gone", () => {
+    const [row] = settlePending([user("x", { fleetPending: true })], false);
+    expect(row.fleetPendingStale).toBe(true);
+  });
+
   it("drops the pending row once the absorbed copy follows it", () => {
     const absorbed = user("这么久的么？", { fleetMidTurn: true });
     expect(settlePending([user("这么久的么？", { fleetPending: true }), absorbed])).toEqual([absorbed]);

@@ -376,6 +376,9 @@ export interface RawMessage {
    *  catches up. The bubble says so; `settlePending` drops the row once the
    *  absorbed copy lands. */
   fleetPending?: boolean;
+  /** Client-side only: a `fleetPending` row whose session is no longer running,
+   *  so the message will never be read (see `settlePending`). */
+  fleetPendingStale?: boolean;
   /** Synthesised by the backend from a codex turn-boundary error (a turn that
    *  failed before producing any reply — expired credentials, a stream error).
    *  Renders as a failure banner, not as an assistant bubble. */

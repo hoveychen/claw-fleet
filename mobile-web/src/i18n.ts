@@ -538,6 +538,7 @@ const DICT: Record<string, string> = {
   错误: "error",
   已中断: "interrupted",
   "已送达 · 等当前工具跑完才会被读到": "Delivered · read once the running tool finishes",
+  会话在读到这条之前就结束了: "The session ended before reading this",
   "{0} 匹配": "{0} matches",
   "{0} 文件": "{0} files",
   "{0} 结果": "{0} results",

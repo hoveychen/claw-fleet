@@ -356,6 +356,8 @@ export interface RawMessage {
    *  queue only between tool calls. Also set on the local echo of an injected
    *  send. `settlePending` drops it once the absorbed copy lands. */
   fleetPending?: boolean;
+  /** Client-side only: a `fleetPending` row whose session is no longer running. */
+  fleetPendingStale?: boolean;
   message?: {
     role?: string;
     content?: string | ContentBlock[];

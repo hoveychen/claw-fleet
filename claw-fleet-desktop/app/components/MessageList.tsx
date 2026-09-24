@@ -311,9 +311,11 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
                 {msg.fleetPending && (
                   <span
                     className={styles.pending_unread}
-                    title={t("detail.pending_unread_hint")}
+                    title={msg.fleetPendingStale ? undefined : t("detail.pending_unread_hint")}
                   >
-                    {t("detail.pending_unread")}
+                    {msg.fleetPendingStale
+                      ? t("detail.pending_unread_stale")
+                      : t("detail.pending_unread")}
                   </span>
                 )}
                 {time && (

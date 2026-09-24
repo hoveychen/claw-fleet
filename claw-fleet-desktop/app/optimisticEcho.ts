@@ -59,7 +59,7 @@ export function stillPending(text: string, landed: Set<string>): boolean {
  * screen as a pending bubble when the absorbed copy arrives in a later chunk.
  * Without this the message would show twice, once still claiming to be unread.
  */
-export function settlePending(messages: RawMessage[]): RawMessage[] {
+export function settlePending(messages: RawMessage[], alive = true): RawMessage[] {
   if (!messages.some((m) => m.fleetPending)) return messages;
   const laterReal = new Set<string>();
   const keep: boolean[] = new Array(messages.length).fill(true);
@@ -70,5 +70,11 @@ export function settlePending(messages: RawMessage[]): RawMessage[] {
     if (m.fleetPending) keep[i] = !laterReal.has(text);
     else laterReal.add(text);
   }
-  return messages.filter((_, i) => keep[i]);
+  const kept = messages.filter((_, i) => keep[i]);
+  // The CLI drains its queue at the latest when the turn ends, so an entry
+  // still outstanding once the process is gone was never read — it died with
+  // the message in its queue. Say that instead of "waiting".
+  return alive
+    ? kept
+    : kept.map((m) => (m.fleetPending ? { ...m, fleetPendingStale: true } : m));
 }

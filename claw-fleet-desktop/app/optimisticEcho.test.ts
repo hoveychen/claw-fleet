@@ -77,6 +77,12 @@ describe("settlePending", () => {
     expect(settlePending([pending("这么久的么？"), absorbed])).toEqual([absorbed]);
   });
 
+  it("marks a still-unread message stale once the session is gone", () => {
+    const [row] = settlePending([pending("这么久的么？")], false);
+    expect(row.fleetPendingStale).toBe(true);
+    expect(settlePending([pending("x")], true)[0].fleetPendingStale).toBeUndefined();
+  });
+
   it("is not settled by an earlier bubble with the same text", () => {
     const msgs = [user("继续"), pending("继续")];
     expect(settlePending(msgs)).toEqual(msgs);
