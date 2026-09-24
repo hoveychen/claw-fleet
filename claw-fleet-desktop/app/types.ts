@@ -369,6 +369,13 @@ export interface RawMessage {
    *  (see `queued_command.rs`). It is the user speaking, so it renders as a
    *  normal bubble; the flag is only here for clients that want to say so. */
   fleetMidTurn?: boolean;
+  /** Set by core on a Fleet-injected message the agent has not read yet: the
+   *  CLI drains its queue only between tool calls, so during a long tool call
+   *  the message sits delivered but unread (see `queued_command::mark_pending`).
+   *  Also set on the local echo of an injected send until the transcript
+   *  catches up. The bubble says so; `settlePending` drops the row once the
+   *  absorbed copy lands. */
+  fleetPending?: boolean;
   /** Synthesised by the backend from a codex turn-boundary error (a turn that
    *  failed before producing any reply — expired credentials, a stream error).
    *  Renders as a failure banner, not as an assistant bubble. */

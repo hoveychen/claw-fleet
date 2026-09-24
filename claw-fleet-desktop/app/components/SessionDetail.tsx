@@ -16,7 +16,7 @@ import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollo
 import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
-import { landedUserTexts, shouldEchoSend, stillPending } from "../optimisticEcho";
+import { landedUserTexts, settlePending, shouldEchoSend, stillPending } from "../optimisticEcho";
 import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
@@ -114,6 +114,9 @@ const RESUME_GRACE_MS = 30_000;
 interface OptimisticSend {
   id: string;
   text: string;
+  /** Injected into a running turn: delivered, but unread until the agent's
+   *  next tool boundary. */
+  injected?: boolean;
 }
 
 /** Build a synthetic `user` RawMessage from an optimistic send so it flows
@@ -125,6 +128,7 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
     uuid: o.id,
     timestamp: new Date().toISOString(),
     message: { role: "user", content: [{ type: "text", text: o.text }] },
+    ...(o.injected ? { fleetPending: true } : {}),
   };
 }
 
@@ -455,7 +459,8 @@ export function SessionDetail({
     if (text) {
       optimisticSeq.current += 1;
       const id = `optimistic-${Date.now()}-${optimisticSeq.current}`;
-      setOptimisticSends((prev) => [...prev, { id, text }]);
+      const injected = mode === "enqueue";
+      setOptimisticSends((prev) => [...prev, { id, text, injected }]);
     }
     // Grace is for a cold-starting `claude --resume` only; an injected message
     // went to a session that is already live and being polled.
@@ -472,7 +477,7 @@ export function SessionDetail({
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const timelineMessages = useMemo(
-    () => withCodexDecisionHistory(liveSession, messages, decisionRecords),
+    () => settlePending(withCodexDecisionHistory(liveSession, messages, decisionRecords)),
     [liveSession, messages, decisionRecords],
   );
   // Durable transcript/history rows first; optimistic user bubbles always stay

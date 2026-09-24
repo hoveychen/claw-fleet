@@ -50,3 +50,25 @@ export function shouldEchoSend(
 export function stillPending(text: string, landed: Set<string>): boolean {
   return !landed.has(text.trim());
 }
+
+/**
+ * Drop `fleetPending` rows that a real bubble with the same text follows.
+ *
+ * On a full read core never emits both, but the live tail follows the file
+ * incrementally: the chunk that carried the unread `enqueue` is already on
+ * screen as a pending bubble when the absorbed copy arrives in a later chunk.
+ * Without this the message would show twice, once still claiming to be unread.
+ */
+export function settlePending(messages: RawMessage[]): RawMessage[] {
+  if (!messages.some((m) => m.fleetPending)) return messages;
+  const laterReal = new Set<string>();
+  const keep: boolean[] = new Array(messages.length).fill(true);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type !== "user" || m.isMeta) continue;
+    const text = messageToText(m).trim();
+    if (m.fleetPending) keep[i] = !laterReal.has(text);
+    else laterReal.add(text);
+  }
+  return messages.filter((_, i) => keep[i]);
+}

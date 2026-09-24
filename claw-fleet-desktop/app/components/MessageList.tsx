@@ -306,11 +306,21 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
                 orphan — a 10px grey run belonging to no container, sitting in
                 the gap between two turns. As a footer it belongs to the thing
                 it timestamps. */}
-            {time && (
+            {(time || msg.fleetPending) && (
               <div className={styles.bubble_time}>
-                <span className={styles.msg_time} title={time.full}>
-                  {time.short}
-                </span>
+                {msg.fleetPending && (
+                  <span
+                    className={styles.pending_unread}
+                    title={t("detail.pending_unread_hint")}
+                  >
+                    {t("detail.pending_unread")}
+                  </span>
+                )}
+                {time && (
+                  <span className={styles.msg_time} title={time.full}>
+                    {time.short}
+                  </span>
+                )}
               </div>
             )}
           </div>

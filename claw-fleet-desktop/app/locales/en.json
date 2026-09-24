@@ -2004,6 +2004,8 @@
     "working_processing": "Processing…",
     "turn_failed": "This turn failed",
     "interrupted": "Interrupted",
+    "pending_unread": "Delivered · read once the running tool finishes",
+    "pending_unread_hint": "Claude Code only picks up new messages between tool calls; it will see this one when the running tool returns",
     "working_delegating": "Delegating to subagents…",
     "tasks_anonymous": "(anonymous plan)",
     "tasks_status_active": "In progress",
