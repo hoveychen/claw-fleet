@@ -32,7 +32,9 @@ describe("fleet control tool parity with claw-fleet-core", () => {
   });
 
   it("every control tool has a friendly label", () => {
-    const raw = FLEET_CONTROL_TOOLS.filter((t) => friendlyToolName(`mcp__fleet__fleet__${t}`).includes("fleet__"));
+    const raw = controlToolDefs()
+      .map((d) => d.tool)
+      .filter((t) => friendlyToolName(`mcp__fleet__fleet__${t}`).includes("fleet__"));
     expect(raw).toEqual([]);
   });
 
