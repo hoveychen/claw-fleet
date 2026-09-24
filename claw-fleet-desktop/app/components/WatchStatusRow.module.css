@@ -20,6 +20,22 @@
   background: var(--color-bg-tool);
   color: var(--color-text-secondary);
   font-size: 10px;
+  /* Only the note gives way when space runs out; the elapsed/poll tail stays
+     on one line. */
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* One line of the watch's note; the full text stays in the chip's tooltip. */
+.watch_note {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
 }
 
 /* The `until` command cannot run at all — this session is not waiting, it is

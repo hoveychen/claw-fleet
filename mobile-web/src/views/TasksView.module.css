@@ -395,6 +395,16 @@
   min-width: 0;
 }
 
+/* One line of a watch's note inside its .handoff chip. */
+.watchNote {
+  min-width: 0;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
 /* 断线提示走和 .handoff 一样的 chip 形状,只把颜色换掉 —— 它是同一行里
    「这条会话出事了」的那一枚,不该长成另一种东西。 */
 .remoteLost {

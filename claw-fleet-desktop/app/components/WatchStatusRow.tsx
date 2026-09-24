@@ -72,6 +72,14 @@ export function WatchStatusRow({
             title={title}
           >
             {broken ? <AlertTriangle size={11} /> : <Radar size={11} />}
+            {/* The note is the only answer to "waiting on what?", so it goes on
+                the chip itself — a tooltip never shows on touch and is easy to miss. */}
+            {w.note && (
+              <>
+                <span className={styles.watch_note}>{w.note}</span>
+                <span aria-hidden>·</span>
+              </>
+            )}
             {broken
               ? t("card.watch_chip_broken", { count: w.structuralFailStreak })
               : t("card.watch_chip", { elapsed, count: w.pollCount })}

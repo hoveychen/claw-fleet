@@ -79,7 +79,7 @@ const LIVE_REFRESH_MS = 30_000;
 
 const STATE_LABEL: Record<AttendanceState, string> = {
   running: "运行中",
-  watching: "挂着 watch 等条件",
+  watching: "挂着守望等条件",
   scheduled: "已定时",
   waitingCard: "等您回复决策卡",
   handingOff: "正在接力",

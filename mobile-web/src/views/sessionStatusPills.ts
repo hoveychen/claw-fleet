@@ -146,7 +146,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     if (broken > 0) {
       pills.push({
         key: "watch",
-        label: t("watch 跑不起来 ×{0}", broken),
+        label: t("守望跑不起来 ×{0}", broken),
         tone: "alert",
         target: "sheet",
       });
@@ -156,8 +156,8 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
       // each one's poll count is in the half-screen.
       const label =
         s.watches.length === 1
-          ? t("watch ×{0}", s.watches[0].pollCount)
-          : t("{0} 个 watch", s.watches.length);
+          ? t("守望 ×{0}", s.watches[0].pollCount)
+          : t("{0} 个守望", s.watches.length);
       pills.push({ key: "watch", label, tone: "live", target: "sheet" });
     }
   }
