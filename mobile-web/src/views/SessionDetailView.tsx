@@ -292,6 +292,25 @@ interface OptimisticSend {
   text: string;
 }
 
+/** Drop `fleetPending` rows that a real user bubble with the same text
+ *  follows. The live tail appends chunks, so the unread `enqueue` is already on
+ *  screen as a pending bubble when the absorbed copy arrives in a later one;
+ *  without this the message would show twice. Mirrors the desktop's
+ *  `optimisticEcho.ts::settlePending`. */
+export function settlePending(rows: RawMessage[]): RawMessage[] {
+  if (!rows.some((m) => m.fleetPending)) return rows;
+  const laterReal = new Set<string>();
+  const keep: boolean[] = new Array(rows.length).fill(true);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const m = rows[i];
+    if (m.type !== "user" || m.isMeta) continue;
+    const text = userText(m);
+    if (m.fleetPending) keep[i] = !laterReal.has(text);
+    else laterReal.add(text);
+  }
+  return rows.filter((_, i) => keep[i]);
+}
+
 /** Synthetic `user` RawMessage from an optimistic send, so it flows through the
  *  same `isRenderableRow` / `groupMetaRuns` / MessageRow path as real rows. */
 function optimisticToMessage(o: OptimisticSend): RawMessage {
@@ -1075,6 +1094,9 @@ const MessageRow = memo(function MessageRow({
           <AttachmentThumbs paths={attachments} client={client ?? null} />
         </div>
         <div className={styles.rowTime}>
+          {msg.fleetPending && (
+            <span className={styles.pendingUnread}>{t("已送达 · 等当前工具跑完才会被读到")}</span>
+          )}
           {display && <CopyButton text={display} />}
           {fmtTime(msg.timestamp)}
         </div>
@@ -1573,7 +1595,7 @@ export function SessionDetailView({
   }, []);
 
   const mainRows = useMemo(() => {
-    const base = filterMainRows(rows, session.jsonlPath);
+    const base = settlePending(filterMainRows(rows, session.jsonlPath));
     if (pendingOptimistic.length === 0) return base;
     return [...base, ...pendingOptimistic.map(optimisticToMessage)];
   }, [rows, pendingOptimistic, session.jsonlPath]);

@@ -537,6 +537,7 @@ const DICT: Record<string, string> = {
   // ── Message details: tool digest chips / work-run tags ──
   错误: "error",
   已中断: "interrupted",
+  "已送达 · 等当前工具跑完才会被读到": "Delivered · read once the running tool finishes",
   "{0} 匹配": "{0} matches",
   "{0} 文件": "{0} files",
   "{0} 结果": "{0} results",
