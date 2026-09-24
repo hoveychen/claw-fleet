@@ -85,6 +85,78 @@ pub(crate) fn export_wiki_doc(
     std::fs::write(&dest, export.bytes).map_err(|e| format!("write '{dest}': {e}"))
 }
 
+/// "Export PDF" for html / htmlDir docs: open the doc top-level in its own
+/// window and hand that window to the OS print panel (`PDF ▾ → Save as PDF`).
+///
+/// It cannot print from the main window: the wiki page shows HTML docs in a
+/// cross-origin sandboxed iframe, and printing the parent only inks the
+/// iframe's on-screen box — a long doc comes out as one clipped page. Loaded
+/// top-level the doc paginates like any page. The window stays open after the
+/// panel closes, doubling as a preview; the user closes it.
+///
+/// The window gets no capability (`capabilities/default.json` only names
+/// `main`), so the doc's scripts run as they do in the iframe, with no IPC.
+#[tauri::command(async)]
+pub(crate) fn print_wiki_doc(
+    app: tauri::AppHandle,
+    slug: String,
+    version: String,
+    entry: String,
+    title: String,
+) -> Result<(), String> {
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+    // Same shape as the frontend's `wikiFileUrl`: slug and version are one
+    // segment each (a `/` in the slug is escaped), the relpath keeps its `/`.
+    let seg = |s: &str| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string();
+    let rel: Vec<String> = entry.split('/').map(seg).collect();
+    let path = format!("{}/{}/{}", seg(&slug), seg(&version), rel.join("/"));
+    let base = if cfg!(windows) {
+        "http://fleet-wiki.localhost"
+    } else {
+        "fleet-wiki://localhost"
+    };
+    let url: tauri::Url = format!("{base}/{path}")
+        .parse()
+        .map_err(|e| format!("bad wiki url: {e}"))?;
+
+    let label = format!(
+        "wiki-print-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::CustomProtocol(url))
+        .title(title)
+        .inner_size(900.0, 1000.0)
+        .on_page_load(move |window, payload| {
+            if payload.event() != tauri::webview::PageLoadEvent::Finished {
+                return;
+            }
+            // Only the first load: a link the doc navigates to must not
+            // reopen the panel.
+            if printed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            // "Finished" is the load event; charts and mermaid in a demo often
+            // render a beat later. Give them that beat, then print on the main
+            // thread, where AppKit requires the operation to be created.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                let w = window.clone();
+                let _ = window.run_on_main_thread(move || {
+                    if let Err(e) = super::print_window(&w) {
+                        eprintln!("[print_wiki_doc] {e}");
+                    }
+                });
+            });
+        })
+        .build()
+        .map_err(|e| format!("open print window: {e}"))?;
+    Ok(())
+}
+
 /// Publish markdown the frontend already holds — the full-screen reader's
 /// "Publish to wiki". `mode` `"append"` grows the doc at `slug` into a running note
 /// instead of superseding its body; an empty `title` is derived from the text.

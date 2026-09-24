@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Package,
   PanelRightClose,
+  Printer,
   RotateCw,
   Trash2,
   X,
@@ -421,6 +422,7 @@ export function buildWikiMenu({
   fail,
   onOpenPage,
   onExport,
+  onExportPdf,
 }: {
   doc: AuxDoc;
   tail: AuxCardTail;
@@ -430,6 +432,9 @@ export function buildWikiMenu({
   /** Only available after the doc loads: export needs the doc's kind (which
    *  determines md / html / zip output) and the current version. */
   onExport?: () => void;
+  /** Same availability as `onExport`; absent in the browser build, which has
+   *  no print pipeline. */
+  onExportPdf?: () => void;
 }): AuxMenuBuild {
   const openPage: AuxAction = {
     id: "open-page",
@@ -465,6 +470,16 @@ export function buildWikiMenu({
       { id: openPage.id, label: openPage.label, icon: openPage.icon, dividerBefore: true, onSelect: openPage.onSelect },
       ...(exportIt
         ? [{ id: exportIt.id, label: `${exportIt.label}…`, icon: exportIt.icon, onSelect: exportIt.onSelect }]
+        : []),
+      ...(onExportPdf
+        ? [
+            {
+              id: "export-pdf",
+              label: t("wiki.export_pdf_short", "导出 PDF"),
+              icon: <Printer {...ICON} />,
+              onSelect: onExportPdf,
+            },
+          ]
         : []),
       {
         id: copyRef.id,

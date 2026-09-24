@@ -635,6 +635,7 @@ async function handleIPC(
     // Printing is a host-side panel with nothing to mock; resolving is enough
     // for the reader to treat the click as handled.
     case "print_webview":
+    case "print_wiki_doc":
       return null;
     case "get_wiki_file_text":
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]

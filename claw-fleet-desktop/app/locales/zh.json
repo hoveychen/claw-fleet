@@ -812,6 +812,8 @@
     "export": "导出当前版本到文件",
     "export_short": "导出",
     "export_failed": "导出失败：{{error}}",
+    "export_pdf": "导出当前版本为 PDF（在打印面板里选「PDF → 存储为 PDF」）",
+    "export_pdf_short": "导出 PDF",
     "move": "移动 / 重命名…",
     "move_short": "移动",
     "move_title": "移动 / 重命名 “{{title}}”",
