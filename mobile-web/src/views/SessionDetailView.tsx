@@ -292,6 +292,33 @@ interface OptimisticSend {
   text: string;
 }
 
+/** Drop `fleetPending` rows that a real user bubble with the same text
+ *  follows. The live tail appends chunks, so the unread `enqueue` is already on
+ *  screen as a pending bubble when the absorbed copy arrives in a later one;
+ *  without this the message would show twice. Mirrors the desktop's
+ *  `optimisticEcho.ts::settlePending`. */
+export function settlePending(rows: RawMessage[], alive = true): RawMessage[] {
+  if (!rows.some((m) => m.fleetPending)) return rows;
+  const laterReal = new Set<string>();
+  const keep: boolean[] = new Array(rows.length).fill(true);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const m = rows[i];
+    if (m.type !== "user" || m.isMeta) continue;
+    const text = userText(m);
+    if (m.fleetPending) keep[i] = !laterReal.has(text);
+    else laterReal.add(text);
+  }
+  const kept = rows.filter((_, i) => keep[i]);
+  // Still outstanding once the process is gone: it died with the message in
+  // its queue, and nobody will read it now.
+  return alive ? kept : kept.map((m) => (m.fleetPending ? { ...m, fleetPendingStale: true } : m));
+}
+
+/** Statuses with a running agent process behind them (desktop `LIVE_STATUSES`). */
+const ALIVE: SessionStatus[] = [
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating",
+];
+
 /** Synthetic `user` RawMessage from an optimistic send, so it flows through the
  *  same `isRenderableRow` / `groupMetaRuns` / MessageRow path as real rows. */
 function optimisticToMessage(o: OptimisticSend): RawMessage {
@@ -1075,6 +1102,13 @@ const MessageRow = memo(function MessageRow({
           <AttachmentThumbs paths={attachments} client={client ?? null} />
         </div>
         <div className={styles.rowTime}>
+          {msg.fleetPending && (
+            <span className={styles.pendingUnread}>
+              {msg.fleetPendingStale
+                ? t("会话在读到这条之前就结束了")
+                : t("已送达 · 等当前工具跑完才会被读到")}
+            </span>
+          )}
           {display && <CopyButton text={display} />}
           {fmtTime(msg.timestamp)}
         </div>
@@ -1573,10 +1607,10 @@ export function SessionDetailView({
   }, []);
 
   const mainRows = useMemo(() => {
-    const base = filterMainRows(rows, session.jsonlPath);
+    const base = settlePending(filterMainRows(rows, session.jsonlPath), ALIVE.includes(session.status));
     if (pendingOptimistic.length === 0) return base;
     return [...base, ...pendingOptimistic.map(optimisticToMessage)];
-  }, [rows, pendingOptimistic, session.jsonlPath]);
+  }, [rows, pendingOptimistic, session.jsonlPath, session.status]);
 
   // Tool metadata lives on the tool_result rows the renderable filter drops —
   // harvest it from the unfiltered list, keyed by tool_use_id.

@@ -73,6 +73,91 @@ pub fn unfold(message: &mut Value) {
     obj.insert("fleetMidTurn".into(), json!(true));
 }
 
+/// Surface a message Fleet injected on the user's behalf that the agent has
+/// not read yet.
+///
+/// The CLI only drains its input queue at a tool boundary. While a long Bash
+/// call runs (a ten-minute deploy poll, say), the injected message exists in
+/// the transcript solely as a `queue-operation` `enqueue` row — the
+/// `queued_command` attachment that [`unfold`] turns into a bubble is written
+/// only when the message is absorbed. So until then no client could tell a
+/// delivered-but-unread message apart from one that went nowhere.
+///
+/// This replays the queue over `messages` and rewrites every enqueue that is
+/// still outstanding at the end — and that carries Fleet's user signature, so
+/// harness wake-ups and `fleet send` peers stay hidden — into a user row
+/// flagged `fleetPending`. Resolved enqueues are left as they are; the
+/// frontends ignore `queue-operation` rows.
+///
+/// Queue semantics, from this machine's transcripts: `remove` names its entry
+/// by `content`; `dequeue` carries no content and pops the oldest entry.
+///
+/// A window that starts after the enqueue cannot see it, and one that ends
+/// before the matching `remove` reports it pending; a later incremental chunk
+/// then brings the absorbed `fleetMidTurn` row, and the clients drop a pending
+/// row once a real bubble with the same text follows it.
+pub fn mark_pending(messages: &mut [Value]) {
+    let mut queue: std::collections::VecDeque<(usize, String)> = Default::default();
+    for (i, row) in messages.iter().enumerate() {
+        match row.get("type").and_then(Value::as_str) {
+            Some("queue-operation") => {
+                let content = row.get("content").and_then(Value::as_str);
+                match (row.get("operation").and_then(Value::as_str), content) {
+                    (Some("enqueue"), Some(c)) => queue.push_back((i, c.to_string())),
+                    (Some("enqueue"), None) => queue.push_back((i, String::new())),
+                    (Some("dequeue"), _) => {
+                        queue.pop_front();
+                    }
+                    (Some(_), Some(c)) => {
+                        if let Some(pos) = queue.iter().position(|(_, q)| q == c) {
+                            queue.remove(pos);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // The absorbed attachment settles its entry even if the window
+            // happens to cut off the `remove` that follows it.
+            Some("attachment")
+                if row["attachment"].get("type").and_then(Value::as_str)
+                    == Some("queued_command") =>
+            {
+                if let Some(p) = row["attachment"].get("prompt").and_then(Value::as_str) {
+                    if let Some(pos) = queue.iter().position(|(_, q)| q == p) {
+                        queue.remove(pos);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (i, content) in queue {
+        let stripped = crate::live_inject::strip_user_signature(content.trim_end());
+        if stripped.len() == content.trim_end().len() || stripped.trim().is_empty() {
+            continue;
+        }
+        let text = stripped.to_string();
+        let Some(obj) = messages[i].as_object_mut() else {
+            continue;
+        };
+        let timestamp = obj.get("timestamp").cloned().unwrap_or(Value::Null);
+        obj.clear();
+        obj.insert("type".into(), json!("user"));
+        // Stable across re-reads so a list keyed by uuid does not remount it.
+        obj.insert(
+            "uuid".into(),
+            json!(format!("fleet-pending-{}", timestamp.as_str().unwrap_or(""))),
+        );
+        obj.insert("timestamp".into(), timestamp);
+        obj.insert(
+            "message".into(),
+            json!({"role": "user", "content": [{"type": "text", "text": text}]}),
+        );
+        obj.insert("fleetPending".into(), json!(true));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +266,76 @@ mod tests {
         assert_eq!(msgs[1]["message"]["content"][0]["text"], "mid-turn ask");
         assert_eq!(msgs[1]["uuid"], "b");
         assert!(msgs[1].get("isMeta").is_none());
+    }
+
+    fn enqueue(content: &str, ts: &str) -> Value {
+        json!({"type": "queue-operation", "operation": "enqueue", "timestamp": ts, "content": content})
+    }
+
+    fn remove(content: &str) -> Value {
+        json!({"type": "queue-operation", "operation": "remove", "reason": "absorbed_mid_turn", "content": content})
+    }
+
+    /// The 2026-09-24 case: a follow-up injected while a ten-minute Bash poll
+    /// ran sat in the queue for 4m43s with nothing on screen to say so.
+    #[test]
+    fn an_unread_signed_injection_becomes_a_pending_bubble() {
+        let signed = crate::live_inject::sign_as_user("这么久的么？");
+        let mut msgs = vec![
+            json!({"type": "assistant", "uuid": "a"}),
+            enqueue(&signed, "2026-09-24T02:54:38.351Z"),
+        ];
+        mark_pending(&mut msgs);
+        assert_eq!(msgs[1]["type"], "user");
+        assert_eq!(msgs[1]["fleetPending"], true);
+        assert_eq!(msgs[1]["message"]["content"][0]["text"], "这么久的么？");
+        assert_eq!(msgs[1]["timestamp"], "2026-09-24T02:54:38.351Z");
+        assert_eq!(msgs[1]["uuid"], "fleet-pending-2026-09-24T02:54:38.351Z");
+        assert!(msgs[1].get("operation").is_none());
+    }
+
+    #[test]
+    fn an_absorbed_injection_stays_hidden() {
+        let signed = crate::live_inject::sign_as_user("继续");
+        let mut msgs = vec![enqueue(&signed, "t"), remove(&signed)];
+        let before = msgs.clone();
+        mark_pending(&mut msgs);
+        assert_eq!(msgs, before);
+
+        // The attachment alone settles it when the window ends before `remove`.
+        let mut msgs = vec![enqueue(&signed, "t"), row(json!({"kind": "peer"}), &signed)];
+        mark_pending(&mut msgs);
+        assert_eq!(msgs[0]["type"], "queue-operation");
+    }
+
+    #[test]
+    fn unsigned_enqueues_are_never_surfaced() {
+        // Task notifications and `fleet send` peers: not something the user typed.
+        let mut msgs = vec![enqueue("<task-notification>x</task-notification>", "t")];
+        let before = msgs.clone();
+        mark_pending(&mut msgs);
+        assert_eq!(msgs, before);
+    }
+
+    /// `dequeue` carries no content and pops the oldest entry, so the one it
+    /// takes is the unsigned one ahead of the user's message.
+    #[test]
+    fn dequeue_pops_the_oldest_entry() {
+        let signed = crate::live_inject::sign_as_user("改成蓝色");
+        let mut msgs = vec![
+            enqueue("<task-notification>x</task-notification>", "t0"),
+            enqueue(&signed, "t1"),
+            json!({"type": "queue-operation", "operation": "dequeue"}),
+        ];
+        mark_pending(&mut msgs);
+        assert_eq!(msgs[1]["fleetPending"], true);
+
+        let mut msgs = vec![
+            enqueue(&signed, "t1"),
+            json!({"type": "queue-operation", "operation": "dequeue"}),
+        ];
+        mark_pending(&mut msgs);
+        assert_eq!(msgs[0]["type"], "queue-operation");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { landedUserTexts, shouldEchoSend, stillPending } from "./optimisticEcho";
+import { landedUserTexts, settlePending, shouldEchoSend, stillPending } from "./optimisticEcho";
 import type { RawMessage } from "./types";
 
 function user(text: string, isMeta?: boolean): RawMessage {
@@ -59,5 +59,32 @@ describe("landedUserTexts", () => {
       message: { role: "assistant", content: [{ type: "text", text: "继续" }] },
     } as RawMessage;
     expect(stillPending("继续", landedUserTexts([assistant]))).toBe(true);
+  });
+});
+
+describe("settlePending", () => {
+  const pending = (text: string) => ({ ...user(text), fleetPending: true }) as RawMessage;
+
+  it("keeps an unread injected message on screen", () => {
+    const msgs = [user("先跑测试"), pending("这么久的么？")];
+    expect(settlePending(msgs)).toEqual(msgs);
+  });
+
+  // The live tail appends chunks: the unread `enqueue` arrived first, the
+  // absorbed copy later. Showing both would duplicate the message.
+  it("drops the pending row once the absorbed copy follows it", () => {
+    const absorbed = { ...user("这么久的么？"), fleetMidTurn: true } as RawMessage;
+    expect(settlePending([pending("这么久的么？"), absorbed])).toEqual([absorbed]);
+  });
+
+  it("marks a still-unread message stale once the session is gone", () => {
+    const [row] = settlePending([pending("这么久的么？")], false);
+    expect(row.fleetPendingStale).toBe(true);
+    expect(settlePending([pending("x")], true)[0].fleetPendingStale).toBeUndefined();
+  });
+
+  it("is not settled by an earlier bubble with the same text", () => {
+    const msgs = [user("继续"), pending("继续")];
+    expect(settlePending(msgs)).toEqual(msgs);
   });
 });

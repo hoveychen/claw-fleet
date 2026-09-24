@@ -56,6 +56,7 @@ impl AgentSource for ClaudeCodeSource {
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
+        crate::queued_command::mark_pending(&mut messages);
         messages.iter_mut().for_each(crate::queued_command::unfold);
         messages.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(messages)
@@ -65,6 +66,7 @@ impl AgentSource for ClaudeCodeSource {
         let mut messages =
             crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
                 .map_err(|e| e.to_string())?;
+        crate::queued_command::mark_pending(&mut messages);
         messages.iter_mut().for_each(crate::queued_command::unfold);
         messages.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(messages)

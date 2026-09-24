@@ -170,6 +170,7 @@ pub trait AgentSource: Send + Sync {
         // row that is not a peer `queued_command` (so for every source but
         // Claude), which is why it rides the shared default rather than a
         // per-source override.
+        crate::queued_command::mark_pending(&mut lines);
         lines.iter_mut().for_each(crate::queued_command::unfold);
         Ok((lines, offset + consumed as u64))
     }

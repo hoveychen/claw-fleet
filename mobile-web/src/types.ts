@@ -350,6 +350,14 @@ export interface RawMessage {
     id?: string | null;
   };
   sourceToolUseID?: string;
+  /** User row core rewrote from a mid-turn injection, once absorbed. */
+  fleetMidTurn?: boolean;
+  /** Fleet-injected message the agent has not read yet — the CLI drains its
+   *  queue only between tool calls. Also set on the local echo of an injected
+   *  send. `settlePending` drops it once the absorbed copy lands. */
+  fleetPending?: boolean;
+  /** Client-side only: a `fleetPending` row whose session is no longer running. */
+  fleetPendingStale?: boolean;
   message?: {
     role?: string;
     content?: string | ContentBlock[];

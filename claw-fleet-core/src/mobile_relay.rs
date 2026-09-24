@@ -1268,7 +1268,7 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 /// Top-level record fields the mobile `RawMessage` declares. `uuid` is
 /// load-bearing beyond rendering — `appendUnique` dedups tailed lines by it.
 /// `isMeta`/`sourceToolUseID` drive the client's MetaFoldCard grouping.
-const TAIL_MSG_FIELDS: [&str; 9] = [
+const TAIL_MSG_FIELDS: [&str; 10] = [
     "type",
     "uuid",
     "timestamp",
@@ -1281,6 +1281,9 @@ const TAIL_MSG_FIELDS: [&str; 9] = [
     // `queued_command.rs`). The row renders as a normal bubble either way;
     // without the flag the phone cannot tell the reader it arrived mid-turn.
     "fleetMidTurn",
+    // A Fleet-injected message the agent has not read yet (see
+    // `queued_command::mark_pending`); the bubble says so.
+    "fleetPending",
 ];
 /// Content-block fields the mobile `ContentBlock` declares and renders.
 /// `is_error` feeds the tool chip's error badge; result bodies stay stripped.
@@ -8265,6 +8268,8 @@ mod tests {
             "sourceToolUseID must survive slimming"
         );
         assert_eq!(slim[0]["fleetEvent"]["kind"], json!("watch"));
+        let pending = slim_tail_messages(vec![json!({"type": "user", "fleetPending": true})]);
+        assert_eq!(pending[0]["fleetPending"], json!(true), "fleetPending must survive slimming");
         assert!(
             slim[0].get("cwd").is_none(),
             "bookkeeping fields stay stripped"

@@ -506,6 +506,13 @@
 
 .msg_time { opacity: 0.7; }
 
+/* Delivered into a running turn but not read yet — the agent only drains its
+   queue between tool calls. Sits left of the time in the same footer. */
+.pending_unread {
+  margin-right: 8px;
+  color: var(--color-text-muted);
+}
+
 /* Redacted thinking */
 /* Waiting for input */
 .waiting {

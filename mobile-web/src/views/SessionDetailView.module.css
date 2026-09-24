@@ -217,6 +217,13 @@
   color: var(--color-text-dim);
 }
 
+/* Delivered into a running turn but not read yet (the agent drains its queue
+   only between tool calls). */
+.pendingUnread {
+  margin-right: 4px;
+  color: var(--color-text-muted, var(--color-text-dim));
+}
+
 /* Assistant prose is flush and full width — no bubble chrome (desktop
    TextBlock convention since the 2026-07 layout redesign). */
 .markdown {
