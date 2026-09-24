@@ -16,6 +16,7 @@
       }
     },
     "kind": {
+      "spawn": "Spawn",
       "plan": "Plan",
       "handoff": "Handoff",
       "watch": "Watch",
@@ -67,7 +68,8 @@
       "line_no": "Line",
       "offset_chars": "Char offset",
       "limit_chars": "Char limit",
-      "force": "Force"
+      "force": "Force",
+      "workspace": "Workspace"
     },
     "param_for": {
       "handoff": {
@@ -81,6 +83,9 @@
       }
     },
     "summary": {
+      "spawn": {
+        "unknown": "New session {{title}}"
+      },
       "plan": {
         "check": "Check {{task}} · {{plan}}",
         "uncheck": "Uncheck {{task}} · {{plan}}",

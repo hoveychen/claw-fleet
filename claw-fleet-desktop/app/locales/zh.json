@@ -16,6 +16,7 @@
       }
     },
     "kind": {
+      "spawn": "起会话",
       "plan": "计划",
       "handoff": "接力",
       "watch": "守望",
@@ -67,7 +68,8 @@
       "line_no": "行号",
       "offset_chars": "字符偏移",
       "limit_chars": "字符上限",
-      "force": "强制"
+      "force": "强制",
+      "workspace": "仓库"
     },
     "param_for": {
       "handoff": {
@@ -81,6 +83,9 @@
       }
     },
     "summary": {
+      "spawn": {
+        "unknown": "新会话 {{title}}"
+      },
       "plan": {
         "check": "勾选 {{task}} · {{plan}}",
         "uncheck": "取消勾选 {{task}} · {{plan}}",

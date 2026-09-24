@@ -168,6 +168,16 @@ describe("registry parity with claw-fleet-core", () => {
     const missing = names.filter((n) => !(n.replace(/^fleet__/, "") in FLEET_TOOL_LABEL_KEYS));
     expect(missing).toEqual([]);
   });
+
+  // `fleet__spawn` joined FLEET_CONTROL_TOOLS without a `fleet.kind` entry, so
+  // FleetToolCard's header rendered the raw key `fleet.kind.spawn`.
+  it("every control tool has a fleet.kind label in both locales", () => {
+    for (const lang of ["en", "zh"]) {
+      const locale = JSON.parse(readFileSync(resolve(__dirname, `../../locales/${lang}.json`), "utf8"));
+      const missing = FLEET_CONTROL_TOOLS.filter((t) => typeof locale.fleet?.kind?.[t] !== "string");
+      expect(missing, `${lang}.json fleet.kind`).toEqual([]);
+    }
+  });
 });
 
 describe("friendlyToolName", () => {
