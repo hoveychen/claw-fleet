@@ -13,7 +13,11 @@ resolver = "2"
 
 [profile.release]
 strip = true
-lto = true
+# Thin, not fat: the release CI links every binary twice (universal macOS), and
+# fat LTO was most of that. Measured locally on fleet-cli with deps cached and
+# only the workspace crates rebuilt: fat 121s vs thin 34s, for a binary 14%
+# larger (17.4 MB -> 19.8 MB).
+lto = "thin"
 
 # A dev/debug build of the desktop app is a supported way to run Fleet, so the
 # dev profile has to stay fast enough to serve the mobile relay — `tail` runs on
