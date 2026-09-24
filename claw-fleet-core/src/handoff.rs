@@ -694,6 +694,24 @@ pub fn has_relayed(session_id: &str) -> bool {
     read_pending(session_id).is_some() || successor_session_of(session_id).is_some()
 }
 
+/// Session-id → successor for every link in the store, built in one pass.
+/// Same answer as [`successor_session_of`] per session, for callers that ask
+/// about hundreds of sessions: that one re-reads every chain file per call.
+pub fn successor_index() -> std::collections::HashMap<String, String> {
+    let Some(dir) = chain_dir() else {
+        return Default::default();
+    };
+    let mut map = std::collections::HashMap::new();
+    for chain in list_chains_in(&dir) {
+        for l in &chain.links {
+            // First link wins, matching `successor_of`'s `find`.
+            map.entry(l.from_session_id.clone())
+                .or_insert_with(|| l.to_session_id.clone());
+        }
+    }
+    map
+}
+
 fn chain_containing_in(dir: &Path, session_id: &str) -> Option<HandoffChain> {
     list_chains_in(dir)
         .into_iter()

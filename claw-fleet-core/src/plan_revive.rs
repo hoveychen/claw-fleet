@@ -408,12 +408,33 @@ pub struct WorkspaceAttendance {
 
 /// Direct claimants of each plan: the sessions whose focus record names it,
 /// each followed down its handoff successors. Newest claim first.
+///
+/// A claim whose relay ended in a session that has since focused on a
+/// different plan is dropped: that successor is working over there now, and
+/// counting it here would put one live session on every plan its chain ever
+/// passed through.
 fn direct_claims(
     records: &[(String, TaskProgressRecord)],
     successor: &dyn Fn(&str) -> Option<String>,
 ) -> HashMap<String, (Vec<String>, String, u64)> {
+    let focus: HashMap<&str, &str> =
+        records.iter().map(|r| (r.0.as_str(), r.1.plan_id.as_str())).collect();
+    let chain_end = |sid: &str| {
+        let mut cur = sid.to_string();
+        for _ in 0..64 {
+            match successor(&cur) {
+                Some(next) => cur = next,
+                None => break,
+            }
+        }
+        cur
+    };
     let mut by_plan: HashMap<&str, Vec<&(String, TaskProgressRecord)>> = HashMap::new();
     for r in records {
+        let end = chain_end(&r.0);
+        if focus.get(end.as_str()).is_some_and(|p| *p != r.1.plan_id) {
+            continue;
+        }
         by_plan.entry(r.1.plan_id.as_str()).or_default().push(r);
     }
     let mut out = HashMap::new();
@@ -479,8 +500,12 @@ pub fn resolve_attendance(
 ) -> WorkspaceAttendance {
     let direct = direct_claims(records, successor);
     let views = collect_views(records, now, successor, closed, &|_| blocks.to_vec());
+    // Claims past the reviver's window are not worth a per-session Codex probe
+    // each (hundreds of them in a busy repo); a live one still shows up through
+    // the machine-wide process and watch sets.
     let owners: HashSet<String> = direct
         .values()
+        .filter(|d| now.saturating_sub(d.2) < RECENCY_MS)
         .flat_map(|d| d.0.iter().cloned())
         .chain(views.iter().flat_map(|v| v.owners.iter().cloned()))
         .collect();
@@ -554,11 +579,12 @@ pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> Wor
         return WorkspaceAttendance::default();
     }
     let state = state_path().and_then(|p| load_state(&p)).unwrap_or_default();
+    let successors = crate::handoff::successor_index();
     resolve_attendance(
         &records,
         blocks,
         plan_snooze::now_ms(),
-        &|sid| crate::handoff::successor_session_of(sid),
+        &|sid| successors.get(sid).cloned(),
         &|sid| crate::task_outcome::read(sid).is_some(),
         &gather_coverage,
         &|plan| state.plans.get(&plan_snooze::plan_key(ws, plan)).cloned(),
@@ -580,12 +606,13 @@ fn gather_coverage(owners: &HashSet<String>) -> Coverage {
         }
     }
     c.alive.extend(crate::live_inject::live_registered_session_ids());
-    for sid in owners {
-        if !c.alive.contains(sid)
-            && crate::codex_source::codex_fleet_owned_cwd(sid).is_some()
-            && crate::codex_source::codex_session_pid(sid).is_some()
-        {
-            c.alive.insert(sid.clone());
+    // One Codex process scan for every owner, and the ownership lookup only for
+    // live threads: for a Claude session id it misses SQLite and falls back to
+    // reading every Codex rollout.
+    let unknown = owners.iter().filter(|s| !c.alive.contains(*s)).map(String::as_str);
+    for sid in crate::codex_source::codex_session_pids(unknown).into_keys() {
+        if crate::codex_source::codex_fleet_owned_cwd(&sid).is_some() {
+            c.alive.insert(sid);
         }
     }
 
@@ -1566,6 +1593,33 @@ mod tests {
         // edge, so the reviver has no outlook for it.
         assert_eq!(a.plans["root"].state, AttendanceState::Idle);
         assert!(a.outlook.is_empty());
+    }
+
+    #[test]
+    fn a_relayed_claim_follows_the_successor_to_its_own_plan() {
+        let now = 100 * H;
+        let records = vec![
+            ("s-old".to_string(), rec("/w", "first", now - 3 * H)),
+            ("s-new".to_string(), rec("/w", "second", now - H)),
+        ];
+        let blocks = [block("first", None, DONE), block("second", None, PENDING)];
+        let a = resolve_attendance(
+            &records,
+            &blocks,
+            now,
+            &|sid| (sid == "s-old").then(|| "s-new".to_string()),
+            &|_| false,
+            &|_| {
+                let mut c = Coverage::default();
+                c.alive.insert("s-new".into());
+                c
+            },
+            &|_| None,
+            &|_| false,
+            true,
+        );
+        assert_eq!(a.plans["second"].state, AttendanceState::Running);
+        assert!(!a.plans.contains_key("first"), "s-new moved on; it is not on `first`");
     }
 
     #[test]
