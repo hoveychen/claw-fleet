@@ -123,6 +123,7 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
     const path = str(input, "path");
     switch (action) {
       case "write": return t("写入笔记 {0}", path);
+      case "edit": return t("修改笔记 {0}", path);
       case "append": return t("追加笔记 {0}", path);
       case "read": return t("读取笔记 {0}", path);
       case "list": return t("列出笔记");

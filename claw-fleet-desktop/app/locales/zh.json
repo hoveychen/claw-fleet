@@ -163,6 +163,7 @@
       },
       "notes": {
         "write": "写入笔记 {{path}}",
+        "edit": "修改笔记 {{path}}",
         "append": "追加笔记 {{path}}",
         "read": "读取笔记 {{path}}",
         "list": "列出笔记",

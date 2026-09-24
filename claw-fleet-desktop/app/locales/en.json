@@ -163,6 +163,7 @@
       },
       "notes": {
         "write": "Wrote note {{path}}",
+        "edit": "Edited note {{path}}",
         "append": "Appended to note {{path}}",
         "read": "Read note {{path}}",
         "list": "Listed notes",
