@@ -903,6 +903,13 @@ pub(crate) enum NotesCommands {
         /// Full replacement text.
         text: String,
     },
+    /// Replace exactly one occurrence of OLD_TEXT with NEW_TEXT in a note.
+    Edit {
+        path: String,
+        old_text: String,
+        /// Replacement text (empty deletes OLD_TEXT).
+        new_text: String,
+    },
     /// Append text exactly as provided (creates the file if absent).
     Append { path: String, text: String },
     /// Print a note, optionally a 1-based inclusive line range (negative counts
