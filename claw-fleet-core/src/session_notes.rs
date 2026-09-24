@@ -312,7 +312,7 @@ pub const CHECKPOINT_PATH: &str = "checkpoint.md";
 
 /// Size a checkpoint should stay under so the post-compaction hint can carry
 /// it whole ([`MAX_HINT_BYTES`] minus the roster and framing).
-pub const CHECKPOINT_BUDGET_BYTES: usize = 3_000;
+pub const CHECKPOINT_BUDGET_BYTES: usize = 5_000;
 
 /// A nudge appended to a write result when the checkpoint has outgrown
 /// [`CHECKPOINT_BUDGET_BYTES`]; `None` while it still fits and for any other
@@ -323,8 +323,8 @@ pub fn over_budget_warning(file: &NoteFile) -> Option<String> {
         format!(
             "warning: {} is {} bytes, over the {CHECKPOINT_BUDGET_BYTES}-byte budget the \
              post-compaction hint carries whole — only its tail will be re-injected. Rewrite it \
-             (action=write) as current state only: drop finished or superseded entries instead \
-             of appending more.",
+             (action=write): drop progress and log entries, merge duplicate requirements and \
+             traps, and keep every requirement the user has not withdrawn.",
             file.path, file.bytes
         )
     })
@@ -571,10 +571,11 @@ pub fn search_in(
 
 // ── Hint (post-compaction re-injection) ──────────────────────────────────────
 
-/// Byte ceiling for the hint injected after a compaction — Codex's
-/// `MAX_THREAD_HINT_BYTES`. A hint is a pointer back into the notes, not the
-/// notes themselves.
-pub const MAX_HINT_BYTES: usize = 4_000;
+/// Byte ceiling for the hint injected after a compaction. Codex's
+/// `MAX_THREAD_HINT_BYTES` is 4,000; ours is larger because the checkpoint
+/// carries the user's accumulated requirements, which must arrive whole —
+/// losing them across a relay is the failure notes exist to prevent.
+pub const MAX_HINT_BYTES: usize = 6_000;
 
 /// How many note files the roster names before collapsing the rest into a
 /// count. A long handoff chain makes every predecessor's notes readable, and an
@@ -596,8 +597,8 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
         return None;
     }
     let mut out = String::from(
-        "<fleet_notes>\nPrivate checkpoint notes from before this context window (own session \
-         first, then handoff predecessors). Read the rest with fleet__notes read, and use \
+        "<fleet_notes>\nPrivate notes (the user's requirements and recurring traps) from before this \
+         context window (own session first, then handoff predecessors). Read the rest with fleet__notes read, and use \
          fleet__history search to recover details a compaction dropped. Internal bookkeeping — \
          do not narrate to the user.\n",
     );
@@ -646,9 +647,9 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
 /// Clip to `budget` bytes on a char boundary, keeping the **tail** and marking
 /// the elision at the top.
 ///
-/// The guidance now asks for a current-state checkpoint that fits the budget
-/// whole, so clipping only bites a note that grew into a log anyway (older
-/// ones were written append-only). For those the newest state lives at the
+/// The guidance now asks for a checkpoint of requirements and traps that fits
+/// the budget whole, so clipping only bites a note that grew into a log anyway
+/// (older ones were written append-only). For those the newest state lives at the
 /// end: clipping the head off a 38 KB checkpoint used to hand the next window
 /// the oldest entries and drop everything since.
 fn clip_bytes(text: &str, budget: usize) -> String {

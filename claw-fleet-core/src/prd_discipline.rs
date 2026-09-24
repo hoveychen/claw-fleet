@@ -185,9 +185,10 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 
 交接是换人；本节管的是同一个会话跨上下文窗口。
 
-- **边做边记，别等到最后。**从一开始就用 `fleet__notes`（CLI：`fleet notes`）维护 `checkpoint.md`（目标、已定决策、坑、进展、下一步，以及能回捞细节的指针）。笔记不受压缩影响，handoff 后继者也读得到。
-- **checkpoint 是「现在的状态」，不是日记。**每完成一个 P-task 或撞上一个值得记的坑，就用 `edit` 改掉变了的那几行，或用 `write` 整份重写；做完的、被推翻的条目直接删掉，不要一条条 `append` 流水账（历史在 git 和 transcript 里）。控制在约 3000 字节以内——压缩后注入的就是它，超出只剩尾巴。作为 handoff 后继者，开工第一件事就是把继承来的 checkpoint 按当前状态改写一遍。
-- 压缩后新窗口开头会注入 `<fleet_notes>`：先读它恢复宏观状态；缺细节就用 `fleet__history search`（CLI：`fleet history`）搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 `read` 那一条。
+- **笔记是为了多轮接力后不丢{title}的要求。**用 `fleet__notes`（CLI：`fleet notes`）在 `checkpoint.md` 里只记两类东西，一出现就记，别等到最后：① {title}提过的要求、偏好和对齐过的结论（尽量保留{title}原话）；② 踩过、以后还会再踩的坑（现象、原因、怎么绕开）。笔记不受压缩影响，handoff 后继者也读得到。
+- **不记流水账。**进度、做了什么、下一步、TODO 一律不写——那些归 TASKS.md、git 和 handoff note。
+- **改写，不追加。**{title}改了某条要求，就用 `edit` 改那一条，别在末尾再追加一条互相矛盾的；重复的合并；只有{title}明确撤回的才删。控制在约 5000 字节以内——压缩后和接力开场注入的就是它，超出只剩尾巴。
+- 压缩后新窗口开头会注入 `<fleet_notes>`：先读它找回{title}的要求和已知的坑；缺细节就用 `fleet__history search`（CLI：`fleet history`）搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 `read` 那一条。
 - 它们是**内部记账**，不要在给{title}的回复里复述笔记或提这两个工具。
 
 ### 绝不用 Claude Code 自带的跨回合调度器
@@ -404,9 +405,10 @@ fleet handoff --note "<the chain's handoff brief: conclusions aligned with {titl
 
 A handoff changes *who*; this section covers one session crossing context windows.
 
-- **Take notes as you go**, not at the end. From the start, keep `checkpoint.md` with `fleet__notes` (CLI: `fleet notes`) (goal, decisions taken, traps, progress, next step, and pointers for recovering detail). Notes survive compression, and a handoff successor can read them.
-- **The checkpoint is the current state, not a diary.** After each P-task or each trap worth recording, `edit` the lines that changed or `write` the whole file anew; delete finished or superseded entries instead of `append`ing a log (the history lives in git and the transcript). Keep it under about 3,000 bytes — it is what gets re-injected after a compression, and past that only its tail survives. As a handoff successor, your first move is to rewrite the inherited checkpoint for the current state.
-- After a compression the new window opens with a `<fleet_notes>` injection: read it to restore the macro state, then use `fleet__history search` (CLI: `fleet history`) to find the verbatim text in your (or a predecessor's) transcript and `read` that `line_no` for the details.
+- **Notes exist so {title}'s requirements survive a long relay.** With `fleet__notes` (CLI: `fleet notes`), keep exactly two kinds of entry in `checkpoint.md`, recorded as they come up, not at the end: (1) requirements, preferences and conclusions {title} stated or agreed to (keep {title}'s own words where you can); (2) traps you hit that are likely to bite again (symptom, cause, how to avoid it). Notes survive compression, and a handoff successor can read them.
+- **No log.** Never record progress, what you did, next steps or TODOs — those belong in TASKS.md, git and the handoff note.
+- **Rewrite, do not append.** When {title} changes a requirement, `edit` that entry instead of appending a contradicting one; merge duplicates; delete only what {title} explicitly withdrew. Keep it under about 5,000 bytes — it is what gets re-injected after a compression and at the start of a relay hop, and past that only its tail survives.
+- After a compression the new window opens with a `<fleet_notes>` injection: read it to recover {title}'s requirements and the known traps, then use `fleet__history search` (CLI: `fleet history`) to find the verbatim text in your (or a predecessor's) transcript and `read` that `line_no` for the details.
 - These are **internal bookkeeping** — do not narrate the notes or these tools back to {title}.
 
 ### Never use Claude Code's built-in cross-turn schedulers
@@ -761,8 +763,9 @@ mod tests {
 
     /// Notes are the layer between TASKS.md (checkboxes) and a handoff note
     /// (one-shot briefing): same session, across context windows. The section
-    /// has to teach the three moves — keep a current-state checkpoint as you go
-    /// (edited in place, not appended to as a log), read the injected hint
+    /// has to teach the three moves — record the boss's requirements and
+    /// recurring traps as they come up (edited in place, never a progress
+    /// log), read the injected hint
     /// after a compaction, recover detail via history — and mark all of it as
     /// internal bookkeeping, in both locales.
     #[test]
@@ -795,17 +798,22 @@ mod tests {
                 "[{locale}] must mark notes as internal, not for the user"
             );
             assert!(
-                g.contains("边做边记") || g.contains("as you go"),
+                g.contains("一出现就记") || g.contains("as they come up"),
                 "[{locale}] must say notes are incremental, not end-of-task"
             );
-            // Append-only guidance grew checkpoints into 20 KB relay diaries
-            // whose injected 4 KB tail dropped the goal and decisions.
+            // Append-only, progress-logging guidance grew checkpoints into
+            // 20 KB relay diaries whose injected tail dropped the requirements
+            // the boss had stated hops earlier — the one thing notes exist for.
             assert!(
-                g.contains("不是日记") || g.contains("not a diary"),
-                "[{locale}] must say the checkpoint is current state, not a log"
+                g.contains("不记流水账") || g.contains("No log."),
+                "[{locale}] must forbid progress logs in notes"
             );
             assert!(
-                g.contains("`edit`") && (g.contains("3000") || g.contains("3,000")),
+                g.contains("提过的要求、偏好") || g.contains("requirements, preferences"),
+                "[{locale}] must say notes hold the boss's requirements and recurring traps"
+            );
+            assert!(
+                g.contains("`edit`") && (g.contains("5000") || g.contains("5,000")),
                 "[{locale}] must teach in-place edits and the size budget"
             );
         }
