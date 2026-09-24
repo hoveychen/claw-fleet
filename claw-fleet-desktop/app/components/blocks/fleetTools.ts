@@ -320,7 +320,7 @@ function isJsonRecordAction(tool: FleetTool, action: string): boolean {
 const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
   inspect: [],
   history: [],
-  notes: ["write", "append"],
+  notes: ["write", "edit", "append"],
   artifact: ["add", "delete"],
   control: ["stop", "interrupt"],
 };

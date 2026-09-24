@@ -315,6 +315,7 @@ const DICT: Record<string, string> = {
   "停止 agent {0}": "Stop agent {0}",
   "打断 agent {0}": "Interrupt agent {0}",
   "写入笔记 {0}": "Write note {0}",
+  "修改笔记 {0}": "Edit note {0}",
   "追加笔记 {0}": "Append to note {0}",
   "读取笔记 {0}": "Read note {0}",
   列出笔记: "List notes",
