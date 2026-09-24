@@ -23,6 +23,7 @@
  * renders through the generic path and loses its label entirely.
  */
 export const FLEET_CONTROL_TOOLS = [
+  "spawn",
   "plan",
   "handoff",
   "watch",

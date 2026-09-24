@@ -42,7 +42,9 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
   const plan = str(input, "plan_id") || str(input, "plan");
   const task = str(input, "task");
   const id = str(input, "id");
-  if (tool === "plan") {
+  if (tool === "spawn") {
+    return t("新会话 {0}", str(input, "title"));
+  } else if (tool === "plan") {
     switch (action) {
       case "check": return t("勾选 {0} · {1}", task, plan);
       case "uncheck": return t("取消勾选 {0} · {1}", task, plan);
@@ -52,12 +54,15 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "migrate": return t("迁移 TASKS.md");
       case "list": return t("列出计划");
       case "get": return t("查看计划 {0}", plan);
+      case "snooze": return t("静默计划 {0}", plan);
+      case "unsnooze": return t("取消静默 {0}", plan);
     }
   } else if (tool === "handoff") {
     switch (action) {
       case "register": return t("登记接力");
       case "cancel": return t("取消待定接力");
       case "list": return t("列出接力链");
+      case "show": return t("查看接力链");
     }
   } else if (tool === "watch") {
     switch (action) {
@@ -88,6 +93,8 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "publish": return t("发布 {0}", str(input, "slug"));
       case "cat": return t("查看 {0}", str(input, "slug"));
       case "list": return t("列出知识库");
+      case "show": return t("查看 {0} 的版本", str(input, "slug"));
+      case "mv": return t("移动 {0}", str(input, "slug"));
       case "search": return t("搜索 {0}", str(input, "query"));
     }
   } else if (tool === "artifact") {
@@ -108,6 +115,7 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
     }
   } else if (tool === "control") {
     switch (action) {
+      case "send": return t("给 agent {0} 发消息", id);
       case "stop": return t("停止 agent {0}", id);
       case "interrupt": return t("打断 agent {0}", id);
     }

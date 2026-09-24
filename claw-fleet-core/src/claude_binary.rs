@@ -43,8 +43,14 @@ pub enum ClaudeBinarySource {
     /// `/usr/local/bin/claude`.
     UsrLocalBin,
     /// `~/.vscode/extensions/anthropic.claude-code-*/resources/native-binary/claude`.
+    ///
+    /// Explicit rename: `rename_all` would emit `vs-code-extension`, which
+    /// matches neither `key()` nor the frontend's i18n keys. The alias keeps
+    /// values serialized under the old spelling readable.
+    #[serde(rename = "vscode-extension", alias = "vs-code-extension")]
     VsCodeExtension,
     /// `~/.vscode-insiders/extensions/anthropic.claude-code-*/...`.
+    #[serde(rename = "vscode-insiders-extension", alias = "vs-code-insiders-extension")]
     VsCodeInsidersExtension,
     /// `~/.windsurf/extensions/anthropic.claude-code-*/...`.
     WindsurfExtension,
@@ -269,6 +275,27 @@ fn which_claude() -> Option<String> {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// The frontend looks up `settings.claude_binary_source.<serde form>`, so the
+    /// wire form must equal `key()` for every variant.
+    #[test]
+    fn serde_form_matches_key() {
+        use ClaudeBinarySource::*;
+        for s in [
+            Path,
+            NativeInstaller,
+            Homebrew,
+            NpmGlobal,
+            UsrLocalBin,
+            VsCodeExtension,
+            VsCodeInsidersExtension,
+            WindsurfExtension,
+        ] {
+            assert_eq!(serde_json::to_value(&s).unwrap(), s.key(), "{s:?}");
+        }
+        let old: ClaudeBinarySource = serde_json::from_str("\"vs-code-extension\"").unwrap();
+        assert_eq!(old, VsCodeExtension);
+    }
 
     #[test]
     fn parse_version_orders_correctly() {
