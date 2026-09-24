@@ -60,11 +60,26 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     // exactly the escape a 97.5%-English prior takes every time; a flat demand is
     // what actually moved it. English locales need no line at all — empty string,
     // no bullet.
+    //
+    // Re-measured 2026-09-24: the line above only moves the first thinking block
+    // of a turn (the one right after the user's prompt). The persisted thinking
+    // is a server-side summary, and blocks written after English tool results
+    // stay English no matter how the thinking request is phrased (5% Chinese
+    // overall). What the summary does keep in the user's language is a report
+    // the model drafts for the user, so the second bullet asks for that report
+    // before every tool call: 22% Chinese across 4/4 probe runs (headless Opus
+    // 5.5, full zh guidance). It must stay a request for a report. Wording that
+    // targets the thinking itself — "explain your reasoning", "someone reads
+    // your thinking", sample thoughts — is refused outright by the API as
+    // `[reasoning_extraction]` (11 of 11 probe runs across those phrasings).
     let thinking_line = match locale {
-        "zh" => "- 思考过程（extended thinking）也必须用中文写。读英文代码、英文文档时同样保持中文思考，不要切回英文。\n",
-        "ja" => "- 思考過程（extended thinking）も必ず日本語で書いてください。英語のコードや資料を読んでいる間も日本語のまま考え、英語に戻さないこと。\n",
-        "ko" => "- 사고 과정(extended thinking)도 반드시 한국어로 작성하세요. 영어 코드나 문서를 읽는 동안에도 한국어로 사고하고 영어로 돌아가지 마세요.\n",
-        _ => "",
+        "zh" => format!("- 思考过程（extended thinking）也必须用中文写。读英文代码、英文文档时同样保持中文思考，不要切回英文。\n\
+- 每次调用工具之前，先用一两句中文向{title_zh}汇报：刚才的结果说明了什么、接下来要做什么。\n"),
+        "ja" => format!("- 思考過程（extended thinking）も必ず日本語で書いてください。英語のコードや資料を読んでいる間も日本語のまま考え、英語に戻さないこと。\n\
+- ツールを呼び出す前に毎回、直前の結果から何が分かったか、次に何をするかを日本語で一、二文、{title_zh}に報告してください。\n"),
+        "ko" => format!("- 사고 과정(extended thinking)도 반드시 한국어로 작성하세요. 영어 코드나 문서를 읽는 동안에도 한국어로 사고하고 영어로 돌아가지 마세요.\n\
+- 도구를 호출하기 전마다, 방금 결과가 무엇을 뜻하는지와 다음에 무엇을 할지를 한국어로 한두 문장 {title_zh}에게 보고하세요.\n"),
+        _ => String::new(),
     };
 
     if locale == "zh" {
@@ -422,6 +437,42 @@ mod tests {
         );
         // The empty thinking_line must not leave a stray blank bullet behind.
         assert!(!en.contains("\n- \n"));
+    }
+
+    #[test]
+    fn render_asks_non_english_locales_to_report_before_tool_calls() {
+        // The pre-tool-call report is the part of the thinking summary that
+        // keeps the user's language; it is what actually moves thinking off English.
+        let zh = render_guidance("师父", "zh");
+        assert!(zh.contains("每次调用工具之前，先用一两句中文向师父汇报"));
+        assert!(render_guidance("", "ja").contains("ツールを呼び出す前に毎回"));
+        assert!(render_guidance("", "ko").contains("도구를 호출하기 전마다"));
+        assert!(!render_guidance("", "en").contains("before every tool call"));
+    }
+
+    #[test]
+    fn guidance_avoids_phrasings_the_api_refuses_as_reasoning_extraction() {
+        // Measured 2026-09-24 on Opus 5.5: guidance that asks the model to expose
+        // its reasoning, says someone reads its thinking, or shows sample thoughts
+        // gets the whole turn refused with `[reasoning_extraction]`.
+        let banned = [
+            "判断过程",
+            "推理过程",
+            "读你的思考",
+            "阅读你的思考",
+            "思考示例",
+            "reads your thinking",
+            "explain your reasoning",
+        ];
+        for loc in ["zh", "ja", "ko", "en"] {
+            let g = render_guidance("老板", loc);
+            for phrase in banned {
+                assert!(
+                    !g.contains(phrase),
+                    "{loc} guidance contains {phrase:?}, which triggers reasoning_extraction refusals"
+                );
+            }
+        }
     }
 
     #[test]
