@@ -72,7 +72,7 @@ const MOCK_SESSIONS_SEED: Array<
     watches: [
       {
         id: "w-mock01",
-        note: "CI run 123 to finish",
+        note: "P2：等 CI run 123 跑完（Linux 单测那一格），绿了就合并 prd/foo，红了看日志修一轮再重跑",
         created: NOW - 3 * MIN - 20 * 1000,
         pollSecs: 60,
         deadlineAt: NOW + 2 * 60 * MIN,

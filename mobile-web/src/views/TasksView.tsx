@@ -1008,6 +1008,9 @@ export function TasksView({
               title={w.note ?? undefined}
             >
               <Radar size={11} />
+              {/* No hover on a phone, so the note has to be on the chip to be seen at all. */}
+              {w.note && <span className={styles.watchNote}>{w.note}</span>}
+              {w.note && " · "}
               {formatWatchElapsed(w.created)} · {t("轮询 {0} 次", w.pollCount)}
             </span>
           ))}
