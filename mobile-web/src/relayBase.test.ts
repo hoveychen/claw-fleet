@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultRelayBaseFrom,
   parseRelayParam,
+  relayOriginOf,
   relayBaseFor,
   relayWsUrl,
 } from "./relayBase";
@@ -11,6 +12,21 @@ import {
 // This file covers the new ones that grew out of multi-device.
 
 const BAKED = "https://fleet-relay.muveeai.com";
+
+describe("relayOriginOf", () => {
+  it("keeps only the origin of a typed address", () => {
+    expect(relayOriginOf("  https://relay.corp.example.com/path/ ")).toBe(
+      "https://relay.corp.example.com",
+    );
+    expect(relayOriginOf("http://10.0.0.5:8080")).toBe("http://10.0.0.5:8080");
+  });
+
+  it("rejects anything that is not an absolute http(s) URL", () => {
+    expect(relayOriginOf("relay.corp.example.com")).toBeNull();
+    expect(relayOriginOf("ftp://relay.example.com")).toBeNull();
+    expect(relayOriginOf("")).toBeNull();
+  });
+});
 
 describe("parseRelayParam", () => {
   it("reads the relay a pairing QR named", () => {

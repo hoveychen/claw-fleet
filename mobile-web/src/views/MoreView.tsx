@@ -29,6 +29,7 @@ import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import { useConfirm } from "../confirmDialog";
 import { BUILD_COMMIT } from "../buildCommit";
+import { relayOriginOf } from "../relayBase";
 import { RELAY_PRESETS, relayChoiceOf } from "../../../shared-ts/relayPresets";
 import styles from "./MoreView.module.css";
 
@@ -83,7 +84,7 @@ interface Props {
   /** Relay the current device actually connects to (its own or the build default);
    *  null when it is not a relay device. */
   activeRelayBase: string | null;
-  /** Move the current device to another official relay host. */
+  /** Move the current device to another relay host (preset or custom origin). */
   onSetRelay: (base: string) => void;
   onRemoveDevice: (device: PairedDevice) => void;
   /** Whether this device's notifications are muted. */
@@ -132,6 +133,20 @@ export function MoreView({
   const { lang, setLang, t } = useI18n();
   const confirm = useConfirm();
   const relayChoice = supportsPush && activeRelayBase ? relayChoiceOf(activeRelayBase) : null;
+  // Inline editor for a custom relay address (inline, not window.prompt — same reason
+  // as device rename below).
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customDraft, setCustomDraft] = useState("");
+  const [customError, setCustomError] = useState(false);
+  const saveCustomRelay = () => {
+    const origin = relayOriginOf(customDraft);
+    if (!origin) {
+      setCustomError(true);
+      return;
+    }
+    setCustomOpen(false);
+    if (origin !== activeRelayBase) onSetRelay(origin);
+  };
   // Device being renamed (inline input, not window.prompt—HarmonyOS ArkWeb dialog
   // may not be available, no reason to depend on it).
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -356,11 +371,11 @@ export function MoreView({
             </span>
             <span className={styles.relayValue}>{endpointLabel}</span>
           </div>
-          {/* Both official hosts front the same relay container, so swapping keeps the
-              pairing valid — the phone-side twin of the desktop's relay dropdown. A
-              self-hosted relay is a separate deployment the desktop sits on; moving off
-              it would just disconnect, so the picker only shows on an official host. */}
-          {relayChoice !== null && relayChoice !== "custom" && (
+          {/* Both official hosts front the same relay container, so swapping between
+              them keeps the pairing valid — the phone-side twin of the desktop's relay
+              dropdown. A custom (self-hosted) relay is a separate deployment: it only
+              works when the desktop already points at the same address, hence the note. */}
+          {relayChoice !== null && (
             <>
               <div className={styles.divider} />
               <div className={styles.row}>
@@ -370,14 +385,64 @@ export function MoreView({
                     <button
                       key={p.key}
                       className={styles.segmentButton}
-                      data-active={relayChoice === p.key}
-                      onClick={() => relayChoice !== p.key && onSetRelay(p.url)}
+                      data-active={!customOpen && relayChoice === p.key}
+                      onClick={() => {
+                        setCustomOpen(false);
+                        if (relayChoice !== p.key) onSetRelay(p.url);
+                      }}
                     >
                       {p.key === "cn" ? t("国内") : t("海外")}
                     </button>
                   ))}
+                  <button
+                    className={styles.segmentButton}
+                    data-active={customOpen || relayChoice === "custom"}
+                    onClick={() => {
+                      setCustomDraft(relayChoice === "custom" ? (activeRelayBase ?? "") : "");
+                      setCustomError(false);
+                      setCustomOpen(true);
+                    }}
+                  >
+                    {t("自定义")}
+                  </button>
                 </div>
               </div>
+              {customOpen && (
+                <div className={styles.hostForm}>
+                  <input
+                    className={styles.deviceInput}
+                    value={customDraft}
+                    autoFocus
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    placeholder="https://relay.example.com"
+                    onChange={(e) => {
+                      setCustomDraft(e.target.value);
+                      setCustomError(false);
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && saveCustomRelay()}
+                  />
+                  {customError && (
+                    <span className={styles.hostError}>
+                      {t("地址要以 http:// 或 https:// 开头。")}
+                    </span>
+                  )}
+                  <div className={styles.hostActions}>
+                    <button className={styles.deviceBtn} onClick={() => setCustomOpen(false)}>
+                      {t("取消")}
+                    </button>
+                    <button className={styles.deviceBtn} onClick={saveCustomRelay}>
+                      {t("保存")}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {(customOpen || relayChoice === "custom") && (
+                <div className={styles.rowNote}>
+                  {t("自定义地址必须和桌面端设置的 relay 地址一致，否则会连不上。")}
+                </div>
+              )}
             </>
           )}
           {/* Same-origin deployment choice only: desktop and mobile are two builds from

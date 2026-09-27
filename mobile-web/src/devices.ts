@@ -357,10 +357,11 @@ export function renameDevice(book: DeviceBook, id: string, label: string): Devic
   };
 }
 
-/** Point a relay device at another relay host. Only meaningful between the official
- *  hosts (shared-ts/relayPresets.ts), which front the same relay container — the
- *  pairing secret stays valid, so no rescan is needed. HTTP devices and unknown IDs
- *  are ignored; an unchanged host returns the same book so callers can skip a write. */
+/** Point a relay device at another relay host. The official hosts
+ *  (shared-ts/relayPresets.ts) front the same relay container, so the pairing secret
+ *  stays valid; a custom host only works when the desktop is on it too. HTTP devices
+ *  and unknown IDs are ignored; an unchanged host returns the same book so callers can
+ *  skip a write. */
 export function setDeviceRelay(book: DeviceBook, id: string, relayBase: string): DeviceBook {
   const target = book.devices.find((d) => d.id === id);
   if (!target || target.kind !== "relay" || target.relayBase === relayBase) return book;
