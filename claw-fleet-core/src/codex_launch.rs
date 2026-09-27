@@ -1056,14 +1056,25 @@ fn maybe_prepend_active_plans(
 /// Prepend the recent-sessions block — what this repository has been worked on
 /// lately — to a brand-new codex thread's first prompt.
 ///
-/// The codex arm of the `fleet recent-sessions` SessionStart hook, sharing its
-/// renderer so the two harnesses inject identical text. Fires on spawn only,
+/// The codex arm of the `fleet recent-sessions` SessionStart hook, using the
+/// shared renderer with only file-backed sources. Fires on spawn only,
 /// because one codex thread is one context window: the block describes the
 /// repo, not the turn, and nothing in it is worth ~5 KB on every resume.
 ///
 /// Silent when the workspace has no other sessions to report.
 fn prepend_recent_sessions(workspace_path: &str, prompt: &str) -> String {
-    match crate::recent_sessions::render_for_workspace(workspace_path, None) {
+    // Scan only local transcript sources: dsh's session/list is unrelated to
+    // launching Codex and must not even be requested on this path. Bound the
+    // remaining file scan for cold or unusually large histories.
+    let block = crate::recent_sessions::render_file_backed_within(
+        workspace_path,
+        Duration::from_secs(5),
+    );
+    prepend_recent_sessions_block(prompt, block.as_deref())
+}
+
+fn prepend_recent_sessions_block(prompt: &str, block: Option<&str>) -> String {
+    match block {
         Some(block) => format!("{block}\n\n{prompt}"),
         None => prompt.to_string(),
     }
@@ -1561,6 +1572,15 @@ pub fn resume_codex_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_sessions_block_preserves_prompt_when_scan_times_out() {
+        assert_eq!(prepend_recent_sessions_block("launch prompt", None), "launch prompt");
+        assert_eq!(
+            prepend_recent_sessions_block("launch prompt", Some("recent sessions")),
+            "recent sessions\n\nlaunch prompt"
+        );
+    }
 
     /// The reminder rides at the head of the prompt, and only a rollout that
     /// already holds identical text may hold it back — every evidence-free case
