@@ -21,8 +21,9 @@
 //!   claimed and long-abandoned plans are left alone.
 //! - Revival always spawns a **new** session (never resumes the old one) and
 //!   pre-attributes it to the plan.
-//! - A plan whose newest session was closed by the boss's terminal button is
-//!   not revived directly: Fleet raises a card and asks first.
+//! - A plan whose newest session was closed by the boss — the card's terminal
+//!   button, or a 「已完成」 mark in the session list — is not revived
+//!   directly: Fleet raises a card and asks first.
 //! - Pressing 「结束任务」 on a session whose plan is fully done continues the
 //!   tree at once, in DFS order ([`continue_after_finish`]); a plan with boxes
 //!   still open keeps the ask-first path above.
@@ -168,7 +169,7 @@ pub struct PlanView {
     pub owners: Vec<String>,
     /// The session holding the newest claim, after following handoff links.
     pub newest_owner: String,
-    /// `true` when `newest_owner` carries a terminal outcome from the boss.
+    /// `true` when the boss closed `newest_owner` (see [`closed_by_boss`]).
     pub boss_closed: bool,
 }
 
@@ -291,6 +292,23 @@ pub fn collect_views(
         }
     }
     out
+}
+
+/// Whether the boss closed this session: either a terminal outcome from the
+/// card's button, or a `Done` mark set in the session list. The list mark is
+/// how the boss usually closes sessions in bulk; honouring only the button
+/// woke plans the boss had already put away (seen 2026-09-25..27).
+fn closed_by_boss(sid: &str) -> bool {
+    match (crate::task_outcome::outcome_dir(), crate::session_mark::mark_dir()) {
+        (Some(outcomes), Some(marks)) => closed_by_boss_in(&outcomes, &marks, sid),
+        _ => false,
+    }
+}
+
+fn closed_by_boss_in(outcomes: &Path, marks: &Path, sid: &str) -> bool {
+    crate::task_outcome::read_in(outcomes, sid).is_some()
+        || crate::session_mark::read_in(marks, sid).map(|r| r.mark)
+            == Some(crate::session_mark::SessionMark::Done)
 }
 
 // ── Coverage ────────────────────────────────────────────────────────────────
@@ -585,7 +603,7 @@ pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> Wor
         blocks,
         plan_snooze::now_ms(),
         &|sid| successors.get(sid).cloned(),
-        &|sid| crate::task_outcome::read(sid).is_some(),
+        &closed_by_boss,
         &gather_coverage,
         &|plan| state.plans.get(&plan_snooze::plan_key(ws, plan)).cloned(),
         &|plan| plan_snooze::active(ws, plan).is_some(),
@@ -1029,7 +1047,7 @@ fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
             "计划唤醒",
             format!(
                 "计划 {label} 还剩 {pending} 个 P 没做，要起新会话接着干吗？\n---\n\
-                 你之前已经按「结束任务」收了负责它的会话，所以 Fleet 没有自动唤醒，先来问你。\n\n\
+                 你之前已经收掉了负责它的会话（按了「结束任务」或标了「已完成」），所以 Fleet 没有自动唤醒，先来问你。\n\n\
                  - 进度：{done}/{total}，下一个：{next}\n\
                  - 上一个会话：`{owner}`\n\n\
                  要让新会话接手吗？",
@@ -1158,7 +1176,7 @@ fn tick_locked(path: &Path) {
         &records,
         now,
         &|sid| successors.get(sid).cloned(),
-        &|sid| crate::task_outcome::read(sid).is_some(),
+        &closed_by_boss,
         &load_workspace_blocks,
     );
 
@@ -1327,7 +1345,7 @@ pub fn dry_run() -> Vec<OrphanReport> {
         &records,
         now,
         &|sid| successors.get(sid).cloned(),
-        &|sid| crate::task_outcome::read(sid).is_some(),
+        &closed_by_boss,
         &load_workspace_blocks,
     );
     let owners: HashSet<String> = views.iter().flat_map(|v| v.owners.iter().cloned()).collect();
@@ -1671,6 +1689,28 @@ mod tests {
             newest_owner: "s".into(),
             boss_closed,
         }
+    }
+
+    #[test]
+    fn a_done_mark_in_the_session_list_counts_as_closed_by_boss() {
+        use crate::session_mark::SessionMark;
+        let root = tempfile::tempdir().unwrap();
+        let (outcomes, marks) = (root.path().join("outcome"), root.path().join("mark"));
+        assert!(!closed_by_boss_in(&outcomes, &marks, "s"));
+        crate::session_mark::set_mark_in(&marks, "s", "/w", Some(SessionMark::Pending)).unwrap();
+        assert!(!closed_by_boss_in(&outcomes, &marks, "s"), "a pending mark is not a close");
+        crate::session_mark::set_mark_in(&marks, "s", "/w", Some(SessionMark::Done)).unwrap();
+        assert!(closed_by_boss_in(&outcomes, &marks, "s"));
+        crate::task_outcome::set_outcome_in(
+            &outcomes,
+            "t",
+            "/w",
+            Some(crate::task_outcome::TaskOutcome::Abandoned),
+            "card",
+            false,
+        )
+        .unwrap();
+        assert!(closed_by_boss_in(&outcomes, &marks, "t"));
     }
 
     #[test]
