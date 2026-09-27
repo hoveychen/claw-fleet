@@ -119,6 +119,13 @@ const DICT: Record<string, string> = {
   // ── Device registry (multi-device pairing) ──
   "设备": "Device",
   改名: "Rename",
+  线路: "Route",
+  海外: "Global",
+  国内: "China",
+  自定义: "Custom",
+  "地址要以 http:// 或 https:// 开头。": "The address must start with http:// or https://.",
+  "自定义地址必须和桌面端设置的 relay 地址一致，否则会连不上。":
+    "A custom address must match the relay address set on the desktop, or the phone cannot connect.",
   静音: "Mute",
   扫码添加设备: "Add a device by QR",
   添加直连主机: "Add a direct host",

@@ -8,7 +8,7 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { localDateKey } from "../localDate";
-import { RELAY_URL_GLOBAL } from "../relayPresets";
+import { RELAY_URL_GLOBAL } from "../../../shared-ts/relayPresets";
 import type { RawMessage, SessionInfo } from "../types";
 import type { LiveThinking } from "../generated/types";
 import type { PromoScene } from "./promo-scene";

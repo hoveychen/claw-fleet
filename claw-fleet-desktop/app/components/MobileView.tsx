@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "./PageShell";
 import { useUIStore } from "../store";
-import { RELAY_PRESETS, relayChoiceOf, type RelayChoice } from "../relayPresets";
+import { RELAY_PRESETS, relayChoiceOf, type RelayChoice } from "../../../shared-ts/relayPresets";
 import styles from "./MobileView.module.css";
 
 interface MobileRelayConfig {

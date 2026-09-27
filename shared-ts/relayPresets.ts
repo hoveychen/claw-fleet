@@ -1,5 +1,7 @@
 /**
- * The two relay hosts offered in the Mobile panel's relay-address dropdown.
+ * The two official relay hosts, offered by the desktop Mobile panel's
+ * relay-address dropdown and by the phone's per-device relay picker
+ * (mobile-web MoreView).
  *
  * `claw-fleet-core/src/relay_region.rs` owns these hostnames and picks one as
  * this machine's region default; the frontend cannot read a Rust const, so the

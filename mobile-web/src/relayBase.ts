@@ -26,9 +26,20 @@
 export function parseRelayParam(hash: string): string | null {
   const match = hash.match(/[#&]relay=([^&]+)/);
   if (!match) return null;
+  try {
+    return relayOriginOf(decodeURIComponent(match[1]));
+  } catch {
+    return null;
+  }
+}
+
+/** Normalise a relay address to its origin, or `null` when it is not an absolute
+ *  http/https URL. Shared by the QR `&relay=` parameter and the custom address the
+ *  user types on the "More" page — both become the base of every relay URL. */
+export function relayOriginOf(raw: string): string | null {
   let candidate: URL;
   try {
-    candidate = new URL(decodeURIComponent(match[1]));
+    candidate = new URL(raw.trim());
   } catch {
     return null;
   }

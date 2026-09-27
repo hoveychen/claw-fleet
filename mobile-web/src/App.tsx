@@ -66,9 +66,11 @@ import {
   removeDevice,
   renameDevice,
   setActiveDevice,
+  setDeviceRelay,
   type DeviceBook,
   type PairedDevice,
 } from "./devices";
+import { relayBaseFor } from "./relayBase";
 import { onPairingLink } from "./deepLink";
 import type { PairedLink } from "./pairingLink";
 import { PairPasteForm } from "./views/PairPasteForm";
@@ -357,6 +359,17 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     setBook((prev) => {
       const next = renameDevice(prev, id, label);
       persistBook(next);
+      return next;
+    });
+  }, []);
+
+  /** Move a device to another official relay host. The new device object changes
+   *  DeviceConnection's transport dependency, so the socket reconnects and push
+   *  re-registers on its own. */
+  const setDeviceRelayBase = useCallback((id: string, base: string) => {
+    setBook((prev) => {
+      const next = setDeviceRelay(prev, id, base);
+      if (next !== prev) persistBook(next);
       return next;
     });
   }, []);
@@ -1286,6 +1299,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             activeKind={current?.kind ?? (NEEDS_PAIRING && !MOCK ? "relay" : "http")}
             onSwitchDevice={switchDevice}
             onRenameDevice={renameDeviceLabel}
+            activeRelayBase={current?.kind === "relay" ? relayBaseFor(current.relayBase) : null}
+            onSetRelay={(base) => {
+              if (current) setDeviceRelayBase(current.id, base);
+            }}
             onRemoveDevice={(d) => void removeDeviceEntry(d)}
             deviceMuted={(id) => pushMuted[id] ?? true}
             onMuteDevice={(d, muted) => void handleMuteDevice(d, muted)}
