@@ -1056,19 +1056,18 @@ fn maybe_prepend_active_plans(
 /// Prepend the recent-sessions block — what this repository has been worked on
 /// lately — to a brand-new codex thread's first prompt.
 ///
-/// The codex arm of the `fleet recent-sessions` SessionStart hook, sharing its
-/// renderer so the two harnesses inject identical text. Fires on spawn only,
+/// The codex arm of the `fleet recent-sessions` SessionStart hook, using the
+/// shared renderer with only file-backed sources. Fires on spawn only,
 /// because one codex thread is one context window: the block describes the
 /// repo, not the turn, and nothing in it is worth ~5 KB on every resume.
 ///
 /// Silent when the workspace has no other sessions to report.
 fn prepend_recent_sessions(workspace_path: &str, prompt: &str) -> String {
-    // A slow or broken source (notably dsh's session/list) must not hold up
-    // the Codex process itself. The same renderer already supports a bounded
-    // scan for dsh; use it here and keep the prompt when the budget expires.
-    let block = crate::recent_sessions::render_within(
+    // Scan only local transcript sources: dsh's session/list is unrelated to
+    // launching Codex and must not even be requested on this path. Bound the
+    // remaining file scan for cold or unusually large histories.
+    let block = crate::recent_sessions::render_file_backed_within(
         workspace_path,
-        None,
         Duration::from_secs(5),
     );
     prepend_recent_sessions_block(prompt, block.as_deref())

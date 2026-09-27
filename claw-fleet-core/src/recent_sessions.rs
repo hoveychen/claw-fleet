@@ -313,9 +313,9 @@ pub fn render(rows: &[RecentRow], workspace_path: &str) -> Option<String> {
 
 /// The whole block for one workspace, ready to inject: scan, layer, render.
 ///
-/// The IO edge of this module — the three clients (the Claude `SessionStart`
-/// hook, the codex prompt-prepend, the dsh section) all call this so the text
-/// they deliver is byte-identical and cannot drift.
+/// The full-source IO edge used by the Claude `SessionStart` hook and dsh
+/// context section. Codex uses [`render_file_backed_within`] so its launch
+/// cannot depend on the dsh server.
 ///
 /// Costs a full `scan_all_sources`: ~2s warm against the on-disk scan cache,
 /// tens of seconds cold on a machine whose cache was never built. That is why
@@ -330,7 +330,15 @@ pub fn render_for_workspace(
     exclude_session_id: Option<&str>,
 ) -> Option<String> {
     let sources = crate::agent_source::build_sources();
-    let sessions = crate::session::scan_all_sources(&sources);
+    render_from_sources(&sources, workspace_path, exclude_session_id)
+}
+
+fn render_from_sources(
+    sources: &[Box<dyn crate::agent_source::AgentSource>],
+    workspace_path: &str,
+    exclude_session_id: Option<&str>,
+) -> Option<String> {
+    let sessions = crate::session::scan_all_sources(sources);
     let mut query = RecentQuery::new(workspace_path);
     if let Some(id) = exclude_session_id {
         query = query.excluding(id);
@@ -338,6 +346,20 @@ pub fn render_for_workspace(
     let reviews = load_reviews(workspace_path);
     let rows = build_rows(&sessions, &query, &reviews, DEFAULT_SUMMARY_DEPTH);
     render(&rows, workspace_path)
+}
+
+/// Render the Codex launch context from transcript files only. This path does
+/// not construct dsh or ask its server for a session roster.
+pub fn render_file_backed_within(
+    workspace_path: &str,
+    budget: std::time::Duration,
+) -> Option<String> {
+    let workspace = workspace_path.to_string();
+    run_within(budget, move || {
+        let sources = crate::agent_source::build_file_backed_sources();
+        render_from_sources(&sources, &workspace, None)
+    })
+    .flatten()
 }
 
 /// [`render_for_workspace`], abandoned if it has not finished in `budget`.

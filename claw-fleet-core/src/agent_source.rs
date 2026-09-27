@@ -492,6 +492,26 @@ pub fn set_source_enabled_local(name: &str, enabled: bool) -> Result<(), String>
 /// to construct the source registry.
 pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
     let config = SourcesConfig::load();
+    let mut sources = file_backed_sources_from_config(&config);
+
+    // dsh (DeepSeek Harness). Gated on the binary existing, not just on the
+    // config flag: this source reaches its sessions through a server it has to
+    // start, so on a machine without dsh installed every poll would fail and
+    // log. The other two sources read files and degrade to an empty list.
+    if config.is_enabled("dsh") && crate::dsh_server::is_available() {
+        sources.push(Box::new(crate::dsh_source::DshSource::new()));
+    }
+
+    sources
+}
+
+/// Sources whose scans read local transcripts without contacting a harness
+/// server. Used by the Codex launch path so a stalled dsh cannot delay it.
+pub fn build_file_backed_sources() -> Vec<Box<dyn AgentSource>> {
+    file_backed_sources_from_config(&SourcesConfig::load())
+}
+
+fn file_backed_sources_from_config(config: &SourcesConfig) -> Vec<Box<dyn AgentSource>> {
     let mut sources: Vec<Box<dyn AgentSource>> = Vec::new();
 
     // Claude Code — always registered first (bare file path prefix = fallback).
@@ -502,14 +522,6 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
     // Codex
     if config.is_enabled("codex") {
         sources.push(Box::new(crate::codex_source::CodexSource::new()));
-    }
-
-    // dsh (DeepSeek Harness). Gated on the binary existing, not just on the
-    // config flag: this source reaches its sessions through a server it has to
-    // start, so on a machine without dsh installed every poll would fail and
-    // log. The other two sources read files and degrade to an empty list.
-    if config.is_enabled("dsh") && crate::dsh_server::is_available() {
-        sources.push(Box::new(crate::dsh_source::DshSource::new()));
     }
 
     sources
@@ -525,7 +537,7 @@ pub fn spawn_session(
     spec: &SpawnSpec,
 ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
     let tool = normalize_tool(tool);
-    let sources = build_sources();
+    let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
     source.spawn(spec)
@@ -543,10 +555,20 @@ pub fn resume_session(
     on_exit: Box<dyn FnOnce(bool) + Send>,
 ) -> Result<(), String> {
     let tool = normalize_tool(tool);
-    let sources = build_sources();
+    let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
     source.resume(spec, on_exit)
+}
+
+fn sources_for_tool(tool: &str) -> Vec<Box<dyn AgentSource>> {
+    // Claude and Codex both launch from local files. Do not probe or construct
+    // the dsh source while dispatching either harness.
+    if matches!(tool, "claude" | "codex") {
+        build_file_backed_sources()
+    } else {
+        build_sources()
+    }
 }
 
 /// Normalise a caller-supplied tool string to a source api name. Blank →
@@ -802,6 +824,27 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn file_backed_sources_never_include_dsh() {
+        let mut config = SourcesConfig::default();
+        config
+            .sources
+            .insert("dsh".into(), SourceEntry { enabled: true });
+        let names: Vec<_> = file_backed_sources_from_config(&config)
+            .iter()
+            .map(|source| source.name())
+            .collect();
+        assert_eq!(names, vec!["claude-code", "codex"]);
+
+        config
+            .sources
+            .insert("codex".into(), SourceEntry { enabled: false });
+        let names: Vec<_> = file_backed_sources_from_config(&config)
+            .iter()
+            .map(|source| source.name())
+            .collect();
+        assert_eq!(names, vec!["claude-code"]);
+    }
     /// A `LaunchContext` for a session running `source` on `model`.
     fn ctx(source: &str, model: &str, effort: &str) -> crate::session::LaunchContext {
         crate::session::LaunchContext {
