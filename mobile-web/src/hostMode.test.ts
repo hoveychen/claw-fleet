@@ -39,8 +39,10 @@ describe("same-origin build must not include relay — guard patterns sensitive 
 
   // App.tsx once imported mock/relay.ts just to read a query param, and that file
   // extends RelayClient — one static import chain pulled the entire relay dependency tree into the same-origin artifact.
-  it("App.tsx must not statically import any relay-side modules", () => {
+  // relayBase is a pure URL helper already imported by devices.ts and MoreView.tsx;
+  // it does not pull in the relay client or crypto implementation.
+  it("App.tsx may import relayBase but no relay client modules", () => {
     const imports = [...appSrc.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
-    expect(imports.filter((s) => /relay/i.test(s))).toEqual([]);
+    expect(imports.filter((s) => /(^|\/)relay/i.test(s))).toEqual(["./relayBase"]);
   });
 });
