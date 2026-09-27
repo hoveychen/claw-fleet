@@ -1063,7 +1063,19 @@ fn maybe_prepend_active_plans(
 ///
 /// Silent when the workspace has no other sessions to report.
 fn prepend_recent_sessions(workspace_path: &str, prompt: &str) -> String {
-    match crate::recent_sessions::render_for_workspace(workspace_path, None) {
+    // A slow or broken source (notably dsh's session/list) must not hold up
+    // the Codex process itself. The same renderer already supports a bounded
+    // scan for dsh; use it here and keep the prompt when the budget expires.
+    let block = crate::recent_sessions::render_within(
+        workspace_path,
+        None,
+        Duration::from_secs(5),
+    );
+    prepend_recent_sessions_block(prompt, block.as_deref())
+}
+
+fn prepend_recent_sessions_block(prompt: &str, block: Option<&str>) -> String {
+    match block {
         Some(block) => format!("{block}\n\n{prompt}"),
         None => prompt.to_string(),
     }
@@ -1561,6 +1573,15 @@ pub fn resume_codex_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_sessions_block_preserves_prompt_when_scan_times_out() {
+        assert_eq!(prepend_recent_sessions_block("launch prompt", None), "launch prompt");
+        assert_eq!(
+            prepend_recent_sessions_block("launch prompt", Some("recent sessions")),
+            "recent sessions\n\nlaunch prompt"
+        );
+    }
 
     /// The reminder rides at the head of the prompt, and only a rollout that
     /// already holds identical text may hold it back — every evidence-free case

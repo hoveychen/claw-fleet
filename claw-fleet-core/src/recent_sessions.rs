@@ -355,13 +355,20 @@ pub fn render_within(
     exclude_session_id: Option<&str>,
     budget: std::time::Duration,
 ) -> Option<String> {
-    let (tx, rx) = std::sync::mpsc::channel();
     let workspace = workspace_path.to_string();
     let exclude = exclude_session_id.map(str::to_string);
+    run_within(budget, move || render_for_workspace(&workspace, exclude.as_deref())).flatten()
+}
+
+fn run_within<T: Send + 'static>(
+    budget: std::time::Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(render_for_workspace(&workspace, exclude.as_deref()));
+        let _ = tx.send(work());
     });
-    rx.recv_timeout(budget).ok().flatten()
+    rx.recv_timeout(budget).ok()
 }
 
 /// Name of the ledger recording which sessions were already sent the block.
@@ -455,6 +462,17 @@ fn load_reviews(workspace_path: &str) -> Vec<crate::task_review::TaskReview> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_render_returns_without_waiting_for_a_stalled_source() {
+        let (release, blocked) = std::sync::mpsc::channel();
+        let result = run_within(std::time::Duration::from_millis(10), move || {
+            let _ = blocked.recv();
+            "late result"
+        });
+        assert_eq!(result, None);
+        release.send(()).unwrap();
+    }
 
     fn session(id: &str, workspace: &str, activity: u64) -> SessionInfo {
         SessionInfo {
