@@ -119,6 +119,9 @@ const DICT: Record<string, string> = {
   // ── Device registry (multi-device pairing) ──
   "设备": "Device",
   改名: "Rename",
+  线路: "Route",
+  海外: "Global",
+  国内: "China",
   静音: "Mute",
   扫码添加设备: "Add a device by QR",
   添加直连主机: "Add a direct host",

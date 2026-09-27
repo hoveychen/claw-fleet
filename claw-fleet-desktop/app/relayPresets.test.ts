@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RELAY_URL_CN, RELAY_URL_GLOBAL, relayChoiceOf } from "./relayPresets";
+import { RELAY_URL_CN, RELAY_URL_GLOBAL, relayChoiceOf } from "../../shared-ts/relayPresets";
 
 describe("relayChoiceOf", () => {
   it("maps each preset host to its dropdown entry", () => {

@@ -29,6 +29,7 @@ import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import { useConfirm } from "../confirmDialog";
 import { BUILD_COMMIT } from "../buildCommit";
+import { RELAY_PRESETS, relayChoiceOf } from "../../../shared-ts/relayPresets";
 import styles from "./MoreView.module.css";
 
 const LANG_CHOICES: Array<[Lang, string]> = [
@@ -79,6 +80,11 @@ interface Props {
   activeKind: "relay" | "http";
   onSwitchDevice: (id: string) => void;
   onRenameDevice: (id: string, label: string) => void;
+  /** Relay the current device actually connects to (its own or the build default);
+   *  null when it is not a relay device. */
+  activeRelayBase: string | null;
+  /** Move the current device to another official relay host. */
+  onSetRelay: (base: string) => void;
   onRemoveDevice: (device: PairedDevice) => void;
   /** Whether this device's notifications are muted. */
   deviceMuted: (deviceId: string) => boolean;
@@ -115,6 +121,8 @@ export function MoreView({
   activeKind,
   onSwitchDevice,
   onRenameDevice,
+  activeRelayBase,
+  onSetRelay,
   onRemoveDevice,
   deviceMuted,
   onMuteDevice,
@@ -123,6 +131,7 @@ export function MoreView({
 }: Props) {
   const { lang, setLang, t } = useI18n();
   const confirm = useConfirm();
+  const relayChoice = supportsPush && activeRelayBase ? relayChoiceOf(activeRelayBase) : null;
   // Device being renamed (inline input, not window.prompt—HarmonyOS ArkWeb dialog
   // may not be available, no reason to depend on it).
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -347,6 +356,30 @@ export function MoreView({
             </span>
             <span className={styles.relayValue}>{endpointLabel}</span>
           </div>
+          {/* Both official hosts front the same relay container, so swapping keeps the
+              pairing valid — the phone-side twin of the desktop's relay dropdown. A
+              self-hosted relay is a separate deployment the desktop sits on; moving off
+              it would just disconnect, so the picker only shows on an official host. */}
+          {relayChoice !== null && relayChoice !== "custom" && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.row}>
+                <span className={styles.rowLabel}>{t("线路")}</span>
+                <div className={styles.segment}>
+                  {RELAY_PRESETS.map((p) => (
+                    <button
+                      key={p.key}
+                      className={styles.segmentButton}
+                      data-active={relayChoice === p.key}
+                      onClick={() => relayChoice !== p.key && onSetRelay(p.url)}
+                    >
+                      {p.key === "cn" ? t("国内") : t("海外")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
           {/* Same-origin deployment choice only: desktop and mobile are two builds from
               same server. Detection by screen short edge (see desktop index.html mobile-redirect);
               large phones or folding phones mis-detect—provide exit so users aren't stuck.

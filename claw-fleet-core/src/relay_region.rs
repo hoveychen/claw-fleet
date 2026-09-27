@@ -180,14 +180,14 @@ mod tests {
     /// at a dead hostname while every Rust-side default moved on.
     #[test]
     fn desktop_dropdown_presets_match_these_hosts() {
-        const PRESETS_TS: &str = include_str!("../../claw-fleet-desktop/app/relayPresets.ts");
+        const PRESETS_TS: &str = include_str!("../../shared-ts/relayPresets.ts");
         assert!(
             PRESETS_TS.contains(RELAY_URL_GLOBAL),
-            "claw-fleet-desktop/app/relayPresets.ts no longer carries {RELAY_URL_GLOBAL}"
+            "shared-ts/relayPresets.ts no longer carries {RELAY_URL_GLOBAL}"
         );
         assert!(
             PRESETS_TS.contains(RELAY_URL_CN),
-            "claw-fleet-desktop/app/relayPresets.ts no longer carries {RELAY_URL_CN}"
+            "shared-ts/relayPresets.ts no longer carries {RELAY_URL_CN}"
         );
     }
 }

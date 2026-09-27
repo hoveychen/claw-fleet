@@ -116,13 +116,21 @@ pub fn build_api(state: Arc<AppState>) -> Router {
                 }
             }),
         )
+        // Open CORS: a PWA served from one relay hostname fetches this from the
+        // other one after the user switches hosts on the phone. It is a public
+        // key, and a plain GET needs no preflight.
         .route(
             "/vapid",
             get({
                 let state = state.clone();
                 move || {
                     let key = state.push.public_b64.clone();
-                    async move { Json(serde_json::json!({ "publicKey": key })) }
+                    async move {
+                        (
+                            [(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
+                            Json(serde_json::json!({ "publicKey": key })),
+                        )
+                    }
                 }
             }),
         )

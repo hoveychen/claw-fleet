@@ -17,6 +17,7 @@ import {
   removeDevice,
   renameDevice,
   setActiveDevice,
+  setDeviceRelay,
   type DeviceBook,
   type PairedDevice,
   type RelayDevice,
@@ -144,6 +145,23 @@ describe("renameDevice / setActiveDevice", () => {
   it("ignores switching to a device that is not in the book", () => {
     const book = twoDevices();
     expect(setActiveDevice(book, "ghost")).toBe(book);
+  });
+});
+
+describe("setDeviceRelay", () => {
+  const CN = "https://fleet-relay.eternizedlab.com";
+
+  it("repoints only the named device and keeps its pairing secret", () => {
+    const next = setDeviceRelay(twoDevices(), "d1", CN);
+    expect(asRelay(next.devices[0]).relayBase).toBe(CN);
+    expect(asRelay(next.devices[0]).secret).toBe(A);
+    expect(asRelay(next.devices[1]).relayBase).toBeNull();
+  });
+
+  it("returns the same book for an unchanged host or an unknown device", () => {
+    const book = setDeviceRelay(twoDevices(), "d1", CN);
+    expect(setDeviceRelay(book, "d1", CN)).toBe(book);
+    expect(setDeviceRelay(book, "ghost", CN)).toBe(book);
   });
 });
 
