@@ -5,7 +5,9 @@
 export type CommandView = { leaves: Array<CommandLeaf>, 
 connectors: Array<Connector>, };
 
-export type CommandLeaf = { argv: Array<string>, nested?: NestedScript | null, triggering?: boolean, already_allowed?: boolean, };
+export type CommandLeaf = { argv: Array<string>, nested?: NestedScript | null, triggering?: boolean, already_allowed?: boolean, 
+redirects?: Array<string>, 
+heredoc?: string | null, };
 
 export type NestedScript = { kind: NestedKind, 
 raw: string, 

@@ -896,6 +896,7 @@ const DICT: Record<string, string> = {
   "eval 内嵌脚本": "eval inline script",
   内嵌脚本: "inline script",
   "heredoc 脚本": "heredoc script",
+  "heredoc 正文 · {0} 行": "heredoc body · {0} lines",
   "触发审计 · 已有规则": "triggers audit · rule exists",
   触发审计: "triggers audit",
 

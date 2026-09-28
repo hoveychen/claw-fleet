@@ -80,7 +80,7 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
     : styles.leaf;
   return (
     <div className={className}>
-      <ArgvLine argv={leaf.argv} nested={leaf.nested} />
+      <ArgvLine argv={leaf.argv} nested={leaf.nested} redirects={leaf.redirects} />
       {triggering && (
         <span
           className={
@@ -106,6 +106,7 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
         </span>
       )}
       {leaf.nested && <NestedBlock nested={leaf.nested} />}
+      {leaf.heredoc != null && <HeredocBlock body={leaf.heredoc} />}
     </div>
   );
 }
@@ -113,9 +114,11 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
 function ArgvLine({
   argv,
   nested,
+  redirects,
 }: {
   argv: string[];
   nested?: NestedScript | null;
+  redirects?: string[];
 }) {
   if (argv.length === 0) return null;
   // When the nested script is inline in argv (e.g. `bash -c "..."`), the last
@@ -134,7 +137,29 @@ function ArgvLine({
           {tok}
         </span>
       ))}
+      {redirects?.map((r, j) => (
+        <span key={`r${j}`} className={styles.redirect}>
+          {r}
+        </span>
+      ))}
     </div>
+  );
+}
+
+/** Short bodies open by default; long ones start collapsed so a 10k-char
+ * document does not push the Allow / Block buttons off screen. */
+const HEREDOC_OPEN_MAX_LINES = 12;
+
+function HeredocBlock({ body }: { body: string }) {
+  const { t } = useTranslation();
+  const lines = body.replace(/\n$/, "").split("\n").length;
+  return (
+    <details className={styles.nested} open={lines <= HEREDOC_OPEN_MAX_LINES}>
+      <summary className={styles.nested_label}>
+        {t("command.heredoc_data", "heredoc · {{count}} lines", { count: lines })}
+      </summary>
+      <pre className={`${styles.script_block} ${styles.heredoc_body}`}>{body}</pre>
+    </details>
   );
 }
 

@@ -2563,7 +2563,8 @@
       "node": "嵌入 node -e",
       "eval": "嵌入 eval",
       "heredoc": "heredoc 脚本"
-    }
+    },
+    "heredoc_data": "heredoc 正文 · {{count}} 行"
   },
   "history": {
     "title": "任务",

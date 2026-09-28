@@ -68,6 +68,16 @@
   border-color: rgba(74, 222, 128, 0.3);
 }
 
+.redirect {
+  color: var(--color-text-dim);
+  word-break: break-all;
+}
+
+.heredocBody {
+  max-height: 40vh;
+  overflow: auto;
+}
+
 .connectorRow {
   padding-left: 6px;
 }

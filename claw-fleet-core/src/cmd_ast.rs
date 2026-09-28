@@ -644,6 +644,15 @@ pub struct CommandLeaf {
     pub triggering: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub already_allowed: bool,
+    /// Redirections in surface form (`> notes.md`, `2>&1`, `<<`), in source
+    /// order.  Display only — the matching engine never sees them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirects: Vec<String>,
+    /// Body of a heredoc fed to a non-interpreter command (`cat > f <<EOF`).
+    /// Interpreter heredocs surface as [`NestedKind::Heredoc`] in `nested`
+    /// instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heredoc: Option<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -765,6 +774,8 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
                         nested: None,
                         triggering: false,
                         already_allowed: false,
+                        redirects: Vec::new(),
+                        heredoc: None,
                     },
                     connector_before,
                 );
@@ -785,6 +796,8 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
                 nested: None,
                 triggering: false,
                 already_allowed: false,
+                redirects: Vec::new(),
+                heredoc: None,
             });
         }
         return single.finish();
@@ -918,6 +931,24 @@ fn visit_simple_for_view(
     // heredoc/stdin lives in a redirect and never reaches argv — lift it out
     // so the guard card can show the body that tripped the audit.
     let nested = detect_nested(&argv).or_else(|| detect_heredoc(&argv, s));
+    let redirects = s
+        .redirects_or_cmd_words
+        .iter()
+        .filter_map(|r| match r {
+            RedirectOrCmdWord::Redirect(redir) => Some(display_redirect(redir)),
+            RedirectOrCmdWord::CmdWord(_) => None,
+        })
+        .collect();
+    // An interpreter's heredoc is already shown as `nested`; anything else
+    // (`cat > f <<EOF`) is data the user still needs to see.
+    let heredoc = if nested.is_some() {
+        None
+    } else {
+        s.redirects_or_cmd_words.iter().find_map(|r| match r {
+            RedirectOrCmdWord::Redirect(Redirect::Heredoc(_, w)) => Some(display_top_word(w)),
+            _ => None,
+        })
+    };
     let conn = next.take();
     b.push(
         CommandLeaf {
@@ -925,9 +956,36 @@ fn visit_simple_for_view(
             nested,
             triggering: false,
             already_allowed: false,
+            redirects,
+            heredoc,
         },
         conn,
     );
+}
+
+/// Surface form of one redirection.  A heredoc renders as `<<` alone: the
+/// parser drops the delimiter word, and the body travels in
+/// [`CommandLeaf::heredoc`] / `nested`.
+fn display_redirect(r: &Redirect<TopLevelWord<String>>) -> String {
+    let (fd, op, target) = match r {
+        Redirect::Read(fd, w) => (fd, "<", Some(w)),
+        Redirect::Write(fd, w) => (fd, ">", Some(w)),
+        Redirect::ReadWrite(fd, w) => (fd, "<>", Some(w)),
+        Redirect::Append(fd, w) => (fd, ">>", Some(w)),
+        Redirect::Clobber(fd, w) => (fd, ">|", Some(w)),
+        Redirect::Heredoc(fd, _) => (fd, "<<", None),
+        Redirect::DupRead(fd, w) => (fd, "<&", Some(w)),
+        Redirect::DupWrite(fd, w) => (fd, ">&", Some(w)),
+    };
+    let fd = fd.map(|n| n.to_string()).unwrap_or_default();
+    match (r, target) {
+        // `2>&1` reads as one token; `> file` reads better with a space.
+        (Redirect::DupRead(..) | Redirect::DupWrite(..), Some(w)) => {
+            format!("{fd}{op}{}", display_top_word(w))
+        }
+        (_, Some(w)) => format!("{fd}{op} {}", display_top_word(w)),
+        (_, None) => format!("{fd}{op}"),
+    }
 }
 
 /// When an interpreter reads its script from a heredoc (`python3 - <<EOF`,
@@ -1355,6 +1413,8 @@ fn detect_nested(argv: &[String]) -> Option<NestedScript> {
                 nested: None,
                 triggering: false,
                 already_allowed: false,
+                redirects: Vec::new(),
+                heredoc: None,
             }],
             connectors: Vec::new(),
         }
@@ -2019,12 +2079,37 @@ mod tests {
     // ── Serde compatibility for triggering / already_allowed flags ──────────
 
     #[test]
+    fn view_keeps_redirects_and_data_heredoc_body() {
+        let view = extract_structured_view(
+            "cat > notes.md <<'EOF'\nline one\nEOF\nls -la 2>&1 >> log.txt | wc -l",
+        );
+        assert_eq!(view.leaves.len(), 3);
+        let cat = &view.leaves[0];
+        assert_eq!(cat.argv, vec!["cat"]);
+        assert_eq!(cat.redirects, vec!["> notes.md", "<<"]);
+        assert_eq!(cat.heredoc.as_deref(), Some("line one\n"));
+        assert!(cat.nested.is_none());
+        assert_eq!(view.leaves[1].redirects, vec!["2>&1", ">> log.txt"]);
+        assert!(view.leaves[1].heredoc.is_none());
+    }
+
+    #[test]
+    fn interpreter_heredoc_stays_nested_not_data() {
+        let view = extract_structured_view("python3 - <<'EOF'\nprint(1)\nEOF");
+        let leaf = &view.leaves[0];
+        assert!(leaf.nested.is_some());
+        assert!(leaf.heredoc.is_none());
+    }
+
+    #[test]
     fn leaf_default_flags_are_omitted_from_json() {
         let leaf = CommandLeaf {
             argv: vec!["ls".into(), "-la".into()],
             nested: None,
             triggering: false,
             already_allowed: false,
+            redirects: Vec::new(),
+            heredoc: None,
         };
         let json = serde_json::to_string(&leaf).unwrap();
         assert!(
@@ -2048,6 +2133,8 @@ mod tests {
             nested: None,
             triggering: true,
             already_allowed: true,
+            redirects: Vec::new(),
+            heredoc: None,
         };
         let json = serde_json::to_string(&leaf).unwrap();
         assert!(json.contains("\"triggering\":true"), "got {json}");
