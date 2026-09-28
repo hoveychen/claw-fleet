@@ -280,7 +280,7 @@ jobs:
       # ordinary pushes and PRs only when the Harmony app's own inputs moved.
       - name: Did the Harmony app's inputs change
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             harmony:
