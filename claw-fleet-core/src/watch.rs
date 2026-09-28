@@ -153,6 +153,23 @@ pub struct WatchRecord {
     /// once per watch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub checked_in: bool,
+    /// Shell command sampled on every poll whose first stdout line is the
+    /// watch's current progress (`3/8`, `42%`, or free text). Display only —
+    /// it never fires or wakes anything.
+    ///
+    /// Why: `until` is a 0/1 gate, so a half-hour wait on "all eight steps
+    /// done" showed nothing but a climbing poll count, and the boss had to ask
+    /// the agent "how far along is it?" to learn anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_cmd: Option<String>,
+    /// Latest progress line (see [`Self::progress_cmd`]), capped at
+    /// [`PROGRESS_TEXT_CAP`]. `None` until the first sample that printed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
+    /// Epoch ms the progress line last *changed*. A progress that stopped
+    /// moving is the real answer to "is it stuck?", more than the value itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_changed_at: Option<u64>,
 }
 
 impl WatchRecord {
@@ -300,6 +317,19 @@ pub fn expect_by_note(rec: &WatchRecord) -> String {
     }
 }
 
+/// The line a registration adds about its progress command: what the first
+/// sample read, or a warning that it printed nothing (so the card would stay
+/// empty). Empty without a progress command.
+pub fn progress_note(rec: &WatchRecord) -> String {
+    match (&rec.progress_cmd, &rec.progress) {
+        (Some(_), Some(p)) => format!("进度首跑：{p}。"),
+        (Some(_), None) => "⚠️ progress 命令首跑没有输出（或退了非 0），老板看到的进度会一直是空的；\
+                            先在 Bash 里手跑确认它打印一行 `N/M`、`N%` 或状态文字。"
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Run the `until` command **once, at registration**, and rule on it.
 ///
 /// Why this exists: `create` used to accept any string and arm a timer, so a
@@ -352,6 +382,7 @@ pub fn create(
     effort: Option<&str>,
     agent_source: Option<&str>,
     expect_by: Option<u64>,
+    progress_cmd: Option<&str>,
 ) -> Result<(WatchRecord, crate::process_util::GateOutcome), String> {
     let dir = watches_dir().ok_or("cannot determine home dir")?;
     let now = now_ms();
@@ -380,6 +411,15 @@ pub fn create(
     rec.last_exit = probe.exit_code;
     rec.last_stderr = probe.stderr.clone();
     rec.expect_by = expect_by;
+    rec.progress_cmd = progress_cmd
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(str::to_string);
+    // Seed the progress too, so the card has something to show before the
+    // first poll lands (up to a poll interval later).
+    if let Some(cmd) = rec.progress_cmd.clone() {
+        record_progress(&mut rec, sample_progress(&cmd), now);
+    }
     write_record(&dir, &rec)?;
     Ok((rec, probe))
 }
@@ -453,6 +493,9 @@ fn create_in(
         structural_fail_streak: 0,
         expect_by: None,
         checked_in: false,
+        progress_cmd: None,
+        progress: None,
+        progress_changed_at: None,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -531,7 +574,7 @@ fn list_in(dir: &Path) -> Vec<WatchRecord> {
 /// round-trip. Elapsed is derived frontend-side from `created` (like every other
 /// timestamp on the card), so it isn't duplicated here. Only *active* watches are
 /// ever summarized — a fired or stopped watch has already deleted its record.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct WatchSummary {
@@ -556,6 +599,20 @@ pub struct WatchSummary {
     /// One-line reason for that, e.g. `sh: gh: command not found`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub last_stderr: String,
+    /// Epoch ms the agent expected the condition to hold (`--expect-by`). With
+    /// it the card draws elapsed time against the expected wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_by: Option<u64>,
+    /// Latest progress line from the watch's `progress` command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
+    /// `progress` as a 0..=1 fraction when it holds an `N/M` or `N%` token —
+    /// parsed here once so every client draws the same bar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_fraction: Option<f64>,
+    /// Epoch ms `progress` last changed; the card shows how long it has sat still.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_changed_at: Option<u64>,
 }
 
 impl From<&WatchRecord> for WatchSummary {
@@ -569,6 +626,10 @@ impl From<&WatchRecord> for WatchSummary {
             poll_count: r.poll_count,
             structural_fail_streak: r.structural_fail_streak,
             last_stderr: r.last_stderr.clone(),
+            expect_by: r.expect_by,
+            progress: r.progress.clone(),
+            progress_fraction: r.progress.as_deref().and_then(parse_progress_fraction),
+            progress_changed_at: r.progress_changed_at,
         }
     }
 }
@@ -858,6 +919,102 @@ fn capture_event(rec: &WatchRecord) -> String {
     }
 }
 
+/// Longest one `progress` sample may run. It runs on every poll right after the
+/// `until` probe, so a hung one must not stall the timer's heartbeat.
+const PROGRESS_LIMIT_SECS: u64 = 15;
+
+/// Cap on a stored progress line: it is a chip label, not a log.
+pub const PROGRESS_TEXT_CAP: usize = 120;
+
+/// Run the `progress` command (bounded by [`PROGRESS_LIMIT_SECS`]) and return
+/// its first non-empty stdout line. `None` when it failed to run, timed out,
+/// exited non-zero or printed nothing — the caller then keeps the last value
+/// rather than blanking a progress that was merely unreadable for one poll.
+fn sample_progress(cmd: &str) -> Option<String> {
+    use std::io::Read;
+    let mut child = crate::process_util::shell_command(cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| crate::log_debug(&format!("watch progress: cannot run ({e}): {cmd}")))
+        .ok()?;
+    // Drain stdout on a thread so a chatty command can't fill the pipe and
+    // block itself while we wait on it.
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(PROGRESS_LIMIT_SECS);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                crate::log_debug(&format!("watch progress: timed out: {cmd}"));
+                return None;
+            }
+        }
+    };
+    let buf = reader.join().ok()?;
+    if !status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(crate::process_util::truncate_chars(line, PROGRESS_TEXT_CAP))
+}
+
+/// Fold one progress sample into the record, stamping `progress_changed_at`
+/// only when the line actually changed. A `None` sample keeps the last value.
+fn record_progress(rec: &mut WatchRecord, sample: Option<String>, now: u64) {
+    let Some(line) = sample else { return };
+    if rec.progress.as_deref() != Some(line.as_str()) {
+        rec.progress = Some(line);
+        rec.progress_changed_at = Some(now);
+    }
+}
+
+/// Read a progress line as a 0..=1 fraction: the first `N/M` token (M > 0) or
+/// `N%` token, wherever it sits in the line — `3/8`, `CI: 3/5 jobs green`,
+/// `(42%)`. Values past the end clamp to 1. `None` for free text.
+pub fn parse_progress_fraction(line: &str) -> Option<f64> {
+    let num = |s: &str| s.parse::<f64>().ok().filter(|v| v.is_finite() && *v >= 0.0);
+    for raw in line.split_whitespace() {
+        let tok = raw.trim_matches(|c: char| !(c.is_ascii_digit() || c == '.' || c == '/' || c == '%'));
+        if let Some(pct) = tok.strip_suffix('%') {
+            if let Some(v) = num(pct) {
+                return Some((v / 100.0).min(1.0));
+            }
+        } else if let Some((a, b)) = tok.split_once('/') {
+            if let (Some(done), Some(total)) = (num(a), num(b)) {
+                if total > 0.0 {
+                    return Some((done / total).min(1.0));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The resume prompts' progress line; empty without a progress command.
+fn progress_line(rec: &WatchRecord) -> String {
+    match (&rec.progress_cmd, &rec.progress) {
+        (Some(_), Some(p)) => format!(
+            "\n最后一次进度：{p}（{} 起未变）",
+            rec.progress_changed_at.map(fmt_local).unwrap_or_default()
+        ),
+        (Some(cmd), None) => format!("\n进度命令从未输出过进度：{cmd}"),
+        _ => String::new(),
+    }
+}
+
 /// The prompt the resumed turn wakes up to: why it came back (condition met vs
 /// timed out), what it was waiting for, the captured event text, and a footer
 /// making clear this is a Fleet-driven resume, not a user message.
@@ -881,6 +1038,7 @@ pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: boo
         if !rec.last_stderr.is_empty() {
             out.push_str(&format!("\n最后一次 stderr：{}", rec.last_stderr));
         }
+        out.push_str(&progress_line(rec));
         if rec.structural_fail_streak > 0 {
             out.push_str(&format!(
                 "\n\n注意：最后 {} 次轮询都是**结构性失败**（命令跑不起来，不是条件没满足）。\
@@ -943,6 +1101,7 @@ pub fn compose_check_in_prompt(rec: &WatchRecord) -> String {
     if !rec.last_stderr.is_empty() {
         out.push_str(&format!("\n最后一次 stderr：{}", rec.last_stderr));
     }
+    out.push_str(&progress_line(rec));
     out.push_str(
         "\n\n请自查：是等的事确实还没发生，还是 until 写错了、永远不会成立？\
          先确认那件事现在的真实状态；如果它已经发生了，就说明 until 写错了。\
@@ -1117,6 +1276,12 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
             *probed.borrow_mut() = Some(out);
             met
         });
+        // Only a poll that is going to keep waiting samples progress; a fire or
+        // exit retires the record, so the sample would have nowhere to land.
+        let progress = match (&step, &rec.progress_cmd) {
+            (TimerStep::Nap { .. } | TimerStep::CheckIn, Some(cmd)) => sample_progress(cmd),
+            _ => None,
+        };
         match step {
             TimerStep::Exit => {
                 crate::log_debug(&format!(
@@ -1134,7 +1299,7 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                 // Record this poll first so the check-in prompt carries its
                 // exit code and the up-to-date count.
                 if let Some(dir) = watches_dir() {
-                    touch_in(&dir, id, generation, now_ms(), probed.borrow().as_ref());
+                    touch_in(&dir, id, generation, now_ms(), probed.borrow().as_ref(), progress);
                     if let Err(e) = check_in_in(
                         &dir,
                         id,
@@ -1156,7 +1321,7 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                 // doesn't mistake this watch for stranded. Preserves generation;
                 // a no-op if the record vanished (stopped) between get and touch.
                 if let Some(dir) = watches_dir() {
-                    touch_in(&dir, id, generation, now_ms(), probed.borrow().as_ref());
+                    touch_in(&dir, id, generation, now_ms(), probed.borrow().as_ref(), progress);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(ms));
             }
@@ -1173,10 +1338,12 @@ fn touch_in(
     generation: u64,
     now: u64,
     outcome: Option<&crate::process_util::GateOutcome>,
+    progress: Option<String>,
 ) {
     if let Some(mut rec) = get_in(dir, id) {
         if rec.generation == generation {
             rec.last_poll_at = now;
+            record_progress(&mut rec, progress, now);
             // Each heartbeat is one condition poll that didn't fire; count it so the
             // session card can show how many times the watch has checked.
             rec.poll_count += 1;
@@ -2123,14 +2290,14 @@ mod tests {
             stderr: String::new(),
             timed_out: false,
         };
-        touch_in(d.path(), "w1", 0, 10_000, Some(&broken));
-        touch_in(d.path(), "w1", 0, 20_000, Some(&broken));
+        touch_in(d.path(), "w1", 0, 10_000, Some(&broken), None);
+        touch_in(d.path(), "w1", 0, 20_000, Some(&broken), None);
         let rec = get_in(d.path(), "w1").unwrap();
         assert_eq!(rec.structural_fail_streak, 2);
         assert_eq!(rec.last_exit, Some(127));
         assert_eq!(rec.last_stderr, "sh: gh: command not found");
 
-        touch_in(d.path(), "w1", 0, 30_000, Some(&unmet));
+        touch_in(d.path(), "w1", 0, 30_000, Some(&unmet), None);
         let rec = get_in(d.path(), "w1").unwrap();
         assert_eq!(
             rec.structural_fail_streak, 0,
@@ -2171,14 +2338,14 @@ mod tests {
     fn touch_updates_heartbeat_only_at_the_right_generation() {
         let d = dir();
         make(d.path(), "w1", 1_000); // last_poll_at = 1_000, gen 0
-        touch_in(d.path(), "w1", 0, 50_000, None);
+        touch_in(d.path(), "w1", 0, 50_000, None, None);
         assert_eq!(get_in(d.path(), "w1").unwrap().last_poll_at, 50_000);
         // wrong generation: no update
-        touch_in(d.path(), "w1", 9, 90_000, None);
+        touch_in(d.path(), "w1", 9, 90_000, None, None);
         assert_eq!(get_in(d.path(), "w1").unwrap().last_poll_at, 50_000);
         // gone: no panic, no resurrection
         stop_in(d.path(), "w1");
-        touch_in(d.path(), "w1", 0, 99_000, None);
+        touch_in(d.path(), "w1", 0, 99_000, None, None);
         assert!(get_in(d.path(), "w1").is_none());
     }
 
@@ -2196,16 +2363,16 @@ mod tests {
             0,
             "starts at zero"
         );
-        touch_in(d.path(), "w1", 0, 50_000, None);
-        touch_in(d.path(), "w1", 0, 80_000, None);
-        touch_in(d.path(), "w1", 0, 110_000, None);
+        touch_in(d.path(), "w1", 0, 50_000, None, None);
+        touch_in(d.path(), "w1", 0, 80_000, None, None);
+        touch_in(d.path(), "w1", 0, 110_000, None, None);
         assert_eq!(
             get_in(d.path(), "w1").unwrap().poll_count,
             3,
             "one increment per poll heartbeat"
         );
         // wrong generation: neither the heartbeat nor the count moves
-        touch_in(d.path(), "w1", 9, 140_000, None);
+        touch_in(d.path(), "w1", 9, 140_000, None, None);
         assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 3);
     }
 
@@ -2216,8 +2383,8 @@ mod tests {
     fn enrich_stamps_active_watches_onto_matching_sessions() {
         let d = dir();
         make(d.path(), "w1", 1_000); // session_id = sess-1
-        touch_in(d.path(), "w1", 0, 2_000, None);
-        touch_in(d.path(), "w1", 0, 3_000, None); // poll_count = 2
+        touch_in(d.path(), "w1", 0, 2_000, None, None);
+        touch_in(d.path(), "w1", 0, 3_000, None, None); // poll_count = 2
         create_in(
             d.path(),
             "sess-2",
@@ -2393,5 +2560,48 @@ mod tests {
             decide(&back, back.generation, now, || false),
             TimerStep::Fire { timed_out: true }
         );
+    }
+
+    #[test]
+    fn progress_fraction_reads_counts_and_percents_anywhere_in_the_line() {
+        assert_eq!(parse_progress_fraction("3/8"), Some(0.375));
+        assert_eq!(parse_progress_fraction("CI: 3/4 jobs green"), Some(0.75));
+        assert_eq!(parse_progress_fraction("(42%)"), Some(0.42));
+        assert_eq!(parse_progress_fraction("12/10 overshoot"), Some(1.0));
+        assert_eq!(parse_progress_fraction("0/0"), None);
+        assert_eq!(parse_progress_fraction("building frontend"), None);
+        assert_eq!(parse_progress_fraction("2026/09/28"), None);
+    }
+
+    #[test]
+    fn sample_progress_takes_the_first_non_empty_line_and_ignores_failures() {
+        assert_eq!(
+            sample_progress("printf '\\n  3/8 steps  \\nnoise\\n'").as_deref(),
+            Some("3/8 steps")
+        );
+        assert_eq!(sample_progress("echo 5/8; exit 1"), None);
+        assert_eq!(sample_progress("true"), None);
+    }
+
+    #[test]
+    fn progress_changed_at_moves_only_when_the_line_changes() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 1_000);
+        rec.progress_cmd = Some("echo 1/3".into());
+        write_record(d.path(), &rec).unwrap();
+        touch_in(d.path(), "w1", 0, 10_000, None, Some("1/3".into()));
+        touch_in(d.path(), "w1", 0, 20_000, None, Some("1/3".into()));
+        let r = get_in(d.path(), "w1").unwrap();
+        assert_eq!(r.progress.as_deref(), Some("1/3"));
+        assert_eq!(r.progress_changed_at, Some(10_000));
+        // An unreadable sample keeps the last value instead of blanking it.
+        touch_in(d.path(), "w1", 0, 30_000, None, None);
+        touch_in(d.path(), "w1", 0, 40_000, None, Some("2/3".into()));
+        let r = get_in(d.path(), "w1").unwrap();
+        assert_eq!(r.progress.as_deref(), Some("2/3"));
+        assert_eq!(r.progress_changed_at, Some(40_000));
+        let sum = WatchSummary::from(&r);
+        assert_eq!(sum.progress_fraction, Some(2.0 / 3.0));
+        assert!(compose_resume_prompt(&r, "", true).contains("最后一次进度：2/3"));
     }
 }

@@ -69,6 +69,15 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                         if w.checked_in { "（已唤醒自查）" } else { "" }
                     );
                 }
+                if let Some(p) = &w.progress {
+                    println!(
+                        "{:<10}  progress {p}{}",
+                        "",
+                        w.progress_changed_at
+                            .map(|t| format!("（{} 未变）", fmt_duration_ms(now.saturating_sub(t))))
+                            .unwrap_or_default()
+                    );
+                }
                 if w.structural_fail_streak > 0 {
                     println!(
                         "{:<10}  ⚠️ 连续 {} 次跑不起来（不是条件没满足）：{}",
@@ -92,7 +101,8 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
             poll,
             timeout,
             expect_by,
-        } => create(until, capture, note, poll, timeout, expect_by, session),
+            progress,
+        } => create(until, capture, note, poll, timeout, expect_by, progress, session),
     }
 }
 
@@ -103,6 +113,7 @@ fn create(
     poll: Option<String>,
     timeout: Option<String>,
     expect_by: Option<String>,
+    progress: Option<String>,
     session: Option<&str>,
 ) {
     use claw_fleet_core::watch;
@@ -227,6 +238,7 @@ fn create(
         ctx.effort.as_deref(),
         ctx.source.as_deref(),
         expect_by,
+        progress.as_deref(),
     ) {
         Ok((rec, probe)) => {
             // The preflight's verdict, when it has one to give (already true /
@@ -237,6 +249,10 @@ fn create(
                 println!("{note}");
             }
             let note = watch::expect_by_note(&rec);
+            if !note.is_empty() {
+                println!("{note}");
+            }
+            let note = watch::progress_note(&rec);
             if !note.is_empty() {
                 println!("{note}");
             }

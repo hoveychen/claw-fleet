@@ -224,7 +224,7 @@ pub fn gate_probe_bounded(cmd: &str, limit: std::time::Duration) -> GateOutcome 
 }
 
 /// Truncate on a char boundary, appending an ellipsis when anything was cut.
-fn truncate_chars(s: &str, cap: usize) -> String {
+pub(crate) fn truncate_chars(s: &str, cap: usize) -> String {
     if s.chars().count() <= cap {
         return s.to_string();
     }
