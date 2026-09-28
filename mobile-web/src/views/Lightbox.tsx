@@ -8,9 +8,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { X } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { HistoryLayer } from "../useNavStack";
 import { t } from "../i18n";
+import { saveImage } from "../imageSave";
 import styles from "./Lightbox.module.css";
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -149,6 +150,12 @@ function LightboxOverlay({
     const cy = () => window.innerHeight / 2;
 
     const onStart = (e: TouchEvent) => {
+      // Toolbar buttons are plain click targets: a touch that starts on one
+      // must not be read as a canvas tap (which would close the viewer).
+      if (e.touches.length === 1 && (e.target as Element | null)?.closest?.("button")) {
+        gesture.current = { mode: "idle" };
+        return;
+      }
       if (e.touches.length >= 2) {
         const [a, b] = [e.touches[0], e.touches[1]];
         gesture.current = {
@@ -254,6 +261,30 @@ function LightboxOverlay({
     };
   }, [apply, clampPan, zoomTo, onClose]);
 
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const statusTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(statusTimer.current), []);
+  const flash = useCallback((msg: string) => {
+    setStatus(msg);
+    window.clearTimeout(statusTimer.current);
+    statusTimer.current = window.setTimeout(() => setStatus(null), 2500);
+  }, []);
+  const onSave = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const outcome = await saveImage(src);
+      // The share sheet is its own feedback; only the silent download path
+      // needs a confirmation.
+      if (outcome === "downloaded") flash(t("图片已保存"));
+    } catch (e) {
+      flash(t("保存失败：{0}", e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSaving(false);
+    }
+  }, [saving, src, flash]);
+
   return (
     <div
       ref={rootRef}
@@ -275,7 +306,19 @@ function LightboxOverlay({
       >
         <X size={22} />
       </button>
-      <div className={styles.hint}>{t("双击放大 · 捏合缩放 · 单击关闭")}</div>
+      <button
+        type="button"
+        className={styles.save}
+        aria-label={t("保存图片")}
+        title={t("保存图片")}
+        disabled={saving}
+        onClick={() => void onSave()}
+      >
+        <Download size={20} />
+      </button>
+      <div className={status ? styles.status : styles.hint} role={status ? "status" : undefined}>
+        {status ?? t("双击放大 · 捏合缩放 · 单击关闭")}
+      </div>
     </div>
   );
 }

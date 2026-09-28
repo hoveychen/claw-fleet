@@ -54,8 +54,30 @@
   cursor: pointer;
 }
 
-.close:active {
+.close:active,
+.save:active {
   background: rgba(255, 255, 255, 0.24);
+}
+
+/* Save / share, left of the close button with the same look. */
+.save {
+  position: absolute;
+  top: calc(var(--safe-top) + 12px);
+  right: 68px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+
+.save:disabled {
+  opacity: 0.5;
 }
 
 .hint {
@@ -66,5 +88,23 @@
   font-size: var(--t-aux, 12px);
   color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Replaces the hint while a save result is showing. */
+.status {
+  position: absolute;
+  bottom: calc(var(--safe-bottom) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: var(--t-aux, 12px);
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
