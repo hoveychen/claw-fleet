@@ -830,6 +830,7 @@ mod tests {
             "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
+            "claude-sonnet-5-5",
             "claude-sonnet-5",
             "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001",
@@ -984,6 +985,9 @@ mod tests {
             !all.contains(&"claude-opus-4-8"),
             "superseded row leaked into the menu"
         );
+        // Sonnet 5 *is* superseded: same price as 5.5, so only 5.5 is offered.
+        assert!(all.contains(&"claude-sonnet-5-5"));
+        assert!(!all.contains(&"claude-sonnet-5"));
 
         let claude = &cat[0];
         for m in &claude.models {

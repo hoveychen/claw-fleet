@@ -355,9 +355,10 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         }
     }
 
-    // Sonnet 5 is $2/$10. `sonnet-5` followed by anything but another digit,
-    // so `claude-sonnet-5`, `-5[1m]` and dated ids match but a hypothetical
-    // `sonnet-50` would not.
+    // Sonnet 5 and 5.5 are both $2/$10. `sonnet-5` followed by anything but
+    // another digit, so `claude-sonnet-5`, `claude-sonnet-5-5`, `-5[1m]` and
+    // dated ids match but a hypothetical `sonnet-50` would not. A future 5.x
+    // minor at a different price needs a `single_digit_minor` branch first.
     if let Some(start) = m.find("sonnet-5") {
         let next = m.as_bytes().get(start + "sonnet-5".len());
         if next.map_or(true, |c| !c.is_ascii_digit()) {
@@ -529,6 +530,10 @@ mod tests {
             "Claude-Sonnet-5",
             "claude-sonnet-5[1m]",
             "claude-sonnet-5-20260601",
+            // Sonnet 5.5 shares Sonnet 5's price, so the `sonnet-5` branch
+            // covers it without a minor-version split.
+            "claude-sonnet-5-5",
+            "claude-sonnet-5-5[1m]",
         ] {
             let cost = turn_cost_usd(model, &usage);
             assert!((cost - 12.0).abs() < 1e-9, "{model} -> {cost}, want 12.0");
