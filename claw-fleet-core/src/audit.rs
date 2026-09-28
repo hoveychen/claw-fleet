@@ -2700,6 +2700,24 @@ mod tests {
         // Inside a command substitution: may feed an interpreter.
         let subst = "bash -c \"$(cat <<'EOF'\ngit push origin main\nEOF\n)\"";
         assert!(classify_bash_command(subst).is_some());
+        // Written to a file that the same command then runs.
+        for run in [
+            "bash r.sh",
+            "sh ./r.sh",
+            "chmod +x r.sh && ./r.sh",
+            "sudo bash /tmp/w/r.sh",
+            "source r.sh",
+            ". r.sh",
+            "python3 r.sh",
+        ] {
+            let cmd = format!("cat > r.sh <<'EOF'\ngit push origin main\nEOF\n{run}");
+            assert!(classify_bash_command(&cmd).is_some(), "must scan body when run via `{run}`");
+        }
+        let tee_run = "tee r.sh <<'EOF'\ngit push origin main\nEOF\nbash r.sh";
+        assert!(classify_bash_command(tee_run).is_some());
+        // Written but only read afterwards: still prose.
+        let read_only = "cat > r.md <<'EOF'\ngit push origin main\nEOF\nwc -l r.md && cat r.md";
+        assert!(classify_bash_command(read_only).is_none());
         // The command around the heredoc is still scanned.
         let around = "cat > m.txt <<'EOF'\nhello\nEOF\ngit push origin main";
         assert!(classify_bash_command(around).is_some());
