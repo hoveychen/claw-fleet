@@ -744,6 +744,16 @@ pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String>
         // 82s after the 300s client timeout, answer returned to a dead request.)
         "-c".to_string(),
         "mcp_servers.fleet.tool_timeout_sec=86400".to_string(),
+        // Codex hands a stdio MCP server only the env listed here, not its own
+        // process env, so the `FLEET_AGENT_SOURCE` stamped on the codex process
+        // never reaches `fleet mcp`. Without it `inherit_launch_context` defaults
+        // the source to Claude, and an MCP `fleet__handoff` from a Codex session
+        // launched `claude --model gpt-6-astra` (observed 2026-09-28).
+        "-c".to_string(),
+        format!(
+            "mcp_servers.fleet.env.FLEET_AGENT_SOURCE={}",
+            toml_basic_string(FLEET_AGENT_SOURCE_CODEX)
+        ),
     ];
     for (k, v) in session_env {
         args.push("-c".to_string());
@@ -1944,6 +1954,29 @@ mod tests {
             args.iter()
                 .any(|a| a == "mcp_servers.fleet.tool_timeout_sec=86400"),
             "must override codex's 300s client-side MCP tool timeout; got: {args:?}"
+        );
+    }
+
+    /// Codex does not pass its own env to stdio MCP servers, so the agent source
+    /// has to be named in `mcp_servers.fleet.env` — otherwise every MCP launch
+    /// tool (`fleet__handoff`, `fleet__spawn`, …) called from a Codex session
+    /// resolves its source to Claude.
+    #[test]
+    fn decision_card_args_stamp_codex_agent_source_on_the_mcp_env() {
+        let _home = TmpHome::new("card-agent-source");
+        let bin = crate::fleet_cli::fleet_bin_dir().expect("bin dir under FLEET_HOME");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(
+            bin.join(if cfg!(windows) { "fleet.exe" } else { "fleet" }),
+            b"#!/bin/sh\n",
+        )
+        .unwrap();
+        let args = fleet_decision_card_args(&[]);
+        assert!(!args.is_empty(), "fleet binary must resolve in this test");
+        assert!(
+            args.iter()
+                .any(|a| a == "mcp_servers.fleet.env.FLEET_AGENT_SOURCE=\"codex\""),
+            "fleet mcp must learn it runs under codex; got: {args:?}"
         );
     }
 

@@ -707,7 +707,18 @@ pub fn route_launch_with(
     };
     let model_flag = clean(model_flag);
     let effort_flag = clean(effort_flag);
-    let inherited = clean(ctx.source.as_deref()).unwrap_or_else(|| "claude-code".to_string());
+    // With no source on the env, the session's own model is better evidence of
+    // its harness than the historical Claude default: a process that lost
+    // `FLEET_AGENT_SOURCE` on the way (Codex's MCP children did) would otherwise
+    // relay a `gpt-*` session to `claude --model gpt-*`.
+    let inherited = clean(ctx.source.as_deref())
+        .or_else(|| {
+            ctx.model
+                .as_deref()
+                .and_then(source_for_model)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "claude-code".to_string());
     let model = model_flag.clone().or_else(|| ctx.model.clone());
 
     let target = model_flag
@@ -1004,6 +1015,44 @@ mod tests {
                 .unwrap();
         assert_eq!(inherited.agent_source, "claude-code");
         assert_eq!(inherited.model.as_deref(), Some("claude-opus-5"));
+    }
+
+    /// The 2026-09-28 mis-launch: a Codex session's `fleet mcp` saw no
+    /// `FLEET_AGENT_SOURCE`, inherited `gpt-6-astra` from the transcript, and
+    /// relayed to `claude --model gpt-6-astra`. A blank source must be inferred
+    /// from the inherited model, not defaulted to Claude.
+    #[test]
+    fn blank_source_is_inferred_from_the_inherited_model() {
+        let codex = route_launch_with(&ctx("", "gpt-6-astra", "high"), None, None, all_available)
+            .unwrap();
+        assert_eq!(codex.agent_source, "codex");
+        assert_eq!(codex.model.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(codex.switched_from, None);
+
+        let dsh = route_launch_with(
+            &ctx("", "deepseek-official/deepseek-flash", "high"),
+            None,
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(dsh.agent_source, "dsh");
+
+        // An unrecognisable model still falls back to Claude.
+        let unknown =
+            route_launch_with(&ctx("", "my-finetune-v3", "high"), None, None, all_available)
+                .unwrap();
+        assert_eq!(unknown.agent_source, "claude-code");
+
+        // An explicit source is never second-guessed by the model.
+        let explicit = route_launch_with(
+            &ctx("codex", "my-finetune-v3", "high"),
+            None,
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(explicit.agent_source, "codex");
     }
 
     /// Routing to a harness this machine cannot spawn must fail at registration
