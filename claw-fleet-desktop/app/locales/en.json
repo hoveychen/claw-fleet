@@ -2043,6 +2043,16 @@
     "tool_running": "Running…",
     "decision_task_completed": "Task finished",
     "decision_task_abandoned": "Task abandoned",
+    "genimage": {
+      "route_chatgpt": "ChatGPT quota",
+      "route_api_key": "API key",
+      "quality": "quality {{v}}",
+      "background": "background {{v}}",
+      "requested": "not echoed by backend — requested values",
+      "ignored": "ignored by backend: {{v}}",
+      "count": "{{count}} images",
+      "refs": "{{count}} reference image(s)"
+    },
     "fleet_sum": {
       "title": "Set session title",
       "title_named": "Set session title: {{title}}",

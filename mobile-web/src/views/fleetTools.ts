@@ -80,6 +80,42 @@ export function isImageCall(name: string): boolean {
   return name.endsWith("fleet__image") || name.endsWith("fleet__image_edit");
 }
 
+/** Parsed `image_api.rs::provenance` line. Mirrors the desktop's
+ *  `blocks/fleetTools.ts::parseImageProvenance`. */
+export interface ImageProvenance {
+  model: string;
+  /** Credential route: `chatgpt` (plan quota) or `api-key`. */
+  route: string;
+  quality?: string;
+  size?: string;
+  background?: string;
+  /** The backend echoed nothing, so quality/size are the *requested* values. */
+  requested: boolean;
+  /** Controls the backend did not honour, as written (`quality and size`). */
+  ignored?: string;
+}
+
+export function parseImageProvenance(line: string): ImageProvenance | null {
+  const [head, tail] = line.split(" — ");
+  const parts = head.trim().split(", ");
+  const m = parts[0].match(/^(\S+) via (\S+)$/);
+  if (!m) return null;
+  const out: ImageProvenance = { model: m[1], route: m[2], requested: false };
+  const ignored = tail?.match(/^(.*) ignored by this backend/)?.[1];
+  if (ignored) out.ignored = ignored;
+  for (let part of parts.slice(1)) {
+    if (part.startsWith("requested ")) {
+      out.requested = true;
+      part = part.slice("requested ".length);
+    }
+    const [key, ...rest] = part.split(" ");
+    const value = rest.join(" ");
+    if (!value) continue;
+    if (key === "quality" || key === "size" || key === "background") out[key] = value;
+  }
+  return out;
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {

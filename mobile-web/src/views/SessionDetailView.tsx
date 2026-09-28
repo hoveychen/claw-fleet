@@ -36,13 +36,14 @@ import {
   Wrench,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
-import { isFleetTool, isImageCall } from "./fleetTools";
+import { isFleetTool, isImageCall, parseImageProvenance } from "./fleetTools";
 import { IngestCard, ingestStepLabel } from "./IngestCard";
 import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { dateLocale, t } from "../i18n";
+import { formatBytes } from "../artifacts";
 import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
 import { AttachmentThumbs } from "./AttachmentThumb";
@@ -85,7 +86,7 @@ import {
 import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
-import type { IngestSummary, ToolDigest } from "../types";
+import type { ImageResultSummary, IngestSummary, ToolDigest } from "../types";
 import { memberDisplayStatus } from "../../../shared-ts/memberStatus";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
 import { HistoryLayer } from "../useNavStack";
@@ -265,6 +266,7 @@ interface ToolMeta {
   /** Set on the two calls that file something into a store, so the row can show
    *  the deliverable instead of a bare "产出" (Artifact) chip. */
   ingest?: IngestSummary;
+  image?: ImageResultSummary;
 }
 
 function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
@@ -279,7 +281,8 @@ function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
         meta.thumbs = b._thumbs.map((d) => `data:image/jpeg;base64,${d}`);
       }
       if (b._ingest) meta.ingest = b._ingest;
-      if (meta.digest || meta.isError || meta.thumbs || meta.ingest) map.set(b.tool_use_id, meta);
+      if (b._image) meta.image = b._image;
+      if (meta.digest || meta.isError || meta.thumbs || meta.ingest || meta.image) map.set(b.tool_use_id, meta);
     }
   }
   return map;
@@ -696,6 +699,42 @@ function ImagePrompt({ text }: { text: string }) {
   );
 }
 
+/** Model, credential, backend-reported quality/size/background, count and size
+ *  of a generated image. Mirrors the desktop's `imageMetaChips`, minus the
+ *  reference-image count (the relay drops `input.images`). */
+export function imageMetaChips(image: ImageResultSummary): Array<{ text: string; warn?: boolean }> {
+  const chips: Array<{ text: string; warn?: boolean }> = [];
+  const p = image.prov ? parseImageProvenance(image.prov) : null;
+  if (p) {
+    chips.push({ text: p.model });
+    chips.push({
+      text: p.route === "chatgpt" ? t("ChatGPT 额度") : p.route === "api-key" ? "API Key" : p.route,
+    });
+    if (p.quality) chips.push({ text: t("质量 {0}", p.quality) });
+    if (p.size) chips.push({ text: p.size.replace(/x/i, "×") });
+    if (p.background) chips.push({ text: t("背景 {0}", p.background) });
+    if (p.requested) chips.push({ text: t("后端未回报，显示的是请求值"), warn: true });
+    if (p.ignored) chips.push({ text: t("后端忽略：{0}", p.ignored), warn: true });
+  }
+  if ((image.count ?? 0) > 1) chips.push({ text: t("共 {0} 张图", image.count!) });
+  if ((image.bytes ?? 0) > 0) chips.push({ text: formatBytes(image.bytes!) });
+  return chips;
+}
+
+function ImageMetaChips({ image }: { image: ImageResultSummary }) {
+  const chips = imageMetaChips(image);
+  if (chips.length === 0) return null;
+  return (
+    <div className={styles.imageMeta}>
+      {chips.map((c, i) => (
+        <span key={i} className={`${styles.chip} ${c.warn ? styles.chipWarn : ""}`}>
+          {c.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function imagePrompt(input: Record<string, unknown> | undefined): string {
   const v = input?.description ?? input?.instruction;
   return typeof v === "string" ? v.trim() : "";
@@ -786,6 +825,7 @@ function ToolStep({
       {meta?.ingest && <IngestCard ingest={meta.ingest} client={client} />}
       {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
       {isImageCall(name) && <ImagePrompt text={imagePrompt(b.input)} />}
+      {isImageCall(name) && meta?.image && <ImageMetaChips image={meta.image} />}
       {open && expandable && (
         <ToolDetailPanel
           client={client}

@@ -20,6 +20,7 @@ import type { ImageCallResult } from "./fleetTools";
 import { ImageLightbox } from "../ImageLightbox";
 import { sessionImageUrl } from "../../sessionImages";
 import { CopyButton } from "../CopyButton";
+import { formatBytes } from "../../formatBytes";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import { useInFlightTools } from "./inFlightTools";
 import styles from "./ToolUseBlock.module.css";
@@ -1244,7 +1245,18 @@ const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
  * squeezes meant for the agent, and message trimming may have cut them to an
  * undecodable preview by the time they reach the webview.
  */
-function GeneratedImagePreview({ images, prompt }: { images: ImageCallResult; prompt: string }) {
+function GeneratedImagePreview({
+  images,
+  prompt,
+  refs,
+}: {
+  images: ImageCallResult;
+  prompt: string;
+  /** Reference images the call attached (`input.images`). */
+  refs: number;
+}) {
+  const { t } = useTranslation();
+  const chips = imageMetaChips(images, refs, t);
   const [zoomed, setZoomed] = useState<{ src: string; name: string } | null>(null);
   const [promptOpen, setPromptOpen] = useState(false);
   return (
@@ -1277,9 +1289,48 @@ function GeneratedImagePreview({ images, prompt }: { images: ImageCallResult; pr
           <CopyButton text={prompt} className={styles.genimage_copy} />
         </div>
       )}
+      {chips.length > 0 && (
+        <div className={styles.genimage_meta}>
+          {chips.map((c, i) => (
+            <span key={i} className={c.warn ? styles.genimage_chip_warn : styles.genimage_chip}>
+              {c.text}
+            </span>
+          ))}
+        </div>
+      )}
       {zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}
     </div>
   );
+}
+
+/**
+ * The facts a reader checks a generated image against: which model and
+ * credential made it, the quality/size/background the backend *reports* it
+ * used (not what was asked for), how big the output is, and what it was
+ * given to work from.
+ */
+export function imageMetaChips(
+  images: ImageCallResult,
+  refs: number,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): Array<{ text: string; warn?: boolean }> {
+  const chips: Array<{ text: string; warn?: boolean }> = [];
+  const p = images.provenance;
+  if (p) {
+    chips.push({ text: p.model });
+    const routeKey =
+      p.route === "chatgpt" ? "detail.genimage.route_chatgpt" : p.route === "api-key" ? "detail.genimage.route_api_key" : null;
+    chips.push({ text: routeKey ? t(routeKey) : p.route });
+    if (p.quality) chips.push({ text: t("detail.genimage.quality", { v: p.quality }) });
+    if (p.size) chips.push({ text: p.size.replace(/x/i, "×") });
+    if (p.background) chips.push({ text: t("detail.genimage.background", { v: p.background }) });
+    if (p.requested) chips.push({ text: t("detail.genimage.requested"), warn: true });
+    if (p.ignored) chips.push({ text: t("detail.genimage.ignored", { v: p.ignored }), warn: true });
+  }
+  if (images.names.length > 1) chips.push({ text: t("detail.genimage.count", { count: images.names.length }) });
+  if (images.bytes > 0) chips.push({ text: formatBytes(images.bytes) });
+  if (refs > 0) chips.push({ text: t("detail.genimage.refs", { count: refs }) });
+  return chips;
 }
 
 /** The prompt behind a generated image: `description` for a fresh image,
@@ -1418,7 +1469,11 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
       </button>
 
       {generatedImages && (
-        <GeneratedImagePreview images={generatedImages} prompt={imagePrompt(block.input)} />
+        <GeneratedImagePreview
+          images={generatedImages}
+          prompt={imagePrompt(block.input)}
+          refs={Array.isArray(block.input.images) ? block.input.images.length : 0}
+        />
       )}
 
       {open && (

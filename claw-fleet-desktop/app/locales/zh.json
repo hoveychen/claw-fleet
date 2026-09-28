@@ -2040,6 +2040,16 @@
     "tool_running": "运行中…",
     "decision_task_completed": "已结束任务",
     "decision_task_abandoned": "已放弃任务",
+    "genimage": {
+      "route_chatgpt": "ChatGPT 额度",
+      "route_api_key": "API Key",
+      "quality": "质量 {{v}}",
+      "background": "背景 {{v}}",
+      "requested": "后端未回报，显示的是请求值",
+      "ignored": "后端忽略：{{v}}",
+      "count": "{{count}} 张",
+      "refs": "参考图 {{count}} 张"
+    },
     "fleet_sum": {
       "title": "设置会话标题",
       "title_named": "设置会话标题：{{title}}",

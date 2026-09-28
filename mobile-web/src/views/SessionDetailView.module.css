@@ -490,6 +490,11 @@
   color: var(--color-error);
 }
 
+.chipWarn {
+  background: rgba(217, 155, 11, 0.14);
+  color: var(--color-warning, #d99b0b);
+}
+
 .chipAdd { color: var(--color-success); }
 .chipDel { color: var(--color-error); }
 
@@ -531,6 +536,13 @@
 .imagePromptOpen {
   display: block;
   -webkit-line-clamp: unset;
+}
+
+.imageMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 4px;
 }
 
 .thumbImg {

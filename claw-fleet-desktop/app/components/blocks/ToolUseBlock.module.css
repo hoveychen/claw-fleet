@@ -568,3 +568,28 @@
 .genimage_copy {
   flex-shrink: 0;
 }
+
+.genimage_meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.genimage_chip,
+.genimage_chip_warn {
+  font-size: var(--t-meta, 10px);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+
+.genimage_chip {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+}
+
+.genimage_chip_warn {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}

@@ -10,6 +10,7 @@ import {
   isFleetTool,
   isImageCall,
   isIngestCall,
+  parseImageProvenance,
   parseImageResult,
   parseArtifactAdd,
   parseFleetCall,
@@ -436,12 +437,12 @@ describe("parseImageResult", () => {
       "thread_id: img-1b2c  (pass this to fleet__image_edit to revise)\n\n2 new image(s):\n" +
       "- /Users/x/.fleet/images/img-1b2c/fox.png (123456 bytes)\n" +
       "- /Users/x/.fleet/images/img-1b2c/fox 2.webp (99 bytes)\n\nAgent note: done";
-    expect(parseImageResult(text)).toEqual({ handle: "img-1b2c", names: ["fox.png", "fox 2.webp"] });
+    expect(parseImageResult(text)).toEqual({ handle: "img-1b2c", names: ["fox.png", "fox 2.webp"], bytes: 123555 });
   });
 
   it("accepts the older indented path lines", () => {
     const text = "thread_id: th_9a2b  (…)\n\n1 new image(s):\n  /Users/dev/.codex/generated_images/th_9a2b/fox.png";
-    expect(parseImageResult(text)).toEqual({ handle: "th_9a2b", names: ["fox.png"] });
+    expect(parseImageResult(text)).toEqual({ handle: "th_9a2b", names: ["fox.png"], bytes: 0 });
   });
 
   it("returns null without a handle or without any image", () => {
@@ -461,5 +462,61 @@ describe("render_image_result wire format", () => {
   it("still leads with `thread_id:` and lists `- {path} ({bytes} bytes)`", () => {
     expect(src).toContain('"thread_id: {}  (pass this to fleet__image_edit to revise)');
     expect(src).toContain('"- {} ({} bytes)\\n"');
+  });
+});
+
+describe("parseImageProvenance", () => {
+  it("reads the backend-echoed controls from a real timeline line", () => {
+    const text =
+      "thread_id: img-9b60  (pass this to fleet__image_edit to revise)\n\n1 new image(s):\n" +
+      "- /Users/x/.fleet/generated_images/img-9b60/1.png (3756519 bytes)\n\nWhat it did:\n" +
+      "- [image] gpt-image-2.5-flare via chatgpt, quality medium, size 1536x1024, background opaque\n" +
+      "- [message] also wrote /tmp/other.png\n";
+    expect(parseImageResult(text)).toEqual({
+      handle: "img-9b60",
+      names: ["1.png"],
+      bytes: 3756519,
+      provenance: {
+        model: "gpt-image-2.5-flare",
+        route: "chatgpt",
+        quality: "medium",
+        size: "1536x1024",
+        background: "opaque",
+        requested: false,
+      },
+    });
+  });
+
+  it("flags requested-only values and ignored controls", () => {
+    expect(parseImageProvenance("m1 via api-key, requested quality high, requested size 1024x1024")).toEqual({
+      model: "m1",
+      route: "api-key",
+      quality: "high",
+      size: "1024x1024",
+      requested: true,
+    });
+    expect(parseImageProvenance("m1 via chatgpt, quality low — size ignored by this backend")).toEqual({
+      model: "m1",
+      route: "chatgpt",
+      quality: "low",
+      requested: false,
+      ignored: "size",
+    });
+    expect(parseImageProvenance("no provenance here")).toBeNull();
+  });
+
+  it("image_api.rs still writes the shapes this parser reads", () => {
+    const src = readFileSync(join(CORE_SRC, "image_api.rs"), "utf8");
+    for (const needle of [
+      '"{} via {}"',
+      '", requested quality {q}"',
+      '", requested size {s}"',
+      '"quality {q}"',
+      '"size {s}"',
+      '"background {b}"',
+      '" — {} ignored by this backend"',
+    ]) {
+      expect(src).toContain(needle);
+    }
   });
 });
