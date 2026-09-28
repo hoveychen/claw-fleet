@@ -395,6 +395,11 @@
   min-width: 0;
 }
 
+/* A watch whose progress stopped moving or that is past its expected time. */
+.handoff[data-tone="warning"] {
+  color: var(--color-warning);
+}
+
 /* One line of a watch's note inside its .handoff chip. */
 .watchNote {
   min-width: 0;

@@ -690,6 +690,11 @@ pub(crate) enum WatchCommands {
         /// --json conclusion -q .conclusion`.
         #[arg(long)]
         capture: Option<String>,
+        /// Shell command sampled on every poll; its first stdout line is shown
+        /// as the watch's live progress. Print `N/M` or `N%` for a progress bar,
+        /// or a short status line. Display only — it never fires the watch.
+        #[arg(long)]
+        progress: Option<String>,
         /// Human note describing what is being waited for, shown to the woken
         /// session so it knows why it came back.
         #[arg(long)]

@@ -45,3 +45,21 @@
   background: var(--color-error-bg);
   color: var(--color-error-fg);
 }
+
+/* Progress: the latest line from the watch's `--progress` command. It is the
+   answer to "how far along?", so the note gives way before it does. */
+.watch_progress {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Progress that stopped moving, or a time-based wait past its expected end —
+   the one thing on this chip that should catch the eye. */
+.watch_stalled {
+  color: var(--color-warning);
+}

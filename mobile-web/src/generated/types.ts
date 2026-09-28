@@ -359,7 +359,11 @@ pollSecs: number,
 deadlineAt: number, 
 pollCount: number, 
 structuralFailStreak: number, 
-lastStderr?: string, };
+lastStderr?: string, 
+expectBy?: number | null, 
+progress?: string | null, 
+progressFraction?: number | null, 
+progressChangedAt?: number | null, };
 
 export type LiveThinking = { sessionId: string, 
 thinking: string, 

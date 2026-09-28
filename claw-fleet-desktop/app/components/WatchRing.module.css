@@ -1,0 +1,22 @@
+/* Progress ring standing in for the watch icon. */
+.ring {
+  flex: 0 0 auto;
+}
+
+.track {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 2.5;
+}
+
+.arc {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.arc_alarming {
+  composes: arc;
+  stroke: var(--color-warning);
+}
