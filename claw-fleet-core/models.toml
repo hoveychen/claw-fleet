@@ -94,11 +94,20 @@ efforts = ["low", "medium", "high", "xhigh", "max"]
 superseded_by = "claude-opus-5"
 
 [[model]]
+id = "claude-sonnet-5-5"
+label = "Sonnet 5.5"
+family = "claude-code"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+# Sonnet 5 与 5.5 同价（$2/$10，缓存 $2.50/$4/$0.20），所以折进 5.5 那一行。
+[[model]]
 id = "claude-sonnet-5"
 label = "Sonnet 5"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+superseded_by = "claude-sonnet-5-5"
 
 [[model]]
 id = "claude-sonnet-4-6"
@@ -106,7 +115,7 @@ label = "Sonnet 4.6"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-superseded_by = "claude-sonnet-5"
+superseded_by = "claude-sonnet-5-5"
 
 # 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
 # `--model haiku-4-5` 用的是不带日期的。两个都列，省得靠模糊匹配去猜；

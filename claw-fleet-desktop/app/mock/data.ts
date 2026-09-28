@@ -3078,7 +3078,7 @@ export const MOCK_MODEL_CATALOG = [
       m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER),
       m("claude-opus-5-5", "Opus 5.5", "claude", "premium", CLAUDE_LADDER),
       m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER),
-      m("claude-sonnet-5", "Sonnet 5", "claude", "standard", CLAUDE_LADDER),
+      m("claude-sonnet-5-5", "Sonnet 5.5", "claude", "standard", CLAUDE_LADDER),
       m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER),
     ],
   },
