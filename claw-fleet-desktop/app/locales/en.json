@@ -78,6 +78,9 @@
       "goal": "Goal",
       "goalReason": "Why the goal changed",
       "expect_by": "Expected by",
+      "progress": "Progress command",
+      "old_text": "Old text",
+      "new_text": "New text",
       "to": "Target"
     },
     "param_for": {

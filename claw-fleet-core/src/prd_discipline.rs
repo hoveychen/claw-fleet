@@ -203,6 +203,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
   - **注册前把 until 的两个分支都手跑一遍**：在当前状态下跑，应退非 0；再找一个条件**已满足**的真实样本（一场正在进行的比赛、一个已经跑完的 CI run）跑，应退 0。只验了「还没到」等于没验——写错的条件永远不成立，每次轮询都和「还没到」一模一样，Fleet 注册时的首跑也分辨不出来。
   - **until 只做判断，不带副作用**：别在 until 里拉起录制、下载这类动作。需要先动手就在注册前自己起好，until 只断言它的产物。
   - **知道条件大概什么时候该成立，就传 `--expect-by`**（时长如 `8h`，或本地时间如 `"2026-09-23 14:30"`）：过了这个点还没成立，Fleet 会唤醒你一次去自查，watch 本身继续跑。
+  - **等的东西数得出进度，就传 `--progress '<命令>'`**（多个 step 做完、处理了多少条、几个 job 绿了）：每次轮询顺带跑一次，stdout 第一行打印 `3/8` 或 `42%` 就会显示成进度条，也可以打印一句简短状态。它只给老板看，不触发也不唤醒你；不传的话，一等半小时老板只能看到轮询次数，还得来问你进度。
 - **把工作交给全新后继者 → `fleet handoff`**。
 - **现在就在另一个 workspace 起一个会话干活 → `fleet spawn`**（MCP 工具 `fleet__spawn`）：`fleet spawn --workspace <项目目录> --prompt '<完整简报>' --title <几个字>`。当场 spawn 一个 detached 会话并把它的 session id 回给你（之后用 `fleet send <id>` 转达、`fleet interrupt <id>` 打断）。刚写完一个属于别的项目的计划、想立刻交给那个项目的会话去执行，就用它——别拿 `fleet schedule --in 60s` 当「立刻」使。
 
@@ -423,6 +424,7 @@ A handoff changes *who*; this section covers one session crossing context window
   - **Run both branches of the `until` by hand before registering**: in the current state it should exit non-zero; then run it against a real sample where the condition **is** met (a match in progress, a CI run that already finished) and it should exit 0. Checking only "not yet" checks nothing — a wrong condition never becomes true, every poll looks exactly like "not yet", and Fleet's first run at registration cannot tell the two apart.
   - **The `until` only tests; it has no side effects**: do not start a recording or a download from inside it. If something has to be kicked off, start it yourself before registering and let the `until` assert on its output.
   - **When you know roughly when the condition should hold, pass `--expect-by`** (a duration like `8h`, or a local time like `"2026-09-23 14:30"`): if it still has not held by then, Fleet wakes you once to check, and the watch keeps running.
+  - **When the wait is countable, pass `--progress '<command>'`** (steps finished, items processed, jobs green): it runs on every poll, and a first stdout line of `3/8` or `42%` is drawn as a progress bar; a short status line works too. It is display only, for the boss — it never fires or wakes you. Without it a half-hour wait shows the boss nothing but a poll count, and they have to ask you how far along it is.
 - **Hand the work to a fresh successor → `fleet handoff`**.
 - **Start a session working in another workspace right now → `fleet spawn`** (MCP tool `fleet__spawn`): `fleet spawn --workspace <project dir> --prompt '<full briefing>' --title <a few words>`. It spawns a detached session immediately and hands you its session id (then `fleet send <id>` to relay, `fleet interrupt <id>` to interrupt). Reach for it when you have just written a plan that belongs to another project and want that project's session on it now — do not use `fleet schedule --in 60s` as a stand-in for "now".
 
@@ -727,6 +729,10 @@ mod tests {
             assert!(
                 g.contains("--expect-by"),
                 "[{locale}] watch guidance must mention --expect-by"
+            );
+            assert!(
+                g.contains("--progress"),
+                "[{locale}] watch guidance must mention --progress"
             );
         }
     }

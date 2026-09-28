@@ -78,6 +78,9 @@
       "goal": "目标",
       "goalReason": "改目标原因",
       "expect_by": "预期时间",
+      "progress": "进度命令",
+      "old_text": "原文",
+      "new_text": "新文",
       "to": "目标位置"
     },
     "param_for": {

@@ -343,7 +343,10 @@ every poll. Keep the `until` side-effect free — start any recording or \
 download yourself before registering and let the `until` assert on its output. \
 If you know roughly when it should hold, pass `--expect-by <8h | \"2026-09-23 \
 14:30\">`: past that point Fleet wakes you once to check while the watch keeps \
-running.\n\
+running. When the wait is countable (steps done, items processed, jobs green), \
+pass `--progress '<command>'`: its first stdout line (`3/8`, `42%` or a short \
+status) is shown to the boss as live progress on every poll — display only, it \
+never fires or wakes you.\n\
 - Pick the scheduling relay by *need*: **repeat periodically (cron) → \
 `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns a fresh \
 session each interval); **fire once at a future time → `fleet schedule`** \
@@ -1123,7 +1126,8 @@ mod tests {
             "must teach the Rule 6 watch"
         );
         assert!(
-            g.contains("on BOTH branches") && g.contains("side-effect free") && g.contains("--expect-by"),
+            g.contains("on BOTH branches") && g.contains("side-effect free") && g.contains("--expect-by")
+                && g.contains("--progress"),
             "Rule 6 must demand a positive-branch run of the until, no side effects, and --expect-by"
         );
         assert!(
