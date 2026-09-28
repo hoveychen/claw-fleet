@@ -644,6 +644,15 @@ pub struct CommandLeaf {
     pub triggering: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub already_allowed: bool,
+    /// Redirections in surface form (`> notes.md`, `2>&1`, `<<`), in source
+    /// order.  Display only — the matching engine never sees them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirects: Vec<String>,
+    /// Body of a heredoc fed to a non-interpreter command (`cat > f <<EOF`).
+    /// Interpreter heredocs surface as [`NestedKind::Heredoc`] in `nested`
+    /// instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heredoc: Option<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -765,6 +774,8 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
                         nested: None,
                         triggering: false,
                         already_allowed: false,
+                        redirects: Vec::new(),
+                        heredoc: None,
                     },
                     connector_before,
                 );
@@ -785,6 +796,8 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
                 nested: None,
                 triggering: false,
                 already_allowed: false,
+                redirects: Vec::new(),
+                heredoc: None,
             });
         }
         return single.finish();
@@ -918,6 +931,24 @@ fn visit_simple_for_view(
     // heredoc/stdin lives in a redirect and never reaches argv — lift it out
     // so the guard card can show the body that tripped the audit.
     let nested = detect_nested(&argv).or_else(|| detect_heredoc(&argv, s));
+    let redirects = s
+        .redirects_or_cmd_words
+        .iter()
+        .filter_map(|r| match r {
+            RedirectOrCmdWord::Redirect(redir) => Some(display_redirect(redir)),
+            RedirectOrCmdWord::CmdWord(_) => None,
+        })
+        .collect();
+    // An interpreter's heredoc is already shown as `nested`; anything else
+    // (`cat > f <<EOF`) is data the user still needs to see.
+    let heredoc = if nested.is_some() {
+        None
+    } else {
+        s.redirects_or_cmd_words.iter().find_map(|r| match r {
+            RedirectOrCmdWord::Redirect(Redirect::Heredoc(_, w)) => Some(display_top_word(w)),
+            _ => None,
+        })
+    };
     let conn = next.take();
     b.push(
         CommandLeaf {
@@ -925,9 +956,36 @@ fn visit_simple_for_view(
             nested,
             triggering: false,
             already_allowed: false,
+            redirects,
+            heredoc,
         },
         conn,
     );
+}
+
+/// Surface form of one redirection.  A heredoc renders as `<<` alone: the
+/// parser drops the delimiter word, and the body travels in
+/// [`CommandLeaf::heredoc`] / `nested`.
+fn display_redirect(r: &Redirect<TopLevelWord<String>>) -> String {
+    let (fd, op, target) = match r {
+        Redirect::Read(fd, w) => (fd, "<", Some(w)),
+        Redirect::Write(fd, w) => (fd, ">", Some(w)),
+        Redirect::ReadWrite(fd, w) => (fd, "<>", Some(w)),
+        Redirect::Append(fd, w) => (fd, ">>", Some(w)),
+        Redirect::Clobber(fd, w) => (fd, ">|", Some(w)),
+        Redirect::Heredoc(fd, _) => (fd, "<<", None),
+        Redirect::DupRead(fd, w) => (fd, "<&", Some(w)),
+        Redirect::DupWrite(fd, w) => (fd, ">&", Some(w)),
+    };
+    let fd = fd.map(|n| n.to_string()).unwrap_or_default();
+    match (r, target) {
+        // `2>&1` reads as one token; `> file` reads better with a space.
+        (Redirect::DupRead(..) | Redirect::DupWrite(..), Some(w)) => {
+            format!("{fd}{op}{}", display_top_word(w))
+        }
+        (_, Some(w)) => format!("{fd}{op} {}", display_top_word(w)),
+        (_, None) => format!("{fd}{op}"),
+    }
 }
 
 /// When an interpreter reads its script from a heredoc (`python3 - <<EOF`,
@@ -999,6 +1057,155 @@ fn splice_substs_from_simple(s: &SimpleT, b: &mut ViewBuilder, next: &mut Option
             }
         }
     }
+}
+
+// ── Data heredocs: bodies that are written somewhere, never executed ───────
+//
+// `cat > notes.md <<'EOF' … EOF` is how agents write files, and the body is
+// arbitrary prose.  Substring audit rules (`"git commit "`, `"rm -rf"`) that
+// scan the raw command string then fire on quoted text in the document.
+// These helpers find such bodies so the classifier can drop them before the
+// substring pass.
+//
+// Deliberately narrow: only `cat` / `tee` heads, only commands whose stdout is
+// not piped on to another command (`cat <<EOF | sh` executes its body), and
+// only commands reachable at the top level — bodies inside `$(...)` or a
+// `bash -c` script are left alone because they may feed an interpreter.
+
+/// Commands whose heredoc stdin is treated as inert data.
+fn is_data_heredoc_head(head: &str) -> bool {
+    matches!(head, "cat" | "tee")
+}
+
+/// Bodies of every data heredoc in `cmd`, in source order.  Empty when the
+/// command does not parse — callers then keep scanning the full string.
+pub fn data_heredoc_bodies(cmd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let parser = DefaultParser::new(Lexer::new(cmd.chars()));
+    for top in parser {
+        match top {
+            Ok(t) => data_heredocs_in_command(&t.0, false, &mut out),
+            Err(_) => return Vec::new(),
+        }
+    }
+    out
+}
+
+fn data_heredocs_in_command(
+    cmd: &Command<AndOrList<DefaultListableCommand>>,
+    piped: bool,
+    out: &mut Vec<String>,
+) {
+    let (Command::Job(list) | Command::List(list)) = cmd;
+    data_heredocs_in_listable(&list.first, piped, out);
+    for ao in &list.rest {
+        let (AndOr::And(body) | AndOr::Or(body)) = ao;
+        data_heredocs_in_listable(body, piped, out);
+    }
+}
+
+fn data_heredocs_in_listable(l: &DefaultListableCommand, piped: bool, out: &mut Vec<String>) {
+    match l {
+        ListableCommand::Single(p) => data_heredocs_in_pipeable(p, piped, out),
+        ListableCommand::Pipe(_, items) => {
+            for (i, p) in items.iter().enumerate() {
+                // Every stage but the last hands its stdout to the next one.
+                data_heredocs_in_pipeable(p, piped || i + 1 < items.len(), out);
+            }
+        }
+    }
+}
+
+fn data_heredocs_in_pipeable(p: &DefaultPipeableCommand, piped: bool, out: &mut Vec<String>) {
+    match p {
+        PipeableCommand::Simple(s) => {
+            if piped {
+                return;
+            }
+            let head = s.redirects_or_cmd_words.iter().find_map(|r| match r {
+                RedirectOrCmdWord::CmdWord(w) => Some(display_top_word(w)),
+                _ => None,
+            });
+            if !head.as_deref().is_some_and(is_data_heredoc_head) {
+                return;
+            }
+            for r in &s.redirects_or_cmd_words {
+                if let RedirectOrCmdWord::Redirect(Redirect::Heredoc(_, w)) = r {
+                    out.push(display_top_word(w));
+                }
+            }
+        }
+        PipeableCommand::Compound(c) => data_heredocs_in_compound(c, piped, out),
+        // A function body only runs when called; nothing to scrub.
+        PipeableCommand::FunctionDef(_, _) => {}
+    }
+}
+
+fn data_heredocs_in_compound(c: &DefaultCompoundCommand, piped: bool, out: &mut Vec<String>) {
+    let cmds: Vec<&TopLevelCommand<String>> = match &c.kind {
+        CompoundCommandKind::Brace(cmds) | CompoundCommandKind::Subshell(cmds) => {
+            cmds.iter().collect()
+        }
+        CompoundCommandKind::While(GuardBodyPair { guard, body })
+        | CompoundCommandKind::Until(GuardBodyPair { guard, body }) => {
+            guard.iter().chain(body.iter()).collect()
+        }
+        CompoundCommandKind::If {
+            conditionals,
+            else_branch,
+        } => {
+            let mut all = Vec::new();
+            for gb in conditionals {
+                all.extend(gb.guard.iter());
+                all.extend(gb.body.iter());
+            }
+            if let Some(eb) = else_branch {
+                all.extend(eb.iter());
+            }
+            all
+        }
+        CompoundCommandKind::For { body, .. } => body.iter().collect(),
+        CompoundCommandKind::Case { arms, .. } => {
+            arms.iter().flat_map(|a| a.body.iter()).collect()
+        }
+    };
+    for child in cmds {
+        data_heredocs_in_command(&child.0, piped, out);
+    }
+}
+
+/// `cmd` with every data heredoc body cut out, for substring audit rules.
+///
+/// A body is only removed where it appears verbatim at the start of a line
+/// after the previous removal point; a body whose parsed form differs from
+/// the source text (escaped `\$` in an unquoted heredoc) is left in place, so
+/// the failure mode is an extra prompt, never a missed one.
+pub fn strip_data_heredoc_bodies(cmd: &str) -> String {
+    let bodies = data_heredoc_bodies(cmd);
+    if bodies.is_empty() {
+        return cmd.to_string();
+    }
+    let mut out = String::with_capacity(cmd.len());
+    let mut rest = cmd;
+    for body in bodies.iter().filter(|b| !b.is_empty()) {
+        let mut from = 0usize;
+        let hit = loop {
+            let Some(rel) = rest[from..].find(body.as_str()) else {
+                break None;
+            };
+            let at = from + rel;
+            if at > 0 && rest[..at].ends_with('\n') {
+                break Some(at);
+            }
+            from = at + rest[at..].chars().next().map_or(1, |c| c.len_utf8());
+        };
+        if let Some(at) = hit {
+            out.push_str(&rest[..at]);
+            rest = &rest[at + body.len()..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 // ── Display-aware flattening: preserve `$VAR` / `$(...)` literally ─────────
@@ -1206,6 +1413,8 @@ fn detect_nested(argv: &[String]) -> Option<NestedScript> {
                 nested: None,
                 triggering: false,
                 already_allowed: false,
+                redirects: Vec::new(),
+                heredoc: None,
             }],
             connectors: Vec::new(),
         }
@@ -1870,12 +2079,37 @@ mod tests {
     // ── Serde compatibility for triggering / already_allowed flags ──────────
 
     #[test]
+    fn view_keeps_redirects_and_data_heredoc_body() {
+        let view = extract_structured_view(
+            "cat > notes.md <<'EOF'\nline one\nEOF\nls -la 2>&1 >> log.txt | wc -l",
+        );
+        assert_eq!(view.leaves.len(), 3);
+        let cat = &view.leaves[0];
+        assert_eq!(cat.argv, vec!["cat"]);
+        assert_eq!(cat.redirects, vec!["> notes.md", "<<"]);
+        assert_eq!(cat.heredoc.as_deref(), Some("line one\n"));
+        assert!(cat.nested.is_none());
+        assert_eq!(view.leaves[1].redirects, vec!["2>&1", ">> log.txt"]);
+        assert!(view.leaves[1].heredoc.is_none());
+    }
+
+    #[test]
+    fn interpreter_heredoc_stays_nested_not_data() {
+        let view = extract_structured_view("python3 - <<'EOF'\nprint(1)\nEOF");
+        let leaf = &view.leaves[0];
+        assert!(leaf.nested.is_some());
+        assert!(leaf.heredoc.is_none());
+    }
+
+    #[test]
     fn leaf_default_flags_are_omitted_from_json() {
         let leaf = CommandLeaf {
             argv: vec!["ls".into(), "-la".into()],
             nested: None,
             triggering: false,
             already_allowed: false,
+            redirects: Vec::new(),
+            heredoc: None,
         };
         let json = serde_json::to_string(&leaf).unwrap();
         assert!(
@@ -1899,6 +2133,8 @@ mod tests {
             nested: None,
             triggering: true,
             already_allowed: true,
+            redirects: Vec::new(),
+            heredoc: None,
         };
         let json = serde_json::to_string(&leaf).unwrap();
         assert!(json.contains("\"triggering\":true"), "got {json}");

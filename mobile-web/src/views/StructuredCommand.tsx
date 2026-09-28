@@ -83,6 +83,11 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
             {tok}
           </span>
         ))}
+        {leaf.redirects?.map((r, j) => (
+          <span key={`r${j}`} className={styles.redirect}>
+            {r}
+          </span>
+        ))}
         {triggering && (
           <span className={styles.triggerBadge} data-covered={covered}>
             {covered ? t("触发审计 · 已有规则") : t("触发审计")}
@@ -90,7 +95,22 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
         )}
       </div>
       {leaf.nested && <NestedBlock nested={leaf.nested} />}
+      {leaf.heredoc != null && <HeredocBlock body={leaf.heredoc} />}
     </div>
+  );
+}
+
+/** Long bodies start collapsed so a 10k-char document does not bury the
+ * Allow / Block buttons. */
+const HEREDOC_OPEN_MAX_LINES = 12;
+
+function HeredocBlock({ body }: { body: string }) {
+  const lines = body.replace(/\n$/, "").split("\n").length;
+  return (
+    <details className={styles.nested} open={lines <= HEREDOC_OPEN_MAX_LINES}>
+      <summary className={styles.nestedLabel}>{t("heredoc 正文 · {0} 行", lines)}</summary>
+      <pre className={`${styles.script} ${styles.heredocBody}`}>{body}</pre>
+    </details>
   );
 }
 

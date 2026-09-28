@@ -2566,7 +2566,8 @@
       "node": "embedded node -e",
       "eval": "embedded eval",
       "heredoc": "heredoc script"
-    }
+    },
+    "heredoc_data": "heredoc body · {{count}} lines"
   },
   "history": {
     "title": "Tasks",

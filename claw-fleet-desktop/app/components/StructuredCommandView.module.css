@@ -76,6 +76,15 @@
   opacity: 0.85;
 }
 
+.redirect {
+  color: var(--color-text-secondary);
+}
+
+.heredoc_body {
+  max-height: 240px;
+  overflow: auto;
+}
+
 .connector_row {
   display: flex;
   justify-content: flex-start;
@@ -104,6 +113,7 @@
 }
 
 .nested_label {
+  cursor: default;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;

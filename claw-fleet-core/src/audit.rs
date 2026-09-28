@@ -1405,8 +1405,13 @@ fn is_python_command(cmd: &str) -> bool {
         || cmd.contains("| python ")
 }
 
+/// `substring_cmd` is what the substring modes scan — `cmd` with data heredoc
+/// bodies removed (see [`crate::cmd_ast::strip_data_heredoc_bodies`]).
+/// `CommandStart` walks the AST of `cmd` itself, which never looks inside a
+/// heredoc body anyway.
 fn match_runtime_patterns(
     cmd: &str,
+    substring_cmd: &str,
     patterns: &[RuntimeRiskPattern],
     max_level: &mut Option<AuditRiskLevel>,
     tags: &mut Vec<String>,
@@ -1417,8 +1422,8 @@ fn match_runtime_patterns(
         }
         for p in &rp.patterns {
             let matched = match rp.match_mode {
-                MatchMode::Contains => cmd.contains(p.as_str()),
-                MatchMode::ContainsWord => contains_word(cmd, p.as_str()),
+                MatchMode::Contains => substring_cmd.contains(p.as_str()),
+                MatchMode::ContainsWord => contains_word(substring_cmd, p.as_str()),
                 MatchMode::CommandStart => matches_command_start(cmd, p.as_str()),
             };
             if matched {
@@ -1537,13 +1542,22 @@ fn classify_bash_command(cmd: &str) -> Option<(AuditRiskLevel, Vec<String>)> {
 
     let mut tags = Vec::new();
     let mut max_level: Option<AuditRiskLevel> = None;
+    // `cat > notes.md <<'EOF'` bodies are prose, not commands; quoting
+    // "git commit" in a document must not trip the git rules.
+    let substring_cmd = crate::cmd_ast::strip_data_heredoc_bodies(trimmed);
 
     // General shell patterns
-    match_runtime_patterns(trimmed, &patterns, &mut max_level, &mut tags);
+    match_runtime_patterns(trimmed, &substring_cmd, &patterns, &mut max_level, &mut tags);
 
     // Python-specific patterns (only when command invokes Python)
     if is_python_command(trimmed) {
-        match_runtime_patterns(trimmed, &python_patterns, &mut max_level, &mut tags);
+        match_runtime_patterns(
+            trimmed,
+            &substring_cmd,
+            &python_patterns,
+            &mut max_level,
+            &mut tags,
+        );
     }
 
     max_level.map(|level| (level, tags))
@@ -2654,6 +2668,41 @@ mod tests {
         let (level, tags) = classify_bash_command(cmd).unwrap();
         assert_eq!(level, AuditRiskLevel::Critical);
         assert!(tags.contains(&"py-http-upload".to_string()));
+    }
+
+    #[test]
+    fn data_heredoc_body_does_not_trip_substring_rules() {
+        reset();
+        // The same text outside a heredoc does fire, so the checks below are
+        // not vacuous.
+        assert!(classify_bash_command("echo 'Every phase ends with a git push'").is_some());
+        // Shape of a real false positive: an agent writing research notes
+        // that quote "git push".
+        let cmd = "cd /tmp/notes && cat > threads.md <<'EOF'\n# Threads\n> Every phase ends with a git push so the team sees it.\nEOF\ncat > more.md <<'EOF'\nthen git push the branch\nEOF\nls | wc -l";
+        assert!(
+            classify_bash_command(cmd).is_none(),
+            "prose in a cat heredoc must not be audited: {:?}",
+            classify_bash_command(cmd)
+        );
+        let tee = "tee notes.md <<EOF\nrun git push later\nEOF";
+        assert!(classify_bash_command(tee).is_none());
+    }
+
+    #[test]
+    fn executed_heredoc_bodies_still_trip_substring_rules() {
+        reset();
+        // Piped to a shell: the body runs.
+        let piped = "cat <<'EOF' | sh\ngit push origin main\nEOF";
+        assert!(classify_bash_command(piped).is_some());
+        // Fed straight to an interpreter.
+        let bash = "bash <<'EOF'\ngit push origin main\nEOF";
+        assert!(classify_bash_command(bash).is_some());
+        // Inside a command substitution: may feed an interpreter.
+        let subst = "bash -c \"$(cat <<'EOF'\ngit push origin main\nEOF\n)\"";
+        assert!(classify_bash_command(subst).is_some());
+        // The command around the heredoc is still scanned.
+        let around = "cat > m.txt <<'EOF'\nhello\nEOF\ngit push origin main";
+        assert!(classify_bash_command(around).is_some());
     }
 
     #[test]
