@@ -219,6 +219,9 @@ export const MOCK_SESSIONS: SessionInfo[] = [
         deadlineAt: NOW + 34 * MIN,
         pollCount: 52,
         structuralFailStreak: 0,
+        progress: "412/508 specs green",
+        progressFraction: 412 / 508,
+        progressChangedAt: NOW - 1 * MIN,
       },
       {
         id: "watch-e2e-artifact",
@@ -228,6 +231,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
         deadlineAt: NOW + 51 * MIN,
         pollCount: 9,
         structuralFailStreak: 0,
+        expectBy: NOW + 6 * MIN,
       },
     ],
     pendingMessages: ["顺手把 quarantine 的那条 flaky 也重跑一遍"],

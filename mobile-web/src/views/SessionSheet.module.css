@@ -249,6 +249,52 @@
   color: var(--color-text-dim);
 }
 
+/* The watch's reported progress (or elapsed against expect-by), with a bar. */
+.watchProgress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-secondary);
+}
+
+.watchProgressText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Progress that stopped moving, or a wait past its expected time. */
+.watchStalled {
+  flex: 0 0 auto;
+  color: var(--color-warning);
+}
+
+.watchBar {
+  flex: 0 0 auto;
+  position: relative;
+  width: 56px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.watchBarFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+
+.watchBarFill[data-overdue] {
+  background: var(--color-warning);
+}
+
 /* 复制行。副行是要复制的原文（id / 路径 / 命令）——等宽、最多两行：单行省略号
    会把每条路径都截成一模一样的 `/Users/xxx/…`，而有信息量的恰恰是尾巴。
    承自旧 SessionHeaderMenu 的 .itemSub。 */

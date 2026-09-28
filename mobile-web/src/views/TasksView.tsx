@@ -43,6 +43,7 @@ import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { compactDuration, watchProgressView } from "../../../shared-ts/watchProgress";
 import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import {
@@ -1001,19 +1002,40 @@ export function TasksView({
               {t("额度耗尽")}
             </span>
           )}
-          {s.watches?.map((w) => (
-            <span
-              key={w.id}
-              className={styles.handoff}
-              title={w.note ?? undefined}
-            >
-              <Radar size={11} />
-              {/* No hover on a phone, so the note has to be on the chip to be seen at all. */}
-              {w.note && <span className={styles.watchNote}>{w.note}</span>}
-              {w.note && " · "}
-              {formatWatchElapsed(w.created)} · {t("轮询 {0} 次", w.pollCount)}
-            </span>
-          ))}
+          {s.watches?.map((w) => {
+            const pv = watchProgressView(w, Date.now());
+            // Progress replaces the poll count when there is any: it is the
+            // one thing the boss would otherwise have to ask the agent for.
+            const tail =
+              pv.kind === "reported"
+                ? pv.fraction !== null
+                  ? `${Math.round(pv.fraction * 100)}%`
+                  : pv.text
+                : pv.kind === "time"
+                  ? t("已过 {0} / 预计 {1}", compactDuration(pv.elapsedMs), compactDuration(pv.expectedMs))
+                  : t("轮询 {0} 次", w.pollCount);
+            const alarming =
+              (pv.kind === "reported" && pv.stalledMs !== null) ||
+              (pv.kind === "time" && pv.overdueMs !== null);
+            return (
+              <span
+                key={w.id}
+                className={styles.handoff}
+                data-tone={alarming ? "warning" : undefined}
+                title={w.note ?? undefined}
+              >
+                <Radar size={11} />
+                {/* No hover on a phone, so the note has to be on the chip to be seen at all. */}
+                {w.note && <span className={styles.watchNote}>{w.note}</span>}
+                {w.note && " · "}
+                {pv.kind === "none" && <>{formatWatchElapsed(w.created)} · </>}
+                {tail}
+                {pv.kind === "reported" && pv.stalledMs !== null && (
+                  <> · {t("{0} 没动", compactDuration(pv.stalledMs))}</>
+                )}
+              </span>
+            );
+          })}
           {(live || tone === "quiet") && (
             <span className={styles.runtime} data-tone={tone ?? undefined}>
               <Clock size={11} />

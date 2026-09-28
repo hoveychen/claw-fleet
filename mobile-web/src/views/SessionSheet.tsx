@@ -48,6 +48,7 @@ import { agentIdTail, agentLabel } from "./agentScope";
 import { canControl, runStop, stopMode } from "./sessionStop";
 import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { DetailPane } from "./sessionStatusPills";
+import { compactDuration, watchProgressView } from "../../../shared-ts/watchProgress";
 import styles from "./SessionSheet.module.css";
 
 /** A clickable row: name on the left, current readout on the right.
@@ -390,17 +391,47 @@ export function SessionSheet({
             {/* Watch doesn't have its own full page — its entire content is "what
                 we're waiting for, how many polls, when to give up" — fits here,
                 not worth a separate screen. */}
-            {watches.map((w) => (
-              <div key={w.id} className={styles.watchRow}>
-                <Timer size={15} className={styles.watchIcon} />
-                <span className={styles.watchText}>
-                  <span className={styles.watchNote}>{w.note || t("未说明在等什么")}</span>
-                  <span className={styles.watchMeta}>
-                    {t("轮询 {0} 次 · 每 {1}s", w.pollCount, w.pollSecs)}
+            {watches.map((w) => {
+              const pv = watchProgressView(w, Date.now());
+              return (
+                <div key={w.id} className={styles.watchRow}>
+                  <Timer size={15} className={styles.watchIcon} />
+                  <span className={styles.watchText}>
+                    <span className={styles.watchNote}>{w.note || t("未说明在等什么")}</span>
+                    {pv.kind === "reported" && (
+                      <span className={styles.watchProgress}>
+                        {pv.fraction !== null && <WatchBar fraction={pv.fraction} />}
+                        <span className={styles.watchProgressText}>{pv.text}</span>
+                        {pv.stalledMs !== null && (
+                          <span className={styles.watchStalled}>
+                            {t("{0} 没动", compactDuration(pv.stalledMs))}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {pv.kind === "time" && (
+                      <span className={styles.watchProgress}>
+                        <WatchBar fraction={pv.fraction} overdue={pv.overdueMs !== null} />
+                        {pv.overdueMs !== null ? (
+                          <span className={styles.watchStalled}>
+                            {t("超出预计 {0}", compactDuration(pv.overdueMs))}
+                          </span>
+                        ) : (
+                          t(
+                            "已过 {0} / 预计 {1}",
+                            compactDuration(pv.elapsedMs),
+                            compactDuration(pv.expectedMs),
+                          )
+                        )}
+                      </span>
+                    )}
+                    <span className={styles.watchMeta}>
+                      {t("轮询 {0} 次 · 每 {1}s", w.pollCount, w.pollSecs)}
+                    </span>
                   </span>
-                </span>
-              </div>
-            ))}
+                </div>
+              );
+            })}
 
             {/* Scope switching. The list from the old ☰ menu moved here as-is —
                 it already belongs to "who's active in this session family right now,"
@@ -462,5 +493,19 @@ export function SessionSheet({
         document.body,
       )}
     </>
+  );
+}
+
+/** Thin progress bar for a watch row; amber once the expected time passed. */
+function WatchBar({ fraction, overdue = false }: { fraction: number; overdue?: boolean }) {
+  const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
+  return (
+    <span className={styles.watchBar} role="progressbar" aria-valuenow={pct}>
+      <span
+        className={styles.watchBarFill}
+        data-overdue={overdue ? "" : undefined}
+        style={{ width: `${pct}%` }}
+      />
+    </span>
   );
 }
