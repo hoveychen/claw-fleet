@@ -4,7 +4,8 @@ import { Bot, ChevronRight, Clock, FolderGit2, MessageCircleQuestion, Radar, Way
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isQuietAlive, isQuietAliveSticky, rowBarColor } from "../types";
 import { pendingDecisionState } from "../pendingDecisionState";
-import { watchProgressView } from "../../../shared-ts/watchProgress";
+import { watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
+import { WatchRing } from "./WatchRing";
 import { useDecisionStore } from "../store";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
@@ -259,6 +260,7 @@ export const SessionRow = memo(function SessionRow({
             )}
             {s.watches?.map((w) => {
               const pv = watchProgressView(w, Date.now());
+              const ring = watchRing(pv);
               // The row has room for one short token: a percentage, a clipped
               // status line, or elapsed against the expected wait.
               const tail =
@@ -295,7 +297,11 @@ export const SessionRow = memo(function SessionRow({
                     .filter(Boolean)
                     .join(" — ")}
                 >
-                  <Radar size={10} strokeWidth={1.6} />
+                  {ring ? (
+                    <WatchRing size={11} fraction={ring.fraction} alarming={ring.alarming} />
+                  ) : (
+                    <Radar size={10} strokeWidth={1.6} />
+                  )}
                   {tail}
                 </span>
               );

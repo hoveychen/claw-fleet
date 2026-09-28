@@ -3,7 +3,7 @@
 // Strings are the English ones: `../i18n` initialises to `en` under vitest.
 //
 // `watchProgressView` is the rule both apps share; the render half checks the
-// chip actually draws what the rule decided (bar, line, stalled callout).
+// chip actually draws what the rule decided (ring, line, stalled callout).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -80,7 +80,7 @@ describe("WatchStatusRow progress", () => {
     act(() => root.render(<WatchStatusRow session={session} />));
   }
 
-  it("draws a bar and the reported line, and calls out a stalled one", () => {
+  it("draws a ring and the reported line, and calls out a stalled one", () => {
     render(
       watch({
         progress: "3/8 steps",
@@ -116,11 +116,14 @@ describe("WatchStatusRow progress", () => {
         />,
       ),
     );
-    return container.querySelector("svg.lucide-radar")?.parentElement;
+    // The ring stands in for the radar icon whenever there is a fraction.
+    return container.querySelector('svg.lucide-radar, svg[role="progressbar"]')?.parentElement;
   }
 
   it("squeezes progress into one token on the compact rail row", () => {
     expect(renderRow(watch({ progress: "3/8", progressFraction: 0.375 }))?.textContent).toBe("38%");
+    expect(container.querySelector("svg.lucide-radar")).toBeNull();
+    expect(container.querySelector('svg[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("38");
     expect(renderRow(watch({ progress: "building the frontend bundle" }))?.textContent).toBe(
       "building the…",
     );

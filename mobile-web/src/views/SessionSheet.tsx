@@ -48,7 +48,8 @@ import { agentIdTail, agentLabel } from "./agentScope";
 import { canControl, runStop, stopMode } from "./sessionStop";
 import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { DetailPane } from "./sessionStatusPills";
-import { compactDuration, watchProgressView } from "../../../shared-ts/watchProgress";
+import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
+import { WatchRing } from "./WatchRing";
 import styles from "./SessionSheet.module.css";
 
 /** A clickable row: name on the left, current readout on the right.
@@ -393,14 +394,20 @@ export function SessionSheet({
                 not worth a separate screen. */}
             {watches.map((w) => {
               const pv = watchProgressView(w, Date.now());
+              const ring = watchRing(pv);
               return (
                 <div key={w.id} className={styles.watchRow}>
-                  <Timer size={15} className={styles.watchIcon} />
+                  {ring ? (
+                    <span className={styles.watchIcon}>
+                      <WatchRing size={16} fraction={ring.fraction} alarming={ring.alarming} />
+                    </span>
+                  ) : (
+                    <Timer size={15} className={styles.watchIcon} />
+                  )}
                   <span className={styles.watchText}>
                     <span className={styles.watchNote}>{w.note || t("未说明在等什么")}</span>
                     {pv.kind === "reported" && (
                       <span className={styles.watchProgress}>
-                        {pv.fraction !== null && <WatchBar fraction={pv.fraction} />}
                         <span className={styles.watchProgressText}>{pv.text}</span>
                         {pv.stalledMs !== null && (
                           <span className={styles.watchStalled}>
@@ -411,7 +418,6 @@ export function SessionSheet({
                     )}
                     {pv.kind === "time" && (
                       <span className={styles.watchProgress}>
-                        <WatchBar fraction={pv.fraction} overdue={pv.overdueMs !== null} />
                         {pv.overdueMs !== null ? (
                           <span className={styles.watchStalled}>
                             {t("超出预计 {0}", compactDuration(pv.overdueMs))}
@@ -493,19 +499,5 @@ export function SessionSheet({
         document.body,
       )}
     </>
-  );
-}
-
-/** Thin progress bar for a watch row; amber once the expected time passed. */
-function WatchBar({ fraction, overdue = false }: { fraction: number; overdue?: boolean }) {
-  const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
-  return (
-    <span className={styles.watchBar} role="progressbar" aria-valuenow={pct}>
-      <span
-        className={styles.watchBarFill}
-        data-overdue={overdue ? "" : undefined}
-        style={{ width: `${pct}%` }}
-      />
-    </span>
   );
 }

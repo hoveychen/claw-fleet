@@ -43,7 +43,8 @@ import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
-import { compactDuration, watchProgressView } from "../../../shared-ts/watchProgress";
+import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
+import { WatchRing } from "./WatchRing";
 import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import {
@@ -1004,6 +1005,7 @@ export function TasksView({
           )}
           {s.watches?.map((w) => {
             const pv = watchProgressView(w, Date.now());
+            const ring = watchRing(pv);
             // Progress replaces the poll count when there is any: it is the
             // one thing the boss would otherwise have to ask the agent for.
             const tail =
@@ -1024,7 +1026,11 @@ export function TasksView({
                 data-tone={alarming ? "warning" : undefined}
                 title={w.note ?? undefined}
               >
-                <Radar size={11} />
+                {ring ? (
+                  <WatchRing size={12} fraction={ring.fraction} alarming={ring.alarming} />
+                ) : (
+                  <Radar size={11} />
+                )}
                 {/* No hover on a phone, so the note has to be on the chip to be seen at all. */}
                 {w.note && <span className={styles.watchNote}>{w.note}</span>}
                 {w.note && " · "}

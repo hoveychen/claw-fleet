@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Radar } from "lucide-react";
 import type { SessionInfo } from "../types";
-import { watchProgressView } from "../../../shared-ts/watchProgress";
+import { watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
+import { WatchRing } from "./WatchRing";
 import styles from "./WatchStatusRow.module.css";
 
 /** Human "1h02m" / "3m40s" / "12s" from a millisecond span. Mirrors
@@ -56,6 +57,7 @@ export function WatchStatusRow({
         // session has been waiting for something that will never happen.
         const broken = (w.structuralFailStreak ?? 0) > 0;
         const pv = watchProgressView(w, now);
+        const ring = watchRing(pv);
         const title = [
           w.note ?? undefined,
           broken
@@ -79,7 +81,13 @@ export function WatchStatusRow({
             className={broken ? styles.watch_chip_broken : styles.watch_chip}
             title={title}
           >
-            {broken ? <AlertTriangle size={11} /> : <Radar size={11} />}
+            {broken ? (
+              <AlertTriangle size={11} />
+            ) : ring ? (
+              <WatchRing size={12} fraction={ring.fraction} alarming={ring.alarming} />
+            ) : (
+              <Radar size={11} />
+            )}
             {/* The note is the only answer to "waiting on what?", so it goes on
                 the chip itself — a tooltip never shows on touch and is easy to miss. */}
             {w.note && (
@@ -92,7 +100,6 @@ export function WatchStatusRow({
               t("card.watch_chip_broken", { count: w.structuralFailStreak })
             ) : pv.kind === "reported" ? (
               <>
-                {pv.fraction !== null && <ProgressBar fraction={pv.fraction} />}
                 <span className={styles.watch_progress}>{pv.text}</span>
                 {pv.stalledMs !== null && (
                   <span className={styles.watch_stalled}>
@@ -104,7 +111,6 @@ export function WatchStatusRow({
               </>
             ) : pv.kind === "time" ? (
               <>
-                <ProgressBar fraction={pv.fraction} overdue={pv.overdueMs !== null} />
                 {pv.overdueMs !== null ? (
                   <span className={styles.watch_stalled}>
                     {t("card.watch_overdue", { elapsed, over: formatElapsed(pv.overdueMs) })}
@@ -123,23 +129,4 @@ export function WatchStatusRow({
   );
 
   return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
-}
-
-/** A 36px inline bar; `overdue` turns it amber once the expected time has passed. */
-function ProgressBar({ fraction, overdue = false }: { fraction: number; overdue?: boolean }) {
-  const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
-  return (
-    <span
-      className={styles.watch_bar}
-      role="progressbar"
-      aria-valuenow={pct}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <span
-        className={overdue ? styles.watch_bar_fill_overdue : styles.watch_bar_fill}
-        style={{ width: `${pct}%` }}
-      />
-    </span>
-  );
 }

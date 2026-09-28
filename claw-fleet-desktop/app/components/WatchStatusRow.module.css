@@ -63,25 +63,3 @@
 .watch_stalled {
   color: var(--color-warning);
 }
-
-.watch_bar {
-  flex: 0 0 auto;
-  position: relative;
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--color-border);
-  overflow: hidden;
-}
-
-.watch_bar_fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 2px;
-  background: var(--color-accent);
-}
-
-.watch_bar_fill_overdue {
-  composes: watch_bar_fill;
-  background: var(--color-warning);
-}

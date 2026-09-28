@@ -84,3 +84,19 @@ export function compactDuration(ms: number): string {
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
 }
+
+/** What the progress ring (drawn in place of the watch icon) shows: how full,
+ *  and whether to paint it amber — reported progress that stopped moving, or a
+ *  time-based wait past its expected end. `null` when there is no fraction to
+ *  draw (no progress source, or a free-text line), so the icon stays. */
+export function watchRing(
+  pv: WatchProgressView,
+): { fraction: number; alarming: boolean } | null {
+  if (pv.kind === "reported" && pv.fraction !== null) {
+    return { fraction: pv.fraction, alarming: pv.stalledMs !== null };
+  }
+  if (pv.kind === "time") {
+    return { fraction: pv.fraction, alarming: pv.overdueMs !== null };
+  }
+  return null;
+}
