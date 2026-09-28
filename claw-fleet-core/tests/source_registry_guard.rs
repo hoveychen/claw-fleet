@@ -4,7 +4,8 @@
 //! `agent_source.rs` holds the same roster twice:
 //!
 //! * [`build_sources`] decides which sources actually get scanned, branching on
-//!   `config.is_enabled("<name>")`.
+//!   `config.is_enabled("<name>")` — partly inline (dsh) and partly through the
+//!   private `file_backed_sources_from_config` it delegates to (Claude, Codex).
 //! * `get_sources_config_local` builds the `SourceInfo` list the desktop's
 //!   "agents to monitor" section renders — from a **hardcoded array**.
 //!
@@ -30,12 +31,17 @@ fn agent_source_rs() -> PathBuf {
         .join("agent_source.rs")
 }
 
-/// The brace-matched body of the named top-level `fn`.
+/// Functions whose bodies together hold every `config.is_enabled("…")` gate
+/// that can register a source. `build_sources` delegates the file-backed ones
+/// to `file_backed_sources_from_config`, so scanning it alone misses them.
+const BUILD_FNS: &[&str] = &["build_sources", "file_backed_sources_from_config"];
+
+/// The brace-matched body of the named top-level `fn` (public or private).
 fn fn_body(src: &str, name: &str) -> String {
-    let needle = format!("pub fn {name}(");
+    let needle = format!("fn {name}(");
     let start = src
         .find(&needle)
-        .unwrap_or_else(|| panic!("`pub fn {name}` not found — was it renamed?"));
+        .unwrap_or_else(|| panic!("`fn {name}` not found — was it renamed?"));
     let mut depth = 0i32;
     let mut body = String::new();
     let mut seen_open = false;
@@ -60,17 +66,22 @@ fn every_buildable_source_has_a_settings_row() {
 
     // Names `build_sources` can register.
     let gate = Regex::new(r#"is_enabled\("([a-z0-9-]+)"\)"#).expect("gate regex");
-    let build_body = fn_body(&src, "build_sources");
-    let mut buildable: Vec<String> = gate
-        .captures_iter(&build_body)
-        .map(|c| c[1].to_string())
+    let mut buildable: Vec<String> = BUILD_FNS
+        .iter()
+        .flat_map(|name| {
+            let body = fn_body(&src, name);
+            gate.captures_iter(&body)
+                .map(|c| c[1].to_string())
+                .collect::<Vec<_>>()
+        })
         .collect();
     buildable.sort();
     buildable.dedup();
     assert!(
         buildable.len() >= 2,
         "the scanner found {buildable:?} — it has probably stopped recognising \
-         `config.is_enabled(\"…\")` in build_sources"
+         `config.is_enabled(\"…\")` in {BUILD_FNS:?} — if a gate moved into \
+         another helper, add that helper to BUILD_FNS"
     );
 
     // Names the settings panel is offered.
