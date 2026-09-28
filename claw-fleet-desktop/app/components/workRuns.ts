@@ -1,6 +1,6 @@
 import type { RawMessage, TextBlock, ToolUseBlock } from "../types";
 import { isDecisionTool } from "../toolResults";
-import { isIngestCall } from "./blocks/fleetTools";
+import { isImageCall, isIngestCall } from "./blocks/fleetTools";
 import { dayKey } from "../messageRows";
 import type { MetaRenderUnit } from "./metaGrouping";
 
@@ -35,6 +35,8 @@ export function isWorkRow(msg: RawMessage): boolean {
       // preview of the thing itself. Folding it into a band puts the one
       // artifact of the run two clicks away, which is how it went unnoticed.
       if (isIngestCall(call.name, call.input)) return false;
+      // Same for a generated image: the picture is the output, previewed inline.
+      if (isImageCall(call.name)) return false;
       sawWork = true;
       continue;
     }

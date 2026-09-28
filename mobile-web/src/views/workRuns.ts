@@ -5,7 +5,7 @@
 
 import type { RawMessage } from "../types";
 import type { MetaRenderUnit } from "./metaGrouping";
-import { isIngestCall } from "./fleetTools";
+import { isImageCall, isIngestCall } from "./fleetTools";
 
 /** Same tail-match rule as the desktop: the MCP tool name is namespaced by the
  *  server, so match `…fleet__ask` rather than the full id. codex's
@@ -41,6 +41,7 @@ export function isWorkRow(msg: RawMessage): boolean {
       // itself, so folding it into a band puts the one artifact of the run two
       // clicks away. Same exception the desktop makes.
       if (isIngestCall(name, (block as { input?: unknown }).input)) return false;
+      if (isImageCall(name)) return false;
       sawWork = true;
       continue;
     }

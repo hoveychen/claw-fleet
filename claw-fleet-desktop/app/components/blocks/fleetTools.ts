@@ -129,6 +129,43 @@ export function isIngestCall(name: string, input: unknown): boolean {
   return tool === "artifact" ? action === "add" : action === "publish";
 }
 
+/**
+ * `fleet__image` / `fleet__image_edit`. The picture is the call's whole point,
+ * so — like an ingest — it renders as a preview under the step row and is never
+ * swept into a collapsed work band.
+ */
+export function isImageCall(name: string): boolean {
+  return name.endsWith("fleet__image") || name.endsWith("fleet__image_edit");
+}
+
+export interface ImageCallResult {
+  /** Native `img-<uuid>` handle or legacy Codex thread id. */
+  handle: string;
+  /** Bare filenames, in the order the tool listed them. */
+  names: string[];
+}
+
+const IMAGE_LINE = /^\s*(?:-\s+)?(\S.*?\.(?:png|jpe?g|webp|gif))(?:\s+\(\d+ bytes\))?\s*$/i;
+
+/**
+ * Pull the handle and filenames out of `render_image_result`'s text
+ * (`claw-fleet-core/src/mcp_server.rs`): `thread_id: <handle> …` followed by
+ * one `- <abs path> (<n> bytes)` line per image. Older transcripts list the
+ * paths indented without the dash or size, which the same pattern accepts.
+ */
+export function parseImageResult(text: string): ImageCallResult | null {
+  const handle = text.match(/^thread_id:\s*(\S+)/m)?.[1];
+  if (!handle) return null;
+  const names: string[] = [];
+  for (const line of text.split("\n")) {
+    const path = line.match(IMAGE_LINE)?.[1];
+    if (!path) continue;
+    const name = path.split(/[\\/]/).pop();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names.length > 0 ? { handle, names } : null;
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {

@@ -496,3 +496,40 @@
   border-top: none;
   padding: 0 0 0 12px;
 }
+
+/* fleet__image / fleet__image_edit output, shown under the header whether or
+   not the card is open — the picture is the call's result, not its detail. */
+.genimage_strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 10px 8px;
+}
+
+.rail .genimage_strip {
+  padding: 2px 0 6px;
+}
+
+.genimage_thumb {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.genimage_thumb:hover {
+  border-color: var(--color-accent);
+}
+
+.genimage_thumb img {
+  display: block;
+  height: 180px;
+  width: auto;
+  /* A panorama can be 3:1; cap the width so one image can't crowd out the rest. */
+  max-width: 360px;
+  object-fit: cover;
+}

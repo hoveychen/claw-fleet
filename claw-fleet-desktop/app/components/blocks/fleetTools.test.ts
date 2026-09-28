@@ -8,7 +8,9 @@ import {
   classifyResult,
   friendlyToolName,
   isFleetTool,
+  isImageCall,
   isIngestCall,
+  parseImageResult,
   parseArtifactAdd,
   parseFleetCall,
   parseWikiPublish,
@@ -425,5 +427,39 @@ describe("ingest wording parity with claw-fleet-core", () => {
 
   it("wiki publish still returns `Published {} (version {}, {} total). title: {}`", () => {
     expect(src).toContain("Published {} (version {}, {} total). title: {}");
+  });
+});
+
+describe("parseImageResult", () => {
+  it("reads the handle and bare filenames from render_image_result's text", () => {
+    const text =
+      "thread_id: img-1b2c  (pass this to fleet__image_edit to revise)\n\n2 new image(s):\n" +
+      "- /Users/x/.fleet/images/img-1b2c/fox.png (123456 bytes)\n" +
+      "- /Users/x/.fleet/images/img-1b2c/fox 2.webp (99 bytes)\n\nAgent note: done";
+    expect(parseImageResult(text)).toEqual({ handle: "img-1b2c", names: ["fox.png", "fox 2.webp"] });
+  });
+
+  it("accepts the older indented path lines", () => {
+    const text = "thread_id: th_9a2b  (…)\n\n1 new image(s):\n  /Users/dev/.codex/generated_images/th_9a2b/fox.png";
+    expect(parseImageResult(text)).toEqual({ handle: "th_9a2b", names: ["fox.png"] });
+  });
+
+  it("returns null without a handle or without any image", () => {
+    expect(parseImageResult("- /a/b.png (1 bytes)")).toBeNull();
+    expect(parseImageResult("thread_id: img-x\n\n0 new image(s):\n")).toBeNull();
+  });
+
+  it("isImageCall matches both tools by tail", () => {
+    expect(isImageCall("mcp__fleet__fleet__image")).toBe(true);
+    expect(isImageCall("mcp__fleet__fleet__image_edit")).toBe(true);
+    expect(isImageCall("mcp__fleet__fleet__inspect")).toBe(false);
+  });
+});
+
+describe("render_image_result wire format", () => {
+  const src = readFileSync(resolve(__dirname, "../../../../claw-fleet-core/src/mcp_server.rs"), "utf8");
+  it("still leads with `thread_id:` and lists `- {path} ({bytes} bytes)`", () => {
+    expect(src).toContain('"thread_id: {}  (pass this to fleet__image_edit to revise)');
+    expect(src).toContain('"- {} ({} bytes)\\n"');
   });
 });

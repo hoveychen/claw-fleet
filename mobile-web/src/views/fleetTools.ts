@@ -70,6 +70,16 @@ export function isIngestCall(name: string, input: unknown): boolean {
   return tool === "artifact" ? action === "add" : action === "publish";
 }
 
+/**
+ * `fleet__image` / `fleet__image_edit`. The picture is the call's whole point
+ * and its thumbnails already sit under the step row (`ThumbRow`), so it is
+ * never swept into a collapsed work band. Mirrors the desktop's
+ * `blocks/fleetTools.ts`.
+ */
+export function isImageCall(name: string): boolean {
+  return name.endsWith("fleet__image") || name.endsWith("fleet__image_edit");
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {
