@@ -8,10 +8,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Download, X } from "lucide-react";
+import { Download, Share, X } from "lucide-react";
 import { HistoryLayer } from "../useNavStack";
 import { t } from "../i18n";
-import { saveImage } from "../imageSave";
+import { canShareFiles, saveImage } from "../imageSave";
 import styles from "./Lightbox.module.css";
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -261,6 +261,9 @@ function LightboxOverlay({
     };
   }, [apply, clampPan, zoomTo, onClose]);
 
+  // Where the OS share sheet is reachable (iOS, Android, Harmony) the button is
+  // a share button; a plain download (desktop browsers) keeps the download icon.
+  const shareable = useMemo(() => canShareFiles(), []);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const statusTimer = useRef<number | undefined>(undefined);
@@ -309,12 +312,12 @@ function LightboxOverlay({
       <button
         type="button"
         className={styles.save}
-        aria-label={t("保存图片")}
-        title={t("保存图片")}
+        aria-label={shareable ? t("分享图片") : t("保存图片")}
+        title={shareable ? t("分享图片") : t("保存图片")}
         disabled={saving}
         onClick={() => void onSave()}
       >
-        <Download size={20} />
+        {shareable ? <Share size={20} /> : <Download size={20} />}
       </button>
       <div className={status ? styles.status : styles.hint} role={status ? "status" : undefined}>
         {status ?? t("双击放大 · 捏合缩放 · 单击关闭")}

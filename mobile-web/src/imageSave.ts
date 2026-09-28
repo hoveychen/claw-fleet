@@ -34,6 +34,17 @@ export function imageFileName(src: string, mime: string, now: Date = new Date())
   return `image-${stamp}.${ext}`;
 }
 
+/** Whether this host can hand an image file to the OS share sheet. */
+export function canShareFiles(): boolean {
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+  if (typeof navigator.share !== "function" || typeof nav.canShare !== "function") return false;
+  try {
+    return nav.canShare({ files: [new File([], "probe.png", { type: "image/png" })] });
+  } catch {
+    return false;
+  }
+}
+
 export type SaveOutcome = "shared" | "downloaded" | "cancelled";
 
 /** Fetch the image behind `src` (data:, blob: or URL) and hand it to the share

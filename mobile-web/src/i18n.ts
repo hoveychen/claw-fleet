@@ -749,6 +749,7 @@ const DICT: Record<string, string> = {
   图片查看: "Image viewer",
   "双击放大 · 捏合缩放 · 单击关闭": "Double-tap to zoom · pinch to scale · tap to close",
   保存图片: "Save image",
+  分享图片: "Share image",
   图片已保存: "Image saved",
   "保存失败：{0}": "Save failed: {0}",
   未配置: "Not configured",
