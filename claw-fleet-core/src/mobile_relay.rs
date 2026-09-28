@@ -1431,7 +1431,10 @@ fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
 /// cannot tell them apart). Same reasoning — and same shape — as the desktop's
 /// `ToolUseBlock`. The bulky siblings (`Agent.prompt`, `AskUserQuestion.
 /// questions`) stay stripped; only the label rides along.
-const TAIL_TOOL_INPUT_FIELDS: [&str; 8] = [
+///
+/// `instruction` is `fleet__image_edit`'s prompt (`fleet__image` uses
+/// `description`): the phone shows it under the generated thumbnails.
+const TAIL_TOOL_INPUT_FIELDS: [&str; 9] = [
     "description",
     "command",
     "file_path",
@@ -1440,6 +1443,7 @@ const TAIL_TOOL_INPUT_FIELDS: [&str; 8] = [
     "query",
     "url",
     "skill",
+    "instruction",
 ];
 
 /// Chars kept of a decision card's summary line / chosen answer. Long enough to
@@ -1488,6 +1492,54 @@ fn ask_summary(input: &Map<String, Value>) -> Option<Value> {
 /// [`ASK_SUMMARY_MAX_CHARS`]: enough to tell two reports apart at phone width,
 /// short enough that the skeleton stream stays KB-scale.
 const INGEST_TITLE_MAX_CHARS: usize = 80;
+
+/// A `fleet__image` / `fleet__image_edit` result's metadata, for the phone's
+/// chip row under the thumbnails. The body is stripped from tail blocks, so
+/// what the desktop parses out of `render_image_result`'s text
+/// ([`crate::mcp_server`]) is recovered here: the `- [image] …` provenance line
+/// (`image_api.rs::provenance`) verbatim, plus the image count and summed size.
+///
+/// Matched on the result's shape for the same reason as [`ingest_summary`]: a
+/// `tool_result` block does not carry the calling tool's name.
+fn image_result_summary(block: &Map<String, Value>) -> Option<Value> {
+    let text = tool_result_text(block.get("content")?);
+    let text = text.trim_start();
+    if !text.starts_with("thread_id: ") || !text.contains(" new image(s):\n") {
+        return None;
+    }
+    let mut count = 0u64;
+    let mut bytes = 0u64;
+    let mut prov: Option<&str> = None;
+    let mut in_timeline = false;
+    for line in text.lines() {
+        if line.trim() == "What it did:" {
+            in_timeline = true;
+        }
+        if let Some(p) = line.strip_prefix("- [image] ") {
+            prov.get_or_insert(p.trim());
+            continue;
+        }
+        if in_timeline {
+            continue;
+        }
+        if let Some(n) = line
+            .strip_prefix("- ")
+            .and_then(|l| l.strip_suffix(" bytes)"))
+            .and_then(|l| l.rsplit_once(" ("))
+            .and_then(|(_, n)| n.parse::<u64>().ok())
+        {
+            count += 1;
+            bytes += n;
+        }
+    }
+    let mut out = Map::new();
+    out.insert("count".into(), count.into());
+    out.insert("bytes".into(), bytes.into());
+    if let Some(p) = prov {
+        out.insert("prov".into(), p.into());
+    }
+    Some(Value::Object(out))
+}
 
 /// Gist of a `fleet__artifact add` / `fleet__wiki publish` confirmation, for
 /// the phone's ingest preview card.
@@ -1804,6 +1856,9 @@ fn slim_tail_block(block: &Value) -> Value {
             }
             if let Some(ingest) = ingest_summary(obj) {
                 out.insert("_ingest".into(), ingest);
+            }
+            if let Some(image) = image_result_summary(obj) {
+                out.insert("_image".into(), image);
             }
         }
         _ => {}
@@ -8647,6 +8702,46 @@ mod tests {
             TAIL_THUMB_MAX_PER_RESULT,
             "thumb count capped"
         );
+    }
+
+    /// A generated-image result keeps its metadata on the phone even though
+    /// the body is stripped: provenance verbatim, count and summed size, with
+    /// timeline lines never mistaken for outputs.
+    #[test]
+    fn slim_tail_surfaces_image_result_metadata() {
+        let text = "thread_id: img-9b60  (pass this to fleet__image_edit to revise)\n\n\
+            2 new image(s):\n\
+            - /Users/x/.fleet/generated_images/img-9b60/1.png (3000 bytes)\n\
+            - /Users/x/.fleet/generated_images/img-9b60/2.png (500 bytes)\n\n\
+            What it did:\n\
+            - [image] gpt-image-2.5-flare via chatgpt, quality medium, size 1536x1024\n\
+            - [message] copied to /tmp/x.png (9 bytes)\n";
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "gen1",
+            "message": { "role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "toolu_gen",
+                "content": [{ "type": "text", "text": text }]
+            }] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert!(block.get("content").is_none(), "result body stays stripped");
+        assert_eq!(
+            block["_image"],
+            json!({
+                "count": 2,
+                "bytes": 3500,
+                "prov": "gpt-image-2.5-flare via chatgpt, quality medium, size 1536x1024",
+            })
+        );
+
+        // Any other result carries no `_image`.
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "gen2",
+            "message": { "role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "toolu_x", "content": "ok: title set"
+            }] }
+        })]);
+        assert!(slim[0]["message"]["content"][0].get("_image").is_none());
     }
 
     /// dsh's transcripts carry an image as a store path, not inline base64

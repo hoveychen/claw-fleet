@@ -55,6 +55,10 @@ describe("isWorkRow", () => {
     expect(isWorkRow(assistant([tool("mcp__fleet__fleet__artifact", { action: "list" })]))).toBe(true);
     expect(isWorkRow(assistant([tool("mcp__fleet__fleet__wiki", { action: "cat" })]))).toBe(true);
   });
+  it("rejects a generated-image call — the picture previews inline", () => {
+    expect(isWorkRow(assistant([think, tool("mcp__fleet__fleet__image")]))).toBe(false);
+    expect(isWorkRow(assistant([tool("mcp__fleet__fleet__image_edit")]))).toBe(false);
+  });
 });
 
 describe("groupWorkRuns", () => {

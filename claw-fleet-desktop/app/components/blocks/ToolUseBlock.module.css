@@ -496,3 +496,100 @@
   border-top: none;
   padding: 0 0 0 12px;
 }
+
+/* fleet__image / fleet__image_edit output, shown under the header whether or
+   not the card is open — the picture is the call's result, not its detail. */
+.genimage {
+  padding: 6px 10px 8px;
+}
+
+.rail .genimage {
+  padding: 2px 0 6px;
+}
+
+.genimage_strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.genimage_thumb {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.genimage_thumb:hover {
+  border-color: var(--color-accent);
+}
+
+.genimage_thumb img {
+  display: block;
+  height: 180px;
+  width: auto;
+  /* A panorama can be 3:1; cap the width so one image can't crowd out the rest. */
+  max-width: 360px;
+  object-fit: cover;
+}
+
+.genimage_prompt_row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Prose, not a code face: the prompt is a sentence the agent wrote. */
+.genimage_prompt {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 11px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.genimage_prompt_open {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.genimage_copy {
+  flex-shrink: 0;
+}
+
+.genimage_meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.genimage_chip,
+.genimage_chip_warn {
+  font-size: var(--t-meta, 10px);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+
+.genimage_chip {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+}
+
+.genimage_chip_warn {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}

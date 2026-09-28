@@ -565,6 +565,12 @@ const DICT: Record<string, string> = {
   "搜索工具：{0}": "Searching tools: {0}",
   停止后台任务: "Stopping background task",
   "停止后台任务：{0}": "Stopping background task: {0}",
+  "ChatGPT 额度": "ChatGPT quota",
+  "质量 {0}": "quality {0}",
+  "背景 {0}": "background {0}",
+  "后端未回报，显示的是请求值": "not echoed by backend — requested values",
+  "后端忽略：{0}": "ignored by backend: {0}",
+  "共 {0} 张图": "{0} images",
   "读取后台任务输出：{0}": "Reading background task: {0}",
   // dsh's own tools (no Claude counterpart) — see views/toolSummary.ts. The
   // bare "Stop background task" above is shared with Claude's TaskStop row; do not re-add

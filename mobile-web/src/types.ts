@@ -270,6 +270,9 @@ export interface ContentBlock {
    *  strips, so without this the phone can only say "artifact" (see
    *  `ingest_summary` in mobile_relay.rs). */
   _ingest?: IngestSummary;
+  /** Metadata of a `fleet__image` / `fleet__image_edit` result, recovered by
+   *  `image_result_summary` in mobile_relay.rs because the body is stripped. */
+  _image?: ImageResultSummary;
   /** Image block whose `source` is a server-side JPEG thumbnail, not the
    *  original (the relay never ships original base64 in the skeleton stream). */
   _thumb?: boolean;
@@ -280,6 +283,13 @@ export interface ContentBlock {
  * What a run filed into a store, computed relay-side from the confirmation
  * sentence. Two shapes, told apart by `kind`.
  */
+export interface ImageResultSummary {
+  count?: number;
+  bytes?: number;
+  /** The `- [image] …` provenance line, verbatim (see `parseImageProvenance`). */
+  prov?: string;
+}
+
 export type IngestSummary =
   | {
       kind: "artifact";

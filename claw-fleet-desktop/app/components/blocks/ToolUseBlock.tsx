@@ -15,7 +15,12 @@ import { ImageThumb } from "./ImageThumb";
 import { resultHasTrimmedImage } from "../../imageData";
 import { TextBlock } from "./TextBlock";
 import { AgentInput, ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
-import { friendlyToolName } from "./fleetTools";
+import { friendlyToolName, isImageCall, parseImageResult, resultText } from "./fleetTools";
+import type { ImageCallResult } from "./fleetTools";
+import { ImageLightbox } from "../ImageLightbox";
+import { sessionImageUrl } from "../../sessionImages";
+import { CopyButton } from "../CopyButton";
+import { formatBytes } from "../../formatBytes";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import { useInFlightTools } from "./inFlightTools";
 import styles from "./ToolUseBlock.module.css";
@@ -1232,6 +1237,109 @@ function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown 
 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
+/**
+ * Always-visible preview of what `fleet__image` / `fleet__image_edit` made.
+ *
+ * Served full-size through `fleet-genimage://` off the handle and filenames in
+ * the result text, not from the result's inline thumbnails: those are ~320px
+ * squeezes meant for the agent, and message trimming may have cut them to an
+ * undecodable preview by the time they reach the webview.
+ */
+function GeneratedImagePreview({
+  images,
+  prompt,
+  refs,
+}: {
+  images: ImageCallResult;
+  prompt: string;
+  /** Reference images the call attached (`input.images`). */
+  refs: number;
+}) {
+  const { t } = useTranslation();
+  const chips = imageMetaChips(images, refs, t);
+  const [zoomed, setZoomed] = useState<{ src: string; name: string } | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
+  return (
+    <div className={styles.genimage}>
+      <div className={styles.genimage_strip}>
+        {images.names.map((name) => {
+          const src = sessionImageUrl(images.handle, name);
+          return (
+            <button
+              key={name}
+              className={styles.genimage_thumb}
+              title={name}
+              onClick={() => setZoomed({ src, name })}
+            >
+              <img src={src} alt={name} loading="lazy" />
+            </button>
+          );
+        })}
+      </div>
+      {/* The header only carries an 80-char snippet; the full prompt is what a
+          reader needs to judge (or reuse) the picture. Clamped until clicked. */}
+      {prompt && (
+        <div className={styles.genimage_prompt_row}>
+          <div
+            className={`${styles.genimage_prompt} ${promptOpen ? styles.genimage_prompt_open : ""}`}
+            onClick={() => setPromptOpen((o) => !o)}
+          >
+            {prompt}
+          </div>
+          <CopyButton text={prompt} className={styles.genimage_copy} />
+        </div>
+      )}
+      {chips.length > 0 && (
+        <div className={styles.genimage_meta}>
+          {chips.map((c, i) => (
+            <span key={i} className={c.warn ? styles.genimage_chip_warn : styles.genimage_chip}>
+              {c.text}
+            </span>
+          ))}
+        </div>
+      )}
+      {zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}
+    </div>
+  );
+}
+
+/**
+ * The facts a reader checks a generated image against: which model and
+ * credential made it, the quality/size/background the backend *reports* it
+ * used (not what was asked for), how big the output is, and what it was
+ * given to work from.
+ */
+export function imageMetaChips(
+  images: ImageCallResult,
+  refs: number,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): Array<{ text: string; warn?: boolean }> {
+  const chips: Array<{ text: string; warn?: boolean }> = [];
+  const p = images.provenance;
+  if (p) {
+    chips.push({ text: p.model });
+    const routeKey =
+      p.route === "chatgpt" ? "detail.genimage.route_chatgpt" : p.route === "api-key" ? "detail.genimage.route_api_key" : null;
+    chips.push({ text: routeKey ? t(routeKey) : p.route });
+    if (p.quality) chips.push({ text: t("detail.genimage.quality", { v: p.quality }) });
+    if (p.size) chips.push({ text: p.size.replace(/x/i, "×") });
+    if (p.background) chips.push({ text: t("detail.genimage.background", { v: p.background }) });
+    if (p.requested) chips.push({ text: t("detail.genimage.requested"), warn: true });
+    if (p.ignored) chips.push({ text: t("detail.genimage.ignored", { v: p.ignored }), warn: true });
+  }
+  if (images.names.length > 1) chips.push({ text: t("detail.genimage.count", { count: images.names.length }) });
+  if (images.bytes > 0) chips.push({ text: formatBytes(images.bytes) });
+  if (refs > 0) chips.push({ text: t("detail.genimage.refs", { count: refs }) });
+  return chips;
+}
+
+/** The prompt behind a generated image: `description` for a fresh image,
+ *  `instruction` for an edit. */
+function imagePrompt(input: Record<string, unknown>): string {
+  const v = input.description ?? input.instruction;
+  return typeof v === "string" ? v.trim() : "";
+}
+
 export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp, paths, rail }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -1284,6 +1392,17 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
           content: full.content as ToolResultBlock["content"],
         }
     : resultProp;
+
+  const generatedImages =
+    isImageCall(block.name) && result && !result.is_error
+      ? parseImageResult(resultText(result.content as string | unknown[]))
+      : null;
+  // The preview strip already shows the pictures; the expanded body keeps the
+  // text (handle, timeline, agent note) without the agent-facing thumbnails.
+  const bodyResult =
+    generatedImages && result && Array.isArray(result.content)
+      ? { ...result, content: result.content.filter((b) => b.type !== "image") }
+      : result;
 
   // codex's function-call tools get a friendly one-liner instead of their raw
   // args object; everything else falls back to the generic formatter.
@@ -1349,6 +1468,14 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
         )}
       </button>
 
+      {generatedImages && (
+        <GeneratedImagePreview
+          images={generatedImages}
+          prompt={imagePrompt(block.input)}
+          refs={Array.isArray(block.input.images) ? block.input.images.length : 0}
+        />
+      )}
+
       {open && (
         <div className={styles.body}>
           {loadingFull && !full && (
@@ -1394,7 +1521,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
           )}
           {/* A custom body already presents the result (stdout, todo list,
               subagent output); repeating the raw blob under it is noise. */}
-          {result && !custom && <ResultContent result={result} />}
+          {bodyResult && !custom && <ResultContent result={bodyResult} />}
           {awaitingResult && !result && (
             <div className={styles.pending}>{t("detail.tool_running", "运行中…")}</div>
           )}

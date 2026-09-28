@@ -129,6 +129,103 @@ export function isIngestCall(name: string, input: unknown): boolean {
   return tool === "artifact" ? action === "add" : action === "publish";
 }
 
+/**
+ * `fleet__image` / `fleet__image_edit`. The picture is the call's whole point,
+ * so — like an ingest — it renders as a preview under the step row and is never
+ * swept into a collapsed work band.
+ */
+export function isImageCall(name: string): boolean {
+  return name.endsWith("fleet__image") || name.endsWith("fleet__image_edit");
+}
+
+export interface ImageCallResult {
+  /** Native `img-<uuid>` handle or legacy Codex thread id. */
+  handle: string;
+  /** Bare filenames, in the order the tool listed them. */
+  names: string[];
+  /** Summed file size of the listed images; 0 when the lines carry none. */
+  bytes: number;
+  /** What the backend reported it actually did; absent on Codex-backend runs. */
+  provenance?: ImageProvenance;
+}
+
+/**
+ * The `- [image] …` timeline line `image_api.rs::provenance` writes, e.g.
+ * `gpt-image-2.5-flare via chatgpt, quality high, size 1536x1024, background
+ * opaque — size ignored by this backend`.
+ */
+export interface ImageProvenance {
+  model: string;
+  /** Credential route: `chatgpt` (plan quota) or `api-key`. */
+  route: string;
+  quality?: string;
+  size?: string;
+  background?: string;
+  /** The backend echoed nothing, so quality/size are the *requested* values. */
+  requested: boolean;
+  /** Controls the backend did not honour, as written (`quality and size`). */
+  ignored?: string;
+}
+
+const IMAGE_LINE = /^\s*(?:-\s+)?(\S.*?\.(?:png|jpe?g|webp|gif))(?:\s+\((\d+) bytes\))?\s*$/i;
+
+export function parseImageProvenance(line: string): ImageProvenance | null {
+  const [head, tail] = line.split(" — ");
+  const parts = head.trim().split(", ");
+  const m = parts[0].match(/^(\S+) via (\S+)$/);
+  if (!m) return null;
+  const out: ImageProvenance = { model: m[1], route: m[2], requested: false };
+  const ignored = tail?.match(/^(.*) ignored by this backend/)?.[1];
+  if (ignored) out.ignored = ignored;
+  for (let part of parts.slice(1)) {
+    if (part.startsWith("requested ")) {
+      out.requested = true;
+      part = part.slice("requested ".length);
+    }
+    const [key, ...rest] = part.split(" ");
+    const value = rest.join(" ");
+    if (!value) continue;
+    if (key === "quality" || key === "size" || key === "background") out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Pull the handle, filenames and provenance out of `render_image_result`'s
+ * text (`claw-fleet-core/src/mcp_server.rs`): `thread_id: <handle> …`, one
+ * `- <abs path> (<n> bytes)` line per image, then a `- [image] …` timeline
+ * line. Older transcripts list the paths indented without the dash or size,
+ * which the same pattern accepts.
+ */
+export function parseImageResult(text: string): ImageCallResult | null {
+  const handle = text.match(/^thread_id:\s*(\S+)/m)?.[1];
+  if (!handle) return null;
+  const names: string[] = [];
+  let bytes = 0;
+  let provenance: ImageProvenance | undefined;
+  // Timeline lines are free text and may mention a path; only the list above
+  // them names the call's outputs.
+  let inTimeline = false;
+  for (const line of text.split("\n")) {
+    if (line.trim() === "What it did:") inTimeline = true;
+    const prov = line.match(/^- \[image\] (.+)$/)?.[1];
+    if (prov) {
+      provenance ??= parseImageProvenance(prov) ?? undefined;
+      continue;
+    }
+    if (inTimeline) continue;
+    const m = line.match(IMAGE_LINE);
+    if (!m) continue;
+    const name = m[1].split(/[\\/]/).pop();
+    if (name && !names.includes(name)) {
+      names.push(name);
+      bytes += m[2] ? Number(m[2]) : 0;
+    }
+  }
+  if (names.length === 0) return null;
+  return provenance ? { handle, names, bytes, provenance } : { handle, names, bytes };
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {

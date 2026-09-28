@@ -490,6 +490,11 @@
   color: var(--color-error);
 }
 
+.chipWarn {
+  background: rgba(217, 155, 11, 0.14);
+  color: var(--color-warning, #d99b0b);
+}
+
 .chipAdd { color: var(--color-success); }
 .chipDel { color: var(--color-error); }
 
@@ -511,6 +516,33 @@
   flex-wrap: wrap;
   gap: 6px;
   padding: 4px 0;
+}
+
+/* A generated image's prompt, under its thumbnails. Prose face, not the
+   monospace tool line. */
+.imagePrompt {
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-bottom: 4px;
+}
+
+.imagePromptOpen {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.imageMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 4px;
 }
 
 .thumbImg {
