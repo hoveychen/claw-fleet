@@ -513,6 +513,26 @@
   padding: 4px 0;
 }
 
+/* A generated image's prompt, under its thumbnails. Prose face, not the
+   monospace tool line. */
+.imagePrompt {
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-bottom: 4px;
+}
+
+.imagePromptOpen {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
 .thumbImg {
   max-width: 160px;
   max-height: 120px;

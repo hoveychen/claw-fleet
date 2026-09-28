@@ -499,15 +499,18 @@
 
 /* fleet__image / fleet__image_edit output, shown under the header whether or
    not the card is open — the picture is the call's result, not its detail. */
+.genimage {
+  padding: 6px 10px 8px;
+}
+
+.rail .genimage {
+  padding: 2px 0 6px;
+}
+
 .genimage_strip {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 6px 10px 8px;
-}
-
-.rail .genimage_strip {
-  padding: 2px 0 6px;
 }
 
 .genimage_thumb {
@@ -532,4 +535,36 @@
   /* A panorama can be 3:1; cap the width so one image can't crowd out the rest. */
   max-width: 360px;
   object-fit: cover;
+}
+
+.genimage_prompt_row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Prose, not a code face: the prompt is a sentence the agent wrote. */
+.genimage_prompt {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 11px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.genimage_prompt_open {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.genimage_copy {
+  flex-shrink: 0;
 }

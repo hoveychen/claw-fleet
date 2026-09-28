@@ -36,7 +36,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
-import { isFleetTool } from "./fleetTools";
+import { isFleetTool, isImageCall } from "./fleetTools";
 import { IngestCard, ingestStepLabel } from "./IngestCard";
 import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
@@ -680,6 +680,27 @@ function ThumbRow({ srcs }: { srcs: string[] }) {
   );
 }
 
+/** The prompt behind a generated image — `description` for `fleet__image`,
+ *  `instruction` for `fleet__image_edit` — shown under its thumbnails. The step
+ *  line only fits a clipped one-liner. Clamped to three lines until tapped. */
+function ImagePrompt({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  return (
+    <div
+      className={`${styles.imagePrompt} ${open ? styles.imagePromptOpen : ""}`}
+      onClick={() => setOpen((o) => !o)}
+    >
+      {text}
+    </div>
+  );
+}
+
+function imagePrompt(input: Record<string, unknown> | undefined): string {
+  const v = input?.description ?? input?.instruction;
+  return typeof v === "string" ? v.trim() : "";
+}
+
 /** One tool call on the rail: summary line + digest chips, tap to expand the
  *  full body (fetched on demand through the relay `tool_detail` method).
  *  Expansion state is local so it survives the parent's poll re-renders. */
@@ -764,6 +785,7 @@ function ToolStep({
           without expanding. */}
       {meta?.ingest && <IngestCard ingest={meta.ingest} client={client} />}
       {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
+      {isImageCall(name) && <ImagePrompt text={imagePrompt(b.input)} />}
       {open && expandable && (
         <ToolDetailPanel
           client={client}

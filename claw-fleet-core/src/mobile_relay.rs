@@ -1431,7 +1431,10 @@ fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
 /// cannot tell them apart). Same reasoning — and same shape — as the desktop's
 /// `ToolUseBlock`. The bulky siblings (`Agent.prompt`, `AskUserQuestion.
 /// questions`) stay stripped; only the label rides along.
-const TAIL_TOOL_INPUT_FIELDS: [&str; 8] = [
+///
+/// `instruction` is `fleet__image_edit`'s prompt (`fleet__image` uses
+/// `description`): the phone shows it under the generated thumbnails.
+const TAIL_TOOL_INPUT_FIELDS: [&str; 9] = [
     "description",
     "command",
     "file_path",
@@ -1440,6 +1443,7 @@ const TAIL_TOOL_INPUT_FIELDS: [&str; 8] = [
     "query",
     "url",
     "skill",
+    "instruction",
 ];
 
 /// Chars kept of a decision card's summary line / chosen answer. Long enough to

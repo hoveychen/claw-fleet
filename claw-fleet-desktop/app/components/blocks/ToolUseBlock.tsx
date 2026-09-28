@@ -19,6 +19,7 @@ import { friendlyToolName, isImageCall, parseImageResult, resultText } from "./f
 import type { ImageCallResult } from "./fleetTools";
 import { ImageLightbox } from "../ImageLightbox";
 import { sessionImageUrl } from "../../sessionImages";
+import { CopyButton } from "../CopyButton";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import { useInFlightTools } from "./inFlightTools";
 import styles from "./ToolUseBlock.module.css";
@@ -1243,26 +1244,49 @@ const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
  * squeezes meant for the agent, and message trimming may have cut them to an
  * undecodable preview by the time they reach the webview.
  */
-function GeneratedImagePreview({ images }: { images: ImageCallResult }) {
+function GeneratedImagePreview({ images, prompt }: { images: ImageCallResult; prompt: string }) {
   const [zoomed, setZoomed] = useState<{ src: string; name: string } | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
   return (
-    <div className={styles.genimage_strip}>
-      {images.names.map((name) => {
-        const src = sessionImageUrl(images.handle, name);
-        return (
-          <button
-            key={name}
-            className={styles.genimage_thumb}
-            title={name}
-            onClick={() => setZoomed({ src, name })}
+    <div className={styles.genimage}>
+      <div className={styles.genimage_strip}>
+        {images.names.map((name) => {
+          const src = sessionImageUrl(images.handle, name);
+          return (
+            <button
+              key={name}
+              className={styles.genimage_thumb}
+              title={name}
+              onClick={() => setZoomed({ src, name })}
+            >
+              <img src={src} alt={name} loading="lazy" />
+            </button>
+          );
+        })}
+      </div>
+      {/* The header only carries an 80-char snippet; the full prompt is what a
+          reader needs to judge (or reuse) the picture. Clamped until clicked. */}
+      {prompt && (
+        <div className={styles.genimage_prompt_row}>
+          <div
+            className={`${styles.genimage_prompt} ${promptOpen ? styles.genimage_prompt_open : ""}`}
+            onClick={() => setPromptOpen((o) => !o)}
           >
-            <img src={src} alt={name} loading="lazy" />
-          </button>
-        );
-      })}
+            {prompt}
+          </div>
+          <CopyButton text={prompt} className={styles.genimage_copy} />
+        </div>
+      )}
       {zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}
     </div>
   );
+}
+
+/** The prompt behind a generated image: `description` for a fresh image,
+ *  `instruction` for an edit. */
+function imagePrompt(input: Record<string, unknown>): string {
+  const v = input.description ?? input.instruction;
+  return typeof v === "string" ? v.trim() : "";
 }
 
 export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp, paths, rail }: Props) {
@@ -1393,7 +1417,9 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
         )}
       </button>
 
-      {generatedImages && <GeneratedImagePreview images={generatedImages} />}
+      {generatedImages && (
+        <GeneratedImagePreview images={generatedImages} prompt={imagePrompt(block.input)} />
+      )}
 
       {open && (
         <div className={styles.body}>
