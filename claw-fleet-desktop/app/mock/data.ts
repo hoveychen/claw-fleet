@@ -78,6 +78,22 @@ const MOCK_SESSIONS_SEED: Array<
         deadlineAt: NOW + 2 * 60 * MIN,
         pollCount: 5,
         structuralFailStreak: 0,
+        // Reported progress that stopped moving, so the stalled callout is
+        // visible in mock mode.
+        progress: "Linux 3/5 jobs green",
+        progressFraction: 0.6,
+        progressChangedAt: NOW - 7 * MIN,
+      },
+      {
+        id: "w-mock03",
+        note: "nightly benchmark",
+        created: NOW - 20 * MIN,
+        pollSecs: 60,
+        deadlineAt: NOW + 2 * 60 * MIN,
+        pollCount: 20,
+        structuralFailStreak: 0,
+        // No progress command, only an expect-by: the time-based bar.
+        expectBy: NOW + 10 * MIN,
       },
     ],
   },

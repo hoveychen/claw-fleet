@@ -170,6 +170,13 @@
   white-space: nowrap;
 }
 
+/* A watch whose reported progress stopped moving, or that is past its
+   expected time — same chip, warning colour. */
+.row_watch_stalled {
+  composes: row_handoff;
+  color: var(--color-warning);
+}
+
 /* Live elapsed run time (clock icon + "5分钟"); colour inherits the status accent
    (green busy / amber waiting) so it reads as a "still going" signal. */
 .row_runtime {

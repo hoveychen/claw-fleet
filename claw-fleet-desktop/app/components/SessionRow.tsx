@@ -4,6 +4,7 @@ import { Bot, ChevronRight, Clock, FolderGit2, MessageCircleQuestion, Radar, Way
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isQuietAlive, isQuietAliveSticky, rowBarColor } from "../types";
 import { pendingDecisionState } from "../pendingDecisionState";
+import { watchProgressView } from "../../../shared-ts/watchProgress";
 import { useDecisionStore } from "../store";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
@@ -256,25 +257,49 @@ export const SessionRow = memo(function SessionRow({
                 {s.handoff.hop}/{s.handoff.chainLen}
               </span>
             )}
-            {s.watches?.map((w) => (
-              <span
-                key={w.id}
-                className={styles.row_handoff}
-                title={[
-                  w.note ?? undefined,
-                  t("card.tip_watch", {
-                    elapsed: compactElapsed(w.created),
-                    count: w.pollCount,
-                    poll: w.pollSecs,
-                  }),
-                ]
-                  .filter(Boolean)
-                  .join(" — ")}
-              >
-                <Radar size={10} strokeWidth={1.6} />
-                {compactElapsed(w.created)}·{w.pollCount}
-              </span>
-            ))}
+            {s.watches?.map((w) => {
+              const pv = watchProgressView(w, Date.now());
+              // The row has room for one short token: a percentage, a clipped
+              // status line, or elapsed against the expected wait.
+              const tail =
+                pv.kind === "reported"
+                  ? pv.fraction !== null
+                    ? `${Math.round(pv.fraction * 100)}%`
+                    : pv.text.length > 14
+                      ? `${pv.text.slice(0, 13).trimEnd()}…`
+                      : pv.text
+                  : pv.kind === "time"
+                    ? `${compactElapsed(w.created)}/${compactElapsed(Date.now() - pv.expectedMs)}`
+                    : `${compactElapsed(w.created)}·${w.pollCount}`;
+              const alarming =
+                (pv.kind === "reported" && pv.stalledMs !== null) ||
+                (pv.kind === "time" && pv.overdueMs !== null);
+              return (
+                <span
+                  key={w.id}
+                  className={alarming ? styles.row_watch_stalled : styles.row_handoff}
+                  title={[
+                    w.note ?? undefined,
+                    t("card.tip_watch", {
+                      elapsed: compactElapsed(w.created),
+                      count: w.pollCount,
+                      poll: w.pollSecs,
+                    }),
+                    pv.kind === "reported"
+                      ? t("card.tip_watch_progress", {
+                          progress: pv.text,
+                          since: compactElapsed(w.progressChangedAt ?? w.created),
+                        })
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" — ")}
+                >
+                  <Radar size={10} strokeWidth={1.6} />
+                  {tail}
+                </span>
+              );
+            })}
             {(LIVE_STATUSES.has(s.status) || quiet) && (
               <span
                 className={styles.row_runtime}

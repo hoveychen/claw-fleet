@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Radar } from "lucide-react";
 import type { SessionInfo } from "../types";
+import { watchProgressView } from "../../../shared-ts/watchProgress";
 import styles from "./WatchStatusRow.module.css";
 
 /** Human "1h02m" / "3m40s" / "12s" from a millisecond span. Mirrors
@@ -54,6 +55,7 @@ export function WatchStatusRow({
         // poll count is not reassuring — it is the measure of how long this
         // session has been waiting for something that will never happen.
         const broken = (w.structuralFailStreak ?? 0) > 0;
+        const pv = watchProgressView(w, now);
         const title = [
           w.note ?? undefined,
           broken
@@ -62,6 +64,12 @@ export function WatchStatusRow({
                 reason: w.lastStderr || "—",
               })
             : t("card.tip_watch", { elapsed, count: w.pollCount, poll: w.pollSecs }),
+          pv.kind === "reported"
+            ? t("card.tip_watch_progress", {
+                progress: pv.text,
+                since: formatElapsed(now - (w.progressChangedAt ?? w.created)),
+              })
+            : undefined,
         ]
           .filter(Boolean)
           .join(" — ");
@@ -80,9 +88,34 @@ export function WatchStatusRow({
                 <span aria-hidden>·</span>
               </>
             )}
-            {broken
-              ? t("card.watch_chip_broken", { count: w.structuralFailStreak })
-              : t("card.watch_chip", { elapsed, count: w.pollCount })}
+            {broken ? (
+              t("card.watch_chip_broken", { count: w.structuralFailStreak })
+            ) : pv.kind === "reported" ? (
+              <>
+                {pv.fraction !== null && <ProgressBar fraction={pv.fraction} />}
+                <span className={styles.watch_progress}>{pv.text}</span>
+                {pv.stalledMs !== null && (
+                  <span className={styles.watch_stalled}>
+                    {t("card.watch_stalled", { duration: formatElapsed(pv.stalledMs) })}
+                  </span>
+                )}
+                <span aria-hidden>·</span>
+                {elapsed}
+              </>
+            ) : pv.kind === "time" ? (
+              <>
+                <ProgressBar fraction={pv.fraction} overdue={pv.overdueMs !== null} />
+                {pv.overdueMs !== null ? (
+                  <span className={styles.watch_stalled}>
+                    {t("card.watch_overdue", { elapsed, over: formatElapsed(pv.overdueMs) })}
+                  </span>
+                ) : (
+                  t("card.watch_chip_time", { elapsed, expected: formatElapsed(pv.expectedMs) })
+                )}
+              </>
+            ) : (
+              t("card.watch_chip", { elapsed, count: w.pollCount })
+            )}
           </span>
         );
       })}
@@ -90,4 +123,23 @@ export function WatchStatusRow({
   );
 
   return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
+}
+
+/** A 36px inline bar; `overdue` turns it amber once the expected time has passed. */
+function ProgressBar({ fraction, overdue = false }: { fraction: number; overdue?: boolean }) {
+  const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
+  return (
+    <span
+      className={styles.watch_bar}
+      role="progressbar"
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <span
+        className={overdue ? styles.watch_bar_fill_overdue : styles.watch_bar_fill}
+        style={{ width: `${pct}%` }}
+      />
+    </span>
+  );
 }
