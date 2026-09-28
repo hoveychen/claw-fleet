@@ -1077,24 +1077,73 @@ fn is_data_heredoc_head(head: &str) -> bool {
     matches!(head, "cat" | "tee")
 }
 
+/// A data heredoc and the files its command writes the body to.
+struct DataHeredoc {
+    body: String,
+    targets: Vec<String>,
+}
+
 /// Bodies of every data heredoc in `cmd`, in source order.  Empty when the
 /// command does not parse — callers then keep scanning the full string.
+///
+/// A body written to a file that the same command then runs (`cat > r.sh
+/// <<EOF … EOF; bash r.sh`) is executed code, not data, and is left out.
 pub fn data_heredoc_bodies(cmd: &str) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut found = Vec::new();
     let parser = DefaultParser::new(Lexer::new(cmd.chars()));
     for top in parser {
         match top {
-            Ok(t) => data_heredocs_in_command(&t.0, false, &mut out),
+            Ok(t) => data_heredocs_in_command(&t.0, false, &mut found),
             Err(_) => return Vec::new(),
         }
     }
-    out
+    if found.is_empty() {
+        return Vec::new();
+    }
+    let commands = extract_simple_commands(cmd);
+    found
+        .into_iter()
+        .filter(|h| !h.targets.iter().any(|t| is_file_executed(t, &commands)))
+        .map(|h| h.body)
+        .collect()
+}
+
+/// Heads that run a file named among their arguments.
+fn is_script_runner(head: &str) -> bool {
+    matches!(
+        head,
+        "bash" | "sh" | "zsh" | "python" | "python2" | "python3" | "node" | "source" | "."
+    )
+}
+
+fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// `true` if any command runs `target`, either as `./target` or through a
+/// script runner.  Compares file names only, so `r.sh`, `./r.sh` and
+/// `/tmp/r.sh` all count — a false match costs a prompt, a miss costs a hole.
+fn is_file_executed(target: &str, commands: &[SimpleCommand]) -> bool {
+    let name = file_name(target);
+    if name.is_empty() {
+        return false;
+    }
+    commands.iter().any(|c| {
+        let argv = strip_wrappers(&c.argv);
+        let Some(head) = argv.first() else {
+            return false;
+        };
+        if head.contains('/') && file_name(head) == name {
+            return true;
+        }
+        is_script_runner(file_name(head)) && argv[1..].iter().any(|a| file_name(a) == name)
+    })
 }
 
 fn data_heredocs_in_command(
     cmd: &Command<AndOrList<DefaultListableCommand>>,
     piped: bool,
-    out: &mut Vec<String>,
+    out: &mut Vec<DataHeredoc>,
 ) {
     let (Command::Job(list) | Command::List(list)) = cmd;
     data_heredocs_in_listable(&list.first, piped, out);
@@ -1104,7 +1153,7 @@ fn data_heredocs_in_command(
     }
 }
 
-fn data_heredocs_in_listable(l: &DefaultListableCommand, piped: bool, out: &mut Vec<String>) {
+fn data_heredocs_in_listable(l: &DefaultListableCommand, piped: bool, out: &mut Vec<DataHeredoc>) {
     match l {
         ListableCommand::Single(p) => data_heredocs_in_pipeable(p, piped, out),
         ListableCommand::Pipe(_, items) => {
@@ -1116,22 +1165,50 @@ fn data_heredocs_in_listable(l: &DefaultListableCommand, piped: bool, out: &mut 
     }
 }
 
-fn data_heredocs_in_pipeable(p: &DefaultPipeableCommand, piped: bool, out: &mut Vec<String>) {
+fn data_heredocs_in_pipeable(p: &DefaultPipeableCommand, piped: bool, out: &mut Vec<DataHeredoc>) {
     match p {
         PipeableCommand::Simple(s) => {
             if piped {
                 return;
             }
-            let head = s.redirects_or_cmd_words.iter().find_map(|r| match r {
-                RedirectOrCmdWord::CmdWord(w) => Some(display_top_word(w)),
-                _ => None,
-            });
-            if !head.as_deref().is_some_and(is_data_heredoc_head) {
+            let words: Vec<String> = s
+                .redirects_or_cmd_words
+                .iter()
+                .filter_map(|r| match r {
+                    RedirectOrCmdWord::CmdWord(w) => Some(display_top_word(w)),
+                    _ => None,
+                })
+                .collect();
+            let Some(head) = words.first() else {
                 return;
+            };
+            if !is_data_heredoc_head(head) {
+                return;
+            }
+            // Where the body lands: `> f` / `>> f` targets, plus `tee`'s
+            // file arguments.
+            let mut targets: Vec<String> = s
+                .redirects_or_cmd_words
+                .iter()
+                .filter_map(|r| match r {
+                    RedirectOrCmdWord::Redirect(
+                        Redirect::Write(_, w)
+                        | Redirect::Append(_, w)
+                        | Redirect::Clobber(_, w)
+                        | Redirect::ReadWrite(_, w),
+                    ) => Some(display_top_word(w)),
+                    _ => None,
+                })
+                .collect();
+            if head == "tee" {
+                targets.extend(words[1..].iter().filter(|a| !a.starts_with('-')).cloned());
             }
             for r in &s.redirects_or_cmd_words {
                 if let RedirectOrCmdWord::Redirect(Redirect::Heredoc(_, w)) = r {
-                    out.push(display_top_word(w));
+                    out.push(DataHeredoc {
+                        body: display_top_word(w),
+                        targets: targets.clone(),
+                    });
                 }
             }
         }
@@ -1141,7 +1218,7 @@ fn data_heredocs_in_pipeable(p: &DefaultPipeableCommand, piped: bool, out: &mut 
     }
 }
 
-fn data_heredocs_in_compound(c: &DefaultCompoundCommand, piped: bool, out: &mut Vec<String>) {
+fn data_heredocs_in_compound(c: &DefaultCompoundCommand, piped: bool, out: &mut Vec<DataHeredoc>) {
     let cmds: Vec<&TopLevelCommand<String>> = match &c.kind {
         CompoundCommandKind::Brace(cmds) | CompoundCommandKind::Subshell(cmds) => {
             cmds.iter().collect()
