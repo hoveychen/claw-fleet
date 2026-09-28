@@ -1001,6 +1001,155 @@ fn splice_substs_from_simple(s: &SimpleT, b: &mut ViewBuilder, next: &mut Option
     }
 }
 
+// ── Data heredocs: bodies that are written somewhere, never executed ───────
+//
+// `cat > notes.md <<'EOF' … EOF` is how agents write files, and the body is
+// arbitrary prose.  Substring audit rules (`"git commit "`, `"rm -rf"`) that
+// scan the raw command string then fire on quoted text in the document.
+// These helpers find such bodies so the classifier can drop them before the
+// substring pass.
+//
+// Deliberately narrow: only `cat` / `tee` heads, only commands whose stdout is
+// not piped on to another command (`cat <<EOF | sh` executes its body), and
+// only commands reachable at the top level — bodies inside `$(...)` or a
+// `bash -c` script are left alone because they may feed an interpreter.
+
+/// Commands whose heredoc stdin is treated as inert data.
+fn is_data_heredoc_head(head: &str) -> bool {
+    matches!(head, "cat" | "tee")
+}
+
+/// Bodies of every data heredoc in `cmd`, in source order.  Empty when the
+/// command does not parse — callers then keep scanning the full string.
+pub fn data_heredoc_bodies(cmd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let parser = DefaultParser::new(Lexer::new(cmd.chars()));
+    for top in parser {
+        match top {
+            Ok(t) => data_heredocs_in_command(&t.0, false, &mut out),
+            Err(_) => return Vec::new(),
+        }
+    }
+    out
+}
+
+fn data_heredocs_in_command(
+    cmd: &Command<AndOrList<DefaultListableCommand>>,
+    piped: bool,
+    out: &mut Vec<String>,
+) {
+    let (Command::Job(list) | Command::List(list)) = cmd;
+    data_heredocs_in_listable(&list.first, piped, out);
+    for ao in &list.rest {
+        let (AndOr::And(body) | AndOr::Or(body)) = ao;
+        data_heredocs_in_listable(body, piped, out);
+    }
+}
+
+fn data_heredocs_in_listable(l: &DefaultListableCommand, piped: bool, out: &mut Vec<String>) {
+    match l {
+        ListableCommand::Single(p) => data_heredocs_in_pipeable(p, piped, out),
+        ListableCommand::Pipe(_, items) => {
+            for (i, p) in items.iter().enumerate() {
+                // Every stage but the last hands its stdout to the next one.
+                data_heredocs_in_pipeable(p, piped || i + 1 < items.len(), out);
+            }
+        }
+    }
+}
+
+fn data_heredocs_in_pipeable(p: &DefaultPipeableCommand, piped: bool, out: &mut Vec<String>) {
+    match p {
+        PipeableCommand::Simple(s) => {
+            if piped {
+                return;
+            }
+            let head = s.redirects_or_cmd_words.iter().find_map(|r| match r {
+                RedirectOrCmdWord::CmdWord(w) => Some(display_top_word(w)),
+                _ => None,
+            });
+            if !head.as_deref().is_some_and(is_data_heredoc_head) {
+                return;
+            }
+            for r in &s.redirects_or_cmd_words {
+                if let RedirectOrCmdWord::Redirect(Redirect::Heredoc(_, w)) = r {
+                    out.push(display_top_word(w));
+                }
+            }
+        }
+        PipeableCommand::Compound(c) => data_heredocs_in_compound(c, piped, out),
+        // A function body only runs when called; nothing to scrub.
+        PipeableCommand::FunctionDef(_, _) => {}
+    }
+}
+
+fn data_heredocs_in_compound(c: &DefaultCompoundCommand, piped: bool, out: &mut Vec<String>) {
+    let cmds: Vec<&TopLevelCommand<String>> = match &c.kind {
+        CompoundCommandKind::Brace(cmds) | CompoundCommandKind::Subshell(cmds) => {
+            cmds.iter().collect()
+        }
+        CompoundCommandKind::While(GuardBodyPair { guard, body })
+        | CompoundCommandKind::Until(GuardBodyPair { guard, body }) => {
+            guard.iter().chain(body.iter()).collect()
+        }
+        CompoundCommandKind::If {
+            conditionals,
+            else_branch,
+        } => {
+            let mut all = Vec::new();
+            for gb in conditionals {
+                all.extend(gb.guard.iter());
+                all.extend(gb.body.iter());
+            }
+            if let Some(eb) = else_branch {
+                all.extend(eb.iter());
+            }
+            all
+        }
+        CompoundCommandKind::For { body, .. } => body.iter().collect(),
+        CompoundCommandKind::Case { arms, .. } => {
+            arms.iter().flat_map(|a| a.body.iter()).collect()
+        }
+    };
+    for child in cmds {
+        data_heredocs_in_command(&child.0, piped, out);
+    }
+}
+
+/// `cmd` with every data heredoc body cut out, for substring audit rules.
+///
+/// A body is only removed where it appears verbatim at the start of a line
+/// after the previous removal point; a body whose parsed form differs from
+/// the source text (escaped `\$` in an unquoted heredoc) is left in place, so
+/// the failure mode is an extra prompt, never a missed one.
+pub fn strip_data_heredoc_bodies(cmd: &str) -> String {
+    let bodies = data_heredoc_bodies(cmd);
+    if bodies.is_empty() {
+        return cmd.to_string();
+    }
+    let mut out = String::with_capacity(cmd.len());
+    let mut rest = cmd;
+    for body in bodies.iter().filter(|b| !b.is_empty()) {
+        let mut from = 0usize;
+        let hit = loop {
+            let Some(rel) = rest[from..].find(body.as_str()) else {
+                break None;
+            };
+            let at = from + rel;
+            if at > 0 && rest[..at].ends_with('\n') {
+                break Some(at);
+            }
+            from = at + rest[at..].chars().next().map_or(1, |c| c.len_utf8());
+        };
+        if let Some(at) = hit {
+            out.push_str(&rest[..at]);
+            rest = &rest[at + body.len()..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 // ── Display-aware flattening: preserve `$VAR` / `$(...)` literally ─────────
 //
 // The matching path (`flatten_top_word`) collapses Param/Subst to "" because
