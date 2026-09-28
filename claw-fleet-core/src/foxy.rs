@@ -303,37 +303,92 @@ pub async fn fetch_custody() -> FoxyCustody {
     }
 }
 
-/// Fetch the in-use account's usage from a running foxy daemon, or `None` if
-/// foxy isn't reachable. Two requests: `/api/cred/status` (cheap, instant) for
-/// the in-use account id, then `/api/accounts` (can take a few seconds) for the
-/// usage. `/api/accounts` gets a generous timeout per foxy's own guidance.
-pub async fn fetch_in_use_account() -> Option<FoxyAccount> {
-    let port = read_port()?;
+/// Outcome of asking foxy for the in-use Claude account.
+///
+/// Only `NotRunning` and `NoClaudeAccount` permit the caller to fall back to
+/// calling Anthropic directly. When foxy is running and injecting an account,
+/// the keychain token *is that pooled account's*, and foxy's vault is already
+/// polling its usage endpoint; a direct call from us is a second poller on the
+/// same token. Anthropic answers the extra load with a 429 carrying a one-hour
+/// `Retry-After`, and the vault's own usage poll for that account then freezes
+/// for as long as we keep going. So a foxy hiccup (slow `/api/accounts`, the
+/// account momentarily missing from the list) must surface as an error, not as
+/// a silent switch to direct polling every tick.
+pub enum FoxyLookup {
+    Account(FoxyAccount),
+    /// No port file, or nothing listening on it (a stale file left behind).
+    NotRunning,
+    /// foxy answered but holds no Claude account; the keychain is the user's own.
+    NoClaudeAccount,
+    /// foxy is running and manages a Claude account, but this read failed.
+    Unavailable(String),
+}
+
+/// Pure tail of [`fetch_in_use_account`], split for testing: given the managed
+/// id from `/api/cred/status` and the `/api/accounts` body, decide the outcome.
+fn lookup_from(managed_id: i64, accounts: &Value) -> FoxyLookup {
+    if managed_id == 0 {
+        return FoxyLookup::NoClaudeAccount;
+    }
+    match map_in_use(accounts, managed_id) {
+        Some(a) => FoxyLookup::Account(a),
+        None => FoxyLookup::Unavailable(format!(
+            "foxy-switcher manages account {managed_id} but /api/accounts does not list it"
+        )),
+    }
+}
+
+/// Fetch the in-use account's usage from a running foxy daemon. Two requests:
+/// `/api/cred/status` (cheap, instant) for the in-use account id, then
+/// `/api/accounts` (can take a few seconds) for the usage. `/api/accounts` gets
+/// a generous timeout per foxy's own guidance. See [`FoxyLookup`] for which
+/// outcomes allow a direct-Anthropic fallback.
+pub async fn fetch_in_use_account() -> FoxyLookup {
+    let Some(port) = read_port() else {
+        return FoxyLookup::NotRunning;
+    };
     let base = format!("http://127.0.0.1:{port}");
     let client = reqwest::Client::new();
 
-    let status: Value = client
+    let status = match client
         .get(format!("{base}/api/cred/status"))
         .timeout(Duration::from_secs(3))
         .send()
         .await
-        .ok()?
-        .json()
-        .await
-        .ok()?;
-    let managed_id = status.get("managed_account_id")?.as_i64()?;
+    {
+        Ok(r) => r,
+        // Connection refused: the port file outlived the daemon.
+        Err(e) if e.is_connect() => return FoxyLookup::NotRunning,
+        Err(e) => return FoxyLookup::Unavailable(format!("foxy /api/cred/status: {e}")),
+    };
+    let status: Value = match status.json().await {
+        Ok(v) => v,
+        Err(e) => return FoxyLookup::Unavailable(format!("foxy /api/cred/status: {e}")),
+    };
+    let managed_id = status
+        .get("managed_account_id")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    if managed_id == 0 {
+        return FoxyLookup::NoClaudeAccount;
+    }
 
-    let accounts: Value = client
-        .get(format!("{base}/api/accounts"))
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await
-        .ok()?
-        .json()
-        .await
-        .ok()?;
+    let accounts: Value = match async {
+        client
+            .get(format!("{base}/api/accounts"))
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return FoxyLookup::Unavailable(format!("foxy /api/accounts: {e}")),
+    };
 
-    map_in_use(&accounts, managed_id)
+    lookup_from(managed_id, &accounts)
 }
 
 /// Fetch the in-use **Codex** account from a running foxy daemon, or `None` if
@@ -494,6 +549,36 @@ mod tests {
     #[test]
     fn missing_managed_account_yields_none() {
         assert!(map_in_use(&sample_accounts(), 999).is_none());
+    }
+
+    #[test]
+    fn lookup_hands_back_the_managed_account() {
+        assert!(matches!(
+            lookup_from(1, &sample_accounts()),
+            FoxyLookup::Account(a) if a.email == "you@example.com"
+        ));
+    }
+
+    #[test]
+    fn lookup_without_a_managed_account_allows_direct_fallback() {
+        assert!(matches!(
+            lookup_from(0, &sample_accounts()),
+            FoxyLookup::NoClaudeAccount
+        ));
+    }
+
+    // The keychain holds pooled account 999's token here, so falling back to a
+    // direct Anthropic call would poll that account behind the vault's back.
+    #[test]
+    fn lookup_of_an_unlisted_managed_account_is_unavailable_not_a_fallback() {
+        assert!(matches!(
+            lookup_from(999, &sample_accounts()),
+            FoxyLookup::Unavailable(_)
+        ));
+        assert!(matches!(
+            lookup_from(999, &json!({})),
+            FoxyLookup::Unavailable(_)
+        ));
     }
 
     // ── Codex accounts ───────────────────────────────────────────────────────
