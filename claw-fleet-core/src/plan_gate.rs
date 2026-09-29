@@ -40,8 +40,9 @@ use crate::task_progress::TaskProgressRecord;
 ///    back to work the boss just called off.
 ///
 /// Past the hatches: the gate fires when the focused plan still has a pending
-/// P-task, or when it is complete but an ancestor still has one (the backtrack
-/// case — now enforced rather than suggested).
+/// P-task, or when it is complete but its tree still has a pending plan in
+/// [`pt::next_plan_in_tree`] order (the backtrack case — now enforced rather
+/// than suggested).
 pub fn gate_reason_in(
     cwd: &Path,
     focus: Option<&TaskProgressRecord>,
@@ -87,11 +88,12 @@ pub fn gate_reason_in(
     let target = pt::resolve_backtrack_target(cwd, plan_id)?;
     let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
     Some(format!(
-        "⤴ Fleet 计划门:子 plan `{plan_id}` 已全部完成,但它的父 plan `{parent}` \
-         尚有未完成任务——这棵计划树还没走完,本 turn 不能结束。\n\n\
-         Fleet 已把你的焦点切回 `{parent}`。下一个要做的是:{next}\n\n\
-         直接继续执行,不要因为子 plan 完成就收工,也不要停下来汇报「子计划完成了」。",
-        parent = target.plan_id,
+        "⤴ Fleet 计划门:plan `{plan_id}` 已全部完成,但这棵计划树还没走完,本 turn 不能结束。\n\n\
+         按计划树顺序(子计划先于父计划,兄弟按文件顺序),下一个是 plan `{next_plan}`,\
+         要做的是:{next}\n\n\
+         先 `fleet plan resume {next_plan}` 认领它,然后直接继续执行,\
+         不要因为一个 plan 完成就收工,也不要停下来汇报「子计划完成了」。",
+        next_plan = target.plan_id,
     ))
 }
 

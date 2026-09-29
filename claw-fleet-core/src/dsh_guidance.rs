@@ -182,7 +182,7 @@ sessions, whose guidance points at MCP first):\n\
   - `fleet plan create <id> --title \"...\" [--parent <id> | --root \
 --root-reason \"...\"]` — add a new plan block. **A plan you author while \
 executing another plan defaults to being that plan's child** — no flag \
-required, and Fleet walks you back to the parent when the child completes. Both \
+required, and Fleet walks you on through the tree when the child completes. Both \
 flags only override that default: `--parent <id>` attaches it elsewhere; \
 `--root` starts a separate top-level tree and, while you are on a plan, **is \
 refused without** `--root-reason \"<why this work does not belong under the \
@@ -221,8 +221,9 @@ hand-edit TASKS.md to work around a missing-session-id warning.\n\
 - Use `- [ ]` pending / `- [x]` done. **Only edit your own block**; treat \
 every other plan's block as another session's in-flight work.\n\
 - **Child plans backtrack automatically:** when you `fleet plan check` the \
-last box of a plan created with `--parent`, Fleet re-points focus to the \
-nearest unfinished ancestor and prints the next P — follow it, do NOT stop \
+last box of a plan, Fleet re-points focus to the next \
+unfinished plan in tree order (children before parent, siblings in file order) \
+and prints the next P — follow it, do NOT stop \
 just because the child finished.\n\
 \n\
 ## Rule 3 — Worktree-based workflow (GLOBAL)\n\

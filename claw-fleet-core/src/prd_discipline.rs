@@ -123,7 +123,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 
 ### 子计划与回溯
 
-计划中途要分出一条必须先完成的旁支时，用 `--parent <current-plan-id>` 建成子计划。用 `fleet plan check` 勾掉子计划**最后**一个框时，Fleet 沿 `parent` 链走到最近的仍有待办的祖先，把你的焦点指回它并打印下一个要恢复的 P。照指令继续，不要因为子计划完成就结束回合。子计划可嵌套，向上走会跳过已完成的祖先。没有 `--parent` 的计划是顶层，完成它就结束。
+计划中途要分出一条必须先完成的旁支时，用 `--parent <current-plan-id>` 建成子计划。用 `fleet plan check` 勾掉一个计划**最后**一个框时，Fleet 按计划树顺序（子计划先于父计划，兄弟按文件顺序）找到下一个还有待办的计划——先是它自己未完成的子计划，再是未完成的兄弟子计划，最后才是父计划自己剩下的 P——把你的焦点指过去并打印下一个要做的 P。照指令继续，不要因为子计划完成就结束回合。子计划可嵌套，向上走会跳过已完成的祖先。没有 `--parent` 的计划是顶层，完成它就结束。
 
 ## Rule 3 —— 基于 worktree 的特性工作流
 
@@ -338,7 +338,7 @@ Any work that starts with "first figure out …", where you cannot yet name the 
 
 ### Sub-plans and backtracking
 
-When a plan needs a side branch that must land first, create it with `--parent <current-plan-id>`. When `fleet plan check` ticks the **last** box of a sub-plan, Fleet walks the `parent` chain to the nearest ancestor that still has unchecked P-tasks, points your focus back at it and prints the next P to resume. Follow that instruction — do not end the turn just because the sub-plan finished. Sub-plans nest, and walking up skips completed ancestors. A plan with no `--parent` is top-level; finishing it ends the work.
+When a plan needs a side branch that must land first, create it with `--parent <current-plan-id>`. When `fleet plan check` ticks the **last** box of a plan, Fleet finds the next plan with unchecked P-tasks in tree order (children before their parent, siblings in file order) — the plan's own unfinished children first, then unfinished sibling sub-plans, and only then the parent's own remaining P-tasks — points your focus at it and prints the next P to resume. Follow that instruction — do not end the turn just because the sub-plan finished. Sub-plans nest, and walking up skips completed ancestors. A plan with no `--parent` is top-level; finishing it ends the work.
 
 ## Rule 3 — Worktree-based feature workflow
 
