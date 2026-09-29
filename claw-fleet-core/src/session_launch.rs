@@ -623,6 +623,8 @@ pub fn spawn_claude_detached_with_envs(
         .spawn()
         .map_err(|e| format!("spawn claude failed: {e}"))?;
     let pid = child.id();
+    // Counted until the reaper below sees the child exit; see `agent_slots`.
+    let slot = crate::agent_slots::track();
 
     // rca-wrapped launch: drain the piped stderr on its own thread, teeing it to
     // the log and watching for the transport-failure markers. Must be spawned
@@ -673,6 +675,7 @@ pub fn spawn_claude_detached_with_envs(
         .flatten();
     std::thread::spawn(move || {
         let result = child.wait();
+        drop(slot);
         let success = matches!(&result, Ok(status) if status.success());
         // After the child is gone, so nothing can still be writing: anything in
         // the local mirror is output that was meant for the remote host.

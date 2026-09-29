@@ -293,6 +293,30 @@ impl AcpAgent {
         let (listed, images) = super::attachments::split_for_tool(tool, &attachments);
         let prompt = super::attachments::prompt_with_attachments(&req.prompt_text(), &listed);
 
+        // Every turn is a fresh `claude -p`, so this is where a turn queues when
+        // the container is at its agent cap (see `agent_slots`). The guard is
+        // held across the spawn/resume call below so the new process is counted
+        // before the next queued turn looks.
+        let admitted = match crate::agent_slots::admit(
+            || self.is_closed() || self.take_cancelled(&req.session_id),
+            |busy| {
+                self.notify_update(
+                    &req.session_id,
+                    SessionUpdate::thought(format!(
+                        "排队中：当前已有 {busy} 个任务在运行，前面的任务结束后会自动开始。"
+                    )),
+                )
+            },
+        ) {
+            Ok(g) => g,
+            Err(()) => {
+                return serde_json::to_value(PromptResponse {
+                    stop_reason: StopReason::Cancelled,
+                })
+                .map_err(|e| RpcError::internal(e.to_string()));
+            }
+        };
+
         let internal_id = match internal_id {
             // Follow-up turn: resume the existing process.
             Some(id) => {
@@ -333,6 +357,9 @@ impl AcpAgent {
                 actual
             }
         };
+        // Released before the turn runs: holding it for the turn would queue
+        // everyone behind this one prompt instead of behind the cap.
+        drop(admitted);
 
         let stop_reason = self.run_turn(&req.session_id, &internal_id);
         serde_json::to_value(PromptResponse { stop_reason })

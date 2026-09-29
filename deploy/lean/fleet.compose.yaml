@@ -30,6 +30,9 @@ services:
       # Default Claude Code model for runs that name none (empty = keep the
       # Claude Code CLI's own default).
       FLEET_CLAUDE_MODEL: "${FLEET_CLAUDE_MODEL-opus}"
+      # Max agent processes alive at once; further ACP turns queue until one
+      # exits. Size it to the container's memory limit (empty/0 = no cap).
+      FLEET_MAX_CONCURRENT_AGENTS: "${FLEET_MAX_CONCURRENT_AGENTS:-}"
       # Wait for the cred store to inject before serving (1=default, 0=skip).
       FLEET_WAIT_FOR_CREDS: "${FLEET_WAIT_FOR_CREDS:-1}"
       # Credential-store wiring (P3). Leave unset to disable.
