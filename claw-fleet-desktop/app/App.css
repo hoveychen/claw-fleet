@@ -202,7 +202,9 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --badge-delegating-bg: #2a1a3a;  --badge-delegating-fg: #c084fc;
 
   /* Tag colors */
-  --tag-main-bg: #1e2a40;   --tag-main-fg: #93c5fd;
+  /* Main is the default scope, so it stays neutral; only the unusual scopes
+     (subagent, skill) get a hue. */
+  --tag-main-bg: rgba(255, 255, 255, 0.08);   --tag-main-fg: var(--color-text-dim);
   --tag-sub-bg: #2d1e40;    --tag-sub-fg: #c4b5fd;
   --tag-skill-bg: #3a1e0a;  --tag-skill-fg: #f97316;
 
@@ -391,7 +393,7 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --badge-delegating-bg: #f3e8ff;  --badge-delegating-fg: #7e22ce;
 
   /* Tag colors — light */
-  --tag-main-bg: #dbeafe;   --tag-main-fg: #1d4ed8;
+  --tag-main-bg: rgba(32, 28, 18, 0.07);   --tag-main-fg: var(--color-text-dim);
   --tag-sub-bg: #f3e8ff;    --tag-sub-fg: #7e22ce;
   --tag-skill-bg: #fee9d9;  --tag-skill-fg: #b3400a;
 

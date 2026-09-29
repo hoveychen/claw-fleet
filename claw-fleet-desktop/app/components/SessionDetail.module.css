@@ -196,7 +196,7 @@
 }
 
 .workspace_chip {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
   background: var(--color-bg-secondary);
@@ -210,7 +210,7 @@
 
 .tag_main,
 .tag_subagent {
-  font-size: 10px;
+  font-size: 12px;
   padding: 2px 6px;
   border-radius: var(--radius-xs);
   white-space: nowrap;
@@ -238,7 +238,7 @@
 .agent_scope_chevron { opacity: 0.7; margin-right: -1px; }
 
 .slug {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -249,7 +249,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
@@ -273,7 +273,7 @@
   min-width: 22px;
   height: 18px;
   padding: 0 5px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   font-family: inherit;
   color: var(--color-text-dim);
@@ -723,7 +723,7 @@
   background: none;
   color: var(--color-text-dim);
   cursor: pointer;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1;
   padding: 3px 4px;
   border-radius: var(--radius-xs);
@@ -893,7 +893,7 @@
    the numbers that move. */
 .agent_card_spec {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 12px;
   color: var(--color-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;

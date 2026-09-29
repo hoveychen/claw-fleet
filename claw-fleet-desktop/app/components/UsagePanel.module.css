@@ -52,7 +52,7 @@
 }
 
 .tool_header {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
   display: flex;
@@ -83,7 +83,7 @@
 }
 
 .plan_badge {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary, var(--color-text-dim));
   background: var(--color-bg-sunken);
@@ -100,7 +100,7 @@
    so the user can see which foxy-managed account is currently in use without
    leaving the usage panel. */
 .account_line {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 2px 0 6px 0;
   overflow: hidden;
@@ -129,12 +129,12 @@
 }
 
 .usage_label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text);
 }
 
 .usage_pct {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
@@ -154,16 +154,20 @@
   transition: width 0.3s ease;
 }
 
+/* 60–85%: same quiet grey as a normal bar — the percentage beside it already
+   says how full it is. Only the critical band takes the accent, so the one
+   orange bar on screen is the one worth acting on. */
 .bar_fill_warn {
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-text-dim);
+  opacity: 0.55;
   border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
 
 .bar_fill_critical {
   height: 100%;
-  background: var(--color-warning);
+  background: var(--color-accent);
   border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
@@ -187,18 +191,18 @@
 }
 
 .usage_reset {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
 .usage_prev {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
 
 .trend_faster {
-  color: #fb923c;
+  color: var(--color-text-dim);
 }
 
 .trend_slower {
@@ -219,7 +223,7 @@
 }
 
 .last_updated {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--color-text-dim);
   opacity: 0.6;
 }
@@ -235,7 +239,7 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--color-text-dim);
   cursor: pointer;
   user-select: none;
@@ -270,13 +274,13 @@
 /* ── Misc ──────────────────────────────────────────────────────────────── */
 
 .dim {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 0;
 }
 
 .error {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-error);
   margin: 0;
   display: flex;
@@ -303,7 +307,7 @@
   color: var(--color-error);
   border-radius: var(--radius-xs);
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   flex-shrink: 0;
@@ -322,7 +326,7 @@
   color: var(--color-text-dim);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   text-align: center;
   transition: background 0.12s, color 0.12s, border-color 0.12s;

@@ -93,7 +93,7 @@
    read/unread axis gone that left every row permanently in the "already read"
    grey, so the base state is now the bright one. */
 .row_title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text);
   /* 500, not 400: at 400 the title sits at the same weight as the grey preview
      line under it and the whole row reads as a paragraph of prose rather than a
@@ -114,7 +114,7 @@
    card view's `.preview` plays. One line only, so the row height stays
    uniform down the rail; the full text lives in the row tooltip. */
 .row_preview {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   line-height: 1.35;
   white-space: nowrap;
@@ -143,7 +143,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
@@ -154,16 +154,16 @@
   white-space: nowrap;
 }
 
-/* Relay-chain position (waypoints icon + "2/3"); tinted away from the dim meta
-   chips so a handed-off session is spottable while scanning the list. The
-   expandable chain itself lives in the detail column. */
+/* Relay-chain position (waypoints icon + "2/3"). Dim like the other meta
+   chips: colour in the row is reserved for the status dot (running) and the
+   decision chip (needs you). The expandable chain lives in the detail column. */
 .row_handoff {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
-  color: var(--color-accent-tool);
+  font-size: 12px;
+  color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
   padding: 1px 5px;
@@ -177,14 +177,14 @@
   color: var(--color-warning);
 }
 
-/* Live elapsed run time (clock icon + "5分钟"); colour inherits the status accent
-   (green busy / amber waiting) so it reads as a "still going" signal. */
+/* Live elapsed run time (clock icon + "5分钟"). Stays dim — the status dot
+   beside the title already carries the busy/waiting colour. */
 .row_runtime {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
@@ -192,17 +192,16 @@
   white-space: nowrap;
 }
 
-/* Running-subagent count (bot icon + N). Colour inherits the status accent via
-   an inline style (green while delegating), so it reads as a live "there are N
-   agents working under this one" signal — the reason the row's activity time can
-   look fresh while the parent's own last message is old. */
+/* Running-subagent count (bot icon + N): "there are N agents working under
+   this one" — the reason the row's activity time can look fresh while the
+   parent's own last message is old. Dim; the status dot carries the colour. */
 .row_subagents {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
-  color: var(--color-success);
+  font-size: 12px;
+  color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
   padding: 1px 5px;
@@ -211,13 +210,13 @@
 
 .row_time {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   white-space: nowrap;
 }
 
 .row_snippet {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   line-height: 1.4;
   display: -webkit-box;
@@ -300,12 +299,20 @@
   color: var(--color-text-dim);
   transition:
     color 0.15s,
-    transform 0.1s;
+    transform 0.1s,
+    opacity 0.12s;
 }
 
 .mark_toggle:hover {
   transform: scale(1.12);
   color: var(--color-text);
+}
+
+/* An unmarked circle on every row is noise while scanning the list, so it only
+   appears on hover or keyboard focus. Rows already marked done / abandoned keep
+   theirs: there the icon is a status, not just an affordance. */
+.row_wrap:not(:hover):not(:focus-within) .mark_toggle[data-done="false"]:not([data-outcome]) {
+  opacity: 0;
 }
 
 .mark_toggle[data-done="true"] {
@@ -328,7 +335,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-accent);
   background: var(--color-bg-tool);
   border-radius: 5px;

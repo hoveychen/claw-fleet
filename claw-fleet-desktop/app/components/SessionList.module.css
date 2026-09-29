@@ -320,11 +320,11 @@
   text-overflow: ellipsis;
 }
 
-/* Rolled-up badges for the tab whose items are currently hidden — same red /
-   green vocabulary as .nav_badge / .nav_badge_running on the items. */
+/* Rolled-up badges for the tab whose items are currently hidden — same
+   red-alert / neutral-count vocabulary as .nav_badge / .nav_badge_running. */
 .nav_tab_badge,
 .nav_tab_badge_running {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: var(--radius-md);
   padding: 0 4px;
@@ -340,8 +340,8 @@
 }
 
 .nav_tab_badge_running {
-  background: var(--color-success);
-  color: var(--color-bg-card);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
 }
 
 .nav_tab_dot {
@@ -415,13 +415,14 @@
   flex-shrink: 0;
 }
 
-/* Green variant for the 仓库 nav badge — matches FilesView's per-repo running
-   badge (.ws_badge) so "running command" reads the same across both surfaces. */
+/* Running-command count on the 仓库 nav item — matches FilesView's per-repo
+   badge (.ws_badge) so "running command" reads the same across both surfaces.
+   Neutral: a count is information, not a call to act. */
 .nav_badge_running {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
-  background: var(--color-success);
-  color: var(--color-bg-card);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
   border-radius: var(--radius-md);
   padding: 1px 6px;
   min-width: 18px;

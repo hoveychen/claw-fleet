@@ -309,7 +309,6 @@ export const SessionRow = memo(function SessionRow({
             {(LIVE_STATUSES.has(s.status) || quiet) && (
               <span
                 className={styles.row_runtime}
-                style={{ color: runColor ?? undefined }}
                 title={new Date(s.createdAtMs).toLocaleString()}
               >
                 <Clock size={10} strokeWidth={1.6} />
@@ -319,7 +318,6 @@ export const SessionRow = memo(function SessionRow({
             {s.runningSubagentCount > 0 && (
               <span
                 className={styles.row_subagents}
-                style={{ color: runColor ?? undefined }}
                 title={t("history.running_subagents", {
                   count: s.runningSubagentCount,
                 })}
