@@ -17,7 +17,7 @@
 
 /* Interrupt: the gentle tier. Reads as "pause", not "destroy". */
 .btn_interrupt {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .btn_interrupt:hover {
@@ -27,7 +27,7 @@
 
 /* Stop: the hard tier. */
 .btn_stop {
-  font-size: 12px;
+  font-size: 9px;
 }
 
 .btn_stop:hover {
@@ -42,7 +42,7 @@
 
 /* Spent: the process is gone, nothing left to stop. */
 .btn_spent {
-  font-size: 12px;
+  font-size: 9px;
   opacity: 0.3;
   cursor: default;
 }

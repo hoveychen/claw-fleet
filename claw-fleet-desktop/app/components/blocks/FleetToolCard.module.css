@@ -37,7 +37,7 @@
 
 .header:hover { background: var(--color-bg-tool-hover); }
 
-.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 12px); flex-shrink: 0; }
+.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
 
 .kind {
   font-weight: var(--font-weight-semibold);
@@ -94,7 +94,7 @@
 
 .error_badge {
   flex-shrink: 0;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-error-bg);
@@ -236,7 +236,7 @@
 .check_mark {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 .check_done .check_mark { color: var(--color-success); }
@@ -324,7 +324,7 @@
 
 .status_badge {
   flex-shrink: 0;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
 }
@@ -360,7 +360,7 @@
 
 .wiki_kind {
   flex-shrink: 0;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 0 5px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-tool);

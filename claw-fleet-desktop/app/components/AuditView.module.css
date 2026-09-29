@@ -66,7 +66,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -85,7 +85,7 @@
 }
 
 .chip_count {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -125,7 +125,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -160,7 +160,7 @@
 }
 
 .scan_info {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
@@ -173,7 +173,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text);
   outline: none;
   transition: border-color 0.1s;
@@ -244,7 +244,7 @@
 }
 
 .workspace_name {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text);
   text-transform: uppercase;
@@ -252,7 +252,7 @@
 }
 
 .workspace_source {
-  font-size: 12px;
+  font-size: 9px;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
   padding: 1px 5px;
@@ -260,7 +260,7 @@
 }
 
 .workspace_count {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   margin-left: auto;
   font-variant-numeric: tabular-nums;
@@ -356,7 +356,7 @@
 }
 
 .card_hook {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   line-height: 1.4;
   overflow: hidden;
@@ -370,7 +370,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -388,7 +388,7 @@
 }
 
 .card_headline {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 550;
   color: var(--color-text);
   line-height: 1.35;
@@ -401,7 +401,7 @@
 /* The raw command is demoted to a dimmed monospace second line — present for
    the power user, no longer the headline the newcomer has to decode. */
 .card_raw {
-  font-size: 12px;
+  font-size: 10.5px;
   color: var(--color-text-dim);
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   line-height: 1.4;
@@ -423,7 +423,7 @@
 }
 
 .overview_title {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -444,7 +444,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
   padding: 4px 10px 4px 8px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text);
   cursor: pointer;
@@ -471,7 +471,7 @@
 }
 
 .overview_count {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -499,7 +499,7 @@
   flex-shrink: 0;
   width: 36px;
   text-align: center;
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.04em;
   padding: 2px 0;
@@ -536,7 +536,7 @@
   background: transparent;
   color: var(--color-text-dim);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
 
@@ -552,7 +552,7 @@
   align-self: flex-start;
   max-width: 100%;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text);
   background: var(--color-bg-secondary);
   padding: 1px 6px;
@@ -632,7 +632,7 @@
 }
 
 .detail_label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -651,7 +651,7 @@
 
 .tag {
   display: inline-block;
-  font-size: 12px;
+  font-size: 10px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
@@ -667,7 +667,7 @@
 }
 
 .command_label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -676,7 +676,7 @@
 }
 
 .command_pre {
-  font-size: 12px;
+  font-size: 11px;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -706,7 +706,7 @@
   border: none;
   border-radius: var(--radius-sm);
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.1s;
@@ -727,7 +727,7 @@
   border: 1px solid var(--color-success);
   border-radius: var(--radius-sm);
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   color: var(--color-success);
@@ -787,14 +787,14 @@
 }
 
 .toggle_label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
 }
 
 /* ── Custom badge / rule extras ───────────────────────────────────────────── */
 
 .custom_badge {
-  font-size: 12px;
+  font-size: 9px;
   color: var(--color-accent);
   background: rgba(217, 119, 87, 0.12);
   padding: 1px 5px;
@@ -818,7 +818,7 @@
   border: 1px solid var(--color-error);
   border-radius: var(--radius-sm);
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   color: var(--color-error);
@@ -949,7 +949,7 @@
 }
 
 .suggest_desc {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text);
   line-height: 1.5;
   margin: 0 0 8px;
@@ -969,7 +969,7 @@
 }
 
 .suggest_reasoning_text {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   line-height: 1.4;
   font-style: italic;
@@ -1003,7 +1003,7 @@
   display: inline-block;
   width: 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -1041,7 +1041,7 @@
   padding: 2px 6px;
   border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .allow_rules_created {

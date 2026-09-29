@@ -14,7 +14,7 @@
   cursor: pointer;
   padding: 0;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 .header:hover .label {
@@ -45,7 +45,7 @@
 }
 
 .icon {
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 .slug {
@@ -59,12 +59,12 @@
   color: var(--color-text-dim);
   text-transform: none;
   letter-spacing: 0;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
 }
 
 .arrow {
   color: var(--color-text-dim);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 9px);
 }
 
   /* No outline: the surface ladder now separates this from the canvas on its
@@ -93,7 +93,7 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-accent);

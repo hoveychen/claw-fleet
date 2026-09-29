@@ -90,7 +90,7 @@
   /* --t-meta is this scale's 11px tier (see the ladder above); there is no
      --t-caption and no --color-text-faint, so both references rendered off
      their fallback and the token guard failed the build. */
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   overflow-wrap: anywhere;
 }
@@ -162,7 +162,7 @@
   gap: 4px;
   padding: 4px 8px;
   margin-bottom: 4px;
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -182,7 +182,7 @@
   width: 20px;
   height: 20px;
   padding: 0;
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   line-height: 1;
   color: var(--color-text);
   background: var(--color-bg);
@@ -230,7 +230,7 @@
 }
 
 .day_sep_label {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   letter-spacing: 0.03em;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
@@ -258,7 +258,7 @@
 }
 
 .interrupt_rule_label {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   letter-spacing: 0.03em;
   opacity: 0.75;
 }
@@ -339,7 +339,7 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   line-height: 1;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
@@ -457,7 +457,7 @@
 .usage {
   display: flex;
   align-items: center;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   margin-top: 4px;
   padding-left: 2px;
@@ -497,7 +497,7 @@
   margin-top: 8px;
   padding-top: 6px;
   border-top: 1px solid var(--color-border-soft);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   text-align: right;
 }

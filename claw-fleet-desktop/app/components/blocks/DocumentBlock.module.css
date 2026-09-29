@@ -33,5 +33,5 @@
 .size {
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }

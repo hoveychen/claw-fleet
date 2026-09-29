@@ -34,7 +34,7 @@
 }
 
 .kpi_label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -49,14 +49,14 @@
 }
 
 .kpi_secondary {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
 /* ── Section label ─────────────────────────────────────────────── */
 .section_label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -68,7 +68,7 @@
 }
 
 .fit_pill {
-  font-size: 12px;
+  font-size: 9px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
@@ -119,7 +119,7 @@
   grid-template-columns: 1fr 90px 60px;
   gap: 8px;
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -183,7 +183,7 @@
 
 .session_table th {
   background: var(--color-bg-secondary);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -214,7 +214,7 @@
 
 .short_id {
   font-family: var(--font-mono, ui-monospace);
-  font-size: 12px;
+  font-size: 11px;
   background: var(--color-bg-secondary);
   padding: 1px 4px;
   border-radius: 3px;
@@ -222,7 +222,7 @@
 
 /* ── Caveat ────────────────────────────────────────────────────── */
 .caveat {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   line-height: 1.55;
   padding: 8px 12px;

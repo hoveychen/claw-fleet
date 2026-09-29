@@ -137,7 +137,7 @@
 }
 
 .dims {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -145,7 +145,7 @@
 }
 
 .badge {
-  font-size: 12px;
+  font-size: 10px;
   padding: 1px 5px;
   border-radius: var(--radius-md);
   background: rgba(var(--color-accent-rgb), 0.15);

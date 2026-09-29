@@ -7,7 +7,7 @@
 }
 
 .error {
-  font-size: 12px;
+  font-size: 10px;
   color: #e06a6a;
   word-break: break-word;
 }
@@ -20,7 +20,7 @@
 }
 
 .queued_label {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-secondary);
   display: flex;
   align-items: center;
@@ -28,7 +28,7 @@
 }
 
 .queued_chip {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   padding: 4px 8px;
   border-radius: 8px;

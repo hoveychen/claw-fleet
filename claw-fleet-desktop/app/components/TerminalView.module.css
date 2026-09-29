@@ -39,7 +39,7 @@
   background: transparent;
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 

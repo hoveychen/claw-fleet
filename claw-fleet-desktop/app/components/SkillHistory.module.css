@@ -6,7 +6,7 @@
 }
 
 .title {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -30,7 +30,7 @@
 }
 
 .section_label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-secondary);
   margin: 4px 0;
@@ -55,7 +55,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   text-align: left;
   width: 100%;
@@ -75,7 +75,7 @@
 
 .caret {
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: 10px;
   width: 10px;
   flex-shrink: 0;
 }
@@ -98,7 +98,7 @@
 
 .time {
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: 10px;
   flex-shrink: 0;
   margin-left: auto;
 }

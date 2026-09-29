@@ -30,7 +30,7 @@
 
 .command_tag {
   font-family: inherit;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);

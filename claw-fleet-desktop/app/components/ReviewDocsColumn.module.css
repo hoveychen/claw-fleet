@@ -49,7 +49,7 @@
 .tab_kind {
   flex: 0 0 auto;
   opacity: 0.6;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .tab_label {
@@ -91,7 +91,7 @@
 .error_detail {
   margin-top: 6px;
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim, #999);
   word-break: break-all;
 }

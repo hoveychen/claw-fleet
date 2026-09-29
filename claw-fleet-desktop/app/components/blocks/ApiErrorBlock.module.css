@@ -52,7 +52,7 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   /* Digits must not reflow the badge once a second. */
   font-variant-numeric: tabular-nums;
 }
@@ -119,7 +119,7 @@
   border: 0;
   background: transparent;
   color: var(--color-text-dim);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   cursor: pointer;
 }
 
@@ -135,7 +135,7 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   white-space: pre-wrap;
 }
 
@@ -156,7 +156,7 @@
 
 .pickerLabel {
   color: var(--color-text-dim);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
 }
 
 .pickerItem {
@@ -189,6 +189,6 @@
 .note {
   margin: -2px 0 8px;
   color: var(--color-text-dim);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   overflow-wrap: anywhere;
 }

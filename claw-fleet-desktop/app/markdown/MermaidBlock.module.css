@@ -33,7 +33,7 @@
   padding: 6px 10px;
   background: var(--color-error-bg);
   color: var(--color-error-fg);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .failed_source {
