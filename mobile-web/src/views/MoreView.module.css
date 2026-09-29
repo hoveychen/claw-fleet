@@ -41,6 +41,13 @@
   margin: 0 14px;
 }
 
+/* Setting rows are plain divs, so without this they inherit the body serif
+   while the tool rows above (buttons) are sans. Both are controls. */
+.rowLabel,
+.rowValue {
+  font-family: var(--font-sans);
+}
+
 .rowLabel {
   font-size: var(--t-ui, 14px);
   color: var(--color-text);
@@ -91,10 +98,13 @@
   color: var(--color-text-secondary);
 }
 
+/* Neutral raised segment, same vocabulary as the tasks filter: four stacked
+   settings should not paint four accent blocks. */
 .segmentButton[data-active="true"] {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
   font-weight: 600;
+  box-shadow: var(--shadow-1);
 }
 
 .connWrap {
@@ -173,7 +183,7 @@
 .navIcon {
   display: inline-flex;
   flex-shrink: 0;
-  color: var(--color-accent);
+  color: var(--color-text-secondary);
 }
 
 .navText {

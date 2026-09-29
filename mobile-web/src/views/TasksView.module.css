@@ -103,8 +103,10 @@
   color: var(--color-text);
 }
 
+/* The active segment is already marked by its raised card background; the
+   icon stays neutral so colour on this screen means status, not selection. */
 .segmentButton[data-active="true"] svg {
-  color: var(--color-accent);
+  color: var(--color-text);
 }
 
 .segmentCount {
@@ -121,9 +123,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border);
+  /* No divider: the done circle and stop button are the card's own controls,
+     not a separate section. The negative inset lines the circle's glyph (not
+     its 30px tap target) up with the text column above. */
+  margin: 4px 0 0 -7px;
 }
 
 /* Single circle→check toggle, mirroring the desktop launchpad MarkControl.
@@ -160,9 +163,11 @@
   font-size: var(--t-aux, 12px);
 }
 
+/* Interrupt only ends the current turn, so it stays neutral; red is kept for
+   stop, which kills the process. */
 .stopButton[data-mode="interrupt"] {
-  border-color: rgba(251, 191, 36, 0.4);
-  color: var(--color-warning);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
 }
 
 .stopButton:disabled {
@@ -202,7 +207,7 @@
 }
 
 .workspaceFolder {
-  color: var(--color-accent);
+  color: var(--color-text-dim);
   flex-shrink: 0;
 }
 
@@ -440,19 +445,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.runtime[data-tone="working"] {
-  color: var(--color-accent);
-}
-
-.runtime[data-tone="waiting"] {
-  color: var(--color-warning);
-}
-
-.runtime[data-tone="quiet"] {
-  color: var(--color-success);
-  opacity: 0.6;
 }
 
 .snippet {

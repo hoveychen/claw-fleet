@@ -18,6 +18,9 @@ interface Props {
   onAnswered: (deviceId: string, id: string) => void;
   onOpenSession: (deviceId: string, sessionId: string) => void;
   deviceLabelOf: (deviceId: string) => string | null;
+  /** The tab bar (and its raised centre FAB) is showing under the peek, so the
+   *  peek must sit above the FAB instead of just above the bar. */
+  clearFab: boolean;
 }
 
 /** Global decision surface that floats above whatever page the boss is on (a
@@ -121,6 +124,7 @@ export function DecisionDrawer(props: Props) {
     <button
       ref={peekRef}
       className={styles.peek}
+      data-clear-fab={props.clearFab}
       onClick={() => setExpanded(true)}
       aria-label={t("查看待处理决策")}
     >

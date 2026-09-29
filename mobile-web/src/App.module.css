@@ -159,6 +159,9 @@
 .main {
   flex: 1;
   padding: 12px 12px calc(70px + var(--safe-bottom));
+  /* While the decision peek floats over the tab body, let the list scroll its
+     last card out from under it (DecisionDrawer publishes --peek-inset). */
+  padding-bottom: max(calc(70px + var(--safe-bottom)), var(--peek-inset, 0px));
 }
 
 .tabs {
@@ -209,8 +212,9 @@
   gap: 3px;
   padding: 0 0 6px;
   font-size: var(--t-meta, 11px);
-  color: var(--color-accent);
-  font-weight: 600;
+  /* The FAB carries the accent; the label matches the other tab labels so it
+     does not compete with the active tab's highlight. */
+  color: var(--color-text-dim);
 }
 
 .centerFab {
