@@ -81,7 +81,7 @@ export function TokenSpeedChart({ compact = false, collapsed: tile = false }: { 
                   scale="time"
                   domain={[domainStart, domainEnd]}
                   tickFormatter={formatTime}
-                  tick={{ fontSize: 9, fill: "var(--color-text-dim)" }}
+                  tick={{ fontSize: 12, fill: "var(--color-text-dim)" }}
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
@@ -108,7 +108,7 @@ export function TokenSpeedChart({ compact = false, collapsed: tile = false }: { 
                   background: "var(--color-bg-secondary)",
                   border: "1px solid var(--color-border)",
                   borderRadius: 6,
-                  fontSize: 11,
+                  fontSize: 12,
                   color: "var(--color-text)",
                 }}
                 labelFormatter={(v) => formatTime(v as number)}

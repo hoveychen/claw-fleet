@@ -1,7 +1,7 @@
 .wrap {
   position: relative;
   padding: 4px 10px 6px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
@@ -60,7 +60,7 @@
 }
 
 .group_name {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;

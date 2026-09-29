@@ -61,7 +61,7 @@
 
 .tag_main,
 .tag_subagent {
-  font-size: 10px;
+  font-size: 12px;
   padding: 2px 6px;
   border-radius: var(--radius-xs);
   white-space: nowrap;
@@ -71,13 +71,13 @@
 .tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); }
 
 .slug {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-style: italic;
 }
 
 .ide {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
   padding: 2px 6px;
@@ -85,7 +85,7 @@
 }
 
 .tokens {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
@@ -103,7 +103,7 @@
 /* Path — the id row directly below it closes the block, so no border here */
 .path {
   padding: 4px 16px 0;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-family: var(--font-mono);
   background: var(--color-bg);

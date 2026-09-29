@@ -90,7 +90,7 @@
 }
 
 .card_icon {
-  font-size: 18px;
+  font-size: 16px;
   flex-shrink: 0;
   width: 24px;
   text-align: center;
@@ -124,7 +124,7 @@
 }
 
 .solution_label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -166,13 +166,13 @@
 }
 
 .copied {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-success);
   flex-shrink: 0;
 }
 
 .hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 0;
   line-height: 1.5;
@@ -182,7 +182,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
@@ -214,7 +214,7 @@
   border: none;
   border-right: 1px solid var(--color-border);
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -241,7 +241,7 @@
 }
 
 .tab_badge {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--color-success);
   font-weight: 600;
   text-transform: uppercase;
@@ -304,7 +304,7 @@
 }
 
 .advanced_hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -359,7 +359,7 @@
 }
 
 .source_detected {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-success);
   font-weight: 600;
   text-transform: uppercase;
@@ -367,7 +367,7 @@
 }
 
 .source_not_found {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -381,7 +381,7 @@
 }
 
 .settings_label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -491,7 +491,7 @@
 }
 
 .preview_caption {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -503,7 +503,7 @@
 
 .preview_caption::before {
   content: "\25B8";
-  font-size: 9px;
+  font-size: 12px;
   opacity: 0.6;
 }
 
@@ -549,14 +549,14 @@
 }
 
 .mock_plan_subtitle {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   font-style: italic;
   line-height: 1.4;
 }
 
 .mock_plan_content {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text);
   background: var(--color-bg-tool, var(--color-bg));
@@ -567,7 +567,7 @@
 }
 
 .mock_btn_edit {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 3px 10px;
   border-radius: var(--radius-xs);
@@ -576,14 +576,14 @@
 }
 
 .mock_decision_title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
 }
 
 .mock_command {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--color-text);
   background: var(--color-bg-tool, var(--color-bg));
@@ -600,7 +600,7 @@
 }
 
 .mock_tag {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
@@ -609,7 +609,7 @@
 }
 
 .mock_question {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text);
   line-height: 1.4;
@@ -622,7 +622,7 @@
 }
 
 .mock_option {
-  font-size: 10px;
+  font-size: 12px;
   padding: 4px 8px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
@@ -643,7 +643,7 @@
 }
 
 .mock_btn_allow {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 3px 10px;
   border-radius: var(--radius-xs);
@@ -653,7 +653,7 @@
 }
 
 .mock_btn_block {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 3px 10px;
   border-radius: var(--radius-xs);
@@ -663,7 +663,7 @@
 }
 
 .mock_btn_secondary {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 3px 10px;
   border-radius: var(--radius-xs);

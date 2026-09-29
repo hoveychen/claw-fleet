@@ -28,7 +28,7 @@
   border: none;
   background: none;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   color: var(--color-text);
   padding: 5px 8px;
@@ -55,7 +55,7 @@
   background: var(--color-bg-field);
   color: var(--color-text);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   padding: 4px 7px;
   border-radius: var(--radius-sm);
 }

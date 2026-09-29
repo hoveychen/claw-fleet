@@ -41,8 +41,10 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --space-4: 10px; --space-5: 12px; --space-6: 14px;
   --space-7: 16px; --space-8: 20px; --space-9: 24px;
 
-  --font-size-2xs: 10px;  /* meta, counts, badges */
-  --font-size-xs: 11px;   /* secondary buttons, chips */
+  /* 12px is the floor: 2xs/xs are kept as names so call sites still say what
+     they are, but nothing on screen renders below 12px any more. */
+  --font-size-2xs: 12px;  /* meta, counts, badges */
+  --font-size-xs: 12px;   /* secondary buttons, chips */
   --font-size-sm: 12px;   /* component default */
   --font-size-md: 13px;   /* body / detail prose */
   --font-size-lg: 16px;   /* page title */

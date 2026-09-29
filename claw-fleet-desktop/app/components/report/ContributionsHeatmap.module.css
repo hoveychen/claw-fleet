@@ -33,7 +33,7 @@
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   border-radius: var(--radius-xs);
   cursor: pointer;
 }
@@ -51,10 +51,10 @@
 
 .month_labels {
   display: flex;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   margin-bottom: 4px;
-  height: 14px;
+  height: 16px;
 }
 
 .day_label_spacer {
@@ -86,7 +86,7 @@
 }
 
 .day_label {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   display: flex;
   align-items: center;
@@ -138,7 +138,7 @@
 }
 
 .legend_label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
@@ -173,12 +173,12 @@
 
 .compact .metric_toggle button {
   padding: 2px 6px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .compact .month_labels {
-  font-size: 9px;
-  height: 12px;
+  font-size: 12px;
+  height: 16px;
   margin-bottom: 2px;
 }
 
@@ -202,7 +202,7 @@
 }
 
 .compact .legend_label {
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .compact .legend_cell {
@@ -217,7 +217,7 @@
   border: 1px solid var(--color-border);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 12px;
   pointer-events: none;
   z-index: 1000;
   box-shadow: var(--shadow-float);

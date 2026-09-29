@@ -39,7 +39,7 @@
 }
 
 .tree_label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -52,7 +52,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text);
   outline: none;
   margin: 0 4px 6px;
@@ -63,7 +63,7 @@
 }
 
 .tree_empty {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-style: italic;
   text-align: center;
@@ -95,7 +95,7 @@
 }
 
 .tree_chevron {
-  font-size: 9px;
+  font-size: 12px;
   width: 10px;
   flex-shrink: 0;
   color: var(--color-text-dim);
@@ -112,7 +112,7 @@
 }
 
 .tree_size {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
@@ -139,7 +139,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -160,7 +160,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
   color: var(--color-text-dim);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -172,7 +172,7 @@
 .sync_tag {
   padding: 0 5px;
   border-radius: var(--radius-xs);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -204,5 +204,5 @@
   padding: 7px 24px;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text-dim);
-  font-size: 10px;
+  font-size: 12px;
 }

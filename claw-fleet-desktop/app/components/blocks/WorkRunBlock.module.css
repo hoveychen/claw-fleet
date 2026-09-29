@@ -20,7 +20,7 @@
   color: var(--color-text);
 }
 
-.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
+.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 12px); flex-shrink: 0; }
 
 /* Headline reads as the run's summary sentence — secondary ink like the
    thinking prose it condenses; hover raises it to full ink to say "expandable". */
@@ -57,7 +57,7 @@
   flex-shrink: 0;
   white-space: nowrap;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
 }
 
 .time {
