@@ -29,7 +29,7 @@
 
 .workspace_folder {
   display: inline-flex;
-  color: var(--color-accent);
+  color: var(--color-text-dim);
   flex: 0 0 auto;
 }
 

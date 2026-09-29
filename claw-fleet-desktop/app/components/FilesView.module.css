@@ -639,8 +639,8 @@
   height: 18px;
   padding: 0 5px;
   border-radius: var(--radius-pill);
-  background: var(--color-success);
-  color: var(--color-bg-card);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
   font-size: 10px;
   font-weight: 700;
 }

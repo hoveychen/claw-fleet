@@ -180,7 +180,7 @@
 }
 
 .trend_faster {
-  color: #fb923c;
+  color: var(--color-text-dim);
 }
 
 .trend_slower {

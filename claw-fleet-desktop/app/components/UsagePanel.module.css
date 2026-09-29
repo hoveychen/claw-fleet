@@ -154,16 +154,20 @@
   transition: width 0.3s ease;
 }
 
+/* 60–85%: same quiet grey as a normal bar — the percentage beside it already
+   says how full it is. Only the critical band takes the accent, so the one
+   orange bar on screen is the one worth acting on. */
 .bar_fill_warn {
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-text-dim);
+  opacity: 0.55;
   border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
 
 .bar_fill_critical {
   height: 100%;
-  background: var(--color-warning);
+  background: var(--color-accent);
   border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
@@ -198,7 +202,7 @@
 }
 
 .trend_faster {
-  color: #fb923c;
+  color: var(--color-text-dim);
 }
 
 .trend_slower {
