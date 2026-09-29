@@ -324,7 +324,9 @@ export function PlansView() {
         onChange: (v) => updatePlansView({ query: v }),
         placeholder: t("plans.search_placeholder", "筛选仓库…"),
       }}
-      bannerCenter={
+      // `actions`, not `bannerCenter`: in the column banner bannerCenter gets a
+      // whole row of its own, which left this lone button stranded under the search.
+      actions={
         <button className={styles.refresh} onClick={() => void load()} title={t("plans.refresh", "刷新")}>
           <RefreshCw size={14} strokeWidth={2} className={loading ? styles.spin : undefined} />
         </button>
