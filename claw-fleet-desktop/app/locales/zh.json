@@ -858,12 +858,11 @@
   },
   "today_usage": {
     "title": "今日累计",
-    "open_receipt": "查看今日花费明细",
+    "open_receipt": "查看用量分析",
     "loading": "统计中…"
   },
   "token_receipt": {
-    "title": "花费明细",
-    "subtitle": "Token 消费小票",
+    "title": "用量分析",
     "loading": "统计中…",
     "no_usage": "今天还没有用量",
     "no_usage_range": "此区间还没有用量",
@@ -883,7 +882,22 @@
     "subtotal": "小计",
     "grand_total": "合计",
     "tokens": "tokens",
-    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径"
+    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
+    "kpi_cost": "花费",
+    "kpi_tokens": "Tokens",
+    "kpi_cache_hit": "缓存命中率",
+    "kpi_cache_hit_sub": "缓存读取 / 全部输入",
+    "kpi_daily_avg": "日均花费",
+    "kpi_days": "{{count}} 天",
+    "kpi_output": "输出 tokens",
+    "trend_peak": "峰值 {{value}}",
+    "mix_title": "Token 构成",
+    "models_title": "按模型",
+    "models_hint": "点击行查看单价明细",
+    "col_model": "模型",
+    "col_cost": "花费",
+    "col_share": "占比",
+    "row_cache_write_5m": "缓存写入 5m"
   },
   "chart": {
     "title": "Token 速度",

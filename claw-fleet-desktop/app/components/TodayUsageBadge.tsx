@@ -85,7 +85,7 @@ export function TodayUsageBadge({
   const receipt = showReceipt
     ? createPortal(<TokenReceiptModal onClose={() => setShowReceipt(false)} />, document.body)
     : null;
-  const openHint = t("today_usage.open_receipt", "查看今日花费明细");
+  const openHint = t("today_usage.open_receipt", "查看用量分析");
 
   if (collapsed) {
     return (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -16,8 +16,8 @@ interface Props {
 type RangeKey = "today" | "7d" | "30d" | "all";
 
 /** Normalized shape both the today and range breakdowns render through. */
-interface ReceiptView {
-  /** Header line: a single date, or `from → to` for a multi-day window. */
+interface UsageView {
+  /** Window label: a single date, or `from → to` for a multi-day window. */
   label: string;
   lines: ModelReceiptLine[];
   totalInputTokens: number;
@@ -31,8 +31,9 @@ interface ReceiptView {
   hasCodexApproximation: boolean;
 }
 
-/** 1.23M / 45.6K / 780 — receipt-scale token counts. */
+/** 1.23M / 45.6K / 780 — compact token counts. */
 function fmtTok(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return `${n}`;
@@ -46,14 +47,32 @@ function fmtUsd(n: number): string {
   return `<$0.0001`;
 }
 
+/** Axis-tick money: no cents once the scale is in the tens. */
+function fmtAxisUsd(n: number): string {
+  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  if (n >= 10) return `$${Math.round(n)}`;
+  return `$${n.toFixed(2)}`;
+}
+
 /** Unit price is always $/M tokens. */
 function fmtPrice(n: number): string {
   return `$${n.toFixed(2)}/M`;
 }
 
+function fmtPct(ratio: number): string {
+  if (!Number.isFinite(ratio) || ratio <= 0) return "0%";
+  if (ratio < 0.001) return "<0.1%";
+  return `${(ratio * 100).toFixed(1)}%`;
+}
+
+/** `2026-09-29` → `09-29`, for axis ticks where the year is noise. */
+function shortDate(date: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(5) : date;
+}
+
 /** Drop the `claude-` noise and any `<provider>/<org>/` prefix; leave gpt /
  * others as-is. A dsh route ships as e.g. `openrouter/anthropic/claude-opus-5`,
- * so this reduces it to `opus-5` for the receipt's model column. */
+ * so this reduces it to `opus-5` for the model column. */
 function prettyModel(model: string): string {
   if (!model) return "unknown";
   const base = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
@@ -94,7 +113,7 @@ function rangeBounds(range: RangeKey): { fromMs: number; toMs: number } {
   }
 }
 
-function normalizeToday(r: TodayUsageBreakdown): ReceiptView {
+function normalizeToday(r: TodayUsageBreakdown): UsageView {
   return {
     label: r.date,
     lines: r.lines,
@@ -108,7 +127,7 @@ function normalizeToday(r: TodayUsageBreakdown): ReceiptView {
   };
 }
 
-function normalizeRange(r: UsageRangeBreakdown): ReceiptView {
+function normalizeRange(r: UsageRangeBreakdown): UsageView {
   return {
     label: r.fromDate === r.toDate ? r.fromDate : `${r.fromDate} → ${r.toDate}`,
     lines: r.lines,
@@ -122,17 +141,27 @@ function normalizeRange(r: UsageRangeBreakdown): ReceiptView {
   };
 }
 
+/** The four billed token kinds, in the order every section of the panel uses. */
+type TokenKind = "input" | "cacheWrite" | "cacheRead" | "output";
+
+const KIND_CLASS: Record<TokenKind, string> = {
+  input: styles.k_input,
+  cacheWrite: styles.k_cache_write,
+  cacheRead: styles.k_cache_read,
+  output: styles.k_output,
+};
+
 /**
- * "Receipt" for token spend. Opened by clicking the sidebar counter. Itemises
- * the spend per model — input / cache-write / cache-read / output tokens, each
- * priced at the model's official $/M rate. The default "today" view reconciles
- * to the sidebar counter (agent + Fleet's own LLM spend); the longer ranges
- * (7d / 30d / all) additionally draw a per-day trend from the range breakdown.
+ * Usage analytics for token spend. Opened by clicking the sidebar counter.
+ * KPI strip, per-day trend (multi-day ranges), token-mix bar, and a per-model
+ * table whose rows expand into the $/M itemisation. The default "today" view
+ * reconciles to the sidebar counter; the longer ranges (7d / 30d / all) come
+ * from the range breakdown and additionally carry the daily series.
  */
 export function TokenReceiptModal({ onClose }: Props) {
   const { t } = useTranslation();
   const [range, setRange] = useState<RangeKey>("today");
-  const [data, setData] = useState<ReceiptView | null>(null);
+  const [data, setData] = useState<UsageView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -169,13 +198,6 @@ export function TokenReceiptModal({ onClose }: Props) {
     };
   }, [range]);
 
-  const totalTokens = data
-    ? data.totalInputTokens +
-      data.totalCacheCreationTokens +
-      data.totalCacheReadTokens +
-      data.totalOutputTokens
-    : 0;
-
   const ranges: { key: RangeKey; label: string }[] = [
     { key: "today", label: t("token_receipt.range_today", "今天") },
     { key: "7d", label: t("token_receipt.range_7d", "近 7 天") },
@@ -187,24 +209,26 @@ export function TokenReceiptModal({ onClose }: Props) {
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
-          <span className={styles.title}>
-            {t("token_receipt.title", "花费明细")}
-          </span>
+          <div className={styles.title_block}>
+            <span className={styles.title}>{t("token_receipt.title", "用量分析")}</span>
+            {data && <span className={styles.window_label}>{data.label}</span>}
+          </div>
+          <div className={styles.range_bar} role="tablist">
+            {ranges.map((r) => (
+              <button
+                key={r.key}
+                role="tab"
+                aria-selected={range === r.key}
+                className={`${styles.range_btn} ${range === r.key ? styles.range_btn_active : ""}`}
+                onClick={() => setRange(r.key)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
           <button className={styles.close_btn} onClick={onClose} aria-label={t("common.close", "关闭")}>
             ✕
           </button>
-        </div>
-
-        <div className={styles.range_bar}>
-          {ranges.map((r) => (
-            <button
-              key={r.key}
-              className={`${styles.range_btn} ${range === r.key ? styles.range_btn_active : ""}`}
-              onClick={() => setRange(r.key)}
-            >
-              {r.label}
-            </button>
-          ))}
         </div>
 
         <div className={styles.body}>
@@ -212,125 +236,319 @@ export function TokenReceiptModal({ onClose }: Props) {
           {!error && !data && (
             <div className={styles.empty}>{t("token_receipt.loading", "统计中…")}</div>
           )}
-          {data && (
-            <div className={styles.receipt}>
-              <div className={styles.receipt_head}>
-                <div className={styles.shop}>CLAW FLEET</div>
-                <div className={styles.receipt_sub}>
-                  {t("token_receipt.subtitle", "Token 消费小票")} · {data.label}
-                </div>
-              </div>
-
-              {data.lines.length === 0 && (
-                <div className={styles.empty}>
-                  {t("token_receipt.no_usage_range", "此区间还没有用量")}
-                </div>
-              )}
-
-              {data.daily.length > 0 && <TrendChart daily={data.daily} />}
-
-              {data.lines.map((line, i) => (
-                <ReceiptLine key={`${line.source}:${line.model}:${i}`} line={line} />
-              ))}
-
-              {data.lines.length > 0 && (
-                <>
-                  <div className={styles.divider_double} />
-                  <div className={styles.grand_row}>
-                    <span className={styles.grand_label}>
-                      {t("token_receipt.grand_total", "合计")}
-                    </span>
-                    <span className={styles.grand_value}>{fmtUsd(data.totalCostUsd)}</span>
-                  </div>
-                  {/* Agent spend only — Fleet's own guard / report LLM calls are
-                      not on this receipt, so there is no agent-vs-fleet split to
-                      show. Fleet's own consumption lives in Settings → Usage. */}
-                  <div className={styles.split_row}>
-                    <span />
-                    <span className={styles.tok_total}>
-                      {fmtTok(totalTokens)} {t("token_receipt.tokens", "tokens")}
-                    </span>
-                  </div>
-                  {data.hasCodexApproximation && (
-                    <div className={styles.codex_note}>
-                      {t(
-                        "token_receipt.codex_note",
-                        "该 Codex 会话有未带时间戳的轮次,这部分归到了会话起始日,趋势为近似",
-                      )}
-                    </div>
-                  )}
-                  <div className={styles.footer_note}>
-                    {t(
-                      "token_receipt.footnote",
-                      "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
-                    )}
-                  </div>
-                </>
-              )}
+          {data && data.lines.length === 0 && (
+            <div className={styles.empty}>
+              {t("token_receipt.no_usage_range", "此区间还没有用量")}
             </div>
           )}
+          {data && data.lines.length > 0 && <UsageBody data={data} />}
         </div>
       </div>
     </div>
   );
 }
 
-/** Compact per-day cost bar chart (the trend behind a multi-day receipt). */
-function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
+function UsageBody({ data }: { data: UsageView }) {
   const { t } = useTranslation();
-  const max = Math.max(...daily.map((d) => d.costUsd), 0.0001);
-  // Linear scale: bar height ratios equal spend ratios. Tiny days bottom out at
-  // the 1px floor below; the exact figure stays in each bar's tooltip.
-  const W = 424;
-  const H = 92;
-  const pad = 4;
-  const n = daily.length;
-  const gap = n > 1 ? 2 : 0;
-  const barW = Math.max(1, (W - pad * 2 - gap * (n - 1)) / n);
+  const totalTokens =
+    data.totalInputTokens +
+    data.totalCacheCreationTokens +
+    data.totalCacheReadTokens +
+    data.totalOutputTokens;
+  // Share of prompt-side tokens served from cache — the lever that dominates
+  // agent spend, so it earns a KPI of its own.
+  const promptTokens =
+    data.totalInputTokens + data.totalCacheCreationTokens + data.totalCacheReadTokens;
+  const cacheHit = promptTokens > 0 ? data.totalCacheReadTokens / promptTokens : 0;
+  const days = data.daily.length;
+  const lines = useMemo(
+    () => [...data.lines].sort((a, b) => b.costUsd - a.costUsd),
+    [data.lines],
+  );
 
   return (
-    <div className={styles.chart}>
-      <div className={styles.chart_title}>
-        {t("token_receipt.trend_title", "每日花费")}
+    <>
+      <div className={styles.kpis}>
+        <Kpi label={t("token_receipt.kpi_cost", "花费")} value={fmtUsd(data.totalCostUsd)} />
+        <Kpi label={t("token_receipt.kpi_tokens", "Tokens")} value={fmtTok(totalTokens)} />
+        <Kpi
+          label={t("token_receipt.kpi_cache_hit", "缓存命中率")}
+          value={fmtPct(cacheHit)}
+          sub={t("token_receipt.kpi_cache_hit_sub", "缓存读取 / 全部输入")}
+        />
+        {days > 1 ? (
+          <Kpi
+            label={t("token_receipt.kpi_daily_avg", "日均花费")}
+            value={fmtUsd(data.totalCostUsd / days)}
+            sub={t("token_receipt.kpi_days", "{{count}} 天", { count: days })}
+          />
+        ) : (
+          <Kpi
+            label={t("token_receipt.kpi_output", "输出 tokens")}
+            value={fmtTok(data.totalOutputTokens)}
+          />
+        )}
       </div>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className={styles.chart_svg}
-        preserveAspectRatio="none"
-      >
-        {daily.map((d, i) => {
-          const h = Math.max(
-            1,
-            (Math.max(d.costUsd, 0) / max) * (H - pad * 2),
-          );
-          const x = pad + i * (barW + gap);
-          const y = H - pad - h;
-          const tok =
-            d.inputTokens + d.cacheCreationTokens + d.cacheReadTokens + d.outputTokens;
-          return (
-            <rect
-              key={d.date}
-              x={x}
-              y={y}
-              width={barW}
-              height={h}
-              rx={1}
-              className={styles.bar}
-            >
-              <title>{`${d.date} · ${fmtUsd(d.costUsd)} · ${fmtTok(tok)} tok`}</title>
-            </rect>
-          );
-        })}
-      </svg>
-      <div className={styles.chart_axis}>
-        <span>{daily[0].date}</span>
-        {daily.length > 1 && <span>{daily[daily.length - 1].date}</span>}
+
+      {days > 0 && <TrendChart daily={data.daily} />}
+
+      <TokenMix
+        values={{
+          input: data.totalInputTokens,
+          cacheWrite: data.totalCacheCreationTokens,
+          cacheRead: data.totalCacheReadTokens,
+          output: data.totalOutputTokens,
+        }}
+      />
+
+      <ModelTable lines={lines} totalCost={data.totalCostUsd} />
+
+      {data.hasCodexApproximation && (
+        <div className={styles.note_warn}>
+          {t(
+            "token_receipt.codex_note",
+            "该 Codex 会话有未带时间戳的轮次,这部分归到了会话起始日,趋势为近似",
+          )}
+        </div>
+      )}
+      {/* Agent spend only — Fleet's own guard / report LLM calls live in
+          Settings → Usage, not here. */}
+      <div className={styles.footnote}>
+        {t(
+          "token_receipt.footnote",
+          "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
+        )}
       </div>
+    </>
+  );
+}
+
+function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className={styles.kpi}>
+      <div className={styles.kpi_label}>{label}</div>
+      <div className={styles.kpi_value}>{value}</div>
+      {sub && <div className={styles.kpi_sub}>{sub}</div>}
     </div>
   );
 }
 
-function ReceiptLine({ line }: { line: ModelReceiptLine }) {
+function SectionHead({ title, aside }: { title: string; aside?: string }) {
+  return (
+    <div className={styles.section_head}>
+      <span className={styles.section_title}>{title}</span>
+      {aside && <span className={styles.section_aside}>{aside}</span>}
+    </div>
+  );
+}
+
+/** Per-day cost bar chart with a labelled y scale (the trend behind a range). */
+function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
+  const { t } = useTranslation();
+  const [hover, setHover] = useState<number | null>(null);
+  const peak = Math.max(...daily.map((d) => d.costUsd), 0);
+  // Linear scale from zero so bar-height ratios equal spend ratios; the top
+  // gridline is the peak day, the middle one its half.
+  const max = Math.max(peak, 0.0001);
+  const W = 720;
+  const H = 120;
+  const n = daily.length;
+  const gap = n > 1 ? (n > 60 ? 1 : 2) : 0;
+  const barW = Math.max(1, (W - gap * (n - 1)) / n);
+  const focus = hover !== null ? daily[hover] : null;
+  const mid = Math.floor((n - 1) / 2);
+
+  return (
+    <section className={styles.section}>
+      <SectionHead
+        title={t("token_receipt.trend_title", "每日花费")}
+        aside={
+          focus
+            ? `${focus.date} · ${fmtUsd(focus.costUsd)} · ${fmtTok(
+                focus.inputTokens +
+                  focus.cacheCreationTokens +
+                  focus.cacheReadTokens +
+                  focus.outputTokens,
+              )} tok`
+            : t("token_receipt.trend_peak", "峰值 {{value}}", { value: fmtUsd(peak) })
+        }
+      />
+      <div className={styles.chart}>
+        <div className={styles.y_axis}>
+          <span>{fmtAxisUsd(max)}</span>
+          <span>{fmtAxisUsd(max / 2)}</span>
+          <span>$0</span>
+        </div>
+        <div className={styles.plot}>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className={styles.chart_svg}
+            preserveAspectRatio="none"
+            onMouseLeave={() => setHover(null)}
+          >
+            {[0, H / 2, H].map((y) => (
+              <line key={y} x1={0} x2={W} y1={y} y2={y} className={styles.grid_line} />
+            ))}
+            {daily.map((d, i) => {
+              const h = Math.max(1, (Math.max(d.costUsd, 0) / max) * H);
+              const x = i * (barW + gap);
+              return (
+                <g key={d.date} onMouseEnter={() => setHover(i)}>
+                  {/* Full-height hit target so thin bars are still easy to hover. */}
+                  <rect x={x} y={0} width={barW + gap} height={H} fill="transparent" />
+                  <rect
+                    x={x}
+                    y={H - h}
+                    width={barW}
+                    height={h}
+                    className={`${styles.bar} ${hover === i ? styles.bar_active : ""}`}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+          <div className={styles.x_axis}>
+            <span>{shortDate(daily[0].date)}</span>
+            {n > 2 && <span>{shortDate(daily[mid].date)}</span>}
+            {n > 1 && <span>{shortDate(daily[n - 1].date)}</span>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** 100%-stacked bar of the four token kinds, with a legend carrying the counts. */
+function TokenMix({ values }: { values: Record<TokenKind, number> }) {
+  const { t } = useTranslation();
+  const total = values.input + values.cacheWrite + values.cacheRead + values.output;
+  const kinds: { kind: TokenKind; label: string }[] = [
+    { kind: "input", label: t("token_receipt.row_input", "输入") },
+    { kind: "cacheWrite", label: t("token_receipt.row_cache_write", "缓存写入") },
+    { kind: "cacheRead", label: t("token_receipt.row_cache_read", "缓存读取") },
+    { kind: "output", label: t("token_receipt.row_output", "输出") },
+  ];
+
+  return (
+    <section className={styles.section}>
+      <SectionHead
+        title={t("token_receipt.mix_title", "Token 构成")}
+        aside={`${fmtTok(total)} ${t("token_receipt.tokens", "tokens")}`}
+      />
+      <div className={styles.mix_bar}>
+        {kinds.map(({ kind }) =>
+          values[kind] > 0 ? (
+            <span
+              key={kind}
+              className={`${styles.mix_seg} ${KIND_CLASS[kind]}`}
+              style={{ flexGrow: values[kind] }}
+            />
+          ) : null,
+        )}
+      </div>
+      <div className={styles.mix_legend}>
+        {kinds.map(({ kind, label }) => (
+          <div key={kind} className={styles.mix_item}>
+            <span className={`${styles.swatch} ${KIND_CLASS[kind]}`} />
+            <span className={styles.mix_label}>{label}</span>
+            <span className={styles.mix_value}>{fmtTok(values[kind])}</span>
+            <span className={styles.mix_pct}>{fmtPct(total > 0 ? values[kind] / total : 0)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ModelTable({ lines, totalCost }: { lines: ModelReceiptLine[]; totalCost: number }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState<string | null>(null);
+
+  return (
+    <section className={styles.section}>
+      <SectionHead
+        title={t("token_receipt.models_title", "按模型")}
+        aside={t("token_receipt.models_hint", "点击行查看单价明细")}
+      />
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th className={styles.col_model}>{t("token_receipt.col_model", "模型")}</th>
+            <th className={styles.num}>{t("token_receipt.row_input", "输入")}</th>
+            <th className={styles.num}>{t("token_receipt.row_cache_write", "缓存写入")}</th>
+            <th className={styles.num}>{t("token_receipt.row_cache_read", "缓存读取")}</th>
+            <th className={styles.num}>{t("token_receipt.row_output", "输出")}</th>
+            <th className={styles.num}>{t("token_receipt.col_cost", "花费")}</th>
+            <th className={styles.col_share}>{t("token_receipt.col_share", "占比")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line, i) => {
+            const key = `${line.source}:${line.model}:${i}`;
+            const expanded = open === key;
+            const share = totalCost > 0 ? line.costUsd / totalCost : 0;
+            const flagged = line.pricedByProvider || line.unpricedCalls > 0;
+            return (
+              <Fragment key={key}>
+                <tr
+                  className={`${styles.row} ${expanded ? styles.row_open : ""}`}
+                  onClick={() => setOpen(expanded ? null : key)}
+                >
+                  <td className={styles.col_model}>
+                    <span className={styles.caret}>{expanded ? "▾" : "▸"}</span>
+                    <span className={styles.model}>{prettyModel(line.model)}</span>
+                    <span className={styles.source}>{sourceLabel(line.source)}</span>
+                    {flagged && <span className={styles.flag}>*</span>}
+                  </td>
+                  <td className={styles.num}>{fmtTok(line.inputTokens)}</td>
+                  <td className={styles.num}>
+                    {fmtTok(line.cacheCreationTokens + line.cacheCreation1hTokens)}
+                  </td>
+                  <td className={styles.num}>{fmtTok(line.cacheReadTokens)}</td>
+                  <td className={styles.num}>{fmtTok(line.outputTokens)}</td>
+                  <td className={`${styles.num} ${styles.cost}`}>{fmtUsd(line.costUsd)}</td>
+                  <td className={styles.col_share}>
+                    <span className={styles.share_track}>
+                      <span className={styles.share_fill} style={{ width: `${share * 100}%` }} />
+                    </span>
+                    <span className={styles.share_pct}>{fmtPct(share)}</span>
+                  </td>
+                </tr>
+                {expanded && (
+                  <tr className={styles.detail_row}>
+                    <td colSpan={7}>
+                      <LineDetail line={line} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td className={styles.col_model}>{t("token_receipt.grand_total", "合计")}</td>
+            <td className={styles.num}>{fmtTok(sum(lines, (l) => l.inputTokens))}</td>
+            <td className={styles.num}>
+              {fmtTok(sum(lines, (l) => l.cacheCreationTokens + l.cacheCreation1hTokens))}
+            </td>
+            <td className={styles.num}>{fmtTok(sum(lines, (l) => l.cacheReadTokens))}</td>
+            <td className={styles.num}>{fmtTok(sum(lines, (l) => l.outputTokens))}</td>
+            <td className={`${styles.num} ${styles.cost}`}>{fmtUsd(totalCost)}</td>
+            <td className={styles.col_share} />
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+  );
+}
+
+function sum(lines: ModelReceiptLine[], f: (l: ModelReceiptLine) => number): number {
+  return lines.reduce((acc, l) => acc + f(l), 0);
+}
+
+/** The $/M itemisation behind one model row: tokens × unit price = subtotal. */
+function LineDetail({ line }: { line: ModelReceiptLine }) {
   const { t } = useTranslation();
   // Provider-priced (dsh): the spend is the provider's own charge for an open
   // model space, which Fleet's reference $/M table cannot reproduce — so the
@@ -340,8 +558,7 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
   const priced = line.pricedByProvider;
   // Cache writes are billed by TTL — a 1-hour write costs 2× the model's input
   // rate, a 5-minute write 1.25× — so they get one row each. Blending them into
-  // a single row would leave `Σ rows ≠ subtotal`, which is exactly the receipt
-  // bug this split fixed.
+  // a single row would leave `Σ rows ≠ subtotal`.
   const rows: { label: string; tokens: number; price: number }[] = [
     { label: t("token_receipt.row_input", "输入"), tokens: line.inputTokens, price: line.inputPrice },
     {
@@ -350,7 +567,7 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
       price: line.cacheWrite1hPrice,
     },
     {
-      label: t("token_receipt.row_cache_write", "缓存写入"),
+      label: t("token_receipt.row_cache_write_5m", "缓存写入 5m"),
       tokens: line.cacheCreationTokens,
       price: line.cacheWritePrice,
     },
@@ -367,33 +584,31 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
   ];
 
   return (
-    <div className={styles.line}>
-      <div className={styles.line_head}>
-        <span className={styles.model}>{prettyModel(line.model)}</span>
-        <span className={styles.source}>{sourceLabel(line.source)}</span>
-      </div>
-      {rows.map((r) =>
-        r.tokens > 0 ? (
-          <div key={r.label} className={styles.tok_row}>
-            <span className={styles.tok_label}>{r.label}</span>
-            <span className={styles.tok_count}>{fmtTok(r.tokens)}</span>
-            {!priced && (
-              <>
-                <span className={styles.tok_price}>× {fmtPrice(r.price)}</span>
-                <span className={styles.tok_sub}>
-                  {fmtUsd((r.tokens / 1_000_000) * r.price)}
-                </span>
-              </>
-            )}
-          </div>
-        ) : null,
-      )}
-      <div className={styles.line_total}>
-        <span>{t("token_receipt.subtotal", "小计")}</span>
-        <span className={styles.line_total_value}>{fmtUsd(line.costUsd)}</span>
+    <div className={styles.detail}>
+      <div className={styles.detail_model}>{line.model || "unknown"}</div>
+      <div className={styles.detail_grid}>
+        {rows.map((r) =>
+          r.tokens > 0 ? (
+            <Fragment key={r.label}>
+              <span className={styles.detail_label}>{r.label}</span>
+              <span className={styles.num}>{fmtTok(r.tokens)}</span>
+              <span className={`${styles.num} ${styles.dim}`}>
+                {priced ? "—" : `× ${fmtPrice(r.price)}`}
+              </span>
+              <span className={styles.num}>
+                {priced ? "" : fmtUsd((r.tokens / 1_000_000) * r.price)}
+              </span>
+            </Fragment>
+          ) : null,
+        )}
+        <span className={styles.detail_total_label}>{t("token_receipt.subtotal", "小计")}</span>
+        <span />
+        <span />
+        <span className={`${styles.num} ${styles.detail_total}`}>{fmtUsd(line.costUsd)}</span>
       </div>
       {priced && (
-        <div className={styles.codex_note}>
+        <div className={styles.note_warn}>
+          *{" "}
           {t(
             "token_receipt.provider_priced",
             "该行消费按 provider 发票或官方标价折算,非 Fleet 的 $/M 参考价,故不逐行计价。实际扣费以账户币种为准",
@@ -404,7 +619,8 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
         // Tokens without money. A fresh OpenRouter generation 404s for some
         // minutes, and a route with no published rate never prices at all —
         // both would otherwise read as "this part was free".
-        <div className={styles.codex_note}>
+        <div className={styles.note_warn}>
+          *{" "}
           {t("token_receipt.unpriced_calls", "另有 {{count}} 次调用暂无法定价,其 token 已计入、金额未计入", {
             count: line.unpricedCalls,
           })}
