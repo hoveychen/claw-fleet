@@ -861,12 +861,11 @@
   },
   "today_usage": {
     "title": "Today",
-    "open_receipt": "View today's spend breakdown",
+    "open_receipt": "Open usage analytics",
     "loading": "Tallying…"
   },
   "token_receipt": {
-    "title": "Spend breakdown",
-    "subtitle": "Token receipt",
+    "title": "Usage analytics",
     "loading": "Tallying…",
     "no_usage": "No usage yet today",
     "no_usage_range": "No usage in this range",
@@ -886,7 +885,22 @@
     "subtotal": "Subtotal",
     "grand_total": "Total",
     "tokens": "tokens",
-    "footnote": "Prices are each model's official $/M rate · cache reads/writes included · today matches the sidebar counter"
+    "footnote": "Prices are each model's official $/M rate · cache reads/writes included · today matches the sidebar counter",
+    "kpi_cost": "Spend",
+    "kpi_tokens": "Tokens",
+    "kpi_cache_hit": "Cache hit rate",
+    "kpi_cache_hit_sub": "cache read / all input",
+    "kpi_daily_avg": "Daily average",
+    "kpi_days": "{{count}} days",
+    "kpi_output": "Output tokens",
+    "trend_peak": "Peak {{value}}",
+    "mix_title": "Token mix",
+    "models_title": "By model",
+    "models_hint": "Click a row for the $/M breakdown",
+    "col_model": "Model",
+    "col_cost": "Spend",
+    "col_share": "Share",
+    "row_cache_write_5m": "Cache write (5m)"
   },
   "chart": {
     "title": "Token speed",
