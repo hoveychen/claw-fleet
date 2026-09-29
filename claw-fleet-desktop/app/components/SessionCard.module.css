@@ -72,7 +72,7 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -134,7 +134,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
@@ -173,7 +173,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 12px;
+  font-size: 11px;
   color: #ea580c;
   white-space: nowrap;
   max-width: 180px;
@@ -193,7 +193,7 @@
   padding: 0 5px;
   border: 1px solid #991b1b;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.5;
   color: #991b1b;
   white-space: nowrap;
@@ -212,7 +212,7 @@
   padding: 0 5px;
   border: 1px solid #b45309;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.5;
   color: #b45309;
   white-space: nowrap;
@@ -235,7 +235,7 @@
   border: 1px solid #9f1239;
   border-radius: 4px;
   background: #9f1239;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 1.5;
   color: #fff;
@@ -257,7 +257,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 11px;
   color: #b91c1c;
   font-variant-numeric: tabular-nums;
 }
@@ -274,7 +274,7 @@
   background: #fee2e2;
   color: #b91c1c;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
   margin-left: auto;
 }
@@ -290,7 +290,7 @@
    like a resume that worked (issue #105). Truncated inline; the full message is
    the `title`. */
 .resume_error {
-  font-size: 12px;
+  font-size: 11px;
   color: #b91c1c;
   max-width: 200px;
   overflow: hidden;
@@ -324,7 +324,7 @@
 .tag_model,
 .tag_thinking,
 .tag_source {
-  font-size: 12px;
+  font-size: 10px;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
 }
@@ -339,7 +339,7 @@
 .tag_source  { background: var(--color-bg-secondary); color: var(--color-text-dim); display: inline-flex; align-items: center; padding: 2px 5px; gap: 2px; }
 
 .slug {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -359,7 +359,7 @@
 }
 
 .preview {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   margin: 0 0 6px;
   line-height: 1.4;
@@ -374,7 +374,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   line-height: 1.4;
 }
@@ -427,14 +427,14 @@
   align-items: center;
   gap: 6px;
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--color-text-secondary);
 }
 
 .bgtask_icon {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 10px;
   opacity: 0.8;
 }
 
@@ -471,7 +471,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
 }
 
@@ -524,7 +524,7 @@
   padding: 1px 5px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.4;
   color: var(--color-text-dim);
   white-space: nowrap;
@@ -540,7 +540,7 @@
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 9px;
   line-height: 1.4;
   padding: 0 4px;
   border: 1px solid var(--color-border);

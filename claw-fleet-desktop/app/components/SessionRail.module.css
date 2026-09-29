@@ -39,13 +39,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .workspace_count {
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -96,7 +96,7 @@
   border: none;
   background: none;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-accent);
   cursor: pointer;
   transition: background 0.14s;

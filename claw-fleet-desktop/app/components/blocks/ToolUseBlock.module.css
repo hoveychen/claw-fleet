@@ -36,7 +36,7 @@
 
 .header:hover { background: var(--color-bg-tool-hover); }
 
-.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 12px); flex-shrink: 0; }
+.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
 
 .tool_name {
   font-weight: 600;
@@ -66,7 +66,7 @@
   /* Monospace because the default summary IS the raw target — a path, a
      command, a glob. Tools whose summary we phrase ourselves opt out below. */
   font-family: var(--font-mono);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 /* Set by ToolUseBlock when codexToolSummary / claudeToolSummary answered, i.e.
@@ -90,7 +90,7 @@
 /* A shell that kept running after the turn ended. Reads as a state, not an
    error, so it borrows the dim meta face rather than a status colour. */
 .bg_badge {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
@@ -100,7 +100,7 @@
 }
 
 .error_badge {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-error-bg);
@@ -126,7 +126,7 @@
 }
 
 .section_label {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -138,7 +138,7 @@
 .input_text {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -155,7 +155,7 @@
 .exec_workdir {
   margin-top: 4px;
   font-family: var(--font-mono);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   word-break: break-all;
 }
@@ -165,7 +165,7 @@
 }
 
 .exec_script_summary {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -187,13 +187,13 @@
   align-items: baseline;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   word-break: break-all;
 }
 
 .patch_op {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 9px);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -225,7 +225,7 @@
 .plan_mark {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 .plan_text { word-break: break-word; }
@@ -253,7 +253,7 @@
 }
 
 .codex_chip {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--color-bg-tool-hover);
@@ -262,7 +262,7 @@
 
 /* wait / write_stdin poll note */
 .codex_note {
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -284,7 +284,7 @@
 .request_opts {
   margin: 3px 0 0;
   padding-left: 16px;
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   display: flex;
   flex-direction: column;
@@ -304,7 +304,7 @@
   align-items: baseline;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 .param_key {
@@ -331,7 +331,7 @@
 }
 
 .param_chip {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--color-bg-tool-hover);
@@ -354,7 +354,7 @@
 }
 
 .target_note {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
@@ -386,7 +386,7 @@
 }
 
 .tool_ref {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
@@ -549,7 +549,7 @@
   flex: 1;
   min-width: 0;
   color: var(--color-text-secondary);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -578,7 +578,7 @@
 
 .genimage_chip,
 .genimage_chip_warn {
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   white-space: nowrap;

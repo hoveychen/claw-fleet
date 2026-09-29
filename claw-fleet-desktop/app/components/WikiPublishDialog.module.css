@@ -39,7 +39,7 @@
 .label {
   display: block;
   margin: 12px 0 5px;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--color-text-secondary);
 }
 
@@ -52,7 +52,7 @@
   background: var(--color-bg-field);
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .input:focus {
@@ -63,7 +63,7 @@
 .normalized {
   margin: 6px 0 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   word-break: break-all;
 }
@@ -80,7 +80,7 @@
 
 .exists {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.5;
   color: var(--color-text-secondary);
 }
@@ -105,13 +105,13 @@
 }
 
 .radio strong {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--color-text);
 }
 
 .radio em {
-  font-size: 12px;
+  font-size: 11px;
   font-style: normal;
   line-height: 1.45;
   color: var(--color-text-dim);
@@ -119,7 +119,7 @@
 
 .error {
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.5;
   color: var(--color-error);
   word-break: break-word;

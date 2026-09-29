@@ -46,6 +46,13 @@ describe("math", () => {
     expect(html).not.toContain("$E=mc^2$");
   });
 
+  it("does not read two dollar amounts as one inline formula", () => {
+    const html = render("首问 $14.84（中位 $0.054/次），**追问** $7.56");
+    expect(html).not.toContain("katex");
+    expect(html).toContain("$14.84");
+    expect(html).toContain("<strong>追问</strong>");
+  });
+
   it("typesets display math", () => {
     expect(render("$$\n\\frac{a}{b}\n$$")).toContain("katex-display");
   });

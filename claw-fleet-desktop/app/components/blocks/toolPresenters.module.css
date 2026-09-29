@@ -5,7 +5,7 @@
 .chip_warn,
 .chip_err {
   flex-shrink: 0;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   white-space: nowrap;
@@ -46,7 +46,7 @@
   background: var(--color-bg-secondary);
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
@@ -56,7 +56,7 @@
 
 .stream_label {
   display: inline-block;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-dim);
@@ -75,7 +75,7 @@
 }
 
 .note {
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -93,7 +93,7 @@
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
@@ -134,7 +134,7 @@
   background: none;
   border: none;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   cursor: pointer;
 }
 
@@ -144,7 +144,7 @@
 .open_agent {
   margin-left: auto;
   padding: 1px 7px;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
   color: var(--color-accent, #60a5fa);
   background: none;
   border: 1px solid var(--color-accent, #60a5fa);
@@ -179,7 +179,7 @@
 .todo_mark {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
 }
 
 .todo_done .todo_text {
@@ -200,7 +200,7 @@
 
 .todo_new {
   flex-shrink: 0;
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 9px);
   padding: 0 4px;
   border-radius: 3px;
   background: var(--color-bg-secondary);
@@ -293,7 +293,7 @@
 }
 
 .search_domain {
-  font-size: var(--t-aux, 12px);
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   flex-shrink: 0;
   margin-left: auto;

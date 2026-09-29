@@ -28,10 +28,10 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--color-accent);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 10px);
 }
 .status[data-status="timeout"] { color: var(--color-warning); }
-.id { color: var(--color-text-dim); font-size: var(--t-meta, 12px); }
+.id { color: var(--color-text-dim); font-size: var(--t-meta, 10px); }
 .arrow { margin-left: auto; color: var(--color-text-dim); }
 .body {
   max-height: 420px;

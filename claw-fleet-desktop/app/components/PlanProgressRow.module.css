@@ -10,7 +10,7 @@
   flex-direction: column;
   gap: 2px;
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   line-height: 1.4;
   cursor: pointer;
@@ -33,7 +33,7 @@
 
 .icon {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 10px;
   opacity: 0.8;
 }
 
@@ -91,7 +91,7 @@
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
-  font-size: var(--t-meta, 12px);
+  font-size: var(--t-meta, 11px);
   gap: 3px;
 }
 

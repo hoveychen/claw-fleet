@@ -376,14 +376,14 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
               scale="time"
               domain={[fromMs, now]}
               tickFormatter={formatClock}
-              tick={{ fontSize: 12 }}
+              tick={{ fontSize: 11 }}
               minTickGap={48}
             />
             <YAxis
               domain={[0, 100]}
               ticks={[0, 25, 50, 75, 100]}
               tickFormatter={(v) => `${v}%`}
-              tick={{ fontSize: 12 }}
+              tick={{ fontSize: 11 }}
               width={48}
             />
             <Tooltip

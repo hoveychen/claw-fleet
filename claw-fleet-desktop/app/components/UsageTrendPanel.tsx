@@ -289,14 +289,14 @@ export function UsageTrendPanel() {
                 />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 12, fill: "var(--color-text-dim)" }}
+                  tick={{ fontSize: 10, fill: "var(--color-text-dim)" }}
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
                   minTickGap={30}
                 />
                 <YAxis
-                  tick={{ fontSize: 12, fill: "var(--color-text-dim)" }}
+                  tick={{ fontSize: 10, fill: "var(--color-text-dim)" }}
                   tickLine={false}
                   axisLine={false}
                   width={48}
@@ -307,7 +307,7 @@ export function UsageTrendPanel() {
                     background: "var(--color-bg-secondary)",
                     border: "1px solid var(--color-border)",
                     borderRadius: 6,
-                    fontSize: 12,
+                    fontSize: 11,
                     color: "var(--color-text)",
                   }}
                   formatter={(v, name) => {
@@ -338,7 +338,7 @@ export function UsageTrendPanel() {
                       {t(`usage.scenario_${name}`)}
                     </span>
                   )}
-                  wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+                  wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
                 />
               </AreaChart>
             </ResponsiveContainer>

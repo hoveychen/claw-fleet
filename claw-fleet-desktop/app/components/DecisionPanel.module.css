@@ -267,7 +267,7 @@
   white-space: nowrap;
 }
 .collapsed_bar_chevron {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
 }
 
@@ -311,6 +311,9 @@
  * "there's more below" affordance regardless of input device. */
 .card_area::-webkit-scrollbar {
   width: 10px;
+  /* Without an explicit height a horizontal overflow falls back to WebKit's
+     ~15px default and draws a thick accent bar across the card. */
+  height: 6px;
 }
 .card_area::-webkit-scrollbar-track {
   background: transparent;
@@ -366,7 +369,7 @@
 }
 
 .history_handle_count {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -400,7 +403,7 @@
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--color-text-secondary);
   transition: background 0.15s, border-color 0.15s, opacity 0.15s;
@@ -443,13 +446,13 @@
 }
 
 .tab_workspace {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
 
 .tab_session {
-  font-size: 12px;
+  font-size: 10px;
   font-family: var(--font-mono);
   color: var(--color-text-dim);
   opacity: 0.7;
@@ -506,6 +509,9 @@
  * is lost). Now that the body scrolls inside .card_scroll, the gutter lives here. */
 .card_scroll::-webkit-scrollbar {
   width: 10px;
+  /* Without an explicit height a horizontal overflow falls back to WebKit's
+     ~15px default and draws a thick accent bar across the card. */
+  height: 6px;
 }
 .card_scroll::-webkit-scrollbar-track {
   background: transparent;
@@ -595,13 +601,13 @@
 }
 
 .card_workspace {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
 
 .master_chip {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-accent, #6366f1);
   background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
   padding: 2px 8px;
@@ -624,7 +630,7 @@
 }
 
 .card_session {
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--color-text-dim);
   background: transparent;
@@ -695,7 +701,7 @@
 
 .perm_file_path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   word-break: break-all;
 }
@@ -705,7 +711,7 @@
   background: transparent;
   border: none;
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   padding: 0;
   margin-bottom: 8px;
@@ -725,7 +731,7 @@
 }
 
 .tag {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 500;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
@@ -934,7 +940,7 @@
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: 11px;
   display: inline-block;
   max-width: 160px;
   overflow: hidden;
@@ -978,7 +984,7 @@
 }
 
 .always_allow_menu_title {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   padding: 4px 8px 6px;
   border-bottom: 1px solid var(--color-border);
@@ -1008,7 +1014,7 @@
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: 11px;
   word-break: break-all;
 }
 
@@ -1037,7 +1043,7 @@
 }
 
 .elicitation_step_badge {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--color-text-dim);
   flex-shrink: 0;
@@ -1098,7 +1104,7 @@
 
 .elicitation_header {
   display: inline-block;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
@@ -1137,7 +1143,7 @@
 }
 
 .elicitation_preview_caption {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   padding: 0 2px;
   overflow: hidden;
@@ -1235,7 +1241,7 @@
 
 /* Mode toggle chip (Single ↔ Multi), shown in the card header */
 .mode_toggle {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: var(--radius-md);
@@ -1411,7 +1417,7 @@
 }
 
 .elicitation_attachment_dims {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1419,7 +1425,7 @@
 }
 
 .elicitation_attachment_badge {
-  font-size: 12px;
+  font-size: 10px;
   padding: 1px 5px;
   border-radius: var(--radius-md);
   background: rgba(var(--color-accent-rgb), 0.15);
@@ -1556,7 +1562,7 @@
 
 .plan_file_path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   margin-bottom: 8px;
 }
@@ -1627,7 +1633,7 @@
 }
 .preceding_label {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--color-text-dim);
 }
@@ -1636,7 +1642,7 @@
 .preceding_snippet {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -1650,7 +1656,7 @@
   border-radius: 999px;
   background: rgba(var(--color-accent-rgb), 0.18);
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: 10px;
   line-height: 16px;
 }
 /* Shared chevron, also used by the options collapse bar in the card footer. */
@@ -1683,7 +1689,7 @@
   margin-bottom: 0;
 }
 .preceding_q {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -1811,7 +1817,7 @@
   border-radius: 999px;
   background: var(--badge-waiting-bg);
   color: var(--badge-waiting-fg);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }

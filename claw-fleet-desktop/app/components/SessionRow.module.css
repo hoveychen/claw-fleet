@@ -93,7 +93,7 @@
    read/unread axis gone that left every row permanently in the "already read"
    grey, so the base state is now the bright one. */
 .row_title {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--color-text);
   /* 500, not 400: at 400 the title sits at the same weight as the grey preview
      line under it and the whole row reads as a paragraph of prose rather than a
@@ -114,7 +114,7 @@
    card view's `.preview` plays. One line only, so the row height stays
    uniform down the rail; the full text lives in the row tooltip. */
 .row_preview {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
   line-height: 1.35;
   white-space: nowrap;
@@ -143,7 +143,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
@@ -162,7 +162,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
@@ -184,7 +184,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
@@ -200,7 +200,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   background: var(--color-bg-tool);
   border-radius: 5px;
@@ -210,13 +210,13 @@
 
 .row_time {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   white-space: nowrap;
 }
 
 .row_snippet {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   line-height: 1.4;
   display: -webkit-box;
@@ -335,7 +335,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-accent);
   background: var(--color-bg-tool);
   border-radius: 5px;

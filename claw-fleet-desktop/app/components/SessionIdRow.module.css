@@ -8,7 +8,7 @@
 
 .label {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-text-dim);
@@ -19,7 +19,7 @@
   min-width: 0;
   overflow: hidden;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-text-dim);
   text-overflow: ellipsis;
   white-space: nowrap;

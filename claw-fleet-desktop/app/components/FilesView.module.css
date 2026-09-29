@@ -35,7 +35,7 @@
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -56,7 +56,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
@@ -86,7 +86,7 @@
 }
 
 .image_meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
@@ -94,7 +94,7 @@
   margin: 0 0 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
 }
@@ -113,7 +113,7 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -146,7 +146,7 @@
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
@@ -215,7 +215,7 @@
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -234,7 +234,7 @@
   margin: 4px 16px 0;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: 11px;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -288,7 +288,7 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-mono, ui-monospace, monospace);
   text-align: left;
   cursor: pointer;
@@ -364,7 +364,7 @@
 
 .proc_section_label {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -407,7 +407,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .proc_shortcut_remove {
@@ -492,7 +492,7 @@
 }
 
 .proc_error {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-error);
   padding: 4px 8px;
   border-radius: var(--radius-sm);
@@ -501,7 +501,7 @@
 
 .proc_empty {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
@@ -534,7 +534,7 @@
 .proc_execution_label {
   flex: 1;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .proc_row {
@@ -593,7 +593,7 @@
 
 .proc_status {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
@@ -606,7 +606,7 @@
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -641,7 +641,7 @@
   border-radius: var(--radius-pill);
   background: var(--color-bg-secondary);
   color: var(--color-text);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -676,13 +676,13 @@
 }
 
 .external_title {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
 .external_path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text);
   overflow-wrap: anywhere;
 }
@@ -700,7 +700,7 @@
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -735,7 +735,7 @@
   background: transparent;
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   overflow-wrap: anywhere;
 }
@@ -752,7 +752,7 @@
 }
 
 .paths_tried_label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
@@ -764,7 +764,7 @@
   flex-direction: column;
   gap: 2px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
 }

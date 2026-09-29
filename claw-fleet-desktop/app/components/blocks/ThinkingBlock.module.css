@@ -21,7 +21,7 @@
 
 .toggle:hover { background: var(--thinking-toggle-bg-hover); }
 
-.icon { color: var(--color-accent); font-size: var(--t-meta, 12px); }
+.icon { color: var(--color-accent); font-size: var(--t-meta, 10px); }
 .label { font-weight: 600; color: var(--thinking-label); white-space: nowrap; }
 
 .preview {

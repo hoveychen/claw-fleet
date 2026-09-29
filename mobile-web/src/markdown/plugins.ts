@@ -23,6 +23,7 @@ import {
   EXPLAIN_MARK_QUOTE_PROP,
   remarkExplainMarks,
 } from "../../../shared-ts/explainMarks";
+import { remarkCurrencyDollar } from "../../../shared-ts/currencyDollar";
 import "katex/dist/katex.min.css";
 
 /**
@@ -98,6 +99,8 @@ export const mdRemarkPlugins: PluggableList = [
   remarkBreaks,
   remarkCjkFriendly,
   remarkMath,
+  // `$14.84 … $0.054` is two amounts, not a formula (shared-ts/currencyDollar.ts).
+  remarkCurrencyDollar,
   // GFM's autolink literal doesn't stop at CJK, so `见 https://example.com，然后`
   // swallows the comma and everything after it into the href.
   remarkCjkAutolinkFix,
