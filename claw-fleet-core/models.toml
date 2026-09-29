@@ -30,6 +30,8 @@
 #
 # Claude 的 min_cli_version 是实测的：从 npm 拉 `@anthropic-ai/claude-code-darwin-arm64`
 # 各版本二进制，二分找出第一个含 `"<id>"` 字面量的版本（2026-09-29）。
+# Codex 各条暂不写：它的模型表由服务端按 client_version 下发，二进制里查不到
+# （gpt-6-sol 不在 0.156.0 的二进制里却照样能用），没有同样可靠的测法。
 #
 # Claude 各条**故意不写 context**：窗口由家族规则判定（Opus/Sonnet 4.6+、5.x、
 # Fable、Mythos 原生 1M，其余 200K），还要认 Fleet 自己的 `[1m]` 后缀和带日期的
@@ -61,6 +63,7 @@ label = "Fable 5.1"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.257"
 
 [[model]]
 id = "claude-fable-5"
@@ -68,6 +71,7 @@ label = "Fable 5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.170"
 superseded_by = "claude-fable-5-1"
 # 折进 5.1 那一行时附带的差异说明。
 legacy_note_zh = "5.1 上强制 tool_choice `any`/`tool` 会 400，5 没这限制"
@@ -90,6 +94,7 @@ label = "Opus 5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.219"
 
 [[model]]
 id = "claude-opus-4-8"
@@ -97,6 +102,7 @@ label = "Opus 4.8"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.154"
 superseded_by = "claude-opus-5"
 
 [[model]]
@@ -114,6 +120,7 @@ label = "Sonnet 5"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.197"
 superseded_by = "claude-sonnet-5-5"
 
 [[model]]
@@ -122,6 +129,7 @@ label = "Sonnet 4.6"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.45"
 superseded_by = "claude-sonnet-5-5"
 
 # 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
@@ -133,6 +141,7 @@ label = "Haiku 4.5"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.0.17"
 
 [[model]]
 id = "claude-haiku-4-5"

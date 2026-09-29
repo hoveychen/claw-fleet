@@ -3112,11 +3112,11 @@ export const MOCK_MODEL_CATALOG = withCliFlags([
     cliVersion: "2.1.284",
     upgradeCommand: "claude update",
     models: [
-      m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER),
+      m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER, null, "2.1.257"),
       m("claude-opus-5-5", "Opus 5.5", "claude", "premium", CLAUDE_LADDER, null, "2.1.280"),
-      m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER),
+      m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER, null, "2.1.219"),
       m("claude-sonnet-5-5", "Sonnet 5.5", "claude", "standard", CLAUDE_LADDER, null, "2.1.284"),
-      m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER),
+      m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER, null, "2.0.17"),
     ],
   },
   {
