@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -78,9 +79,12 @@ export function TodayUsageBadge({
     ? `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}`
     : `${label}: ${loadingText}`;
 
-  const receipt = showReceipt ? (
-    <TokenReceiptModal onClose={() => setShowReceipt(false)} />
-  ) : null;
+  // Portalled to <body>: this badge lives in the sidebar scroller, whose
+  // mask-image makes it the containing block for position:fixed and would
+  // clip the receipt's overlay to the sidebar.
+  const receipt = showReceipt
+    ? createPortal(<TokenReceiptModal onClose={() => setShowReceipt(false)} />, document.body)
+    : null;
   const openHint = t("today_usage.open_receipt", "查看今日花费明细");
 
   if (collapsed) {
