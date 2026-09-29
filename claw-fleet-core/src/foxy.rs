@@ -305,30 +305,43 @@ pub async fn fetch_custody() -> FoxyCustody {
 
 /// Outcome of asking foxy for the in-use Claude account.
 ///
-/// Only `NotRunning` and `NoClaudeAccount` permit the caller to fall back to
-/// calling Anthropic directly. When foxy is running and injecting an account,
-/// the keychain token *is that pooled account's*, and foxy's vault is already
-/// polling its usage endpoint; a direct call from us is a second poller on the
-/// same token. Anthropic answers the extra load with a 429 carrying a one-hour
-/// `Retry-After`, and the vault's own usage poll for that account then freezes
-/// for as long as we keep going. So a foxy hiccup (slow `/api/accounts`, the
-/// account momentarily missing from the list) must surface as an error, not as
-/// a silent switch to direct polling every tick.
+/// Only `NotInstalled` permits the caller to fall back to calling Anthropic
+/// directly. Once foxy is installed on this machine the keychain token may be a
+/// pooled account's, and foxy's vault polls that account's usage from a
+/// different host; a direct call from this device is a second poller on the
+/// same token from a second IP, which Anthropic answers with 429s (one-hour
+/// `Retry-After`) and treats as account-sharing. So every foxy failure mode
+/// while it is installed — daemon down, stale port file, restart window,
+/// momentarily no in-use account, slow `/api/accounts` — must surface as an
+/// error, never as a silent switch to direct polling.
 pub enum FoxyLookup {
     Account(FoxyAccount),
-    /// No port file, or nothing listening on it (a stale file left behind).
-    NotRunning,
-    /// foxy answered but holds no Claude account; the keychain is the user's own.
-    NoClaudeAccount,
-    /// foxy is running and manages a Claude account, but this read failed.
+    /// No foxy data directory on this machine: the keychain is the user's own.
+    NotInstalled,
+    /// foxy is installed but could not hand back the in-use account.
     Unavailable(String),
+}
+
+/// Whether foxy is installed, judged by its data directory existing. Split
+/// from [`installed`] for testing.
+fn installed_at(dir: Option<&std::path::Path>) -> bool {
+    dir.is_some_and(|d| d.is_dir())
+}
+
+/// Whether foxy-switcher is installed on this machine. Presence of the data
+/// directory is the signal, not a live daemon: a stopped daemon is exactly the
+/// state in which the keychain may still hold a pooled token.
+fn installed() -> bool {
+    installed_at(data_dir().as_deref())
 }
 
 /// Pure tail of [`fetch_in_use_account`], split for testing: given the managed
 /// id from `/api/cred/status` and the `/api/accounts` body, decide the outcome.
 fn lookup_from(managed_id: i64, accounts: &Value) -> FoxyLookup {
     if managed_id == 0 {
-        return FoxyLookup::NoClaudeAccount;
+        return FoxyLookup::Unavailable(
+            "foxy-switcher has no in-use Claude account".to_string(),
+        );
     }
     match map_in_use(accounts, managed_id) {
         Some(a) => FoxyLookup::Account(a),
@@ -344,8 +357,13 @@ fn lookup_from(managed_id: i64, accounts: &Value) -> FoxyLookup {
 /// a generous timeout per foxy's own guidance. See [`FoxyLookup`] for which
 /// outcomes allow a direct-Anthropic fallback.
 pub async fn fetch_in_use_account() -> FoxyLookup {
+    if !installed() {
+        return FoxyLookup::NotInstalled;
+    }
     let Some(port) = read_port() else {
-        return FoxyLookup::NotRunning;
+        return FoxyLookup::Unavailable(
+            "foxy-switcher is installed but its daemon is not running (no port file)".to_string(),
+        );
     };
     let base = format!("http://127.0.0.1:{port}");
     let client = reqwest::Client::new();
@@ -357,8 +375,8 @@ pub async fn fetch_in_use_account() -> FoxyLookup {
         .await
     {
         Ok(r) => r,
-        // Connection refused: the port file outlived the daemon.
-        Err(e) if e.is_connect() => return FoxyLookup::NotRunning,
+        // Connection refused (the port file outlived the daemon, or it is
+        // mid-restart) is still an error: foxy is installed.
         Err(e) => return FoxyLookup::Unavailable(format!("foxy /api/cred/status: {e}")),
     };
     let status: Value = match status.json().await {
@@ -369,10 +387,6 @@ pub async fn fetch_in_use_account() -> FoxyLookup {
         .get("managed_account_id")
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    if managed_id == 0 {
-        return FoxyLookup::NoClaudeAccount;
-    }
-
     let accounts: Value = match async {
         client
             .get(format!("{base}/api/accounts"))
@@ -560,11 +574,19 @@ mod tests {
     }
 
     #[test]
-    fn lookup_without_a_managed_account_allows_direct_fallback() {
+    fn lookup_without_a_managed_account_is_unavailable_not_a_fallback() {
         assert!(matches!(
             lookup_from(0, &sample_accounts()),
-            FoxyLookup::NoClaudeAccount
+            FoxyLookup::Unavailable(_)
         ));
+    }
+
+    #[test]
+    fn installed_only_when_the_data_dir_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(installed_at(Some(tmp.path())));
+        assert!(!installed_at(Some(&tmp.path().join("missing"))));
+        assert!(!installed_at(None));
     }
 
     // The keychain holds pooled account 999's token here, so falling back to a

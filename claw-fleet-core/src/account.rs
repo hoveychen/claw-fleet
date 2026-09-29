@@ -648,9 +648,9 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
     // usage endpoint once a minute for the in-use account, so reading from it
     // avoids a redundant Anthropic call (and the rate limits that come with it).
     // foxy only exposes email + plan, so full_name falls back to the email and
-    // organization_name is left blank. Only "foxy isn't running" or "foxy holds
-    // no Claude account" falls back to the direct API — see `foxy::FoxyLookup`
-    // for why a failed read while foxy is injecting must not.
+    // organization_name is left blank. Only "foxy isn't installed" falls back
+    // to the direct API — see `foxy::FoxyLookup` for why any foxy failure while
+    // it is installed must not.
     use crate::foxy::FoxyLookup;
     let (
         usage_source,
@@ -677,7 +677,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
             ),
         ),
         FoxyLookup::Unavailable(e) => return Err(e),
-        FoxyLookup::NotRunning | FoxyLookup::NoClaudeAccount => {
+        FoxyLookup::NotInstalled => {
             ("anthropic".to_string(), fetch_via_anthropic().await?)
         }
     };
