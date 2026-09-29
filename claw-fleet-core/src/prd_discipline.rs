@@ -71,7 +71,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 ## Rule 1 —— main 上的提交纪律（仅多步计划）
 
 - 计划进行中，不要提议、也不要跑 main 上的 `git commit`。没有「自然检查点」，工作的单位是计划，不是单个 P-task。
-- 例外只有两个：① {title}本回合明确要求；② 所有 P-task 已勾选 + 构建/测试已跑 + 已向{title}呈报摘要，此时唯一那次 main 提交就是 `git merge --no-ff prd/<id>`。
+- 例外只有两个：① {title}本回合明确要求；② 所有 P-task 已勾选 + 构建/测试已跑且全绿，此时唯一那次 main 提交就是 `git merge --no-ff prd/<id>`，直接合，合完在最终汇报里告知{title}。
 - worktree 分支 `prd/<id>` 上的**中间提交明确允许，不违反 Rule 1**，随便提，无需请示。
 - **`git push` 永远需要{title}本回合的明确批准**，与计划状态无关。
 - 撞上阻塞点就提问，不要拿「怕进度丢」当理由提交。破坏性操作（rebase、force-push、删分支、`git reset --hard`）先问。
@@ -135,7 +135,7 @@ git worktree add -b prd/<task-id> .worktrees/<task-id> main
 
 `<task-id>` 多步计划用 TASKS.md 的计划 id，单步改动当场挑一个短 kebab-case 标识。所有代码工作在 worktree 里跑，主 checkout 全程保持干净。
 
-- 结束时从主 checkout 一次原子合并：`git merge --no-ff prd/<task-id>`。`--no-ff` 强制；**禁止** `--ff-only` 和 `--squash`——我们要每个 worktree 提交在 main 历史里都可见。
+- 结束时从主 checkout 一次原子合并：`git merge --no-ff prd/<task-id>`。`--no-ff` 强制；**禁止** `--ff-only` 和 `--squash`——我们要每个 worktree 提交在 main 历史里都可见。验证全绿、没有冲突就自己合，不用先请示（单步改动同样如此）；只在 Rule 4 列的合并阻碍出现时才停下来问。
 - **合并或移除 worktree 前，抢救 gitignored / 未跟踪产物。** merge 只带走已提交内容，`git worktree remove` 会连同其余一起永久删除，没有 git 对象能恢复。先跑 `git status --ignored` 并检查未跟踪文件。`target/`、`node_modules/`、`dist/`、`.next/` 这类例行可再生的目录跳过。若有**不**能从已提交代码重现的产物，停下来问{title}（拷出去，还是该跟踪它），解决前不要 remove——移除是不可逆的那一步。
 - 合并成功后：`git worktree remove .worktrees/<task-id>`，然后 `git branch -d prd/<task-id>`。合并失败就地解决——不要弃掉 worktree、不要 amend 合并提交、不要 `git reset --hard` 抹掉合并。
 - 不要把 worktree 分支 push 到远端。
@@ -155,7 +155,7 @@ git worktree add -b prd/<task-id> .worktrees/<task-id> main
 
 **只为以下四种情形停顿**（「我做了不少，要不要报个到」永远不是其中之一）：
 
-1. **最后一个 P-task 的验收闸门** —— 跑 `git merge --no-ff` 前呈报「可以合并了」并等明确放行。这次合并就是计划的验收时刻，不要在中间检查点征求验收。
+1. **合并前的真实阻碍** —— `git merge --no-ff` 有冲突、要抢救的未跟踪产物（见 Rule 3），或{title}本回合说过「先别合」。除此之外验证全绿就直接合并，在最终汇报里说一声已合并；**不要为合并单独发卡请示放行**——{title}在卡上看到的并不比测试结果多，这张卡只能被点「合并」，是白问。最终汇报就是验收时刻，不要在中间检查点征求验收。
 2. **一个真正的方向问题** —— 路上有真岔口、需要{title}判断（「保持向后兼容还是丢掉？」「删还是归档？」「API 设计 A 还是 B？」）。
 3. **挺过一轮修复的验证红灯** —— 构建/测试第一次失败可以试一轮诊断加修复；没恢复绿灯，或动手前根因就不清楚，停下来作为阻塞点呈报，不要陷入「修→重试→修→重试」循环。
 4. **一次破坏性操作**（rebase、force-push、删分支、丢弃 migration、`git reset --hard`）。
@@ -286,7 +286,7 @@ A **multi-step plan** = any task you decomposed into 2 or more sequential subtas
 **Scope of "commit" in this rule.** Throughout Rule 1, "commit" means the **main / default branch**. Commits on a worktree branch (`prd/<plan-id>`) are governed by Rule 3, are explicitly allowed at every P-task boundary, and are not a Rule 1 violation.
 
 - While a plan is in flight, do not propose `git commit` on main. Not after P1, not after P2, not at any "natural checkpoint" — the unit of work is the plan, not one P-task.
-- Do not actually run `git commit` on main either. You may commit on main only when: ① {title} explicitly asks for it in the current turn; or ② every P-task is checked, build/tests have run, and you have surfaced a summary to {title} — and that single allowed commit takes the form `git merge --no-ff prd/<plan-id>`.
+- Do not actually run `git commit` on main either. You may commit on main only when: ① {title} explicitly asks for it in the current turn; or ② every P-task is checked and build/tests have run green — and that single allowed commit takes the form `git merge --no-ff prd/<plan-id>`. Run it yourself, then tell {title} in the final report that it was merged.
 - **Intermediate commits** on the worktree branch `prd/<plan-id>` are explicitly allowed and do NOT violate Rule 1 — they are governed by Rule 3. Commit freely there without asking.
 - **`git push` is always gated** — never push without {title}'s explicit approval in the current turn, regardless of plan state.
 - Hit a blocker? Ask. Do not use "I'm afraid of losing progress" as a reason to commit. Destructive operations (rebase, force-push, deleting branches, `git reset --hard`) always stop and ask first.
@@ -351,7 +351,7 @@ git worktree add -b prd/<task-id> .worktrees/<task-id> main
 For a multi-step plan `<task-id>` is the TASKS.md plan id; for a single mechanical change, pick a short kebab-case id on the spot. All code work happens in the worktree; the main checkout stays clean throughout.
 
 - **Commit inside the worktree** between P-tasks — those commits are progress markers nobody else sees, and they need no approval.
-- Finish with one atomic merge from the main checkout: `git merge --no-ff prd/<task-id>`. `--no-ff` is mandatory; `--ff-only` and `--squash` are **forbidden** — every worktree commit stays visible in main's history.
+- Finish with one atomic merge from the main checkout: `git merge --no-ff prd/<task-id>`. `--no-ff` is mandatory; `--ff-only` and `--squash` are **forbidden** — every worktree commit stays visible in main's history. When verification is green and there is no conflict, run the merge yourself without asking first (single-step changes included); stop only for the merge obstacles listed in Rule 4.
 - **Before merging or removing a worktree, rescue gitignored / untracked artifacts.** The merge **only carries across** committed content; `git worktree remove` then deletes the rest permanently, and since they were never tracked there is **no git object to recover** them. `.gitignore` means "don't put this in version control", not "don't keep this" — a generated dataset, a downloaded asset, a `.env` is real data even when untracked. Run `git status --ignored` and check untracked files first. Routinely regenerable directories — `target/`, `node_modules/`, `dist/`, `.next/` — can be skipped. If the worktree holds an artifact that cannot be reproduced from committed code, stop and ask {title} (copy it out, or should it be tracked?) before removing anything — removal is the irreversible step.
 - After a successful merge: `git worktree remove .worktrees/<task-id>`, then `git branch -d prd/<task-id>`. If the merge fails, resolve it in place — do not abandon the worktree, do not amend the merge commit, do not `git reset --hard` the merge away.
 - Do not push the worktree branch to a remote.
@@ -376,7 +376,7 @@ Two mechanisms now enforce this rhythm. **Focused injection**: once you are attr
 
 **The rhythm stops for exactly four things** ("I've made a lot of progress, should I check in?" is never one of them):
 
-1. **The final P-task's acceptance gate** — before running `git merge --no-ff`, surface a "ready to merge" summary and wait for explicit clearance. That merge is the plan's acceptance moment; do not solicit acceptance at intermediate checkpoints.
+1. **A real obstacle to the merge** — `git merge --no-ff` conflicts, an untracked artifact needs rescuing (see Rule 3), or {title} said "don't merge yet" this turn. Otherwise, once verification is green, merge and say so in the final report; **do not raise a card just to ask for merge clearance** — {title} sees nothing on that card beyond the test results, so the only possible answer is "merge". The final report is the acceptance moment; do not solicit acceptance at intermediate checkpoints.
 2. **A genuine question about direction** — a real fork in the road that needs {title}'s judgement ("keep backwards compatibility or drop it?", "delete or archive?", "API design A or B?").
 3. **A red build/test that survived one round of fixes** — you may try ONE round of diagnosis and repair; if that round does not restore green, or the root cause was unclear before you started, stop and surface it as a blocker instead of looping fix → retry → fix → retry.
 4. **A destructive operation** (rebase, force-push, deleting a branch, dropping a migration, `git reset --hard`).
@@ -1204,13 +1204,22 @@ mod tests {
     }
 
     #[test]
-    fn render_rule_4_acceptance_gate_at_final_merge() {
+    fn render_rule_4_merges_without_asking_for_clearance() {
         let g = render_guidance("Boss", "en");
         let r4_pos = g.find("## Rule 4").expect("Rule 4 section must exist");
         let r4_body = &g[r4_pos..];
         assert!(
-            r4_body.contains("acceptance gate") || r4_body.contains("acceptance moment"),
-            "Rule 4 must label the final-merge pause point as an acceptance gate so it's the only sign-off moment"
+            r4_body.contains("do not raise a card just to ask for merge clearance"),
+            "Rule 4 must forbid a merge-clearance card: its only possible answer is 'merge', so it is pure friction"
+        );
+        assert!(
+            !r4_body.contains("wait for explicit clearance"),
+            "Rule 4 must not reinstate the old wait-for-clearance gate before merging"
+        );
+        let zh = render_guidance("老板", "zh");
+        assert!(
+            zh.contains("不要为合并单独发卡请示放行") && !zh.contains("等明确放行"),
+            "the zh guidance must carry the same no-clearance-card rule as the en one"
         );
         assert!(
             r4_body.contains("git merge --no-ff"),

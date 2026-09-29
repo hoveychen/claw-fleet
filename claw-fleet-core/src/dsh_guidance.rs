@@ -281,9 +281,10 @@ progress before P4?\" or \"I've done a lot, want me to summarise?\". Those \
 proactive progress-report checkpoints are exactly what this rule kills — \
 {title} can already see progress via TASKS.md checkboxes and worktree \
 commits.\n\
-- **The rhythm pauses ONLY for:** (1) the final-merge acceptance gate \
-(surface a \"ready to merge\" summary and wait for {title}'s go-ahead before \
-`git merge --no-ff`); (2) a genuine direction-of-work fork where {title}'s \
+- **The rhythm pauses ONLY for:** (1) a real obstacle to `git merge --no-ff` \
+(a conflict, an untracked artifact to rescue, or {title} said \"don't merge \
+yet\") — otherwise merge once green and say so in the final report; never \
+raise a card just to ask for merge clearance; (2) a genuine direction-of-work fork where {title}'s \
 judgement is needed (API A vs B, keep/drop compatibility); (3) a test/verify \
 red light that survives ONE repair attempt — then stop, do NOT loop \
 fix→retry→fix→retry; (4) a destructive operation (rebase, force-push, branch \
