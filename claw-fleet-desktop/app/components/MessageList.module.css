@@ -61,7 +61,7 @@
   --t-body: 15px;  /* prose, user bubble          (was 13) */
   --t-ui:   13px;  /* tool headers, step labels   (was 12) */
   --t-aux:  12px;  /* mono summaries, params      (was 11) */
-  --t-meta: 12px;  /* timestamps, badges, chips   (was 10 and 9, then 11) */
+  --t-meta: 11px;  /* timestamps, badges, chips   (was 10 and 9) */
   --t-h2:   17px;  /* markdown h2                 (was 14) */
   --t-h1:   19px;  /* markdown h1                 (was 16) */
 
