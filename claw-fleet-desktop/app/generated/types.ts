@@ -276,11 +276,15 @@ label: string,
 harness: string, 
 tier: string | null, 
 efforts: Array<string>, 
-defaultEffort: string | null, };
+defaultEffort: string | null, 
+minCliVersion: string | null, 
+needsCliUpgrade: boolean, };
 
 export type PickerHarness = { 
 name: string, 
-available: boolean, models: Array<PickerModel>, };
+available: boolean, 
+cliVersion: string | null, 
+upgradeCommand: string | null, models: Array<PickerModel>, };
 
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };

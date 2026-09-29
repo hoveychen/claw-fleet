@@ -112,7 +112,7 @@ pub fn too_old_message(found: Option<&str>) -> String {
 /// `None` when there is no leading numeric segment at all — `parse_version` in
 /// [`crate::claude_binary`] is the strict sibling of this: it rejects any
 /// non-numeric segment outright, because Claude's versions never carry tags.
-fn numeric_core(v: &str) -> Option<Vec<u32>> {
+pub(crate) fn numeric_core(v: &str) -> Option<Vec<u32>> {
     let mut nums = Vec::new();
     for part in v.split('.') {
         let digits: String = part.chars().take_while(char::is_ascii_digit).collect();

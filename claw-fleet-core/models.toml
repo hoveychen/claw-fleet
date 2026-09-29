@@ -25,6 +25,11 @@
 #   listed         false = 可解析但不进速查表（裸别名 `opus` 之类）。默认 true。
 #   superseded_by  被哪个 id 取代。这种行不单独占一行，而是折进目标行末尾的
 #                  「前代 X 同价仍可选」——那是三份 guidance 原本就用的体例。
+#   min_cli_version 认得这个 id 的最早一版 harness CLI。本机 CLI 低于它时，
+#                  桌面与移动端的模型选择器会提示升级。不写 = 没有已知下限。
+#
+# Claude 的 min_cli_version 是实测的：从 npm 拉 `@anthropic-ai/claude-code-darwin-arm64`
+# 各版本二进制，二分找出第一个含 `"<id>"` 字面量的版本（2026-09-29）。
 #
 # Claude 各条**故意不写 context**：窗口由家族规则判定（Opus/Sonnet 4.6+、5.x、
 # Fable、Mythos 原生 1M，其余 200K），还要认 Fleet 自己的 `[1m]` 后缀和带日期的
@@ -74,6 +79,7 @@ label = "Opus 5.5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.280"
 
 # Opus 5 **没有**写 superseded_by：5.5 比它便宜（$4/$20 对 $5/$25），而折行的
 # 渲染文案写死的是「前代同价仍可选」，折进去那句就成了假话。价格不同的两代各占
@@ -99,6 +105,7 @@ label = "Sonnet 5.5"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.284"
 
 # Sonnet 5 与 5.5 同价（$2/$10，缓存 $2.50/$4/$0.20），所以折进 5.5 那一行。
 [[model]]
