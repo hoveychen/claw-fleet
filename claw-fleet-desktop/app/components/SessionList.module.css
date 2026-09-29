@@ -644,6 +644,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Fade the last 24px into the footer instead of slicing a text line in
+     half; the matching bottom padding lets the final row scroll clear of it. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  padding-bottom: 24px;
 }
 
 .mascot_section {
@@ -772,12 +776,13 @@
   color: var(--color-text);
 }
 
-/* Keep-awake (coffee) toggle in the "on" state — accent fill, matching the
-   banner's active segmented-control cell so the always-on status pops. */
+/* Keep-awake (coffee) toggle in the "on" state — accent-tinted icon on a soft
+   wash. A solid accent fill made this 130px cell the loudest thing on screen
+   for a status that is on most of the day. */
 .footer_toolbar_btn_active,
 .footer_toolbar_btn_active:hover {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
 /* Theme cycle cell holds a text glyph (☀/☽/⊙) rather than an SVG — size it to
