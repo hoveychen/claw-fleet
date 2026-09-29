@@ -4,7 +4,7 @@
 
 .section_title {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
 }
@@ -32,7 +32,7 @@
 }
 
 .cost {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.1;
@@ -40,7 +40,7 @@
 }
 
 .tokens {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }

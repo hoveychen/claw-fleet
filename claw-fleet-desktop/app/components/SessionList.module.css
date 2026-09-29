@@ -324,7 +324,7 @@
    red-alert / neutral-count vocabulary as .nav_badge / .nav_badge_running. */
 .nav_tab_badge,
 .nav_tab_badge_running {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: var(--radius-md);
   padding: 0 4px;
@@ -419,7 +419,7 @@
    badge (.ws_badge) so "running command" reads the same across both surfaces.
    Neutral: a count is information, not a call to act. */
 .nav_badge_running {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   background: var(--color-bg-secondary);
   color: var(--color-text);
