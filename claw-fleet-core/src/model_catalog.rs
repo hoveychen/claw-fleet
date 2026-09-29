@@ -79,6 +79,13 @@ pub struct ModelEntry {
     pub legacy_note_zh: Option<String>,
     #[serde(default)]
     pub legacy_note_en: Option<String>,
+    /// Oldest harness CLI release that knows this model id (e.g. `"2.1.284"`
+    /// for `claude-sonnet-5-5`). The API accepts a new id the day it ships, but
+    /// the CLI that fronts it lags: an older CLI does not list it, and does not
+    /// know its window or effort ladder. The pickers warn when the installed
+    /// CLI is below this. Absent = no known floor.
+    #[serde(default)]
+    pub min_cli_version: Option<String>,
 }
 
 impl ModelEntry {
@@ -128,6 +135,9 @@ impl ModelEntry {
         }
         if other.legacy_note_en.is_some() {
             self.legacy_note_en = other.legacy_note_en;
+        }
+        if other.min_cli_version.is_some() {
+            self.min_cli_version = other.min_cli_version;
         }
     }
 }
@@ -352,6 +362,13 @@ pub struct PickerModel {
     pub efforts: Vec<String>,
     /// The level the model itself defaults to, when known.
     pub default_effort: Option<String>,
+    /// Oldest CLI release that supports this model, when the catalog records one.
+    pub min_cli_version: Option<String>,
+    /// The installed CLI is known to be older than `min_cli_version`. False when
+    /// either version is unknown — an unreadable version is not evidence of an
+    /// old binary, and a false alarm on every model would teach people to
+    /// ignore the real one.
+    pub needs_cli_upgrade: bool,
 }
 
 /// The selectable models for one harness, plus whether that harness is here.
@@ -367,6 +384,13 @@ pub struct PickerHarness {
     /// offering a model whose spawn is guaranteed to fail is a dead end the
     /// client should not have to discover by trying.
     pub available: bool,
+    /// The version the installed CLI reports, when it could be read.
+    pub cli_version: Option<String>,
+    /// The shell command that upgrades this CLI through the channel it was
+    /// installed with (`claude update`, `brew upgrade --cask claude-code`, …),
+    /// so the upgrade hint names the right fix. `None` when the channel has no
+    /// command of its own (an editor-bundled binary) or nothing is installed.
+    pub upgrade_command: Option<String>,
     pub models: Vec<PickerModel>,
 }
 
@@ -377,38 +401,126 @@ pub struct PickerHarness {
 /// contract in `CLAUDE.md`. It replaces two hand-maintained TS lists that had
 /// drifted from each other and from the guidance sheets.
 pub fn picker_catalog() -> Vec<PickerHarness> {
-    picker_catalog_with(|family| {
-        crate::agent_source::find_source_by_api_name(
-            &crate::agent_source::build_sources(),
-            crate::agent_source::normalize_tool(family),
-        )
-        .is_some()
-    })
+    picker_catalog_for(
+        |family| {
+            crate::agent_source::find_source_by_api_name(
+                &crate::agent_source::build_sources(),
+                crate::agent_source::normalize_tool(family),
+            )
+            .is_some()
+        },
+        cached_cli_install,
+    )
 }
 
-/// [`picker_catalog`] against an injectable availability probe.
+/// [`picker_catalog`] against an injectable availability probe, with no CLI
+/// version known (so nothing is flagged for upgrade).
 pub fn picker_catalog_with(is_available: impl Fn(&str) -> bool) -> Vec<PickerHarness> {
+    picker_catalog_for(is_available, |_| None)
+}
+
+/// [`picker_catalog`] with both probes injectable.
+pub fn picker_catalog_for(
+    is_available: impl Fn(&str) -> bool,
+    cli_install: impl Fn(&str) -> Option<crate::harness_status::CliInstall>,
+) -> Vec<PickerHarness> {
     ["claude-code", "codex", "dsh"]
         .into_iter()
-        .map(|family| PickerHarness {
-            name: match family {
-                "claude-code" => "claude".to_string(),
-                other => other.to_string(),
-            },
-            available: is_available(family),
-            models: listed_models(family)
-                .into_iter()
-                .map(|e| PickerModel {
-                    id: e.id.clone(),
-                    label: e.display().to_string(),
-                    harness: harness_of(e).to_string(),
-                    tier: e.tier.clone(),
-                    efforts: e.efforts.clone().unwrap_or_default(),
-                    default_effort: e.default_effort.clone(),
-                })
-                .collect(),
+        .map(|family| {
+            let install = cli_install(family);
+            let cli_version = install.as_ref().and_then(|i| i.version.clone());
+            let upgrade_command = install.as_ref().and_then(|i| {
+                let plan = crate::harness_install::update_plan(
+                    family,
+                    Some(&i.channel),
+                    Some(&i.path),
+                )
+                .ok()?;
+                // The plan pins the resolved binary, whose file name can be a
+                // bare version (`~/.local/share/claude/versions/2.1.280`).
+                let program = if plan.program == i.path {
+                    if family == "claude-code" { "claude" } else { family }.to_string()
+                } else {
+                    plan.program
+                };
+                Some(display_command(&program, &plan.args))
+            });
+            PickerHarness {
+                name: match family {
+                    "claude-code" => "claude".to_string(),
+                    other => other.to_string(),
+                },
+                available: is_available(family),
+                models: listed_models(family)
+                    .into_iter()
+                    .map(|e| PickerModel {
+                        id: e.id.clone(),
+                        label: e.display().to_string(),
+                        harness: harness_of(e).to_string(),
+                        tier: e.tier.clone(),
+                        efforts: e.efforts.clone().unwrap_or_default(),
+                        default_effort: e.default_effort.clone(),
+                        min_cli_version: e.min_cli_version.clone(),
+                        needs_cli_upgrade: is_below(
+                            cli_version.as_deref(),
+                            e.min_cli_version.as_deref(),
+                        ),
+                    })
+                    .collect(),
+                cli_version,
+                upgrade_command,
+            }
         })
         .collect()
+}
+
+/// `installed < required`, comparing the numeric `major.minor.patch` core.
+/// False when either side is missing or unparseable.
+fn is_below(installed: Option<&str>, required: Option<&str>) -> bool {
+    let core = |v: Option<&str>| v.and_then(crate::dsh_server::numeric_core);
+    match (core(installed), core(required)) {
+        (Some(have), Some(need)) => have < need,
+        _ => false,
+    }
+}
+
+/// An upgrade plan as a user would type it: the program's file name rather
+/// than an absolute path (`npm install -g …`, not `/opt/homebrew/bin/npm …`).
+fn display_command(program: &str, args: &[String]) -> String {
+    let name = std::path::Path::new(program)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| program.to_string());
+    std::iter::once(name)
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// How long a probed CLI version is reused. The picker catalog is fetched on
+/// every menu mount and every relay request; one `--version` subprocess per
+/// harness per minute is plenty, and an upgrade shows up within that minute.
+const CLI_PROBE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn cached_cli_install(source: &str) -> Option<crate::harness_status::CliInstall> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::Instant;
+    type Cache = HashMap<String, (Instant, Option<crate::harness_status::CliInstall>)>;
+    static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((at, hit)) = cache.lock().ok()?.get(source) {
+        if at.elapsed() < CLI_PROBE_TTL {
+            return hit.clone();
+        }
+    }
+    // Probe outside the lock: `--version` can take seconds on a cold start and
+    // must not stall a concurrent request for another harness.
+    let fresh = crate::harness_status::cli_install(source);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(source.to_string(), (Instant::now(), fresh.clone()));
+    }
+    fresh
 }
 
 /// The harness column value for a row.
@@ -965,6 +1077,45 @@ mod tests {
         assert!(!cat[2].available);
         // Models are listed regardless of availability — the flag is the signal.
         assert!(!cat[1].models.is_empty(), "codex models still enumerated");
+    }
+
+    /// A model newer than the installed CLI is flagged, with the fix spelled out
+    /// through the channel the CLI was installed with.
+    #[test]
+    fn picker_catalog_flags_models_the_installed_cli_is_too_old_for() {
+        let install = |v: &str| crate::harness_status::CliInstall {
+            path: "/Users/x/.local/share/claude/versions/2.1.280".into(),
+            channel: "native-installer".into(),
+            version: Some(v.into()),
+        };
+        let pick = |cat: &[PickerHarness], id: &str| {
+            cat[0].models.iter().find(|m| m.id == id).cloned().unwrap()
+        };
+
+        let old = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.280")));
+        assert_eq!(old[0].cli_version.as_deref(), Some("2.1.280"));
+        assert_eq!(old[0].upgrade_command.as_deref(), Some("claude update"));
+        let sonnet = pick(&old, "claude-sonnet-5-5");
+        assert_eq!(sonnet.min_cli_version.as_deref(), Some("2.1.284"));
+        assert!(sonnet.needs_cli_upgrade);
+        assert!(!pick(&old, "claude-opus-5-5").needs_cli_upgrade, "280 is Opus 5.5's floor");
+
+        let new = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.284")));
+        assert!(new[0].models.iter().all(|m| !m.needs_cli_upgrade));
+
+        // An unreadable version flags nothing.
+        let unknown = picker_catalog_for(|_| true, |_| None);
+        assert!(unknown.iter().flat_map(|h| &h.models).all(|m| !m.needs_cli_upgrade));
+        assert_eq!(unknown[0].upgrade_command, None);
+    }
+
+    #[test]
+    fn version_floor_compares_numerically() {
+        assert!(is_below(Some("2.1.99"), Some("2.1.100")));
+        assert!(!is_below(Some("2.1.284"), Some("2.1.284")));
+        assert!(!is_below(Some("2.2.0"), Some("2.1.284")));
+        assert!(!is_below(None, Some("2.1.284")));
+        assert!(!is_below(Some("2.1.0"), None));
     }
 
     /// Superseded rows and bare aliases stay out of the menus, and every entry

@@ -10,7 +10,7 @@ import {
   resumeConfigChips,
   resumeConfigOverrides,
 } from "./Composer";
-import { effortChoicesFor, modelChoicesFor } from "../useModelCatalog";
+import { cliFloorFor, effortChoicesFor, modelChoicesFor } from "../useModelCatalog";
 import type { PickerHarness } from "../generated/types";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import type { SessionInfo } from "../types";
@@ -43,6 +43,8 @@ describe("Model / effort dropdown (from model_catalog)", () => {
     {
       name: "codex",
       available: true,
+      cliVersion: "0.153.4",
+      upgradeCommand: "codex update",
       models: [
         {
           id: "gpt-6-astra",
@@ -51,6 +53,8 @@ describe("Model / effort dropdown (from model_catalog)", () => {
           tier: "premium",
           efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
           defaultEffort: "medium",
+          minCliVersion: "0.160.0",
+          needsCliUpgrade: true,
         },
         {
           id: "gpt-5.5",
@@ -59,6 +63,8 @@ describe("Model / effort dropdown (from model_catalog)", () => {
           tier: "premium",
           efforts: ["low", "medium", "high", "xhigh"],
           defaultEffort: "xhigh",
+          minCliVersion: null,
+          needsCliUpgrade: false,
         },
       ],
     },
@@ -88,6 +94,19 @@ describe("Model / effort dropdown (from model_catalog)", () => {
     expect(astra).toContain("ultra");
     // Old list invented minimal out of nowhere; no Codex model accepts it.
     expect(astra).not.toContain("minimal");
+  });
+
+  it("names the CLI floor only for a model the installed CLI predates", () => {
+    expect(cliFloorFor(catalog, "codex", "gpt-6-astra")).toEqual({
+      min: "0.160.0",
+      current: "0.153.4",
+      command: "codex update",
+    });
+    expect(cliFloorFor(catalog, "codex", "gpt-5.5")).toBeNull();
+    expect(cliFloorFor(catalog, "codex", "")).toBeNull();
+    // An unreadable CLI version flags nothing.
+    const unknown = [{ ...catalog[0], cliVersion: null }];
+    expect(cliFloorFor(unknown, "codex", "gpt-6-astra")).toBeNull();
   });
 
   it("when no model chosen, return union of efforts across harness", () => {

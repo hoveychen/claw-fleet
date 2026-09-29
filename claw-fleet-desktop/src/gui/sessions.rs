@@ -252,14 +252,17 @@ pub(crate) async fn dsh_models(
 
 /// Fleet's own model catalog (`models.toml`) for the launcher's menus.
 ///
-/// Cheap and synchronous — the catalog is parsed once per process and the
-/// availability probe reads the sources config. Unlike `dsh_models` there is no
-/// server to start.
+/// On the blocking pool: besides the in-process catalog, it reports each
+/// harness CLI's installed version so the menus can flag models that CLI is
+/// too old for, and that probe runs `<cli> --version` (cached for a minute in
+/// core, but a cold probe can take seconds). Read-only, so moving it off the
+/// main thread cannot race anything.
 #[tauri::command]
-pub(crate) fn model_catalog(
+pub(crate) async fn model_catalog(
     state: tauri::State<'_, AppState>,
-) -> Vec<claw_fleet_core::model_catalog::PickerHarness> {
-    state.backend.model_catalog()
+) -> Result<Vec<claw_fleet_core::model_catalog::PickerHarness>, String> {
+    let backend = state.backend.clone();
+    run_blocking(move || backend.model_catalog()).await
 }
 
 #[tauri::command]

@@ -3052,7 +3052,8 @@ const CODEX_LADDER = ["low", "medium", "high", "xhigh", "max"];
 const CODEX_ULTRA_LADDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
 const DSH_LADDER = ["off", "low", "high", "max"];
 
-/** One `PickerModel` row. */
+/** One `PickerModel` row. `needsCliUpgrade` is filled in per harness below,
+ *  from that harness's mocked `cliVersion`. */
 function m(
   id: string,
   label: string,
@@ -3060,8 +3061,42 @@ function m(
   tier: string,
   efforts: string[],
   defaultEffort: string | null = null,
+  minCliVersion: string | null = null,
 ) {
-  return { id, label, harness, tier, efforts, defaultEffort };
+  return { id, label, harness, tier, efforts, defaultEffort, minCliVersion, needsCliUpgrade: false };
+}
+
+/** `a < b` on dotted numeric versions — the mock's stand-in for core's check. */
+function versionBelow(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d < 0;
+  }
+  return false;
+}
+
+type MockHarness = {
+  name: string;
+  available: boolean;
+  cliVersion: string | null;
+  upgradeCommand: string | null;
+  models: ReturnType<typeof m>[];
+};
+
+function withCliFlags(harnesses: MockHarness[]): MockHarness[] {
+  return harnesses.map((h) => ({
+    ...h,
+    models: h.models.map((row) => ({
+      ...row,
+      needsCliUpgrade: !!(
+        h.cliVersion &&
+        row.minCliVersion &&
+        versionBelow(h.cliVersion, row.minCliVersion)
+      ),
+    })),
+  }));
 }
 
 // Fleet's own model catalog (`claw-fleet-core/models.toml`), as the
@@ -3070,21 +3105,25 @@ function m(
 // (`gpt-5.5` stops at `xhigh` while its siblings reach `max`/`ultra`; the
 // deepseek route offers `off` and has no `medium`), and a uniform placeholder
 // ladder would mask the very drift this catalog was built to prevent.
-export const MOCK_MODEL_CATALOG = [
+export const MOCK_MODEL_CATALOG = withCliFlags([
   {
     name: "claude",
     available: true,
+    cliVersion: "2.1.284",
+    upgradeCommand: "claude update",
     models: [
-      m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER),
-      m("claude-opus-5-5", "Opus 5.5", "claude", "premium", CLAUDE_LADDER),
-      m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER),
-      m("claude-sonnet-5-5", "Sonnet 5.5", "claude", "standard", CLAUDE_LADDER),
-      m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER),
+      m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER, null, "2.1.257"),
+      m("claude-opus-5-5", "Opus 5.5", "claude", "premium", CLAUDE_LADDER, null, "2.1.280"),
+      m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER, null, "2.1.219"),
+      m("claude-sonnet-5-5", "Sonnet 5.5", "claude", "standard", CLAUDE_LADDER, null, "2.1.284"),
+      m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER, null, "2.0.17"),
     ],
   },
   {
     name: "codex",
     available: true,
+    cliVersion: "0.153.4",
+    upgradeCommand: "codex update",
     models: [
       m("gpt-6-astra", "GPT-6 Astra", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
       m("gpt-6-sol", "GPT-6 Sol", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
@@ -3098,6 +3137,8 @@ export const MOCK_MODEL_CATALOG = [
   {
     name: "dsh",
     available: true,
+    cliVersion: null,
+    upgradeCommand: null,
     models: [
       // One row, not three — verified against the real `model_catalog()` on
       // 2026-09-10. DeepSeek retired the two older flash ids into aliases of
@@ -3106,7 +3147,7 @@ export const MOCK_MODEL_CATALOG = [
       m("deepseek-official/deepseek-flash", "DeepSeek V4.1 Flash", "dsh", "standard", DSH_LADDER, "high"),
     ],
   },
-];
+]);
 
 export const MOCK_DSH_MODELS = {
   groups: [

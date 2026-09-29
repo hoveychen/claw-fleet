@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AGENT_TOOL_CHOICES,
+  cliUpgradeFor,
   effortChoicesFor,
   modelChoicesFor,
   CLAUDE_PERMISSION_MODE_CHOICES,
@@ -13,6 +14,7 @@ import {
   dshLadderSpec,
   dshModelMenu,
   type CodexProfile,
+  type ModelChoice,
 } from "../modelChoices";
 import { useModelCatalog } from "../useModelCatalog";
 import type { DshModelCatalog } from "../generated/types";
@@ -166,6 +168,26 @@ export function SessionOptionPills({
     () => dshFindPick(dshMenu, dshLadderSpec(dshCatalog, model)),
     [dshMenu, dshCatalog, model],
   );
+  // A model the installed CLI is too old for stays pickable — the API may well
+  // accept the id — but the menu says which CLI it needs and how to get there,
+  // and the pill keeps saying so after the pick.
+  const cliHint = isDsh ? null : cliUpgradeFor(catalog, isCodex ? "codex" : "claude");
+  const pickedChoice = modelChoices.find((m) => m.value === model);
+  const pickedNeedsCli = !!(cliHint && pickedChoice?.needsCliUpgrade);
+  const outdatedModels = cliHint ? modelChoices.filter((m) => m.needsCliUpgrade) : [];
+  const cliSub = (m: Partial<ModelChoice>) =>
+    cliHint && m.needsCliUpgrade
+      ? t("new_session.model_needs_cli", { min: m.minCliVersion, current: cliHint.cliVersion })
+      : undefined;
+  const cliNote = cliHint
+    ? cliHint.upgradeCommand
+      ? t("new_session.cli_outdated_note", {
+          name: toolLabel,
+          current: cliHint.cliVersion,
+          command: cliHint.upgradeCommand,
+        })
+      : t("new_session.cli_outdated_note_nocmd", { name: toolLabel, current: cliHint.cliVersion })
+    : "";
   const effortChoices = isDsh
     ? (dshLadderPick?.efforts ?? [])
     : effortChoicesFor(catalog, isCodex ? "codex" : "claude", model);
@@ -185,8 +207,9 @@ export function SessionOptionPills({
   // value replaces the label with that value.
   const modelLabel = isDsh
     ? (dshPick?.label ?? (model || t("new_session.model_pill_default")))
-    : (modelChoices.find((m) => m.value === model)?.label ??
-      t("new_session.model_pill_default"));
+    : pickedChoice
+      ? `${pickedChoice.label}${pickedNeedsCli ? " ⚠" : ""}`
+      : t("new_session.model_pill_default");
   const effortLabel = effort || t("new_session.effort_pill_default");
   // dsh names a per-model default, so the un-chosen effort item can say which
   // one it means instead of a bare "Default".
@@ -227,6 +250,7 @@ export function SessionOptionPills({
         ...(isDsh ? dshMenu.inline : modelChoices).map((m) => ({
           id: m.value,
           label: m.label,
+          sub: cliSub(m),
           checked: m.value === model,
           onSelect: () => onModelChange(m.value),
         })),
@@ -295,12 +319,29 @@ export function SessionOptionPills({
       <PillMenu
         placement={placement}
         label={modelLabel}
-        title={t("new_session.model")}
+        title={
+          pickedNeedsCli && cliHint
+            ? `${t("new_session.model_needs_cli", {
+                min: pickedChoice?.minCliVersion,
+                current: cliHint.cliVersion,
+              })}\n${cliNote}`
+            : t("new_session.model")
+        }
         testId="model-pill"
         disabled={disabled}
         items={modelItems}
         onOpen={isDsh ? () => loadDshCatalog() : undefined}
-        menuHeader={isDsh ? dshStatusHeader : undefined}
+        menuHeader={
+          isDsh
+            ? dshStatusHeader
+            : outdatedModels.length > 0
+              ? () => (
+                  <div className={pillStyles.menu_warn} data-testid="model-cli-outdated">
+                    {cliNote}
+                  </div>
+                )
+              : undefined
+        }
       />
       <PillMenu
         placement={placement}

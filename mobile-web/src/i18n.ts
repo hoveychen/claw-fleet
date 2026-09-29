@@ -819,6 +819,11 @@ const DICT: Record<string, string> = {
   默认模型: "Default model",
   默认努力度: "Default effort",
   "默认（{0}）": "Default ({0})",
+  "（需 CLI ≥ {0}）": "(needs CLI ≥ {0})",
+  "电脑上的 {0} CLI 是 {1}，这个模型需要 {2} 以上。先升级：{3}":
+    "The computer's {0} CLI is {1}; this model needs {2} or newer. Upgrade first: {3}",
+  "电脑上的 {0} CLI 是 {1}，这个模型需要 {2} 以上，请先升级 CLI":
+    "The computer's {0} CLI is {1}; this model needs {2} or newer — upgrade the CLI first",
   自动接受编辑: "Auto-accept edits",
   计划模式: "Plan mode",
   跳过权限: "Bypass permissions",

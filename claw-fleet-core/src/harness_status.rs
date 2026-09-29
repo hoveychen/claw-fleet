@@ -76,24 +76,61 @@ pub fn probe_source(source: &str) -> Option<HarnessStatus> {
 
 // ── claude-code ───────────────────────────────────────────────────────────────
 
-fn probe_claude() -> HarnessStatus {
+/// Where a harness CLI lives, how it was installed, and which version it
+/// reports — the subset of [`HarnessStatus`] that needs no credential read.
+///
+/// The model pickers use this to tell a model the installed CLI is too old
+/// for; they must not pay for (or trigger) the keychain read that
+/// [`probe_source`] does for the login state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CliInstall {
+    pub path: String,
+    pub channel: String,
+    pub version: Option<String>,
+}
+
+/// Resolve a harness CLI without touching its auth state. `None` when the
+/// binary is not installed or the source has no CLI concept here.
+pub fn cli_install(source: &str) -> Option<CliInstall> {
+    match source {
+        "claude-code" => claude_install(),
+        "codex" => codex_install(),
+        _ => None,
+    }
+}
+
+fn claude_install() -> Option<CliInstall> {
     let override_path = crate::claude_binary::ClaudeBinaryConfig::load().override_path;
-    let resolved = crate::claude_binary::resolve(override_path.as_deref());
-
-    let (installed, path, channel, dir_version) = match &resolved {
-        Some(bin) => (
-            true,
-            Some(bin.path.clone()),
-            Some(claude_channel(bin).to_string()),
-            bin.version.clone(),
-        ),
-        None => (false, None, None, None),
-    };
-
+    let bin = crate::claude_binary::resolve(override_path.as_deref())?;
     // A live `--version` beats the version parsed out of an extension dir
     // name: the dir name is the bundle's version, not necessarily what the
     // binary reports after a self-update.
-    let version = path.as_deref().and_then(probe_version).or(dir_version);
+    let version = probe_version(&bin.path).or_else(|| bin.version.clone());
+    Some(CliInstall {
+        channel: claude_channel(&bin),
+        path: bin.path,
+        version,
+    })
+}
+
+fn codex_install() -> Option<CliInstall> {
+    let path = crate::codex_source::find_codex_binary()?
+        .to_string_lossy()
+        .to_string();
+    Some(CliInstall {
+        channel: codex_channel_for_path(&path).to_string(),
+        version: probe_version(&path),
+        path,
+    })
+}
+
+fn probe_claude() -> HarnessStatus {
+    let found = claude_install();
+    let installed = found.is_some();
+    let (path, channel, version) = match found {
+        Some(c) => (Some(c.path), Some(c.channel), c.version),
+        None => (None, None, None),
+    };
 
     let (logged_in, auth_detail) = match crate::account::read_keychain_credentials() {
         Ok((_token, subscription)) => (Some(true), Some(subscription)),
@@ -156,17 +193,13 @@ fn claude_channel_for_path_hit(path: &Path) -> &'static str {
 // ── codex ─────────────────────────────────────────────────────────────────────
 
 fn probe_codex() -> HarnessStatus {
-    let found = crate::codex_source::find_codex_binary();
-    let (installed, path, channel) = match &found {
-        Some(p) => {
-            let s = p.to_string_lossy().to_string();
-            let channel = codex_channel_for_path(&s);
-            (true, Some(s), Some(channel.to_string()))
-        }
-        None => (false, None, None),
+    let found = codex_install();
+    let installed = found.is_some();
+    let (path, channel, version) = match found {
+        Some(c) => (Some(c.path), Some(c.channel), c.version),
+        None => (None, None, None),
     };
 
-    let version = path.as_deref().and_then(probe_version);
     let (logged_in, auth_detail) = codex_auth_state(crate::codex_launch::codex_home().as_deref());
 
     HarnessStatus {
