@@ -19,6 +19,7 @@ import {
   EXPLAIN_MARK_QUOTE_PROP,
   remarkExplainMarks,
 } from "../../../shared-ts/explainMarks";
+import { remarkCurrencyDollar } from "../../../shared-ts/currencyDollar";
 import "katex/dist/katex.min.css";
 
 /**
@@ -234,6 +235,8 @@ export const safeRemarkPlugins: PluggableList = [
   remarkBreaks,
   remarkCjkFriendly,
   remarkMath,
+  // `$14.84 … $0.054` is two amounts, not a formula (shared-ts/currencyDollar.ts).
+  remarkCurrencyDollar,
   remarkCjkAutolinkFix,
   // `[?text]` → `<span class="explain-mark">`, the agent's own "this may need
   // explaining" annotation (shared-ts/explainMarks.ts). Parsed on every

@@ -311,6 +311,9 @@
  * "there's more below" affordance regardless of input device. */
 .card_area::-webkit-scrollbar {
   width: 10px;
+  /* Without an explicit height a horizontal overflow falls back to WebKit's
+     ~15px default and draws a thick accent bar across the card. */
+  height: 6px;
 }
 .card_area::-webkit-scrollbar-track {
   background: transparent;
@@ -506,6 +509,9 @@
  * is lost). Now that the body scrolls inside .card_scroll, the gutter lives here. */
 .card_scroll::-webkit-scrollbar {
   width: 10px;
+  /* Without an explicit height a horizontal overflow falls back to WebKit's
+     ~15px default and draws a thick accent bar across the card. */
+  height: 6px;
 }
 .card_scroll::-webkit-scrollbar-track {
   background: transparent;
