@@ -4953,6 +4953,28 @@ mod tests {
         fs::remove_file(&tmp).ok();
     }
 
+    #[test]
+    fn tail_delta_annotates_fleet_events() {
+        // A watch fire appended while the session is open must arrive already
+        // tagged, or the live view draws the whole capture as a user bubble.
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-tail-event-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let prompt = "你注册的 Fleet watch `w9` 触发了——等待的条件已满足。\n\n---\nRUNNING\n\n---\n（这是 Fleet watch 在后台轮询到条件后自动 resume 本会话的，不是用户消息。）";
+        let line = json!({"type":"user","message":{"role":"user","content":prompt}});
+        fs::write(&tmp, format!("{line}\n")).unwrap();
+        let out = serve_tail_delta(&json!({ "path": tmp.to_str().unwrap(), "offset": 0 })).unwrap();
+        let lines = out["lines"].as_array().unwrap();
+        assert_eq!(lines[0]["fleetEvent"]["kind"], json!("watch"));
+        assert_eq!(lines[0]["fleetEvent"]["id"], json!("w9"));
+        fs::remove_file(&tmp).ok();
+    }
+
     fn with_temp_home<F: FnOnce()>(f: F) {
         // `_with`, so the name is minted under the lock: `{pid}-{nanos}` is
         // only unique because the lock serialises the two tests racing to

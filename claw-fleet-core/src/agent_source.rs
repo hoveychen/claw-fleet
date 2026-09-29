@@ -172,6 +172,10 @@ pub trait AgentSource: Send + Sync {
         // per-source override.
         crate::queued_command::mark_pending(&mut lines);
         lines.iter_mut().for_each(crate::queued_command::unfold);
+        // Same annotation `get_messages` / `get_messages_tail` apply. A watch
+        // fire or handoff prompt lands while the session is open and live, so
+        // without this it renders as a raw user bubble until the view reloads.
+        lines.iter_mut().for_each(crate::fleet_event::annotate);
         Ok((lines, offset + consumed as u64))
     }
 
