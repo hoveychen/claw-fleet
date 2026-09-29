@@ -779,6 +779,9 @@ async function handleIPC(
       return MOCK_WAITING_ALERTS;
     case "get_account_info":
       return MOCK_ACCOUNT_INFO;
+    case "get_usage_history":
+    case "get_codex_usage_history":
+      return [];
     case "get_source_account": {
       return null;
     }

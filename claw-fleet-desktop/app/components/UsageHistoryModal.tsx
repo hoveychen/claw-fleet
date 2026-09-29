@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { UsageHistoryChart } from "./UsageHistoryChart";
 import styles from "./UsageHistoryModal.module.css";
@@ -19,7 +20,10 @@ export function UsageHistoryModal({ onClose }: Props) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  return (
+  // Portalled to <body>: the sidebar scroller that mounts this has a
+  // mask-image, which makes it the containing block for position:fixed and
+  // would clip the overlay to the sidebar.
+  return createPortal(
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
@@ -32,6 +36,7 @@ export function UsageHistoryModal({ onClose }: Props) {
           <UsageHistoryChart height={360} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
