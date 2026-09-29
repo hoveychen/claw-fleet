@@ -75,7 +75,7 @@ pub struct PrdBlock {
     /// `id` of the plan this one is a child of, from the begin sentinel's
     /// `parent="..."` attribute. `None` for a top-level plan. A child plan is
     /// side work spawned mid-parent; when it completes, Fleet points the agent
-    /// back at the nearest ancestor that still has pending P-tasks.
+    /// at the next pending plan in tree order ([`next_plan_in_tree`]).
     pub parent: Option<String>,
     /// `kind="..."` from the begin sentinel. See [`PlanKind`].
     pub kind: PlanKind,
@@ -895,64 +895,106 @@ pub fn dedup_blocks_keep_latest_mtime(blocks: Vec<SourcedBlock>) -> Vec<SourcedB
         .collect()
 }
 
-// ── Backtrack (child plan → nearest pending ancestor) ─────────────────────────
+// ── Backtrack (finished plan → next plan in tree order) ───────────────────────
 
-/// The plan to return to once a child plan completes: the nearest ancestor that
-/// still has a pending P-task, plus that ancestor's first pending task.
+/// Where the tree's work continues once a plan is fully checked, plus that
+/// plan's first pending task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BacktrackTarget {
     pub plan_id: String,
-    /// First still-pending top-level P-task in that ancestor (e.g. `**P3** — …`).
+    /// First still-pending top-level P-task in that plan (e.g. `**P3** — …`).
     /// `None` only if the pending line couldn't be turned into a P-label.
     pub next_task: Option<String>,
 }
 
-/// After `completed_plan` is fully checked, find the nearest ancestor (walking
-/// `parent="..."` links upward) that still has a pending P-task. Returns `None`
-/// when the plan has no parent, every ancestor is already complete, an ancestor
-/// is missing, or a parent cycle is detected.
+/// After `completed_plan` is fully checked, find where its tree continues — see
+/// [`next_plan_in_tree`] for the order.
 ///
 /// Multi-source: merges every TASKS.md the workspace can see (main checkout +
 /// sibling worktrees), deduped by id with latest mtime winning — the same view
 /// the hook renders — so a child living in a worktree can point at a parent in
-/// the main checkout. Completed ancestors are kept in the merge (`active_only`
-/// = false) so the walk can climb past a finished parent to a pending grandparent.
+/// the main checkout. Completed plans are kept in the merge (`active_only` =
+/// false) so the walk can climb past a finished parent to a pending grandparent.
 pub fn resolve_backtrack_target(cwd: &Path, completed_plan: &str) -> Option<BacktrackTarget> {
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     let (raw, _) = collect_from_sources(&sources, false);
     let blocks = dedup_blocks_keep_latest_mtime(raw);
-    let by_id: HashMap<&str, &SourcedBlock> = blocks
-        .iter()
-        .filter_map(|b| b.id.as_deref().map(|id| (id, b)))
-        .collect();
-    resolve_backtrack_in(&by_id, completed_plan)
+    next_plan_in_tree(&blocks, completed_plan)
 }
 
-/// Pure core of [`resolve_backtrack_target`]: walk the parent chain over a
-/// pre-built id → block map. Split out so tests exercise the walk (including
-/// cycles and cross-source parents) without touching the filesystem.
-fn resolve_backtrack_in(
-    by_id: &HashMap<&str, &SourcedBlock>,
-    completed_plan: &str,
-) -> Option<BacktrackTarget> {
-    let mut visited: HashSet<String> = HashSet::new();
-    visited.insert(completed_plan.to_string());
-    let mut cursor = by_id.get(completed_plan)?.parent.clone();
-    while let Some(pid) = cursor {
-        // A parent pointing back into the already-visited chain is a cycle;
-        // stop rather than loop forever.
-        if !visited.insert(pid.clone()) {
+/// The single definition of "what comes next" in a plan tree, shared by the
+/// `plan check` backtrack, the `Stop` plan gate, the per-prompt backstop and
+/// the finish-button continuation. They used to disagree: the first three
+/// climbed to the nearest ancestor with an open box of its own, skipping a
+/// pending sibling sub-plan and stopping altogether when the parent's own boxes
+/// were ticked but a child was not; the finish button walked the tree in DFS
+/// order. The tree was then finished by whichever path happened to fire.
+///
+/// Order: the first pending plan below `finished`, else below its nearest
+/// ancestor that still has pending work anywhere in its subtree, descending to
+/// the deepest pending plan (children before their parent, file order among
+/// siblings) — a post-order walk, the same order the reviver's live-edge view
+/// ([`crate::plan_revive::collect_views`]) targets. `None` when `finished`
+/// itself still has pending tasks, when the whole tree is done, or on a parent
+/// cycle.
+pub fn next_plan_in_tree(blocks: &[SourcedBlock], finished: &str) -> Option<BacktrackTarget> {
+    let mut parent: HashMap<&str, &str> = HashMap::new();
+    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut body: HashMap<&str, &str> = HashMap::new();
+    let mut pending: HashSet<&str> = HashSet::new();
+    for b in blocks {
+        let Some(id) = b.id.as_deref() else { continue };
+        if let Some(p) = b.parent.as_deref() {
+            parent.insert(id, p);
+            children.entry(p).or_default().push(id);
+        }
+        body.insert(id, &b.body);
+        if b.body.lines().any(is_pending_task_line) {
+            pending.insert(id);
+        }
+    }
+    if pending.contains(finished) {
+        return None;
+    }
+    // `depth` bounds both recursions against parent cycles.
+    fn subtree_pending(
+        id: &str,
+        children: &HashMap<&str, Vec<&str>>,
+        pending: &HashSet<&str>,
+        depth: u32,
+    ) -> bool {
+        depth < 64
+            && (pending.contains(id)
+                || children.get(id).is_some_and(|cs| {
+                    cs.iter().any(|c| subtree_pending(c, children, pending, depth + 1))
+                }))
+    }
+    fn descend<'a>(
+        id: &'a str,
+        children: &HashMap<&'a str, Vec<&'a str>>,
+        pending: &HashSet<&str>,
+        depth: u32,
+    ) -> Option<&'a str> {
+        if depth >= 64 {
             return None;
         }
-        let block = by_id.get(pid.as_str())?;
-        if block.body.lines().any(is_pending_task_line) {
+        for c in children.get(id).into_iter().flatten() {
+            if subtree_pending(c, children, pending, depth + 1) {
+                return descend(c, children, pending, depth + 1);
+            }
+        }
+        pending.contains(id).then_some(id)
+    }
+    let mut cursor = finished;
+    for _ in 0..64 {
+        if let Some(t) = descend(cursor, &children, &pending, 0) {
             return Some(BacktrackTarget {
-                plan_id: pid,
-                next_task: first_pending_task(&block.body),
+                plan_id: t.to_string(),
+                next_task: body.get(t).and_then(|b| first_pending_task(b)),
             });
         }
-        cursor = block.parent.clone();
+        cursor = parent.get(cursor)?;
     }
     None
 }
@@ -1066,7 +1108,7 @@ pub struct AncestorLink {
 }
 
 /// Walk `plan`'s `parent="..."` links upward, nearest ancestor first, over a
-/// pre-built id → block map. Unlike [`resolve_backtrack_in`] this does not stop
+/// pre-built id → block map. Unlike [`next_plan_in_tree`] this does not stop
 /// at the first ancestor with pending work — the whole chain is the agent's
 /// position in the tree. A parent that is missing from the map ends the walk; a
 /// parent pointing back into the chain is a cycle and also ends it (the partial
@@ -1186,7 +1228,7 @@ fn render_cursor_neighborhood(
 ///
 /// Split out of [`render_active_plans_reminder`] so tests can drive the focus
 /// directly instead of writing a record into the process-global `~/.fleet`
-/// (same rationale as [`resolve_backtrack_in`]).
+/// (same rationale as [`next_plan_in_tree`]).
 ///
 /// A focus record naming a plan that is missing here (another workspace's plan,
 /// a deleted block) or already complete falls through to the flat listing: a
@@ -1460,9 +1502,9 @@ pub fn resolve_current_task(
 
 // ── Active-plans reminder (shared by `fleet prd-context` + codex prompt-prepend) ─
 
-/// Backstop directive for the child→parent backtrack. Returns `Some(text)` when
-/// `session_id`'s attributed plan is a child that is now fully complete and its
-/// nearest ancestor still has pending work — the same condition `plan check`
+/// Backstop directive for the tree-order backtrack. Returns `Some(text)` when
+/// `session_id`'s attributed plan is now fully complete and its tree still has
+/// a pending plan ([`next_plan_in_tree`]) — the same condition `plan check`
 /// acts on, re-checked here every prompt in case focus was left on a completed
 /// child (hand-edited box, handoff successor, etc.). `None` in every other case.
 fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
@@ -1478,10 +1520,10 @@ fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     let target = resolve_backtrack_target(cwd, focused)?;
     let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
     Some(format!(
-        "⤴ 回溯提醒:你当前归属的子 plan `{focused}` 已全部完成,其父 plan `{parent}` \
-         尚有未完成任务。请运行 `fleet plan resume {parent}` 并从 {next} 继续执行,\
-         不要因为子 plan 完成就结束工作。",
-        parent = target.plan_id,
+        "⤴ 回溯提醒:你当前归属的 plan `{focused}` 已全部完成,但它所在的计划树还没走完。\
+         按计划树顺序,下一个是 plan `{next_plan}`。请运行 `fleet plan resume {next_plan}` \
+         并从 {next} 继续执行,不要因为一个 plan 完成就结束工作。",
+        next_plan = target.plan_id,
     ))
 }
 
@@ -2747,7 +2789,7 @@ trailing notes outside\n";
             sbp("par", "- [x] **P1** — p\n", Some("gp")),
             sbp("child", "- [x] **P1** — c\n", Some("par")),
         ];
-        let t = resolve_backtrack_in(&by_id_map(&blocks), "child").unwrap();
+        let t = next_plan_in_tree(&blocks, "child").unwrap();
         assert_eq!(t.plan_id, "gp");
         assert_eq!(t.next_task.as_deref(), Some("**P2** — g"));
     }
@@ -2758,7 +2800,7 @@ trailing notes outside\n";
             sbp("par", "- [x] **P1** — p1\n- [ ] **P3** — p3\n", None),
             sbp("child", "- [x] **P1** — c\n", Some("par")),
         ];
-        let t = resolve_backtrack_in(&by_id_map(&blocks), "child").unwrap();
+        let t = next_plan_in_tree(&blocks, "child").unwrap();
         assert_eq!(t.plan_id, "par");
         assert_eq!(t.next_task.as_deref(), Some("**P3** — p3"));
     }
@@ -2767,13 +2809,13 @@ trailing notes outside\n";
     fn backtrack_none_when_no_parent_or_all_ancestors_complete() {
         // no parent at all
         let top = [sbp("solo", "- [x] **P1** — x\n", None)];
-        assert_eq!(resolve_backtrack_in(&by_id_map(&top), "solo"), None);
+        assert_eq!(next_plan_in_tree(&top, "solo"), None);
         // parent chain fully complete
         let done = [
             sbp("par", "- [x] **P1** — p\n", None),
             sbp("child", "- [x] **P1** — c\n", Some("par")),
         ];
-        assert_eq!(resolve_backtrack_in(&by_id_map(&done), "child"), None);
+        assert_eq!(next_plan_in_tree(&done, "child"), None);
     }
 
     #[test]
@@ -2784,10 +2826,41 @@ trailing notes outside\n";
             sbp("a", "- [x] **P1** — a\n", Some("b")),
             sbp("b", "- [x] **P1** — b\n", Some("a")),
         ];
-        assert_eq!(resolve_backtrack_in(&by_id_map(&cyc), "a"), None);
+        assert_eq!(next_plan_in_tree(&cyc, "a"), None);
         // parent id names a plan absent from the merged view
         let missing = [sbp("child", "- [x] **P1** — c\n", Some("ghost"))];
-        assert_eq!(resolve_backtrack_in(&by_id_map(&missing), "child"), None);
+        assert_eq!(next_plan_in_tree(&missing, "child"), None);
+    }
+
+    /// A pending sibling sub-plan comes before the parent's own open boxes —
+    /// the order the reviver and the finish button already used. The old
+    /// ancestor-only climb sent the agent to `par`'s P3 and left `sib` to be
+    /// picked up by a revived session later.
+    #[test]
+    fn backtrack_visits_a_pending_sibling_before_the_parent() {
+        let blocks = [
+            sbp("par", "- [x] **P1** — p1\n- [ ] **P3** — p3\n", None),
+            sbp("child", "- [x] **P1** — c\n", Some("par")),
+            sbp("sib", "- [ ] **P1** — s1\n", Some("par")),
+        ];
+        let t = next_plan_in_tree(&blocks, "child").unwrap();
+        assert_eq!(t.plan_id, "sib");
+        assert_eq!(t.next_task.as_deref(), Some("**P1** — s1"));
+    }
+
+    /// The parent's own boxes are all ticked but a child is still open: the
+    /// tree is not finished. The old climb found no ancestor with an open box
+    /// of its own and let the turn end.
+    #[test]
+    fn backtrack_finds_a_pending_child_under_a_ticked_parent() {
+        let blocks = [
+            sbp("par", "- [x] **P1** — p1\n", None),
+            sbp("child", "- [x] **P1** — c\n", Some("par")),
+            sbp("sib", "- [ ] **P1** — s1\n", Some("par")),
+        ];
+        assert_eq!(next_plan_in_tree(&blocks, "child").unwrap().plan_id, "sib");
+        // Same for a finished plan whose own child is still open.
+        assert_eq!(next_plan_in_tree(&blocks, "par").unwrap().plan_id, "sib");
     }
 
     #[test]

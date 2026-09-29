@@ -889,67 +889,13 @@ fn spawn_for_plan(view: &PlanView, prompt: String, title_prefix: &str) -> Result
 // would hold the reviver back), continue the tree right away: the button *is*
 // the boss's go-ahead. Only 「结束任务」 does this; 「放弃任务」 means stop.
 
-/// The plan where the tree's work continues once `finished` is done, in DFS
-/// order: the first pending plan below `finished`, else below its nearest
-/// ancestor that still has pending work anywhere in its subtree, descending to
-/// the deepest pending plan (children before their parent, file order among
-/// siblings). `None` when `finished` itself still has pending tasks — the boss
-/// decided that case keeps the existing ask-first behaviour — or when the whole
-/// tree is done.
+/// The plan where the tree's work continues once `finished` is done — the same
+/// [`pt::next_plan_in_tree`] order `plan check` and the plan gate follow.
+/// `None` when `finished` itself still has pending tasks — the boss decided
+/// that case keeps the existing ask-first behaviour — or when the whole tree is
+/// done.
 pub fn next_plan_after(blocks: &[pt::SourcedBlock], finished: &str) -> Option<String> {
-    let mut parent: HashMap<&str, &str> = HashMap::new();
-    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
-    let mut pending: HashSet<&str> = HashSet::new();
-    for b in blocks {
-        let Some(id) = b.id.as_deref() else { continue };
-        if let Some(p) = b.parent.as_deref() {
-            parent.insert(id, p);
-            children.entry(p).or_default().push(id);
-        }
-        if b.body.lines().any(pt::is_pending_task_line) {
-            pending.insert(id);
-        }
-    }
-    if pending.contains(finished) {
-        return None;
-    }
-    // `depth` bounds both recursions against parent cycles.
-    fn subtree_pending(
-        id: &str,
-        children: &HashMap<&str, Vec<&str>>,
-        pending: &HashSet<&str>,
-        depth: u32,
-    ) -> bool {
-        depth < 64
-            && (pending.contains(id)
-                || children.get(id).is_some_and(|cs| {
-                    cs.iter().any(|c| subtree_pending(c, children, pending, depth + 1))
-                }))
-    }
-    fn descend(
-        id: &str,
-        children: &HashMap<&str, Vec<&str>>,
-        pending: &HashSet<&str>,
-        depth: u32,
-    ) -> Option<String> {
-        if depth >= 64 {
-            return None;
-        }
-        for c in children.get(id).into_iter().flatten() {
-            if subtree_pending(c, children, pending, depth + 1) {
-                return descend(c, children, pending, depth + 1);
-            }
-        }
-        pending.contains(id).then(|| id.to_string())
-    }
-    let mut cursor = finished;
-    for _ in 0..64 {
-        if let Some(t) = descend(cursor, &children, &pending, 0) {
-            return Some(t);
-        }
-        cursor = parent.get(cursor)?;
-    }
-    None
+    pt::next_plan_in_tree(blocks, finished).map(|t| t.plan_id)
 }
 
 /// Opening prompt for a session started by the finish button. Product text.

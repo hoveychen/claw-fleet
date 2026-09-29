@@ -65,8 +65,8 @@ fn record_focus(cwd: &Path, plan_id: &str, content: &str, session_id: Option<&st
 }
 
 /// Tick or untick a task's checkbox, then record focus. When ticking the last
-/// box of a child plan, backtrack focus to the nearest pending ancestor and
-/// return that directive as the message.
+/// box of a plan, move focus to the next pending plan in its tree
+/// ([`pt::next_plan_in_tree`]) and return that directive as the message.
 pub fn mutate_checkbox(
     cwd: &Path,
     plan_id: &str,
@@ -97,8 +97,8 @@ pub fn mutate_checkbox(
 }
 
 /// When `plan_id` just became fully complete (no pending top-level task left)
-/// AND it is a child plan whose nearest pending ancestor still has work,
-/// re-attribute `session_id`'s focus to that ancestor and return a directive
+/// AND its tree still has a pending plan, re-attribute `session_id`'s focus to
+/// that plan and return a directive
 /// telling the agent to keep going there. Returns `None` when the plan still has
 /// pending tasks or there is nowhere to backtrack to.
 fn backtrack_on_completion(
@@ -129,9 +129,10 @@ fn backtrack_on_completion(
     let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
     Some((
         format!(
-            "ok — 子 plan '{plan_id}' 已全部完成。其父 plan '{parent}' 尚有未完成任务,\
-             Fleet 已把你的焦点切回 '{parent}'。请从 {next} 继续执行,不要结束 turn。",
-            parent = target.plan_id,
+            "ok — plan '{plan_id}' 已全部完成,但它所在的计划树还没走完。按计划树顺序\
+             (子计划先于父计划,兄弟按文件顺序),下一个是 plan '{next_plan}',\
+             Fleet 已把你的焦点切到 '{next_plan}'。请从 {next} 继续执行,不要结束 turn。",
+            next_plan = target.plan_id,
         ),
         warnings,
     ))
