@@ -299,12 +299,20 @@
   color: var(--color-text-dim);
   transition:
     color 0.15s,
-    transform 0.1s;
+    transform 0.1s,
+    opacity 0.12s;
 }
 
 .mark_toggle:hover {
   transform: scale(1.12);
   color: var(--color-text);
+}
+
+/* An unmarked circle on every row is noise while scanning the list, so it only
+   appears on hover or keyboard focus. Rows already marked done / abandoned keep
+   theirs: there the icon is a status, not just an affordance. */
+.row_wrap:not(:hover):not(:focus-within) .mark_toggle[data-done="false"]:not([data-outcome]) {
+  opacity: 0;
 }
 
 .mark_toggle[data-done="true"] {
