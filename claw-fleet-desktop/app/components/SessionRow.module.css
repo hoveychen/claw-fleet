@@ -170,10 +170,25 @@
   white-space: nowrap;
 }
 
+/* Watch chip: same look as the handoff chip, but the one chip in the row that
+   may shrink, so a long progress line takes the row's spare width and only
+   ellipsizes once that runs out. */
+.row_watch {
+  composes: row_handoff;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.row_watch_text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* A watch whose reported progress stopped moving, or that is past its
    expected time — same chip, warning colour. */
 .row_watch_stalled {
-  composes: row_handoff;
+  composes: row_watch;
   color: var(--color-warning);
 }
 
