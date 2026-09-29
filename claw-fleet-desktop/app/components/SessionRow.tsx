@@ -261,15 +261,15 @@ export const SessionRow = memo(function SessionRow({
             {s.watches?.map((w) => {
               const pv = watchProgressView(w, Date.now());
               const ring = watchRing(pv);
-              // The row has room for one short token: a percentage, a clipped
-              // status line, or elapsed against the expected wait.
+              // A percentage, the status line, or elapsed against the expected
+              // wait. The status line is clipped by CSS to whatever width the row
+              // has left, never by a fixed character count — its tail ("已读 124
+              // 篇") is usually the part that answers "how far along?".
               const tail =
                 pv.kind === "reported"
                   ? pv.fraction !== null
                     ? `${Math.round(pv.fraction * 100)}%`
-                    : pv.text.length > 14
-                      ? `${pv.text.slice(0, 13).trimEnd()}…`
-                      : pv.text
+                    : pv.text
                   : pv.kind === "time"
                     ? `${compactElapsed(w.created)}/${compactElapsed(Date.now() - pv.expectedMs)}`
                     : `${compactElapsed(w.created)}·${w.pollCount}`;
@@ -279,7 +279,7 @@ export const SessionRow = memo(function SessionRow({
               return (
                 <span
                   key={w.id}
-                  className={alarming ? styles.row_watch_stalled : styles.row_handoff}
+                  className={alarming ? styles.row_watch_stalled : styles.row_watch}
                   title={[
                     w.note ?? undefined,
                     t("card.tip_watch", {
@@ -302,7 +302,7 @@ export const SessionRow = memo(function SessionRow({
                   ) : (
                     <Radar size={10} strokeWidth={1.6} />
                   )}
-                  {tail}
+                  <span className={styles.row_watch_text}>{tail}</span>
                 </span>
               );
             })}
