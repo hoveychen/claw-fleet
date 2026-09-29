@@ -1,6 +1,7 @@
 pub mod account;
 pub mod acp;
 pub mod agent_loop;
+pub mod agent_slots;
 pub mod agent_source;
 pub mod artifacts;
 pub mod atomic_json;
