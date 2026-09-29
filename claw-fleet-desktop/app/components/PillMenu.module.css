@@ -164,6 +164,19 @@
   color: var(--color-text-dim);
 }
 
+/* A non-blocking caution above the items — the Claude/Codex model menu uses it
+   to say the installed CLI is too old for some of the listed models. */
+.menu_warn {
+  padding: 6px 8px;
+  margin: 2px 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 12px;
+  overflow-wrap: break-word;
+  white-space: pre-line;
+}
+
 .menu_error {
   display: flex;
   align-items: flex-start;

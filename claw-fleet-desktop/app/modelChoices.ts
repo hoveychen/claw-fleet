@@ -10,16 +10,41 @@ import type { DshModelCatalog, PickerHarness } from "./generated/types";
 // Consumers prepend their own "default" entry, since the default differs per
 // surface (the new-session launcher, for one, follows the CLI's own model).
 
+/** One model-menu entry. The CLI fields are absent for entries that do not
+ *  come from the catalog (Codex profiles). */
+export interface ModelChoice {
+  value: string;
+  label: string;
+  /** Oldest CLI release that knows this model, when the catalog records one. */
+  minCliVersion?: string | null;
+  /** The installed CLI is known to be older than `minCliVersion`. */
+  needsCliUpgrade?: boolean;
+}
+
 /** Selectable models for one harness, `[]` before the catalog arrives. */
-export function modelChoicesFor(
-  catalog: PickerHarness[],
-  harness: string,
-): { value: string; label: string }[] {
+export function modelChoicesFor(catalog: PickerHarness[], harness: string): ModelChoice[] {
   return (
     catalog
       .find((h) => h.name === harness)
-      ?.models.map((m) => ({ value: m.id, label: m.label })) ?? []
+      ?.models.map((m) => ({
+        value: m.id,
+        label: m.label,
+        minCliVersion: m.minCliVersion,
+        needsCliUpgrade: m.needsCliUpgrade,
+      })) ?? []
   );
+}
+
+/** The installed CLI version and how to upgrade it, for the "this model needs
+ *  a newer CLI" hints. `null` before the catalog arrives or when the version
+ *  could not be read — then nothing is flagged either. */
+export function cliUpgradeFor(
+  catalog: PickerHarness[],
+  harness: string,
+): { cliVersion: string; upgradeCommand: string | null } | null {
+  const h = catalog.find((x) => x.name === harness);
+  if (!h?.cliVersion) return null;
+  return { cliVersion: h.cliVersion, upgradeCommand: h.upgradeCommand ?? null };
 }
 
 /** The effort ladder for a specific model, or the harness's common ladder when
@@ -79,9 +104,7 @@ export interface CodexProfile {
  *  what the user recognises — and falls back to the profile name for a profile
  *  that sets no model of its own. Effort stays selectable regardless: Fleet's
  *  `-c model_reasoning_effort=` flag overrides whatever the profile sets. */
-export function codexProfileChoices(
-  profiles: CodexProfile[],
-): { value: string; label: string }[] {
+export function codexProfileChoices(profiles: CodexProfile[]): ModelChoice[] {
   return profiles.map((p) => {
     const model = p.model?.trim();
     const provider = p.model_provider?.trim();

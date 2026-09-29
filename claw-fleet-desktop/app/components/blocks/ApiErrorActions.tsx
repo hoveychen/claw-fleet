@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { ErrorAction, SyntheticErrorInfo } from "../../../../shared-ts/syntheticError";
 import type { ProcRecord } from "../../types";
-import { modelChoicesFor } from "../../modelChoices";
+import { cliUpgradeFor, modelChoicesFor } from "../../modelChoices";
 import { useModelCatalog } from "../../useModelCatalog";
 import { canResumeSession, resumeErrorText, resumeSession } from "../sessionResume";
 import { ProcTerminal } from "../ProcTerminal";
@@ -58,10 +58,9 @@ export function ApiErrorActions({
       })
     : false;
 
-  const models = useMemo(
-    () => modelChoicesFor(catalog, ctx?.agentSource === "codex" ? "codex" : "claude"),
-    [catalog, ctx?.agentSource],
-  );
+  const harness = ctx?.agentSource === "codex" ? "codex" : "claude";
+  const models = useMemo(() => modelChoicesFor(catalog, harness), [catalog, harness]);
+  const cliHint = cliUpgradeFor(catalog, harness);
 
   /** Run a resume, reporting whatever the backend said if it refused. */
   const fire = useCallback(
@@ -160,12 +159,21 @@ export function ApiErrorActions({
                 className={styles.pickerItem}
                 data-model={m.value}
                 disabled={busy != null}
+                title={
+                  cliHint && m.needsCliUpgrade
+                    ? t("new_session.model_needs_cli", {
+                        min: m.minCliVersion,
+                        current: cliHint.cliVersion,
+                      }) + (cliHint.upgradeCommand ? ` · ${cliHint.upgradeCommand}` : "")
+                    : undefined
+                }
                 onClick={() => {
                   setPicking(false);
                   void fire("switchModel", { model: m.value });
                 }}
               >
                 {m.label}
+                {cliHint && m.needsCliUpgrade ? " ⚠" : ""}
               </button>
             ))
           )}

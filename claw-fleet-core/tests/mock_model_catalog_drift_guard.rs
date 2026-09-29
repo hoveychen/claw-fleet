@@ -43,6 +43,7 @@ struct MockRow {
     tier: String,
     efforts: Vec<String>,
     default_effort: Option<String>,
+    min_cli_version: Option<String>,
 }
 
 fn read_mock() -> String {
@@ -214,6 +215,7 @@ fn parse_mock(src: &str) -> Vec<(String, Vec<MockRow>)> {
             tier: unquote(&args[3]),
             efforts,
             default_effort: args.get(5).map(|s| unquote(s)).filter(|s| s != "null"),
+            min_cli_version: args.get(6).map(|s| unquote(s)).filter(|s| s != "null"),
         };
 
         // Which harness group is this call inside? The last `name: "..."` before it.
@@ -273,6 +275,11 @@ fn mock_model_catalog_matches_the_real_picker_catalog() {
             assert_eq!(
                 r.default_effort, m.default_effort,
                 "drift-guard: {} default effort",
+                r.id
+            );
+            assert_eq!(
+                r.min_cli_version, m.min_cli_version,
+                "drift-guard: {} minimum CLI version",
                 r.id
             );
         }

@@ -6,19 +6,22 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PickerHarness } from "./generated/types";
 
-// Module-level cache. The catalog is compiled into the binary and parsed once
-// per process, so it cannot change while the app runs — refetching it on every
-// picker mount would be pure IPC noise. A single in-flight promise is shared so
-// two pickers mounting together make one call.
+// Module-level cache, served immediately on mount and then revalidated. The
+// model rows are compiled in and never change while the app runs, but the
+// installed CLI version they are judged against does: after the user runs
+// `claude update` the "needs a newer CLI" marks must go away without an app
+// restart. Core caches its `--version` probe for a minute, so the refetch is
+// cheap. A single in-flight promise is shared so two pickers mounting together
+// make one call.
 let cached: PickerHarness[] | null = null;
 let inFlight: Promise<PickerHarness[]> | null = null;
 
 function load(): Promise<PickerHarness[]> {
-  if (cached) return Promise.resolve(cached);
   if (!inFlight) {
     inFlight = invoke<PickerHarness[]>("model_catalog")
       .then((c) => {
         cached = c ?? [];
+        inFlight = null;
         return cached;
       })
       .catch(() => {
@@ -27,7 +30,7 @@ function load(): Promise<PickerHarness[]> {
         // here — this path means IPC itself is down — so retrying is right and
         // caching the failure would not be.
         inFlight = null;
-        return [];
+        return cached ?? [];
       });
   }
   return inFlight;
@@ -38,7 +41,6 @@ function load(): Promise<PickerHarness[]> {
 export function useModelCatalog(): PickerHarness[] {
   const [catalog, setCatalog] = useState<PickerHarness[]>(cached ?? []);
   useEffect(() => {
-    if (cached) return;
     let live = true;
     load().then((c) => {
       if (live) setCatalog(c);
