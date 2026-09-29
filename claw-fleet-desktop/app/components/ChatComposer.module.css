@@ -13,6 +13,18 @@
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
+/* The framed composer owns the focus cue: the global `textarea:focus-visible`
+   ring in App.css would otherwise draw a square 2px outline inside this
+   rounded box. Bare mode keeps the textarea ring because its host supplies
+   the framing and may not style focus itself. */
+.composer:not(.bare):focus-within {
+  border-color: var(--color-border-strong);
+}
+
+.composer:not(.bare) .input:focus-visible {
+  outline: none;
+}
+
 /* While an OS file drag hovers the composer, highlight the drop target. */
 .drag_active {
   border-color: var(--color-accent);
