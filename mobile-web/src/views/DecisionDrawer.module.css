@@ -16,13 +16,20 @@
   align-items: center;
   gap: 10px;
   padding: 11px 14px;
-  border: 1px solid var(--color-accent);
+  /* The pulsing dot and the count pill already say "needs you"; an accent
+     border on top of them was a third copy of the same signal. */
+  border: 1px solid var(--color-border-strong);
   border-radius: 14px;
   background: var(--color-bg-glass);
   backdrop-filter: blur(12px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
   text-align: left;
   animation: peekIn 200ms ease-out;
+}
+
+/* Over the tab bar the centre FAB rises 18px above it; clear it with a gap. */
+.peek[data-clear-fab="true"] {
+  bottom: calc(78px + var(--safe-bottom));
 }
 
 .peek:active {
@@ -73,7 +80,7 @@
 
 .peekChevron {
   flex-shrink: 0;
-  color: var(--color-accent);
+  color: var(--color-text-dim);
 }
 
 .scrim {

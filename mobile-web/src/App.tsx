@@ -1516,6 +1516,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onAnswered={markAnswered}
           onOpenSession={openSessionRoot}
           deviceLabelOf={deviceLabelOf}
+          clearFab={!overlayOpen}
         />
       )}
 
