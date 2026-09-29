@@ -1201,6 +1201,22 @@ pub fn no_commit_attribution_applied() -> bool {
             == Some(false)
 }
 
+/// Whether the user has turned commit bylines off, under either spelling.
+/// Looser than [`no_commit_attribution_applied`]: that one asks whether heal
+/// has run, this one asks what the user wants — `commit_trailer` blocks a
+/// hand-written Claude trailer only when it is `true`.
+pub fn commit_trailers_disabled() -> bool {
+    let Some(settings) = read_settings() else {
+        return false;
+    };
+    settings.get("includeCoAuthoredBy").and_then(|v| v.as_bool()) == Some(false)
+        || settings
+            .get("attribution")
+            .and_then(|a| a.get("commitTrailers"))
+            .and_then(|v| v.as_bool())
+            == Some(false)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Everything the session scan derives from one pass over the hook events.
