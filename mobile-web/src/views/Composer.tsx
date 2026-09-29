@@ -35,6 +35,7 @@ import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModels } from "../d
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import {
   effortChoicesFor,
+  cliFloorFor,
   modelChoicesFor,
   useModelCatalog,
 } from "../useModelCatalog";
@@ -464,7 +465,15 @@ function OptionSelects({
     : isCodex
       ? effortChoicesFor(catalog, "codex", model, t("默认努力度"))
       : effortChoicesFor(catalog, "claude", model, t("默认努力度"));
+  // A model the installed CLI predates stays selectable (the API may accept the
+  // id), but each such option says which CLI it needs and the picked one gets a
+  // warning line with the upgrade.
+  const harness = isCodex ? "codex" : "claude";
+  const optionFloor = (v: string) => (isDsh ? null : cliFloorFor(catalog, harness, v));
+  const pickedFloor = optionFloor(model);
+  const toolName = isCodex ? "Codex" : "Claude";
   return (
+    <>
     <div className={styles.optionRow}>
       <label className={styles.optionField}>
         <span>{t("模型")}</span>
@@ -500,11 +509,14 @@ function OptionSelects({
               ))}
             </>
           ) : (
-            modelChoices.map(([v, label]) => (
-              <option key={v} value={v}>
-                {t(label)}
-              </option>
-            ))
+            modelChoices.map(([v, label]) => {
+              const floor = optionFloor(v);
+              return (
+                <option key={v} value={v}>
+                  {floor ? `${t(label)} ${t("（需 CLI ≥ {0}）", floor.min)}` : t(label)}
+                </option>
+              );
+            })
           )}
         </select>
       </label>
@@ -542,6 +554,25 @@ function OptionSelects({
         </label>
       )}
     </div>
+    {pickedFloor && (
+      <span className={styles.cliFloorHint} role="status" data-testid="model-cli-outdated">
+        {pickedFloor.command
+          ? t(
+              "电脑上的 {0} CLI 是 {1}，这个模型需要 {2} 以上。先升级：{3}",
+              toolName,
+              pickedFloor.current,
+              pickedFloor.min,
+              pickedFloor.command,
+            )
+          : t(
+              "电脑上的 {0} CLI 是 {1}，这个模型需要 {2} 以上，请先升级 CLI",
+              toolName,
+              pickedFloor.current,
+              pickedFloor.min,
+            )}
+      </span>
+    )}
+    </>
   );
 }
 

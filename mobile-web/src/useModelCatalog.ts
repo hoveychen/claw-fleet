@@ -47,6 +47,20 @@ export function modelChoicesFor(
   return [["", defaultLabel], ...models.map((m): [string, string] => [m.id, m.label])];
 }
 
+/** Why a model is too new for the installed CLI, or `null` when it is not (or
+ *  either version is unknown — core only sets `needsCliUpgrade` when both are
+ *  known). `command` is the channel-appropriate upgrade, when there is one. */
+export function cliFloorFor(
+  catalog: PickerHarness[],
+  harness: string,
+  model: string,
+): { min: string; current: string; command: string | null } | null {
+  const h = catalog.find((x) => x.name === harness);
+  const m = h?.models.find((x) => x.id === model);
+  if (!h?.cliVersion || !m?.needsCliUpgrade || !m.minCliVersion) return null;
+  return { min: m.minCliVersion, current: h.cliVersion, command: h.upgradeCommand ?? null };
+}
+
 /** Effort ladder for a model; when no model is selected, the union of all efforts
  *  in that harness.
  *

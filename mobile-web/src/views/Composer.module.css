@@ -266,6 +266,15 @@
   line-height: 1.4;
 }
 
+/* The picked model needs a newer CLI than the computer has. */
+.cliFloorHint {
+  display: block;
+  margin: 6px 2px 0;
+  color: var(--color-warning);
+  font-size: var(--t-aux, 12px);
+  line-height: 1.4;
+}
+
 .permissionHint[data-danger="true"] {
   color: var(--color-error);
 }
