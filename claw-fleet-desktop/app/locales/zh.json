@@ -870,7 +870,7 @@
     "range_7d": "近 7 天",
     "range_30d": "近 30 天",
     "range_all": "全部",
-    "trend_title": "每日花费",
+    "trend_title": "每日趋势",
     "codex_note": "该 Codex 会话有未带时间戳的轮次,这部分归到了会话起始日,趋势为近似",
     "provider_priced": "该行消费按 provider 发票或官方标价折算,非 Fleet 的 $/M 参考价,故不逐行计价。实际扣费以账户币种为准",
     "unpriced_calls": "另有 {{count}} 次调用暂无法定价,其 token 已计入、金额未计入",
@@ -897,7 +897,9 @@
     "col_model": "模型",
     "col_cost": "花费",
     "col_share": "占比",
-    "row_cache_write_5m": "缓存写入 5m"
+    "row_cache_write_5m": "缓存写入 5m",
+    "trend_metric_cost": "花费",
+    "trend_metric_tokens": "Tokens"
   },
   "chart": {
     "title": "Token 速度",

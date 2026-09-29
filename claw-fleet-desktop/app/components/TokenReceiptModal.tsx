@@ -151,6 +151,14 @@ const KIND_CLASS: Record<TokenKind, string> = {
   output: styles.k_output,
 };
 
+/** SVG fill counterparts of KIND_CLASS (which sets `background`). */
+const KIND_FILL: Record<TokenKind, string> = {
+  input: styles.f_input,
+  cacheWrite: styles.f_cache_write,
+  cacheRead: styles.f_cache_read,
+  output: styles.f_output,
+};
+
 /**
  * Usage analytics for token spend. Opened by clicking the sidebar counter.
  * KPI strip, per-day trend (multi-day ranges), token-mix bar, and a per-model
@@ -342,14 +350,35 @@ function SectionHead({ title, aside }: { title: string; aside?: string }) {
   );
 }
 
-/** Per-day cost bar chart with a labelled y scale (the trend behind a range). */
+type TrendMetric = "cost" | "tokens";
+
+/** Bottom-to-top stacking order of a tokens-mode bar. */
+const STACK: { kind: TokenKind; tokens: (d: DailyUsagePoint) => number }[] = [
+  { kind: "cacheRead", tokens: (d) => d.cacheReadTokens },
+  { kind: "cacheWrite", tokens: (d) => d.cacheCreationTokens },
+  { kind: "input", tokens: (d) => d.inputTokens },
+  { kind: "output", tokens: (d) => d.outputTokens },
+];
+
+function dayTokens(d: DailyUsagePoint): number {
+  return d.inputTokens + d.cacheCreationTokens + d.cacheReadTokens + d.outputTokens;
+}
+
+/**
+ * Per-day trend with a labelled y scale. "cost" draws one bar of spend per
+ * day; "tokens" stacks the four token kinds. The daily series carries no
+ * per-kind or per-model money, so a stacked view can only be in tokens.
+ */
 function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
   const { t } = useTranslation();
+  const [metric, setMetric] = useState<TrendMetric>("cost");
   const [hover, setHover] = useState<number | null>(null);
-  const peak = Math.max(...daily.map((d) => d.costUsd), 0);
-  // Linear scale from zero so bar-height ratios equal spend ratios; the top
-  // gridline is the peak day, the middle one its half.
-  const max = Math.max(peak, 0.0001);
+  const value = metric === "cost" ? (d: DailyUsagePoint) => d.costUsd : dayTokens;
+  const fmtAxis = metric === "cost" ? fmtAxisUsd : fmtTok;
+  const peak = Math.max(...daily.map(value), 0);
+  // Linear scale from zero so bar-height ratios equal the value ratios; the
+  // top gridline is the peak day, the middle one its half.
+  const max = Math.max(peak, metric === "cost" ? 0.0001 : 1);
   const W = 720;
   const H = 120;
   const n = daily.length;
@@ -358,26 +387,60 @@ function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
   const focus = hover !== null ? daily[hover] : null;
   const mid = Math.floor((n - 1) / 2);
 
+  const kindLabel: Record<TokenKind, string> = {
+    input: t("token_receipt.row_input", "输入"),
+    cacheWrite: t("token_receipt.row_cache_write", "缓存写入"),
+    cacheRead: t("token_receipt.row_cache_read", "缓存读取"),
+    output: t("token_receipt.row_output", "输出"),
+  };
+
+  let readout: string;
+  if (!focus) {
+    readout = t("token_receipt.trend_peak", "峰值 {{value}}", {
+      value: metric === "cost" ? fmtUsd(peak) : `${fmtTok(peak)} tok`,
+    });
+  } else if (metric === "cost") {
+    readout = `${focus.date} · ${fmtUsd(focus.costUsd)} · ${fmtTok(dayTokens(focus))} tok`;
+  } else {
+    readout = [
+      focus.date,
+      ...[...STACK].reverse().map((s) => `${kindLabel[s.kind]} ${fmtTok(s.tokens(focus))}`),
+    ].join(" · ");
+  }
+
+  const metrics: { key: TrendMetric; label: string }[] = [
+    { key: "cost", label: t("token_receipt.trend_metric_cost", "花费") },
+    { key: "tokens", label: t("token_receipt.trend_metric_tokens", "Tokens") },
+  ];
+
   return (
     <section className={styles.section}>
-      <SectionHead
-        title={t("token_receipt.trend_title", "每日花费")}
-        aside={
-          focus
-            ? `${focus.date} · ${fmtUsd(focus.costUsd)} · ${fmtTok(
-                focus.inputTokens +
-                  focus.cacheCreationTokens +
-                  focus.cacheReadTokens +
-                  focus.outputTokens,
-              )} tok`
-            : t("token_receipt.trend_peak", "峰值 {{value}}", { value: fmtUsd(peak) })
-        }
-      />
+      <div className={styles.section_head}>
+        <span className={styles.section_title}>
+          {t("token_receipt.trend_title", "每日趋势")}
+        </span>
+        <span className={styles.trend_tools}>
+          <span className={styles.section_aside}>{readout}</span>
+          <span className={styles.metric_bar} role="tablist">
+            {metrics.map((m) => (
+              <button
+                key={m.key}
+                role="tab"
+                aria-selected={metric === m.key}
+                className={`${styles.metric_btn} ${metric === m.key ? styles.metric_btn_active : ""}`}
+                onClick={() => setMetric(m.key)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </span>
+        </span>
+      </div>
       <div className={styles.chart}>
         <div className={styles.y_axis}>
-          <span>{fmtAxisUsd(max)}</span>
-          <span>{fmtAxisUsd(max / 2)}</span>
-          <span>$0</span>
+          <span>{fmtAxis(max)}</span>
+          <span>{fmtAxis(max / 2)}</span>
+          <span>{metric === "cost" ? "$0" : "0"}</span>
         </div>
         <div className={styles.plot}>
           <svg
@@ -390,19 +453,37 @@ function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
               <line key={y} x1={0} x2={W} y1={y} y2={y} className={styles.grid_line} />
             ))}
             {daily.map((d, i) => {
-              const h = Math.max(1, (Math.max(d.costUsd, 0) / max) * H);
               const x = i * (barW + gap);
+              const active = hover === i ? styles.bar_active : "";
+              let bars;
+              if (metric === "cost") {
+                const h = Math.max(1, (Math.max(d.costUsd, 0) / max) * H);
+                bars = (
+                  <rect x={x} y={H - h} width={barW} height={h} className={`${styles.bar} ${active}`} />
+                );
+              } else {
+                let top = H;
+                bars = STACK.map((s) => {
+                  const h = (Math.max(s.tokens(d), 0) / max) * H;
+                  if (h <= 0) return null;
+                  top -= h;
+                  return (
+                    <rect
+                      key={s.kind}
+                      x={x}
+                      y={top}
+                      width={barW}
+                      height={h}
+                      className={`${styles.stack_seg} ${KIND_FILL[s.kind]} ${active}`}
+                    />
+                  );
+                });
+              }
               return (
                 <g key={d.date} onMouseEnter={() => setHover(i)}>
                   {/* Full-height hit target so thin bars are still easy to hover. */}
                   <rect x={x} y={0} width={barW + gap} height={H} fill="transparent" />
-                  <rect
-                    x={x}
-                    y={H - h}
-                    width={barW}
-                    height={h}
-                    className={`${styles.bar} ${hover === i ? styles.bar_active : ""}`}
-                  />
+                  {bars}
                 </g>
               );
             })}

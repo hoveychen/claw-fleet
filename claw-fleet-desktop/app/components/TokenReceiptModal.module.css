@@ -242,6 +242,72 @@
   opacity: 1;
 }
 
+.stack_seg {
+  opacity: 0.8;
+  pointer-events: none;
+}
+.stack_seg.bar_active {
+  opacity: 1;
+}
+
+.f_input {
+  fill: var(--color-info);
+}
+.f_cache_write {
+  fill: var(--color-warning);
+}
+.f_cache_read {
+  fill: var(--color-teal);
+}
+.f_output {
+  fill: var(--color-accent);
+}
+
+.trend_tools {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.trend_tools .section_aside {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Small twin of the header's range control. */
+.metric_bar {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.metric_btn {
+  padding: 1px 8px;
+  font-size: var(--font-size-2xs);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+.metric_btn:first-child {
+  border-left: none;
+}
+.metric_btn:hover {
+  color: var(--color-text);
+}
+
+.metric_btn_active,
+.metric_btn_active:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
 .x_axis {
   display: flex;
   justify-content: space-between;
