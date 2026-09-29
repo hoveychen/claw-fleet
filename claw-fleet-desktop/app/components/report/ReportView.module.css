@@ -257,6 +257,9 @@
   color: var(--color-text-dim);
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
+  /* "892.5K in / 345.1K out" no longer fits one line in a narrow card at
+     12px; balance splits it at the slash instead of orphaning "out". */
+  text-wrap: balance;
 }
 
 /* ── Charts row ───────────────────────────────────────────────────────────── */

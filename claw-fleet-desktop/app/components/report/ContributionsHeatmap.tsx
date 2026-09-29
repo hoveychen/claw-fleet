@@ -48,6 +48,11 @@ function getMonthLabels(weeks: string[][]): { label: string; col: number }[] {
     if (!firstDate) continue;
     const month = new Date(firstDate).getMonth();
     if (month !== lastMonth) {
+      // A partial leading month can start one or two columns before the next
+      // one, and a 12px "Sep" is wider than that — drop the stub instead of
+      // printing two labels on top of each other.
+      const prev = labels[labels.length - 1];
+      if (prev && w - prev.col < 3) labels.pop();
       labels.push({ label: months[month], col: w });
       lastMonth = month;
     }
