@@ -32,7 +32,7 @@
 }
 
 .total_label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -57,7 +57,7 @@
   background: transparent;
   border: none;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   cursor: pointer;
   font-family: inherit;
@@ -77,7 +77,7 @@
 }
 
 .disclaimer {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-style: italic;
   padding: 6px 10px;
@@ -105,7 +105,7 @@
 
 .legend_label {
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .table {
@@ -118,7 +118,7 @@
   text-align: left;
   font-weight: 500;
   color: var(--color-text-dim);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 6px 8px;

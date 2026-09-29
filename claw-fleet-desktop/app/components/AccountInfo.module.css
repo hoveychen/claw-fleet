@@ -13,7 +13,7 @@
   cursor: pointer;
   padding: 8px 14px;
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -83,7 +83,7 @@
 }
 
 .section_title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   margin-bottom: 2px;
@@ -97,13 +97,13 @@
 }
 
 .row_label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
 
 .row_value {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text);
   text-align: right;
   word-break: break-all;
@@ -126,12 +126,12 @@
 }
 
 .usage_label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text);
 }
 
 .usage_pct {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
@@ -169,12 +169,12 @@
 }
 
 .usage_reset {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
 .usage_prev {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -192,13 +192,13 @@
 }
 
 .dim {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 0;
 }
 
 .error {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-error);
   margin: 0;
   display: flex;
@@ -211,7 +211,7 @@
 }
 
 .log_hint {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   word-break: break-all;
   opacity: 0.8;
@@ -223,7 +223,7 @@
   color: var(--color-error);
   border-radius: var(--radius-xs);
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
   align-self: flex-start;
 }
@@ -240,7 +240,7 @@
 }
 
 .last_updated {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   opacity: 0.6;
 }
@@ -256,7 +256,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   cursor: pointer;
   user-select: none;
@@ -299,7 +299,7 @@
 }
 
 .cli_install_btn {
-  font-size: 11px;
+  font-size: 12px;
   padding: 3px 10px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-accent);
@@ -319,12 +319,12 @@
 }
 
 .cli_success {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-success);
 }
 
 .cli_error {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-error);
 }
 
@@ -373,7 +373,7 @@
 }
 
 .modal_desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 0;
   line-height: 1.5;
@@ -400,7 +400,7 @@
   border-radius: 50%;
   background: var(--color-accent);
   color: var(--color-on-accent);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -415,14 +415,14 @@
 }
 
 .step_desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 0;
   line-height: 1.5;
 }
 
 .step_hint {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin: 0;
   font-style: italic;
@@ -443,12 +443,12 @@
 }
 
 .tool_name {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text);
 }
 
 .tool_path {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-family: monospace;
   padding-left: 12px;
@@ -464,7 +464,7 @@
 }
 
 .step_btn {
-  font-size: 11px;
+  font-size: 12px;
   padding: 4px 12px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-accent);
@@ -484,7 +484,7 @@
 }
 
 .step_btn_secondary {
-  font-size: 11px;
+  font-size: 12px;
   padding: 4px 12px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
@@ -500,13 +500,13 @@
 }
 
 .step_ok {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-success);
   word-break: break-all;
 }
 
 .step_err {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-error);
   word-break: break-all;
 }

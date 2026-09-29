@@ -1221,7 +1221,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         <span
                           className={styles.row_label}
                           style={{
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "var(--color-text-dim)",
                             display: "block",
                             marginTop: 2,
@@ -1242,7 +1242,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.auto_update_check")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.auto_update_check_desc")}
                     </span>
                   </div>
@@ -1256,7 +1256,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.report_auto_popup")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.report_auto_popup_desc")}
                     </span>
                   </div>
@@ -1270,7 +1270,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.group_handoff")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.group_handoff_desc")}
                     </span>
                   </div>
@@ -1287,7 +1287,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.auto_resume")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.auto_resume_desc")}
                     </span>
                   </div>
@@ -1304,7 +1304,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <div className={styles.row}>
                     <div>
                       <span className={styles.row_label}>{t("settings.auto_resume_max_wait")}</span>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                         {t("settings.auto_resume_max_wait_desc")}
                       </span>
                     </div>
@@ -1325,7 +1325,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.plan_revive")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.plan_revive_desc")}
                     </span>
                   </div>
@@ -1343,7 +1343,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <div className={styles.row}>
                     <div>
                       <span className={styles.row_label}>{t("settings.keep_awake")}</span>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                         {t("settings.keep_awake_desc")}
                       </span>
                     </div>
@@ -1384,14 +1384,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 {llmConfig.provider !== "none" && dualReportProvidersEnabled && (
                   <div className={styles.row}>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                       {t("settings.llm_provider_routing_desc")}
                     </span>
                   </div>
                 )}
                 {llmConfig.provider === "none" && (
                   <div className={styles.row}>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-warning, #e8a838)" }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-warning, #e8a838)" }}>
                       {t("settings.llm_disabled_warning")}
                     </span>
                   </div>
@@ -1400,7 +1400,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <div className={styles.row}>
                     <div>
                       <span className={styles.row_label}>{t("settings.llm_daily_report_preference")}</span>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                         {t("settings.llm_daily_report_preference_desc")}
                       </span>
                     </div>
@@ -1420,7 +1420,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <div className={styles.row}>
                       <div>
                         <span className={styles.row_label}>{t("settings.llm_fast_model")}</span>
-                        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                           {t("settings.llm_fast_model_desc")}
                         </span>
                       </div>
@@ -1438,7 +1438,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <div className={styles.row}>
                       <div>
                         <span className={styles.row_label}>{t("settings.llm_standard_model")}</span>
-                        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                           {t("settings.llm_standard_model_desc")}
                         </span>
                       </div>
@@ -1457,7 +1457,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 )}
                 {llmConfig.provider !== "none" && claudeCodexPairActive && (
                   <div className={styles.row}>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                       {t("settings.llm_model_alignment_desc")}
                     </span>
                   </div>
@@ -1472,7 +1472,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.simplified_mode")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.simplified_mode_desc")}
                     </span>
                   </div>
@@ -1489,7 +1489,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.mascot_visible")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.mascot_visible_desc")}
                     </span>
                   </div>
@@ -1503,7 +1503,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <div className={styles.row}>
                     <div>
                       <span className={styles.row_label}>{t("settings.personalized_mascot")}</span>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                         {t("settings.personalized_mascot_desc")}
                       </span>
                     </div>
@@ -1524,7 +1524,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.user_title")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.user_title_desc")}
                     </span>
                   </div>
@@ -1582,7 +1582,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.claude_binary")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.claude_binary_desc")}
                   </span>
                 </div>
@@ -1627,7 +1627,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     </div>
                     {claudeBinaryOverride && !claudeBinaries.some((b) => b.path === claudeBinaryOverride) && (
                       <div className={styles.row}>
-                        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                        <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                           {t("settings.claude_binary_custom_path", { path: claudeBinaryOverride })}
                         </span>
                       </div>
@@ -1648,7 +1648,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.sources")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.sources_desc")}
                   </span>
                 </div>
@@ -1693,13 +1693,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     docs/rca-ux-review.md 6.6). */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_hosts")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.remote_hosts_desc")}
                   </span>
                 </div>
                 {sshHosts.length === 0 && (
                   <div className={styles.row}>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                       {t("settings.remote_host_empty")}
                     </span>
                   </div>
@@ -1713,10 +1713,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       <div className={styles.row}>
                         <span className={styles.row_label} style={{ minWidth: 0 }}>
                           {h.label || target}
-                          <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360, fontFamily: "var(--font-mono, monospace)" }}>
+                          <span style={{ display: "block", fontSize: 12, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360, fontFamily: "var(--font-mono, monospace)" }}>
                             {target}
                           </span>
-                          <span style={{ display: "block", fontSize: 10, marginTop: 2 }}>
+                          <span style={{ display: "block", fontSize: 12, marginTop: 2 }}>
                             {h.rcaPath
                               ? <span style={{ color: "var(--color-text-dim)" }}>{t("settings.remote_host_cap_rca")}</span>
                               : <span style={{ color: "var(--color-text-dim)" }}>{t("settings.remote_host_cap_none")}</span>}
@@ -1746,7 +1746,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       </div>
                       {spaces.map((w) => (
                         <div className={styles.row} key={w.path} style={{ paddingLeft: 14 }}>
-                          <span className={styles.row_label} style={{ minWidth: 0, fontSize: 11, fontFamily: "var(--font-mono, monospace)" }}>
+                          <span className={styles.row_label} style={{ minWidth: 0, fontSize: 12, fontFamily: "var(--font-mono, monospace)" }}>
                             {w.path}
                           </span>
                           <button
@@ -1781,15 +1781,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     {remoteWorkspaces.filter((w) => !w.hostId).map((w) => (
                       <div className={styles.row} key={w.path}>
                         <span className={styles.row_label} style={{ minWidth: 0 }}>
-                          <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}>{w.path}</span>
-                          <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)" }}>
+                          <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{w.path}</span>
+                          <span style={{ display: "block", fontSize: 12, color: "var(--color-text-dim)" }}>
                             {w.sshTarget ?? w.pairingCode}
                           </span>
                           {(() => {
                             const h = rwHealth[`ws:${w.path}`];
                             if (!h || h === "probing") return null;
                             return (
-                              <span style={{ display: "block", fontSize: 10, color: h.sshOk && h.stdioOk ? "var(--color-ok, inherit)" : "var(--color-danger, inherit)" }}>
+                              <span style={{ display: "block", fontSize: 12, color: h.sshOk && h.stdioOk ? "var(--color-ok, inherit)" : "var(--color-danger, inherit)" }}>
                                 {h.sshOk && h.stdioOk
                                   ? t("settings.remote_host_ready", { version: h.rcaVersion ?? "rca" })
                                   : (h.error ?? t("settings.remote_host_unreachable"))}
@@ -1836,7 +1836,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   {t("settings.remote_host_add_title")}
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.remote_host_add_desc")}
                   </span>
                 </div>
@@ -1888,7 +1888,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 {sshHosts.length === 0 && rwSshProfiles.length === 0 && (
                   <div className={styles.row}>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                       {t("settings.remote_ws_no_conns")}
                     </span>
                   </div>
@@ -1898,7 +1898,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     {rwInstallSteps.map((s, i) => (
                       <span
                         key={i}
-                        style={{ fontSize: 11, color: "var(--color-text-dim)", fontFamily: "var(--font-mono, monospace)" }}
+                        style={{ fontSize: 12, color: "var(--color-text-dim)", fontFamily: "var(--font-mono, monospace)" }}
                       >
                         {i === rwInstallSteps.length - 1 && rwInstalling ? "▸ " : "✓ "}
                         {s}
@@ -1921,7 +1921,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.elicitation")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.elicitation_desc")}
                   </span>
                 </div>
@@ -1936,7 +1936,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.plan_approval")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.plan_approval_desc")}
                   </span>
                 </div>
@@ -1951,7 +1951,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.interaction_mode")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.interaction_mode_desc")}
                   </span>
                 </div>
@@ -1959,7 +1959,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <div>
                     <span className={styles.row_label}>{t("settings.interaction_mode_enabled")}</span>
                     {!elicitationEnabled && (
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                         {t("settings.interaction_mode_requires_elicitation")}
                       </span>
                     )}
@@ -1977,7 +1977,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.interaction_group_safety")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.guard_desc")}
                   </span>
                 </div>
@@ -2001,14 +2001,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.permissions_bypass")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.permissions_bypass_desc")}
                   </span>
                 </div>
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.permissions_bypass_recommended")}
                     </span>
                   </div>
@@ -2032,7 +2032,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <span
                     className={styles.row_label}
-                    style={{ fontSize: 11, color: "var(--color-text-dim)" }}
+                    style={{ fontSize: 12, color: "var(--color-text-dim)" }}
                   >
                     {t("settings.interaction_diagnostics_desc")}
                   </span>
@@ -2095,7 +2095,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                                 defaultValue: c.label,
                               })}
                               {!c.fixAction && (
-                                <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                                <span style={{ fontSize: 12, color: "var(--color-text-dim)", marginLeft: 6 }}>
                                   {t("settings.interaction_diagnostics_problem_manual")}
                                 </span>
                               )}
@@ -2179,7 +2179,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       </div>
                       <div
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
                           color: "var(--color-text-dim)",
                           marginTop: 2,
                           marginLeft: 22,
@@ -2224,7 +2224,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                           : t(`settings.${b.label}`)}
                       </button>
                       <span
-                        style={{ fontSize: 11, color: "var(--color-text-dim)", flex: 1 }}
+                        style={{ fontSize: 12, color: "var(--color-text-dim)", flex: 1 }}
                       >
                         {t(`settings.${b.hint}`)}
                       </span>
@@ -2237,7 +2237,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     className={styles.row}
                     style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}
                   >
-                    <div style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    <div style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                       <b>{t("settings.interaction_diagnostics_last_test")}:</b>{" "}
                       {lastTestResult.message}
                     </div>
@@ -2248,7 +2248,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                           padding: 8,
                           maxHeight: 200,
                           overflow: "auto",
-                          fontSize: 10,
+                          fontSize: 12,
                           background: "var(--color-bg-elevated, rgba(0,0,0,0.04))",
                           borderRadius: 4,
                           whiteSpace: "pre-wrap",
@@ -2269,7 +2269,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.interaction_group_discipline")}</div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.prd_mode_desc")}
                   </span>
                 </div>
@@ -2282,7 +2282,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   />
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.wiki_guidance_desc")}
                   </span>
                 </div>
@@ -2295,7 +2295,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   />
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.model_guidance_desc")}
                   </span>
                 </div>
@@ -2308,7 +2308,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   />
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.session_title_guidance_desc")}
                   </span>
                 </div>
@@ -2321,7 +2321,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   />
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                  <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                     {t("settings.codex_mirror_note")}
                   </span>
                 </div>
@@ -2354,7 +2354,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <>
                     <div className={styles.section_title} style={{ marginTop: 12 }}>{t("settings.timeouts_section_title")}</div>
                     <div className={styles.row}>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
                         {t("settings.timeouts_desc")}
                       </span>
                     </div>
@@ -2363,7 +2363,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         <div className={styles.row}>
                           <span className={styles.row_label}>
                             {t("settings.timeouts_wait")}
-                            <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                            <span style={{ fontSize: 12, color: "var(--color-text-dim)", marginLeft: 6 }}>
                               {t("settings.timeouts_unit_seconds")} · 60–3600
                             </span>
                           </span>
@@ -2392,7 +2392,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         <div className={styles.row}>
                           <span className={styles.row_label}>
                             {t("settings.timeouts_poll")}
-                            <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                            <span style={{ fontSize: 12, color: "var(--color-text-dim)", marginLeft: 6 }}>
                               {t("settings.timeouts_unit_ms")} · 50–1000
                             </span>
                           </span>
@@ -2421,7 +2421,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         <div className={styles.row}>
                           <span className={styles.row_label}>
                             {t("settings.timeouts_heartbeat")}
-                            <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                            <span style={{ fontSize: 12, color: "var(--color-text-dim)", marginLeft: 6 }}>
                               {t("settings.timeouts_unit_seconds")} · 5–60
                             </span>
                           </span>
@@ -2469,7 +2469,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.mute_all")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                    <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                       {t("settings.mute_all_desc")}
                     </span>
                   </div>
@@ -2504,7 +2504,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     </div>
                     <span
                       className={styles.row_label}
-                      style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}
+                      style={{ fontSize: 12, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}
                     >
                       {t("settings.notification_web_unavailable")}
                     </span>

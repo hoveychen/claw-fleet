@@ -51,7 +51,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
   padding: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -75,7 +75,7 @@
 }
 
 .chip_count {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -122,7 +122,7 @@
 }
 
 .workspace_name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
   text-transform: uppercase;
@@ -130,7 +130,7 @@
 }
 
 .workspace_count {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -141,7 +141,7 @@
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
   color: var(--color-text-dim);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -152,7 +152,7 @@
 }
 
 .badge {
-  font-size: 9px;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-weight: 700;
@@ -223,7 +223,7 @@
 }
 
 .card_title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.3;
@@ -235,7 +235,7 @@
 }
 
 .card_hook {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   line-height: 1.35;
   overflow: hidden;
@@ -249,7 +249,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
@@ -265,7 +265,7 @@
   flex-shrink: 0;
   width: 30px;
   text-align: center;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   padding: 2px 0;
@@ -320,7 +320,7 @@
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   text-transform: uppercase;
@@ -334,7 +334,7 @@
 }
 
 .unindexed_caret {
-  font-size: 9px;
+  font-size: 12px;
   opacity: 0.7;
 }
 
@@ -344,7 +344,7 @@
 }
 
 .unindexed_count {
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -450,7 +450,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -494,7 +494,7 @@
   background: none;
   border: none;
   padding: 8px 14px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text);
   cursor: pointer;
   text-align: left;
@@ -538,11 +538,11 @@
   gap: 8px;
   padding: 8px 12px;
   background: var(--color-bg-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .history_tool {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
@@ -561,19 +561,19 @@
 
 .history_time {
   color: var(--color-text-dim);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .history_session {
   color: var(--color-text-dim);
-  font-size: 10px;
+  font-size: 12px;
   margin-left: auto;
   font-family: monospace;
 }
 
 .history_body {
   padding: 8px 12px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   white-space: pre-wrap;
@@ -644,7 +644,7 @@
 }
 
 .lesson_why_label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -672,7 +672,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -685,7 +685,7 @@
 
 .lesson_session {
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -700,7 +700,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 5px 11px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;

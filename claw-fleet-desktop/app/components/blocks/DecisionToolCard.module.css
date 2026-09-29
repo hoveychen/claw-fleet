@@ -53,7 +53,7 @@
 
 .header:hover { background: var(--color-bg-card-hover); }
 
-.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
+.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 12px); flex-shrink: 0; }
 
 .kind {
   font-weight: 600;
@@ -79,7 +79,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   background: var(--color-success-bg);
@@ -88,7 +88,7 @@
 
 .pending_chip {
   flex-shrink: 0;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
@@ -100,7 +100,7 @@
    a distinct, settled state rather than "still waiting". */
 .outcome_chip {
   flex-shrink: 0;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   background: var(--color-warning-bg);
@@ -109,7 +109,7 @@
 
 .count {
   flex-shrink: 0;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   padding: 1px 5px;
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
@@ -129,7 +129,7 @@
 
 .error_badge {
   flex-shrink: 0;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-error-bg);
@@ -148,7 +148,7 @@
   border-radius: var(--radius-xs);
   background: var(--color-error-bg);
   color: var(--color-error-fg);
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -168,7 +168,7 @@
 
 .question_text :global(p) { margin: 0 0 6px; }
 .question_text :global(p:last-child) { margin-bottom: 0; }
-.question_text :global(table) { font-size: var(--t-aux, 11px); }
+.question_text :global(table) { font-size: var(--t-aux, 12px); }
 
 .preview_frame {
   width: 100%;
@@ -188,7 +188,7 @@
 }
 
 .html_marker {
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   font-style: italic;
   margin-bottom: 8px;
@@ -226,13 +226,13 @@
 .marker {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
 }
 
 .option_selected .marker { color: var(--color-success); }
 
 .option_desc {
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
   padding-left: 16px;
@@ -247,7 +247,7 @@
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   line-height: 1.45;
   max-height: 220px;
   overflow: auto;
@@ -256,7 +256,7 @@
 
 .attachments {
   margin-top: 4px;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   color: var(--color-text-dim);
   word-break: break-all;
 }

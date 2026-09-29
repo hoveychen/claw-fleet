@@ -54,7 +54,7 @@
 }
 
 .title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
   margin: 0;
@@ -137,7 +137,7 @@
   border: none;
   border-top: 1px solid var(--color-border);
   text-align: left;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -165,7 +165,7 @@
 }
 
 .section_title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -192,7 +192,7 @@
 }
 
 .row_hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
   margin-top: 2px;
 }
@@ -235,7 +235,7 @@
 }
 
 .hooks_error {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-status-error, #e55);
   margin-top: 4px;
 }
@@ -249,7 +249,7 @@
 }
 
 .source_unavailable {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-dim);
   opacity: 0.7;
   font-style: italic;
@@ -313,7 +313,7 @@
 }
 
 .sources_restart_hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-warning, #f0a070);
 }
 
@@ -369,7 +369,7 @@
 }
 
 .radio_desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 

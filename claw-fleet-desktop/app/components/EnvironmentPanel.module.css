@@ -42,7 +42,7 @@
 
 .badge_ok,
 .badge_warn {
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
@@ -62,7 +62,7 @@
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
@@ -164,7 +164,7 @@
   border-radius: 6px;
   background: var(--color-bg-sunken);
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   max-height: 140px;
   overflow: auto;

@@ -7,7 +7,7 @@
   flex-wrap: wrap;
   gap: 4px;
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -19,7 +19,7 @@
   border-radius: 9px;
   background: var(--color-bg-tool);
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   /* Only the note gives way when space runs out; the elapsed/poll tail stays
      on one line. */
   max-width: 100%;

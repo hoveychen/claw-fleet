@@ -98,7 +98,7 @@
    directory) and a proportional font makes a column of them unscannable. */
 .dense {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.35;
   color: var(--color-text-dim);
   overflow: hidden;

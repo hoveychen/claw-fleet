@@ -728,7 +728,7 @@ function PluginDetail({
             </div>
             <div
               className={pluginStyles.detail_meta_value}
-              style={{ fontSize: 11, fontFamily: "var(--font-mono, monospace)" }}
+              style={{ fontSize: 12, fontFamily: "var(--font-mono, monospace)" }}
             >
               {plugin.rootPath}
             </div>

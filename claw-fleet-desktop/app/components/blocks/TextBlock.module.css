@@ -100,7 +100,7 @@
   border-radius: var(--radius-xs);
   padding: 1px 4px;
   font-family: var(--font-mono);
-  font-size: var(--t-aux, 11px);
+  font-size: var(--t-aux, 12px);
   color: var(--color-code-fg);
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -121,7 +121,7 @@
   position: absolute;
   top: 6px;
   left: 10px;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   line-height: 16px;
   color: var(--color-text-dim);
   font-family: var(--font-mono);
@@ -132,7 +132,7 @@
   position: absolute;
   top: 5px;
   right: 8px;
-  font-size: var(--t-meta, 10px);
+  font-size: var(--t-meta, 12px);
   padding: 2px 6px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
