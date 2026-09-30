@@ -1166,6 +1166,7 @@ type ResumeFn<'a> = dyn Fn(&WatchRecord, &str) -> Result<(), String> + 'a;
 /// rather than propagated — the record is already consumed, and re-arming would
 /// risk a double-resume. Returns the claimed record, or the claim error if a
 /// racing timer already fired it.
+#[cfg(test)]
 fn fire_in(
     dir: &Path,
     id: &str,
@@ -1263,6 +1264,30 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
     )
 }
 
+/// [`spawn_resume`], but a resume the drive lease refuses (a parked card is
+/// waiting for its answer, another driver's turn is in flight) queues the event
+/// instead of losing it: the queue drain delivers it once the session is free.
+fn resume_or_queue(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
+    match spawn_resume(rec, prompt) {
+        Err(e) if e.starts_with("drive lease:") => {
+            // `Agent`: the event is Fleet speaking, never the user's approval.
+            let how = crate::pending_message::enqueue(
+                &rec.session_id,
+                &rec.workspace_path,
+                prompt,
+                crate::pending_message::Sender::Agent,
+            )
+            .map_err(|q| format!("{e}; queueing failed: {q}"))?;
+            crate::log_debug(&format!(
+                "watch {}: resume refused ({e}) -> {how:?} for session {}",
+                rec.id, rec.session_id
+            ));
+            Ok(())
+        }
+        other => other,
+    }
+}
+
 /// SIGINT the session if a Fleet-owned CLI is still running it, returning
 /// whether it interrupted anything. Shared shape with `parked::answer_with`'s
 /// pre-resume guard: never launch a resume while the original turn can still be
@@ -1308,7 +1333,7 @@ fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, 
         &capture_event,
         &defer_to_live_turn,
         &interrupt_if_live,
-        &|rec, prompt| spawn_resume(rec, prompt),
+        &|rec, prompt| resume_or_queue(rec, prompt),
     )
 }
 
@@ -1363,7 +1388,7 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                         id,
                         generation,
                         &interrupt_if_live,
-                        &|rec, prompt| spawn_resume(rec, prompt),
+                        &|rec, prompt| resume_or_queue(rec, prompt),
                     ) {
                         crate::log_debug(&format!("watch {id}: check-in refused ({e})"));
                     }

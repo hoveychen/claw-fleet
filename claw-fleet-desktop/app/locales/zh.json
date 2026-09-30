@@ -730,6 +730,7 @@
     "att_scheduled": "已定时",
     "att_waiting_card": "等您回复决策卡",
     "att_handing_off": "正在接力",
+    "att_reserved": "即将自动续跑",
     "att_idle": "已停止",
     "att_boss_closed": "已被您结束",
     "att_stale": "超过 7 天没人认领",

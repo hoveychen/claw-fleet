@@ -335,7 +335,7 @@ setBy: string, createdMs: number, };
 
 export type PlanReviveConfig = { enabled: boolean, };
 
-export type AttendanceState = "running" | "watching" | "scheduled" | "waitingCard" | "handingOff" | "idle" | "bossClosed" | "stale";
+export type AttendanceState = "running" | "watching" | "scheduled" | "waitingCard" | "handingOff" | "reserved" | "idle" | "bossClosed" | "stale";
 
 export type PlanAttendance = { 
 sessionId: string, state: AttendanceState, 

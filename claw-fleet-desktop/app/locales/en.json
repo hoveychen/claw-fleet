@@ -733,6 +733,7 @@
     "att_scheduled": "Scheduled",
     "att_waiting_card": "Waiting for your reply",
     "att_handing_off": "Handing off",
+    "att_reserved": "Will resume on its own",
     "att_idle": "Stopped",
     "att_boss_closed": "Closed by you",
     "att_stale": "Unclaimed for over 7 days",
