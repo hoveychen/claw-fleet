@@ -37,7 +37,8 @@ pub struct DailyReport {
 ///       matching cost and the sidebar counter's methodology.
 ///   2 — usage attributed by finalized turn timestamp, including sessions that
 ///       crossed midnight and live Claude/Codex sources.
-pub const CURRENT_METRICS_VERSION: u32 = 2;
+///   3 — only sessions Fleet launched (the launch registry) are counted.
+pub const CURRENT_METRICS_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -1666,9 +1667,18 @@ pub fn append_lesson_to_claude_md(lesson: &Lesson) -> Result<(), String> {
 
 /// Scan `~/.claude/projects/` for JSONL files with finalized assistant activity
 /// on `date` (YYYY-MM-DD) in the local timezone. Unlike the normal session
-/// scanner, this has no age limit and is suitable for backfill.
+/// scanner, this has no age limit and is suitable for backfill. Only sessions
+/// in the launch registry count — a `claude` the user opened by hand is not
+/// Fleet's spend — and a subagent counts when its parent session does.
 pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
     use crate::session::decode_workspace_path_with_parts;
+
+    let registry = crate::launch_spec::registry();
+    let registered = |p: &std::path::Path| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|id| registry.contains_key(id))
+    };
 
     let projects_dir = match crate::session::get_claude_dir() {
         Some(d) => d.join("projects"),
@@ -1713,6 +1723,9 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
 
             // Top-level JSONL = main-agent session
             if file_path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                if !registered(&file_path) {
+                    continue;
+                }
                 if let Some(si) = make_session_info_for_date(
                     &file_path,
                     date,
@@ -1726,7 +1739,7 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
             }
 
             // Sub-directory named <session-uuid>: contains subagents/agent-*.jsonl
-            if !file_path.is_dir() {
+            if !file_path.is_dir() || !registered(&file_path) {
                 continue;
             }
             let subagents_dir = file_path.join("subagents");
@@ -2109,7 +2122,9 @@ fn run_backfill_check(
                 sessions.push(session.clone());
             }
         }
-        if sessions.is_empty() {
+        // A cached day with no Fleet session left still gets rewritten, or the
+        // hand-opened spend a v2 report counted would stay on it forever.
+        if sessions.is_empty() && existing.is_none() {
             continue;
         }
         let session_refs: Vec<&crate::session::SessionInfo> = sessions.iter().collect();
