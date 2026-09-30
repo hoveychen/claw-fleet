@@ -170,8 +170,9 @@ pub fn remove_at(session_id: &str, index: usize) -> Result<(), String> {
 /// Only Fleet-owned sessions can be resumed headlessly, so this rejects sessions
 /// Fleet didn't launch — the same gate [`crate::parked::parkable_workspace`]
 /// uses, so a message never gets queued for a session that can never drain it.
-/// Follow the handoff chain from `session_id` to the hop that still owns the
-/// work, or `None` when this session never handed its baton over.
+/// Follow the succession from `session_id` — handoff links and plan-revive
+/// takeovers alike ([`crate::session_driver::live_end`]) — to the session that
+/// still owns the work, or `None` when this session was never replaced.
 ///
 /// A retired hop must never be resumed: its successor is already running the
 /// plan, and waking the predecessor puts a second agent on the same work with a
@@ -180,16 +181,7 @@ pub fn remove_at(session_id: &str, index: usize) -> Result<(), String> {
 /// answer is not to drop it but to re-address it — the message was meant for
 /// whoever is doing the work, and that is the live baton.
 fn live_baton_of(session_id: &str) -> Option<String> {
-    let mut current = crate::handoff::successor_session_of(session_id)?;
-    // Chains are short and acyclic; the bound is only so a corrupted store
-    // cannot spin the scan thread forever.
-    for _ in 0..64 {
-        match crate::handoff::successor_session_of(&current) {
-            Some(next) => current = next,
-            None => break,
-        }
-    }
-    Some(current)
+    crate::session_driver::live_end(session_id)
 }
 
 /// The session a follow-up addressed to `session_id` will actually land on —
