@@ -1642,14 +1642,15 @@ fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [L
 }
 
 /// The `hooks` object for a Fleet-started session's `--settings` file: the
-/// hooks.jsonl event append on every observed event, plus the groups of every
-/// hook feature `enabled` says is on.
+/// hooks.jsonl event append on every observed event (when `events`), plus the
+/// groups of every hook feature `enabled` admits.
 ///
 /// Claude Code merges `--settings` hooks with the user's own (measured on
 /// 2.1.284: both fire), so this carries Fleet's hooks only and leaves the
 /// user's settings.json untouched.
 pub(crate) fn launch_hooks(
     fleet_bin: &str,
+    events: bool,
     enabled: impl Fn(crate::control_plane_prefs::Feature) -> bool,
 ) -> Value {
     let mut hooks: Map<String, Value> = Map::new();
@@ -1659,8 +1660,10 @@ pub(crate) fn launch_hooks(
             arr.push(group);
         }
     };
-    for &event in FLEET_HOOK_EVENTS {
-        push(event, fleet_hook_group());
+    if events {
+        for &event in FLEET_HOOK_EVENTS {
+            push(event, fleet_hook_group());
+        }
     }
     for feature in crate::control_plane_prefs::Feature::ALL {
         if !enabled(feature) {

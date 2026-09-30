@@ -447,6 +447,13 @@ pub fn managed_file_content() -> Option<String> {
     has_any_block(&content).then_some(content)
 }
 
+/// Whether `~/.claude/CLAUDE.md` still carries the lessons `@import`.
+pub fn import_installed() -> bool {
+    claude_md_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .is_some_and(|c| c.contains(IMPORT_BEGIN))
+}
+
 /// Ensure the `@fleet-lessons.md` import sentinel is present in CLAUDE.md.
 fn ensure_import_installed() -> Result<(), String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;

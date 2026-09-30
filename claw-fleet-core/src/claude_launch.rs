@@ -25,6 +25,14 @@
 //! after it.
 //!
 //! Which features are on comes from [`crate::control_plane_prefs`].
+//!
+//! **Only what the global config does not already provide.** Until the one-shot
+//! migration strips Fleet's old global writes, a host still carries them, and
+//! handing the same hook or guidance over a second time would make it fire
+//! twice (two `prd-context` injections per prompt, the whole guidance twice in
+//! the system prompt). So each piece is skipped while its global counterpart is
+//! in place — [`GlobalCarriers`] — and the launch arguments take over as the
+//! migration removes them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,10 +46,6 @@ const LAUNCH_DIR: &str = "claude-launch";
 const SETTINGS_FILE: &str = "settings.json";
 const MCP_FILE: &str = "mcp.json";
 const SYSTEM_PROMPT_FILE: &str = "system-prompt.md";
-/// The concept guidance rendered by [`reconcile_guidance`]. Kept apart from
-/// [`SYSTEM_PROMPT_FILE`] because it needs the user's title and locale, which
-/// only the reconcile callers know; lessons are appended at launch time.
-const GUIDANCE_FILE: &str = "claude-guidance.md";
 const CONFIG_FILE: &str = "claude-launch.json";
 
 fn fleet_dir() -> Option<PathBuf> {
@@ -52,15 +56,11 @@ fn launch_dir() -> Option<PathBuf> {
     fleet_dir().map(|d| d.join(LAUNCH_DIR))
 }
 
-fn guidance_path() -> Option<PathBuf> {
-    fleet_dir().map(|d| d.join(GUIDANCE_FILE))
-}
-
 fn config_path() -> Option<PathBuf> {
     fleet_dir().map(|d| d.join(CONFIG_FILE))
 }
 
-// ── Default model ────────────────────────────────────────────────────────────
+// ── Config: default model, guidance title/locale ─────────────────────────────
 
 /// `~/.fleet/claude-launch.json`.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +70,12 @@ pub struct ClaudeLaunchConfig {
     /// `model` key Fleet used to write into the global settings.json.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    /// What the guidance calls the user, as last reconciled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_title: Option<String>,
+    /// Guidance locale, as last reconciled. `None` = never reconciled here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
 }
 
 pub fn load_config() -> ClaudeLaunchConfig {
@@ -107,26 +113,63 @@ pub fn set_default_model(model: &str) -> Result<(), String> {
     save_config(&cfg)
 }
 
+// ── What the user's global config already carries ────────────────────────────
+
+/// Which Fleet pieces the user's global Claude config still provides — Fleet
+/// wrote them there before per-launch injection existed.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GlobalCarriers {
+    /// `settings.json` hooks and `CLAUDE.md` guidance imports, per feature.
+    plan: crate::hooks::HookSetupPlan,
+    /// `mcpServers.fleet` in `~/.claude.json`, with a launchable command.
+    mcp: bool,
+    /// The lessons `@import` in `~/.claude/CLAUDE.md`.
+    lessons: bool,
+}
+
+impl GlobalCarriers {
+    pub(crate) fn probe() -> Self {
+        Self {
+            plan: crate::hooks::plan_hook_setup(),
+            mcp: crate::mcp_injector::fleet_server_registered(),
+            lessons: crate::lessons_store::import_installed(),
+        }
+    }
+
+    fn has(&self, feature: Feature) -> bool {
+        crate::control_plane::is_installed(feature, &self.plan)
+    }
+
+    /// On for Fleet sessions and not already delivered globally.
+    fn wants(&self, feature: Feature) -> bool {
+        is_enabled(feature) && !self.has(feature)
+    }
+}
+
 // ── Guidance ─────────────────────────────────────────────────────────────────
 
-/// Render the enabled guidance concepts, in the order the old CLAUDE.md
-/// imports used. Deterministic for a given (prefs, title, locale), which is
-/// what keeps a fork's system prompt identical to its parent's.
-pub fn render_guidance(user_title: &str, locale: &str) -> String {
+/// Render the guidance concepts `include` admits, in the order the old
+/// CLAUDE.md imports used. Deterministic for a given input, which is what keeps
+/// a fork's system prompt identical to its parent's.
+fn render_guidance_with(
+    user_title: &str,
+    locale: &str,
+    include: impl Fn(Feature) -> bool,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if is_enabled(Feature::InteractionMode) {
+    if include(Feature::InteractionMode) {
         parts.push(crate::interaction_mode::render_guidance(user_title, locale));
     }
-    if is_enabled(Feature::PrdDiscipline) {
+    if include(Feature::PrdDiscipline) {
         parts.push(crate::prd_discipline::render_guidance(user_title, locale));
     }
-    if is_enabled(Feature::WikiGuidance) {
+    if include(Feature::WikiGuidance) {
         parts.push(crate::wiki_guidance::render_guidance(locale));
     }
-    if is_enabled(Feature::ModelGuidance) {
+    if include(Feature::ModelGuidance) {
         parts.push(crate::model_guidance::render_guidance(locale));
     }
-    if is_enabled(Feature::SessionTitleGuidance) {
+    if include(Feature::SessionTitleGuidance) {
         parts.push(crate::session_title_guidance::render_guidance(
             user_title, locale,
         ));
@@ -143,28 +186,36 @@ fn join_sections(parts: Vec<String>) -> String {
         .join("\n\n")
 }
 
-/// Re-render the guidance file from the current prefs. Called wherever the
-/// codex/dsh carriers are reconciled — after a concept toggle and on startup —
-/// since those are the callers that know the user's title and locale.
+/// Record the title and locale the guidance is rendered with. Called wherever
+/// the codex/dsh carriers are reconciled — after a concept toggle and on
+/// startup — since those are the callers that know them. Which concepts are on
+/// is read from prefs at each launch, so a toggle needs no call here.
 pub fn reconcile_guidance(user_title: &str, locale: &str) -> Result<(), String> {
-    let path = guidance_path().ok_or("cannot determine fleet dir")?;
-    write_if_changed(&path, &render_guidance(user_title, locale))
+    let mut cfg = load_config();
+    cfg.user_title = Some(user_title.to_string());
+    cfg.locale = Some(locale.to_string());
+    save_config(&cfg)
 }
 
-/// Whether [`reconcile_guidance`] has ever written the guidance file here.
+/// Whether [`reconcile_guidance`] has ever run on this host.
 pub fn guidance_rendered() -> bool {
-    guidance_path().is_some_and(|p| p.exists())
+    load_config().locale.is_some()
 }
 
 /// The text handed to `--append-system-prompt-file`: lessons, then the
 /// concept guidance. `None` when there is nothing to add.
-fn system_prompt_text() -> Option<String> {
-    let lessons = crate::lessons_store::managed_file_content().unwrap_or_default();
-    // No reconcile has run on this host yet (a `fleet serve` nobody configured).
-    // Render with the defaults rather than start the session with no guidance.
-    let guidance = guidance_path()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .unwrap_or_else(|| render_guidance("", "en"));
+fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
+    let lessons = if global.lessons {
+        String::new()
+    } else {
+        crate::lessons_store::managed_file_content().unwrap_or_default()
+    };
+    // No reconcile has run on this host yet (a `fleet serve` nobody configured):
+    // render with the defaults rather than start the session with no guidance.
+    let cfg = load_config();
+    let title = cfg.user_title.unwrap_or_default();
+    let locale = cfg.locale.unwrap_or_else(|| "en".to_string());
+    let guidance = render_guidance_with(&title, &locale, |f| global.wants(f));
     let text = join_sections(vec![lessons, guidance]);
     (!text.is_empty()).then_some(text)
 }
@@ -173,7 +224,7 @@ fn system_prompt_text() -> Option<String> {
 
 /// The `--settings` document. `fleet_bin` is `None` when no fleet binary
 /// resolves, in which case only the settings that need no binary are kept.
-fn settings_value(fleet_bin: Option<&str>) -> Value {
+fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
     let mut v = json!({
         "permissions": { "allow": crate::permissions_injector::INJECT_RULES },
         // Both spellings: only the old `includeCoAuthoredBy` actually reaches
@@ -182,7 +233,8 @@ fn settings_value(fleet_bin: Option<&str>) -> Value {
         "attribution": { "commitTrailers": false, "sessionUrl": false },
     });
     if let Some(bin) = fleet_bin {
-        v["hooks"] = crate::hooks::launch_hooks(bin, is_enabled);
+        v["hooks"] =
+            crate::hooks::launch_hooks(bin, !global.plan.already_installed, |f| global.wants(f));
     }
     v
 }
@@ -195,27 +247,16 @@ fn mcp_value(fleet_bin: &str) -> Value {
     })
 }
 
-/// Write `content` to `path` unless it already holds exactly that, via a
-/// temp file and a rename so a concurrently starting `claude` never reads a
-/// half-written file.
+/// Write `content` to `path` unless it already holds exactly that. Atomic, so
+/// a concurrently starting `claude` never reads a half-written file.
 fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
     if fs::read_to_string(path).is_ok_and(|old| old == content) {
         return Ok(());
     }
     let parent = path.parent().ok_or("path has no parent")?;
     fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let tmp = parent.join(format!(
-        ".{}.{}.{}.tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
-        std::process::id(),
-        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("rename into {}: {e}", path.display())
-    })
+    crate::atomic_json::write_atomic(path, content.as_bytes())
+        .map_err(|e| format!("write {}: {e}", path.display()))
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -232,10 +273,14 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 /// degraded, a session that never starts is lost.
 pub fn fleet_launch_args(existing: &[String]) -> Vec<String> {
     let fleet_bin = crate::hooks::resolve_fleet_binary();
-    launch_args_with(existing, fleet_bin.as_deref())
+    launch_args_with(existing, fleet_bin.as_deref(), &GlobalCarriers::probe())
 }
 
-fn launch_args_with(existing: &[String], fleet_bin: Option<&str>) -> Vec<String> {
+fn launch_args_with(
+    existing: &[String],
+    fleet_bin: Option<&str>,
+    global: &GlobalCarriers,
+) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let Some(dir) = launch_dir() else {
         return out;
@@ -255,15 +300,18 @@ fn launch_args_with(existing: &[String], fleet_bin: Option<&str>) -> Vec<String>
         }
     };
 
-    let settings = serde_json::to_string_pretty(&settings_value(fleet_bin)).unwrap_or_default();
+    let settings =
+        serde_json::to_string_pretty(&settings_value(fleet_bin, global)).unwrap_or_default();
     emit("--settings", SETTINGS_FILE, settings);
 
-    let mcp_ok = fleet_bin.is_some_and(|bin| {
-        let mcp = serde_json::to_string_pretty(&mcp_value(bin)).unwrap_or_default();
-        emit("--mcp-config", MCP_FILE, mcp)
-    });
+    // A second server under the same `fleet` key would clash with the global one.
+    let mcp_ok = global.mcp
+        || fleet_bin.is_some_and(|bin| {
+            let mcp = serde_json::to_string_pretty(&mcp_value(bin)).unwrap_or_default();
+            emit("--mcp-config", MCP_FILE, mcp)
+        });
 
-    if let Some(text) = system_prompt_text() {
+    if let Some(text) = system_prompt_text(global) {
         emit("--append-system-prompt-file", SYSTEM_PROMPT_FILE, text);
     }
 
@@ -321,6 +369,11 @@ mod tests {
 
     const BIN: &str = "/opt/fleet/bin/fleet";
 
+    /// A host whose global config carries nothing of Fleet's.
+    fn none() -> GlobalCarriers {
+        GlobalCarriers::default()
+    }
+
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.windows(2)
             .find(|w| w[0] == flag)
@@ -338,7 +391,7 @@ mod tests {
     #[test]
     fn a_fresh_host_gets_every_hook_permission_and_mcp_server() {
         let _h = Home::new("fresh");
-        let args = launch_args_with(&[], Some(BIN));
+        let args = launch_args_with(&[], Some(BIN), &none());
 
         let settings = read_json(value_after(&args, "--settings").expect("--settings"));
         let hooks = subcommands(&settings);
@@ -377,7 +430,7 @@ mod tests {
         crate::control_plane_prefs::mark_disabled(Feature::GuardHook).unwrap();
         crate::control_plane_prefs::mark_disabled(Feature::IdleHooks).unwrap();
 
-        let args = launch_args_with(&[], Some(BIN));
+        let args = launch_args_with(&[], Some(BIN), &none());
         let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
         assert!(!hooks.contains("\" guard;"), "guard must be off: {hooks}");
         assert!(!hooks.contains("session idle"), "idle must be off: {hooks}");
@@ -388,7 +441,7 @@ mod tests {
     fn without_a_fleet_binary_no_mcp_or_prompt_tool_is_named() {
         // Naming an unresolvable permission-prompt tool aborts the CLI.
         let _h = Home::new("nobin");
-        let args = launch_args_with(&[], None);
+        let args = launch_args_with(&[], None, &none());
         assert!(value_after(&args, "--mcp-config").is_none());
         assert!(value_after(&args, "--permission-prompt-tool").is_none());
         let settings = read_json(value_after(&args, "--settings").unwrap());
@@ -399,14 +452,14 @@ mod tests {
     #[test]
     fn the_default_model_is_added_only_when_the_caller_named_none() {
         let _h = Home::new("model");
-        assert!(value_after(&launch_args_with(&[], Some(BIN)), "--model").is_none());
+        assert!(value_after(&launch_args_with(&[], Some(BIN), &none()), "--model").is_none());
 
         set_default_model("opus[1m]").unwrap();
-        let args = launch_args_with(&[], Some(BIN));
+        let args = launch_args_with(&[], Some(BIN), &none());
         assert_eq!(value_after(&args, "--model"), Some("opus[1m]"));
 
         let explicit = vec!["--model".to_string(), "sonnet".to_string()];
-        assert!(value_after(&launch_args_with(&explicit, Some(BIN)), "--model").is_none());
+        assert!(value_after(&launch_args_with(&explicit, Some(BIN), &none()), "--model").is_none());
     }
 
     #[test]
@@ -416,7 +469,7 @@ mod tests {
             "--permission-prompt-tool".to_string(),
             crate::session_launch::PERMISSION_PROMPT_TOOL.to_string(),
         ];
-        let args = launch_args_with(&existing, Some(BIN));
+        let args = launch_args_with(&existing, Some(BIN), &none());
         assert!(!args.iter().any(|a| a == "--permission-prompt-tool"));
     }
 
@@ -426,7 +479,7 @@ mod tests {
         crate::control_plane_prefs::mark_disabled(Feature::WikiGuidance).unwrap();
         reconcile_guidance("老板", "zh").unwrap();
 
-        let args = launch_args_with(&[], Some(BIN));
+        let args = launch_args_with(&[], Some(BIN), &none());
         let text =
             fs::read_to_string(value_after(&args, "--append-system-prompt-file").unwrap()).unwrap();
         let interaction = crate::interaction_mode::render_guidance("老板", "zh");
@@ -443,17 +496,65 @@ mod tests {
         // is handed is byte-identical; nothing here may vary per launch.
         let _h = Home::new("stable");
         reconcile_guidance("Boss", "en").unwrap();
-        let first = launch_args_with(&[], Some(BIN));
+        let first = launch_args_with(&[], Some(BIN), &none());
         let snap = |args: &[String]| -> Vec<String> {
             args.windows(2)
-                .filter(|w| w[0].starts_with("--settings") || w[0].starts_with("--mcp") || w[0].starts_with("--append"))
+                .filter(|w| {
+                    w[0].starts_with("--settings")
+                        || w[0].starts_with("--mcp")
+                        || w[0].starts_with("--append")
+                })
                 .map(|w| fs::read_to_string(&w[1]).unwrap())
                 .collect()
         };
         let before = snap(&first);
-        let second = launch_args_with(&[], Some(BIN));
+        let second = launch_args_with(&[], Some(BIN), &none());
         assert_eq!(first, second);
         assert_eq!(before, snap(&second));
+    }
+
+    #[test]
+    fn what_the_global_config_still_carries_is_not_handed_over_twice() {
+        // Before the migration strips Fleet's old global writes, a second copy
+        // would fire every hook twice and repeat the guidance.
+        let _h = Home::new("global");
+        reconcile_guidance("Boss", "en").unwrap();
+        let global = GlobalCarriers {
+            plan: crate::hooks::HookSetupPlan {
+                already_installed: true,
+                guard_installed: true,
+                interaction_mode_installed: true,
+                ..Default::default()
+            },
+            mcp: true,
+            lessons: false,
+        };
+        let args = launch_args_with(&[], Some(BIN), &global);
+
+        let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
+        assert!(!hooks.contains("\" guard;"), "global guard: {hooks}");
+        assert!(
+            !hooks.contains(".fleet/hooks.jsonl"),
+            "global events: {hooks}"
+        );
+        assert!(
+            hooks.contains("elicitation"),
+            "missing globally → per launch"
+        );
+
+        assert!(
+            value_after(&args, "--mcp-config").is_none(),
+            "same-name clash"
+        );
+        assert!(
+            value_after(&args, "--permission-prompt-tool").is_some(),
+            "the global server still resolves the prompt tool"
+        );
+
+        let text =
+            fs::read_to_string(value_after(&args, "--append-system-prompt-file").unwrap()).unwrap();
+        assert!(!text.contains(crate::interaction_mode::render_guidance("Boss", "en").trim_end()));
+        assert!(text.contains(crate::prd_discipline::render_guidance("Boss", "en").trim_end()));
     }
 
     #[test]
@@ -469,7 +570,7 @@ mod tests {
             crate::control_plane_prefs::mark_disabled(f).unwrap();
         }
         reconcile_guidance("Boss", "en").unwrap();
-        let args = launch_args_with(&[], Some(BIN));
+        let args = launch_args_with(&[], Some(BIN), &none());
         assert!(value_after(&args, "--append-system-prompt-file").is_none());
     }
 }
