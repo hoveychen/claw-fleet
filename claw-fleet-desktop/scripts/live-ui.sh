@@ -38,8 +38,8 @@ done
 # data is the whole point of this harness, and the scanners read it out of
 # ~/.claude/projects, so isolating CLAUDE_CONFIG_DIR would hand the UI an empty
 # board. The cost is that every *write* route this page reaches is a write to
-# the developer's own machine. The one that bit: `controlPlaneSelfHeal` posts
-# the five guidance appliers on every App mount, and with no host-prefs source
+# the developer's own machine. The one that bit: the since-removed
+# `controlPlaneSelfHeal` posted the five guidance appliers on every App mount, and with no host-prefs source
 # installed in `?mock&live` they went out in a guessed locale and translated a
 # Chinese user's whole ~/.claude control plane. Guarded now in
 # `app/mock/liveProxy.ts` (`GUIDANCE_COMMANDS`); keep new write routes in mind.

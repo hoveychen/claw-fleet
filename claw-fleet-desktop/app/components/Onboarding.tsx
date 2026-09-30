@@ -23,6 +23,7 @@ import {
   type FeatureState,
 } from "../storage";
 import { TriStateToggle } from "./TriStateToggle";
+import { type FeatureSwitches, syncFeatureStates } from "../featureSync";
 import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
 import { ThemeToggle } from "./ThemeToggle";
 import { EnvironmentPanel } from "./EnvironmentPanel";
@@ -53,19 +54,7 @@ type Issue =
   | "no_claude_at_all"
   | "not_logged_in";
 
-interface HookSetupPlan {
-  toAdd: string[];
-  hooksGloballyDisabled: boolean;
-  alreadyInstalled: boolean;
-  guardInstalled: boolean;
-  elicitationInstalled: boolean;
-  interactionModeInstalled: boolean;
-  planApprovalInstalled: boolean;
-  prdContextInstalled: boolean;
-  prdDisciplineInstalled: boolean;
-  wikiGuidanceInstalled: boolean;
-  modelGuidanceInstalled: boolean;
-}
+type HookSetupPlan = FeatureSwitches;
 
 type NotificationMode = "all" | "user_action" | "none";
 
@@ -819,9 +808,6 @@ function InteractionModeCard({
 
 function HooksSetupCard({
   hooksPlan,
-  onInstall,
-  status,
-  errorMsg,
   guardValue,
   onGuardChange,
   elicitationValue,
@@ -830,9 +816,6 @@ function HooksSetupCard({
   onPlanApprovalChange,
 }: {
   hooksPlan: HookSetupPlan;
-  onInstall: () => void;
-  status: "idle" | "installing" | "success" | "error";
-  errorMsg: string;
   guardValue: FeatureState;
   onGuardChange: (state: FeatureState) => void;
   elicitationValue: FeatureState;
@@ -841,7 +824,7 @@ function HooksSetupCard({
   onPlanApprovalChange: (state: FeatureState) => void;
 }) {
   const { t } = useTranslation();
-  const hooksReady = hooksPlan.alreadyInstalled || status === "success";
+  const hooksReady = !hooksPlan.hooksGloballyDisabled;
 
   return (
     <div className={`${styles.card} ${hooksReady ? styles.card_info : styles.card_warn}`}>
@@ -852,25 +835,8 @@ function HooksSetupCard({
       </div>
       <p className={styles.card_description}>{t("onboarding.hooks_setup.description")}</p>
 
-      {!hooksReady && (
-        <div className={styles.hooks_actions}>
-          <button
-            className={styles.btn_primary}
-            onClick={onInstall}
-            disabled={status === "installing"}
-            style={{ padding: "8px 20px", fontSize: 12 }}
-          >
-            {status === "installing" ? t("account.loading") : t("hooks.install")}
-          </button>
-        </div>
-      )}
       {hooksPlan.hooksGloballyDisabled && (
         <p className={styles.hint}>{t("onboarding.hooks_setup.disabled_warning")}</p>
-      )}
-      {status === "error" && (
-        <p className={styles.hint} style={{ color: "var(--color-error-fg)" }}>
-          {t("hooks.install_error", { error: errorMsg })}
-        </p>
       )}
 
       {/* ── Guard section ──────────────────────────────────────────── */}
@@ -973,24 +939,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
   // ── Hooks state ────────────────────────────────────────────────────────
   const [hooksPlan, setHooksPlan] = useState<HookSetupPlan | null>(null);
-  const [hooksStatus, setHooksStatus] = useState<"idle" | "installing" | "success" | "error">("idle");
-  const [hooksError, setHooksError] = useState("");
-
-  useEffect(() => {
-    invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
-  }, []);
-
-  const handleInstallHooks = useCallback(async () => {
-    setHooksStatus("installing");
-    try {
-      await invoke("apply_hooks_setup");
-      setHooksStatus("success");
-      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
-    } catch (e) {
-      setHooksStatus("error");
-      setHooksError(String(e));
-    }
-  }, []);
 
   // ── Guard state ─────────────────────────────────────────────────────────
   const [guardState, setGuardState] = useState<FeatureState>(
@@ -1168,6 +1116,24 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     } catch (e) {
       console.error("wiki guidance toggle failed:", e);
     }
+  }, []);
+
+  // The switches live in the backend's control-plane prefs; the tristates
+  // above are only this page's copy, so realign them once the prefs load.
+  useEffect(() => {
+    invoke<HookSetupPlan>("get_hooks_setup_plan")
+      .then((plan) => {
+        setHooksPlan(plan);
+        const states = syncFeatureStates(plan);
+        setGuardState(states["guard-enabled"]);
+        setElicitationState(states["elicitation-enabled"]);
+        setPlanApprovalState(states["plan-approval-enabled"]);
+        setInteractionModeState(states["interaction-mode-enabled"]);
+        setPrdModeState(states["prd-mode-enabled"]);
+        setWikiGuidanceState(states["wiki-guidance-enabled"]);
+        setModelGuidanceState(states["model-guidance-enabled"]);
+      })
+      .catch(() => {});
   }, []);
 
   // ── Notification state (tristate: concrete mode or "default") ───────────
@@ -1420,9 +1386,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             <div className={styles.cards}>
               <HooksSetupCard
                 hooksPlan={hooksPlan}
-                onInstall={handleInstallHooks}
-                status={hooksStatus}
-                errorMsg={hooksError}
                 guardValue={guardState}
                 onGuardChange={handleToggleGuard}
                 elicitationValue={elicitationState}
@@ -1619,9 +1582,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                   {hasClaudeCode && hooksPlan && (
                     <HooksSetupCard
                       hooksPlan={hooksPlan}
-                      onInstall={handleInstallHooks}
-                      status={hooksStatus}
-                      errorMsg={hooksError}
                       guardValue={guardState}
                       onGuardChange={handleToggleGuard}
                       elicitationValue={elicitationState}

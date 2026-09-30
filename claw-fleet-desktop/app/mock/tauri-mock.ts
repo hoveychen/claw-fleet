@@ -307,7 +307,6 @@ async function handleIPC(
     case "stop_watching_session":
     case "set_locale":
     case "set_source_enabled":
-    case "apply_hooks_setup":
     case "interrupt_session":
     case "kill_session":
     case "kill_workspace_sessions":
