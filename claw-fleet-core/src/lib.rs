@@ -234,6 +234,7 @@ pub mod search_index;
 pub mod session;
 pub mod session_explain;
 pub mod session_history;
+pub mod session_driver;
 pub mod session_launch;
 pub mod session_mark;
 pub mod session_notes;
