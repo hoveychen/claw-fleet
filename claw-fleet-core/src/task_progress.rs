@@ -224,6 +224,15 @@ mod tests {
     }
 
     #[test]
+    fn a_later_focus_write_clears_the_backtrack_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_in(tmp.path(), "s", "/ws", "next", None, Some("done")).unwrap();
+        assert_eq!(read_in(tmp.path(), "s").unwrap().backtracked_from.as_deref(), Some("done"));
+        set_current_in(tmp.path(), "s", "/ws", "next", None).unwrap();
+        assert_eq!(read_in(tmp.path(), "s").unwrap().backtracked_from, None);
+    }
+
+    #[test]
     fn current_task_omitted_when_none() {
         let rec = TaskProgressRecord {
             workspace_path: "/ws".to_string(),

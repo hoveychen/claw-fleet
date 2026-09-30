@@ -117,11 +117,12 @@ fn backtrack_on_completion(
     let mut warnings = Vec::new();
     if let Some(sid) = session_id {
         let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-        if let Err(e) = crate::task_progress::set_current(
+        if let Err(e) = crate::task_progress::set_backtracked(
             sid,
             &ws.to_string_lossy(),
             &target.plan_id,
             target.next_task.clone(),
+            plan_id,
         ) {
             warnings.push(format!("could not re-attribute focus to parent plan: {e}"));
         }
