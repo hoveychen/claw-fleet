@@ -595,6 +595,7 @@ pub fn resume_session_with_pending(
     let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
+    refuse_if_retired(&spec.session_id, driver)?;
     let lease = crate::session_driver::acquire(&spec.session_id, driver, own_pending)
         .map_err(|r| format!("drive lease: {r}"))?;
     source.resume(
@@ -604,6 +605,29 @@ pub fn resume_session_with_pending(
             on_exit(success);
         }),
     )
+}
+
+/// Prefix of the error [`resume_session`] returns for a retired session.
+/// Callers carrying something the new owner should see (a watch event, a card
+/// answer) re-send it through [`crate::pending_message::enqueue`], which
+/// re-addresses it to the live end of the succession.
+pub const RETIRED_ERR_PREFIX: &str = "retired:";
+
+/// An automatic resume of a session someone else took over (handoff, plan
+/// revive) would run a second agent on the work next to its successor. Only
+/// the boss may still do that on purpose; the front ends warn first.
+fn refuse_if_retired(session_id: &str, driver: crate::session_driver::Driver) -> Result<(), String> {
+    if driver.class == crate::session_driver::DriverClass::Manual {
+        return Ok(());
+    }
+    match crate::session_driver::live_end(session_id) {
+        Some(end) => {
+            let msg = format!("{RETIRED_ERR_PREFIX} session {session_id} was taken over by {end}");
+            crate::log_debug(&format!("resume_session: refused {}: {msg}", driver.mechanism));
+            Err(msg)
+        }
+        None => Ok(()),
+    }
 }
 
 fn sources_for_tool(tool: &str) -> Vec<Box<dyn AgentSource>> {
@@ -1411,6 +1435,29 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn dispatcher_refuses_automatic_resumes_of_a_retired_session() {
+        // 2026-09-29: a25d624f was resumed next to the revive d1aca5fb that
+        // had replaced it. Automatic drivers are now refused before any spawn;
+        // the boss still may, after the front end's warning.
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let old = uuid::Uuid::new_v4().to_string();
+        crate::session_driver::record_takeover(&old, "successor", "plan_revive");
+        for d in [Driver::continue_("watch"), Driver::continue_("server_error_retry"), Driver::answer("turn_card")] {
+            let err = super::resume_session(
+                "claude",
+                &ResumeSpec { session_id: old.clone(), ..Default::default() },
+                d,
+                Box::new(|_| {}),
+            )
+            .unwrap_err();
+            assert!(err.starts_with(super::RETIRED_ERR_PREFIX) && err.contains("successor"), "{err}");
+        }
+        assert!(super::refuse_if_retired(&old, Driver::manual("desktop_resume")).is_ok());
+        assert!(super::refuse_if_retired("never-replaced", Driver::continue_("watch")).is_ok());
     }
 
     #[test]

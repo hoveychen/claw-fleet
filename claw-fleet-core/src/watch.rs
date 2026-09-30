@@ -1267,9 +1267,11 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
 /// [`spawn_resume`], but a resume the drive lease refuses (a parked card is
 /// waiting for its answer, another driver's turn is in flight) queues the event
 /// instead of losing it: the queue drain delivers it once the session is free.
+/// A retired session's event goes the same way, and `enqueue` re-addresses it
+/// to the session that took the work over.
 fn resume_or_queue(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
     match spawn_resume(rec, prompt) {
-        Err(e) if e.starts_with("drive lease:") => {
+        Err(e) if e.starts_with("drive lease:") || e.starts_with(crate::agent_source::RETIRED_ERR_PREFIX) => {
             // `Agent`: the event is Fleet speaking, never the user's approval.
             let how = crate::pending_message::enqueue(
                 &rec.session_id,

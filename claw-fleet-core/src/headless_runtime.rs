@@ -162,6 +162,10 @@ pub(crate) fn desired_resume_intents(
                 .find(|s| s.id == i.session_id)
                 .is_some_and(|s| crate::auto_resume::can_reach_workspace(&s.workspace_path))
         })
+        // A retired session is never resumed again (the dispatcher refuses it),
+        // so it must not reserve itself either: that would read as "covered" to
+        // the reviver. Last, so the store is only read for real candidates.
+        .filter(|i| crate::session_driver::successor_of(&i.session_id).is_none())
         .collect()
 }
 

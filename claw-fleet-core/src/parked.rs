@@ -544,7 +544,7 @@ pub(crate) fn resume_session(
     permission_mode: Option<&str>,
 ) -> Result<(), String> {
     let source = resume_source(session_id);
-    crate::agent_source::resume_session(
+    let resumed = crate::agent_source::resume_session(
         source,
         &crate::agent_source::ResumeSpec {
             session_id: session_id.to_string(),
@@ -557,7 +557,20 @@ pub(crate) fn resume_session(
         },
         crate::session_driver::Driver::answer("parked_card"),
         Box::new(|_| {}),
-    )
+    );
+    match resumed {
+        // The session was taken over after it parked: the boss's answer is for
+        // whoever owns the work now, and `enqueue` re-addresses it there.
+        Err(e) if e.starts_with(crate::agent_source::RETIRED_ERR_PREFIX) => crate::pending_message::enqueue(
+            session_id,
+            workspace,
+            prompt,
+            crate::pending_message::Sender::User,
+        )
+        .map(|how| crate::log_debug(&format!("parked: {e} -> answer {how:?} to the successor")))
+        .map_err(|q| format!("{e}; forwarding the answer failed: {q}")),
+        other => other,
+    }
 }
 
 fn resume_source(session_id: &str) -> &'static str {
