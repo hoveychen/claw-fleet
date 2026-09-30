@@ -182,6 +182,17 @@ pub const COST_GPT6_SOL: ModelCosts = ModelCosts {
     web_search: 0.0,
 };
 
+// gpt-6.1-sol: $2 / $10 per Mtok like gpt-6-sol, but cached input is $0.10
+// (verified 2026-09-30), so it needs its own tier despite containing "gpt-6".
+pub const COST_GPT61_SOL: ModelCosts = ModelCosts {
+    input: 2.0,
+    output: 10.0,
+    cache_write: 2.50,
+    cache_write_1h: 2.50,
+    cache_read: 0.10,
+    web_search: 0.0,
+};
+
 // gpt-6-luna: $0.10 / $0.50 per Mtok.
 pub const COST_GPT6_LUNA: ModelCosts = ModelCosts {
     input: 0.10,
@@ -270,6 +281,9 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         }
         // GPT-6 Sol / Luna share their tier names with 5.6 but not its
         // prices, so the generation has to be decided before the name.
+        if m.contains("gpt-6.1") && m.contains("sol") {
+            return COST_GPT61_SOL;
+        }
         if m.contains("gpt-6") {
             if m.contains("luna") {
                 return COST_GPT6_LUNA;
@@ -749,6 +763,8 @@ mod tests {
         assert!((turn_cost_usd("gpt-5.6-luna", &usage) - 1.40).abs() < 1e-9);
         // GPT-6 Sol: $2 + $10 = $12 — not the 5.6 Sol tier.
         assert!((turn_cost_usd("gpt-6-sol", &usage) - 12.0).abs() < 1e-9);
+        // GPT-6.1 Sol: same $2 + $10 = $12.
+        assert!((turn_cost_usd("GPT-6.1-Sol", &usage) - 12.0).abs() < 1e-9);
         // GPT-6 Luna: $0.10 + $0.50 = $0.60 — not the 5.6 Luna tier.
         assert!((turn_cost_usd("GPT-6-Luna", &usage) - 0.60).abs() < 1e-9);
         // gpt-5.5 kept its $5 + $30 = $35 when 5.6 was cut.
@@ -784,6 +800,8 @@ mod tests {
         };
         assert!((turn_cost_usd("gpt-5.6-sol", &usage) - 0.40).abs() < 1e-9);
         assert!((turn_cost_usd("gpt-6-sol", &usage) - 0.20).abs() < 1e-9);
+        // 6.1 Sol halves 6 Sol's cached-input price.
+        assert!((turn_cost_usd("gpt-6.1-sol", &usage) - 0.10).abs() < 1e-9);
         assert!((turn_cost_usd("gpt-6-luna", &usage) - 0.01).abs() < 1e-9);
     }
 

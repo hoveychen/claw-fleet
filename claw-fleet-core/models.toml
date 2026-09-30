@@ -30,8 +30,11 @@
 #
 # Claude 的 min_cli_version 是实测的：从 npm 拉 `@anthropic-ai/claude-code-darwin-arm64`
 # 各版本二进制，二分找出第一个含 `"<id>"` 字面量的版本（2026-09-29）。
-# Codex 各条暂不写：它的模型表由服务端按 client_version 下发，二进制里查不到
-# （gpt-6-sol 不在 0.156.0 的二进制里却照样能用），没有同样可靠的测法。
+# Codex's model list is served per client_version, so the binary holds no model
+# literals (gpt-6-sol works on 0.156.0 without appearing in it). The reliable
+# probe is `npx -y @openai/codex@<v> debug models` across published versions:
+# that asks the server what it hands that client. Only entries probed this way
+# carry a min_cli_version; the older Codex rows predate the probe.
 #
 # Claude 各条**故意不写 context**：窗口由家族规则判定（Opus/Sonnet 4.6+、5.x、
 # Fable、Mythos 原生 1M，其余 200K），还要认 Fleet 自己的 `[1m]` 后缀和带日期的
@@ -183,6 +186,23 @@ listed = false
 # `ultra` = “最高推理强度，并自动委派任务”。只有部分模型有。
 # label 用带版本号的全名（"GPT-5.6 Sol" 而非 "Sol"）：它同时是桌面与移动端模型
 # 下拉里的那行字，光写 "Sol" 在下拉里认不出是哪一代。
+
+# GPT-6.1 Sol: ladder, default and windows from `codex debug models` on client
+# 0.159.2 (2026-09-30), where Codex ranks it priority 0. The server first lists
+# it for 0.159.0 (0.158.0 and earlier: absent); on 0.156.0 a turn fails with
+# 400 "not supported when using Codex with a ChatGPT account". Premium, like
+# gpt-6-sol. It does not supersede gpt-6-sol: same $2/$10 but cached input is
+# $0.10 vs $0.20, and a superseded row renders as "same price".
+[[model]]
+id = "gpt-6.1-sol"
+label = "GPT-6.1 Sol"
+family = "codex"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+min_cli_version = "0.159.0"
 
 [[model]]
 id = "gpt-6-astra"

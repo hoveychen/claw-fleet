@@ -3125,6 +3125,7 @@ export const MOCK_MODEL_CATALOG = withCliFlags([
     cliVersion: "0.153.4",
     upgradeCommand: "codex update",
     models: [
+      m("gpt-6.1-sol", "GPT-6.1 Sol", "codex", "premium", CODEX_ULTRA_LADDER, "medium", "0.159.0"),
       m("gpt-6-astra", "GPT-6 Astra", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
       m("gpt-6-sol", "GPT-6 Sol", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
       m("gpt-6-luna", "GPT-6 Luna", "codex", "fast", CODEX_LADDER, "medium"),

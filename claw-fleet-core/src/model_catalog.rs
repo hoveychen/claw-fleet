@@ -821,6 +821,7 @@ mod tests {
     #[test]
     fn xhigh_survives_the_hop_to_codex() {
         for model in [
+            "gpt-6.1-sol",
             "gpt-6-astra",
             "gpt-6-sol",
             "gpt-6-luna",
@@ -946,6 +947,7 @@ mod tests {
             "claude-sonnet-5",
             "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001",
+            "gpt-6.1-sol",
             "gpt-6-astra",
             "gpt-6-sol",
             "gpt-6-luna",
