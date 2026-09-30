@@ -103,6 +103,123 @@ pub fn maybe_interrupt_stalled_codex(
     }
 }
 
+/// A session this process's scheduler will bring back later, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResumeIntent {
+    pub session_id: String,
+    pub mechanism: &'static str,
+    pub reason: String,
+    pub not_before_ms: Option<u64>,
+}
+
+/// Lifetime of a scheduler intent. Deliberately long: the intent is withdrawn
+/// explicitly the tick its session stops qualifying, and dropped with this
+/// process if it dies, so the TTL is only a backstop. A short one would lapse
+/// while the Mac sleeps — exactly when the reviver and the retry both come due
+/// on wake (semgap-recount, 2026-09-25).
+const RESUME_INTENT_TTL_MS: u64 = 24 * 3600 * 1000;
+
+/// Sessions the rate-limit resume or the server-error retry will fire for once
+/// their gate opens: the eligibility of [`crate::auto_resume::should_auto_resume`]
+/// minus its time gate, and a server-error retry with budget left. Pure so the
+/// selection is testable without a scheduler.
+pub(crate) fn desired_resume_intents(
+    sessions: &[SessionInfo],
+    config: &crate::auto_resume::AutoResumeConfig,
+    server_errors: &HashMap<String, u32>,
+    failures: &HashMap<String, u32>,
+) -> Vec<ResumeIntent> {
+    sessions
+        .iter()
+        .filter(|s| !s.proc_alive)
+        .filter_map(|s| {
+            if let Some(rl) = crate::auto_resume::auto_resume_eligible(s, config) {
+                if crate::auto_resume::is_backed_off(failures, &s.id, AUTO_RESUME_FAILURE_BACKOFF) {
+                    return None;
+                }
+                return Some(ResumeIntent {
+                    session_id: s.id.clone(),
+                    mechanism: "auto_resume",
+                    reason: format!("rate limit resets at {}", rl.resets_at.to_rfc3339()),
+                    not_before_ms: u64::try_from(rl.resets_at.timestamp_millis()).ok(),
+                });
+            }
+            let budget_left = server_errors
+                .get(&s.id)
+                .is_none_or(|&n| n < config.max_server_error_retries);
+            (crate::auto_resume::should_retry_server_error(s, config) && budget_left).then(|| {
+                ResumeIntent {
+                    session_id: s.id.clone(),
+                    mechanism: "server_error_retry",
+                    reason: "retry after a server error".into(),
+                    not_before_ms: None,
+                }
+            })
+        })
+        .filter(|i| {
+            sessions
+                .iter()
+                .find(|s| s.id == i.session_id)
+                .is_some_and(|s| crate::auto_resume::can_reach_workspace(&s.workspace_path))
+        })
+        .collect()
+}
+
+/// session id → the pending-intent token this process registered for it.
+fn intent_tokens() -> &'static Mutex<HashMap<String, String>> {
+    static TOKENS: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+    TOKENS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Bring this process's registered intents in line with `desired`: register the
+/// new ones (and any another driver revoked while the session still qualifies),
+/// withdraw the ones whose session no longer does — a retry budget spent, a
+/// session the user resumed, the feature switched off.
+fn sync_resume_intents(desired: &[ResumeIntent]) {
+    let mut tokens = intent_tokens().lock().unwrap_or_else(|p| p.into_inner());
+    tokens.retain(|sid, token| {
+        let keep = desired.iter().any(|d| &d.session_id == sid);
+        if !keep {
+            crate::session_driver::withdraw_pending(sid, token);
+        }
+        keep
+    });
+    for d in desired {
+        if let Some(t) = tokens.get(&d.session_id) {
+            if crate::session_driver::pending_held(&d.session_id, t) {
+                continue;
+            }
+        }
+        let spec = crate::session_driver::PendingSpec {
+            reason: d.reason.clone(),
+            not_before_ms: d.not_before_ms,
+            ttl_ms: RESUME_INTENT_TTL_MS,
+            yield_to_turn: true,
+        };
+        match crate::session_driver::register_pending(
+            &d.session_id,
+            crate::session_driver::Driver::continue_(d.mechanism),
+            spec,
+        ) {
+            Some(t) => {
+                tokens.insert(d.session_id.clone(), t);
+            }
+            None => {
+                tokens.remove(&d.session_id);
+            }
+        }
+    }
+}
+
+/// Take the intent token for a session about to be fired, so the resume is not
+/// blocked by its own reservation (and consumes it).
+fn take_intent_token(session_id: &str) -> Option<String> {
+    intent_tokens()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(session_id)
+}
+
 /// Scan the current session list for auto-resume candidates and fire them,
 /// bounded by a global concurrency cap.
 ///
@@ -121,6 +238,15 @@ pub fn maybe_fire_auto_resume(
     server_errors: &Arc<Mutex<HashMap<String, u32>>>,
 ) {
     let config = crate::auto_resume::AutoResumeConfig::load();
+    // Before any early return: a disabled feature or a full slot table still
+    // has to keep the reservations truthful.
+    let desired = {
+        let sess = sessions.lock().unwrap();
+        let se_map = server_errors.lock().unwrap();
+        let fail_map = failures.lock().unwrap();
+        desired_resume_intents(&sess, &config, &se_map, &fail_map)
+    };
+    sync_resume_intents(&desired);
     if !config.enabled {
         return;
     }
@@ -192,7 +318,8 @@ pub fn maybe_fire_auto_resume(
         let in_flight_done = in_flight.clone();
         let failures_done = failures.clone();
         let id_done = session_id.clone();
-        let spawn_result = crate::agent_source::resume_session(
+        let token = take_intent_token(&session_id);
+        let spawn_result = crate::agent_source::resume_session_with_pending(
             &agent_source,
             &crate::agent_source::ResumeSpec {
                 session_id: session_id.clone(),
@@ -204,6 +331,7 @@ pub fn maybe_fire_auto_resume(
                 images: Vec::new(),
             },
             crate::session_driver::Driver::continue_("auto_resume"),
+            token.as_deref(),
             Box::new(move |success| {
                 in_flight_done.fetch_sub(1, Ordering::SeqCst);
                 if let Ok(mut fail_map) = failures_done.lock() {
@@ -287,7 +415,8 @@ pub fn maybe_fire_auto_resume(
         ));
         in_flight.fetch_add(1, Ordering::SeqCst);
         let in_flight_done = in_flight.clone();
-        let spawn_result = crate::agent_source::resume_session(
+        let token = take_intent_token(&session_id);
+        let spawn_result = crate::agent_source::resume_session_with_pending(
             &agent_source,
             &crate::agent_source::ResumeSpec {
                 session_id: session_id.clone(),
@@ -299,6 +428,7 @@ pub fn maybe_fire_auto_resume(
                 images: Vec::new(),
             },
             crate::session_driver::Driver::continue_("server_error_retry"),
+            token.as_deref(),
             // The per-episode se_map cap (not the failures backoff) bounds these,
             // so the reaper only needs to release the concurrency slot.
             Box::new(move |_success| {
@@ -510,5 +640,100 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&self.base);
         }
+    }
+
+    // ── Pending drive intents ───────────────────────────────────────────────
+
+    fn intent_session(id: &str, status: crate::session::SessionStatus) -> SessionInfo {
+        let mut s = crate::session::test_session(id);
+        s.workspace_path = std::env::temp_dir().to_string_lossy().into_owned();
+        s.status = status;
+        s
+    }
+
+    fn rate_limited(id: &str) -> SessionInfo {
+        let mut s = intent_session(id, crate::session::SessionStatus::RateLimited);
+        let now = chrono::Utc::now();
+        s.rate_limit = Some(crate::session::RateLimitState {
+            resets_at: now + chrono::Duration::hours(2),
+            limit_type: crate::rate_limit_parser::RateLimitType::SessionLimit,
+            parsed: true,
+            error_timestamp: now,
+        });
+        s
+    }
+
+    #[test]
+    fn desired_intents_cover_waiting_rate_limits_and_retries_with_budget() {
+        let cfg = crate::auto_resume::AutoResumeConfig::default();
+        let mut alive = intent_session("alive", crate::session::SessionStatus::ServerErrored);
+        alive.proc_alive = true;
+        let sessions = vec![
+            rate_limited("rl"),
+            intent_session("se", crate::session::SessionStatus::ServerErrored),
+            intent_session("spent", crate::session::SessionStatus::ServerErrored),
+            intent_session("idle", crate::session::SessionStatus::Idle),
+            alive,
+        ];
+        let se_map = HashMap::from([("spent".to_string(), cfg.max_server_error_retries)]);
+        let got = desired_resume_intents(&sessions, &cfg, &se_map, &HashMap::new());
+        let ids: Vec<_> = got.iter().map(|i| (i.session_id.as_str(), i.mechanism)).collect();
+        assert_eq!(ids, [("rl", "auto_resume"), ("se", "server_error_retry")]);
+        assert!(got[0].not_before_ms.is_some(), "rate-limit intent names its reset time");
+    }
+
+    #[test]
+    fn desired_intents_are_empty_when_the_feature_is_off() {
+        let cfg = crate::auto_resume::AutoResumeConfig { enabled: false, ..Default::default() };
+        let sessions = vec![rate_limited("rl"), intent_session("se", crate::session::SessionStatus::ServerErrored)];
+        assert!(desired_resume_intents(&sessions, &cfg, &HashMap::new(), &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn sync_registers_then_withdraws_and_blocks_takeover_meanwhile() {
+        let _guard = isolated_fleet_home();
+        let sid = format!("sync-{}", uuid::Uuid::new_v4());
+        let want = vec![ResumeIntent {
+            session_id: sid.clone(),
+            mechanism: "server_error_retry",
+            reason: "retry after a server error".into(),
+            not_before_ms: None,
+        }];
+        sync_resume_intents(&want);
+        let reserved = crate::session_driver::snapshot(&sid);
+        assert_eq!(reserved.pending.len(), 1);
+        assert!(
+            crate::session_driver::acquire_takeover(&sid, crate::session_driver::Driver::takeover("plan_revive"))
+                .is_err(),
+            "a pending retry keeps the reviver off the session"
+        );
+        // Idempotent: a second tick does not stack a second intent.
+        sync_resume_intents(&want);
+        assert_eq!(crate::session_driver::snapshot(&sid).pending.len(), 1);
+        // Budget spent / session recovered: the intent is withdrawn.
+        sync_resume_intents(&[]);
+        assert!(crate::session_driver::snapshot(&sid).pending.is_empty());
+        assert!(!intent_tokens().lock().unwrap().contains_key(&sid));
+    }
+
+    #[test]
+    fn firing_consumes_the_own_intent() {
+        let _guard = isolated_fleet_home();
+        let sid = format!("fire-{}", uuid::Uuid::new_v4());
+        sync_resume_intents(&[ResumeIntent {
+            session_id: sid.clone(),
+            mechanism: "auto_resume",
+            reason: "r".into(),
+            not_before_ms: None,
+        }]);
+        let token = take_intent_token(&sid).expect("registered");
+        let lease = crate::session_driver::acquire(
+            &sid,
+            crate::session_driver::Driver::continue_("auto_resume"),
+            Some(&token),
+        )
+        .expect("own intent does not block its holder");
+        assert!(crate::session_driver::snapshot(&sid).pending.is_empty());
+        drop(lease);
     }
 }

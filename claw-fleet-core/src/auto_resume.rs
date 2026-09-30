@@ -169,14 +169,30 @@ pub fn should_auto_resume(
     now: chrono::DateTime<chrono::Utc>,
     usage: Option<&crate::account::UsageHistoryPoint>,
 ) -> bool {
-    if !config.enabled {
+    let Some(rl) = auto_resume_eligible(session, config) else {
         return false;
+    };
+    let hint_elapsed = now >= rl.resets_at + RESET_GRACE;
+    hint_elapsed || limit_recovered(rl, usage)
+}
+
+/// Every gate of [`should_auto_resume`] except the time one: the rate-limited
+/// session the scheduler *will* resume once its window resets. Returns its
+/// rate-limit payload. This is what the scheduler registers as a pending drive
+/// intent while it waits, so the plan reviver does not start a successor for a
+/// session that is only parked on a limit.
+pub fn auto_resume_eligible<'a>(
+    session: &'a crate::session::SessionInfo,
+    config: &AutoResumeConfig,
+) -> Option<&'a crate::session::RateLimitState> {
+    if !config.enabled {
+        return None;
     }
     // Subagent transcripts (`agent-*.jsonl`) are not independently resumable:
     // `claude --resume agent-X` always fails, leaving the session RateLimited
     // so it re-fires forever. Never treat a subagent as a resume candidate.
     if session.is_subagent {
-        return false;
+        return None;
     }
     // Only Fleet-spawned headless sessions are auto-resumable. A session running
     // inside an interactive IDE (VS Code / Claude app) writes an ide
@@ -185,7 +201,7 @@ pub fn should_auto_resume(
     // they want. Headless Fleet-spawned `claude --print` sessions have no lock
     // (`ide_name == None`) and are the only ones we resume.
     if session.ide_name.is_some() {
-        return false;
+        return None;
     }
     // Source is no longer a hard gate here: the resume *form* is dispatched by
     // `agent_source` at spawn time (claude → `claude --resume`, codex →
@@ -198,18 +214,12 @@ pub fn should_auto_resume(
     // a rate-limited codex session lands with the Fleet-owned marking (M3 P9)
     // and is validated end-to-end in P8.
     if session.status != crate::session::SessionStatus::RateLimited {
-        return false;
+        return None;
     }
-    let Some(rl) = session.rate_limit.as_ref() else {
-        return false;
-    };
-    let hint_elapsed = now >= rl.resets_at + RESET_GRACE;
-    if !hint_elapsed && !limit_recovered(rl, usage) {
-        return false;
-    }
+    let rl = session.rate_limit.as_ref()?;
     let wait = rl.resets_at - rl.error_timestamp;
     let max_wait = chrono::Duration::hours(config.max_wait_hours as i64);
-    wait <= max_wait
+    (wait <= max_wait).then_some(rl)
 }
 
 /// Pick which sessions to auto-resume on this tick, bounded by the number of
@@ -241,7 +251,7 @@ pub fn should_auto_resume(
 /// - a registered remote workspace, whose local mirror directory is created at
 ///   launch time by `remote_workspace::wrap_launch` — its absence right now
 ///   says nothing about whether the resume would succeed.
-fn can_reach_workspace(path: &str) -> bool {
+pub(crate) fn can_reach_workspace(path: &str) -> bool {
     let p = std::path::Path::new(path);
     crate::tcc::is_tcc_protected(p)
         || p.is_dir()

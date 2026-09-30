@@ -1166,6 +1166,7 @@ type ResumeFn<'a> = dyn Fn(&WatchRecord, &str) -> Result<(), String> + 'a;
 /// rather than propagated — the record is already consumed, and re-arming would
 /// risk a double-resume. Returns the claimed record, or the claim error if a
 /// racing timer already fired it.
+#[cfg(test)]
 fn fire_in(
     dir: &Path,
     id: &str,
