@@ -71,7 +71,8 @@ export function TodayUsageBadge({
   const inputTokens = usage?.inputTokens ?? 0;
   const outputTokens = usage?.outputTokens ?? 0;
   const tokens = inputTokens + outputTokens;
-  const label = t("today_usage.title", "今日累计");
+  const label = t("today_usage.title", "今日 Fleet 花费");
+  const railLabel = t("today_usage.rail_label", "今日累计");
   const loadingText = t("today_usage.loading", "统计中…");
   const tokenBreakdown =
     usage && tokens > 0 ? `\nin ${fmtTokens(inputTokens)} + out ${fmtTokens(outputTokens)}` : "";
@@ -94,7 +95,7 @@ export function TodayUsageBadge({
             tooltip and in the receipt this opens. */}
         <RailStatTile
           value={loaded ? fmtRailMoney(cost) : "—"}
-          label={label}
+          label={railLabel}
           title={`${title}\n${openHint}`}
           onClick={() => setShowReceipt(true)}
           dataWizard="today-usage"

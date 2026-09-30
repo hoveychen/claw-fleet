@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import "./fonts";
 import "./App.css";
 import { Onboarding } from "./components/Onboarding";
-import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DecisionPanel } from "./components/DecisionPanel";
@@ -65,8 +64,6 @@ function App() {
   const find = useFindController();
 
   const simplifiedMode = useUIStore((s) => s.simplifiedMode);
-  const viewMode = useUIStore((s) => s.viewMode);
-  const isSessionView = viewMode === "list" || viewMode === "gallery";
 
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
@@ -186,9 +183,8 @@ function App() {
     };
   }, [setTheme, setViewMode, setSettingsOpen]);
 
-  // Open a session detail when the user clicks an agent in the tray menu.
-  // Fleet-spawned sessions route to the 「任务」(Tasks) page's inline detail; others
-  // keep the 「会话」(Sessions) page drawer (see navigateToSessionDetail).
+  // Open a session detail when the user clicks an agent in the tray menu: the
+  // 「任务」(Tasks) page's inline detail (see navigateToSessionDetail).
   useEffect(() => {
     const unlisten = listen<string>("open-session", (event) => {
       const jsonlPath = event.payload;
@@ -264,7 +260,6 @@ function App() {
           decision panel) is excluded by not being tagged. */}
       <div className="app_main" data-find-content>
         <SessionList />
-        {isSessionView && <SessionDetail />}
       </div>
       {!simplifiedMode && <DecisionPanel />}
       {settingsOpen && <SettingsPanel onClose={closeSettings} />}

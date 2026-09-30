@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useAuditStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { useAuditStore, useSessionsStore, useUIStore } from "../store";
 import type {
   AuditEvent,
   AuditRiskLevel,
@@ -191,8 +191,7 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   // the user picks any chip themselves.
   const [autoRevealed, setAutoRevealed] = useState(false);
   const { sessions } = useSessionsStore();
-  const { open } = useDetailStore();
-  const { setViewMode } = useUIStore();
+  const requestOpenTask = useUIStore((s) => s.requestOpenTask);
   const { isRead, markAsRead, getEventKey, setCriticalEvents, markAllCriticalAsRead, unreadCriticalCount } =
     useAuditStore();
 
@@ -325,10 +324,7 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
 
   const navigateToSession = (jsonlPath: string) => {
     const session = sessions.find((s) => s.jsonlPath === jsonlPath);
-    if (session) {
-      setViewMode("list");
-      open(session);
-    }
+    if (session) requestOpenTask(session.id);
   };
 
   const selResolved = selectedEvent ? resolveFor(selectedEvent) : null;

@@ -205,7 +205,6 @@
       "fired": "已触发"
     }
   },
-  "filter_placeholder": "过滤会话…",
   "active": "活跃",
   "recent": "最近",
   "no_sessions": "未找到会话。",
@@ -305,9 +304,6 @@
   "language": "语言",
   "view_list": "列表",
   "view_gallery": "画廊",
-  "view_sessions": "会话",
-  "view_mode_list_tooltip": "列表视图",
-  "view_mode_gallery_tooltip": "画廊视图",
   "keep_awake_on_tooltip": "防休眠已开启——系统不会闲置休眠，点击关闭",
   "keep_awake_off_tooltip": "保持系统唤醒（相当于 caffeinate -i）",
   "view_audit": "审计",
@@ -390,12 +386,6 @@
   "launcher": {
     "add_files": "文件…",
     "add_directory": "目录…"
-  },
-  "gallery_show_all": "全部显示",
-  "gallery_show_active": "仅活跃",
-  "gallery": {
-    "subs": "个子进程",
-    "idle_subs": "{{n}} 个空闲"
   },
   "account": {
     "panel_title": "账户",
@@ -858,12 +848,13 @@
     "section_title": "实时"
   },
   "today_usage": {
-    "title": "今日累计",
+    "title": "今日 Fleet 花费",
+    "rail_label": "今日累计",
     "open_receipt": "查看用量分析",
     "loading": "统计中…"
   },
   "token_receipt": {
-    "title": "用量分析",
+    "title": "Fleet 用量分析",
     "loading": "统计中…",
     "no_usage": "今天还没有用量",
     "no_usage_range": "此区间还没有用量",
@@ -883,7 +874,7 @@
     "subtotal": "小计",
     "grand_total": "合计",
     "tokens": "tokens",
-    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
+    "footnote": "仅统计 Fleet 启动的会话 · 价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
     "kpi_cost": "花费",
     "kpi_tokens": "Tokens",
     "kpi_cache_hit": "缓存命中率",
@@ -1033,7 +1024,6 @@
   "confirm": "确认",
   "save": "保存",
   "edit": "编辑",
-  "search_matches": "条匹配",
   "window": {
     "maximize": "最大化",
     "minimize": "最小化",
@@ -2575,7 +2565,7 @@
     "dc_type_fleet_ask": "富交互卡",
     "dc_type_plan_approval": "计划审批",
     "dc_no_rec": "无推荐",
-    "total_cost": "总花费",
+    "total_cost": "Fleet 总花费",
     "dc_task_outcome": "完成/放弃",
     "task_reviews": "当日任务复盘",
     "no_task_reviews": "今天还没有任务被结束或放弃。",

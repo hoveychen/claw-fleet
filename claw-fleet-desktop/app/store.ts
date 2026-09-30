@@ -3,10 +3,9 @@ import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
-import { isFleetOwnedTask } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
-import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
+import { isViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
 import i18n, { isSupportedLanguage } from "./i18n";
@@ -32,7 +31,7 @@ export type Theme = "dark" | "light" | "system";
 // tab table from it without importing this module (which imports navGroups).
 // Re-exported here because most call sites import ViewMode from the store.
 export { ALL_VIEW_MODES } from "./viewModes";
-export type { ViewMode, SessionViewMode } from "./viewModes";
+export type { ViewMode } from "./viewModes";
 /** Launcher rail's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
 /** What the task rail's sections stand for: the repository a session runs in,
@@ -42,7 +41,6 @@ export type MarkFilter = "all" | "pending" | "done";
 export type HistoryGroupMode = "workspace" | "status" | "none";
 
 export interface MainViewState {
-  gallery: { query: string; showAll: boolean; idleExpanded: boolean };
   audit: {
     tab: "events" | "rules";
     filter: "all" | "critical" | "high" | "medium";
@@ -119,7 +117,6 @@ export interface MainViewState {
 }
 
 const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
-  gallery: { query: "", showAll: false, idleExpanded: false },
   audit: {
     tab: "events",
     filter: "all",
@@ -222,10 +219,6 @@ interface UIState {
   viewMode: ViewMode;
   simplifiedMode: boolean;
   setSimplifiedMode: (enabled: boolean) => void;
-  /** Last session-list sub-view (list vs gallery). Used by the unified
-   *  "Sessions" nav entry to restore the user's preferred layout when they
-   *  navigate back from audit/report/etc. */
-  lastSessionViewMode: SessionViewMode;
   /** Last page visited inside each sidebar tab (Fleet / Work), so switching tabs
    *  returns you where you left off instead of always landing on the tab's home
    *  page. Persisted as a JSON blob under "nav-group-last-view". There is
@@ -299,7 +292,6 @@ interface UIState {
   /** Switch sidebar tabs: hops to that tab's remembered page (or its home page
    *  on the first visit). A no-op when the current page already belongs to it. */
   setNavGroup: (g: NavGroup) => void;
-  setLastSessionViewMode: (m: SessionViewMode) => void;
   setSidebarCollapsed: (on: boolean) => void;
   /** Toggle the collapsed state of `view`'s secondary sidebar. */
   toggleSecondarySidebar: (view: ViewMode) => void;
@@ -535,6 +527,13 @@ const LEGACY_NAV_GROUP_KEYS: Partial<Record<NavGroup, string>> = {
  *  page that no longer belongs to its tab is dropped rather than restored —
  *  otherwise moving a page between tabs would strand the old tab on a page it
  *  no longer lists. */
+/** The stored page, or the Tasks page when it names one that no longer exists —
+ *  the retired Sessions page ("list" / "gallery") above all. */
+function readViewMode(): ViewMode {
+  const stored = getItem("viewMode");
+  return isViewMode(stored) ? stored : "history";
+}
+
 function readLastViewByNavGroup(): Record<NavGroup, ViewMode> {
   const result = { ...NAV_GROUP_HOME };
   const stored = readJson<Record<string, unknown>>("nav-group-last-view", {});
@@ -558,12 +557,7 @@ function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
   setItem("viewMode", m);
   const lastViewByNavGroup = { ...s.lastViewByNavGroup, [navGroupOf(m)]: m };
   setItem("nav-group-last-view", JSON.stringify(lastViewByNavGroup));
-  const patch: Partial<UIState> = { viewMode: m, lastViewByNavGroup };
-  if (m === "list" || m === "gallery") {
-    setItem("lastSessionViewMode", m);
-    patch.lastSessionViewMode = m;
-  }
-  return patch;
+  return { viewMode: m, lastViewByNavGroup };
 }
 
 /** Read once: the call rewrites the retired pseudo-values on disk, so the two
@@ -625,9 +619,7 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   viewMode: initialSimplifiedMode
     ? (getItem("viewMode") === "artifacts" ? "artifacts" : "history")
-    : (getItem("viewMode") as ViewMode) ?? "gallery",
-  lastSessionViewMode:
-    (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
+    : readViewMode(),
   lastViewByNavGroup: readLastViewByNavGroup(),
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
@@ -693,10 +685,6 @@ export const useUIStore = create<UIState>((set) => ({
         ? {}
         : viewModePatch(s, s.lastViewByNavGroup[g] ?? NAV_GROUP_HOME[g]),
     ),
-  setLastSessionViewMode: (m) => {
-    setItem("lastSessionViewMode", m);
-    set({ lastSessionViewMode: m });
-  },
   fileNav: null,
   requestFileNav: (req) =>
     set((s) => ({
@@ -785,9 +773,9 @@ export const useUIStore = create<UIState>((set) => ({
   newSessionNav: null,
   requestNewSession: (req) =>
     set((s) => ({
-      // Hop to the user's preferred session layout (list/gallery) where the
-      // new-session draft tab lives, persisting it like setViewMode.
-      ...viewModePatch(s, s.lastSessionViewMode),
+      // Hop to the Tasks page, whose draft column takes the request, persisting
+      // the view like setViewMode.
+      ...viewModePatch(s, "history"),
       newSessionNav: { ...req, nonce: (s.newSessionNav?.nonce ?? 0) + 1 },
     })),
   clearNewSessionNav: () => set({ newSessionNav: null }),
@@ -1002,14 +990,6 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   initialTab: null,
 
   open: async (session, searchQuery, initialTab) => {
-    // The global detail drawer only renders on the Sessions page, so any
-    // opener (tray, waiting alert, mascot bubble) must land there first —
-    // otherwise open() would set a selected session that nothing displays.
-    const ui = useUIStore.getState();
-    if (ui.viewMode !== "list" && ui.viewMode !== "gallery") {
-      ui.setViewMode(ui.lastSessionViewMode);
-    }
-
     await get().close();
 
     set({
@@ -1150,22 +1130,12 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   },
 }));
 
-/** Route a notification / tray click to the right session detail. A
- *  Fleet-spawned session (the ones the Tasks page lists) opens in that page's
- *  inline tab strip; every other session keeps the old behaviour — the global
- *  detail drawer on the Sessions page. `isFleetOwnedTask` is the exact gate
- *  HistoryView filters `adhocSessions` by, so "would this appear on the Tasks
- *  page" and "route it there" stay in lockstep. */
+/** Route a notification / tray click to the session's detail. Every listed
+ *  session is one Fleet launched, so it opens in the Tasks page's inline tab
+ *  strip — a subagent or a handoff predecessor included, since that page
+ *  resolves the open id against the whole scan, not only its own rows. */
 export function navigateToSessionDetail(session: SessionInfo) {
-  if (useUIStore.getState().simplifiedMode || isFleetOwnedTask(session)) {
-    useUIStore.getState().requestOpenTask(session.id);
-  } else {
-    // The drawer renders under both list and gallery (see App's isSessionView),
-    // and open() already hops to the user's session layout when we're on a
-    // non-session view. Forcing `list` here used to silently persist itself as
-    // the new default — the whole reason gallery stopped sticking. Just open.
-    useDetailStore.getState().open(session);
-  }
+  useUIStore.getState().requestOpenTask(session.id);
 }
 
 // ── Audit read-state store ──────────────────────────────────────────────────

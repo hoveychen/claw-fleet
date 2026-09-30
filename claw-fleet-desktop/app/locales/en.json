@@ -205,7 +205,6 @@
       "fired": "Fired"
     }
   },
-  "filter_placeholder": "Filter sessions…",
   "active": "Active",
   "recent": "Recent",
   "no_sessions": "No sessions found.",
@@ -305,9 +304,6 @@
   "language": "Language",
   "view_list": "List",
   "view_gallery": "Gallery",
-  "view_sessions": "Sessions",
-  "view_mode_list_tooltip": "List view",
-  "view_mode_gallery_tooltip": "Gallery view",
   "keep_awake_on_tooltip": "Keep awake is on — the system won't idle-sleep. Click to turn off",
   "keep_awake_off_tooltip": "Keep the system awake (like caffeinate -i)",
   "view_audit": "Audit",
@@ -390,12 +386,6 @@
   "launcher": {
     "add_files": "Files…",
     "add_directory": "Folder…"
-  },
-  "gallery_show_all": "Show All",
-  "gallery_show_active": "Active Only",
-  "gallery": {
-    "subs": "subs",
-    "idle_subs": "{{n}} idle"
   },
   "account": {
     "panel_title": "Account",
@@ -861,12 +851,13 @@
     "section_title": "Live"
   },
   "today_usage": {
-    "title": "Today",
+    "title": "Fleet spend today",
+    "rail_label": "Today",
     "open_receipt": "Open usage analytics",
     "loading": "Tallying…"
   },
   "token_receipt": {
-    "title": "Usage analytics",
+    "title": "Fleet usage analytics",
     "loading": "Tallying…",
     "no_usage": "No usage yet today",
     "no_usage_range": "No usage in this range",
@@ -886,7 +877,7 @@
     "subtotal": "Subtotal",
     "grand_total": "Total",
     "tokens": "tokens",
-    "footnote": "Prices are each model's official $/M rate · cache reads/writes included · today matches the sidebar counter",
+    "footnote": "Only sessions Fleet launched · prices are each model's official $/M rate · cache reads/writes included · today matches the sidebar counter",
     "kpi_cost": "Spend",
     "kpi_tokens": "Tokens",
     "kpi_cache_hit": "Cache hit rate",
@@ -1036,7 +1027,6 @@
   "confirm": "Confirm",
   "save": "Save",
   "edit": "Edit",
-  "search_matches": "matched",
   "window": {
     "maximize": "Maximize",
     "minimize": "Minimize",
@@ -2578,7 +2568,7 @@
     "dc_type_fleet_ask": "Rich card",
     "dc_type_plan_approval": "Plan approval",
     "dc_no_rec": "no rec.",
-    "total_cost": "Total Cost",
+    "total_cost": "Fleet Total Cost",
     "dc_task_outcome": "done/given up",
     "task_reviews": "Task retrospectives",
     "no_task_reviews": "No task was finished or abandoned today.",

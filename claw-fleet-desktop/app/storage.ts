@@ -29,15 +29,9 @@ const ALL_KEYS = [
   // readable on boot, or that flash persists. The "simplified-mode" above
   // (user's explicit choice) takes precedence over this.
   "simplified-mode-host-default",
-  // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
-  "lastSessionViewMode",
   // Last page visited under each sidebar tab (Fleet / Work), as a JSON blob. The
   // active tab itself is derived from "viewMode", so it is not stored.
   "nav-group-last-view",
-  // One-shot flag: existing users' stored "list" has been flipped to the new
-  // gallery default (see migrateSessionViewDefault). Must be readable on boot
-  // so the migration never re-runs and clobbers a later deliberate "list".
-  "gallery-default-migrated",
   // One-shot flag: legacy binary values for the tristate-migrated feature keys
   // have been reset to "default" (see migrateFeatureTristate). MUST be readable
   // on boot, otherwise the migration re-runs every launch and re-wipes whatever
@@ -208,23 +202,6 @@ export async function initStorage(): Promise<void> {
 /** Synchronous read from in-memory cache. */
 export function getItem(key: string): string | null {
   return cache.get(key) ?? null;
-}
-
-/**
- * One-time rollout of gallery as the default session view. The code default is
- * already "gallery", but existing users can carry a stored "list" — most often
- * written accidentally by an older notification/tray path that force-switched
- * to list and persisted it. Flip a stored "list" to "gallery" exactly once,
- * guarded by a persisted flag so a later *deliberate* toggle back to list still
- * sticks. Call once on boot, after initStorage() and before the store reads.
- */
-export function migrateSessionViewDefault(): void {
-  if (getItem("gallery-default-migrated") === "true") return;
-  if (getItem("viewMode") === "list") setItem("viewMode", "gallery");
-  if (getItem("lastSessionViewMode") === "list") {
-    setItem("lastSessionViewMode", "gallery");
-  }
-  setItem("gallery-default-migrated", "true");
 }
 
 /** Write to both cache and Tauri store (async, fire-and-forget). */

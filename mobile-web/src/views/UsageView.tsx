@@ -222,7 +222,7 @@ export function UsageView({
       <div className={styles.body}>
         {/* ── Today's Cumulative ── */}
         <div className={styles.section}>
-          <div className={styles.sectionLabel}>{t("今日累计")}</div>
+          <div className={styles.sectionLabel}>{t("今日 Fleet 花费")}</div>
           <div className={styles.card}>
             {todayUsage ? (
               <>
@@ -234,7 +234,7 @@ export function UsageView({
                 </div>
                 <div className={styles.divider} />
                 <Row
-                  label={t("会话花费")}
+                  label={t("Fleet 会话花费")}
                   value={`$${todayUsage.agentCostUsd.toFixed(2)} · ${t("{0} 个会话", todayUsage.sessionCount)}`}
                 />
                 <Row label={t("Fleet 自身花费")} value={`$${todayUsage.fleetCostUsd.toFixed(2)}`} />

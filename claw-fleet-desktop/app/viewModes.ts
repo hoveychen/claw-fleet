@@ -13,8 +13,6 @@
  *  every page is assigned to exactly one sidebar tab. A page added here and
  *  forgotten there fails that test instead of silently vanishing from the nav. */
 export const ALL_VIEW_MODES = [
-  "list",
-  "gallery",
   "history",
   "audit",
   "report",
@@ -31,8 +29,6 @@ export const ALL_VIEW_MODES = [
 ] as const;
 
 export type ViewMode = (typeof ALL_VIEW_MODES)[number];
-
-export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 
 /** Guard for values read back from storage. */
 export function isViewMode(value: unknown): value is ViewMode {

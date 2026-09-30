@@ -1169,7 +1169,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         {todayUsage && (
           <span
             className={styles.usage}
-            title={`${t("今日累计")} $${todayUsage.costUsd.toFixed(2)} · ${fmtTokens(todayUsage.inputTokens + todayUsage.outputTokens)} tok`}
+            title={`${t("今日 Fleet 花费")} $${todayUsage.costUsd.toFixed(2)} · ${fmtTokens(todayUsage.inputTokens + todayUsage.outputTokens)} tok`}
           >
             <span className={styles.usageCost}>${todayUsage.costUsd.toFixed(2)}</span>
             <span className={styles.usageTokens}>
