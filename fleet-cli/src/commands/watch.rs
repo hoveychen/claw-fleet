@@ -274,7 +274,7 @@ fn create(
                 ),
                 Err(e) => println!(
                     "ok: watch {} created (polling every {}), 但计时器启动失败: {e}。\
-                     Stop hook 的 reconcile 会在下次任意会话结束 turn 时补上。停止用 `fleet watch stop {}`。",
+                     Fleet 桌面端或 `fleet serve` 在运行时会在 30 秒内自动补上。停止用 `fleet watch stop {}`。",
                     rec.id,
                     fmt_secs(rec.poll_secs),
                     rec.id,

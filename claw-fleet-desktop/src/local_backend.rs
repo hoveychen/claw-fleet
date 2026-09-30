@@ -863,6 +863,8 @@ impl LocalBackend {
                 // the 2026-09-09 ~108s stall was invisible because neither this
                 // loop nor the watch-path rescan logged a single line.
                 let mut last_tick_end: Option<Instant> = None;
+                // At startup, not one interval in: see `headless_runtime::run`.
+                claw_fleet_core::headless_runtime::reconcile_timers();
                 loop {
                     std::thread::sleep(Duration::from_secs(30));
                     if !running_ar.load(Ordering::SeqCst) {

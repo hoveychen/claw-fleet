@@ -221,7 +221,7 @@ pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
                         ),
                         Err(e) => println!(
                             "ok: loop {} created (every {}), 但计时器启动失败: {e}。\
-                             Stop hook 的 reconcile 会在下次任意会话结束 turn 时补上。停止用 `fleet loop stop {}`。",
+                             Fleet 桌面端或 `fleet serve` 在运行时会在 30 秒内自动补上。停止用 `fleet loop stop {}`。",
                             rec.id,
                             fmt_interval_secs(rec.interval_secs),
                             rec.id,

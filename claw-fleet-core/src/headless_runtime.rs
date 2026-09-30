@@ -565,6 +565,10 @@ pub fn reconcile_timers() {
 /// Intended to be called on a dedicated thread; it sleeps [`TICK_INTERVAL`]
 /// between passes and checks `running` before each.
 pub fn run<F: Fn() -> Vec<SessionInfo>>(scan: F, running: Arc<AtomicBool>) {
+    // At startup, not one interval in: a reboot strands every timer at once,
+    // and nothing else re-arms them now that sessions Fleet did not launch run
+    // no Fleet Stop hook.
+    reconcile_timers();
     run_with_interval(scan, running, TICK_INTERVAL);
 }
 
