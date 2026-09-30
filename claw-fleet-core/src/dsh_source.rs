@@ -1329,7 +1329,29 @@ impl AgentSource for DshSource {
         }
         let session_id = normalize_session_id(spec.session_id.as_deref());
 
-        self.with_client(|client| {
+        // Mark it as Fleet's, the way every other spawn path does. Without this
+        // the session is created and healthy but never enters the Tasks list
+        // (`isFleetOwnedTask` needs both `fleet_spawned` and a known
+        // `entrypoint`), so the "New session" dialog waits for an id that can never
+        // arrive and spins forever. dsh has no per-session process to stamp an
+        // entrypoint on — its turns run inside the shared server — so the note
+        // carries the launcher surface too.
+        //
+        // Recorded *before* `session/create`: the Fleet dsh plugin only injects
+        // guidance into sessions that have a launch spec, and its pre-step for
+        // the very first turn runs inside `session/prompt`. Recording afterwards
+        // left turn 1 without the doctrine. Any failure below withdraws it again.
+        let entrypoint = Some(spec.entrypoint.trim())
+            .filter(|e| !e.is_empty())
+            .unwrap_or(crate::session_launch::NEW_SESSION_ENTRYPOINT);
+        crate::launch_spec::record_with_entrypoint(
+            &session_id,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            Some(entrypoint),
+        );
+
+        let started = self.with_client(|client| {
             let mut payload = json!({ "cwd": spec.workspace_path, "sessionId": session_id });
             let asked_preset = resolve_chat_preset(&spec.workspace_path, |m, p| {
                 client.call(m, p).map_err(String::from)
@@ -1373,24 +1395,11 @@ impl AgentSource for DshSource {
                 spec.effort.as_deref(),
             )?;
             Self::prompt(client, &session_id, &spec.prompt)
-        })?;
-
-        // Mark it as Fleet's, the way every other spawn path does. Without this
-        // the session is created and healthy but never enters the Tasks list
-        // (`isFleetOwnedTask` needs both `fleet_spawned` and a known
-        // `entrypoint`), so the "New session" dialog waits for an id that can never
-        // arrive and spins forever. dsh has no per-session process to stamp an
-        // entrypoint on — its turns run inside the shared server — so the note
-        // carries the launcher surface too.
-        let entrypoint = Some(spec.entrypoint.trim())
-            .filter(|e| !e.is_empty())
-            .unwrap_or(crate::session_launch::NEW_SESSION_ENTRYPOINT);
-        crate::launch_spec::record_with_entrypoint(
-            &session_id,
-            spec.model.as_deref(),
-            spec.effort.as_deref(),
-            Some(entrypoint),
-        );
+        });
+        if let Err(e) = started {
+            crate::launch_spec::forget(&session_id);
+            return Err(e);
+        }
 
         Ok(crate::session_launch::SpawnSessionResponse {
             // Every dsh session shares the server's pid — there is no per-session
