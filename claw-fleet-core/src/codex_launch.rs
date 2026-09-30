@@ -655,6 +655,84 @@ fn toml_basic_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// A TOML basic string for arbitrary text, newlines and control characters
+/// included. JSON's string escapes are a subset of TOML's, so serde_json's
+/// quoting is valid TOML. It matters: a `-c` value codex fails to parse as TOML
+/// is taken as a raw literal, quotes and all, with nothing reported.
+fn toml_text_string(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| toml_basic_string(s))
+}
+
+/// How a new codex thread receives Fleet's guidance.
+#[derive(Debug, PartialEq, Eq)]
+struct GuidanceRoute {
+    /// Extra `-c` args for the command line.
+    args: Vec<String>,
+    /// The prompt to put on the command line (`-` means "read stdin").
+    prompt: String,
+    /// What to write to the child's stdin, if anything.
+    stdin: Option<String>,
+}
+
+/// Route `guidance` into a new codex thread.
+///
+/// Normally as `developer_instructions`: codex freezes that into the thread
+/// when it is created (measured on 0.159.2: a resume passing a different value,
+/// or none, keeps the original and does not duplicate it), so it is given on
+/// spawn only. It replaces the user's own top-level `developer_instructions`
+/// from config.toml rather than adding to it, which is why `user_own` is
+/// carried in front.
+///
+/// On Windows the guidance (~28K UTF-16 units) plus the prompt does not fit
+/// the 32,767-unit command line, so the guidance rides in front of the prompt
+/// and both go through stdin (`codex exec -`). That makes it user-role text,
+/// the same standing the global AGENTS.md it replaces had.
+fn route_guidance(
+    guidance: Option<&str>,
+    user_own: Option<&str>,
+    prompt: String,
+    windows: bool,
+) -> GuidanceRoute {
+    let Some(guidance) = guidance.filter(|g| !g.trim().is_empty()) else {
+        return GuidanceRoute {
+            args: Vec::new(),
+            prompt,
+            stdin: None,
+        };
+    };
+    if windows {
+        return GuidanceRoute {
+            args: Vec::new(),
+            prompt: "-".to_string(),
+            stdin: Some(format!(
+                "<system-reminder>\n{guidance}\n</system-reminder>\n\n{prompt}"
+            )),
+        };
+    }
+    let text = match user_own.map(str::trim).filter(|u| !u.is_empty()) {
+        Some(own) => format!("{own}\n\n{guidance}"),
+        None => guidance.to_string(),
+    };
+    GuidanceRoute {
+        args: vec![
+            "-c".to_string(),
+            format!("developer_instructions={}", toml_text_string(&text)),
+        ],
+        prompt,
+        stdin: None,
+    }
+}
+
+/// The user's own top-level `developer_instructions` from codex's config.toml.
+fn user_developer_instructions() -> Option<String> {
+    let path = crate::session::get_codex_dir()?.join("config.toml");
+    let table: toml::Table = std::fs::read_to_string(path).ok()?.parse().ok()?;
+    table
+        .get("developer_instructions")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Inline Codex hook config that routes resolved shell commands through the
 /// same synchronous Fleet Guard used by Claude Code, and lets the guard inject
 /// a one-time Rule 7 correction after an outer code-mode `exec` omits its note.
@@ -1016,10 +1094,16 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Channel B (prompt-prepend) of codex guidance: if the codex **PRD** block is
-/// installed (its `~/.codex/AGENTS.md` sentinel is present) AND the workspace
-/// has active TASKS.md plans, prepend the same `<system-reminder>` block Claude
-/// gets via the `fleet prd-context` UserPromptSubmit hook to the codex prompt.
+/// Channel B (prompt-prepend) of codex guidance: unless the user switched PRD
+/// discipline off, and when the workspace has active TASKS.md plans, prepend
+/// the same `<system-reminder>` block Claude gets via the `fleet prd-context`
+/// UserPromptSubmit hook to the codex prompt.
+///
+/// The switch is read from the recorded opt-out
+/// ([`crate::control_plane_prefs`]), not from the `~/.codex/AGENTS.md`
+/// sentinel: Fleet is moving its codex guidance off the global AGENTS.md (a
+/// file every codex on the machine reads), and gating on that file would turn
+/// plan injection off silently the moment the block is gone.
 ///
 /// Because Fleet drives every codex turn with a fresh `codex exec` /
 /// `codex exec resume … -- <prompt>`, prepending here on each spawn and resume
@@ -1027,9 +1111,9 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
 /// chosen in P1 (B1 codex hooks are an experimental, already-renamed feature).
 ///
 /// Gated on the codex PRD concept specifically (active-plans is a TASKS.md / PRD
-/// concern): static (AGENTS.md PRD block) and dynamic (this) injection move
-/// together with the PRD toggle. No PRD block / no active plan → returns the
-/// prompt unchanged (AC3 graceful degradation).
+/// concern): static and dynamic (this) injection move together with the PRD
+/// toggle. PRD switched off / no active plan → returns the prompt unchanged
+/// (AC3 graceful degradation).
 ///
 /// A resume whose previous turn already carried byte-identical text prepends
 /// nothing — that copy is still in the thread's history. See
@@ -1040,7 +1124,8 @@ fn maybe_prepend_active_plans(
     session_id: Option<&str>,
     prompt: &str,
 ) -> String {
-    if !crate::codex_guidance::is_codex_prd_installed() {
+    if crate::control_plane_prefs::is_disabled(crate::control_plane_prefs::Feature::PrdDiscipline)
+    {
         return prompt.to_string();
     }
     let reminder =
@@ -1168,6 +1253,15 @@ pub fn spawn_new_codex_session(
     // reminder this block is background about the repo, not turn state, so
     // re-sending it on every resume would be ~5 KB per turn for nothing.
     let prompt = prepend_recent_sessions(&workspace_path, &prompt);
+    // Fleet's standing guidance, for this thread only — see `route_guidance`.
+    let route = route_guidance(
+        crate::codex_guidance::launch_guidance().as_deref(),
+        user_developer_instructions().as_deref(),
+        prompt,
+        cfg!(windows),
+    );
+    pre_prompt.extend(route.args);
+    let prompt = route.prompt;
     pre_prompt.extend(codex_image_args(images));
     let args = build_codex_exec_args(&workspace_path, &prompt, model, effort, &pre_prompt);
 
@@ -1207,8 +1301,14 @@ pub fn spawn_new_codex_session(
     let mut cmd = crate::process_util::command(&program);
     cmd.args(&args)
         .current_dir(&workspace_path)
-        // MUST be null: `codex exec` otherwise blocks reading stdin forever.
-        .stdin(std::process::Stdio::null())
+        // Null unless the prompt is fed through it: `codex exec` otherwise
+        // blocks reading stdin forever. A piped prompt is closed right after
+        // it is written, which is the EOF codex waits for.
+        .stdin(if route.stdin.is_some() {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        })
         // File, not pipe: a pipe's read end dies with the app and takes the turn
         // down with `Broken pipe`; a file fd survives. Tailed below for the
         // `thread.started` line.
@@ -1229,6 +1329,16 @@ pub fn spawn_new_codex_session(
         .spawn()
         .map_err(|e| format!("spawn codex failed: {e}"))?;
     let pid = child.id();
+    if let (Some(text), Some(mut stdin)) = (route.stdin, child.stdin.take()) {
+        // On its own thread: the text is larger than a pipe buffer, so the
+        // write only completes as codex reads, and that must not hold up the
+        // `thread.started` tail below.
+        std::thread::spawn(move || {
+            if let Err(e) = stdin.write_all(text.as_bytes()) {
+                crate::log_debug(&format!("new_codex_session: write prompt to stdin: {e}"));
+            }
+        });
+    }
 
     // Tail/reaper thread: tail the stdout sink for the `thread.started` line to
     // learn the thread id (Codex mints it post-spawn), record the spawn pid, then
@@ -1662,6 +1772,91 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn guidance_rides_developer_instructions_and_round_trips_through_toml() {
+        let guidance = "# 规则\nline \"two\"\n\tpath C:\\x";
+        let r = route_guidance(Some(guidance), None, "do it".into(), false);
+        assert_eq!(r.prompt, "do it");
+        assert_eq!(r.stdin, None);
+        assert_eq!(r.args[0], "-c");
+        let parsed: toml::Table = r.args[1].parse().expect("value must be valid TOML");
+        assert_eq!(parsed["developer_instructions"].as_str(), Some(guidance));
+    }
+
+    #[test]
+    fn user_developer_instructions_stay_in_front_of_fleet_guidance() {
+        let r = route_guidance(Some("fleet"), Some("mine"), "p".into(), false);
+        let parsed: toml::Table = r.args[1].parse().unwrap();
+        assert_eq!(parsed["developer_instructions"].as_str(), Some("mine\n\nfleet"));
+    }
+
+    #[test]
+    fn windows_feeds_guidance_and_prompt_through_stdin() {
+        let r = route_guidance(Some("fleet rules"), Some("mine"), "do it".into(), true);
+        assert!(r.args.is_empty(), "nothing large may go on a Windows command line");
+        assert_eq!(r.prompt, "-");
+        let stdin = r.stdin.expect("stdin text");
+        assert!(stdin.starts_with("<system-reminder>\nfleet rules\n</system-reminder>"));
+        assert!(stdin.ends_with("\n\ndo it"));
+    }
+
+    #[test]
+    fn no_guidance_leaves_the_launch_untouched() {
+        for g in [None, Some("  \n")] {
+            let r = route_guidance(g, Some("mine"), "do it".into(), true);
+            assert_eq!(
+                r,
+                GuidanceRoute {
+                    args: Vec::new(),
+                    prompt: "do it".into(),
+                    stdin: None
+                }
+            );
+        }
+    }
+
+    /// Plan injection follows the recorded PRD switch, not the global AGENTS.md:
+    /// with no AGENTS.md at all the plans still reach the prompt, and only an
+    /// explicit opt-out stops them.
+    #[test]
+    fn active_plans_prepend_follows_the_prd_switch_not_agents_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = crate::paths::fleet_home_guard(tmp.path());
+        let codex_home = home.home().join("codex-home-without-agents-md");
+        std::fs::create_dir_all(&codex_home).unwrap();
+        let prev_codex = std::env::var_os("CODEX_HOME");
+        unsafe { std::env::set_var("CODEX_HOME", &codex_home) };
+
+        let ws = home.home().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"demo\" v=\"2\" -->\n\n\
+**Plan:** Demo work\n\n\
+- [ ] **P1** — first task\n\n\
+<!-- fleet:prd:end id=\"demo\" -->\n",
+        )
+        .unwrap();
+        let ws = ws.to_string_lossy().to_string();
+
+        let on = maybe_prepend_active_plans(&ws, None, "do it");
+        crate::control_plane_prefs::mark_disabled(crate::control_plane_prefs::Feature::PrdDiscipline)
+            .unwrap();
+        let off = maybe_prepend_active_plans(&ws, None, "do it");
+
+        unsafe {
+            match prev_codex {
+                Some(p) => std::env::set_var("CODEX_HOME", p),
+                None => std::env::remove_var("CODEX_HOME"),
+            }
+        }
+        assert!(
+            on.contains("## Plan: demo") && on.ends_with("do it"),
+            "plans must be prepended without any AGENTS.md block, got {on:?}"
+        );
+        assert_eq!(off, "do it", "an explicit PRD opt-out must stop the prepend");
     }
 
     #[test]
