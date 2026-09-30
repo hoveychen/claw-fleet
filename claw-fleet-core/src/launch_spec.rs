@@ -353,6 +353,24 @@ pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
     out
 }
 
+impl LaunchSpec {
+    /// The latest spawn's pid, if that process is still running. The recorded
+    /// start time must match, so a pid the OS has since handed to another
+    /// process does not count. This is the whole liveness check — no process
+    /// table scan.
+    pub fn live_pid(&self) -> Option<u32> {
+        let pid = self.pid?;
+        let started = self.pid_start_time?;
+        (crate::session::process_start_time(pid) == Some(started)).then_some(pid)
+    }
+}
+
+/// [`LaunchSpec::live_pid`] for one session: the pid of the process Fleet
+/// last spawned for it, while that process runs.
+pub fn live_pid(session_id: &str) -> Option<u32> {
+    get(session_id)?.live_pid()
+}
+
 /// Could the transcript at `path` belong to a session Fleet started? For the
 /// file watcher, so a `claude`/`codex` the user runs by hand does not trigger
 /// rescans. Cheap — one `stat` per candidate id, no registry read.
@@ -432,6 +450,7 @@ pub fn backfill_once() -> usize {
         return 0;
     }
     let filled = backfill(&claude_transcripts(), &crate::codex_source::all_thread_rollout_cwds());
+    backfill_pids(&running_session_pids());
     if let Some(parent) = marker.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -467,6 +486,36 @@ fn backfill(
         filled += 1;
     }
     filled
+}
+
+/// Sessions running right now whose argv names them, keyed by id — one
+/// process-table scan, once per host, so the sessions an older build spawned
+/// (and recorded no pid for) keep reading as alive after the upgrade.
+fn running_session_pids() -> std::collections::HashMap<String, u32> {
+    let mut out: std::collections::HashMap<String, u32> = crate::session::scan_cli_processes()
+        .into_iter()
+        .filter_map(|p| Some((p.resume_session_id?, p.pid)))
+        .collect();
+    out.extend(crate::codex_source::running_thread_pids());
+    out
+}
+
+/// Stamp `pids` onto the notes that have no pid yet.
+fn backfill_pids(pids: &std::collections::HashMap<String, u32>) {
+    for (id, pid) in pids {
+        let Some(mut spec) = get(id) else {
+            continue;
+        };
+        if spec.pid.is_some() {
+            continue;
+        }
+        let Some(started) = crate::session::process_start_time(*pid) else {
+            continue;
+        };
+        spec.pid = Some(*pid);
+        spec.pid_start_time = Some(started);
+        write(id, &spec);
+    }
 }
 
 /// Every `~/.claude/projects/*/<id>.jsonl`, keyed by id.
@@ -963,5 +1012,40 @@ mod tests {
         }
         let hand = "/h/.claude/projects/-w/99999999-2222-3333-4444-555555555555.jsonl";
         assert!(!transcript_path_is_registered(std::path::Path::new(hand)));
+    }
+
+    #[test]
+    fn live_pid_needs_the_recorded_start_time_to_match() {
+        let _home = TmpHome::new("livepid");
+        let me = std::process::id();
+        note_spawn(
+            "alive",
+            Spawn {
+                source: "claude",
+                kind: SpawnKind::New,
+                workspace: "/w",
+                pid: Some(me),
+                parent: None,
+                transcript: None,
+            },
+        );
+        assert_eq!(live_pid("alive"), Some(me));
+        // Same pid, different start time: the pid was reused.
+        let mut spec = get("alive").unwrap();
+        spec.pid_start_time = spec.pid_start_time.map(|t| t - 1);
+        write("alive", &spec);
+        assert_eq!(live_pid("alive"), None);
+        record("no-pid", None, None);
+        assert_eq!(live_pid("no-pid"), None);
+    }
+
+    #[test]
+    fn backfill_pids_fills_only_notes_without_one() {
+        let _home = TmpHome::new("pidfill");
+        let me = std::process::id();
+        record("old", None, None);
+        backfill_pids(&[("old".to_string(), me), ("unknown".to_string(), me)].into());
+        assert_eq!(live_pid("old"), Some(me));
+        assert!(get("unknown").is_none(), "a session with no note gets none");
     }
 }

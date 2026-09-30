@@ -41,18 +41,12 @@ const CODEX_URI_PREFIX: &str = "codex://";
 /// pathological >N-message gap self-heals on the next full `tail` (reopen).
 const CODEX_TAIL_FOLLOW_WINDOW: usize = 40;
 
-pub struct CodexSource {
-    /// `None` timestamp = never scanned, force refresh on first read.
-    /// Avoids `Instant::now() - 999s` which panics on Windows runners
-    /// with low uptime ("overflow when subtracting duration from instant").
-    process_cache: std::sync::Mutex<(Option<std::time::Instant>, Vec<CodexProcess>)>,
-}
+pub struct CodexSource {}
 
 /// A running Codex process with its PID, working directory, and optional thread ID.
 #[derive(Clone)]
 struct CodexProcess {
     pid: u32,
-    cwd: String,
     /// Thread ID extracted from `--thread <id>` or `--resume <id>` command-line args.
     thread_id: Option<String>,
 }
@@ -83,7 +77,6 @@ struct SqliteThread {
 impl CodexSource {
     pub fn new() -> Self {
         Self {
-            process_cache: std::sync::Mutex::new((None, Vec::new())),
         }
     }
 }
@@ -1604,7 +1597,6 @@ fn scan_codex_processes() -> Vec<CodexProcess> {
 
             result.push(CodexProcess {
                 pid: pid.as_u32(),
-                cwd,
                 thread_id,
             });
         }
@@ -1764,10 +1756,7 @@ fn read_threads_from_sqlite() -> Option<Vec<SqliteThread>> {
 }
 
 /// Build a SessionInfo from SQLite metadata, enriching with rollout data for active sessions.
-fn build_session_from_sqlite(
-    thread: &SqliteThread,
-    codex_processes: &[CodexProcess],
-) -> Option<SessionInfo> {
+fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
     let rollout_path = PathBuf::from(&thread.rollout_path);
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2007,8 +1996,8 @@ fn build_session_from_sqlite(
     let source_info = parse_source(&thread.source);
 
     // PID resolution: prefer thread-id match, fall back to workspace path match.
-    let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
-    let proc_alive = codex_proc_alive(codex_processes, &thread.id);
+    let (pid, pid_precise) = resolve_pid(&thread.id);
+    let proc_alive = pid.is_some();
     // Drop the rates for a session that is generating nothing — blocked by the
     // API, or its process gone (see `dead_turn_silences_rates`). Evaluated on
     // the pre-clamp status, and after the rate-limit override above, so both
@@ -2167,46 +2156,12 @@ mod tests {
         derive_codex_title, determine_status, exec_note_from_script, extract_context_percent,
         extract_first_user_prompt, last_rollout_rate_limits, latest_total_token_usage,
         normalize_messages, parse_codex_session, plan_type_from_foxy_label,
-        read_rollout_originator, resolve_pid, strip_leading_system_reminder,
-        strip_trailing_context_files, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
+        read_rollout_originator, strip_leading_system_reminder,
+        strip_trailing_context_files, CodexRateLimitWindow, CodexUsageItem,
         SqliteThread, USAGE_SOURCE_FOXY,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
-
-    /// The rollout records cwd as the process wrote it (native separators),
-    /// while the comparison target may come from a decoded projects-dir key
-    /// (always forward slashes). On Windows the two spellings name the same
-    /// directory, so the cwd tier of resolve_pid must not require an exact
-    /// string match — a `C:\code\proj` process is the `C:/code/proj` session.
-    /// A process whose argv names another thread (a `session_explain` fork
-    /// resuming its rollout copy) must not be taken for this session on the
-    /// cwd tier, even when it is the only codex process in the workspace.
-    #[test]
-    fn resolve_pid_cwd_tier_skips_processes_bound_to_another_thread() {
-        let procs = vec![CodexProcess {
-            pid: 5151,
-            cwd: "/ws".to_string(),
-            thread_id: Some("fork-copy-id".to_string()),
-        }];
-        assert_eq!(resolve_pid(&procs, "source-thread", "/ws"), (None, false));
-    }
-
-    #[test]
-    fn resolve_pid_cwd_match_tolerates_separator_spelling() {
-        let procs = vec![CodexProcess {
-            pid: 4242,
-            cwd: "C:\\code\\proj".to_string(),
-            thread_id: None,
-        }];
-        let (pid, precise) = resolve_pid(&procs, "no-such-thread-separator-test", "C:/code/proj");
-        assert_eq!(
-            pid,
-            Some(4242),
-            "cwd tier must match across separator spellings of the same path"
-        );
-        assert!(precise, "a single cwd match is precise");
-    }
 
     /// FSEvents starvation fallback: a codex session whose on-disk rollout
     /// mtime is newer than the snapshot's `last_activity_ms` must be reported
@@ -2531,7 +2486,7 @@ mod tests {
             .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
             .unwrap();
 
-        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        let info = parse_codex_session(f.path()).expect("rollout must parse");
         // No live process → clamp_dead_session_status downgrades the in-flight
         // display status to WaitingInput. The buggy tail-window path never sees
         // task_started and lands on Idle instead.
@@ -2559,7 +2514,7 @@ mod tests {
         .unwrap();
         f.flush().unwrap();
 
-        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        let info = parse_codex_session(f.path()).expect("rollout must parse");
         assert_eq!(
             info.workspace_name, "claude-fleet",
             "a codex worktree checkout must be named after the repo, not the task-id leaf"
@@ -2595,7 +2550,7 @@ mod tests {
         .unwrap();
         f.flush().unwrap();
 
-        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        let info = parse_codex_session(f.path()).expect("rollout must parse");
         assert_eq!(
             info.effort.as_deref(),
             Some("high"),
@@ -2637,7 +2592,7 @@ mod tests {
             first_user_message: "hi".to_string(),
         };
 
-        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        let info = build_session_from_sqlite(&thread).expect("should build a SessionInfo");
         assert_eq!(
             info.effort.as_deref(),
             Some("high"),
@@ -2681,7 +2636,7 @@ mod tests {
             reasoning_effort: None,
         };
 
-        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        let info = build_session_from_sqlite(&thread).expect("should build a SessionInfo");
         assert_eq!(
             info.workspace_name, "claude-fleet",
             "a codex worktree checkout must be named after the repo, not the task-id leaf"
@@ -2965,8 +2920,7 @@ mod tests {
             reasoning_effort: None,
         };
 
-        let procs: Vec<CodexProcess> = Vec::new();
-        let info = build_session_from_sqlite(&thread, &procs).expect("should build a SessionInfo");
+        let info = build_session_from_sqlite(&thread).expect("should build a SessionInfo");
 
         // last_activity must track the fresh file mtime (~now), not the stale
         // SQLite updated_at (~20 min ago). Old behaviour: gated behind
@@ -4228,28 +4182,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn codex_proc_alive_only_on_exact_thread_match() {
-        use super::{codex_proc_alive, CodexProcess};
-        let procs = vec![
-            CodexProcess {
-                pid: 10,
-                cwd: "/ws".into(),
-                thread_id: Some("t-alive".into()),
-            },
-            // Same cwd, different thread — must NOT make t-dead look alive (the
-            // pid-per-session hazard a cwd match would fall into).
-            CodexProcess {
-                pid: 11,
-                cwd: "/ws".into(),
-                thread_id: None,
-            },
-        ];
-        assert!(codex_proc_alive(&procs, "t-alive"));
-        assert!(!codex_proc_alive(&procs, "t-dead"));
-        assert!(!codex_proc_alive(&[], "t-alive"));
-    }
-
     /// A Codex turn that dies mid-flight leaves the snapshot `proc_alive = true`
     /// with no live process. `reconcile_codex_liveness` must clamp exactly the
     /// genuinely-dead Codex sessions and leave live ones (and non-Codex ones)
@@ -4257,7 +4189,7 @@ mod tests {
     /// of the host's real process table.
     #[test]
     fn reconcile_clamps_only_dead_codex_sessions() {
-        use super::{reconcile_codex_liveness, CodexProcess};
+        use super::reconcile_codex_liveness;
         use crate::session::{SessionInfo, SessionStatus};
         let _lock = crate::session::fleet_home_lock();
 
@@ -4289,13 +4221,7 @@ mod tests {
             ),
             mk("t-claude", "claude"),
         ];
-        let procs = vec![CodexProcess {
-            pid: 7,
-            cwd: "/ws".into(),
-            thread_id: Some("t-live-codex".into()),
-        }];
-
-        let changed = reconcile_codex_liveness(&mut sessions, &procs);
+        let changed = reconcile_codex_liveness(&mut sessions, &|id| id == "t-live-codex");
 
         assert!(changed, "a dead codex session must be reconciled");
         assert!(!sessions[0].proc_alive, "dead session proc_alive cleared");
@@ -4382,56 +4308,6 @@ mod tests {
         );
     }
 
-    /// A freshly spawned `codex exec` mints its thread id *after* launch, so that
-    /// id is in no argv while its first turn runs — the argv match above reads it
-    /// as dead. The spawn-pid note closes that gap: liveness falls back to "the
-    /// pid Fleet recorded at spawn is still a live Codex process". Without this,
-    /// the enqueue-drain gate fires a second `resume` on a still-running new
-    /// session and corrupts its transcript (M5 P15).
-    #[test]
-    fn codex_proc_alive_recognises_running_spawn_via_pid_note() {
-        use super::{codex_proc_alive, CodexProcess};
-        let _lock = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-spawnpid-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let prev = std::env::var_os("FLEET_HOME");
-        std::env::set_var("FLEET_HOME", &tmp);
-
-        crate::codex_launch::record_spawn_pid("t-new", 4242);
-
-        // The live Codex set has that pid but no thread id in argv — exactly what
-        // a mid-first-turn `codex exec` looks like.
-        let running = vec![CodexProcess {
-            pid: 4242,
-            cwd: "/ws".into(),
-            thread_id: None,
-        }];
-        assert!(
-            codex_proc_alive(&running, "t-new"),
-            "a running new spawn must read as alive via its recorded pid"
-        );
-        // The pid leaving the live Codex set (session exited) makes it drainable.
-        assert!(
-            !codex_proc_alive(&[], "t-new"),
-            "spawn pid no longer live => not alive"
-        );
-        // A thread with no note must not borrow another session's liveness.
-        assert!(!codex_proc_alive(&running, "t-unknown"));
-
-        match prev {
-            Some(p) => std::env::set_var("FLEET_HOME", p),
-            None => std::env::remove_var("FLEET_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
     /// An image thread must not survive the scan as a `SessionInfo` — that type
     /// is what the turn-completion card, auto-resume and the pending-message
     /// drain all act on. Real threads alongside it must be untouched.
@@ -4476,52 +4352,6 @@ mod tests {
             kept,
             vec![real_id.to_string()],
             "only the image thread may be dropped"
-        );
-
-        match prev {
-            Some(p) => std::env::set_var("FLEET_HOME", p),
-            None => std::env::remove_var("FLEET_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    /// A freshly spawned Codex turn has no thread id in argv, but Fleet records
-    /// its pid as soon as Codex reports the minted thread id. That note must
-    /// make Stop target the one session even when a sibling Codex shares cwd.
-    #[test]
-    fn codex_resolve_pid_recognises_running_spawn_via_pid_note() {
-        use super::{resolve_pid, CodexProcess};
-        let _lock = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-resolve-spawnpid-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let prev = std::env::var_os("FLEET_HOME");
-        std::env::set_var("FLEET_HOME", &tmp);
-
-        crate::codex_launch::record_spawn_pid("t-new", 4242);
-        let running = vec![
-            CodexProcess {
-                pid: 3131,
-                cwd: "/ws".into(),
-                thread_id: None,
-            },
-            CodexProcess {
-                pid: 4242,
-                cwd: "/ws".into(),
-                thread_id: None,
-            },
-        ];
-
-        assert_eq!(
-            resolve_pid(&running, "t-new", "/ws"),
-            (Some(4242), true),
-            "the live recorded spawn pid must be precise despite a sibling in cwd"
         );
 
         match prev {
@@ -5264,7 +5094,7 @@ mod tests {
         f.flush().unwrap();
 
         // Filesystem fallback path.
-        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        let info = parse_codex_session(f.path()).expect("rollout must parse");
         assert!(
             info.out_of_credits
                 .as_deref()
@@ -5295,7 +5125,7 @@ mod tests {
             archived: false,
             first_user_message: "hi".to_string(),
         };
-        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        let info = build_session_from_sqlite(&thread).expect("should build a SessionInfo");
         assert!(
             info.out_of_credits
                 .as_deref()
@@ -5428,73 +5258,36 @@ fn determine_status_from_age(age_secs: f64) -> SessionStatus {
     }
 }
 
-/// Resolve PID for a session: prefer exact thread-id match, fall back to cwd match.
-/// Whether a live Codex process is definitively running this thread — an exact
-/// thread-id match on a running `codex exec resume <thread-id>` argv. This is
-/// Codex's analogue of Claude's `exact_proc_alive` ("a live process whose argv
-/// names exactly this session id"): unambiguous, so it never mis-attributes a
-/// sibling session's process the way a cwd match can (see the pid-per-session
-/// caveat in `resolve_pid`).
-///
-/// Only *resumed* sessions carry their thread id in argv. A freshly spawned
-/// `codex exec` does not — Codex mints the id after launch — so a new session
-/// mid-first-turn is invisible to the argv match. For those, Fleet's spawn-pid
-/// note (`codex_launch::record_spawn_pid`) closes the gap: liveness falls back
-/// to "the pid recorded at spawn is still a live Codex process". Matching that
-/// pid against `processes` (the live Codex set) makes it immune to pid reuse — a
-/// recycled pid owned by some other process simply is not in the set. Without
-/// this, the enqueue-drain gate (`pending_message`, M5 P15) reads a still-running
-/// new session as idle and fires a second `resume` on it, corrupting the
-/// transcript.
-fn codex_proc_alive(processes: &[CodexProcess], thread_id: &str) -> bool {
-    // Resumed sessions: exact thread-id argv match.
-    if processes
-        .iter()
-        .any(|p| p.thread_id.as_deref() == Some(thread_id))
-    {
-        return true;
-    }
-    // Freshly-spawned sessions: the recorded spawn pid still in the live set.
-    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
-        return processes.iter().any(|p| p.pid == pid);
-    }
-    false
+/// Is the Codex process Fleet last spawned for `thread_id` still running? The
+/// launch note's pid and start time answer it (see
+/// [`crate::launch_spec::LaunchSpec::live_pid`]) — including for a fresh
+/// `codex exec` whose thread id is in no argv yet.
+fn codex_proc_alive(thread_id: &str) -> bool {
+    crate::launch_spec::live_pid(thread_id).is_some()
 }
 
-/// The exact Fleet-owned Codex process for `thread_id`, if it is still live.
-///
-/// Resumed turns carry the thread id in argv. Fresh turns use Fleet's
-/// thread-id → pid note because Codex mints the id only after spawning. The
-/// note is accepted only while that pid is still in the scanned Codex process
-/// set, so pid reuse cannot target an unrelated process.
-pub fn codex_session_pid(thread_id: &str) -> Option<u32> {
-    codex_session_pid_in(&scan_codex_processes(), thread_id)
-}
-
-/// [`codex_session_pid`] for many threads against a single process scan, for
-/// callers checking hundreds of ids at once. Only the live ones are returned.
-pub fn codex_session_pids<'a>(
-    thread_ids: impl IntoIterator<Item = &'a str>,
-) -> std::collections::HashMap<String, u32> {
-    let processes = scan_codex_processes();
-    thread_ids
+/// Codex processes whose argv names their thread (`resume <id>`), keyed by
+/// thread id. Only the one-off launch-note backfill scans for these.
+pub(crate) fn running_thread_pids() -> std::collections::HashMap<String, u32> {
+    scan_codex_processes()
         .into_iter()
-        .filter_map(|id| codex_session_pid_in(&processes, id).map(|pid| (id.to_string(), pid)))
+        .filter_map(|p| Some((p.thread_id?, p.pid)))
         .collect()
 }
 
-fn codex_session_pid_in(processes: &[CodexProcess], thread_id: &str) -> Option<u32> {
-    if let Some(process) = processes
-        .iter()
-        .find(|p| p.thread_id.as_deref() == Some(thread_id))
-    {
-        return Some(process.pid);
-    }
-    let recorded = crate::codex_launch::resolve_spawn_pid(thread_id)?;
-    processes
-        .iter()
-        .any(|p| p.pid == recorded)
-        .then_some(recorded)
+/// The Fleet-spawned Codex process for `thread_id`, if it is still live.
+pub fn codex_session_pid(thread_id: &str) -> Option<u32> {
+    crate::launch_spec::live_pid(thread_id)
+}
+
+/// [`codex_session_pid`] for many threads. Only the live ones are returned.
+pub fn codex_session_pids<'a>(
+    thread_ids: impl IntoIterator<Item = &'a str>,
+) -> std::collections::HashMap<String, u32> {
+    thread_ids
+        .into_iter()
+        .filter_map(|id| codex_session_pid(id).map(|pid| (id.to_string(), pid)))
+        .collect()
 }
 
 /// A fresh liveness check for one Codex thread: scans the live Codex process set
@@ -5511,7 +5304,7 @@ pub fn codex_session_alive(thread_id: &str) -> bool {
 /// any session was clamped.
 fn reconcile_codex_liveness(
     sessions: &mut [crate::session::SessionInfo],
-    processes: &[CodexProcess],
+    alive: &dyn Fn(&str) -> bool,
 ) -> bool {
     let mut changed = false;
     for s in sessions.iter_mut() {
@@ -5520,7 +5313,7 @@ fn reconcile_codex_liveness(
         }
         // Only clamp sessions whose process is genuinely gone; a still-running
         // turn (argv thread match or a live spawn-pid note) is left untouched.
-        if codex_proc_alive(processes, &s.id) {
+        if alive(&s.id) {
             continue;
         }
         s.proc_alive = false;
@@ -5559,8 +5352,7 @@ pub fn refresh_dead_codex_liveness(sessions: &mut [crate::session::SessionInfo])
     {
         return false;
     }
-    let processes = scan_codex_processes();
-    reconcile_codex_liveness(sessions, &processes)
+    reconcile_codex_liveness(sessions, &codex_proc_alive)
 }
 
 // ── Stall watchdog: alive-but-hung Codex turns ───────────────────────────────
@@ -5745,45 +5537,15 @@ pub fn interrupt_stalled_codex_turn(stall: &StalledCodexTurn) -> Result<(), Stri
     .map(|_| ())
 }
 
-fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {
-    // First: exact thread-id match (most precise).
-    for p in processes {
-        if let Some(ref tid) = p.thread_id {
-            if tid == thread_id {
-                return (Some(p.pid), true);
-            }
-        }
-    }
-    // Second: a fresh `codex exec` has no thread id in argv because Codex mints
-    // it after launch. Fleet records the minted thread id -> spawn pid once it
-    // appears in stdout; accept that note only while the pid is still a live
-    // Codex process, matching the liveness safety check in `codex_proc_alive`.
-    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
-        if processes.iter().any(|p| p.pid == pid) {
-            return (Some(pid), true);
-        }
-    }
-    // Third: cwd match. Precise only if exactly one process matches. A process
-    // whose argv names *another* thread is that thread's, not this one's —
-    // without this, a `session_explain` fork (`exec resume <copy-id>`) in the
-    // same workspace would light up its source session as running.
-    let cwd_matches: Vec<_> = processes
-        .iter()
-        .filter(|p| p.thread_id.is_none())
-        .filter(|p| crate::session::same_workspace_path(&p.cwd, cwd))
-        .collect();
-    match cwd_matches.len() {
-        1 => (Some(cwd_matches[0].pid), true),
-        n if n > 1 => (Some(cwd_matches[0].pid), false),
-        _ => (None, false),
-    }
+/// The session's live pid, precise whenever there is one: it is the process
+/// Fleet spawned for exactly this thread.
+fn resolve_pid(thread_id: &str) -> (Option<u32>, bool) {
+    let pid = crate::launch_spec::live_pid(thread_id);
+    (pid, pid.is_some())
 }
 
 /// Parse a single rollout file into a SessionInfo (filesystem fallback).
-fn parse_codex_session(
-    rollout_path: &Path,
-    codex_processes: &[CodexProcess],
-) -> Option<SessionInfo> {
+fn parse_codex_session(rollout_path: &Path) -> Option<SessionInfo> {
     let metadata = fs::metadata(rollout_path).ok()?;
     let last_modified = metadata.modified().ok()?;
     let last_activity_ms = last_modified.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
@@ -5906,8 +5668,8 @@ fn parse_codex_session(
     let effort = extract_effort(&all_parsed).or_else(|| crate::launch_spec::effort_of(&session_id));
 
     // PID resolution: prefer thread-id match, fall back to workspace path.
-    let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
-    let proc_alive = codex_proc_alive(codex_processes, &session_id);
+    let (pid, pid_precise) = resolve_pid(&session_id);
+    let proc_alive = pid.is_some();
 
     // Prefer source-embedded nickname > rollout meta nickname > the rollout's
     // opening authored prompt. Codex has no semantic title; its SQLite `title`
@@ -7125,26 +6887,13 @@ impl AgentSource for CodexSource {
     }
 
     fn scan_sessions(&self) -> Vec<SessionInfo> {
-        // Reuse cached process list if fresh (< 10 s).
-        let codex_processes = {
-            let mut guard = self.process_cache.lock().unwrap();
-            let stale = guard
-                .0
-                .map_or(true, |t| t.elapsed() > Duration::from_secs(10));
-            if stale {
-                guard.1 = scan_codex_processes();
-                guard.0 = Some(std::time::Instant::now());
-            }
-            guard.1.clone()
-        };
-
         // Only the threads Fleet started are listed; see `launch_spec::registry`.
         let registry = crate::launch_spec::registry();
         // Try SQLite first (fast path).
-        let mut sessions = match self.scan_from_sqlite(&codex_processes, &registry) {
+        let mut sessions = match self.scan_from_sqlite(&registry) {
             Some(sessions) => sessions,
             // Fallback: filesystem scan.
-            None => self.scan_from_filesystem(&codex_processes),
+            None => self.scan_from_filesystem(),
         };
         crate::launch_spec::retain_registered(&mut sessions, &registry);
         drop_internal_threads(sessions)
@@ -8143,7 +7892,6 @@ impl CodexSource {
     /// Scan sessions using SQLite metadata (fast path).
     fn scan_from_sqlite(
         &self,
-        codex_processes: &[CodexProcess],
         registry: &std::collections::HashMap<String, crate::launch_spec::LaunchSpec>,
     ) -> Option<Vec<SessionInfo>> {
         let threads = read_threads_from_sqlite()?;
@@ -8175,7 +7923,7 @@ impl CodexSource {
                     crate::launch_spec::note_transcript(&thread.id, &thread.rollout_path);
                 }
             }
-            if let Some(info) = build_session_from_sqlite(thread, codex_processes) {
+            if let Some(info) = build_session_from_sqlite(thread) {
                 sessions.push(info);
             }
         }
@@ -8184,7 +7932,7 @@ impl CodexSource {
     }
 
     /// Scan sessions by walking the filesystem (fallback when SQLite is unavailable).
-    fn scan_from_filesystem(&self, codex_processes: &[CodexProcess]) -> Vec<SessionInfo> {
+    fn scan_from_filesystem(&self) -> Vec<SessionInfo> {
         let Some(sessions_dir) = get_sessions_dir() else {
             return vec![];
         };
@@ -8207,7 +7955,7 @@ impl CodexSource {
         files_with_mtime.sort_by(|a, b| b.1.cmp(&a.1));
 
         for (path, _) in files_with_mtime {
-            if let Some(info) = parse_codex_session(&path, codex_processes) {
+            if let Some(info) = parse_codex_session(&path) {
                 if seen_ids.insert(info.id.clone()) {
                     sessions.push(info);
                 }

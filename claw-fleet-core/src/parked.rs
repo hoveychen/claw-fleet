@@ -458,20 +458,11 @@ pub fn park_and_stop(
 
 // ── Interrupting the session ─────────────────────────────────────────────────
 
-/// The pid of the `claude` process running `session_id`, if it is still up.
-///
-/// Only the exact-argv match is accepted (`--session-id <id>` / `--resume <id>`,
-/// which every Fleet spawn carries). The looser cwd-based fallbacks in
-/// [`crate::session::resolve_pid`] would happily hand back *some other* session
-/// in the same workspace — fine for a status badge, catastrophic for a SIGINT.
+/// The pid of the process Fleet spawned for `session_id` (Claude or Codex),
+/// if it is still up — the launch note's pid, checked against its recorded
+/// start time so a reused pid is never SIGINTed.
 pub fn session_pid(session_id: &str) -> Option<u32> {
-    if crate::codex_source::codex_fleet_owned_cwd(session_id).is_some() {
-        return crate::codex_source::codex_session_pid(session_id);
-    }
-    crate::session::scan_cli_processes()
-        .into_iter()
-        .find(|p| p.resume_session_id.as_deref() == Some(session_id))
-        .map(|p| p.pid)
+    crate::launch_spec::live_pid(session_id)
 }
 
 /// Whether the Fleet-owned process for this session is still live, across

@@ -2,12 +2,9 @@ use super::*;
 
 // ── Scan cache ───────────────────────────────────────────────────────────────
 
-/// Caches expensive operations across rescans: process-table lookups and
-/// already-parsed session files whose mtime hasn't changed.
+/// Caches expensive operations across rescans: already-parsed session files
+/// whose mtime hasn't changed.
 pub struct ScanCache {
-    /// Cached `scan_cli_processes()` result + timestamp.
-    /// `None` timestamp = never scanned, force refresh on first read.
-    pub process_cache: Mutex<(Option<Instant>, Vec<CliProcess>)>,
     /// JSONL path → (mtime_ms, SessionInfo).
     pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
     /// JSONL path → how far that transcript has been folded, plus the running
@@ -45,7 +42,6 @@ impl ScanCache {
         // subtraction panics on Windows runners with low uptime
         // ("overflow when subtracting duration from instant").
         Self {
-            process_cache: Mutex::new((None, Vec::new())),
             session_cache: Mutex::new(crate::scan_cache_disk::load()),
             incr_cache: Mutex::new(HashMap::new()),
             last_persisted_at: Mutex::new(None),
@@ -304,6 +300,8 @@ struct RegisteredTranscript {
     id: String,
     transcript: PathBuf,
     workspace: Option<String>,
+    /// The spawned process, while it runs ([`crate::launch_spec::LaunchSpec::live_pid`]).
+    live_pid: Option<u32>,
 }
 
 /// How long after a spawn a note with no transcript on record is still worth
@@ -367,10 +365,12 @@ fn registered_claude_transcripts(
         let Some(dir) = transcript.parent().map(Path::to_path_buf) else {
             continue;
         };
+        let live_pid = spec.live_pid();
         groups.entry(dir).or_default().push(RegisteredTranscript {
             id,
             transcript,
             workspace: spec.workspace,
+            live_pid,
         });
     }
     groups
@@ -379,19 +379,6 @@ fn registered_claude_transcripts(
 pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     let ide_sessions = scan_ide_sessions(claude_dir);
-
-    // Reuse cached process list if fresh (< 10 s).
-    let cli_processes = {
-        let mut guard = scan_cache.process_cache.lock().unwrap();
-        let stale = guard
-            .0
-            .map_or(true, |t| t.elapsed() > Duration::from_secs(10));
-        if stale {
-            guard.1 = scan_cli_processes();
-            guard.0 = Some(Instant::now());
-        }
-        guard.1.clone()
-    };
 
     // One pass over hooks.jsonl yields both the state map and the outstanding
     // background tasks — the file is huge, so the scan must not read it twice.
@@ -471,13 +458,10 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         let ws_name = workspace_name(&workspace_path);
         let ide_name = ide.map(|s| s.ide_name.clone());
 
-        // Collect all CLI processes for this workspace (may be >1 when subagents are running).
-        // PID: use Claude CLI process only (not the IDE PID — killing the IDE PID would
-        // terminate the editor itself, not just the Claude session).
-        let procs_in_cwd: Vec<CliProcess> = cli_processes
+        // Liveness is the launch note's pid (and its start time), per session.
+        let live_pids: HashMap<&str, u32> = members
             .iter()
-            .filter(|p| same_workspace_path(&p.cwd, &workspace_path))
-            .cloned()
+            .filter_map(|m| Some((m.id.as_str(), m.live_pid?)))
             .collect();
 
         // Each registered session's transcript, then its subagent dir
@@ -502,12 +486,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     .unwrap_or_default()
                     .to_string();
 
-                let (session_pid, pid_precise) = resolve_pid(&procs_in_cwd, &session_id);
-                // Definitive liveness signal for Fleet-spawned sessions: a
-                // live process whose argv names exactly this session id.
-                let exact_proc_alive = procs_in_cwd
-                    .iter()
-                    .any(|p| p.resume_session_id.as_deref() == Some(session_id.as_str()));
+                // The process Fleet spawned for exactly this session: its pid
+                // is always precise, and its liveness is the definitive signal.
+                let session_pid = live_pids.get(session_id.as_str()).copied();
+                let pid_precise = session_pid.is_some();
+                let exact_proc_alive = session_pid.is_some();
 
                 // Try session cache first (skip re-reading unchanged files).
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
@@ -651,9 +634,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     let meta_model = meta.as_ref().and_then(|m| m.model.clone());
                     let meta_thinking_level = meta.and_then(|m| m.thinking_level.clone());
 
-                    // Subagents share the parent's PID resolution; never precise on their own
-                    // since we can't kill just the subagent independently.
-                    let (sub_pid, _) = resolve_pid(&procs_in_cwd, &parent_session_id);
+                    // Subagents run in the parent's process; never precise on their
+                    // own since we can't kill just the subagent independently.
+                    let sub_pid = live_pids.get(parent_session_id.as_str()).copied();
 
                     // Try session cache first for subagents too.
                     if let Some((mut info, age)) =

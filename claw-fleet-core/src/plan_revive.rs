@@ -695,23 +695,15 @@ pub(crate) fn gather_coverage(owners: &HashSet<String>) -> Coverage {
     let now = plan_snooze::now_ms();
     let mut c = Coverage::default();
 
-    // Liveness: argv-pinned processes (every Fleet spawn) plus the CLI's own
-    // registrations (interactive terminal sessions carry no id in argv).
-    for p in crate::session::scan_cli_processes() {
-        if let Some(id) = p.resume_session_id {
+    // Liveness: the process each launch note records (every Fleet spawn,
+    // Claude and Codex alike) plus the CLI's own registrations (interactive
+    // terminal sessions).
+    for (id, spec) in crate::launch_spec::registry() {
+        if spec.live_pid().is_some() {
             c.alive.insert(id);
         }
     }
     c.alive.extend(crate::live_inject::live_registered_session_ids());
-    // One Codex process scan for every owner, and the ownership lookup only for
-    // live threads: for a Claude session id it misses SQLite and falls back to
-    // reading every Codex rollout.
-    let unknown = owners.iter().filter(|s| !c.alive.contains(*s)).map(String::as_str);
-    for sid in crate::codex_source::codex_session_pids(unknown).into_keys() {
-        if crate::codex_source::codex_fleet_owned_cwd(&sid).is_some() {
-            c.alive.insert(sid);
-        }
-    }
 
     for w in crate::watch::list() {
         if w.is_live(now) {

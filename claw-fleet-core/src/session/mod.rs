@@ -2641,12 +2641,6 @@ mod tests {
         assert_eq!(s.status, SessionStatus::Thinking);
     }
 
-    // ── resolve_pid tests ───────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_pid_empty() {
-        assert_eq!(resolve_pid(&[], "sess1"), (None, false));
-    }
 
     fn argv(args: &[&str]) -> Vec<std::ffi::OsString> {
         args.iter().map(std::ffi::OsString::from).collect()
@@ -2730,83 +2724,6 @@ mod tests {
         // not be treated as headless, or we'd block turns we know nothing about.
         assert!(!is_headless_session_in(&procs, "who-dis"));
         assert!(!is_headless_session_in(&[], "headless-one"));
-    }
-
-    #[test]
-    fn resolve_pid_exact_resume_match() {
-        let procs = vec![
-            CliProcess {
-                pid: 100,
-                ppid: None,
-                cwd: "/tmp".into(),
-                resume_session_id: Some("sess1".into()),
-                headless: false,
-            },
-            CliProcess {
-                pid: 200,
-                ppid: None,
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-        ];
-        assert_eq!(resolve_pid(&procs, "sess1"), (Some(100), true));
-    }
-
-    #[test]
-    fn resolve_pid_single_process() {
-        let procs = vec![CliProcess {
-            pid: 42,
-            ppid: None,
-            cwd: "/tmp".into(),
-            resume_session_id: None,
-            headless: false,
-        }];
-        assert_eq!(resolve_pid(&procs, "other"), (Some(42), true));
-    }
-
-    #[test]
-    fn resolve_pid_parent_child_filtering() {
-        let procs = vec![
-            CliProcess {
-                pid: 100,
-                ppid: Some(1),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-            CliProcess {
-                pid: 200,
-                ppid: Some(100),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-        ];
-        assert_eq!(resolve_pid(&procs, "any"), (Some(100), true));
-    }
-
-    #[test]
-    fn resolve_pid_multiple_roots_imprecise() {
-        let procs = vec![
-            CliProcess {
-                pid: 100,
-                ppid: Some(1),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-            CliProcess {
-                pid: 200,
-                ppid: Some(2),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-        ];
-        let (pid, precise) = resolve_pid(&procs, "any");
-        assert!(pid.is_some());
-        assert!(!precise);
     }
 
     // ── workspace_name / encode / decode tests ──────────────────────────────
