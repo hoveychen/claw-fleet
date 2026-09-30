@@ -138,6 +138,7 @@ mod tests {
             plan_id: plan_id.to_string(),
             current_task: None,
             updated,
+            backtracked_from: None,
         }
     }
 

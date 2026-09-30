@@ -1045,6 +1045,42 @@ pub fn next_plan_after(blocks: &[pt::SourcedBlock], finished: &str) -> Option<St
     pt::next_plan_in_tree(blocks, finished).map(|t| t.plan_id)
 }
 
+/// The plan the finish button continues, and the plan it counts as finished,
+/// for the session whose focus is `focus`.
+///
+/// Ticking a plan's last box makes `plan check` move the focus onto the next
+/// plan in the tree, so by the time the boss presses finish the focus usually
+/// names a plan with open boxes. Judged by that plan, the continuation saw
+/// "unfinished, ask first" and never fired; the record's `backtracked_from`
+/// names the plan the session actually finished.
+pub fn finish_target(blocks: &[pt::SourcedBlock], focus: &TaskProgressRecord) -> Option<(String, String)> {
+    let finished = focus.backtracked_from.as_deref().unwrap_or(&focus.plan_id);
+    next_plan_after(blocks, finished).map(|t| (t, finished.to_string()))
+}
+
+/// Whether starting `target` needs the boss's go-ahead: the reviver's rule
+/// ([`collect_views`]) that an unclaimed plan under an explore plan is that
+/// plan's deliverable, for the boss to read before anyone starts it. Walks up
+/// from `target` to the nearest plan in `claimed`, inclusive.
+fn finish_needs_go_ahead(blocks: &[pt::SourcedBlock], target: &str, claimed: &HashSet<String>) -> bool {
+    if claimed.contains(target) {
+        return false;
+    }
+    let find = |id: &str| blocks.iter().find(|b| b.id.as_deref() == Some(id));
+    let mut cur = target.to_string();
+    for _ in 0..64 {
+        let Some(p) = find(&cur).and_then(|b| b.parent.clone()) else { return false };
+        if find(&p).is_some_and(|b| b.kind == pt::PlanKind::Explore) {
+            return true;
+        }
+        if claimed.contains(&p) {
+            return false;
+        }
+        cur = p;
+    }
+    false
+}
+
 /// Opening prompt for a session started by the finish button. Product text.
 pub fn finish_prompt(view: &PlanView, finished_plan: &str, previous: Option<&str>) -> String {
     let pending = view.total.saturating_sub(view.done);
@@ -1092,22 +1128,51 @@ pub fn continue_after_finish(session_id: &str) {
     };
     let ws = focus.workspace_path.trim_end_matches('/').to_string();
     let blocks = load_workspace_blocks(&ws);
-    let Some(target) = next_plan_after(&blocks, &focus.plan_id) else { return };
+    let Some((target, finished)) = finish_target(&blocks, &focus) else { return };
     let Some(block) = blocks.iter().find(|b| b.id.as_deref() == Some(target.as_str())) else {
         return;
     };
     if plan_snooze::active(&ws, &target).is_some() {
         return;
     }
-    let owners: HashSet<String> = crate::task_progress::all_records()
+    let others: Vec<(String, TaskProgressRecord)> = crate::task_progress::all_records()
         .into_iter()
-        .filter(|(_, r)| r.plan_id == target && r.workspace_path.trim_end_matches('/') == ws)
-        .map(|(sid, _)| sid)
-        .filter(|sid| sid != session_id)
+        .filter(|(sid, r)| sid != session_id && r.workspace_path.trim_end_matches('/') == ws)
+        .collect();
+    let owners: HashSet<String> = others
+        .iter()
+        .filter(|(_, r)| r.plan_id == target)
+        .map(|(sid, _)| sid.clone())
         .collect();
     let owner_list: Vec<String> = owners.iter().cloned().collect();
-    if let Some(why) = gather_coverage(&owners).reason(&owner_list) {
+    let coverage = gather_coverage(&owners);
+    if let Some(why) = coverage.reason(&owner_list) {
         crate::log_debug(&format!("finish continuation: {target} already covered ({why})"));
+        return;
+    }
+    // Same gates the reviver applies before it spawns. Each one leaves the
+    // plan to the reviver, which asks the boss or waits as it would anyway.
+    let claimed: HashSet<String> = others.iter().map(|(_, r)| r.plan_id.clone()).collect();
+    if finish_needs_go_ahead(&blocks, &target, &claimed) {
+        crate::log_debug(&format!("finish continuation: {target} waits for the boss's go-ahead"));
+        return;
+    }
+    let Some(state_file) = state_path() else { return };
+    let state = load_state(&state_file).unwrap_or_default();
+    if state.pause.is_some() {
+        crate::log_debug(&format!("finish continuation: reviver paused, {target} not started"));
+        return;
+    }
+    let running = state
+        .plans
+        .values()
+        .filter_map(|s| s.revived_session_id.as_deref())
+        .filter(|sid| coverage.alive.contains(*sid))
+        .count();
+    if running >= MAX_CONCURRENT {
+        crate::log_debug(&format!(
+            "finish continuation: {running} revived sessions running, {target} left to the reviver"
+        ));
         return;
     }
     let (done, total) = pt::count_tasks(&block.body);
@@ -1123,11 +1188,10 @@ pub fn continue_after_finish(session_id: &str) {
         boss_closed: None,
         needs_go_ahead: false,
     };
-    let prompt = finish_prompt(&view, &focus.plan_id, transcript_of(session_id).as_deref());
+    let prompt = finish_prompt(&view, &finished, transcript_of(session_id).as_deref());
     match spawn_for_plan(&view, prompt, "接续", None) {
         Ok(sid) => crate::log_debug(&format!(
-            "finish continuation: {sid} picks up {target} after {}",
-            focus.plan_id
+            "finish continuation: {sid} picks up {target} after {finished}"
         )),
         Err(e) => crate::log_debug(&format!("finish continuation: spawn for {target}: {e}")),
     }
@@ -1619,6 +1683,7 @@ mod tests {
             plan_id: plan.into(),
             current_task: None,
             updated,
+            backtracked_from: None,
         }
     }
 
@@ -1658,6 +1723,44 @@ mod tests {
         );
         let ids: Vec<_> = v.iter().map(|v| v.plan_id.as_str()).collect();
         assert_eq!(ids, vec!["fresh"]);
+    }
+
+    #[test]
+    fn finish_continues_after_plan_check_moved_the_focus() {
+        // The session ticks a's last box; `plan check` moves its focus to b.
+        // The boss then presses finish: a is done, so b must be picked up.
+        let tree = vec![
+            block("root", None, PENDING),
+            block("a", Some("root"), DONE),
+            block("b", Some("root"), PENDING),
+        ];
+        let mut moved = rec("/w", "b", 0);
+        moved.backtracked_from = Some("a".into());
+        assert_eq!(finish_target(&tree, &moved), Some(("b".into(), "a".into())));
+        // Focus the session set itself on an unfinished plan: ask first, as before.
+        assert_eq!(finish_target(&tree, &rec("/w", "b", 0)), None);
+        // Focus still on the finished plan (no backtrack happened).
+        assert_eq!(finish_target(&tree, &rec("/w", "a", 0)), Some(("b".into(), "a".into())));
+        // The boss re-opened a box of the finished plan: nothing continues.
+        let reopened = vec![block("root", None, PENDING), block("a", Some("root"), PENDING), block("b", Some("root"), PENDING)];
+        assert_eq!(finish_target(&reopened, &moved), None);
+    }
+
+    #[test]
+    fn finish_waits_for_go_ahead_under_an_explore_plan() {
+        let mut explore = block("probe", None, DONE);
+        explore.kind = pt::PlanKind::Explore;
+        let tree = vec![explore, block("fix", Some("probe"), PENDING), block("fix2", Some("fix"), PENDING)];
+        let none = HashSet::new();
+        // The explore plan's derived child, never started: the boss reads it first.
+        assert!(finish_needs_go_ahead(&tree, "fix", &none));
+        assert!(finish_needs_go_ahead(&tree, "fix2", &none));
+        // Someone is already on it, or on a plan between it and the explore plan.
+        assert!(!finish_needs_go_ahead(&tree, "fix", &HashSet::from(["fix".to_string()])));
+        assert!(!finish_needs_go_ahead(&tree, "fix2", &HashSet::from(["fix".to_string()])));
+        // A plain exec tree needs no go-ahead.
+        let exec = vec![block("root", None, PENDING), block("a", Some("root"), PENDING)];
+        assert!(!finish_needs_go_ahead(&exec, "a", &none));
     }
 
     #[test]
