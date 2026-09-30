@@ -73,7 +73,7 @@ fn installed_anywhere(feature: Feature, plan: &crate::hooks::HookSetupPlan) -> b
 
 /// Phase 1. Returns the steps it took; empty on a host with nothing to record.
 fn snapshot() -> Vec<Step> {
-    let plan = crate::hooks::plan_hook_setup();
+    let plan = crate::hooks::global_hook_setup();
     let installed: Vec<(Feature, bool)> = Feature::ALL
         .iter()
         .map(|&f| (f, installed_anywhere(f, &plan)))

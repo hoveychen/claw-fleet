@@ -18,6 +18,7 @@ import {
   modeDefault,
   type FeatureState,
 } from "../storage";
+import { syncFeatureStates, type FeatureSwitches } from "../featureSync";
 import { TriStateToggle } from "./TriStateToggle";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { AccountInfo } from "./AccountInfo";
@@ -32,19 +33,7 @@ import type { RemoteWorkspace, RemoteWorkspacesConfig, ResumeTriggersConfig } fr
 import { sshTargetOf, type HostHealth, type SshHost } from "../sshHosts";
 
 
-interface HookSetupPlan {
-  toAdd: string[];
-  hooksGloballyDisabled: boolean;
-  alreadyInstalled: boolean;
-  guardInstalled: boolean;
-  elicitationInstalled: boolean;
-  interactionModeInstalled: boolean;
-  planApprovalInstalled: boolean;
-  prdContextInstalled: boolean;
-  prdDisciplineInstalled: boolean;
-  wikiGuidanceInstalled: boolean;
-  modelGuidanceInstalled: boolean;
-}
+type HookSetupPlan = FeatureSwitches;
 
 interface SourceInfo {
   name: string;
@@ -434,24 +423,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   // ── Hooks state ──────────────────────────────────────────────────────────
   const [hooksPlan, setHooksPlan] = useState<HookSetupPlan | null>(null);
-  const [hooksStatus, setHooksStatus] = useState<"idle" | "installing" | "success" | "error">("idle");
-  const [hooksError, setHooksError] = useState("");
-
-  useEffect(() => {
-    invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
-  }, []);
-
-  const handleInstallHooks = useCallback(async () => {
-    setHooksStatus("installing");
-    try {
-      await invoke("apply_hooks_setup");
-      setHooksStatus("success");
-      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
-    } catch (e) {
-      setHooksStatus("error");
-      setHooksError(String(e));
-    }
-  }, []);
 
   // ── Guard state ────────────────────────────────────────────────────────
   const [guardState, setGuardState] = useState<FeatureState>(
@@ -482,32 +453,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const handleToggleGuardLlm = useCallback((state: FeatureState) => {
     setGuardLlmState(state);
     setFeatureState("guard-llm-analysis", state);
-  }, []);
-
-  // ── Permissions bypass state (cross-process, persists to ~/.fleet) ────
-  interface PermissionsConfig {
-    enabled: boolean;
-  }
-  const [permissionsBypassEnabled, setPermissionsBypassEnabled] = useState<boolean | null>(
-    null,
-  );
-
-  useEffect(() => {
-    invoke<PermissionsConfig>("get_permissions_config")
-      .then((cfg) => setPermissionsBypassEnabled(cfg.enabled))
-      .catch(() => setPermissionsBypassEnabled(true));
-  }, []);
-
-  const handleTogglePermissionsBypass = useCallback(async (enabled: boolean) => {
-    setPermissionsBypassEnabled(enabled);
-    try {
-      await invoke<PermissionsConfig>("set_permissions_config", {
-        cfg: { enabled },
-      });
-    } catch (e) {
-      console.error("set_permissions_config failed:", e);
-      setPermissionsBypassEnabled(!enabled);
-    }
   }, []);
 
   // ── Elicitation state ─────────────────────────────────────────────────
@@ -683,6 +628,25 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
+  // The switches live in the backend's control-plane prefs; the tristates
+  // above are only this panel's copy, so realign them once the prefs load.
+  useEffect(() => {
+    invoke<HookSetupPlan>("get_hooks_setup_plan")
+      .then((plan) => {
+        setHooksPlan(plan);
+        const states = syncFeatureStates(plan);
+        setGuardState(states["guard-enabled"]);
+        setElicitationState(states["elicitation-enabled"]);
+        setPlanApprovalState(states["plan-approval-enabled"]);
+        setInteractionModeState(states["interaction-mode-enabled"]);
+        setPrdModeState(states["prd-mode-enabled"]);
+        setWikiGuidanceState(states["wiki-guidance-enabled"]);
+        setModelGuidanceState(states["model-guidance-enabled"]);
+        setSessionTitleGuidanceState(states["session-title-guidance-enabled"]);
+      })
+      .catch(() => {});
+  }, []);
+
   // ── Decision panel timeouts (cross-process, persists to ~/.fleet) ─────
   interface DecisionPanelConfig {
     wait_seconds: number;
@@ -758,10 +722,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     label: string;
     status: "pass" | "warn" | "fail" | "unknown";
     detail: string;
-    fixAction?:
-      | "reinstall_interaction_mode"
-      | "enable_elicitation_hook"
-      | "enable_mcp_injector";
+    fixAction?: "reinstall_interaction_mode" | "enable_elicitation_hook";
   };
   type TestRunResult = {
     kind: string;
@@ -857,18 +818,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const handleInteractionFix = useCallback(
     async (
-      action:
-        | "reinstall_interaction_mode"
-        | "enable_elicitation_hook"
-        | "enable_mcp_injector",
+      action: NonNullable<DiagnosticCheck["fixAction"]>,
     ) => {
       try {
         if (action === "reinstall_interaction_mode") {
           await invoke("apply_interaction_mode");
-        } else if (action === "enable_elicitation_hook") {
-          await invoke("apply_elicitation_hook");
         } else {
-          await invoke("apply_mcp_injector");
+          await invoke("apply_elicitation_hook");
         }
         await refreshInteractionDiagnostics();
       } catch (e) {
@@ -879,8 +835,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   );
 
   // Run every distinct fix action across all currently-failing checks, then
-  // re-check. Deduped because reinstall_interaction_mode covers both the
-  // CLAUDE.md sentinel and the guidance file.
+  // re-check.
   const handleFixAll = useCallback(async () => {
     setFixingAll(true);
     try {
@@ -897,8 +852,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           await invoke("apply_interaction_mode");
         } else if (action === "enable_elicitation_hook") {
           await invoke("apply_elicitation_hook");
-        } else if (action === "enable_mcp_injector") {
-          await invoke("apply_mcp_injector");
         }
       }
       await refreshInteractionDiagnostics();
@@ -1197,8 +1150,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
-
-  const hooksInstalled = hooksPlan?.alreadyInstalled || hooksStatus === "success";
 
   const tabLabels: Record<SettingsTab, string> = {
     general: t("settings.tab_general"),
@@ -1617,26 +1568,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <span className={styles.row_label}>{t("settings.hooks_desc")}</span>
                 </div>
                 <div className={styles.row}>
-                  {hooksInstalled ? (
-                    <span className={styles.hooks_ok}>{t("hooks.installed")}</span>
+                  {hooksPlan?.hooksGloballyDisabled ? (
+                    <span className={styles.hooks_warn}>
+                      {t("onboarding.hooks_setup.disabled_warning")}
+                    </span>
                   ) : (
-                    <div>
-                      <span className={styles.hooks_warn}>{t("hooks.banner")}</span>
-                    </div>
-                  )}
-                  {!hooksInstalled && hooksPlan && (
-                    <button
-                      className={styles.hooks_install_btn}
-                      onClick={handleInstallHooks}
-                      disabled={hooksStatus === "installing"}
-                    >
-                      {hooksStatus === "installing" ? t("account.loading") : t("hooks.install")}
-                    </button>
+                    <span className={styles.hooks_ok}>{t("hooks.installed")}</span>
                   )}
                 </div>
-                {hooksStatus === "error" && (
-                  <p className={styles.hooks_error}>{t("hooks.install_error", { error: hooksError })}</p>
-                )}
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.claude_binary")}</div>
                 <div className={styles.row}>
@@ -2055,30 +1994,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     disabled={!guardEnabled}
                     onChange={handleToggleGuardLlm}
                   />
-                </div>
-
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.permissions_bypass")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.permissions_bypass_desc")}
-                  </span>
-                </div>
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.permissions_bypass_recommended")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={permissionsBypassEnabled ?? true}
-                      disabled={permissionsBypassEnabled === null}
-                      onChange={(e) => handleTogglePermissionsBypass(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
                 </div>
               </div>
 

@@ -199,21 +199,6 @@ pub(crate) fn respond_to_a2ui_render(
         .respond_to_a2ui_render(&id, cancelled, action_name, action_context)
 }
 
-/// One-click fix for the `mcp_injection` diagnostic. Resolves the fleet
-/// sibling binary and re-acquires the `mcpServers.fleet` entry in
-/// `~/.claude.json`. Returns an error when the sibling binary can't be
-/// located so the frontend can surface a useful hint.
-#[tauri::command(async)]
-pub(crate) fn apply_mcp_injector(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let p = crate::fleet_binary::resolve_fleet_binary().ok_or(
-        "Fleet sibling binary not found near this Fleet desktop process — \
-                 build fleet-cli or install the production sidecar so the MCP \
-                 injector can point at a real `command` path",
-    )?;
-    let fleet_path = p.to_string_lossy().to_string();
-    state.backend.apply_mcp_injector(&fleet_path)
-}
-
 #[tauri::command(async)]
 pub(crate) fn upload_elicitation_attachment(
     state: tauri::State<'_, AppState>,

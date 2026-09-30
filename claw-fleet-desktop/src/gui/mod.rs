@@ -25,7 +25,6 @@ use super::*;
 mod blocking;
 mod decision;
 mod notification;
-mod permissions;
 mod setup;
 mod tts;
 // Remote harness install (remote.rs) emits the same progress event shape.
@@ -74,7 +73,6 @@ use self::mascot::*;
 use self::memory::*;
 use self::notes::*;
 use self::notification::*;
-use self::permissions::*;
 use self::plan_approval::*;
 use self::plugins::*;
 use self::proc_runner::*;
@@ -1811,8 +1809,6 @@ pub fn run() {
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,
-            apply_hooks_setup,
-            remove_hooks,
             apply_guard_hook,
             remove_guard_hook,
             respond_to_guard,
@@ -1843,7 +1839,6 @@ pub fn run() {
             respond_to_fleet_ask,
             respond_to_a2ui_render,
             respond_to_permission_prompt,
-            apply_mcp_injector,
             upload_elicitation_attachment,
             stage_pasted_attachment,
             read_local_file_bytes,
@@ -1878,8 +1873,6 @@ pub fn run() {
             get_decision_panel_config,
             set_decision_panel_config,
             read_review_doc,
-            get_permissions_config,
-            set_permissions_config,
             get_user_title,
             set_user_title,
             open_notification_settings,

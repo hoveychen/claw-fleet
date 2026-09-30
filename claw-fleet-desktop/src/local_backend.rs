@@ -3339,14 +3339,6 @@ impl LocalBackend {
         crate::hooks::plan_hook_setup()
     }
 
-    pub fn apply_hooks(&self) -> Result<(), String> {
-        crate::hooks::apply_hook_setup()
-    }
-
-    pub fn remove_hooks(&self) -> Result<(), String> {
-        crate::hooks::remove_fleet_hooks()
-    }
-
     pub fn apply_guard_hook(&self) -> Result<(), String> {
         crate::hooks::apply_guard_hook()
     }
@@ -3601,11 +3593,6 @@ impl LocalBackend {
             cancelled,
             claw_fleet_core::mcp_a2ui_ipc::write_response,
         )
-    }
-
-    pub fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
-        claw_fleet_core::mcp_injector::acquire(std::process::id(), fleet_path)
-            .map_err(|e| e.to_string())
     }
 
     pub fn apply_plan_approval_hook(&self) -> Result<(), String> {

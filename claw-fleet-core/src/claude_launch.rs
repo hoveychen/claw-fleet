@@ -130,7 +130,7 @@ pub(crate) struct GlobalCarriers {
 impl GlobalCarriers {
     pub(crate) fn probe() -> Self {
         Self {
-            plan: crate::hooks::plan_hook_setup(),
+            plan: crate::hooks::global_hook_setup(),
             mcp: crate::mcp_injector::fleet_server_registered(),
             lessons: crate::lessons_store::import_installed(),
         }

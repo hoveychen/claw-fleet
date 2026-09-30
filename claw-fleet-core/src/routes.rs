@@ -14,7 +14,6 @@ pub const ANALYZE: &str = "/analyze";
 pub const APPLY_ELICITATION_HOOK: &str = "/apply_elicitation_hook";
 pub const APPLY_GUARD_HOOK: &str = "/apply_guard_hook";
 pub const RECONCILE_CODEX_GUIDANCE: &str = "/reconcile_codex_guidance";
-pub const APPLY_HOOKS: &str = "/apply_hooks";
 pub const APPLY_INTERACTION_MODE: &str = "/apply_interaction_mode";
 pub const APPLY_MODEL_GUIDANCE: &str = "/apply_model_guidance";
 pub const APPLY_SESSION_TITLE_GUIDANCE: &str = "/apply_session_title_guidance";
@@ -61,7 +60,6 @@ pub const PLAN_REVIVE_CONFIG: &str = "/plan_revive_config";
 /// The remaining automatic-continuation switches
 /// (`resume_triggers::ResumeTriggersConfig`), same GET/POST shape.
 pub const RESUME_TRIGGERS_CONFIG: &str = "/resume_triggers_config";
-pub const PERMISSIONS_CONFIG: &str = "/permissions_config";
 pub const DECISION_PANEL_CONFIG: &str = "/decision_panel_config";
 pub const AUDIT_CHECK_UPDATE: &str = "/audit/check-update";
 pub const AUDIT_PATTERN_INFO: &str = "/audit/pattern-info";
@@ -248,7 +246,6 @@ pub const REMOTE_WORKSPACES_UPSERT: &str = "/remote_workspaces/upsert";
 pub const REMOTE_WORKSPACES_REMOVE: &str = "/remote_workspaces/remove";
 pub const REMOVE_ELICITATION_HOOK: &str = "/remove_elicitation_hook";
 pub const REMOVE_GUARD_HOOK: &str = "/remove_guard_hook";
-pub const REMOVE_HOOKS: &str = "/remove_hooks";
 pub const REMOVE_INTERACTION_MODE: &str = "/remove_interaction_mode";
 pub const REMOVE_MODEL_GUIDANCE: &str = "/remove_model_guidance";
 pub const REMOVE_SESSION_TITLE_GUIDANCE: &str = "/remove_session_title_guidance";

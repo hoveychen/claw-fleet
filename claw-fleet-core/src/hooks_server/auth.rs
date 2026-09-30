@@ -177,14 +177,10 @@ mod tests {
             routes::SSH_HOSTS,
             routes::SSH_HOSTS_UPSERT,
             routes::SSH_HOSTS_REMOVE,
-            // The three host-settings pairs. `PERMISSIONS_CONFIG` is the sharp
-            // one: a POST there flips the `settings.json` allow-rule injection
-            // for every session on the host, so a customer token reaching it
-            // could disarm the guard gate outright.
+            // The host-settings pairs.
             routes::AUTO_RESUME_CONFIG,
             routes::PLAN_REVIVE_CONFIG,
             routes::RESUME_TRIGGERS_CONFIG,
-            routes::PERMISSIONS_CONFIG,
             routes::DECISION_PANEL_CONFIG,
         ] {
             assert_eq!(

@@ -1231,10 +1231,6 @@ fn handle_request(
                 route_resume_triggers_config(ctx, request, &query, json_header, path)
             }
 
-            crate::routes::PERMISSIONS_CONFIG => {
-                route_permissions_config(ctx, request, &query, json_header, path)
-            }
-
             crate::routes::DECISION_PANEL_CONFIG => {
                 route_decision_panel_config(ctx, request, &query, json_header, path)
             }
@@ -1693,10 +1689,6 @@ fn handle_request(
 
             crate::routes::HOOKS_PLAN => route_hooks_plan(ctx, request, &query, json_header, path),
 
-            crate::routes::APPLY_HOOKS => {
-                route_apply_hooks(ctx, request, &query, json_header, path)
-            }
-
             crate::routes::SOURCES_CONFIG => {
                 route_sources_config(ctx, request, &query, json_header, path)
             }
@@ -1714,10 +1706,6 @@ fn handle_request(
 
             crate::routes::CLAUDE_BINARY_OVERRIDE => {
                 route_claude_binary_override(ctx, request, &query, json_header, path)
-            }
-
-            crate::routes::REMOVE_HOOKS => {
-                route_remove_hooks(ctx, request, &query, json_header, path)
             }
 
             // ── Guard hook endpoints ──────────────────────────────────────

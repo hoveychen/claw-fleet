@@ -2,16 +2,18 @@
 //!
 //! Users sometimes report "I turned interaction mode on but Agent's
 //! AskUserQuestion never reaches my Decision Panel". The link from toggle to
-//! Decision Card has four backend-observable checkpoints and one
-//! frontend-only one:
+//! Decision Card has three backend-observable checkpoints and one
+//! frontend-only one, all about the sessions Fleet starts — the pipeline
+//! reaches them through launch arguments ([`crate::claude_launch`]), not the
+//! user's global config:
 //!
-//!   1. `claude_md_sentinel`  — `~/.claude/CLAUDE.md` carries the
-//!      `fleet:interaction-mode` sentinel block that imports the guidance.
-//!   2. `guidance_file`       — `~/.claude/fleet-interaction-mode.md` exists
-//!      and is non-empty.
-//!   3. `elicitation_hook`    — `~/.claude/settings.json` has the Fleet
-//!      `PreToolUse → AskUserQuestion` hook group so the CLI can intercept
-//!      the tool call and write a request file.
+//!   1. `interaction_mode`    — the interaction-mode guidance is switched on,
+//!      so a launch appends it to the system prompt.
+//!   2. `elicitation_hook`    — the `PreToolUse → AskUserQuestion` hook is
+//!      switched on, so a launch's `--settings` carries it and the CLI can
+//!      intercept the tool call and write a request file.
+//!   3. `fleet_mcp_server`    — a fleet binary resolves, so a launch's
+//!      `--mcp-config` carries the server exposing `fleet__ask`.
 //!   4. `watcher_heartbeat`   — The decision watcher (desktop app or
 //!      `fleet serve` SSE consumer) is alive: it polls the elicitation dir
 //!      and emits events. Tracked via `~/.fleet/consumer.heartbeat`.
@@ -24,27 +26,22 @@
 //! already-collected raw inputs so they can be unit-tested without touching
 //! the file system.
 
-use std::fs;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::consumer_heartbeat::{self, ConsumerStatus};
-use crate::hooks;
-use crate::interaction_mode;
+use crate::control_plane_prefs::{is_enabled, Feature};
 
 /// Stable check ids — used by the frontend for i18n lookup and the Tauri
 /// fix-action dispatch. Kept as `&'static str` here so the source of truth
 /// is one place; serde serializes them as the same string via the `id`
 /// field below.
 pub mod id {
-    pub const CLAUDE_MD_SENTINEL: &str = "claude_md_sentinel";
-    pub const GUIDANCE_FILE: &str = "guidance_file";
+    pub const INTERACTION_MODE: &str = "interaction_mode";
     pub const ELICITATION_HOOK: &str = "elicitation_hook";
     pub const WATCHER_HEARTBEAT: &str = "watcher_heartbeat";
-    /// fleet__ask MCP-tool injection — `mcpServers.fleet` in ~/.claude.json
-    /// points at an existing executable.
-    pub const MCP_INJECTION: &str = "mcp_injection";
+    pub const FLEET_MCP_SERVER: &str = "fleet_mcp_server";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -59,16 +56,10 @@ pub enum CheckStatus {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FixAction {
-    /// Re-run `interaction_mode::apply_interaction_mode` to rewrite both the
-    /// CLAUDE.md sentinel block and the guidance markdown file.
+    /// Switch interaction mode back on (`apply_interaction_mode`).
     ReinstallInteractionMode,
-    /// Re-run `hooks::apply_elicitation_hook` to re-install the
-    /// `PreToolUse → AskUserQuestion` hook group in settings.json.
+    /// Switch the elicitation hook back on (`apply_elicitation_hook`).
     EnableElicitationHook,
-    /// Re-run `mcp_injector::acquire` so `~/.claude.json` carries the
-    /// `mcpServers.fleet` entry that Claude Code uses to launch the MCP
-    /// stdio server exposing `fleet__ask`.
-    EnableMcpInjector,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -95,140 +86,91 @@ const HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(30);
 /// `frontend_listener` row.
 pub fn run_checks() -> Vec<DiagnosticCheck> {
     vec![
-        check_claude_md_sentinel(interaction_mode::is_interaction_mode_installed()),
-        check_guidance_file(read_guidance_file()),
-        check_elicitation_hook(hooks::plan_hook_setup().elicitation_installed),
+        check_interaction_mode(is_enabled(Feature::InteractionMode)),
+        check_elicitation_hook(is_enabled(Feature::ElicitationHook)),
         check_watcher_heartbeat(&consumer_heartbeat::consumer_status(HEARTBEAT_STALE_AFTER)),
-        check_mcp_injection(read_mcp_fleet_command()),
+        check_fleet_mcp_server(
+            crate::hooks::resolve_fleet_binary(),
+            crate::mcp_injector::fleet_server_registered(),
+        ),
     ]
 }
 
-/// Return the `mcpServers.fleet.command` value from ~/.claude.json, or
-/// `None` if the file / object / key is missing / not a string. Kept pure
-/// so `check_mcp_injection` can be unit-tested without filesystem state.
-fn read_mcp_fleet_command() -> Option<String> {
-    let path = crate::session::get_claude_config_json()?;
-    let raw = fs::read_to_string(&path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    v.get("mcpServers")?
-        .get(crate::mcp_injector::FLEET_SERVER_KEY)?
-        .get("command")?
-        .as_str()
-        .map(|s| s.to_string())
-}
-
-fn read_guidance_file() -> Option<String> {
-    let path = crate::session::get_claude_dir()?.join("fleet-interaction-mode.md");
-    fs::read_to_string(&path).ok()
-}
-
-pub fn check_claude_md_sentinel(installed: bool) -> DiagnosticCheck {
-    if installed {
+pub fn check_interaction_mode(enabled: bool) -> DiagnosticCheck {
+    let label = "interaction mode".to_string();
+    if enabled {
         DiagnosticCheck {
-            id: id::CLAUDE_MD_SENTINEL.into(),
-            label: "CLAUDE.md sentinel block".into(),
+            id: id::INTERACTION_MODE.into(),
+            label,
             status: CheckStatus::Pass,
-            detail: "Sentinel block found in ~/.claude/CLAUDE.md".into(),
+            detail: "On — Fleet sessions start with the decision-card guidance".into(),
             fix_action: None,
         }
     } else {
         DiagnosticCheck {
-            id: id::CLAUDE_MD_SENTINEL.into(),
-            label: "CLAUDE.md sentinel block".into(),
+            id: id::INTERACTION_MODE.into(),
+            label,
             status: CheckStatus::Fail,
-            detail: "~/.claude/CLAUDE.md is missing the fleet:interaction-mode sentinel block — \
-                 Agent will not load the AskUserQuestion guidance"
+            detail: "Off — Fleet sessions start without the guidance that steers the Agent \
+                 to ask through the Decision Panel"
                 .into(),
             fix_action: Some(FixAction::ReinstallInteractionMode),
         }
     }
 }
 
-pub fn check_guidance_file(content: Option<String>) -> DiagnosticCheck {
-    match content {
-        Some(c) if !c.trim().is_empty() => DiagnosticCheck {
-            id: id::GUIDANCE_FILE.into(),
-            label: "fleet-interaction-mode.md".into(),
-            status: CheckStatus::Pass,
-            detail: format!(
-                "~/.claude/fleet-interaction-mode.md present ({} bytes)",
-                c.len()
-            ),
-            fix_action: None,
-        },
-        Some(_) => DiagnosticCheck {
-            id: id::GUIDANCE_FILE.into(),
-            label: "fleet-interaction-mode.md".into(),
-            status: CheckStatus::Fail,
-            detail: "~/.claude/fleet-interaction-mode.md exists but is empty".into(),
-            fix_action: Some(FixAction::ReinstallInteractionMode),
-        },
-        None => DiagnosticCheck {
-            id: id::GUIDANCE_FILE.into(),
-            label: "fleet-interaction-mode.md".into(),
-            status: CheckStatus::Fail,
-            detail: "~/.claude/fleet-interaction-mode.md does not exist".into(),
-            fix_action: Some(FixAction::ReinstallInteractionMode),
-        },
-    }
-}
-
-pub fn check_elicitation_hook(installed: bool) -> DiagnosticCheck {
-    if installed {
+pub fn check_elicitation_hook(enabled: bool) -> DiagnosticCheck {
+    let label = "elicitation hook".to_string();
+    if enabled {
         DiagnosticCheck {
             id: id::ELICITATION_HOOK.into(),
-            label: "elicitation hook in settings.json".into(),
+            label,
             status: CheckStatus::Pass,
-            detail: "Fleet PreToolUse → AskUserQuestion hook installed".into(),
+            detail: "On — Fleet sessions carry the PreToolUse → AskUserQuestion hook".into(),
             fix_action: None,
         }
     } else {
         DiagnosticCheck {
             id: id::ELICITATION_HOOK.into(),
-            label: "elicitation hook in settings.json".into(),
+            label,
             status: CheckStatus::Fail,
-            detail: "~/.claude/settings.json does not have the Fleet elicitation hook — \
-                 AskUserQuestion calls will not be intercepted"
-                .into(),
+            detail: "Off — AskUserQuestion calls in Fleet sessions will not be intercepted".into(),
             fix_action: Some(FixAction::EnableElicitationHook),
         }
     }
 }
 
-pub fn check_mcp_injection(fleet_command: Option<String>) -> DiagnosticCheck {
-    match fleet_command {
-        Some(cmd) if !cmd.trim().is_empty() => {
-            let exists = std::path::Path::new(&cmd).is_file();
-            if exists {
-                DiagnosticCheck {
-                    id: id::MCP_INJECTION.into(),
-                    label: "mcpServers.fleet in ~/.claude.json".into(),
-                    status: CheckStatus::Pass,
-                    detail: format!("Fleet MCP server registered, command → {} (exists)", cmd),
-                    fix_action: None,
-                }
-            } else {
-                DiagnosticCheck {
-                    id: id::MCP_INJECTION.into(),
-                    label: "mcpServers.fleet in ~/.claude.json".into(),
-                    status: CheckStatus::Fail,
-                    detail: format!(
-                        "mcpServers.fleet.command points at {} but no executable found there — \
-                         re-acquire to point at this Fleet's actual binary",
-                        cmd
-                    ),
-                    fix_action: Some(FixAction::EnableMcpInjector),
-                }
-            }
-        }
-        _ => DiagnosticCheck {
-            id: id::MCP_INJECTION.into(),
-            label: "mcpServers.fleet in ~/.claude.json".into(),
+/// `fleet_bin` is what a launch would name in its `--mcp-config`;
+/// `globally_registered` is an older Fleet's `mcpServers.fleet` in
+/// `~/.claude.json`, which a launch defers to while it is still there.
+pub fn check_fleet_mcp_server(
+    fleet_bin: Option<String>,
+    globally_registered: bool,
+) -> DiagnosticCheck {
+    let label = "fleet MCP server".to_string();
+    match fleet_bin {
+        Some(bin) => DiagnosticCheck {
+            id: id::FLEET_MCP_SERVER.into(),
+            label,
+            status: CheckStatus::Pass,
+            detail: format!("Fleet sessions get the fleet MCP server → {bin}"),
+            fix_action: None,
+        },
+        None if globally_registered => DiagnosticCheck {
+            id: id::FLEET_MCP_SERVER.into(),
+            label,
+            status: CheckStatus::Pass,
+            detail: "Fleet sessions get the fleet MCP server from ~/.claude.json".into(),
+            fix_action: None,
+        },
+        None => DiagnosticCheck {
+            id: id::FLEET_MCP_SERVER.into(),
+            label,
             status: CheckStatus::Fail,
-            detail: "~/.claude.json has no mcpServers.fleet entry — \
-                 the fleet__ask MCP tool will be invisible to Claude Code"
+            detail: "No fleet binary found next to this Fleet — sessions start without the \
+                 fleet MCP server, so fleet__ask is invisible to Claude Code"
                 .into(),
-            fix_action: Some(FixAction::EnableMcpInjector),
+            fix_action: None,
         },
     }
 }
@@ -281,58 +223,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_md_sentinel_installed_passes_no_fix() {
-        let c = check_claude_md_sentinel(true);
-        assert_eq!(c.id, id::CLAUDE_MD_SENTINEL);
+    fn interaction_mode_on_passes_no_fix() {
+        let c = check_interaction_mode(true);
+        assert_eq!(c.id, id::INTERACTION_MODE);
         assert_eq!(c.status, CheckStatus::Pass);
         assert!(c.fix_action.is_none());
     }
 
     #[test]
-    fn claude_md_sentinel_missing_fails_with_reinstall_fix() {
-        let c = check_claude_md_sentinel(false);
+    fn interaction_mode_off_fails_with_reinstall_fix() {
+        let c = check_interaction_mode(false);
         assert_eq!(c.status, CheckStatus::Fail);
         assert_eq!(c.fix_action, Some(FixAction::ReinstallInteractionMode));
-        assert!(c.detail.contains("CLAUDE.md"));
     }
 
     #[test]
-    fn guidance_file_present_passes() {
-        let c = check_guidance_file(Some("# Fleet Interaction Mode...".to_string()));
-        assert_eq!(c.status, CheckStatus::Pass);
-        assert!(c.detail.contains("bytes"));
-        assert!(c.fix_action.is_none());
-    }
-
-    #[test]
-    fn guidance_file_empty_fails_with_reinstall_fix() {
-        let c = check_guidance_file(Some("   \n  ".to_string()));
-        assert_eq!(c.status, CheckStatus::Fail);
-        assert_eq!(c.fix_action, Some(FixAction::ReinstallInteractionMode));
-        assert!(c.detail.contains("empty"));
-    }
-
-    #[test]
-    fn guidance_file_missing_fails_with_reinstall_fix() {
-        let c = check_guidance_file(None);
-        assert_eq!(c.status, CheckStatus::Fail);
-        assert_eq!(c.fix_action, Some(FixAction::ReinstallInteractionMode));
-        assert!(c.detail.contains("does not exist"));
-    }
-
-    #[test]
-    fn elicitation_hook_installed_passes() {
+    fn elicitation_hook_on_passes() {
         let c = check_elicitation_hook(true);
         assert_eq!(c.status, CheckStatus::Pass);
         assert!(c.fix_action.is_none());
     }
 
     #[test]
-    fn elicitation_hook_missing_fails_with_enable_fix() {
+    fn elicitation_hook_off_fails_with_enable_fix() {
         let c = check_elicitation_hook(false);
         assert_eq!(c.status, CheckStatus::Fail);
         assert_eq!(c.fix_action, Some(FixAction::EnableElicitationHook));
-        assert!(c.detail.contains("settings.json"));
     }
 
     #[test]
@@ -404,76 +320,23 @@ mod tests {
     }
 
     #[test]
-    fn mcp_injection_present_and_executable_passes() {
-        // Use the test binary itself as a stand-in "command" — guaranteed
-        // to exist on disk regardless of CI environment.
-        let exe = std::env::current_exe().unwrap();
-        let c = check_mcp_injection(Some(exe.to_string_lossy().to_string()));
-        assert_eq!(c.id, id::MCP_INJECTION);
+    fn fleet_mcp_server_passes_with_a_binary() {
+        let c = check_fleet_mcp_server(Some("/opt/fleet/bin/fleet".into()), false);
+        assert_eq!(c.id, id::FLEET_MCP_SERVER);
         assert_eq!(c.status, CheckStatus::Pass);
+        assert!(c.detail.contains("/opt/fleet/bin/fleet"));
+    }
+
+    #[test]
+    fn fleet_mcp_server_passes_on_an_older_global_registration() {
+        let c = check_fleet_mcp_server(None, true);
+        assert_eq!(c.status, CheckStatus::Pass);
+    }
+
+    #[test]
+    fn fleet_mcp_server_fails_without_a_binary_and_has_no_fix() {
+        let c = check_fleet_mcp_server(None, false);
+        assert_eq!(c.status, CheckStatus::Fail);
         assert!(c.fix_action.is_none());
-        assert!(c.detail.contains("registered"));
-    }
-
-    #[test]
-    fn mcp_injection_missing_entry_fails_with_enable_fix() {
-        let c = check_mcp_injection(None);
-        assert_eq!(c.status, CheckStatus::Fail);
-        assert_eq!(c.fix_action, Some(FixAction::EnableMcpInjector));
-        assert!(c.detail.contains("no mcpServers.fleet"));
-    }
-
-    #[test]
-    fn mcp_injection_empty_command_fails_with_enable_fix() {
-        let c = check_mcp_injection(Some("".to_string()));
-        assert_eq!(c.status, CheckStatus::Fail);
-        assert_eq!(c.fix_action, Some(FixAction::EnableMcpInjector));
-    }
-
-    #[test]
-    fn mcp_injection_pointing_at_missing_path_fails_with_enable_fix() {
-        let c = check_mcp_injection(Some(
-            "/tmp/this-binary-definitely-does-not-exist-xyz123".into(),
-        ));
-        assert_eq!(c.status, CheckStatus::Fail);
-        assert_eq!(c.fix_action, Some(FixAction::EnableMcpInjector));
-        assert!(c.detail.contains("no executable found"));
-    }
-
-    #[test]
-    fn enable_mcp_injector_serialises_snake_case() {
-        let c = check_mcp_injection(None);
-        let json = serde_json::to_string(&c).unwrap();
-        assert!(
-            json.contains("\"fixAction\":\"enable_mcp_injector\""),
-            "frontend expects snake_case tag: {json}"
-        );
-    }
-
-    #[test]
-    fn serialized_check_uses_camel_case_for_fix_action() {
-        let c = check_claude_md_sentinel(false);
-        let json = serde_json::to_string(&c).unwrap();
-        assert!(
-            json.contains("\"fixAction\":\"reinstall_interaction_mode\""),
-            "frontend expects camelCase field name + snake_case enum tag: {json}"
-        );
-    }
-
-    #[test]
-    fn serialized_check_omits_fix_action_when_none() {
-        let c = check_claude_md_sentinel(true);
-        let json = serde_json::to_string(&c).unwrap();
-        assert!(
-            !json.contains("fixAction"),
-            "no fixAction key should appear for a Pass result: {json}"
-        );
-    }
-
-    #[test]
-    fn check_status_serializes_lowercase() {
-        let c = check_claude_md_sentinel(true);
-        let json = serde_json::to_string(&c).unwrap();
-        assert!(json.contains("\"status\":\"pass\""));
     }
 }

@@ -6,7 +6,7 @@
 //! `~/.claude/settings.json` any more, so a claude the user starts by hand runs
 //! without them. The `apply_*` / `remove_*` functions only flip the feature's
 //! switch in [`crate::control_plane_prefs`]. What still reads the global file
-//! is detection of hooks an older Fleet wrote there ([`plan_hook_setup`]) and
+//! is detection of hooks an older Fleet wrote there ([`global_hook_setup`]) and
 //! the one-off scope migration that takes them back out.
 
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ const FLEET_HOOK_COMMAND: &str = r#"sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'"#;
 /// for. `is_fleet_group` never matched it (it only recognizes the current
 /// `.fleet/hooks.jsonl` path), so once we migrated the write target that group
 /// lingered in settings.json — appended to on every event with no truncation,
-/// seen at 5.3 GB in the wild. `purge_legacy_event_hooks` deletes it on sync.
+/// seen at 5.3 GB in the wild. The scope migration strips it with the rest.
 const LEGACY_EVENTS_HOOK_SUBSTR: &str = ".claude/fleet/hooks.jsonl";
 
 // Fleet hook groups are identified structurally by
@@ -168,20 +168,49 @@ pub fn append_hook_event(reader: &mut impl std::io::Read) -> Result<(), String> 
     writeln!(f, "{line}").map_err(|e| format!("append {}: {e}", path.display()))
 }
 
-fn fleet_dir() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".fleet"))
-}
-
 // ── Plan (dry-run) ───────────────────────────────────────────────────────────
 
-/// Inspect settings.json and report what changes are needed.
-pub fn plan_hook_setup() -> HookSetupPlan {
-    let settings = read_settings().unwrap_or_else(|| json!({}));
-
-    let hooks_disabled = settings
+/// Whether the user's global settings set `disableAllHooks`, which silences
+/// the hooks a launch's `--settings` carries as well.
+fn hooks_globally_disabled(settings: &Value) -> bool {
+    settings
         .get("disableAllHooks")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
+
+/// The feature switches as the settings panel shows them: what the sessions
+/// Fleet starts get, read from [`crate::control_plane_prefs`]. The event-log
+/// group rides on every launch, so it always reads as installed.
+pub fn plan_hook_setup() -> HookSetupPlan {
+    use crate::control_plane_prefs::{is_enabled, Feature};
+    let settings = read_settings().unwrap_or_else(|| json!({}));
+    HookSetupPlan {
+        to_add: Vec::new(),
+        hooks_globally_disabled: hooks_globally_disabled(&settings),
+        already_installed: true,
+        guard_installed: is_enabled(Feature::GuardHook),
+        elicitation_installed: is_enabled(Feature::ElicitationHook),
+        plan_approval_installed: is_enabled(Feature::PlanApprovalHook),
+        interaction_mode_installed: is_enabled(Feature::InteractionMode),
+        prd_context_installed: is_enabled(Feature::PrdContextHook),
+        notes_hint_installed: is_enabled(Feature::PrdContextHook),
+        prd_discipline_installed: is_enabled(Feature::PrdDiscipline),
+        wiki_guidance_installed: is_enabled(Feature::WikiGuidance),
+        model_guidance_installed: is_enabled(Feature::ModelGuidance),
+        session_title_guidance_installed: is_enabled(Feature::SessionTitleGuidance),
+        idle_hooks_installed: is_enabled(Feature::IdleHooks),
+        wakeup_guard_installed: is_enabled(Feature::WakeupGuardHook),
+    }
+}
+
+/// What an older Fleet left in the user's global `~/.claude` config, read off
+/// `settings.json` and the `CLAUDE.md` imports. [`crate::claude_launch`] skips
+/// whatever this finds (so nothing fires twice) and the scope migration strips
+/// it; the settings panel wants [`plan_hook_setup`] instead.
+pub fn global_hook_setup() -> HookSetupPlan {
+    let settings = read_settings().unwrap_or_else(|| json!({}));
+    let hooks_disabled = hooks_globally_disabled(&settings);
 
     let hooks_obj = settings
         .get("hooks")
@@ -230,84 +259,6 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         idle_hooks_installed,
         wakeup_guard_installed,
     }
-}
-
-// ── Apply ────────────────────────────────────────────────────────────────────
-
-/// Kept for the settings panel's "install hooks" button: the event-log group
-/// has no switch — every Fleet launch carries it — so all that is left to do
-/// is make sure `~/.fleet/`, where the events land, exists.
-pub fn apply_hook_setup() -> Result<(), String> {
-    if let Some(dir) = fleet_dir() {
-        fs::create_dir_all(&dir).map_err(|e| format!("create fleet dir: {e}"))?;
-    }
-    Ok(())
-}
-
-/// Remove the event-log hook groups an older Fleet wrote into the global
-/// settings.json.
-pub fn remove_fleet_hooks() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    for &event in FLEET_HOOK_EVENTS {
-        if let Some(arr) = hooks_obj.get_mut(event).and_then(|v| v.as_array_mut()) {
-            arr.retain(|group| !is_fleet_group(group));
-            if arr.is_empty() {
-                hooks_obj.remove(event);
-            }
-        }
-    }
-
-    // Uninstall should leave nothing of ours behind, including any legacy
-    // event-log group from a pre-`~/.fleet` build.
-    purge_legacy_event_hooks(hooks_obj);
-
-    // Remove "hooks" key entirely if empty.
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove every hook group that appends to the legacy
-/// `~/.claude/fleet/hooks.jsonl` path from all event arrays, dropping any event
-/// array left empty. Pure over the `hooks` object so it can be unit-tested
-/// without touching settings.json.
-fn purge_legacy_event_hooks(hooks_obj: &mut Map<String, Value>) {
-    let events: Vec<String> = hooks_obj.keys().cloned().collect();
-    for event in events {
-        let Some(arr) = hooks_obj.get_mut(&event).and_then(|v| v.as_array_mut()) else {
-            continue;
-        };
-        arr.retain(|group| !group_targets_legacy_events_file(group));
-        if arr.is_empty() {
-            hooks_obj.remove(&event);
-        }
-    }
-}
-
-/// Whether a hook group appends to the legacy `~/.claude/fleet/hooks.jsonl`
-/// path (installed by an older build, no longer recognized by `is_fleet_group`).
-fn group_targets_legacy_events_file(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(LEGACY_EVENTS_HOOK_SUBSTR))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
 }
 
 // ── Guard hook (synchronous interception) ────────────────────────────────────
@@ -630,7 +581,7 @@ pub(crate) fn strip_all_fleet_hooks() -> Result<usize, String> {
 
 /// Whether any one hook group of `feature` is in the global `settings.json`.
 ///
-/// Looser than [`plan_hook_setup`], which wants *every* group of a feature
+/// Looser than [`global_hook_setup`], which wants *every* group of a feature
 /// before it reads as installed. The scope migration asks what the user meant
 /// before it strips the hooks, and a host whose Fleet predates one companion
 /// group (say `ctx-reminder`) still meant the feature to be on.
@@ -2198,21 +2149,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_group_is_not_recognized_as_current_fleet_group() {
-        // The whole reason it lingered: is_fleet_group only matches the
-        // `.fleet/hooks.jsonl` path, and `.claude/fleet/hooks.jsonl` does not
-        // contain that substring (the `f` is preceded by `/`, not `.`).
-        let legacy = legacy_events_group();
-        assert!(!is_fleet_group(&legacy));
-        assert!(group_targets_legacy_events_file(&legacy));
-        assert!(!group_targets_legacy_events_file(&fleet_hook_group()));
-    }
-
-    #[test]
-    fn purge_drops_legacy_groups_but_keeps_others() {
+    fn migration_strips_legacy_event_groups_but_keeps_others() {
         let mut hooks: Map<String, Value> = Map::new();
-        // PostToolUse hosts the legacy group alongside the current one and an
-        // unrelated third-party group — only the legacy one must go.
         let unrelated = json!({
             "hooks": [{ "type": "command", "command": "echo hi" }]
         });
@@ -2223,15 +2161,9 @@ mod tests {
         // Stop hosts ONLY the legacy group — the emptied array must be removed.
         hooks.insert("Stop".into(), json!([legacy_events_group()]));
 
-        purge_legacy_event_hooks(&mut hooks);
+        strip_fleet_hooks_in(&mut hooks);
 
-        let post = hooks.get("PostToolUse").unwrap().as_array().unwrap();
-        assert_eq!(post.len(), 2, "legacy dropped, current + unrelated kept");
-        assert!(post.iter().any(is_fleet_group));
-        assert!(post
-            .iter()
-            .any(|g| !is_fleet_group(g) && !group_targets_legacy_events_file(g)));
-        assert!(!post.iter().any(group_targets_legacy_events_file));
+        assert_eq!(hooks.get("PostToolUse"), Some(&json!([unrelated])));
         assert!(!hooks.contains_key("Stop"), "emptied event array removed");
     }
 

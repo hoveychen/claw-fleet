@@ -20,30 +20,6 @@ pub(crate) fn route_hooks_plan(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
-pub(crate) fn route_apply_hooks(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    match hooks::apply_hook_setup() {
-        Ok(()) => {
-            let _ = request.respond(
-                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
-            );
-        }
-        Err(e) => {
-            let body = serde_json::json!({"error": e}).to_string();
-            let _ = request.respond(
-                tiny_http::Response::from_string(body)
-                    .with_status_code(500)
-                    .with_header(json_header),
-            );
-        }
-    }
-}
-
 pub(crate) fn route_sources_config(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -162,29 +138,5 @@ pub(crate) fn route_claude_binary_override(
         let cfg = crate::claude_binary::ClaudeBinaryConfig::load();
         let body = serde_json::json!({ "path": cfg.override_path }).to_string();
         let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
-    }
-}
-
-pub(crate) fn route_remove_hooks(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    match hooks::remove_fleet_hooks() {
-        Ok(()) => {
-            let _ = request.respond(
-                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
-            );
-        }
-        Err(e) => {
-            let body = serde_json::json!({"error": e}).to_string();
-            let _ = request.respond(
-                tiny_http::Response::from_string(body)
-                    .with_status_code(500)
-                    .with_header(json_header),
-            );
-        }
     }
 }
