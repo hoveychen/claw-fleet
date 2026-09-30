@@ -118,10 +118,6 @@ impl AgentSource for ClaudeCodeSource {
         crate::session::kill_pid_impl(pid)
     }
 
-    fn kill_workspace(&self, workspace_path: &str) -> Result<(), String> {
-        crate::session::kill_workspace_impl(workspace_path)
-    }
-
     fn list_memories(&self) -> Vec<WorkspaceMemory> {
         crate::memory::scan_all_memories()
     }

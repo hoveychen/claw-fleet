@@ -446,8 +446,6 @@ const DICT: Record<string, string> = {
   "{0} 小时前": "{0} h ago",
   "{0} 天前": "{0} d ago",
   "确定停止「{0}」的这个会话吗？": "Stop this session in \"{0}\"?",
-  "无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？":
-    "Cannot pinpoint the process — this stops ALL sessions under \"{0}\". Continue?",
   操作失败: "Operation failed",
   中断当前回合: "Interrupt this turn",
   停止这个会话: "Stop this session",

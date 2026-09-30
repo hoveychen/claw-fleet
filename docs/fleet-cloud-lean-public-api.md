@@ -104,7 +104,6 @@ curl -H "$H" "$B/cloud_usage"
 | `POST /cancel_pending_message` | 取消待发消息 |
 | `POST /interrupt` | 中断（可恢复） |
 | `POST /stop` | 停止会话 |
-| `POST /stop_workspace` | 停止该 workspace 下全部 agent |
 
 ### 答决策卡（六类，pending + respond）
 `guard` / `elicitation` / `fleet-ask` / `plan-approval` / `permission-prompt` / `a2ui-render`，各有 `GET /<type>/pending` 与 `POST /<type>/respond`；`elicitation` 另有 `POST /elicitation/upload`。

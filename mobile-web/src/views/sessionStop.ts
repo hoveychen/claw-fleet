@@ -55,18 +55,7 @@ export async function runStop(
     await transport.request("interrupt", { pid: s.pid });
     return true;
   }
-  if (s.pidPrecise) {
-    if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return false;
-    await transport.request("stop", { pid: s.pid });
-    return true;
-  }
-  if (
-    !(await confirm(
-      t("无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？", s.workspaceName),
-    ))
-  ) {
-    return false;
-  }
-  await transport.request("stop_workspace", { workspacePath: s.workspacePath });
+  if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return false;
+  await transport.request("stop", { pid: s.pid });
   return true;
 }

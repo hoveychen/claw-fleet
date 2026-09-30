@@ -380,7 +380,6 @@ export class MockRelayClient extends RelayClient {
       // update is what we're exercising, not the desktop's side of it.
       case "session_mark":
       case "stop":
-      case "stop_workspace":
       case "interrupt":
       case "resume_session":
       case "cancel_pending_message":

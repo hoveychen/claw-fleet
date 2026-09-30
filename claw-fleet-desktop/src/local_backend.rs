@@ -2237,20 +2237,6 @@ impl LocalBackend {
         Ok(())
     }
 
-    pub fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
-        claw_fleet_core::session::kill_workspace_impl(&workspace_path)?;
-        // Trigger a rescan after a delay.
-        let app = self.app.clone();
-        let sessions = self.sessions.clone();
-        let sources = self.sources.clone();
-        let outcomes = self.session_outcomes.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(500));
-            rescan_and_emit(&sources, &app, &sessions, &outcomes);
-        });
-        Ok(())
-    }
-
     pub fn resume_session(
         &self,
         session_id: String,

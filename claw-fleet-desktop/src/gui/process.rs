@@ -29,14 +29,6 @@ pub(crate) fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Resul
 }
 
 #[tauri::command(async)]
-pub(crate) fn kill_workspace_sessions(
-    workspace_path: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    state.backend.kill_workspace(workspace_path)
-}
-
-#[tauri::command(async)]
 pub(crate) fn resume_rate_limited_session(
     session_id: String,
     workspace_path: String,

@@ -1032,7 +1032,6 @@
   "unstick_session": "Unstick: interrupt the wedged tool call (session stays resumable)",
   "stop_spent": "Session has ended — no process left to stop",
   "stop_session": "Stop session (kill process tree)",
-  "stop_session_imprecise": "Stop all sessions in this workspace (imprecise PID match — multiple agent processes share this workspace)",
   "cancel": "Cancel",
   "confirm": "Confirm",
   "save": "Save",
@@ -1069,7 +1068,6 @@
     "later": "Later"
   },
   "stop_confirm": "Stop session in {{name}}?",
-  "stop_imprecise_confirm": "Multiple agent processes share workspace \"{{workspace}}\" and cannot be individually targeted.\n\nThis will stop ALL agents in this workspace. Continue?",
   "card": {
     "tip_main": "Main agent session",
     "tip_subagent": "Subagent",

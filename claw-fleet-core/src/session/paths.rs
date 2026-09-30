@@ -779,8 +779,7 @@ pub(crate) fn encode_workspace_path(path: &str) -> String {
 /// `decode_walk`) always joins with `/` (e.g. `C:/code/proj`), while a live
 /// process cwd from sysinfo comes back with native `\` separators
 /// (`C:\code\proj`). A plain `==` therefore never matches a Fleet-spawned
-/// session's process on Windows — liveness reads dead and workspace kills
-/// find nothing. Separators are folded on every platform (both comparands are
+/// session's process on Windows. Separators are folded on every platform (both comparands are
 /// directory paths from the OS or our own decode, so a literal `\` inside a
 /// unix file name colliding with a real `/` boundary is not a practical
 /// concern); case is folded only where the filesystem is case-insensitive

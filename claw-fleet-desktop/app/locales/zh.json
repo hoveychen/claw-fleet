@@ -1029,7 +1029,6 @@
   "unstick_session": "解卡：中断卡死的工具调用（会话保留，可恢复）",
   "stop_spent": "会话已结束，没有可停止的进程",
   "stop_session": "停止会话（清除进程树）",
-  "stop_session_imprecise": "停止该 workspace 下的所有会话（无法精确匹配 PID —— 该 workspace 有多个 Agent 进程）",
   "cancel": "取消",
   "confirm": "确认",
   "save": "保存",
@@ -1066,7 +1065,6 @@
     "later": "稍后"
   },
   "stop_confirm": "停止 {{name}} 中的会话？",
-  "stop_imprecise_confirm": "workspace「{{workspace}}」中存在多个 Agent 进程，无法单独定位。\n\n此操作将停止该 workspace 下的所有 Agent，确认继续？",
   "card": {
     "tip_main": "主进程会话",
     "tip_subagent": "子进程",

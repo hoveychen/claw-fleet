@@ -274,11 +274,6 @@ pub trait AgentSource: Send + Sync {
         Err(format!("{}: kill_pid not supported", self.name()))
     }
 
-    /// Kill all processes in a workspace.
-    fn kill_workspace(&self, _workspace_path: &str) -> Result<(), String> {
-        Err(format!("{}: kill_workspace not supported", self.name()))
-    }
-
     /// Launch a brand-new headless session for this source. Default is "not
     /// supported"; sources that can be Fleet-launched (Claude, Codex) override.
     fn spawn(

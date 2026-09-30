@@ -229,38 +229,6 @@ pub(crate) fn route_stop(
     }
 }
 
-pub(crate) fn route_stop_workspace(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    let path_param = query
-        .get("path")
-        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-        .unwrap_or_default();
-    if path_param.is_empty() {
-        let _ = request.respond(tiny_http::Response::empty(400));
-        return;
-    }
-    match crate::session::kill_workspace_impl(&path_param) {
-        Ok(()) => {
-            let _ = request.respond(
-                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
-            );
-        }
-        Err(e) => {
-            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
-            let _ = request.respond(
-                tiny_http::Response::from_string(body)
-                    .with_status_code(500)
-                    .with_header(json_header),
-            );
-        }
-    }
-}
-
 pub(crate) fn route_sources_prefix(
     ctx: &ServeCtx,
     request: tiny_http::Request,

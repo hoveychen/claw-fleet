@@ -1652,7 +1652,6 @@ pub fn run() {
             interrupt_session,
             interrupt_agent_session,
             kill_session,
-            kill_workspace_sessions,
             resume_rate_limited_session,
             enqueue_session_message,
             cancel_session_pending_message,
