@@ -59,6 +59,12 @@ fn unique_tempdir(label: &str) -> PathBuf {
         nanos
     ));
     std::fs::create_dir_all(&dir).expect("create tempdir");
+    // Only sessions Fleet started are listed: give the fixture's one a
+    // launch note, as a Fleet spawn would.
+    let notes = dir.join(".fleet").join("launch-spec");
+    std::fs::create_dir_all(&notes).expect("create launch-spec dir");
+    std::fs::write(notes.join("session-fake-slow.json"), r#"{"source":"dsh"}"#)
+        .expect("write launch note");
     dir
 }
 

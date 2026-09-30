@@ -3629,6 +3629,9 @@ mod tests {
             Some(SystemTime::now() - Duration::from_secs(30 * 24 * 3600)),
         );
 
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        register_claude(live_id, &projects.join(&live_encoded));
+        register_claude(gone_id, &projects.join(&gone_encoded));
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -3687,6 +3690,8 @@ mod tests {
         let us_id = "33333333-3333-3333-3333-333333333333";
         write_session(&projects.join(&us_encoded), us_id);
 
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        register_claude(us_id, &projects.join(&us_encoded));
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -3764,6 +3769,9 @@ mod tests {
             SystemTime::now() - Duration::from_secs(30 * 24 * 3600),
         );
 
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        register_claude(live_id, &gone_dir);
+        register_claude(zombie_id, &gone_dir);
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -3777,6 +3785,80 @@ mod tests {
         assert!(
             !ids.contains(&zombie_id),
             "a long-dead transcript of a removed worktree must stay hidden: {ids:?}"
+        );
+    }
+
+    /// Note a Claude session in the launch registry the way a Fleet spawn
+    /// does, with its transcript at `<proj_dir>/<id>.jsonl`.
+    fn register_claude(id: &str, proj_dir: &std::path::Path) {
+        let transcript = proj_dir.join(format!("{id}.jsonl"));
+        crate::launch_spec::note_spawn(
+            id,
+            crate::launch_spec::Spawn {
+                source: "claude",
+                kind: crate::launch_spec::SpawnKind::New,
+                workspace: "",
+                pid: None,
+                parent: None,
+                transcript: Some(&transcript.to_string_lossy()),
+            },
+        );
+    }
+
+    /// The point of the launch registry: a `claude` the user opened by hand
+    /// writes a transcript like any other, but has no note, so the scan never
+    /// lists it. A Fleet session's subagents are listed with it although they
+    /// have no note of their own.
+    #[test]
+    fn scan_lists_only_registered_sessions_and_their_subagents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_dir = tmp.path().join("claude_home");
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let proj = claude_dir
+            .join("projects")
+            .join(super::paths::encode_workspace_path(&ws.to_string_lossy()));
+        let line = json!({
+            "type": "user",
+            "message": {"role": "user", "content": "hi"},
+            "timestamp": "2026-09-30T00:00:00.000Z"
+        });
+        let fleet_id = "66666666-6666-6666-6666-666666666666";
+        let hand_id = "77777777-7777-7777-7777-777777777777";
+        let sub_dir = proj.join(fleet_id).join("subagents");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::create_dir_all(proj.join(hand_id).join("subagents")).unwrap();
+        for p in [
+            proj.join(format!("{fleet_id}.jsonl")),
+            proj.join(format!("{hand_id}.jsonl")),
+            sub_dir.join("agent-a1.jsonl"),
+            proj.join(hand_id).join("subagents").join("agent-b1.jsonl"),
+        ] {
+            fs::write(&p, format!("{line}\n")).unwrap();
+        }
+
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        // Registered with only a workspace: the transcript is found from it
+        // and written back to the note.
+        crate::launch_spec::note_spawn(
+            fleet_id,
+            crate::launch_spec::Spawn {
+                source: "claude",
+                kind: crate::launch_spec::SpawnKind::New,
+                workspace: &ws.to_string_lossy(),
+                pid: None,
+                parent: None,
+                transcript: None,
+            },
+        );
+        let sessions = scan_claude_sessions(&claude_dir, &ScanCache::new());
+        let mut ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec![fleet_id, "agent-a1"], "only the Fleet session and its subagent");
+        assert_eq!(
+            crate::launch_spec::get(fleet_id).and_then(|s| s.transcript),
+            Some(proj.join(format!("{fleet_id}.jsonl")).to_string_lossy().into_owned()),
+            "the transcript a scan found is written back to the note"
         );
     }
 }

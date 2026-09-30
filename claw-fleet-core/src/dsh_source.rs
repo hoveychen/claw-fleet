@@ -1275,6 +1275,25 @@ impl AgentSource for DshSource {
                         }
                         infos.push(info);
                     }
+                    // Only the sessions Fleet started are listed (see
+                    // `launch_spec::registry`) — and filtered before the spend
+                    // refresh, which would otherwise spend RPCs on the rest.
+                    // `roster_updated` is filtered alongside to stay aligned.
+                    let registry = crate::launch_spec::registry();
+                    let mut kept = infos.clone();
+                    crate::launch_spec::retain_registered(&mut kept, &registry);
+                    let kept: std::collections::HashSet<String> =
+                        kept.into_iter().map(|s| s.id).collect();
+                    let (mut infos, roster_updated): (Vec<SessionInfo>, Vec<i64>) = infos
+                        .into_iter()
+                        .zip(roster_updated)
+                        .filter(|(info, _)| kept.contains(&info.id))
+                        .unzip();
+                    for info in &infos {
+                        if registry.get(&info.id).is_some_and(|s| s.workspace.is_none()) {
+                            crate::launch_spec::note_workspace(&info.id, &info.workspace_path);
+                        }
+                    }
                     refresh_one_stale_spend(&mut infos, &roster_updated, &spend);
                     overlay_speed(&mut infos);
                     infos

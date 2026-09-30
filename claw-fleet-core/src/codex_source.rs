@@ -7138,12 +7138,15 @@ impl AgentSource for CodexSource {
             guard.1.clone()
         };
 
+        // Only the threads Fleet started are listed; see `launch_spec::registry`.
+        let registry = crate::launch_spec::registry();
         // Try SQLite first (fast path).
-        let sessions = match self.scan_from_sqlite(&codex_processes) {
+        let mut sessions = match self.scan_from_sqlite(&codex_processes, &registry) {
             Some(sessions) => sessions,
             // Fallback: filesystem scan.
             None => self.scan_from_filesystem(&codex_processes),
         };
+        crate::launch_spec::retain_registered(&mut sessions, &registry);
         drop_internal_threads(sessions)
     }
 
@@ -8138,11 +8141,40 @@ fn query_codex_rate_limits(child: &mut std::process::Child) -> Result<CodexUsage
 
 impl CodexSource {
     /// Scan sessions using SQLite metadata (fast path).
-    fn scan_from_sqlite(&self, codex_processes: &[CodexProcess]) -> Option<Vec<SessionInfo>> {
+    fn scan_from_sqlite(
+        &self,
+        codex_processes: &[CodexProcess],
+        registry: &std::collections::HashMap<String, crate::launch_spec::LaunchSpec>,
+    ) -> Option<Vec<SessionInfo>> {
         let threads = read_threads_from_sqlite()?;
 
+        // Skip threads Fleet did not start before building them: a thread is
+        // kept when it has a note or descends from one that does (subagents).
+        let parents: std::collections::HashMap<&str, Option<String>> = threads
+            .iter()
+            .map(|t| (t.id.as_str(), parse_source(&t.source).parent_thread_id))
+            .collect();
+        let registered = |id: &str| {
+            let mut cur = Some(id.to_string());
+            for _ in 0..16 {
+                let Some(c) = cur else { return false };
+                if registry.contains_key(&c) {
+                    return true;
+                }
+                cur = parents.get(c.as_str()).cloned().flatten();
+            }
+            false
+        };
+
         let mut sessions = Vec::new();
-        for thread in &threads {
+        for thread in threads.iter().filter(|t| registered(&t.id)) {
+            if let Some(spec) = registry.get(&thread.id) {
+                if !thread.rollout_path.is_empty()
+                    && spec.transcript.as_deref() != Some(thread.rollout_path.as_str())
+                {
+                    crate::launch_spec::note_transcript(&thread.id, &thread.rollout_path);
+                }
+            }
             if let Some(info) = build_session_from_sqlite(thread, codex_processes) {
                 sessions.push(info);
             }

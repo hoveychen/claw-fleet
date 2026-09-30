@@ -575,6 +575,14 @@ impl LocalBackend {
                             if !all_trigger_exts.contains(ext) {
                                 continue;
                             }
+                            // Only Fleet's own sessions are listed, so a
+                            // transcript no launch note claims is not worth a
+                            // rescan (a `claude` the user runs by hand).
+                            if matches!(ext, "jsonl" | "zst")
+                                && !claw_fleet_core::launch_spec::transcript_path_is_registered(path)
+                            {
+                                continue;
+                            }
 
                             // Mark only the source(s) whose watch dirs contain this path.
                             for (idx, dirs) in &source_watch_dirs {

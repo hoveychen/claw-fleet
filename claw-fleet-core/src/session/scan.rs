@@ -299,6 +299,83 @@ fn touched_within_keep_window(path: &Path) -> bool {
     now_ms.saturating_sub(modified_ms) <= MISSING_WS_KEEP_MS
 }
 
+/// A registered Claude session whose transcript was found.
+struct RegisteredTranscript {
+    id: String,
+    transcript: PathBuf,
+    workspace: Option<String>,
+}
+
+/// How long after a spawn a note with no transcript on record is still worth
+/// searching every project dir for. Past that, the spawn never wrote one.
+const TRANSCRIPT_SEARCH_WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// The transcripts of every Claude session in the launch registry, grouped by
+/// project dir.
+///
+/// A note's stored transcript is trusted when the file exists; one that is
+/// gone was cleaned up and is not looked for again. A note with none on record
+/// is resolved from its workspace (`projects/<encoded>/<id>.jsonl`), and, while
+/// the spawn is recent, by searching the project dirs — the encoding of a
+/// long workspace path is a hash only Claude Code knows. A found path is
+/// written back so the next scan is a single `stat`.
+fn registered_claude_transcripts(
+    projects_dir: &Path,
+) -> std::collections::BTreeMap<PathBuf, Vec<RegisteredTranscript>> {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let name_of = |id: &str| format!("{id}.jsonl");
+    let mut groups: std::collections::BTreeMap<PathBuf, Vec<RegisteredTranscript>> =
+        Default::default();
+    for (id, spec) in crate::launch_spec::registry() {
+        if spec.source.as_deref() != Some("claude") {
+            continue;
+        }
+        let found = match spec.transcript.as_deref() {
+            Some(stored) => Some(PathBuf::from(stored)).filter(|p| p.is_file()),
+            None => {
+                let guessed = spec
+                    .workspace
+                    .as_deref()
+                    .map(|w| projects_dir.join(encode_workspace_path(w)).join(name_of(&id)))
+                    .filter(|p| p.is_file());
+                let recent = spec
+                    .last_spawn_at_ms
+                    .is_some_and(|t| now_ms.saturating_sub(t) <= TRANSCRIPT_SEARCH_WINDOW_MS);
+                let found = guessed.or_else(|| {
+                    recent
+                        .then(|| {
+                            fs::read_dir(projects_dir)
+                                .ok()?
+                                .flatten()
+                                .map(|e| e.path().join(name_of(&id)))
+                                .find(|p| p.is_file())
+                        })
+                        .flatten()
+                });
+                if let Some(p) = &found {
+                    crate::launch_spec::note_transcript(&id, &p.to_string_lossy());
+                }
+                found
+            }
+        };
+        let Some(transcript) = found else {
+            continue;
+        };
+        let Some(dir) = transcript.parent().map(Path::to_path_buf) else {
+            continue;
+        };
+        groups.entry(dir).or_default().push(RegisteredTranscript {
+            id,
+            transcript,
+            workspace: spec.workspace,
+        });
+    }
+    groups
+}
+
 pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     let ide_sessions = scan_ide_sessions(claude_dir);
@@ -322,18 +399,15 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     let hook_states = &hook_snapshot.states;
     let session_cache_snapshot = scan_cache.session_cache.lock().unwrap().clone();
 
+    // Only the sessions Fleet started are listed: walk the launch registry,
+    // not `projects/`. A `claude` the user opened by hand has no note and is
+    // never read.
     let projects_dir = claude_dir.join("projects");
-    let Ok(workspace_entries) = fs::read_dir(&projects_dir) else {
-        return sessions;
-    };
+    let groups = registered_claude_transcripts(&projects_dir);
     // Every slug below decodes against the filesystem; list each level once.
     let _sweep = super::paths::DecodeSweep::begin();
 
-    for workspace_entry in workspace_entries.flatten() {
-        let workspace_dir = workspace_entry.path();
-        if !workspace_dir.is_dir() {
-            continue;
-        }
+    for (workspace_dir, members) in groups {
 
         let encoded = workspace_dir
             .file_name()
@@ -363,6 +437,14 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     .find(|f| encode_workspace_path(f) == encoded)
             })
             .cloned()
+            // The workspace Fleet spawned in is exact; the decode is lossy.
+            .or_else(|| {
+                members
+                    .iter()
+                    .filter_map(|m| m.workspace.as_deref())
+                    .find(|w| encode_workspace_path(w) == encoded)
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| {
                 heal_workspace_path(&workspace_dir, decode_workspace_path(&encoded))
             });
@@ -398,12 +480,14 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             .cloned()
             .collect();
 
-        let Ok(entries) = fs::read_dir(&workspace_dir) else {
-            continue;
-        };
+        // Each registered session's transcript, then its subagent dir
+        // (`<id>/subagents/…`), which the loop below tells apart by kind.
+        let paths: Vec<PathBuf> = members
+            .iter()
+            .flat_map(|m| [m.transcript.clone(), workspace_dir.join(&m.id)])
+            .collect();
 
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in paths {
 
             // Workspace gone: keep only transcripts still being written to.
             if workspace_missing && !touched_within_keep_window(&path) {

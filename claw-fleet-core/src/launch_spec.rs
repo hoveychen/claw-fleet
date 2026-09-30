@@ -178,7 +178,15 @@ fn write(session_id: &str, spec: &LaunchSpec) {
     }
     match serde_json::to_string(spec) {
         Ok(json) => {
-            if let Err(e) = fs::write(&path, json) {
+            // Write-then-rename: every scan reads these notes, and one caught
+            // between `fs::write`'s truncate and its write parses as nothing —
+            // the session drops out of the registry for that scan.
+            static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let tmp = path.with_extension(format!("json.{}-{seq}.tmp", std::process::id()));
+            let res = fs::write(&tmp, json).and_then(|()| fs::rename(&tmp, &path));
+            if let Err(e) = res {
+                let _ = fs::remove_file(&tmp);
                 crate::log_debug(&format!("launch_spec: write {session_id}: {e}"));
             }
         }
@@ -243,6 +251,19 @@ pub fn note_transcript(session_id: &str, path: &str) {
     write(session_id, &spec);
 }
 
+/// Store the workspace a scan found for a note that lacked one (dsh notes
+/// written before [`note_spawn`] existed). Never overwrites a recorded one.
+pub fn note_workspace(session_id: &str, workspace: &str) {
+    let Some(mut spec) = get(session_id) else {
+        return;
+    };
+    if spec.workspace.is_some() || workspace.trim().is_empty() {
+        return;
+    }
+    spec.workspace = Some(workspace.to_string());
+    write(session_id, &spec);
+}
+
 /// Every note on disk, keyed by session id, in no particular order.
 pub fn all() -> Vec<(String, LaunchSpec)> {
     let Some(dir) = spec_dir() else {
@@ -260,6 +281,135 @@ pub fn all() -> Vec<(String, LaunchSpec)> {
             Some((id, spec))
         })
         .collect()
+}
+
+/// The sessions a scan lists: every note except forks, which are side
+/// questions rather than sessions of their own.
+///
+/// This is what every source's `scan_sessions` iterates, so it runs on every
+/// poll. Notes are re-read only when their file changed since the last call
+/// (keyed on mtime + length); an unchanged registry costs one `read_dir` and a
+/// `stat` per note.
+pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    type Cached = HashMap<String, (SystemTime, u64, LaunchSpec)>;
+    static CACHE: Mutex<Option<(PathBuf, Cached)>> = Mutex::new(None);
+
+    // Whichever process lists sessions first on a host fills in the notes
+    // written before `note_spawn` existed — the CLI may run before any desktop.
+    static BACKFILL: std::sync::Once = std::sync::Once::new();
+    BACKFILL.call_once(|| {
+        backfill_once();
+    });
+
+    let Some(dir) = spec_dir() else {
+        return HashMap::new();
+    };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return HashMap::new();
+    };
+    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    // A different directory (tests swap FLEET_HOME) invalidates everything.
+    if guard.as_ref().is_some_and(|(d, _)| *d != dir) {
+        *guard = None;
+    }
+    let old = guard.take().map(|(_, c)| c).unwrap_or_default();
+    let mut fresh: Cached = HashMap::with_capacity(old.len());
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Some(id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        let len = meta.len();
+        if let Some((m, l, spec)) = old.get(id) {
+            if *m == mtime && *l == len {
+                fresh.insert(id.to_string(), (mtime, len, spec.clone()));
+                continue;
+            }
+        }
+        let Some(spec) = fs::read_to_string(entry.path())
+            .ok()
+            .and_then(|s| serde_json::from_str::<LaunchSpec>(&s).ok())
+        else {
+            continue;
+        };
+        fresh.insert(id.to_string(), (mtime, len, spec));
+    }
+    let out = fresh
+        .iter()
+        .filter(|(_, (_, _, s))| s.kind.as_deref() != Some("fork"))
+        .map(|(id, (_, _, s))| (id.clone(), s.clone()))
+        .collect();
+    *guard = Some((dir, fresh));
+    out
+}
+
+/// Could the transcript at `path` belong to a session Fleet started? For the
+/// file watcher, so a `claude`/`codex` the user runs by hand does not trigger
+/// rescans. Cheap — one `stat` per candidate id, no registry read.
+///
+/// Candidates are every path component (a Claude subagent lives under
+/// `<session-id>/subagents/`), the file stem (`<session-id>.jsonl`) and the
+/// stem's trailing uuid (Codex's `rollout-<time>-<thread-id>.jsonl[.zst]`).
+pub fn transcript_path_is_registered(path: &std::path::Path) -> bool {
+    const UUID_LEN: usize = 36;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let stem = name
+        .strip_suffix(".zst")
+        .unwrap_or(name)
+        .strip_suffix(".jsonl")
+        .unwrap_or(name);
+    let tail = stem
+        .len()
+        .checked_sub(UUID_LEN)
+        .and_then(|i| stem.get(i..))
+        .unwrap_or(stem);
+    [stem, tail]
+        .into_iter()
+        .chain(
+            path.components()
+                .filter_map(|c| c.as_os_str().to_str())
+                .filter(|c| c.len() >= UUID_LEN),
+        )
+        .any(was_fleet_spawned)
+}
+
+/// Keep only the sessions Fleet started: those with a note in `registry`,
+/// plus every subagent whose parent chain reaches one of them (a subagent is
+/// spawned by the agent itself and never gets a note of its own).
+pub fn retain_registered(
+    sessions: &mut Vec<crate::session::SessionInfo>,
+    registry: &std::collections::HashMap<String, LaunchSpec>,
+) {
+    let mut kept: std::collections::HashSet<String> = sessions
+        .iter()
+        .filter(|s| registry.contains_key(&s.id))
+        .map(|s| s.id.clone())
+        .collect();
+    // Subagents can nest; widen until no parent adds a child.
+    loop {
+        let before = kept.len();
+        for s in sessions.iter() {
+            if let Some(parent) = &s.parent_session_id {
+                if kept.contains(parent) {
+                    kept.insert(s.id.clone());
+                }
+            }
+        }
+        if kept.len() == before {
+            break;
+        }
+    }
+    sessions.retain(|s| kept.contains(&s.id));
 }
 
 const BACKFILL_MARKER: &str = "launch-spec-backfill-v1.done";
@@ -750,5 +900,68 @@ mod tests {
         assert_eq!(get("d").unwrap().source.as_deref(), Some("dsh"));
         assert_eq!(get("k").unwrap().source, None);
         assert_eq!(get("n").unwrap().workspace.as_deref(), Some("/ws/new"));
+    }
+
+    /// Forks are side questions, not sessions: the registry leaves them out.
+    #[test]
+    fn registry_skips_forks_and_rereads_changed_notes() {
+        let _home = TmpHome::new("registry");
+        let spawn = |kind| Spawn {
+            source: "claude",
+            kind,
+            workspace: "/w",
+            pid: None,
+            parent: Some("p"),
+            transcript: None,
+        };
+        note_spawn("n1", spawn(SpawnKind::New));
+        note_spawn("f1", spawn(SpawnKind::Fork));
+        let reg = registry();
+        assert!(reg.contains_key("n1"));
+        assert!(!reg.contains_key("f1"));
+        assert_eq!(reg["n1"].transcript, None);
+        note_transcript("n1", "/w/n1.jsonl");
+        assert_eq!(registry()["n1"].transcript.as_deref(), Some("/w/n1.jsonl"));
+    }
+
+    #[test]
+    fn retain_registered_keeps_nested_subagents_of_registered_sessions() {
+        let _home = TmpHome::new("retain");
+        record("root", None, None);
+        let mk = |id: &str, parent: Option<&str>| crate::session::SessionInfo {
+            id: id.into(),
+            parent_session_id: parent.map(str::to_string),
+            ..Default::default()
+        };
+        let mut sessions = vec![
+            mk("child", Some("root")),
+            mk("grandchild", Some("child")),
+            mk("root", None),
+            mk("stranger", None),
+            mk("stranger-child", Some("stranger")),
+        ];
+        retain_registered(&mut sessions, &registry());
+        let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["child", "grandchild", "root"]);
+    }
+
+    #[test]
+    fn transcript_path_is_registered_recognises_claude_and_codex_layouts() {
+        let _home = TmpHome::new("watchgate");
+        let claude = "11111111-2222-3333-4444-555555555555";
+        let codex = "019a0000-aaaa-bbbb-cccc-dddddddddddd";
+        record(claude, None, None);
+        record(codex, None, None);
+        let yes = [
+            format!("/h/.claude/projects/-w/{claude}.jsonl"),
+            format!("/h/.claude/projects/-w/{claude}/subagents/agent-a1.jsonl"),
+            format!("/h/.codex/sessions/2026/09/30/rollout-2026-09-30T10-00-00-{codex}.jsonl"),
+            format!("/h/.codex/sessions/2026/09/30/rollout-2026-09-30T10-00-00-{codex}.jsonl.zst"),
+        ];
+        for p in &yes {
+            assert!(transcript_path_is_registered(std::path::Path::new(p)), "{p}");
+        }
+        let hand = "/h/.claude/projects/-w/99999999-2222-3333-4444-555555555555.jsonl";
+        assert!(!transcript_path_is_registered(std::path::Path::new(hand)));
     }
 }
