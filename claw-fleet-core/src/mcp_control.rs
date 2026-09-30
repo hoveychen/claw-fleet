@@ -918,7 +918,7 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
             )?;
             let armed = match watch::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
-                Err(e) => format!("但计时器启动失败: {e}(Stop hook reconcile 会补上)"),
+                Err(e) => format!("但计时器启动失败: {e}(Fleet 桌面端或 fleet serve 运行时会在 30 秒内补上)"),
             };
             Ok(format!(
                 "ok: watch {} created — polling, resumes session {}. {armed}。\
@@ -984,7 +984,7 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
             )?;
             let armed = match agent_loop::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
-                Err(e) => format!("但计时器启动失败: {e}(Stop hook reconcile 会补上)"),
+                Err(e) => format!("但计时器启动失败: {e}(Fleet 桌面端或 fleet serve 运行时会在 30 秒内补上)"),
             };
             Ok(format!(
                 "ok: loop {} created — in {}, model={}. {armed}。停止用 action=stop id={}。",
@@ -1129,7 +1129,7 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
             )?;
             let armed = match schedule::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
-                Err(e) => format!("但计时器启动失败: {e}(Stop hook reconcile 会补上)"),
+                Err(e) => format!("但计时器启动失败: {e}(Fleet 桌面端或 fleet serve 运行时会在 30 秒内补上)"),
             };
             Ok(format!(
                 "ok: schedule {} created — fires at epoch-ms {} in {}, model={}{}. {armed}。取消用 action=cancel id={}。",

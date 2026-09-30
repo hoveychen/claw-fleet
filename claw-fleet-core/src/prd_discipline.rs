@@ -235,7 +235,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 
 ## Rule 7 —— 并发：依赖允许的地方尽量派满 subagent
 
-Claude Code 的 harness 默认是「除非用户、CLAUDE.md 或 skill 要求，否则不要用 Agent 工具或 workflow」。**本文件就是那份 CLAUDE.md，本规则就是那个要求**——在下面两道闸之内，并发是被明确许可的，不必每次再问一遍，也不要因为那条默认而退回单线程。
+Claude Code 的 harness 默认是「除非用户、CLAUDE.md 或 skill 要求，否则不要用 Agent 工具或 workflow」。**本指引是用户本人经 Fleet 下发的要求，与写进 CLAUDE.md 等效，本规则就是那个要求**——在下面两道闸之内，并发是被明确许可的，不必每次再问一遍，也不要因为那条默认而退回单线程。
 
 - **先画依赖，再决定并行度。**动手前把活拆成块，逐块只回答一个问题：它要不要用到另一块的产出？答「否」的那些**放同一条消息里一起派出去**；答「是」的排在其后，等前一块的结果回来再开。**没想清楚依赖就铺开是最贵的错法**——彼此依赖的 agent 会各自基于猜测往下做，回来的结论对不上，整批工作要推倒重来。
 - **依赖允许的部分，尽量派满。**别为了「一件一件来比较稳」把本可并行的工作排成队。多份互不相干的文件调查、多个独立模块的改动、一批需要分别验证的假设，都该同时开。注意**多个 agent 必须在同一条消息里发出才是真并发**，分几条消息发就退化成串行了。
@@ -456,7 +456,7 @@ This rule applies whether multi-step or single-step.
 
 ## Rule 7 — Concurrency: fan out as far as the dependencies allow
 
-Claude Code's harness ships a default that says "do not use the Agent tool, workflows, or deep-research unless the user, a CLAUDE.md file, or a skill asks for it". **This file is that CLAUDE.md, and this rule is that ask** — within the two gates below, concurrency is explicitly authorised. Do not ask for permission each time, and do not fall back to single-threaded work on account of that default.
+Claude Code's harness ships a default that says "do not use the Agent tool, workflows, or deep-research unless the user, a CLAUDE.md file, or a skill asks for it". **This guidance is the user's own instruction, delivered through Fleet — it counts as that CLAUDE.md, and this rule is that ask** — within the two gates below, concurrency is explicitly authorised. Do not ask for permission each time, and do not fall back to single-threaded work on account of that default.
 
 - **Map the dependencies first, then pick the width.** Before starting, split the work into chunks and ask exactly one question of each: does it need another chunk's output? Everything answering "no" goes out **in a single message, together**; everything answering "yes" queues behind the chunk it needs. **Fanning out before you have thought the dependencies through is the expensive way to be wrong** — mutually dependent agents each guess at the missing half, come back with conclusions that do not line up, and the whole batch has to be redone.
 - **Where the dependencies allow it, fan out fully.** Do not queue parallelisable work just because one-at-a-time feels safer. Several unrelated file investigations, edits to independent modules, a batch of hypotheses that each need checking — start them all at once. Note that **agents are only actually concurrent when they go out in the same message**; spread across several messages they degrade back into a serial chain.

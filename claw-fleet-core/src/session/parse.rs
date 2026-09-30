@@ -465,9 +465,14 @@ pub(crate) fn session_cwd_from_jsonl(path: &Path) -> Option<String> {
         })
 }
 
-/// The `model` field of `~/.claude/settings.json`, e.g. `opus[1m]`. This is the
-/// CLI's default when a session is launched without `--model`.
+/// The model a session launched without an explicit `--model` runs on, e.g.
+/// `opus[1m]`: Fleet's own launch default, which every Fleet launch passes as
+/// `--model`, else the `model` field of `~/.claude/settings.json` — the CLI's
+/// default when nothing names one.
 fn configured_model_spec() -> Option<String> {
+    if let Some(m) = crate::claude_launch::default_model() {
+        return Some(m);
+    }
     let raw = fs::read_to_string(get_claude_dir()?.join("settings.json")).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
     let m = v.get("model")?.as_str()?.trim();

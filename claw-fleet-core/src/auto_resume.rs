@@ -455,6 +455,15 @@ pub fn spawn_resume_tracked_prompt(
         effort,
         permission_mode,
     )?;
+    // Keep a chat a chat on every turn after the first: without these, the
+    // resumed process would reload the global doctrine the initial spawn
+    // deliberately excluded (no-op outside the chat workspace).
+    override_args.extend(crate::chat_workspace::chat_launch_args(workspace_path));
+    // Hooks, permissions and the fleet MCP server are read per process, so a
+    // resume that omitted them would run as a plain `claude`. Here rather than
+    // in `spawn_resume_with_path`, whose test drives a stand-in binary.
+    let launch = crate::claude_launch::fleet_launch_args_for(&override_args, workspace_path);
+    override_args.extend(launch);
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());
@@ -491,7 +500,7 @@ pub fn spawn_resume_tracked_prompt(
 /// exit status — so failures stop being silent and we don't accumulate zombies.
 /// Thin wrapper over the generic [`crate::session_launch::spawn_claude_detached`].
 /// `override_args` carries the pre-validated `--model` / `--effort` /
-/// `--permission-mode` flags (empty for the auto-resume scheduler).
+/// `--permission-mode` flags plus the chat and Fleet launch arguments.
 #[allow(clippy::too_many_arguments)]
 fn spawn_resume_with_path(
     claude_path: &str,
@@ -513,13 +522,6 @@ fn spawn_resume_with_path(
     // stdout was otherwise discarded, the JSONL transcript is unaffected).
     args.extend(crate::session_launch::live_thinking_stream_args());
     args.extend(override_args.iter().cloned());
-    // Route native permission prompts to Fleet's Decision Panel instead of
-    // headless auto-deny (no-op when the fleet MCP server isn't injected).
-    args.extend(crate::session_launch::permission_prompt_tool_args());
-    // Keep a chat a chat on every turn after the first: without these, the
-    // resumed process would reload the global doctrine the initial spawn
-    // deliberately excluded (no-op outside the chat workspace).
-    args.extend(crate::chat_workspace::chat_launch_args(workspace_path));
     crate::session_launch::spawn_claude_detached_with_envs(
         claude_path,
         &args,

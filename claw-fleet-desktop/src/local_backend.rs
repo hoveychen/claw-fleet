@@ -863,6 +863,8 @@ impl LocalBackend {
                 // the 2026-09-09 ~108s stall was invisible because neither this
                 // loop nor the watch-path rescan logged a single line.
                 let mut last_tick_end: Option<Instant> = None;
+                // At startup, not one interval in: see `headless_runtime::run`.
+                claw_fleet_core::headless_runtime::reconcile_timers();
                 loop {
                     std::thread::sleep(Duration::from_secs(30));
                     if !running_ar.load(Ordering::SeqCst) {
@@ -3517,7 +3519,9 @@ impl LocalBackend {
         // other's blocks; the first error is what the UI retries on.
         let codex = crate::codex_guidance::reconcile_codex_from_claude_state(user_title, locale);
         let dsh = crate::dsh_guidance::reconcile_dsh_from_claude_state(user_title, locale);
-        codex.and(dsh)
+        // And the guidance Fleet hands its own claude sessions at launch.
+        let claude = crate::claude_launch::reconcile_guidance(user_title, locale);
+        codex.and(dsh).and(claude)
     }
 
     pub fn respond_to_elicitation(

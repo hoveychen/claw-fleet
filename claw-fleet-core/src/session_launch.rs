@@ -282,25 +282,6 @@ pub struct SpawnSessionResponse {
 /// `fleet` and tool `fleet__permission_prompt`.
 pub const PERMISSION_PROMPT_TOOL: &str = "mcp__fleet__fleet__permission_prompt";
 
-/// `--permission-prompt-tool` args for headless spawns, or empty when the
-/// fleet MCP server is not registered in `~/.claude.json` (naming an
-/// unresolvable MCP tool makes the CLI abort at startup, so the flag is only
-/// safe while the injection is live).
-///
-/// With the flag, a headless session's native permission prompts (tool calls
-/// that are neither allowed nor denied by permission rules) surface as Fleet
-/// Decision Cards instead of being silently auto-denied.
-pub fn permission_prompt_tool_args() -> Vec<String> {
-    if crate::mcp_injector::fleet_server_registered() {
-        vec![
-            "--permission-prompt-tool".to_string(),
-            PERMISSION_PROMPT_TOOL.to_string(),
-        ]
-    } else {
-        Vec::new()
-    }
-}
-
 /// Args that turn a headless spawn's stdout into the live-thinking stream:
 /// emit the streaming JSON payload (incremental `thinking_delta` events) so it
 /// can be teed to a sidecar (see [`crate::live_thinking`]). This only changes
@@ -880,7 +861,6 @@ pub(crate) fn spawn_new_session_impl(
     ];
     args.extend(live_thinking_stream_args());
     args.extend(override_args);
-    args.extend(permission_prompt_tool_args());
     // The pure-chat workspace is Fleet-owned and may not exist yet — create it
     // before the `is_dir` gate below rejects the spawn — and launch it as a chat
     // rather than a coding agent (see `chat_workspace`).
@@ -888,6 +868,9 @@ pub(crate) fn spawn_new_session_impl(
         crate::chat_workspace::ensure_chat_workspace()?;
         args.extend(crate::chat_workspace::chat_session_args());
     }
+    // Last, so it sees the caller's `--model` and the chat's setting sources.
+    let launch = crate::claude_launch::fleet_launch_args_for(&args, workspace_path);
+    args.extend(launch);
     crate::log_debug(&format!(
         "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
         args[2..].join(" "),
@@ -1113,71 +1096,6 @@ mod tests {
         assert!(
             err.contains("invalid session_id"),
             "unexpected error: {err}"
-        );
-    }
-
-    /// Regression (2026-08-27, the reported symptom): `~/.claude.json` carried
-    /// a `fleet` entry whose command pointed into a merged-and-deleted
-    /// worktree. This function only asked "is the key there?", so it kept
-    /// emitting `--permission-prompt-tool mcp__fleet__fleet__permission_prompt`
-    /// — and every tool call needing a permission decision died with
-    /// `MCP tool ... not found. Available MCP tools: none` instead of just
-    /// going without the bridge.
-    #[test]
-    fn permission_prompt_flag_is_dropped_when_the_registered_binary_is_gone() {
-        let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet_test_pp_flag_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let prev = std::env::var_os("FLEET_HOME");
-        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
-
-        let write_command = |command: &str| {
-            std::fs::write(
-                tmp.join(".claude.json"),
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "mcpServers": { "fleet": { "command": command, "args": ["mcp"] } }
-                }))
-                .unwrap(),
-            )
-            .unwrap();
-        };
-
-        write_command("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
-        let dead = super::permission_prompt_tool_args();
-
-        let live = std::env::current_exe()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        write_command(&live);
-        let alive = super::permission_prompt_tool_args();
-
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("FLEET_HOME", v),
-                None => std::env::remove_var("FLEET_HOME"),
-            }
-        }
-        let _ = std::fs::remove_dir_all(&tmp);
-
-        assert!(
-            dead.is_empty(),
-            "a dead fleet binary must not be named by --permission-prompt-tool, got {dead:?}",
-        );
-        assert_eq!(
-            alive,
-            vec![
-                "--permission-prompt-tool".to_string(),
-                super::PERMISSION_PROMPT_TOOL.to_string(),
-            ],
-            "a live registration must still get the bridge",
         );
     }
 

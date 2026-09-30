@@ -645,8 +645,10 @@ fn account(rec: &ExplainRecord, usage: Option<&TurnUsage>) {
 /// - `--model` must match, else the prefix is a different model's.
 /// - `--permission-mode`, `--max-turns` and `--no-session-persistence` do not
 ///   enter the prefix.
-/// Chat-workspace sessions add their settings/MCP flags for the same reason
-/// (they shape the system prompt). The stream flags are taken from
+/// Chat-workspace sessions add their setting-sources flag for the same reason
+/// (it shapes the system prompt), and the caller appends
+/// `claude_launch::fleet_launch_args_for` — the same hooks, MCP server and
+/// permission-prompt tool the session itself runs with. The stream flags are taken from
 /// `session_launch::live_thinking_stream_args` so the fork tracks whatever
 /// the real launches use, rather than a second hand-maintained list.
 pub fn claude_fork_args(
@@ -656,7 +658,6 @@ pub fn claude_fork_args(
     model: Option<&str>,
     effort: Option<&str>,
     stream_args: Vec<String>,
-    permission_prompt_tool_args: Vec<String>,
     chat_args: Vec<String>,
 ) -> Vec<String> {
     let mut args = vec![
@@ -679,7 +680,6 @@ pub fn claude_fork_args(
     args.extend(stream_args);
     // `push_session_override_args` cannot fail without a permission mode.
     let _ = crate::session_launch::push_session_override_args(&mut args, model, effort, None);
-    args.extend(permission_prompt_tool_args);
     args.extend(chat_args);
     args
 }
@@ -973,16 +973,19 @@ pub(crate) fn claude_fork_ask(
     crate::launch_spec::record(&fork_session_id, model.as_deref(), effort.as_deref());
     let _forget = ForgetLaunchSpec(fork_session_id.clone());
 
-    let args = claude_fork_args(
+    let mut args = claude_fork_args(
         &spec.session_id,
         &fork_session_id,
         &spec.prompt,
         model.as_deref(),
         effort.as_deref(),
         crate::session_launch::live_thinking_stream_args(),
-        crate::session_launch::permission_prompt_tool_args(),
         crate::chat_workspace::chat_launch_args(&spec.workspace_path),
     );
+    // The same launch files the session's own spawns use: the fleet MCP tools
+    // and the permission-prompt tool are part of the cached prefix.
+    let launch = crate::claude_launch::fleet_launch_args_for(&args, &spec.workspace_path);
+    args.extend(launch);
 
     let entrypoint = crate::session::session_entrypoint(&spec.session_id)
         .filter(|e| !e.trim().is_empty())
@@ -1172,11 +1175,7 @@ mod tests {
             Some("claude-fable-5-1"),
             Some("high"),
             crate::session_launch::live_thinking_stream_args(),
-            vec![
-                "--permission-prompt-tool".into(),
-                "mcp__fleet__fleet__permission_prompt".into(),
-            ],
-            vec![],
+            vec!["--setting-sources".into(), "project".into()],
         );
         let joined = args.join(" ");
         assert!(joined.starts_with(
@@ -1187,14 +1186,14 @@ mod tests {
         assert!(joined.contains("--thinking-display summarized"));
         assert!(joined.contains("--model claude-fable-5-1"));
         assert!(joined.contains("--effort high"));
-        assert!(joined.ends_with("--permission-prompt-tool mcp__fleet__fleet__permission_prompt"));
+        assert!(joined.ends_with("--setting-sources project"));
         // Permission mode is deliberately absent: it does not enter the prefix.
         assert!(!joined.contains("--permission-mode"));
     }
 
     #[test]
     fn fork_args_without_overrides_stay_minimal() {
-        let args = claude_fork_args("sid", "fork-id", "ask", None, None, vec![], vec![], vec![]);
+        let args = claude_fork_args("sid", "fork-id", "ask", None, None, vec![], vec![]);
         assert!(!args.iter().any(|a| a == "--model" || a == "--effort"));
     }
 

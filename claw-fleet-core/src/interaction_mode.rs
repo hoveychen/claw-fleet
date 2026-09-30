@@ -88,7 +88,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 当本会话中 `fleet__ask` 可用时，每一个原本会通过纯文本输出把控制权交回用户的回合，都**必须**改为通过 `fleet__ask` 递交。回合中途仍可用文本汇报进度，但用户在一个回合里最终看到的必须是一张决策卡。\n\
 \n\
-`fleet__ask` 是 Fleet 经 MCP 注册的决策卡工具（~/.claude.json 里的 mcpServers.fleet），完整工具名 `mcp__fleet__fleet__ask`（server 名 + 工具名，两段 fleet 都要）。它**可能被列为 deferred**（只列出名字、不预载 schema）——**被延迟列出不等于缺席**，绝不能因此退回纯文本；这种情况下本会话**首次调用前必须**先用 `ToolSearch` 以 `select:mcp__fleet__fleet__ask` 加载 schema（清单里若印的是别的前缀，以清单原文为准），然后照常调用。它是本模式的唯一首选；内置 `AskUserQuestion` 只在 `fleet__ask` 缺席时兜底（见文末）。两者都缺席时本文件失效，用纯文本回复。\n\
+`fleet__ask` 是 Fleet 为本会话注册的决策卡工具（MCP server 名 `fleet`），完整工具名 `mcp__fleet__fleet__ask`（server 名 + 工具名，两段 fleet 都要）。它**可能被列为 deferred**（只列出名字、不预载 schema）——**被延迟列出不等于缺席**，绝不能因此退回纯文本；这种情况下本会话**首次调用前必须**先用 `ToolSearch` 以 `select:mcp__fleet__fleet__ask` 加载 schema（清单里若印的是别的前缀，以清单原文为准），然后照常调用。它是本模式的唯一首选；内置 `AskUserQuestion` 只在 `fleet__ask` 缺席时兜底（见文末）。两者都缺席时本文件失效，用纯文本回复。\n\
 \n\
 `ExitPlanMode` 不走本模式——它有自己的审批面板，别把方案审批塞进 `fleet__ask`。本模式只作用于助手回合的*终端*输出，不要包裹回合中途的叙述。\n\
 \n\
@@ -172,7 +172,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 When `fleet__ask` is available this session, every turn that would otherwise hand control back to the user as plain text **must** be handed over through `fleet__ask` instead. Mid-turn text is still fine for progress notes, but the last thing the user sees in a turn must be a decision card.\n\
 \n\
-`fleet__ask` is Fleet's MCP-registered decision-card tool (mcpServers.fleet in ~/.claude.json), whose full tool name is `mcp__fleet__fleet__ask` (server name + tool name — both `fleet` segments). It **may be listed as deferred** (name listed, schema not preloaded) — **a deferred listing does NOT mean absent**, so never fall back to plain text on that basis; when it is deferred you **MUST first load** its schema this session with `ToolSearch` using `select:mcp__fleet__fleet__ask` (if the list prints a different prefix, copy the listed name verbatim), then call it as usual. It is this mode's **sole preferred** decision-card tool; the built-in `AskUserQuestion` is a fallback used only when `fleet__ask` is absent (see the end). When both are absent this file is inert and you reply in plain text.\n\
+`fleet__ask` is Fleet's decision-card tool, registered for this session as the `fleet` MCP server, whose full tool name is `mcp__fleet__fleet__ask` (server name + tool name — both `fleet` segments). It **may be listed as deferred** (name listed, schema not preloaded) — **a deferred listing does NOT mean absent**, so never fall back to plain text on that basis; when it is deferred you **MUST first load** its schema this session with `ToolSearch` using `select:mcp__fleet__fleet__ask` (if the list prints a different prefix, copy the listed name verbatim), then call it as usual. It is this mode's **sole preferred** decision-card tool; the built-in `AskUserQuestion` is a fallback used only when `fleet__ask` is absent (see the end). When both are absent this file is inert and you reply in plain text.\n\
 \n\
 `ExitPlanMode` is out of scope — it has its own approval panel, so never stuff plan approval into `fleet__ask`. This mode governs the *terminal* output of an assistant turn only; do not wrap mid-turn narration.\n\
 \n\

@@ -1228,7 +1228,7 @@ pub(crate) enum WikiGuidanceCommands {
     },
     /// Strip the sentinel block and delete the guidance file (idempotent)
     Remove,
-    /// Print whether the guidance block is currently installed
+    /// Print whether the guidance is enabled for Fleet sessions (exit 1 if not)
     Status,
 }
 
@@ -1285,7 +1285,7 @@ pub(crate) enum ModelGuidanceCommands {
     },
     /// Strip the sentinel block and delete the guidance file (idempotent)
     Remove,
-    /// Print whether the guidance block is installed (exit 1 if not)
+    /// Print whether the guidance is enabled for Fleet sessions (exit 1 if not)
     Status,
 }
 
@@ -1303,7 +1303,7 @@ pub(crate) enum SessionTitleGuidanceCommands {
     },
     /// Strip the sentinel block and delete the guidance file (idempotent)
     Remove,
-    /// Print whether the guidance block is installed (exit 1 if not)
+    /// Print whether the guidance is enabled for Fleet sessions (exit 1 if not)
     Status,
 }
 
@@ -1538,10 +1538,12 @@ fn main() {
                 }
             }
             ModelGuidanceCommands::Status => {
-                if claw_fleet_core::model_guidance::is_model_guidance_installed() {
-                    println!("installed");
+                if claw_fleet_core::control_plane_prefs::is_enabled(
+                    claw_fleet_core::control_plane_prefs::Feature::ModelGuidance,
+                ) {
+                    println!("enabled");
                 } else {
-                    println!("not installed");
+                    println!("disabled");
                     std::process::exit(1);
                 }
             }
@@ -1570,10 +1572,12 @@ fn main() {
                 }
             }
             SessionTitleGuidanceCommands::Status => {
-                if claw_fleet_core::session_title_guidance::is_session_title_guidance_installed() {
-                    println!("installed");
+                if claw_fleet_core::control_plane_prefs::is_enabled(
+                    claw_fleet_core::control_plane_prefs::Feature::SessionTitleGuidance,
+                ) {
+                    println!("enabled");
                 } else {
-                    println!("not installed");
+                    println!("disabled");
                     std::process::exit(1);
                 }
             }

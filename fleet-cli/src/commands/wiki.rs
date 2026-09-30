@@ -309,10 +309,12 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
                 }
             }
             WikiGuidanceCommands::Status => {
-                if claw_fleet_core::wiki_guidance::is_wiki_guidance_installed() {
-                    println!("installed");
+                if claw_fleet_core::control_plane_prefs::is_enabled(
+                    claw_fleet_core::control_plane_prefs::Feature::WikiGuidance,
+                ) {
+                    println!("enabled");
                 } else {
-                    println!("not installed");
+                    println!("disabled");
                     std::process::exit(1);
                 }
             }
