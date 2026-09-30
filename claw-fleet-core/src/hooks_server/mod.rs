@@ -1280,6 +1280,10 @@ fn handle_request(
                 route_plan_revive_config(ctx, request, &query, json_header, path)
             }
 
+            crate::routes::RESUME_TRIGGERS_CONFIG => {
+                route_resume_triggers_config(ctx, request, &query, json_header, path)
+            }
+
             crate::routes::PERMISSIONS_CONFIG => {
                 route_permissions_config(ctx, request, &query, json_header, path)
             }

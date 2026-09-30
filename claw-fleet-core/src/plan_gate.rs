@@ -105,6 +105,9 @@ pub fn gate_reason_in(
 /// the second hatch looks for). Both hold in `fleet session idle`, where this
 /// sits next to the [`crate::bg_guard`] check.
 pub fn gate_reason(cwd: &Path, session_id: &str, stop_hook_active: bool) -> Option<String> {
+    if !crate::resume_triggers::ResumeTriggersConfig::load().plan_gate {
+        return None;
+    }
     let focus = crate::task_progress::read(session_id);
     let turn_start = crate::idle::read_turn_start(session_id);
     let has_pending_handoff = crate::handoff::read_pending(session_id).is_some();

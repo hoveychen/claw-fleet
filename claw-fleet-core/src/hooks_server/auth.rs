@@ -183,6 +183,7 @@ mod tests {
             // could disarm the guard gate outright.
             routes::AUTO_RESUME_CONFIG,
             routes::PLAN_REVIVE_CONFIG,
+            routes::RESUME_TRIGGERS_CONFIG,
             routes::PERMISSIONS_CONFIG,
             routes::DECISION_PANEL_CONFIG,
         ] {

@@ -112,6 +112,8 @@ describe("host facts", () => {
     "set_auto_resume_config",
     "get_plan_revive_config",
     "set_plan_revive_config",
+    "get_resume_triggers_config",
+    "set_resume_triggers_config",
   ])("%s is left to the probe rather than answered locally", (cmd) => {
     expect(localCommand(cmd, {}).handled).toBe(false);
   });

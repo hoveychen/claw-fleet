@@ -1757,6 +1757,8 @@ pub fn run() {
             set_auto_resume_config,
             get_plan_revive_config,
             set_plan_revive_config,
+            get_resume_triggers_config,
+            set_resume_triggers_config,
             set_session_mark,
             set_session_title,
             host_features,

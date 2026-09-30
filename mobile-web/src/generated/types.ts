@@ -335,6 +335,12 @@ setBy: string, createdMs: number, };
 
 export type PlanReviveConfig = { enabled: boolean, };
 
+export type ResumeTriggersConfig = { 
+finishContinue: boolean, 
+codexStallWatchdog: boolean, 
+planGate: boolean, 
+handoffSuccessor: boolean, };
+
 export type AttendanceState = "running" | "watching" | "scheduled" | "waitingCard" | "handingOff" | "reserved" | "idle" | "bossClosed" | "stale";
 
 export type PlanAttendance = { 

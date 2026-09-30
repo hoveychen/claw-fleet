@@ -1292,6 +1292,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
+            client={client}
             onOpenTerminal={() => setTerminal({ workspace: null })}
             terminalEnabled={hostFeatures.terminal}
             devices={book.devices}

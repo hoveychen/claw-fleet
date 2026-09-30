@@ -19,10 +19,8 @@ pub struct AutoResumeConfig {
     pub max_wait_hours: u64,
     /// Auto-retry Fleet-headless sessions that hit a transient `server_error`
     /// (the "Server error mid-response / Response stalled mid-stream" family).
-    /// Independent of the rate-limit `enabled` gate above? No — it is ANDed with
-    /// `enabled`, so turning the whole feature off also stops server-error
-    /// retries; this flag lets a user keep rate-limit resume on but opt out of
-    /// server-error retries specifically.
+    /// Independent of the rate-limit `enabled` gate above: the settings panel
+    /// shows the two as separate checkboxes, so either can run without the other.
     pub retry_server_errors: bool,
     /// Give up after this many consecutive server-error retries for one session
     /// so a persistently-failing turn (or a server that stays down) stops
@@ -288,7 +286,7 @@ pub fn select_resume_candidates(
 /// Unlike [`should_auto_resume`] there is NO `resets_at` / usage gate — a
 /// server error is transient, so the resume fires as soon as the scheduler's
 /// debounce and per-session attempt cap allow. Eligibility requires ALL of:
-/// - `config.enabled` AND `config.retry_server_errors` (the feature is on)
+/// - `config.retry_server_errors` (the feature is on; independent of `enabled`)
 /// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
 /// - the session is NOT attached to an interactive IDE (`ide_name == None`) —
 ///   same rule as auto-resume: never fire a detached headless `claude --resume`
@@ -298,7 +296,7 @@ pub fn should_retry_server_error(
     session: &crate::session::SessionInfo,
     config: &AutoResumeConfig,
 ) -> bool {
-    if !config.enabled || !config.retry_server_errors {
+    if !config.retry_server_errors {
         return false;
     }
     // Same non-resumable gates as auto-resume: subagent transcripts can't be
@@ -1033,10 +1031,10 @@ mod tests {
     }
 
     #[test]
-    fn server_error_retry_blocked_when_feature_disabled() {
+    fn server_error_retry_runs_with_rate_limit_resume_off() {
         let mut cfg = AutoResumeConfig::default();
         cfg.enabled = false;
-        assert!(!should_retry_server_error(&mk_server_errored(), &cfg));
+        assert!(should_retry_server_error(&mk_server_errored(), &cfg));
     }
 
     #[test]

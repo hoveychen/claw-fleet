@@ -2454,6 +2454,17 @@ impl LocalBackend {
         config.save()
     }
 
+    pub fn get_resume_triggers_config(&self) -> claw_fleet_core::resume_triggers::ResumeTriggersConfig {
+        claw_fleet_core::resume_triggers::ResumeTriggersConfig::load()
+    }
+
+    pub fn set_resume_triggers_config(
+        &self,
+        config: claw_fleet_core::resume_triggers::ResumeTriggersConfig,
+    ) -> Result<(), String> {
+        config.save()
+    }
+
     pub fn set_session_mark(
         &self,
         session_id: String,

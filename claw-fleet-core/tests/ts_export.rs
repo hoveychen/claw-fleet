@@ -153,6 +153,7 @@ fn build_bundle() -> String {
         claw_fleet_core::prd_tasks::PlanKind,
         claw_fleet_core::plan_snooze::PlanSnooze,
         claw_fleet_core::plan_revive::PlanReviveConfig,
+        claw_fleet_core::resume_triggers::ResumeTriggersConfig,
         claw_fleet_core::plan_revive::AttendanceState,
         claw_fleet_core::plan_revive::PlanAttendance,
         claw_fleet_core::plan_revive::ReviveOutlook,

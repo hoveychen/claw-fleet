@@ -260,6 +260,21 @@ pub(crate) fn set_plan_revive_config(
     state.backend.set_plan_revive_config(config)
 }
 
+#[tauri::command(async)]
+pub(crate) fn get_resume_triggers_config(
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::resume_triggers::ResumeTriggersConfig {
+    state.backend.get_resume_triggers_config()
+}
+
+#[tauri::command(async)]
+pub(crate) fn set_resume_triggers_config(
+    config: claw_fleet_core::resume_triggers::ResumeTriggersConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.set_resume_triggers_config(config)
+}
+
 /// Set (or clear, when `mark` is null) the human's manual review mark for a
 /// session. Written to the local side-channel file.
 #[tauri::command(async)]
