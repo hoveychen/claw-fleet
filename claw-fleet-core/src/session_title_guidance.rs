@@ -207,7 +207,7 @@ pub fn remove_session_title_guidance() -> Result<(), String> {
     )
 }
 
-fn remove_inner() -> Result<(), String> {
+pub(crate) fn remove_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         crate::claude_md_lock::with_lock(&claude_md, || {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
@@ -228,19 +228,21 @@ fn remove_inner() -> Result<(), String> {
     Ok(())
 }
 
-/// The `## Session title` section exactly as currently installed on disk, or
-/// `None` when the feature is not installed.
+/// The `## Session title` section, or `None` when the feature is switched off.
 ///
-/// For the one caller that needs the section but cannot reach the user's global
-/// `CLAUDE.md`: a chat-workspace session launches with `--setting-sources
-/// project`, which drops that file (and with it the `@import` sentinel block) to
-/// keep the 22k-token engineering doctrine out of a conversation — see
-/// [`crate::chat_workspace`]. Reading the rendered file back, rather than
-/// re-rendering, is what keeps the user's configured `title`/`locale` and the
-/// settings-panel toggle authoritative: `remove_session_title_guidance` deletes
-/// this file, so a switched-off feature reads as `None` here too.
-pub fn installed_section() -> Option<String> {
-    let content = fs::read_to_string(guidance_file_path()?).ok()?;
+/// For the one caller that needs the section without the rest of the
+/// guidance: a chat-workspace session gets no engineering doctrine at all, to
+/// keep 22k tokens out of a conversation — see [`crate::chat_workspace`].
+/// Rendered with the title / locale Fleet's launches use, and gated on
+/// [`crate::control_plane_prefs`] rather than on a file under `~/.claude`,
+/// which Fleet no longer writes.
+pub fn enabled_section() -> Option<String> {
+    use crate::control_plane_prefs::{is_enabled, Feature};
+    if !is_enabled(Feature::SessionTitleGuidance) {
+        return None;
+    }
+    let (title, locale) = crate::claude_launch::guidance_voice();
+    let content = render_guidance(&title, &locale);
     // Drop the managed-file `# …` header; keep from the `## …` heading on.
     let start = content
         .split_inclusive('\n')

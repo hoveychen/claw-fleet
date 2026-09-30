@@ -1189,6 +1189,156 @@ pub fn commit_trailers_disabled() -> bool {
             == Some(false)
 }
 
+// ── Taking the global writes back (scope migration) ─────────────────────────
+
+/// Whether one hook entry is Fleet's: any `fleet <subcommand>` invocation, in
+/// either shape, or an event-log append to `~/.fleet/hooks.jsonl` (current) or
+/// `~/.claude/fleet/hooks.jsonl` (legacy).
+fn is_fleet_hook_entry(hook: &Value) -> bool {
+    if hook_fleet_invocation(hook).is_some() {
+        return true;
+    }
+    hook.get("command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| c.contains(".fleet/hooks.jsonl") || c.contains(LEGACY_EVENTS_HOOK_SUBSTR))
+}
+
+/// Drop every Fleet hook entry from `hooks_obj`, then every group and event
+/// array left empty. Entry-level rather than group-level so a group the user
+/// hand-merged with one of Fleet's keeps the user's half. Returns how many
+/// entries went. Pure, for the tests.
+fn strip_fleet_hooks_in(hooks_obj: &mut Map<String, Value>) -> usize {
+    let mut removed = 0;
+    let events: Vec<String> = hooks_obj.keys().cloned().collect();
+    for event in events {
+        let Some(groups) = hooks_obj.get_mut(&event).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for group in groups.iter_mut() {
+            if let Some(entries) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                let before = entries.len();
+                entries.retain(|e| !is_fleet_hook_entry(e));
+                removed += before - entries.len();
+            }
+        }
+        groups.retain(|g| {
+            g.get("hooks")
+                .and_then(|h| h.as_array())
+                .is_none_or(|entries| !entries.is_empty())
+        });
+        if groups.is_empty() {
+            hooks_obj.remove(&event);
+        }
+    }
+    removed
+}
+
+/// Remove every hook Fleet ever wrote into the global `settings.json`, without
+/// recording anything in `control_plane_prefs` — this is Fleet moving its
+/// hooks into per-launch `--settings`, not the user switching features off.
+/// Returns how many entries were removed; writes nothing when that is zero.
+pub(crate) fn strip_all_fleet_hooks() -> Result<usize, String> {
+    let Some(mut settings) = read_settings() else {
+        return Ok(0);
+    };
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(0);
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(0);
+    };
+    let removed = strip_fleet_hooks_in(hooks_obj);
+    if removed == 0 {
+        return Ok(0);
+    }
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+    write_settings(&settings)?;
+    Ok(removed)
+}
+
+/// Whether any one hook group of `feature` is in the global `settings.json`.
+///
+/// Looser than [`plan_hook_setup`], which wants *every* group of a feature
+/// before it reads as installed. The scope migration asks what the user meant
+/// before it strips the hooks, and a host whose Fleet predates one companion
+/// group (say `ctx-reminder`) still meant the feature to be on.
+pub(crate) fn any_hook_of_installed(feature: crate::control_plane_prefs::Feature) -> bool {
+    let Some(settings) = read_settings() else {
+        return false;
+    };
+    let Some(hooks_obj) = settings.get("hooks").and_then(|h| h.as_object()) else {
+        return false;
+    };
+    launch_hooks_for(feature).iter().any(|h| {
+        hooks_obj
+            .get(h.event)
+            .and_then(|v| v.as_array())
+            .is_some_and(|groups| {
+                groups
+                    .iter()
+                    .any(|g| group_invokes_fleet_subcommand(g, h.subcommand))
+            })
+    })
+}
+
+/// What [`strip_fleet_settings_values_in`] took out.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct StrippedValues {
+    /// The global `model`, which Fleet's default-model setting wrote. Handed
+    /// on to [`crate::claude_launch::set_default_model`] so Fleet sessions keep
+    /// running on it.
+    pub model: Option<String>,
+    /// Whether any commit-attribution key was removed.
+    pub attribution: bool,
+}
+
+/// Take the settings *values* Fleet wrote — `model` and the commit-attribution
+/// switches of [`apply_no_commit_attribution`] — out of a settings document.
+///
+/// The attribution keys only go when they hold the value Fleet wrote (`false`);
+/// one the user set to `true` is theirs. `model` goes whatever it names: Fleet
+/// wrote it for its own default model, and it now rides on each launch's
+/// `--model` instead.
+fn strip_fleet_settings_values_in(obj: &mut Map<String, Value>) -> StrippedValues {
+    let mut out = StrippedValues::default();
+    if let Some(Value::String(m)) = obj.remove("model") {
+        out.model = Some(m);
+    }
+    if obj.get("includeCoAuthoredBy") == Some(&json!(false)) {
+        obj.remove("includeCoAuthoredBy");
+        out.attribution = true;
+    }
+    if let Some(attr) = obj.get_mut("attribution").and_then(|a| a.as_object_mut()) {
+        for key in ["commitTrailers", "sessionUrl"] {
+            if attr.get(key) == Some(&json!(false)) {
+                attr.remove(key);
+                out.attribution = true;
+            }
+        }
+        if attr.is_empty() {
+            obj.remove("attribution");
+        }
+    }
+    out
+}
+
+/// [`strip_fleet_settings_values_in`] applied to the global `settings.json`.
+pub(crate) fn strip_fleet_settings_values() -> Result<StrippedValues, String> {
+    let Some(mut settings) = read_settings() else {
+        return Ok(StrippedValues::default());
+    };
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(StrippedValues::default());
+    };
+    let out = strip_fleet_settings_values_in(obj);
+    if out != StrippedValues::default() {
+        write_settings(&settings)?;
+    }
+    Ok(out)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Everything the session scan derives from one pass over the hook events.

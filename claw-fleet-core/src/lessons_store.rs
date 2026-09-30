@@ -472,7 +472,7 @@ fn ensure_import_installed() -> Result<(), String> {
 }
 
 /// Strip the `@fleet-lessons.md` import sentinel from CLAUDE.md.
-fn remove_import() -> Result<(), String> {
+pub(crate) fn remove_import() -> Result<(), String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
     // Locked read-modify-write — see `claude_md_lock`.
     crate::claude_md_lock::with_lock(&claude_md, || {

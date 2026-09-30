@@ -141,29 +141,29 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 
 /// The full brief written to the chat workspace's `CLAUDE.md`: the static
 /// [`CHAT_CLAUDE_MD`] plus the session-title section when that feature is
-/// installed.
+/// on.
 ///
-/// The title instruction has to be appended here because the *only* place it
-/// otherwise lives is the user's global `CLAUDE.md`, which
-/// [`chat_session_args`] deliberately drops — so before this, chat sessions
+/// The title instruction has to be appended here because otherwise it only
+/// reaches a session inside the engineering guidance, which a chat launch
+/// deliberately goes without — so before this, chat sessions
 /// never learned to name themselves and their titles fell all the way back to a
 /// raw prompt excerpt (`ai_title ?? slug ?? last_message_preview`, and Claude
 /// Code stopped writing `ai-title` on 2026-09-06). The wording still has a
 /// single owner in [`crate::session_title_guidance`]; this only relocates it.
 ///
 /// The inline `[?…]` marks section rides along the same way: it lives inside
-/// the interaction-mode file (also dropped by `--setting-sources project`) and
-/// is lifted from there by [`crate::explain_marks_guidance::installed_section`],
+/// the interaction-mode guidance and is lifted from there by
+/// [`crate::explain_marks_guidance::enabled_section`],
 /// so a chat session marks its prose exactly like an engineering session does
 /// — the boss's screenshot that motivated the feature was a chat session.
 fn chat_claude_md() -> String {
     let mut out = CHAT_CLAUDE_MD.to_string();
-    if let Some(section) = crate::session_title_guidance::installed_section() {
+    if let Some(section) = crate::session_title_guidance::enabled_section() {
         out.push('\n');
         out.push_str(&section);
         out.push('\n');
     }
-    if let Some(section) = crate::explain_marks_guidance::installed_section() {
+    if let Some(section) = crate::explain_marks_guidance::enabled_section() {
         out.push('\n');
         out.push_str(&section);
         out.push('\n');
@@ -335,7 +335,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         with_home(tmp.path(), || {
             with_claude_dir(&tmp.path().join(".claude"), || {
-                crate::session_title_guidance::apply_session_title_guidance("老板", "zh").unwrap();
+                crate::claude_launch::reconcile_guidance("老板", "zh").unwrap();
                 ensure_chat_workspace().unwrap();
                 let body =
                     std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();
@@ -353,8 +353,6 @@ mod tests {
         });
     }
 
-    /// The settings-panel toggle stays authoritative: `remove` deletes the
-    /// guidance file, and with no file there is no section to append.
     /// The `[?…]` marks section lives in the interaction-mode file, which the
     /// chat launch flags drop with the rest of `~/.claude/*.md`; the brief has
     /// to carry it itself or chat replies never get marks — and a chat session
@@ -364,7 +362,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         with_home(tmp.path(), || {
             with_claude_dir(&tmp.path().join(".claude"), || {
-                crate::interaction_mode::apply_interaction_mode("老板", "zh").unwrap();
+                crate::claude_launch::reconcile_guidance("老板", "zh").unwrap();
                 ensure_chat_workspace().unwrap();
                 let body =
                     std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();
@@ -386,11 +384,16 @@ mod tests {
         });
     }
 
+    /// The settings-panel toggle stays authoritative: a switched-off feature
+    /// contributes no section.
     #[test]
     fn brief_omits_the_section_when_the_feature_is_off() {
         let tmp = tempfile::tempdir().unwrap();
         with_home(tmp.path(), || {
             with_claude_dir(&tmp.path().join(".claude"), || {
+                use crate::control_plane_prefs::{mark_disabled, Feature};
+                mark_disabled(Feature::SessionTitleGuidance).unwrap();
+                mark_disabled(Feature::InteractionMode).unwrap();
                 ensure_chat_workspace().unwrap();
                 let body =
                     std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();

@@ -550,6 +550,49 @@ fn restore_from_snapshot(lock: &McpLock) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Whether `entry` is the server Fleet registers: a `fleet` binary run as
+/// `fleet mcp`. A same-named server pointing anywhere else is the user's.
+fn is_fleets_own_entry(entry: &serde_json::Value) -> bool {
+    let base = entry
+        .get("command")
+        .and_then(|c| c.as_str())
+        .map(|c| c.rsplit(['/', '\\']).next().unwrap_or(c).to_ascii_lowercase());
+    let args_are_mcp = entry
+        .get("args")
+        .and_then(|a| a.as_array())
+        .is_some_and(|a| a.len() == 1 && a[0] == FLEET_MCP_ARG);
+    matches!(base.as_deref(), Some("fleet" | "fleet.exe")) && args_are_mcp
+}
+
+/// Take Fleet's `mcpServers.fleet` out of `~/.claude.json` for good and drop
+/// the injector lock — Fleet sessions get the server from `--mcp-config` now.
+///
+/// Deliberately ignores the lock's snapshot: on hosts where a lock was ever
+/// recreated after an earlier injection, `original_fleet_entry` *is* Fleet's
+/// own entry, and restoring it would put the server straight back. Returns
+/// whether the file changed.
+pub(crate) fn strip_fleet_server() -> std::io::Result<bool> {
+    let (mut current, exists) = read_claude_json()?;
+    let ours = exists
+        && extract_fleet_entry(&current)
+            .0
+            .as_ref()
+            .is_some_and(is_fleets_own_entry);
+    if ours {
+        remove_fleet_entry(&mut current);
+        let mcp_empty = current
+            .get("mcpServers")
+            .and_then(|m| m.as_object())
+            .is_some_and(|o| o.is_empty());
+        if mcp_empty {
+            strip_mcp_servers(&mut current);
+        }
+        write_claude_json(&current)?;
+    }
+    delete_lock()?;
+    Ok(ours)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

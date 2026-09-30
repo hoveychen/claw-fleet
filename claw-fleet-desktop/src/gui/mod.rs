@@ -1422,6 +1422,10 @@ pub fn run() {
                 claw_fleet_core::log_debug(&format!("ensure_fleet_cli_link failed: {e}"));
             }
 
+            // Take back whatever an older Fleet wrote into the global agent
+            // config — Fleet sessions get it as launch arguments now.
+            claw_fleet_core::scope_migration::run_and_log("desktop");
+
             // Install the idle hooks (Stop → `fleet session idle`,
             // UserPromptSubmit → `fleet session resume`). The Stop hook is the
             // trigger for handoff relays (`handoff::consume_and_spawn`) and the

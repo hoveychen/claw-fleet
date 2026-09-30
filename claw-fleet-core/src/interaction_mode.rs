@@ -302,7 +302,7 @@ pub fn remove_interaction_mode() -> Result<(), String> {
     )
 }
 
-fn remove_interaction_mode_inner() -> Result<(), String> {
+pub(crate) fn remove_interaction_mode_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         crate::claude_md_lock::with_lock(&claude_md, || {
             if let Ok(existing) = fs::read_to_string(&claude_md) {

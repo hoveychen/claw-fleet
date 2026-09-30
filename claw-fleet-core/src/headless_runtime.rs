@@ -569,6 +569,8 @@ pub fn run<F: Fn() -> Vec<SessionInfo>>(scan: F, running: Arc<AtomicBool>) {
     // and nothing else re-arms them now that sessions Fleet did not launch run
     // no Fleet Stop hook.
     reconcile_timers();
+    // Take back whatever an older Fleet wrote into the global agent config.
+    crate::scope_migration::run_and_log("headless");
     run_with_interval(scan, running, TICK_INTERVAL);
 }
 

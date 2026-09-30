@@ -202,6 +202,18 @@ pub fn guidance_rendered() -> bool {
     load_config().locale.is_some()
 }
 
+/// The `(user title, locale)` Fleet's guidance is rendered with, as last
+/// reconciled. When no reconcile has run on this host yet (a `fleet serve`
+/// nobody configured), the defaults — so a session starts with guidance rather
+/// than none.
+pub fn guidance_voice() -> (String, String) {
+    let cfg = load_config();
+    (
+        cfg.user_title.unwrap_or_default(),
+        cfg.locale.unwrap_or_else(|| "en".to_string()),
+    )
+}
+
 /// The text handed to `--append-system-prompt-file`: lessons, then the
 /// concept guidance. `None` when there is nothing to add.
 fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
@@ -210,11 +222,7 @@ fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
     } else {
         crate::lessons_store::managed_file_content().unwrap_or_default()
     };
-    // No reconcile has run on this host yet (a `fleet serve` nobody configured):
-    // render with the defaults rather than start the session with no guidance.
-    let cfg = load_config();
-    let title = cfg.user_title.unwrap_or_default();
-    let locale = cfg.locale.unwrap_or_else(|| "en".to_string());
+    let (title, locale) = guidance_voice();
     let guidance = render_guidance_with(&title, &locale, |f| global.wants(f));
     let text = join_sections(vec![lessons, guidance]);
     (!text.is_empty()).then_some(text)
