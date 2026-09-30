@@ -42,6 +42,7 @@ pub(crate) fn route_resume_session(
                     permission_mode: req.permission_mode.clone(),
                     images: Vec::new(),
                 },
+                crate::session_driver::Driver::manual("serve_resume"),
                 Box::new(|_| {}),
             ) {
                 Ok(()) => {

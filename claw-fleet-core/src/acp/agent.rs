@@ -328,8 +328,13 @@ impl AcpAgent {
                     images,
                     ..Default::default()
                 };
-                crate::agent_source::resume_session(tool, &spec, Box::new(|_| {}))
-                    .map_err(RpcError::internal)?;
+                crate::agent_source::resume_session(
+                    tool,
+                    &spec,
+                    crate::session_driver::Driver::manual("acp"),
+                    Box::new(|_| {}),
+                )
+                .map_err(RpcError::internal)?;
                 id
             }
             // First turn: this is where the process actually starts.

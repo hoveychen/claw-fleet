@@ -380,8 +380,27 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
         permission_mode: None,
         images: Vec::new(),
     };
-    match resume_session(&job.session.agent_source, &spec, Box::new(|_| {})) {
+    match resume_session(
+        &job.session.agent_source,
+        &spec,
+        crate::session_driver::Driver::answer("turn_card"),
+        Box::new(|_| {}),
+    ) {
         Ok(()) => mark_reminded(&job.session.id),
+        // Someone else is driving the session (it was resumed meanwhile): an
+        // answer never interrupts a running turn, it queues behind it.
+        Err(e) if e.starts_with("drive lease:") => match crate::pending_message::enqueue(
+            &job.session.id,
+            &job.session.workspace_path,
+            &spec.prompt,
+            crate::pending_message::Sender::User,
+        ) {
+            Ok(_) => mark_reminded(&job.session.id),
+            Err(q) => crate::log_debug(&format!(
+                "turn card: {} busy ({e}) and queueing the reminder failed: {q}",
+                job.session.id
+            )),
+        },
         Err(e) => crate::log_debug(&format!(
             "turn card: resume reminder for {} failed: {e}",
             job.session.id

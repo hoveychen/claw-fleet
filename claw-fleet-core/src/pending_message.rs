@@ -523,6 +523,7 @@ pub fn maybe_drain(session: &crate::session::SessionInfo) {
                 permission_mode: perm.map(str::to_string),
                 images: Vec::new(),
             },
+            crate::session_driver::Driver::answer("pending_message"),
             Box::new(|_| {}),
         )
     });

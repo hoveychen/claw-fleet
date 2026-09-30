@@ -547,22 +547,63 @@ pub fn spawn_session(
     source.spawn(spec)
 }
 
+/// Launch a new session that *replaces* `replaced_session` (plan revive,
+/// finish-button continue). Refused while anything still drives or plans to
+/// bring back the replaced session — see [`crate::session_driver::decide`].
+pub fn spawn_takeover(
+    tool: &str,
+    spec: &SpawnSpec,
+    replaced_session: &str,
+    driver: crate::session_driver::Driver,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    crate::session_driver::acquire_takeover(replaced_session, driver)
+        .map_err(|r| format!("drive lease: {r}"))?;
+    spawn_session(tool, spec)
+}
+
 /// Resume an existing session with the given `tool`, routing to that source's
 /// [`AgentSource::resume`]. Accepts both api names ("claude"/"codex") and
 /// config/`agent_source` names ("claude-code"); blank defaults to "claude"
 /// (older callers omitted it). `on_exit(success)` fires when the resume process
 /// exits (no-op box for untracked manual resume). Errors if the tool's source
 /// is not registered or doesn't support resuming.
+///
+/// Every resume in Fleet goes through here, so this is where the drive lease is
+/// enforced: `driver` says who is asking, and the resume is refused (with a
+/// `drive lease:` error, logged) when another driver holds the session. The
+/// lease rides inside `on_exit` and is released when the process exits — or
+/// immediately when the source fails and drops the callback unrun.
 pub fn resume_session(
     tool: &str,
     spec: &ResumeSpec,
+    driver: crate::session_driver::Driver,
+    on_exit: Box<dyn FnOnce(bool) + Send>,
+) -> Result<(), String> {
+    resume_session_with_pending(tool, spec, driver, None, on_exit)
+}
+
+/// [`resume_session`] for a mechanism that registered a pending intent on the
+/// session and is now acting on it: its own intent does not block it.
+pub fn resume_session_with_pending(
+    tool: &str,
+    spec: &ResumeSpec,
+    driver: crate::session_driver::Driver,
+    own_pending: Option<&str>,
     on_exit: Box<dyn FnOnce(bool) + Send>,
 ) -> Result<(), String> {
     let tool = normalize_tool(tool);
     let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
-    source.resume(spec, on_exit)
+    let lease = crate::session_driver::acquire(&spec.session_id, driver, own_pending)
+        .map_err(|r| format!("drive lease: {r}"))?;
+    source.resume(
+        spec,
+        Box::new(move |success| {
+            drop(lease);
+            on_exit(success);
+        }),
+    )
 }
 
 fn sources_for_tool(tool: &str) -> Vec<Box<dyn AgentSource>> {
@@ -1339,6 +1380,7 @@ mod tests {
         let err = super::resume_session(
             "definitely-not-a-tool",
             &ResumeSpec::default(),
+            crate::session_driver::Driver::manual("test"),
             Box::new(|_| {}),
         )
         .unwrap_err();
@@ -1346,6 +1388,70 @@ mod tests {
             err.contains("not available") || err.contains("disabled"),
             "unexpected error: {err}"
         );
+    }
+
+    fn drive_home() -> crate::paths::FleetHomeGuard {
+        crate::paths::fleet_home_guard_with(|| {
+            let d = std::env::temp_dir()
+                .join(format!("fleet-dispatch-lease-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
+            let _ = std::fs::create_dir_all(&d);
+            d
+        })
+    }
+
+    fn reserve(sid: &str, driver: crate::session_driver::Driver, yield_to_turn: bool) -> String {
+        crate::session_driver::register_pending(
+            sid,
+            driver,
+            crate::session_driver::PendingSpec {
+                reason: "test".into(),
+                not_before_ms: None,
+                ttl_ms: 60_000,
+                yield_to_turn,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn dispatcher_refuses_a_continue_while_an_answer_is_pending() {
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let sid = uuid::Uuid::new_v4().to_string();
+        reserve(&sid, Driver::answer("parked_card"), false);
+        let err = super::resume_session(
+            "claude",
+            &ResumeSpec { session_id: sid, ..Default::default() },
+            Driver::continue_("server_error_retry"),
+            Box::new(|_| {}),
+        )
+        .unwrap_err();
+        assert!(err.starts_with("drive lease:"), "refused before any spawn: {err}");
+    }
+
+    #[test]
+    fn spawn_takeover_is_refused_while_the_replaced_session_is_reserved() {
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let sid = uuid::Uuid::new_v4().to_string();
+        reserve(&sid, Driver::continue_("server_error_retry"), true);
+        let err = super::spawn_takeover("claude", &SpawnSpec::default(), &sid, Driver::takeover("plan_revive"))
+            .unwrap_err();
+        assert!(err.starts_with("drive lease:"), "refused before any spawn: {err}");
+    }
+
+    #[test]
+    fn manual_resume_revokes_a_pending_retry() {
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let token = reserve(&sid, Driver::continue_("server_error_retry"), true);
+        // The lease the dispatcher takes for a manual resume; once released the
+        // superseded retry stays revoked.
+        let lease = crate::session_driver::acquire(&sid, Driver::manual("desktop_resume"), None).unwrap();
+        assert!(!crate::session_driver::pending_held(&sid, &token));
+        drop(lease);
+        assert!(crate::session_driver::snapshot(&sid).running.is_none());
     }
 
     #[test]

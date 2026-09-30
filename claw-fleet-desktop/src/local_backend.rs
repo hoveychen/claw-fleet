@@ -1997,6 +1997,7 @@ pub fn resume_session_impl(
             permission_mode: permission_mode.map(str::to_string),
             images: Vec::new(),
         },
+        claw_fleet_core::session_driver::Driver::manual("desktop_resume"),
         Box::new(|_| {}),
     )
 }

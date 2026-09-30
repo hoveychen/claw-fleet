@@ -1175,6 +1175,24 @@ fn fire_in(
     interrupt_if_live: &dyn Fn(&str) -> bool,
     resume: &ResumeFn<'_>,
 ) -> Result<WatchRecord, ClaimError> {
+    fire_in_with_defer(dir, id, generation, timed_out, capture, &|_, _| None, interrupt_if_live, resume)
+}
+
+/// [`fire_in`] with a `defer` step ahead of the interrupt. `defer` hands the
+/// event to a session whose turn is still *working* (see [`defer_to_live_turn`])
+/// and returns `Some(outcome)` when it took the event; `None` falls through to
+/// interrupt-then-resume.
+#[allow(clippy::too_many_arguments)]
+fn fire_in_with_defer(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    timed_out: bool,
+    capture: &dyn Fn(&WatchRecord) -> String,
+    defer: &dyn Fn(&WatchRecord, &str) -> Option<Result<String, String>>,
+    interrupt_if_live: &dyn Fn(&str) -> bool,
+    resume: &ResumeFn<'_>,
+) -> Result<WatchRecord, ClaimError> {
     let rec = claim_fire_in(dir, id, generation)?;
     let event_text = if timed_out {
         String::new()
@@ -1182,14 +1200,31 @@ fn fire_in(
         capture(&rec)
     };
     let prompt = compose_resume_prompt(&rec, &event_text, timed_out);
-    // A watch resumes on the assumption its session already died (a headless
-    // `-p` turn that ended). But a condition can fire while the session is
-    // still live — most often it is blocked on a decision card, whose hook
+    let kind = if timed_out { "timeout" } else { "condition" };
+    // A live turn that is still working is never interrupted for a watch: the
+    // event joins the session's message queue and reaches it in this turn (live
+    // inject) or the next (queue drain). Only a turn blocked on the user falls
+    // through to the interrupt below — the session-driver rule that only a turn
+    // waiting on a card may be cut short.
+    if let Some(outcome) = defer(&rec, &prompt) {
+        match outcome {
+            Ok(how) => crate::log_debug(&format!(
+                "watch {id}: fired ({kind}) while session {} was working -> {how}",
+                rec.session_id
+            )),
+            Err(e) => crate::log_debug(&format!(
+                "watch {id}: fired ({kind}) while session {} was working, but queueing failed: {e} (event lost)",
+                rec.session_id
+            )),
+        }
+        return Ok(rec);
+    }
+    // Still live here means the turn is blocked on a decision card, whose hook
     // keeps the CLI process alive for its full wait window (up to 600s).
     // Resuming then would put a *second* `claude` on the same transcript, which
     // is exactly how a session gets corrupted; `parked::answer_with` guards the
-    // same way before every resume. Interrupt the live turn first so only one
-    // turn ever runs on the transcript.
+    // same way before every resume. Interrupt the waiting turn first so only
+    // one turn ever runs on the transcript.
     if interrupt_if_live(&rec.session_id) {
         crate::log_debug(&format!(
             "watch {id}: session {} still live at fire time; interrupted it before resuming",
@@ -1198,13 +1233,11 @@ fn fire_in(
     }
     match resume(&rec, &prompt) {
         Ok(()) => crate::log_debug(&format!(
-            "watch {id}: fired ({}) -> resumed session {}",
-            if timed_out { "timeout" } else { "condition" },
+            "watch {id}: fired ({kind}) -> resumed session {}",
             rec.session_id
         )),
         Err(e) => crate::log_debug(&format!(
-            "watch {id}: fired ({}) but resume failed: {e} (event lost)",
-            if timed_out { "timeout" } else { "condition" }
+            "watch {id}: fired ({kind}) but resume failed: {e} (event lost)"
         )),
     }
     Ok(rec)
@@ -1225,6 +1258,7 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
             permission_mode: None,
             images: Vec::new(),
         },
+        crate::session_driver::Driver::continue_("watch"),
         Box::new(|_| {}),
     )
 }
@@ -1241,14 +1275,38 @@ fn interrupt_if_live(session_id: &str) -> bool {
     }
 }
 
+/// Hand the fired event to a session whose turn is still working, instead of
+/// interrupting it. `None` when the session is not running, or is running but
+/// blocked on the user (a pending decision card / guard prompt) — those fall
+/// through to interrupt-then-resume.
+fn defer_to_live_turn(rec: &WatchRecord, prompt: &str) -> Option<Result<String, String>> {
+    if !crate::parked::session_alive(&rec.session_id)
+        || crate::codex_source::session_has_pending_decision(&rec.session_id)
+    {
+        return None;
+    }
+    // `Agent`: the event is Fleet speaking, not the user — it must never read
+    // as the user's approval of anything.
+    Some(
+        crate::pending_message::enqueue(
+            &rec.session_id,
+            &rec.workspace_path,
+            prompt,
+            crate::pending_message::Sender::Agent,
+        )
+        .map(|d| format!("{d:?}")),
+    )
+}
+
 fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, ClaimError> {
     let dir = watches_dir().ok_or(ClaimError::Gone)?;
-    fire_in(
+    fire_in_with_defer(
         &dir,
         id,
         generation,
         timed_out,
         &capture_event,
+        &defer_to_live_turn,
         &interrupt_if_live,
         &|rec, prompt| spawn_resume(rec, prompt),
     )
@@ -2174,6 +2232,35 @@ mod tests {
             events.into_inner(),
             vec!["interrupt:sess-1".to_string(), "resume:sess-1".to_string()],
             "a live session must be interrupted before the resume, not left to run concurrently",
+        );
+    }
+
+    /// A live turn that is still working gets the event through its message
+    /// queue: no interrupt, no second resume, and the watch still counts as
+    /// fired (the record is claimed).
+    #[test]
+    fn fire_defers_to_a_working_turn_without_interrupting() {
+        let d = dir();
+        make(d.path(), "w1", 0);
+        let events: RefCell<Vec<String>> = RefCell::new(Vec::new());
+        let capture = |_r: &WatchRecord| String::new();
+        let defer = |r: &WatchRecord, p: &str| {
+            events.borrow_mut().push(format!("queue:{}:{}", r.session_id, !p.is_empty()));
+            Some(Ok("Queued".to_string()))
+        };
+        let interrupt = |sid: &str| {
+            events.borrow_mut().push(format!("interrupt:{sid}"));
+            true
+        };
+        let resume = |r: &WatchRecord, _p: &str| {
+            events.borrow_mut().push(format!("resume:{}", r.session_id));
+            Ok(())
+        };
+        fire_in_with_defer(d.path(), "w1", 0, false, &capture, &defer, &interrupt, &resume).unwrap();
+        assert_eq!(events.into_inner(), vec!["queue:sess-1:true".to_string()]);
+        assert!(
+            claim_fire_in(d.path(), "w1", 0).is_err(),
+            "the fire still consumed the record"
         );
     }
 

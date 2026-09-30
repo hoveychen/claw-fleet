@@ -203,6 +203,7 @@ pub fn maybe_fire_auto_resume(
                 permission_mode: None,
                 images: Vec::new(),
             },
+            crate::session_driver::Driver::continue_("auto_resume"),
             Box::new(move |success| {
                 in_flight_done.fetch_sub(1, Ordering::SeqCst);
                 if let Ok(mut fail_map) = failures_done.lock() {
@@ -297,6 +298,7 @@ pub fn maybe_fire_auto_resume(
                 permission_mode: None,
                 images: Vec::new(),
             },
+            crate::session_driver::Driver::continue_("server_error_retry"),
             // The per-episode se_map cap (not the failures backoff) bounds these,
             // so the reaper only needs to release the concurrency slot.
             Box::new(move |_success| {
