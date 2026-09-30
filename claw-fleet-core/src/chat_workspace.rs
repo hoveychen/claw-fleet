@@ -16,17 +16,17 @@
 //! overridden** (verified: a project CLAUDE.md reading "ignore all global
 //! instructions" still left the global doctrine fully present in context).
 //!
-//! `--setting-sources project` does drop it — but it also drops the user
-//! `settings.json` (Fleet's hooks) and `~/.claude.json` (the `fleet` MCP
-//! server), which would blind Fleet to the session and, worse, make the CLI
-//! abort at startup once `--permission-prompt-tool` names an MCP tool that no
-//! longer resolves. [`chat_session_args`] therefore drops the user source and
-//! hands both back explicitly via `--settings` / `--mcp-config`.
+//! `--setting-sources project` does drop it — along with the user
+//! `settings.json` and `~/.claude.json`. Fleet's hooks and MCP server no longer
+//! live there anyway: like every Fleet session, a chat gets them from
+//! `claude_launch::fleet_launch_args_for`, which sees the excluded user layer
+//! and hands every piece over (minus the system-prompt guidance, which this
+//! workspace's brief replaces).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::session::{get_claude_dir, get_fleet_dir};
+use crate::session::get_fleet_dir;
 
 /// Directory under `~/.fleet/` that backs the chat workspace.
 const CHAT_DIR: &str = "chat";
@@ -36,10 +36,6 @@ const CHAT_DIR: &str = "chat";
 /// desktop locales and on the phone; the launcher UI labels its pinned entry
 /// with a localized string of its own.
 pub const CHAT_WORKSPACE_NAME: &str = "Chat";
-
-/// Generated `--mcp-config` payload, refreshed on every chat spawn so it can't
-/// go stale when the Fleet binary moves.
-const CHAT_MCP_FILE: &str = "chat-mcp.json";
 
 /// The chat workspace's own `CLAUDE.md`. This is the *only* memory file a chat
 /// session loads (the user's global doctrine is excluded by
@@ -270,35 +266,6 @@ pub fn ensure_chat_workspace() -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Write the `--mcp-config` payload mirroring the `fleet` MCP server currently
-/// registered in `~/.claude.json`, returning its path. `None` when Fleet's MCP
-/// injection isn't live — the caller then omits the flag, which lines up with
-/// `session_launch::permission_prompt_tool_args` omitting
-/// `--permission-prompt-tool` under the same condition.
-fn write_chat_mcp_config() -> Option<String> {
-    let entry = crate::mcp_injector::registered_fleet_entry()?;
-    let dir = get_fleet_dir()?;
-    let path = dir.join(CHAT_MCP_FILE);
-    let payload = serde_json::json!({
-        "mcpServers": { crate::mcp_injector::FLEET_SERVER_KEY: entry },
-    });
-    fs::write(&path, serde_json::to_string_pretty(&payload).ok()?).ok()?;
-    Some(path.to_string_lossy().to_string())
-}
-
-/// Path of the user's `settings.json`, or `None` when it doesn't exist.
-fn user_settings_path() -> Option<PathBuf> {
-    let path = get_claude_dir()?.join("settings.json");
-    Path::new(&path).is_file().then_some(path)
-}
-
-/// Extra `claude` args that turn a spawn inside the chat workspace into a chat:
-/// exclude the user's global memory/doctrine, then hand back the two things
-/// Fleet actually needs from that source — its hooks and its MCP server.
-///
-/// Each `--settings` / `--mcp-config` flag is added only when its file resolves,
-/// so a host without them degrades to "no global CLAUDE.md" rather than failing
-/// to launch.
 /// [`chat_session_args`] when `workspace_path` is the chat workspace, empty
 /// otherwise. Every spawn site (new session, resume, handoff, the mobile relay)
 /// runs its args through this, so a chat stays a chat across all of its turns —
@@ -312,17 +279,10 @@ pub fn chat_launch_args(workspace_path: &str) -> Vec<String> {
     }
 }
 
+/// Extra `claude` args that turn a spawn inside the chat workspace into a chat:
+/// exclude the user's global memory/doctrine.
 pub fn chat_session_args() -> Vec<String> {
-    let mut args = vec!["--setting-sources".to_string(), "project".to_string()];
-    if let Some(settings) = user_settings_path() {
-        args.push("--settings".to_string());
-        args.push(settings.to_string_lossy().to_string());
-    }
-    if let Some(mcp) = write_chat_mcp_config() {
-        args.push("--mcp-config".to_string());
-        args.push(mcp);
-    }
-    args
+    vec!["--setting-sources".to_string(), "project".to_string()]
 }
 
 #[cfg(test)]
@@ -560,14 +520,10 @@ mod tests {
     }
 
     #[test]
-    fn chat_session_args_always_drop_the_user_setting_source() {
-        let tmp = tempfile::tempdir().unwrap();
-        with_home(tmp.path(), || {
-            // No ~/.claude/settings.json and no registered MCP server on this
-            // synthetic home: the flag pair must degrade, not panic.
-            let args = chat_session_args();
-            assert_eq!(args, vec!["--setting-sources", "project"]);
-        });
+    fn chat_session_args_only_drop_the_user_setting_source() {
+        // Fleet's hooks and MCP server come from `claude_launch`, not from a
+        // copy of the user's global settings.
+        assert_eq!(chat_session_args(), vec!["--setting-sources", "project"]);
     }
 
     #[test]
@@ -577,56 +533,6 @@ mod tests {
             assert!(chat_launch_args("/Users/foo/my-project").is_empty());
             let chat = tmp.path().join(".fleet/chat");
             assert!(!chat_launch_args(&chat.to_string_lossy()).is_empty());
-        });
-    }
-
-    /// Regression (2026-08-27): `~/.claude.json` carried a `fleet` entry whose
-    /// `command` pointed into a merged-and-deleted worktree. This function
-    /// copied it verbatim into `~/.fleet/chat-mcp.json`, so the chat session
-    /// launched with a `--mcp-config` naming a binary that no longer existed —
-    /// "Available MCP tools: none", and the `--permission-prompt-tool` that
-    /// shipped alongside it turned every permission-gated tool call into a hard
-    /// error. A dead command must produce no flag at all.
-    #[test]
-    fn chat_session_args_omit_mcp_config_when_the_registered_binary_is_gone() {
-        let tmp = tempfile::tempdir().unwrap();
-        with_home(tmp.path(), || {
-            let claude_json = tmp.path().join(".claude.json");
-            std::fs::write(
-                &claude_json,
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "mcpServers": {
-                        "fleet": {
-                            "command": "/nonexistent/.worktrees/gone/target/debug/fleet-cli",
-                            "args": ["mcp"],
-                        }
-                    }
-                }))
-                .unwrap(),
-            )
-            .unwrap();
-            let args = chat_session_args();
-            assert!(
-                !args.iter().any(|a| a == "--mcp-config"),
-                "a dead fleet binary must not be handed to --mcp-config, got {args:?}",
-            );
-        });
-    }
-
-    #[test]
-    fn chat_session_args_hand_back_settings_when_present() {
-        let tmp = tempfile::tempdir().unwrap();
-        with_home(tmp.path(), || {
-            let claude = tmp.path().join(".claude");
-            std::fs::create_dir_all(&claude).unwrap();
-            let settings = claude.join("settings.json");
-            std::fs::write(&settings, "{}").unwrap();
-            let args = chat_session_args();
-            let i = args
-                .iter()
-                .position(|a| a == "--settings")
-                .expect("--settings");
-            assert_eq!(args[i + 1], settings.to_string_lossy());
         });
     }
 }

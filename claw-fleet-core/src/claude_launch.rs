@@ -264,29 +264,82 @@ fn has_flag(args: &[String], flag: &str) -> bool {
         .any(|a| a == flag || a.starts_with(&format!("{flag}=")))
 }
 
-/// The arguments that make a `claude` launch a Fleet session. `existing` is
-/// the argv the caller already built; flags it sets itself (`--model`,
+/// Whether `args` names a `--setting-sources` list without the user layer —
+/// the chat workspace's launch does. Such a session loads none of the user's
+/// global settings, CLAUDE.md or MCP servers.
+fn excludes_user_settings(args: &[String]) -> bool {
+    args.iter().enumerate().any(|(i, a)| {
+        let list = if a == "--setting-sources" {
+            args.get(i + 1).map(String::as_str)
+        } else {
+            a.strip_prefix("--setting-sources=")
+        };
+        list.is_some_and(|l| !l.split(',').any(|s| s.trim() == "user"))
+    })
+}
+
+/// How one launch is shaped, beyond the argv the caller built.
+struct Shape {
+    global: GlobalCarriers,
+    /// Hand over guidance and lessons. Off for the chat workspace, whose own
+    /// `CLAUDE.md` brief is the whole of its doctrine.
+    system_prompt: bool,
+    /// Prefix on the launch file names. A launch that excludes the user layer
+    /// gets different contents (every hook, not only the ones the global
+    /// config lacks), and two launches starting at once must not overwrite
+    /// each other's file between write and read.
+    file_prefix: &'static str,
+}
+
+/// The arguments that make a `claude` launch in `workspace_path` a Fleet
+/// session. `existing` is the argv the caller already built — including the
+/// chat workspace's `--setting-sources`; flags it sets itself (`--model`,
 /// `--permission-prompt-tool`) are not added twice.
+///
+/// Every spawn and resume must pass these: hooks, permissions and MCP servers
+/// are read per process.
 ///
 /// Best-effort: a file that cannot be written drops that one flag and is
 /// logged, rather than failing the spawn — a session without Fleet's hooks is
 /// degraded, a session that never starts is lost.
-pub fn fleet_launch_args(existing: &[String]) -> Vec<String> {
+pub fn fleet_launch_args_for(existing: &[String], workspace_path: &str) -> Vec<String> {
+    let chat = crate::chat_workspace::is_chat_workspace(workspace_path);
+    let isolated = chat || excludes_user_settings(existing);
+    let shape = Shape {
+        global: if isolated {
+            GlobalCarriers::default()
+        } else {
+            GlobalCarriers::probe()
+        },
+        system_prompt: !chat,
+        file_prefix: if isolated { "isolated-" } else { "" },
+    };
     let fleet_bin = crate::hooks::resolve_fleet_binary();
-    launch_args_with(existing, fleet_bin.as_deref(), &GlobalCarriers::probe())
+    launch_args_shaped(existing, fleet_bin.as_deref(), &shape)
 }
 
+#[cfg(test)]
 fn launch_args_with(
     existing: &[String],
     fleet_bin: Option<&str>,
     global: &GlobalCarriers,
 ) -> Vec<String> {
+    let shape = Shape {
+        global: global.clone(),
+        system_prompt: true,
+        file_prefix: "",
+    };
+    launch_args_shaped(existing, fleet_bin, &shape)
+}
+
+fn launch_args_shaped(existing: &[String], fleet_bin: Option<&str>, shape: &Shape) -> Vec<String> {
+    let global = &shape.global;
     let mut out: Vec<String> = Vec::new();
     let Some(dir) = launch_dir() else {
         return out;
     };
     let mut emit = |flag: &str, file: &str, value: String| {
-        let path = dir.join(file);
+        let path = dir.join(format!("{}{file}", shape.file_prefix));
         match write_if_changed(&path, &value) {
             Ok(()) => {
                 out.push(flag.to_string());
@@ -311,7 +364,11 @@ fn launch_args_with(
             emit("--mcp-config", MCP_FILE, mcp)
         });
 
-    if let Some(text) = system_prompt_text(global) {
+    if let Some(text) = shape
+        .system_prompt
+        .then(|| system_prompt_text(global))
+        .flatten()
+    {
         emit("--append-system-prompt-file", SYSTEM_PROMPT_FILE, text);
     }
 
@@ -555,6 +612,50 @@ mod tests {
             fs::read_to_string(value_after(&args, "--append-system-prompt-file").unwrap()).unwrap();
         assert!(!text.contains(crate::interaction_mode::render_guidance("Boss", "en").trim_end()));
         assert!(text.contains(crate::prd_discipline::render_guidance("Boss", "en").trim_end()));
+    }
+
+    #[test]
+    fn setting_sources_without_user_exclude_the_user_layer() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(excludes_user_settings(&v(&[
+            "--setting-sources",
+            "project"
+        ])));
+        assert!(excludes_user_settings(&v(&[
+            "--setting-sources=project,local"
+        ])));
+        assert!(!excludes_user_settings(&v(&[
+            "--setting-sources",
+            "user,project"
+        ])));
+        assert!(!excludes_user_settings(&v(&["-p", "hi"])));
+    }
+
+    #[test]
+    fn the_chat_workspace_gets_every_hook_and_no_guidance_in_its_own_files() {
+        // The chat launch excludes the user layer, so nothing global reaches
+        // it — even on a host whose global config still carries Fleet's hooks.
+        let h = Home::new("chat");
+        reconcile_guidance("Boss", "en").unwrap();
+        let chat = crate::chat_workspace::ensure_chat_workspace().unwrap();
+        let existing = crate::chat_workspace::chat_session_args();
+        let args = fleet_launch_args_for(&existing, &chat);
+
+        let settings_path = value_after(&args, "--settings").expect("--settings");
+        assert!(
+            settings_path.ends_with("isolated-settings.json"),
+            "must not share the regular launch file: {settings_path}"
+        );
+        assert!(Path::new(settings_path).starts_with(&h.dir));
+        if crate::hooks::resolve_fleet_binary().is_some() {
+            let hooks = subcommands(&read_json(settings_path));
+            assert!(hooks.contains("prd-context"), "every hook: {hooks}");
+            assert!(value_after(&args, "--mcp-config").is_some());
+        }
+        assert!(
+            value_after(&args, "--append-system-prompt-file").is_none(),
+            "the chat brief replaces the guidance"
+        );
     }
 
     #[test]
