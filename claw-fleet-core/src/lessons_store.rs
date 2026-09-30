@@ -1,11 +1,13 @@
 //! Managed store for daily-report lessons the user adds to their global Claude
 //! guidance.
 //!
-//! Install strategy mirrors [`crate::model_guidance`] / `wiki_guidance`:
-//!   1. Each added lesson lives as its own sentinel-wrapped block inside one
-//!      managed file, `~/.claude/fleet-lessons.md`.
-//!   2. A single sentinel-wrapped `@~/.claude/fleet-lessons.md` import is
-//!      injected into `~/.claude/CLAUDE.md`.
+//! Each added lesson lives as its own sentinel-wrapped block inside one managed
+//! file, `~/.claude/fleet-lessons.md`, and every Fleet launch hands that file to
+//! the session as system prompt ([`managed_file_content`], read by
+//! [`crate::claude_launch`]). Older builds also injected an
+//! `@~/.claude/fleet-lessons.md` import into `~/.claude/CLAUDE.md`, which put
+//! the lessons in front of every claude on the machine; nothing adds it any
+//! more, and the scope migration strips it ([`remove_import`]).
 //!
 //! Unlike the guidance modules (one static file, one sentinel), the lessons
 //! file holds **many** per-lesson blocks so individual lessons can be listed and
@@ -223,6 +225,7 @@ fn strip_import(content: &str) -> String {
 
 /// Inject (or re-inject) the `fleet:lessons` import sentinel pointing at
 /// `import_path` into `CLAUDE.md` body. Idempotent.
+#[cfg(test)]
 fn inject_import(content: &str, import_path: &str) -> String {
     let stripped = strip_import(content);
     let block = format!("{IMPORT_BEGIN}\n@{import_path}\n{IMPORT_END}\n");
@@ -397,13 +400,11 @@ pub fn add_lesson(lesson: &Lesson) -> Result<String, String> {
     }
     new_content.push_str(&render_block(&id, lesson));
     fs::write(&path, new_content).map_err(|e| format!("write fleet-lessons.md: {e}"))?;
-
-    ensure_import_installed()?;
     Ok(id)
 }
 
 /// Remove the lesson with `id`. If it was the last one, delete the managed file
-/// and strip the CLAUDE.md import. Idempotent.
+/// and strip any CLAUDE.md import an older build left. Idempotent.
 pub fn remove_lesson(id: &str) -> Result<(), String> {
     let path = lessons_file_path().ok_or("cannot determine home dir")?;
     let existing = match fs::read_to_string(&path) {
@@ -454,25 +455,8 @@ pub fn import_installed() -> bool {
         .is_some_and(|c| c.contains(IMPORT_BEGIN))
 }
 
-/// Ensure the `@fleet-lessons.md` import sentinel is present in CLAUDE.md.
-fn ensure_import_installed() -> Result<(), String> {
-    let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let path = lessons_file_path().ok_or("cannot determine home dir")?;
-    // Locked read-modify-write — see `claude_md_lock`.
-    crate::claude_md_lock::with_lock(&claude_md, || {
-        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-        let new_content = inject_import(&existing, &path.display().to_string());
-        if new_content != existing {
-            crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
-                .map_err(|e| format!("write CLAUDE.md: {e}"))?;
-        }
-        Ok::<(), String>(())
-    })?;
-    Ok(())
-}
-
 /// Strip the `@fleet-lessons.md` import sentinel from CLAUDE.md.
-fn remove_import() -> Result<(), String> {
+pub(crate) fn remove_import() -> Result<(), String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
     // Locked read-modify-write — see `claude_md_lock`.
     crate::claude_md_lock::with_lock(&claude_md, || {
@@ -493,8 +477,9 @@ fn remove_import() -> Result<(), String> {
 /// Idempotent — a second run finds nothing to move.
 pub fn migrate_legacy_lessons() -> Result<usize, String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    // Clean CLAUDE.md first, then re-home each lesson (add_lesson re-adds the
-    // import at the end). Read and write under one lock — see `claude_md_lock`.
+    // Clean CLAUDE.md first, then re-home each lesson into the managed file,
+    // which Fleet launches hand over as system prompt. Read and write under one
+    // lock — see `claude_md_lock`.
     let lessons = crate::claude_md_lock::with_lock(&claude_md, || {
         let content = match fs::read_to_string(&claude_md) {
             Ok(c) => c,

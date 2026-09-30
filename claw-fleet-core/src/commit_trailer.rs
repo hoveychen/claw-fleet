@@ -1,7 +1,7 @@
 //! Commit-trailer interception: `git commit` calls that hand-write a Claude
 //! byline after the user turned bylines off.
 //!
-//! `includeCoAuthoredBy: false` (see [`crate::hooks::apply_no_commit_attribution`])
+//! `includeCoAuthoredBy: false` (every Fleet launch sets it, see [`crate::claude_launch`])
 //! only removes the line Claude Code *injects* into its own system prompt. It
 //! cannot stop the model from copying the trailer out of the repo's history.
 //! Observed 2026-09-29 in `anatole-mono` commit `5fd0a96`: the session ran

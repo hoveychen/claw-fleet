@@ -259,12 +259,16 @@ fn run_cli_test_inner(
             .collect(),
     };
 
+    // The hooks, MCP server and guidance under test reach a Fleet session
+    // only through its launch arguments, so the probe has to carry them too.
+    let launch = crate::claude_launch::fleet_launch_args_for(&[], &workdir.to_string_lossy());
     let mut child = build_claude_command(
         std::path::Path::new(&bin.path),
         allowed_tool,
         prompt,
         &workdir,
     )?
+    .args(&launch)
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -404,7 +408,7 @@ fn build_cli_message(
         ),
         // Smoking-gun failure: claude finished cleanly but never produced a card.
         (false, false, Some(0)) => format!(
-            "❌ claude -p exited 0 but NO test {tool_name} card landed — the agent ran but never called the tool. Read the stream-json output below: look for `\"name\":\"{tool_name}\"` tool_use blocks (if missing, the CLAUDE.md interaction-mode injection isn't reaching the agent)."
+            "❌ claude -p exited 0 but NO test {tool_name} card landed — the agent ran but never called the tool. Read the stream-json output below: look for `\"name\":\"{tool_name}\"` tool_use blocks (if missing, the interaction-mode guidance isn't reaching the agent)."
         ),
         // Timeout with no card: hung without producing the tool call.
         (true, false, _) => format!(
@@ -426,7 +430,7 @@ fn build_cli_message(
 /// 2026-07) is invisible to a behavioural test that just spawns the child.
 ///
 /// `--allowed-tools <name>` is load-bearing: without it the tool isn't
-/// in `claude -p`'s default tool list, so the CLAUDE.md interaction-mode
+/// in `claude -p`'s default tool list, so the interaction-mode
 /// guidance has nothing to call and the model silently falls back to
 /// plain text. `--output-format stream-json --verbose` makes the
 /// captured output self-explanatory.
@@ -605,7 +609,7 @@ mod tests {
         assert!(msg.starts_with("❌"), "expected failure marker: {msg}");
         assert!(msg.contains("exited 0 but NO test"));
         assert!(msg.contains("AskUserQuestion"));
-        assert!(msg.contains("interaction-mode injection"));
+        assert!(msg.contains("interaction-mode guidance"));
     }
 
     #[test]

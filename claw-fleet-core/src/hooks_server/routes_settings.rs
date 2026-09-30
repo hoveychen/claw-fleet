@@ -97,37 +97,6 @@ pub(crate) fn route_resume_triggers_config(
     );
 }
 
-pub(crate) fn route_permissions_config(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    config_pair(
-        request,
-        json_header,
-        crate::permissions_injector::load_config,
-        |cfg| {
-            // Save *then* apply, same order as `gui::set_permissions_config`:
-            // every other Fleet process's watchdog reads the file, so it has to
-            // be the new truth before the lock changes under them.
-            crate::permissions_injector::save_config(&cfg).map_err(|e| e.to_string())?;
-            if cfg.enabled {
-                crate::permissions_injector::acquire(std::process::id())
-                    .map_err(|e| e.to_string())?;
-            } else {
-                // The toggle is the only un-injection path, and it is global:
-                // deactivate even while a peer process holds the lock, since
-                // every watchdog then reads `enabled == false` and stops
-                // re-injecting.
-                crate::permissions_injector::deactivate().map_err(|e| e.to_string())?;
-            }
-            Ok(cfg)
-        },
-    );
-}
-
 pub(crate) fn route_decision_panel_config(
     ctx: &ServeCtx,
     request: tiny_http::Request,

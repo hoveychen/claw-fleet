@@ -218,18 +218,15 @@ describe("live proxy route table", () => {
   });
 
   /**
-   * The three host-settings POSTs pass the config object straight through, so
+   * The host-settings POSTs pass the config object straight through, so
    * the only thing that can be wrong is which IPC arg it comes from — and the
    * frontend is not consistent: `set_auto_resume_config` sends `{ config }`
-   * while the other two send `{ cfg }`. Reading the wrong one posts `undefined`,
+   * while `set_decision_panel_config` sends `{ cfg }`. Reading the wrong one posts `undefined`,
    * which serializes to no body at all and 400s on the server.
    */
   it("takes each host-settings body from the arg name the caller uses", () => {
     expect(LIVE_ROUTES.set_auto_resume_config({ config: { enabled: false } }).body).toEqual({
       enabled: false,
-    });
-    expect(LIVE_ROUTES.set_permissions_config({ cfg: { enabled: true } }).body).toEqual({
-      enabled: true,
     });
     expect(
       LIVE_ROUTES.set_decision_panel_config({ cfg: { wait_seconds: 600 } }).body,
@@ -685,8 +682,8 @@ describe("get_app_version composite", () => {
  *
  * What this pins down happened for real: `?mock&live` installs `tauri-mock`,
  * which — unlike `webTransport` — never calls `setHostPrefsSource`, and the old
- * fallback answered `locale: "en"`. `controlPlaneSelfHeal` posts these on every
- * App mount, so one headless `live-ui.sh` screenshot run rewrote a Chinese
+ * fallback answered `locale: "en"`. The since-removed `controlPlaneSelfHeal`
+ * posted these on every App mount, so one headless `live-ui.sh` screenshot run rewrote a Chinese
  * user's whole control plane in English, and every session started afterwards
  * answered in the wrong language.
  */

@@ -1,5 +1,4 @@
-//! PRD Discipline mode — injects a guidance block into `~/.claude/CLAUDE.md`
-//! that locks down two failure modes the user kept hitting:
+//! PRD Discipline mode — the guidance block that locks down two failure modes the user kept hitting:
 //!
 //!   1. Mid-PRD commit nagging — the agent finishes P1/P2, gets a "should I
 //!      commit now?" reflex, and the user has to keep saying "no, keep going."
@@ -8,11 +7,13 @@
 //!
 //! The discipline rules live in this guidance file. The persistence half
 //! (TASKS.md re-injection on every UserPromptSubmit) is implemented as a
-//! Claude Code hook in `hooks::apply_user_prompt_submit_hook`.
+//! Claude Code hook (`fleet prd-context`, see `hooks::launch_hooks`).
 //!
-//! Install strategy mirrors `interaction_mode`:
-//!   1. Render `~/.claude/fleet-prd-discipline.md`.
-//!   2. Sentinel-wrap an `@import` in `~/.claude/CLAUDE.md`.
+//! Delivery: rendered into each Fleet-started session's system prompt
+//! (`--append-system-prompt-file`, see [`crate::claude_launch`]). Older Fleet
+//! builds wrote it to `~/.claude/fleet-prd-discipline.md` behind an `@import` in
+//! `~/.claude/CLAUDE.md`, which reached every claude on the machine;
+//! [`crate::scope_migration`] takes that back out.
 //!
 //! **Rule 7 (concurrency) is deliberately Claude-only.** The compact codex and
 //! dsh PRD blocks in `codex_guidance` / `dsh_guidance` do not mirror it: neither
@@ -490,58 +491,22 @@ This mode is **independent of** Fleet Interaction Mode; they can be enabled sepa
     )
 }
 
-/// Apply PRD-discipline mode: write the guidance file and inject the
-/// `@import` sentinel block into `~/.claude/CLAUDE.md`. Idempotent.
-pub fn apply_prd_discipline(user_title: &str, locale: &str) -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_prd_discipline_inner(user_title, locale),
-        crate::control_plane_prefs::Feature::PrdDiscipline,
-        false,
-    )
+/// Switch PRD-discipline mode on for Fleet-started sessions. The guidance is rendered
+/// into each launch's system prompt ([`crate::claude_launch`]) with the title
+/// and locale reconciled there; the arguments stay for the callers' sake.
+pub fn apply_prd_discipline(_user_title: &str, _locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdDiscipline, true)
 }
 
-fn apply_prd_discipline_inner(user_title: &str, locale: &str) -> Result<(), String> {
-    let dir = claude_dir().ok_or("cannot determine home dir")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
-
-    let guidance_path = guidance_file_path().ok_or("cannot determine home dir")?;
-    let guidance = render_guidance(user_title, locale);
-    fs::write(&guidance_path, guidance).map_err(|e| format!("write guidance file: {e}"))?;
-
-    // Locked read-modify-write — see `claude_md_lock`.
-    let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let block = format!(
-        "{begin}\n@{path}\n{end}\n",
-        begin = BEGIN_MARKER,
-        end = END_MARKER,
-        path = guidance_path.display(),
-    );
-    crate::claude_md_lock::with_lock(&claude_md, || {
-        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-        let new_content = compose_claude_md(&existing, &block);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
-            .map_err(|e| format!("write CLAUDE.md: {e}"))
-    })?;
-    Ok(())
-}
-
-/// Thin wrapper over [`crate::claude_md_block::compose`] — see there for why
-/// the blank-line accounting is what it is.
-fn compose_claude_md(existing: &str, block: &str) -> String {
-    crate::claude_md_block::compose(existing, block, BEGIN_MARKER, END_MARKER)
-}
-
-/// Remove PRD-discipline mode: strip the sentinel block and delete the
-/// guidance file. Idempotent.
+/// Switch PRD-discipline mode off for Fleet-started sessions.
 pub fn remove_prd_discipline() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_prd_discipline_inner(),
-        crate::control_plane_prefs::Feature::PrdDiscipline,
-        true,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdDiscipline, false)
 }
 
-fn remove_prd_discipline_inner() -> Result<(), String> {
+/// Take the guidance an older Fleet wrote into `~/.claude` back out: strip the
+/// sentinel block from `CLAUDE.md` and delete the guidance file. Only the scope
+/// migration calls this; it records nothing in `control_plane_prefs`.
+pub(crate) fn remove_prd_discipline_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         crate::claude_md_lock::with_lock(&claude_md, || {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
@@ -560,30 +525,6 @@ fn remove_prd_discipline_inner() -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// Whether the guidance file on disk needs rewriting with what this build
-/// renders. True when it is missing, and when its text drifted while staying
-/// the *same* locale variant.
-///
-/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
-/// nothing about the *wording* of the file it points at. A Fleet upgrade that
-/// edits the guidance text therefore reached no existing host, because the
-/// appliers only run on install/toggle. This is what lets `heal` notice.
-///
-/// The first-line guard is why a drifted locale is not "stale": `fleet serve`
-/// resolves its locale from `FLEET_LOCALE`, which a hand-run one on a desktop
-/// host does not have, so an exact-match check would let it rewrite the user's
-/// Chinese guidance in English on every start.
-pub fn guidance_file_is_stale(user_title: &str, locale: &str) -> bool {
-    let Some(path) = guidance_file_path() else {
-        return false;
-    };
-    let Ok(on_disk) = fs::read_to_string(&path) else {
-        return true; // missing or unreadable — rewrite it
-    };
-    let fresh = render_guidance(user_title, locale);
-    on_disk.lines().next() == fresh.lines().next() && on_disk != fresh
 }
 
 /// Whether the sentinel block is present in `~/.claude/CLAUDE.md`.
@@ -606,26 +547,6 @@ fn strip_sentinel_block(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn compose_claude_md_is_idempotent() {
-        let block = format!("{BEGIN_MARKER}\n@~/.claude/fleet-prd-discipline.md\n{END_MARKER}\n");
-        // Existing doc that already carries the block after a blank line — the
-        // real-world shape (another managed block above it).
-        let existing = format!("user stuff\n\nother block end\n\n{block}");
-        let once = compose_claude_md(&existing, &block);
-        let twice = compose_claude_md(&once, &block);
-        assert_eq!(
-            once, twice,
-            "composing twice must not accumulate blank lines"
-        );
-        // Exactly one blank line between prior content and the block.
-        assert!(
-            once.contains("other block end\n\n<!--"),
-            "one blank-line separator: {once:?}"
-        );
-        assert!(!once.contains("\n\n\n"), "no triple newline: {once:?}");
-    }
 
     #[test]
     fn strip_removes_block_preserves_rest() {

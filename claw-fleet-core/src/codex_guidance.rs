@@ -806,15 +806,21 @@ pub fn reconcile_codex_agents_md(
     user_title: &str,
     locale: &str,
 ) -> Result<(), String> {
+    write_launch_guidance(&render_blocks(set, user_title, locale))?;
+    strip_agents_md()
+}
+
+/// Remove every Fleet-managed block from `~/.codex/AGENTS.md`, keeping the
+/// user's own content; delete the file when nothing else was in it.
+///
+/// AGENTS.md itself only ever loses Fleet's blocks now: every codex on the
+/// machine reads it, so guidance written there changed the behaviour of codex
+/// sessions the user started by hand.
+pub(crate) fn strip_agents_md() -> Result<(), String> {
     let agents_md = agents_md_path().ok_or("cannot determine codex home")?;
     let existing = fs::read_to_string(&agents_md).unwrap_or_default();
     let user_content = strip_all_fleet_blocks(&existing);
 
-    write_launch_guidance(&render_blocks(set, user_title, locale))?;
-
-    // AGENTS.md itself only ever loses Fleet's blocks now: every codex on the
-    // machine reads it, so guidance written there changed the behaviour of
-    // codex sessions the user started by hand.
     if existing.is_empty() && !agents_md.exists() {
         return Ok(());
     }

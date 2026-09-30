@@ -37,7 +37,6 @@
 //! is why nesting is forbidden; five marks on a long reply were all judged
 //! well-placed, which is where the cap comes from.
 
-use std::fs;
 
 /// Sentinels around the section inside the interaction-mode file. They let
 /// [`installed_section`] lift the exact rendered text without re-deriving the
@@ -114,16 +113,22 @@ not what matters most.",
     format!("{BEGIN_MARKER}\n{body}\n{END_MARKER}")
 }
 
-/// The section as currently written into the interaction-mode file, or `None`
-/// when that feature is off (file absent) or predates the section.
+/// The section the interaction-mode guidance carries, or `None` when that
+/// feature is switched off.
 ///
-/// Read back from disk rather than re-rendered so a carrier that does not know
-/// the user title / locale (the chat brief) emits exactly what the engineering
-/// sessions got, and so a switched-off interaction mode reads as "no marks".
-pub fn installed_section() -> Option<String> {
-    let path = crate::session::get_claude_dir()?.join("fleet-interaction-mode.md");
-    let content = fs::read_to_string(path).ok()?;
-    extract_section(&content)
+/// Rendered with the title / locale Fleet's launches use
+/// ([`crate::claude_launch::guidance_voice`]), so a carrier that sees none of
+/// the engineering guidance (the chat brief) emits exactly what the
+/// engineering sessions got. The switch is read from
+/// [`crate::control_plane_prefs`], not from a file under `~/.claude`: Fleet no
+/// longer writes its guidance there.
+pub fn enabled_section() -> Option<String> {
+    use crate::control_plane_prefs::{is_enabled, Feature};
+    if !is_enabled(Feature::InteractionMode) {
+        return None;
+    }
+    let (title, locale) = crate::claude_launch::guidance_voice();
+    extract_section(&crate::interaction_mode::render_guidance(&title, &locale))
 }
 
 /// Lift the sentinel-delimited section (sentinels included) out of `content`.

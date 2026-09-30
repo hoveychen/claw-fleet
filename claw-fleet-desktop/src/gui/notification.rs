@@ -20,162 +20,36 @@ pub(crate) fn get_user_title(state: tauri::State<AppState>) -> String {
     state.user_title.lock().unwrap().clone()
 }
 
-/// `(async)` for the same reason as `set_locale`: the reapply below is a dozen
-/// file operations across six guidance carriers, and none of it belongs on the
+/// `(async)` for the same reason as `set_locale`: the reconcile below writes
+/// launch-guidance files for three harnesses, and none of it belongs on the
 /// event loop. Nothing here needs the main thread.
 #[tauri::command(async)]
 pub(crate) fn set_user_title(title: String, state: tauri::State<'_, AppState>) {
     *state.user_title.lock().unwrap() = title.clone();
-    reapply_all_guidance_if_installed(&state, &title, None);
+    reconcile_launch_guidance(&state, &title, None);
 }
 
-/// Re-sync every Fleet-managed guidance carrier that is currently installed, so
-/// their `~/.claude` / `~/.codex` files pick up the latest bundled template
-/// after an app upgrade. Idempotent: each concept only rewrites when it's
-/// already installed on disk, and codex reconciles against the Claude sentinels
-/// (a no-op when nothing is installed).
+/// Re-render the guidance Fleet hands its own sessions — claude's launch
+/// voice, codex's launch guidance, dsh's plugin — with the title and locale the
+/// frontend just pushed, so an app upgrade's new wording reaches the next
+/// session. Which concepts are included comes from `control_plane_prefs`; none
+/// of this touches `~/.claude`.
 ///
 /// Called from the two frontend-driven startup syncs — `set_locale` (fires on
-/// every App mount) and `set_user_title` — so the refresh happens at app
-/// startup, not only when the Settings panel is opened. Both carry the real
-/// title/locale the frontend just pushed, unlike `setup()` whose AppState still
-/// holds the `en` / empty-title defaults.
-///
-/// **This path refreshes; it never installs.** Every arm below returns early
-/// when its carrier is absent from disk, because "not installed" here is
-/// indistinguishable from "the user turned it off". Installing a default-ON
-/// feature that was never installed is the frontend's job
-/// (`app/controlPlaneSelfHeal.ts`, run from `App.tsx` on every start), where
-/// the localStorage tristate — the actual source of truth for that choice — is
-/// readable. Do not turn these into unconditional applies: that would
-/// resurrect guidance the user deliberately removed.
-pub(crate) fn reapply_all_guidance_if_installed(
+/// every App mount) and `set_user_title` — because they carry the real
+/// title/locale, unlike `setup()` whose AppState still holds the `en` /
+/// empty-title defaults.
+pub(crate) fn reconcile_launch_guidance(
     state: &tauri::State<AppState>,
-    title_override: &str,
-    locale_override: Option<&str>,
-) {
-    reapply_interaction_mode_if_installed(state, title_override, locale_override);
-    reapply_prd_mode_if_installed(state, title_override, locale_override);
-    reapply_wiki_guidance_if_installed(state, locale_override);
-    reapply_model_guidance_if_installed(state, locale_override);
-    reapply_session_title_guidance_if_installed(state, title_override, locale_override);
-    reapply_codex_guidance(state, title_override, locale_override);
-}
-
-/// If the interaction-mode guidance is currently installed, regenerate it with
-/// fresh title/locale values. Silent on failure — it's a convenience re-sync.
-pub(crate) fn reapply_interaction_mode_if_installed(
-    state: &tauri::State<AppState>,
-    title_override: &str,
-    locale_override: Option<&str>,
-) {
-    let backend = &state.backend;
-    let plan = backend.get_hooks_plan();
-    if !plan.interaction_mode_installed {
-        return;
-    }
-    let locale = match locale_override {
-        Some(l) => l.to_string(),
-        None => state.locale.lock().unwrap().clone(),
-    };
-    if let Err(e) = backend.apply_interaction_mode(title_override, &locale) {
-        eprintln!("re-apply interaction mode failed: {e}");
-    }
-}
-
-pub(crate) fn reapply_prd_mode_if_installed(
-    state: &tauri::State<AppState>,
-    title_override: &str,
-    locale_override: Option<&str>,
-) {
-    let backend = &state.backend;
-    let plan = backend.get_hooks_plan();
-    if !plan.prd_discipline_installed {
-        return;
-    }
-    let locale = match locale_override {
-        Some(l) => l.to_string(),
-        None => state.locale.lock().unwrap().clone(),
-    };
-    if let Err(e) = backend.apply_prd_mode(title_override, &locale) {
-        eprintln!("re-apply prd mode failed: {e}");
-    }
-}
-
-/// Wiki guidance is locale-only (no title). Re-sync it when installed.
-pub(crate) fn reapply_wiki_guidance_if_installed(
-    state: &tauri::State<AppState>,
-    locale_override: Option<&str>,
-) {
-    let backend = &state.backend;
-    if !backend.get_hooks_plan().wiki_guidance_installed {
-        return;
-    }
-    let locale = match locale_override {
-        Some(l) => l.to_string(),
-        None => state.locale.lock().unwrap().clone(),
-    };
-    if let Err(e) = backend.apply_wiki_guidance(&locale) {
-        eprintln!("re-apply wiki guidance failed: {e}");
-    }
-}
-
-/// Model guidance is locale-only (no title). Re-sync it when installed.
-pub(crate) fn reapply_model_guidance_if_installed(
-    state: &tauri::State<AppState>,
-    locale_override: Option<&str>,
-) {
-    let backend = &state.backend;
-    if !backend.get_hooks_plan().model_guidance_installed {
-        return;
-    }
-    let locale = match locale_override {
-        Some(l) => l.to_string(),
-        None => state.locale.lock().unwrap().clone(),
-    };
-    if let Err(e) = backend.apply_model_guidance(&locale) {
-        eprintln!("re-apply model guidance failed: {e}");
-    }
-}
-
-/// Session-title guidance carries the user title, so it re-syncs on both a
-/// title and a locale change (unlike the two locale-only blocks above).
-pub(crate) fn reapply_session_title_guidance_if_installed(
-    state: &tauri::State<AppState>,
-    title_override: &str,
-    locale_override: Option<&str>,
-) {
-    let backend = &state.backend;
-    if !backend.get_hooks_plan().session_title_guidance_installed {
-        return;
-    }
-    let locale = match locale_override {
-        Some(l) => l.to_string(),
-        None => state.locale.lock().unwrap().clone(),
-    };
-    if let Err(e) = backend.apply_session_title_guidance(title_override, &locale) {
-        eprintln!("re-apply session title guidance failed: {e}");
-    }
-}
-
-/// Mirror the Claude concept toggles onto codex's `AGENTS.md`. Self-gating: it
-/// reads which concepts are installed from the Claude sentinels and reconciles
-/// the matching codex blocks (removing `AGENTS.md` when nothing is installed),
-/// so it's safe to call unconditionally — no `_if_installed` guard needed.
-pub(crate) fn reapply_codex_guidance(
-    state: &tauri::State<AppState>,
-    title_override: &str,
+    title: &str,
     locale_override: Option<&str>,
 ) {
     let locale = match locale_override {
         Some(l) => l.to_string(),
         None => state.locale.lock().unwrap().clone(),
     };
-    if let Err(e) = state
-        .backend
-        .reconcile_codex_guidance(title_override, &locale)
-    {
-        eprintln!("re-apply codex guidance failed: {e}");
+    if let Err(e) = state.backend.reconcile_codex_guidance(title, &locale) {
+        eprintln!("reconcile launch guidance failed: {e}");
     }
 }
 

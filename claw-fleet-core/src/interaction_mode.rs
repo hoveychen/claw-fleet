@@ -1,16 +1,13 @@
-//! Interaction Mode — injects a guidance block into `~/.claude/CLAUDE.md`
-//! that steers Claude Code to route all terminal-level final output through
+//! Interaction Mode — the guidance block that steers Claude Code to route all terminal-level final output through
 //! the `fleet__ask` MCP tool (falling back to the built-in `AskUserQuestion`
 //! only when `fleet__ask` is absent), so Fleet can route every wait-for-user
 //! moment into its decision panel.
 //!
-//! Install strategy:
-//!   1. Render a guidance markdown file at `~/.claude/fleet-interaction-mode.md`
-//!      with the user's title and locale interpolated.
-//!   2. Inject a sentinel-wrapped `@~/.claude/fleet-interaction-mode.md` import
-//!      line into `~/.claude/CLAUDE.md`.
-//!
-//! Uninstall removes both.
+//! Delivery: rendered into each Fleet-started session's system prompt
+//! (`--append-system-prompt-file`, see [`crate::claude_launch`]). Older Fleet
+//! builds wrote it to `~/.claude/fleet-interaction-mode.md` behind an `@import` in
+//! `~/.claude/CLAUDE.md`, which reached every claude on the machine;
+//! [`crate::scope_migration`] takes that back out.
 
 use std::fs;
 use std::path::PathBuf;
@@ -254,55 +251,22 @@ If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — n
     )
 }
 
-/// Apply interaction mode: write the guidance file and inject the `@import`
-/// sentinel block into `~/.claude/CLAUDE.md`. Idempotent.
-pub fn apply_interaction_mode(user_title: &str, locale: &str) -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_interaction_mode_inner(user_title, locale),
-        crate::control_plane_prefs::Feature::InteractionMode,
-        false,
-    )
+/// Switch interaction mode on for Fleet-started sessions. The guidance is rendered
+/// into each launch's system prompt ([`crate::claude_launch`]) with the title
+/// and locale reconciled there; the arguments stay for the callers' sake.
+pub fn apply_interaction_mode(_user_title: &str, _locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::InteractionMode, true)
 }
 
-fn apply_interaction_mode_inner(user_title: &str, locale: &str) -> Result<(), String> {
-    let dir = claude_dir().ok_or("cannot determine home dir")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
-
-    // Always (re)write the guidance file — config may have changed.
-    let guidance_path = guidance_file_path().ok_or("cannot determine home dir")?;
-    let guidance = render_guidance(user_title, locale);
-    fs::write(&guidance_path, guidance).map_err(|e| format!("write guidance file: {e}"))?;
-
-    // Inject sentinel block into CLAUDE.md (idempotent), under the shared lock
-    // — see `claude_md_lock` on why read-modify-write here must be serialized.
-    let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let block = format!(
-        "{begin}\n@{path}\n{end}\n",
-        begin = BEGIN_MARKER,
-        end = END_MARKER,
-        path = guidance_path.display(),
-    );
-    crate::claude_md_lock::with_lock(&claude_md, || {
-        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-        let new_content =
-            crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
-            .map_err(|e| format!("write CLAUDE.md: {e}"))
-    })?;
-    Ok(())
-}
-
-/// Remove interaction mode: strip the sentinel block and delete the guidance
-/// file. Idempotent (no-op if already clean).
+/// Switch interaction mode off for Fleet-started sessions.
 pub fn remove_interaction_mode() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_interaction_mode_inner(),
-        crate::control_plane_prefs::Feature::InteractionMode,
-        true,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::InteractionMode, false)
 }
 
-fn remove_interaction_mode_inner() -> Result<(), String> {
+/// Take the guidance an older Fleet wrote into `~/.claude` back out: strip the
+/// sentinel block from `CLAUDE.md` and delete the guidance file. Only the scope
+/// migration calls this; it records nothing in `control_plane_prefs`.
+pub(crate) fn remove_interaction_mode_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         crate::claude_md_lock::with_lock(&claude_md, || {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
@@ -332,30 +296,6 @@ pub fn is_interaction_mode_installed() -> bool {
         return false;
     };
     content.contains(BEGIN_MARKER) && content.contains(END_MARKER)
-}
-
-/// Whether the guidance file on disk needs rewriting with what this build
-/// renders. True when it is missing, and when its text drifted while staying
-/// the *same* locale variant.
-///
-/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
-/// nothing about the *wording* of the file it points at. A Fleet upgrade that
-/// edits the guidance text therefore reached no existing host, because the
-/// appliers only run on install/toggle. This is what lets `heal` notice.
-///
-/// The first-line guard is why a drifted locale is not "stale": `fleet serve`
-/// resolves its locale from `FLEET_LOCALE`, which a hand-run one on a desktop
-/// host does not have, so an exact-match check would let it rewrite the user's
-/// Chinese guidance in English on every start.
-pub fn guidance_file_is_stale(user_title: &str, locale: &str) -> bool {
-    let Some(path) = guidance_file_path() else {
-        return false;
-    };
-    let Ok(on_disk) = fs::read_to_string(&path) else {
-        return true; // missing or unreadable — rewrite it
-    };
-    let fresh = render_guidance(user_title, locale);
-    on_disk.lines().next() == fresh.lines().next() && on_disk != fresh
 }
 
 /// Thin wrapper over [`crate::claude_md_block::strip`] — the markers are this

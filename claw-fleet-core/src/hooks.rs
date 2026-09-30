@@ -1,5 +1,13 @@
-//! Fleet hooks — injects Claude Code hooks into ~/.claude/settings.json for
-//! accurate agent state detection, and reads the resulting hook events.
+//! Fleet hooks — the Claude Code hooks a Fleet-started session carries for
+//! accurate agent state detection, and the reader for the events they log.
+//!
+//! The hooks ride on each launch's `--settings` file ([`launch_hooks`], used by
+//! [`crate::claude_launch`]); nothing here writes them into the global
+//! `~/.claude/settings.json` any more, so a claude the user starts by hand runs
+//! without them. The `apply_*` / `remove_*` functions only flip the feature's
+//! switch in [`crate::control_plane_prefs`]. What still reads the global file
+//! is detection of hooks an older Fleet wrote there ([`global_hook_setup`]) and
+//! the one-off scope migration that takes them back out.
 
 use std::collections::HashMap;
 use std::fs;
@@ -18,13 +26,13 @@ const FLEET_HOOK_COMMAND: &str = r#"sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'"#;
 /// for. `is_fleet_group` never matched it (it only recognizes the current
 /// `.fleet/hooks.jsonl` path), so once we migrated the write target that group
 /// lingered in settings.json — appended to on every event with no truncation,
-/// seen at 5.3 GB in the wild. `purge_legacy_event_hooks` deletes it on sync.
+/// seen at 5.3 GB in the wild. The scope migration strips it with the rest.
 const LEGACY_EVENTS_HOOK_SUBSTR: &str = ".claude/fleet/hooks.jsonl";
 
 // Fleet hook groups are identified structurally by
 // [`group_invokes_fleet_subcommand`], which recognizes both shapes a Fleet
 // hook can take: the unix `sh -c` wrapper from [`fault_tolerant_command`] and
-// the Windows exec form from [`fleet_subcommand_hook`].
+// the Windows exec form from [`fleet_subcommand_hook_with`].
 
 /// Event types we need hooks for.
 const FLEET_HOOK_EVENTS: &[&str] = &[
@@ -160,20 +168,49 @@ pub fn append_hook_event(reader: &mut impl std::io::Read) -> Result<(), String> 
     writeln!(f, "{line}").map_err(|e| format!("append {}: {e}", path.display()))
 }
 
-fn fleet_dir() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".fleet"))
-}
-
 // ── Plan (dry-run) ───────────────────────────────────────────────────────────
 
-/// Inspect settings.json and report what changes are needed.
-pub fn plan_hook_setup() -> HookSetupPlan {
-    let settings = read_settings().unwrap_or_else(|| json!({}));
-
-    let hooks_disabled = settings
+/// Whether the user's global settings set `disableAllHooks`, which silences
+/// the hooks a launch's `--settings` carries as well.
+fn hooks_globally_disabled(settings: &Value) -> bool {
+    settings
         .get("disableAllHooks")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
+
+/// The feature switches as the settings panel shows them: what the sessions
+/// Fleet starts get, read from [`crate::control_plane_prefs`]. The event-log
+/// group rides on every launch, so it always reads as installed.
+pub fn plan_hook_setup() -> HookSetupPlan {
+    use crate::control_plane_prefs::{is_enabled, Feature};
+    let settings = read_settings().unwrap_or_else(|| json!({}));
+    HookSetupPlan {
+        to_add: Vec::new(),
+        hooks_globally_disabled: hooks_globally_disabled(&settings),
+        already_installed: true,
+        guard_installed: is_enabled(Feature::GuardHook),
+        elicitation_installed: is_enabled(Feature::ElicitationHook),
+        plan_approval_installed: is_enabled(Feature::PlanApprovalHook),
+        interaction_mode_installed: is_enabled(Feature::InteractionMode),
+        prd_context_installed: is_enabled(Feature::PrdContextHook),
+        notes_hint_installed: is_enabled(Feature::PrdContextHook),
+        prd_discipline_installed: is_enabled(Feature::PrdDiscipline),
+        wiki_guidance_installed: is_enabled(Feature::WikiGuidance),
+        model_guidance_installed: is_enabled(Feature::ModelGuidance),
+        session_title_guidance_installed: is_enabled(Feature::SessionTitleGuidance),
+        idle_hooks_installed: is_enabled(Feature::IdleHooks),
+        wakeup_guard_installed: is_enabled(Feature::WakeupGuardHook),
+    }
+}
+
+/// What an older Fleet left in the user's global `~/.claude` config, read off
+/// `settings.json` and the `CLAUDE.md` imports. [`crate::claude_launch`] skips
+/// whatever this finds (so nothing fires twice) and the scope migration strips
+/// it; the settings panel wants [`plan_hook_setup`] instead.
+pub fn global_hook_setup() -> HookSetupPlan {
+    let settings = read_settings().unwrap_or_else(|| json!({}));
+    let hooks_disabled = hooks_globally_disabled(&settings);
 
     let hooks_obj = settings
         .get("hooks")
@@ -224,120 +261,6 @@ pub fn plan_hook_setup() -> HookSetupPlan {
     }
 }
 
-// ── Apply ────────────────────────────────────────────────────────────────────
-
-/// Merge Fleet hooks into settings.json.  Only touches the `hooks` key;
-/// all other settings are preserved byte-for-byte.
-pub fn apply_hook_setup() -> Result<(), String> {
-    // Ensure ~/.fleet/ directory exists.
-    if let Some(dir) = fleet_dir() {
-        fs::create_dir_all(&dir).map_err(|e| format!("create fleet dir: {e}"))?;
-    }
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    // Ensure "hooks" key exists as an object.
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    // Self-heal: drop any legacy `~/.claude/fleet/hooks.jsonl` groups a pre-move
-    // build left behind before we (re)install the current `~/.fleet` groups.
-    purge_legacy_event_hooks(hooks_obj);
-
-    for &event in FLEET_HOOK_EVENTS {
-        if has_fleet_hook(hooks_obj, event) {
-            continue;
-        }
-
-        let fleet_group = fleet_hook_group();
-
-        if let Some(existing) = hooks_obj.get_mut(event) {
-            // Append our group to the existing array.
-            if let Some(arr) = existing.as_array_mut() {
-                arr.push(fleet_group);
-            }
-        } else {
-            // Create new array with just our group.
-            hooks_obj.insert(event.to_string(), json!([fleet_group]));
-        }
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove all Fleet hooks from settings.json.
-pub fn remove_fleet_hooks() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    for &event in FLEET_HOOK_EVENTS {
-        if let Some(arr) = hooks_obj.get_mut(event).and_then(|v| v.as_array_mut()) {
-            arr.retain(|group| !is_fleet_group(group));
-            if arr.is_empty() {
-                hooks_obj.remove(event);
-            }
-        }
-    }
-
-    // Uninstall should leave nothing of ours behind, including any legacy
-    // event-log group from a pre-`~/.fleet` build.
-    purge_legacy_event_hooks(hooks_obj);
-
-    // Remove "hooks" key entirely if empty.
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove every hook group that appends to the legacy
-/// `~/.claude/fleet/hooks.jsonl` path from all event arrays, dropping any event
-/// array left empty. Pure over the `hooks` object so it can be unit-tested
-/// without touching settings.json.
-fn purge_legacy_event_hooks(hooks_obj: &mut Map<String, Value>) {
-    let events: Vec<String> = hooks_obj.keys().cloned().collect();
-    for event in events {
-        let Some(arr) = hooks_obj.get_mut(&event).and_then(|v| v.as_array_mut()) else {
-            continue;
-        };
-        arr.retain(|group| !group_targets_legacy_events_file(group));
-        if arr.is_empty() {
-            hooks_obj.remove(&event);
-        }
-    }
-}
-
-/// Whether a hook group appends to the legacy `~/.claude/fleet/hooks.jsonl`
-/// path (installed by an older build, no longer recognized by `is_fleet_group`).
-fn group_targets_legacy_events_file(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(LEGACY_EVENTS_HOOK_SUBSTR))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
-}
-
 // ── Guard hook (synchronous interception) ────────────────────────────────────
 
 /// Resolve the `fleet` binary path baked into the hook commands we write.
@@ -351,123 +274,28 @@ pub(crate) fn resolve_fleet_binary() -> Option<String> {
     crate::fleet_cli::resolve_fleet_binary().map(|p| p.to_string_lossy().to_string())
 }
 
-/// The fleet binary to bake into `settings.json`, refusing one that Rule 3's
-/// worktree cleanup is about to delete.
+/// PreToolUse matcher for the guard hook.
 ///
-/// `settings.json` outlives this process by design, so a hook naming a
-/// worktree build is a hook that stops existing at merge time. The MCP injector
-/// has refused that since 2026-09-06; hooks never did, which is how a machine
-/// ends up with a `guard` hook — the gate for *every* shell command — pointing
-/// into a directory that was deleted weeks ago.
-fn resolve_publishable_fleet_binary() -> Result<String, String> {
-    let bin = resolve_fleet_binary().ok_or("Cannot find fleet binary — install fleet CLI first")?;
-    if !crate::fleet_cli::may_publish_self(&bin) {
-        return Err(crate::fleet_cli::ephemeral_publish_refused(
-            &bin,
-            "settings.json hooks",
-        ));
-    }
-    Ok(bin)
-}
-
-/// PreToolUse matcher for the guard hook. Pipe alternation fires the group for
-/// **either** shell tool Claude Code can drive — `Bash` and `PowerShell` — so
-/// both are audited by the single guard group. See [`apply_guard_hook`] for why
-/// omitting `PowerShell` would leave Windows-without-Git-Bash sessions running
-/// un-audited.
+/// Covers **both** shell tools Claude Code can drive: `Bash` (macOS/Linux, and
+/// Windows with Git Bash) and `PowerShell` (Windows without Git Bash, where it
+/// is enabled automatically, plus opt-in elsewhere). Pipe alternation fires the
+/// group for either tool, so a single group audits both — without `PowerShell`,
+/// a Windows session with no Git Bash would run every shell command un-audited
+/// (the guard is the sole gate: a Fleet launch's `--settings` also allows
+/// `Bash(*)` / `PowerShell(*)`). The `PowerShell` tool carries its command
+/// under the same `tool_input.command` field as `Bash`, so `fleet guard` needs
+/// no per-tool parsing branch.
 pub(crate) const GUARD_MATCHER: &str = "Bash|PowerShell";
 
-/// Install the guard hook (synchronous PreToolUse for shell tools) into
-/// settings.json.
-///
-/// The matcher covers **both** shell tools Claude Code can drive: `Bash`
-/// (macOS/Linux, and Windows with Git Bash) and `PowerShell` (Windows without
-/// Git Bash, where it is enabled automatically, plus opt-in elsewhere). Pipe
-/// alternation in a PreToolUse matcher fires the group for either tool, so a
-/// single group audits both — without `PowerShell`, a Windows session with no
-/// Git Bash would run every shell command un-audited (the guard is the sole
-/// gate now that the permissions injector suppresses Claude Code's native
-/// prompt). The `PowerShell` tool carries its command under the same
-/// `tool_input.command` field as `Bash`, so `fleet guard` needs no per-tool
-/// parsing branch.
+/// Switch the guard hook (synchronous PreToolUse for shell tools) on for
+/// Fleet-started sessions.
 pub fn apply_guard_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_guard_hook_inner(),
-        crate::control_plane_prefs::Feature::GuardHook,
-        false,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::GuardHook, true)
 }
 
-fn apply_guard_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_publishable_fleet_binary()?;
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    let mut guard_hook = fleet_subcommand_hook(&fleet_bin, "guard");
-    guard_hook["timeout"] = json!(120000);
-    let guard_group = json!({
-        "matcher": GUARD_MATCHER,
-        "hooks": [guard_hook]
-    });
-
-    // Idempotent: strip any pre-existing fleet guard groups (possibly pointing
-    // at stale binary paths) before appending a fresh one.
-    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_guard_group(group));
-            arr.push(guard_group);
-        }
-    } else {
-        hooks_obj.insert("PreToolUse".to_string(), json!([guard_group]));
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove the guard hook from settings.json.
+/// Switch the guard hook off for Fleet-started sessions.
 pub fn remove_guard_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_guard_hook_inner(),
-        crate::control_plane_prefs::Feature::GuardHook,
-        true,
-    )
-}
-
-fn remove_guard_hook_inner() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    if let Some(arr) = hooks_obj
-        .get_mut("PreToolUse")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_guard_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("PreToolUse");
-        }
-    }
-
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::GuardHook, false)
 }
 
 /// Check whether PreToolUse already has a guard hook group.
@@ -486,85 +314,15 @@ fn is_guard_group(group: &Value) -> bool {
 
 // ── Elicitation hook (AskUserQuestion interception) ─────────────────────
 
-/// Install the elicitation hook (synchronous PreToolUse for AskUserQuestion).
+/// Switch the elicitation hook (synchronous PreToolUse for AskUserQuestion) on
+/// for Fleet-started sessions.
 pub fn apply_elicitation_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_elicitation_hook_inner(),
-        crate::control_plane_prefs::Feature::ElicitationHook,
-        false,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::ElicitationHook, true)
 }
 
-fn apply_elicitation_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_publishable_fleet_binary()?;
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    let mut elicitation_hook = fleet_subcommand_hook(&fleet_bin, "elicitation");
-    elicitation_hook["timeout"] = json!(120000);
-    let elicitation_group = json!({
-        "matcher": "AskUserQuestion",
-        "hooks": [elicitation_hook]
-    });
-
-    // Idempotent: strip any pre-existing fleet elicitation groups (possibly
-    // pointing at stale binary paths) before appending a fresh one.
-    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_elicitation_group(group));
-            arr.push(elicitation_group);
-        }
-    } else {
-        hooks_obj.insert("PreToolUse".to_string(), json!([elicitation_group]));
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove the elicitation hook from settings.json.
+/// Switch the elicitation hook off for Fleet-started sessions.
 pub fn remove_elicitation_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_elicitation_hook_inner(),
-        crate::control_plane_prefs::Feature::ElicitationHook,
-        true,
-    )
-}
-
-fn remove_elicitation_hook_inner() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    if let Some(arr) = hooks_obj
-        .get_mut("PreToolUse")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_elicitation_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("PreToolUse");
-        }
-    }
-
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::ElicitationHook, false)
 }
 
 fn has_elicitation_hook(hooks_obj: &Map<String, Value>) -> bool {
@@ -581,85 +339,15 @@ fn is_elicitation_group(group: &Value) -> bool {
 
 // ── Plan-approval hook (ExitPlanMode interception) ──────────────────────
 
-/// Install the plan-approval hook (synchronous PreToolUse for ExitPlanMode).
+/// Switch the plan-approval hook (synchronous PreToolUse for ExitPlanMode) on
+/// for Fleet-started sessions.
 pub fn apply_plan_approval_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_plan_approval_hook_inner(),
-        crate::control_plane_prefs::Feature::PlanApprovalHook,
-        false,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PlanApprovalHook, true)
 }
 
-fn apply_plan_approval_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_publishable_fleet_binary()?;
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    let mut plan_approval_hook = fleet_subcommand_hook(&fleet_bin, "plan-approval");
-    plan_approval_hook["timeout"] = json!(600000);
-    let plan_approval_group = json!({
-        "matcher": "ExitPlanMode",
-        "hooks": [plan_approval_hook]
-    });
-
-    // Idempotent: strip any pre-existing fleet plan-approval groups before
-    // appending a fresh one.
-    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_plan_approval_group(group));
-            arr.push(plan_approval_group);
-        }
-    } else {
-        hooks_obj.insert("PreToolUse".to_string(), json!([plan_approval_group]));
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove the plan-approval hook from settings.json.
+/// Switch the plan-approval hook off for Fleet-started sessions.
 pub fn remove_plan_approval_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_plan_approval_hook_inner(),
-        crate::control_plane_prefs::Feature::PlanApprovalHook,
-        true,
-    )
-}
-
-fn remove_plan_approval_hook_inner() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    if let Some(arr) = hooks_obj
-        .get_mut("PreToolUse")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_plan_approval_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("PreToolUse");
-        }
-    }
-
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PlanApprovalHook, false)
 }
 
 fn has_plan_approval_hook(hooks_obj: &Map<String, Value>) -> bool {
@@ -676,115 +364,13 @@ fn is_plan_approval_group(group: &Value) -> bool {
 
 // ── PRD-context hook (UserPromptSubmit injection of TASKS.md) ───────────
 
-/// Install the PRD-context hook (UserPromptSubmit, no matcher) into
-/// settings.json. The hook calls `fleet prd-context`, which reads the active
-/// workspace's `TASKS.md` and emits it as additional context, so context
-/// compression can't erase the macro plan.
+/// Switch the PRD-context hooks on for Fleet-started sessions: the
+/// UserPromptSubmit `fleet prd-context` (re-injects the workspace's `TASKS.md`
+/// so compaction can't erase the macro plan), and its companions — the two
+/// SessionStart blocks (`notes-hint`, `recent-sessions`) and the PostToolUse
+/// `ctx-reminder`. See [`launch_hooks_for`].
 pub fn apply_prd_context_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_prd_context_hook_inner(),
-        crate::control_plane_prefs::Feature::PrdContextHook,
-        false,
-    )
-}
-
-fn apply_prd_context_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_publishable_fleet_binary()?;
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    // UserPromptSubmit hooks have no matcher field — they run for every prompt.
-    let mut prd_context_hook = fleet_subcommand_hook(&fleet_bin, "prd-context");
-    prd_context_hook["timeout"] = json!(10000);
-    let prd_context_group = json!({
-        "hooks": [prd_context_hook]
-    });
-
-    if let Some(existing) = hooks_obj.get_mut("UserPromptSubmit") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_prd_context_group(group));
-            arr.push(prd_context_group);
-        }
-    } else {
-        hooks_obj.insert("UserPromptSubmit".to_string(), json!([prd_context_group]));
-    }
-
-    // Companion: the notes-hint SessionStart hook. Fires when a context window
-    // is (re)opened — after a compaction, on `--resume`, and on startup (a
-    // handoff successor inherits its predecessor's notes) — and re-injects the
-    // session's private checkpoint notes. Same feature as prd-context: both
-    // exist so compaction can't erase what the agent was doing.
-    let mut notes_hint_hook = fleet_subcommand_hook(&fleet_bin, "notes-hint");
-    notes_hint_hook["timeout"] = json!(10000);
-    let notes_hint_group = json!({
-        "matcher": NOTES_HINT_MATCHER,
-        "hooks": [notes_hint_hook]
-    });
-    if let Some(existing) = hooks_obj.get_mut("SessionStart") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_notes_hint_group(group));
-            arr.push(notes_hint_group);
-        }
-    } else {
-        hooks_obj.insert("SessionStart".to_string(), json!([notes_hint_group]));
-    }
-
-    // Companion: the recent-sessions SessionStart hook. Same event, its own
-    // entry — Claude Code keeps the `additionalContext` of every matching hook
-    // and hands them to the model together, so this block gets its own byte
-    // budget instead of eating into the notes summary's.
-    //
-    // Longer timeout than its neighbours because it pays for a full session
-    // scan: about two seconds against a warm on-disk scan cache, but tens of
-    // seconds on a machine that has never built one. Timing out costs the
-    // block, not the session.
-    let mut recent_sessions_hook = fleet_subcommand_hook(&fleet_bin, "recent-sessions");
-    recent_sessions_hook["timeout"] = json!(20000);
-    let recent_sessions_group = json!({
-        "matcher": RECENT_SESSIONS_MATCHER,
-        "hooks": [recent_sessions_hook]
-    });
-    if let Some(existing) = hooks_obj.get_mut("SessionStart") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_recent_sessions_group(group));
-            arr.push(recent_sessions_group);
-        }
-    } else {
-        hooks_obj.insert("SessionStart".to_string(), json!([recent_sessions_group]));
-    }
-
-    // Companion: the context-pressure PostToolUse hook. Same feature for the
-    // same reason — it exists so a session notices the window filling *before*
-    // a compaction summarises its macro state away. It hangs off PostToolUse
-    // rather than UserPromptSubmit because the sessions that fill a window
-    // never come back for another prompt: a headless `-p` turn can run for
-    // hours, and a tool call is the only event that recurs inside one.
-    let mut ctx_reminder_hook = fleet_subcommand_hook(&fleet_bin, "ctx-reminder");
-    ctx_reminder_hook["timeout"] = json!(10000);
-    let ctx_reminder_group = json!({
-        "hooks": [ctx_reminder_hook]
-    });
-    if let Some(existing) = hooks_obj.get_mut("PostToolUse") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_ctx_reminder_group(group));
-            arr.push(ctx_reminder_group);
-        }
-    } else {
-        hooks_obj.insert("PostToolUse".to_string(), json!([ctx_reminder_group]));
-    }
-
-    write_settings(&settings)
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdContextHook, true)
 }
 
 /// `SessionStart` sources that open a context window whose model has not seen
@@ -804,65 +390,16 @@ pub const NOTES_HINT_MATCHER: &str = "compact|resume|startup";
 /// hooks answer to different features and either may need to move alone.
 pub const RECENT_SESSIONS_MATCHER: &str = "compact|resume|startup";
 
-/// Remove the PRD-context hook from settings.json.
+/// Switch the PRD-context hooks off for Fleet-started sessions.
 pub fn remove_prd_context_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_prd_context_hook_inner(),
-        crate::control_plane_prefs::Feature::PrdContextHook,
-        true,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdContextHook, false)
 }
 
-fn remove_prd_context_hook_inner() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    if let Some(arr) = hooks_obj
-        .get_mut("UserPromptSubmit")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_prd_context_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("UserPromptSubmit");
-        }
-    }
-    if let Some(arr) = hooks_obj
-        .get_mut("SessionStart")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_notes_hint_group(group) && !is_recent_sessions_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("SessionStart");
-        }
-    }
-    if let Some(arr) = hooks_obj
-        .get_mut("PostToolUse")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_ctx_reminder_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("PostToolUse");
-        }
-    }
-
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
-}
-
-/// All four parts must be present: the UserPromptSubmit injection, its two
-/// SessionStart companions (notes hint, recent sessions), and the PostToolUse
-/// context-pressure reminder. A
-/// settings.json from a build that predates a companion therefore reads as
-/// "not installed", which is what makes `control_plane::heal` add the missing
-/// group instead of leaving upgraded hosts without it forever.
+/// All four parts must be present in the global settings.json: the
+/// UserPromptSubmit injection, its two SessionStart companions (notes hint,
+/// recent sessions), and the PostToolUse context-pressure reminder. A partial
+/// set reads as "not installed", so [`crate::claude_launch`] carries the whole
+/// feature on the launch instead of trusting a half-installed global copy.
 fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
     hooks_obj
         .get("UserPromptSubmit")
@@ -916,90 +453,18 @@ fn is_recent_sessions_group(group: &Value) -> bool {
 
 // ── Wakeup guard hook (ScheduleWakeup / CronCreate interception) ────────
 
-/// Install the wakeup guard (synchronous PreToolUse for the built-in
-/// cross-turn schedulers). Installed and removed alongside the PRD-context
-/// hook: it is the enforcement layer for PRD discipline's Rule 5, which tells
+/// Switch the wakeup guard (synchronous PreToolUse for the built-in
+/// cross-turn schedulers) on for Fleet-started sessions. Switched alongside the
+/// PRD-context hook: it is the enforcement layer for PRD discipline's Rule 5, which tells
 /// agents to relay via `fleet watch` / `fleet handoff` / `fleet loop` rather
 /// than the built-ins that silently strand a Fleet turn.
 pub fn apply_wakeup_guard_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_wakeup_guard_hook_inner(),
-        crate::control_plane_prefs::Feature::WakeupGuardHook,
-        false,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::WakeupGuardHook, true)
 }
 
-fn apply_wakeup_guard_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_publishable_fleet_binary()?;
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    // Short timeout: the decision is a local file check, not a user prompt.
-    let mut wakeup_hook = fleet_subcommand_hook(&fleet_bin, "wakeup-guard");
-    wakeup_hook["timeout"] = json!(5000);
-    let wakeup_group = json!({
-        "matcher": crate::wakeup_guard::WAKEUP_GUARD_MATCHER,
-        "hooks": [wakeup_hook]
-    });
-
-    // Idempotent: strip any pre-existing fleet wakeup-guard groups (possibly
-    // pointing at stale binary paths) before appending a fresh one.
-    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_wakeup_guard_group(group));
-            arr.push(wakeup_group);
-        }
-    } else {
-        hooks_obj.insert("PreToolUse".to_string(), json!([wakeup_group]));
-    }
-
-    write_settings(&settings)
-}
-
-/// Remove the wakeup guard from settings.json.
+/// Switch the wakeup guard off for Fleet-started sessions.
 pub fn remove_wakeup_guard_hook() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_wakeup_guard_hook_inner(),
-        crate::control_plane_prefs::Feature::WakeupGuardHook,
-        true,
-    )
-}
-
-fn remove_wakeup_guard_hook_inner() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    if let Some(arr) = hooks_obj
-        .get_mut("PreToolUse")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_wakeup_guard_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("PreToolUse");
-        }
-    }
-
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::WakeupGuardHook, false)
 }
 
 fn is_wakeup_guard_group(group: &Value) -> bool {
@@ -1016,66 +481,11 @@ fn has_wakeup_guard_hook(hooks_obj: &Map<String, Value>) -> bool {
 
 // ── Idle hooks (Stop + UserPromptSubmit → kanban Pending sentinel) ──────
 
-/// Install both idle hooks: `Stop` calls `fleet session idle` (marks the
-/// kanban card Pending), `UserPromptSubmit` calls `fleet session resume`
-/// (clears it back to Running on next prompt).
-///
-/// Coexists with the prd-context hook on UserPromptSubmit — markers are
-/// distinct, retain-then-push only filters our own group.
+/// Switch both idle hooks on for Fleet-started sessions: `Stop` calls
+/// `fleet session idle` (marks the kanban card Pending), `UserPromptSubmit`
+/// calls `fleet session resume` (clears it back to Running on next prompt).
 pub fn apply_idle_hooks() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_idle_hooks_inner(),
-        crate::control_plane_prefs::Feature::IdleHooks,
-        false,
-    )
-}
-
-fn apply_idle_hooks_inner() -> Result<(), String> {
-    let fleet_bin = resolve_publishable_fleet_binary()?;
-
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-
-    if !obj.contains_key("hooks") {
-        obj.insert("hooks".into(), json!({}));
-    }
-    let hooks_obj = obj
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-        .ok_or("hooks is not an object")?;
-
-    let mut stop_hook = fleet_subcommand_hook(&fleet_bin, "session idle");
-    stop_hook["timeout"] = json!(5000);
-    let stop_group = json!({
-        "hooks": [stop_hook]
-    });
-    let mut resume_hook = fleet_subcommand_hook(&fleet_bin, "session resume");
-    resume_hook["timeout"] = json!(5000);
-    let resume_group = json!({
-        "hooks": [resume_hook]
-    });
-
-    if let Some(existing) = hooks_obj.get_mut("Stop") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_idle_stop_group(group));
-            arr.push(stop_group);
-        }
-    } else {
-        hooks_obj.insert("Stop".to_string(), json!([stop_group]));
-    }
-
-    if let Some(existing) = hooks_obj.get_mut("UserPromptSubmit") {
-        if let Some(arr) = existing.as_array_mut() {
-            arr.retain(|group| !is_idle_resume_group(group));
-            arr.push(resume_group);
-        }
-    } else {
-        hooks_obj.insert("UserPromptSubmit".to_string(), json!([resume_group]));
-    }
-
-    write_settings(&settings)
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::IdleHooks, true)
 }
 
 fn has_idle_hooks(hooks_obj: &Map<String, Value>) -> bool {
@@ -1100,93 +510,157 @@ fn is_idle_resume_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "session resume")
 }
 
-// ── Commit attribution (settings.json `attribution`) ────────────────────────
+// ── Taking the global writes back (scope migration) ─────────────────────────
 
-/// Turn off Claude Code's commit/PR bylines in `~/.claude/settings.json`.
-///
-/// Claude Code's own system prompt ends every commit message with
-/// `Co-Authored-By: Claude … <noreply@anthropic.com>` (and a
-/// `🤖 Generated with Claude Code` line in PR bodies), and web / Remote Control
-/// sessions additionally paste a claude.ai session URL. That default is *not*
-/// reachable from guidance text — `attribution` in settings.json is the only
-/// lever, so a Fleet-governed host has to set it here alongside the hooks.
-///
-/// Inside `attribution`, two keys, both booleans:
-/// - `commitTrailers` — the `Co-Authored-By` / `Generated with` trailers.
-/// - `sessionUrl` — the claude.ai session link in web/Remote Control commits.
-///
-/// Plus the top-level `includeCoAuthoredBy`, the older spelling of
-/// `commitTrailers`. Writing the new one alone is **not** enough: measured
-/// against Claude Code 2.1.263 on 2026-09-10, `attribution.commitTrailers:
-/// false` does not reach the system-prompt assembly, and a fresh session still
-/// gets `End git commit messages with: Co-Authored-By: …`. The probe was a new
-/// `claude -p` session asked to quote that line verbatim — with only
-/// `attribution.commitTrailers` it quoted the trailer, with
-/// `includeCoAuthoredBy: false` it answered `NONE`, and with both it answered
-/// `NONE` (they do not conflict). So write both spellings until upstream wires
-/// the new key up; dropping the old one silently re-enables the byline.
-///
-/// Merges into an existing `attribution` object rather than replacing it, so a
-/// future key someone set by hand survives. Claude Code reads settings.json at
-/// startup, so this only affects sessions spawned after the write.
-pub fn apply_no_commit_attribution() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-    obj.insert("includeCoAuthoredBy".to_string(), json!(false));
-    let attribution = obj
-        .entry("attribution".to_string())
-        .or_insert_with(|| json!({}));
-    if !attribution.is_object() {
-        *attribution = json!({});
+/// Whether one hook entry is Fleet's: any `fleet <subcommand>` invocation, in
+/// either shape, or an event-log append to `~/.fleet/hooks.jsonl` (current) or
+/// `~/.claude/fleet/hooks.jsonl` (legacy).
+fn is_fleet_hook_entry(hook: &Value) -> bool {
+    if hook_fleet_invocation(hook).is_some() {
+        return true;
     }
-    let attribution = attribution
-        .as_object_mut()
-        .ok_or("attribution is not an object")?;
-    attribution.insert("commitTrailers".to_string(), json!(false));
-    attribution.insert("sessionUrl".to_string(), json!(false));
-    write_settings(&settings)
+    hook.get("command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| c.contains(".fleet/hooks.jsonl") || c.contains(LEGACY_EVENTS_HOOK_SUBSTR))
 }
 
-/// Whether [`apply_no_commit_attribution`] has already been applied.
+/// Drop every Fleet hook entry from `hooks_obj`, then every group and event
+/// array left empty. Entry-level rather than group-level so a group the user
+/// hand-merged with one of Fleet's keeps the user's half. Returns how many
+/// entries went. Pure, for the tests.
+fn strip_fleet_hooks_in(hooks_obj: &mut Map<String, Value>) -> usize {
+    let mut removed = 0;
+    let events: Vec<String> = hooks_obj.keys().cloned().collect();
+    for event in events {
+        let Some(groups) = hooks_obj.get_mut(&event).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for group in groups.iter_mut() {
+            if let Some(entries) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                let before = entries.len();
+                entries.retain(|e| !is_fleet_hook_entry(e));
+                removed += before - entries.len();
+            }
+        }
+        groups.retain(|g| {
+            g.get("hooks")
+                .and_then(|h| h.as_array())
+                .is_none_or(|entries| !entries.is_empty())
+        });
+        if groups.is_empty() {
+            hooks_obj.remove(&event);
+        }
+    }
+    removed
+}
+
+/// Remove every hook Fleet ever wrote into the global `settings.json`, without
+/// recording anything in `control_plane_prefs` — this is Fleet moving its
+/// hooks into per-launch `--settings`, not the user switching features off.
+/// Returns how many entries were removed; writes nothing when that is zero.
+pub(crate) fn strip_all_fleet_hooks() -> Result<usize, String> {
+    let Some(mut settings) = read_settings() else {
+        return Ok(0);
+    };
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(0);
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(0);
+    };
+    let removed = strip_fleet_hooks_in(hooks_obj);
+    if removed == 0 {
+        return Ok(0);
+    }
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+    write_settings(&settings)?;
+    Ok(removed)
+}
+
+/// Whether any one hook group of `feature` is in the global `settings.json`.
 ///
-/// Exists so `control_plane::heal` can stay silent on a host that is already
-/// whole — it prints the steps it ran, and an unconditional write would put a
-/// line on every `fleet webui` start. Deliberately *not* a
-/// [`HookSetupPlan`] field: that struct is the settings panel's toggle list, and
-/// this is a value with no on/off UI, like the pinned default model.
-pub fn no_commit_attribution_applied() -> bool {
+/// Looser than [`global_hook_setup`], which wants *every* group of a feature
+/// before it reads as installed. The scope migration asks what the user meant
+/// before it strips the hooks, and a host whose Fleet predates one companion
+/// group (say `ctx-reminder`) still meant the feature to be on.
+pub(crate) fn any_hook_of_installed(feature: crate::control_plane_prefs::Feature) -> bool {
     let Some(settings) = read_settings() else {
         return false;
     };
-    let Some(attribution) = settings.get("attribution") else {
+    let Some(hooks_obj) = settings.get("hooks").and_then(|h| h.as_object()) else {
         return false;
     };
-    attribution.get("commitTrailers").and_then(|v| v.as_bool()) == Some(false)
-        && attribution.get("sessionUrl").and_then(|v| v.as_bool()) == Some(false)
-        // The old spelling is the one Claude Code actually honours, so a host
-        // that only has the new key is *not* whole — heal must rewrite it.
-        && settings
-            .get("includeCoAuthoredBy")
-            .and_then(|v| v.as_bool())
-            == Some(false)
+    launch_hooks_for(feature).iter().any(|h| {
+        hooks_obj
+            .get(h.event)
+            .and_then(|v| v.as_array())
+            .is_some_and(|groups| {
+                groups
+                    .iter()
+                    .any(|g| group_invokes_fleet_subcommand(g, h.subcommand))
+            })
+    })
 }
 
-/// Whether the user has turned commit bylines off, under either spelling.
-/// Looser than [`no_commit_attribution_applied`]: that one asks whether heal
-/// has run, this one asks what the user wants — `commit_trailer` blocks a
-/// hand-written Claude trailer only when it is `true`.
-pub fn commit_trailers_disabled() -> bool {
-    let Some(settings) = read_settings() else {
-        return false;
+/// What [`strip_fleet_settings_values_in`] took out.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct StrippedValues {
+    /// The global `model`, which Fleet's default-model setting wrote. Handed
+    /// on to [`crate::claude_launch::set_default_model`] so Fleet sessions keep
+    /// running on it.
+    pub model: Option<String>,
+    /// Whether any commit-attribution key was removed.
+    pub attribution: bool,
+}
+
+/// Take the settings *values* an older Fleet wrote — `model` and the
+/// commit-attribution switches (`includeCoAuthoredBy`, `attribution.
+/// commitTrailers` / `sessionUrl`, all `false`) — out of a settings document.
+/// Fleet sessions now get both from their launch arguments
+/// ([`crate::claude_launch`]).
+///
+/// The attribution keys only go when they hold the value Fleet wrote (`false`);
+/// one the user set to `true` is theirs. `model` goes whatever it names: Fleet
+/// wrote it for its own default model, and it now rides on each launch's
+/// `--model` instead.
+fn strip_fleet_settings_values_in(obj: &mut Map<String, Value>) -> StrippedValues {
+    let mut out = StrippedValues::default();
+    if let Some(Value::String(m)) = obj.remove("model") {
+        out.model = Some(m);
+    }
+    if obj.get("includeCoAuthoredBy") == Some(&json!(false)) {
+        obj.remove("includeCoAuthoredBy");
+        out.attribution = true;
+    }
+    if let Some(attr) = obj.get_mut("attribution").and_then(|a| a.as_object_mut()) {
+        for key in ["commitTrailers", "sessionUrl"] {
+            if attr.get(key) == Some(&json!(false)) {
+                attr.remove(key);
+                out.attribution = true;
+            }
+        }
+        if attr.is_empty() {
+            obj.remove("attribution");
+        }
+    }
+    out
+}
+
+/// [`strip_fleet_settings_values_in`] applied to the global `settings.json`.
+pub(crate) fn strip_fleet_settings_values() -> Result<StrippedValues, String> {
+    let Some(mut settings) = read_settings() else {
+        return Ok(StrippedValues::default());
     };
-    settings.get("includeCoAuthoredBy").and_then(|v| v.as_bool()) == Some(false)
-        || settings
-            .get("attribution")
-            .and_then(|a| a.get("commitTrailers"))
-            .and_then(|v| v.as_bool())
-            == Some(false)
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(StrippedValues::default());
+    };
+    let out = strip_fleet_settings_values_in(obj);
+    if out != StrippedValues::default() {
+        write_settings(&settings)?;
+    }
+    Ok(out)
 }
 
 // ── Read hook events ─────────────────────────────────────────────────────────
@@ -1670,7 +1144,6 @@ pub(crate) fn launch_hooks(
             continue;
         }
         for h in launch_hooks_for(feature) {
-            // `_with` skips the per-hook debug line: this runs on every spawn.
             let mut entry = fleet_subcommand_hook_with(cfg!(windows), fleet_bin, h.subcommand);
             entry["timeout"] = json!(h.timeout_ms);
             let mut group = json!({ "hooks": [entry] });
@@ -1734,7 +1207,7 @@ fn fleet_hook_group() -> Value {
     })
 }
 
-// ── Binary-path drift ────────────────────────────────────────────────────────
+// ── Recognising Fleet's hook entries ─────────────────────────────────────────
 
 /// The `(fleet binary, subcommand)` a hook entry names, for either shape
 /// [`fleet_subcommand_hook_with`] writes. `None` for anything that is not a
@@ -1775,87 +1248,6 @@ fn hook_fleet_invocation(hook: &Value) -> Option<(String, String)> {
         return None;
     }
     Some((cmd.to_string(), args.join(" ")))
-}
-
-/// Rewrite every Fleet hook in `hooks_obj` to name `fleet_bin`, returning how
-/// many entries actually changed. Pure, so the drift logic is testable without
-/// touching a real `settings.json`.
-fn repoint_fleet_hooks_in(hooks_obj: &mut Map<String, Value>, fleet_bin: &str) -> usize {
-    let mut changed = 0;
-    for (_event, groups) in hooks_obj.iter_mut() {
-        let Some(groups) = groups.as_array_mut() else {
-            continue;
-        };
-        for group in groups.iter_mut() {
-            let Some(entries) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
-                continue;
-            };
-            for entry in entries.iter_mut() {
-                let Some((bin, sub)) = hook_fleet_invocation(entry) else {
-                    continue;
-                };
-                if bin == fleet_bin {
-                    continue;
-                }
-                // Keep the shape already on disk: a Windows settings.json
-                // carries exec form, a unix one the sh wrapper, and a machine
-                // must not be handed the other platform's shape just because
-                // the path drifted.
-                let was_exec_form = entry.get("args").is_some();
-                let mut fresh = fleet_subcommand_hook_with(was_exec_form, fleet_bin, &sub);
-                // Preserve per-entry settings the appliers add (`timeout`,
-                // `async`) — this rewrites the path, nothing else.
-                if let (Some(fresh_obj), Some(old_obj)) = (fresh.as_object_mut(), entry.as_object())
-                {
-                    for (k, v) in old_obj {
-                        if k != "command" && k != "args" && k != "type" {
-                            fresh_obj.insert(k.clone(), v.clone());
-                        }
-                    }
-                }
-                *entry = fresh;
-                changed += 1;
-            }
-        }
-    }
-    changed
-}
-
-/// Point every Fleet hook in `settings.json` at the fleet binary this machine
-/// resolves *now*, and report how many entries moved.
-///
-/// Hook commands bake an absolute path, and nothing ever rewrote it: the
-/// appliers replace a hook wholesale, but they only run when a feature is
-/// installed or toggled, and `control_plane::heal` skips anything already
-/// present — a check that reads the *subcommand*, never the path. So a hook
-/// installed by a `./target/debug/fleet` keeps naming that build forever,
-/// and a machine ends up with its hooks split across several binaries of
-/// different ages. Measured on the author's Mac on 2026-09-14: eight Fleet
-/// hooks across three different binaries, one of which no longer knew the
-/// subcommand it was pointed at.
-///
-/// Path-only: which features are installed is not this function's business, so
-/// it adds and removes nothing. Safe and cheap to run on every startup — it
-/// writes only when something actually changed.
-pub fn repoint_fleet_hooks() -> Result<usize, String> {
-    // Nothing publishable to point at — including a worktree build, which would
-    // move every hook onto a path that disappears at merge. Leaving the
-    // existing paths alone is strictly better than rewriting them to a guess.
-    let Ok(fleet_bin) = resolve_publishable_fleet_binary() else {
-        return Ok(0);
-    };
-    let Some(mut settings) = read_settings() else {
-        return Ok(0);
-    };
-    let Some(hooks_obj) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(0);
-    };
-    let changed = repoint_fleet_hooks_in(hooks_obj, &fleet_bin);
-    if changed == 0 {
-        return Ok(0);
-    }
-    write_settings(&settings)?;
-    Ok(changed)
 }
 
 /// Check whether a given event already has a Fleet hook group.
@@ -1958,20 +1350,9 @@ fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
 /// form's real-executable requirement. The trade-off is no missing-binary
 /// fault tolerance on Windows; the published `~/.fleet/bin/fleet.exe` copy is
 /// what the hooks point at, and hook spawn failures are non-blocking.
-fn fleet_subcommand_hook(fleet_bin: &str, subcommand: &str) -> Value {
-    crate::log_debug(&format!(
-        "hooks: emitting `fleet {subcommand}` hook as {} (bin={fleet_bin})",
-        if cfg!(windows) {
-            "exec form"
-        } else {
-            "sh wrapper"
-        },
-    ));
-    fleet_subcommand_hook_with(cfg!(windows), fleet_bin, subcommand)
-}
-
-/// Pure core of [`fleet_subcommand_hook`] — the `windows` flag stands in for
-/// `cfg!(windows)` so both shapes are unit-testable on any host.
+///
+/// The `windows` flag stands in for `cfg!(windows)` so both shapes are
+/// unit-testable on any host.
 fn fleet_subcommand_hook_with(windows: bool, fleet_bin: &str, subcommand: &str) -> Value {
     if windows {
         json!({
@@ -2224,81 +1605,10 @@ mod fleet_subcommand_hook_tests {
     }
 
     #[test]
-    fn repoint_moves_every_shape_onto_the_current_binary_and_spares_the_rest() {
-        // A settings.json in the state this Mac was actually found in on
-        // 2026-09-14: Fleet hooks spread over three binaries of different ages,
-        // in both shapes, next to a user's own hook and the `cat >>` event
-        // logger (which names no binary and must not be touched).
-        let mut hooks_obj = json!({
-            "PreToolUse": [
-                {"matcher": "Bash|PowerShell", "hooks": [{
-                    "type": "command",
-                    "command": fault_tolerant_command("/old/path/fleet", "guard"),
-                    "timeout": 120000
-                }]},
-                {"matcher": "ScheduleWakeup", "hooks": [{
-                    "type": "command",
-                    "command": "C:\\Users\\x\\.fleet\\bin\\fleet.exe",
-                    "args": ["wakeup-guard"]
-                }]},
-                {"matcher": "Bash", "hooks": [{
-                    "type": "command",
-                    "command": "my-own-linter --check"
-                }]}
-            ],
-            "Stop": [
-                {"hooks": [{"type": "command", "command": FLEET_HOOK_COMMAND, "async": true}]},
-                {"hooks": [{
-                    "type": "command",
-                    "command": fault_tolerant_command("/new/fleet", "session idle")
-                }]}
-            ]
-        })
-        .as_object()
-        .unwrap()
-        .clone();
-
-        let moved = repoint_fleet_hooks_in(&mut hooks_obj, "/new/fleet");
-        // guard + wakeup-guard moved; `session idle` was already current, the
-        // user's linter and the `cat >>` logger are not ours.
-        assert_eq!(moved, 2, "moved the wrong number of hooks");
-
-        let pre = &hooks_obj["PreToolUse"];
-        let guard = &pre[0]["hooks"][0];
-        assert_eq!(
-            guard["command"].as_str().unwrap(),
-            fault_tolerant_command("/new/fleet", "guard"),
-            "the unix wrapper should be rewritten in place"
-        );
-        assert_eq!(
-            guard["timeout"], 120000,
-            "rewriting the path must not drop the entry's timeout"
-        );
-
-        let wakeup = &pre[1]["hooks"][0];
-        assert_eq!(
-            wakeup["command"], "/new/fleet",
-            "a Windows exec-form entry must stay exec form, just repointed"
-        );
-        assert_eq!(wakeup["args"], json!(["wakeup-guard"]));
-
-        assert_eq!(
-            pre[2]["hooks"][0]["command"], "my-own-linter --check",
-            "a hook that is not Fleet's must be left alone"
-        );
-        assert_eq!(
-            hooks_obj["Stop"][0]["hooks"][0]["command"], FLEET_HOOK_COMMAND,
-            "the `cat >>` event logger names no binary and cannot drift"
-        );
-
-        // Idempotent: a second pass has nothing left to do.
-        assert_eq!(repoint_fleet_hooks_in(&mut hooks_obj, "/new/fleet"), 0);
-    }
-
-    #[test]
     fn hook_fleet_invocation_reads_back_what_the_appliers_write() {
-        // Round-trip guard: if the emitted shape ever changes, the drift
-        // parser must change with it or repointing silently stops working.
+        // Round-trip guard: if the emitted shape ever changes, the parser
+        // must change with it or the scope migration stops recognising (and
+        // stripping) Fleet's entries.
         for sub in ["guard", "prd-context", "session idle", "hook-event"] {
             for windows in [false, true] {
                 let hook = fleet_subcommand_hook_with(windows, "/some/fleet", sub);
@@ -2588,90 +1898,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_wakeup_guard_is_idempotent_and_spares_sibling_hooks() {
-        let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-hooks-wakeupguard-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        let _ = fs::create_dir_all(&tmp);
-        let prev = std::env::var_os("FLEET_HOME");
-        // SAFETY: serialised by the fleet_home_lock.
-        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
-
-        let outcome = (|| -> Result<(), String> {
-            // Seed a settings.json that already has a foreign PreToolUse group,
-            // so we can prove apply/remove leave it untouched.
-            let foreign = json!({
-                "matcher": "Bash",
-                "hooks": [{"type": "command", "command": "/usr/local/bin/somebody-else"}]
-            });
-            write_settings(&json!({ "hooks": { "PreToolUse": [foreign.clone()] } }))?;
-
-            // Apply twice — the second must not duplicate the group.
-            apply_wakeup_guard_hook()?;
-            apply_wakeup_guard_hook()?;
-
-            let settings = read_settings().ok_or("settings vanished after apply")?;
-            let arr = settings["hooks"]["PreToolUse"]
-                .as_array()
-                .ok_or("PreToolUse is not an array")?
-                .clone();
-            let ours: Vec<&Value> = arr.iter().filter(|g| is_wakeup_guard_group(g)).collect();
-            if ours.len() != 1 {
-                return Err(format!(
-                    "expected exactly 1 wakeup group, got {}",
-                    ours.len()
-                ));
-            }
-            let matcher = ours[0]["matcher"].as_str().unwrap_or_default();
-            if matcher != crate::wakeup_guard::WAKEUP_GUARD_MATCHER {
-                return Err(format!("wrong matcher: {matcher}"));
-            }
-            if !arr.contains(&foreign) {
-                return Err("apply clobbered the foreign PreToolUse group".into());
-            }
-
-            remove_wakeup_guard_hook()?;
-            let after = read_settings().ok_or("settings vanished after remove")?;
-            let arr_after = after["hooks"]["PreToolUse"]
-                .as_array()
-                .ok_or("remove dropped PreToolUse entirely, taking the foreign group with it")?;
-            if arr_after.iter().any(is_wakeup_guard_group) {
-                return Err("remove left our group behind".into());
-            }
-            if !arr_after.contains(&foreign) {
-                return Err("remove clobbered the foreign PreToolUse group".into());
-            }
-            Ok(())
-        })();
-
-        // Restore env before asserting so a failure can't leak FLEET_HOME.
-        unsafe {
-            match prev {
-                Some(p) => std::env::set_var("FLEET_HOME", p),
-                None => std::env::remove_var("FLEET_HOME"),
-            }
-        }
-        let _ = fs::remove_dir_all(&tmp);
-
-        // resolve_fleet_binary() needs an installed fleet CLI; without one the
-        // apply path can't be exercised, so treat that as a skip rather than a
-        // failure (mirrors how the hook itself fails open).
-        if let Err(e) = &outcome {
-            if e.contains("Cannot find fleet binary") {
-                eprintln!("skipped: no fleet binary on this host");
-                return;
-            }
-        }
-        outcome.expect("wakeup guard apply/remove must be idempotent and sibling-safe");
-    }
-
-    #[test]
     fn removing_a_hook_records_the_users_intent_and_reapplying_clears_it() {
         // The contract self-healing rests on: after the user switches the guard
         // off, `~/.fleet/control-plane-prefs.json` says so, and heal must skip
@@ -2773,96 +1999,6 @@ mod tests {
             wrote,
             "write_settings must create ~/.claude and write settings.json on a fresh host: {res:?}"
         );
-    }
-
-    #[test]
-    fn apply_no_commit_attribution_disables_trailers_and_merges() {
-        // Guards the reason this exists: Claude Code's Co-Authored-By trailer is
-        // a system-prompt default that guidance text cannot override, so the
-        // control plane has to write `attribution` — without clobbering the
-        // hooks the other bootstrap steps wrote, without dropping an unrelated
-        // key someone put inside `attribution` by hand, and reporting itself as
-        // applied afterwards so heal stays quiet.
-        let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-hooks-attribution-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        let _ = fs::create_dir_all(&tmp);
-        let prev = std::env::var_os("FLEET_HOME");
-        // SAFETY: serialised by the fleet_home_lock.
-        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
-
-        let outcome = (|| -> Result<(), String> {
-            write_settings(&json!({
-                "hooks": { "PreToolUse": [] },
-                "attribution": { "somethingElse": "keep me" }
-            }))?;
-            if no_commit_attribution_applied() {
-                return Err("must not read as applied before the write".into());
-            }
-
-            apply_no_commit_attribution()?;
-            let after = read_settings().ok_or("settings unreadable after apply")?;
-            let attr = after.get("attribution").ok_or("attribution key missing")?;
-            if attr.get("commitTrailers").and_then(|v| v.as_bool()) != Some(false) {
-                return Err(format!("commitTrailers not disabled: {after}"));
-            }
-            if attr.get("sessionUrl").and_then(|v| v.as_bool()) != Some(false) {
-                return Err(format!("sessionUrl not disabled: {after}"));
-            }
-            // Both spellings, because as of Claude Code 2.1.263 only the old
-            // one suppresses the trailer in the system prompt — see
-            // `apply_no_commit_attribution`'s doc comment for the probe.
-            if after.get("includeCoAuthoredBy").and_then(|v| v.as_bool()) != Some(false) {
-                return Err(format!("includeCoAuthoredBy not disabled: {after}"));
-            }
-            if attr.get("somethingElse").and_then(|v| v.as_str()) != Some("keep me") {
-                return Err(format!("apply replaced the attribution object: {after}"));
-            }
-            if after.get("hooks").is_none() {
-                return Err("apply clobbered the hooks key".into());
-            }
-            if !no_commit_attribution_applied() {
-                return Err("probe must see its own write, or heal reruns forever".into());
-            }
-
-            // Idempotent — bootstrap re-runs on every Fleet Cloud start.
-            apply_no_commit_attribution()?;
-            if !no_commit_attribution_applied() {
-                return Err("second apply must leave it applied".into());
-            }
-
-            // A host carrying only the new spelling — every host Fleet healed
-            // before 2026-09-10 — still gets the byline, so it must read as
-            // *not* applied and be rewritten.
-            write_settings(&json!({
-                "attribution": { "commitTrailers": false, "sessionUrl": false }
-            }))?;
-            if no_commit_attribution_applied() {
-                return Err("attribution-only host must not read as applied".into());
-            }
-            apply_no_commit_attribution()?;
-            if !no_commit_attribution_applied() {
-                return Err("heal must add the old spelling to such a host".into());
-            }
-            Ok(())
-        })();
-
-        // Restore env before asserting so a failure can't leak FLEET_HOME.
-        unsafe {
-            match prev {
-                Some(p) => std::env::set_var("FLEET_HOME", p),
-                None => std::env::remove_var("FLEET_HOME"),
-            }
-        }
-        let _ = fs::remove_dir_all(&tmp);
-
-        outcome.expect("apply_no_commit_attribution must disable both trailers and merge");
     }
 
     #[test]
@@ -3013,21 +2149,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_group_is_not_recognized_as_current_fleet_group() {
-        // The whole reason it lingered: is_fleet_group only matches the
-        // `.fleet/hooks.jsonl` path, and `.claude/fleet/hooks.jsonl` does not
-        // contain that substring (the `f` is preceded by `/`, not `.`).
-        let legacy = legacy_events_group();
-        assert!(!is_fleet_group(&legacy));
-        assert!(group_targets_legacy_events_file(&legacy));
-        assert!(!group_targets_legacy_events_file(&fleet_hook_group()));
-    }
-
-    #[test]
-    fn purge_drops_legacy_groups_but_keeps_others() {
+    fn migration_strips_legacy_event_groups_but_keeps_others() {
         let mut hooks: Map<String, Value> = Map::new();
-        // PostToolUse hosts the legacy group alongside the current one and an
-        // unrelated third-party group — only the legacy one must go.
         let unrelated = json!({
             "hooks": [{ "type": "command", "command": "echo hi" }]
         });
@@ -3038,15 +2161,9 @@ mod tests {
         // Stop hosts ONLY the legacy group — the emptied array must be removed.
         hooks.insert("Stop".into(), json!([legacy_events_group()]));
 
-        purge_legacy_event_hooks(&mut hooks);
+        strip_fleet_hooks_in(&mut hooks);
 
-        let post = hooks.get("PostToolUse").unwrap().as_array().unwrap();
-        assert_eq!(post.len(), 2, "legacy dropped, current + unrelated kept");
-        assert!(post.iter().any(is_fleet_group));
-        assert!(post
-            .iter()
-            .any(|g| !is_fleet_group(g) && !group_targets_legacy_events_file(g)));
-        assert!(!post.iter().any(group_targets_legacy_events_file));
+        assert_eq!(hooks.get("PostToolUse"), Some(&json!([unrelated])));
         assert!(!hooks.contains_key("Stop"), "emptied event array removed");
     }
 

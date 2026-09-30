@@ -173,7 +173,8 @@ export function hasHostLocale(): boolean {
  * Why this guard exists, from the day it bit: `?mock&live` (the `live-ui.sh`
  * harness) installs `tauri-mock`, not `webTransport` — so nothing ever called
  * `setHostPrefsSource`, and the old fallback quietly answered `locale: "en"`.
- * `controlPlaneSelfHeal` posts these five on *every* App mount, and the
+ * The since-removed `controlPlaneSelfHeal` posted these five on *every* App
+ * mount, and the
  * harness's probe runs against the real `$HOME` (it has to: the whole point is
  * real session data, which is read out of `~/.claude/projects`). One headless
  * screenshot run therefore retranslated a Chinese user's entire control plane
@@ -252,12 +253,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   apply_guard_hook: () => ({
     method: "POST",
     path: "/apply_guard_hook",
-    empty: true,
-  }),
-
-  apply_hooks_setup: () => ({
-    method: "POST",
-    path: "/apply_hooks",
     empty: true,
   }),
 
@@ -466,7 +461,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   // over SSH they govern the desktop machine, not the probe host. A browser
   // tab has no machine of its own, so it asks the host that served it. The
   // POST bodies are the config object verbatim under the IPC arg name the
-  // frontend uses (`cfg` for two of them, `config` for auto-resume), and each
+  // frontend uses (`cfg` for the decision panel, `config` for auto-resume), and each
   // route answers with the value as stored, which is not always what went in:
   // the decision-panel config is clamped on its way to disk.
   get_auto_resume_config: () => ({
@@ -500,17 +495,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/resume_triggers_config",
     body: a.config,
-  }),
-
-  get_permissions_config: () => ({
-    method: "GET",
-    path: "/permissions_config",
-  }),
-
-  set_permissions_config: (a) => ({
-    method: "POST",
-    path: "/permissions_config",
-    body: a.cfg,
   }),
 
   get_decision_panel_config: () => ({

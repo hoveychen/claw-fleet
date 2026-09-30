@@ -149,6 +149,18 @@ pub fn mark_enabled(feature: Feature) -> Result<(), String> {
     save(&prefs)
 }
 
+/// Switch `feature` on or off for the sessions Fleet starts — what every
+/// settings toggle, CLI switch and `fleet bootstrap` comes down to. Nothing
+/// else is written: a session gets the feature through its launch arguments
+/// ([`crate::claude_launch`], [`crate::codex_launch`]), read from here.
+pub fn set_enabled(feature: Feature, on: bool) -> Result<(), String> {
+    if on {
+        mark_enabled(feature)
+    } else {
+        mark_disabled(feature)
+    }
+}
+
 /// Whether the user deliberately switched `feature` off.
 pub fn is_disabled(feature: Feature) -> bool {
     load().disabled.contains(feature.key())

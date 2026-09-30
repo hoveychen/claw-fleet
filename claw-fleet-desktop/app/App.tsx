@@ -19,7 +19,6 @@ import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { applyWindowTheme, navigateToSessionDetail, useReportStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
-import { runControlPlaneSelfHeal, type ControlPlaneInstallState } from "./controlPlaneSelfHeal";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
 import { localDateKeyDaysAgo } from "./localDate";
@@ -205,26 +204,13 @@ function App() {
     };
   }, []);
 
-  // Push locale + user title to the Rust backend, then self-heal the control plane.
-  //
-  // One effect on purpose: the guidance files are rendered from AppState's
-  // locale/title, which still hold the `en` / empty defaults until these two
-  // land, so the heal has to run after them. And it has to run *here* — the
-  // same list used to live in SettingsPanel's mount effect, which only exists
-  // while 「设置」(Settings) is open, so a newly added default-ON feature was
-  // installed by nobody (that is how `fleet-session-title.md` stayed missing
-  // and every Claude session came out untitled).
+  // Push locale + user title to the Rust backend, which re-renders the launch
+  // guidance Fleet hands its own sessions with them. Nothing is installed into
+  // ~/.claude any more, so there is no control plane to self-heal here.
   useEffect(() => {
     const title = getItem("user-title");
-    Promise.all([
-      invoke("set_locale", { locale: i18n.language }).catch(() => {}),
-      title ? invoke("set_user_title", { title }).catch(() => {}) : Promise.resolve(),
-    ])
-      .then(() => invoke<ControlPlaneInstallState>("get_hooks_setup_plan"))
-      .then((plan) => {
-        runControlPlaneSelfHeal((command) => invoke(command), plan);
-      })
-      .catch(() => {});
+    invoke("set_locale", { locale: i18n.language }).catch(() => {});
+    if (title) invoke("set_user_title", { title }).catch(() => {});
   }, []);
 
   // Sync notification mode to Rust backend on startup (backend defaults to "user_action").

@@ -1,28 +1,26 @@
-//! Installing the control plane — the hooks and `~/.claude/CLAUDE.md` guidance
-//! that turn a bare Claude Code host into a Fleet-governed one.
+//! The control plane's switches — which Fleet features its sessions carry —
+//! and the two entry points that set them up.
 //!
-//! Two callers, one dispatch table:
+//! Nothing here writes into `~/.claude` any more. Every feature rides on each
+//! Fleet launch ([`crate::claude_launch`]: `--settings` hooks, the system-prompt
+//! guidance, `--mcp-config`), so a claude the user starts by hand behaves as if
+//! Fleet were not installed. What is left to "install" is the switch in
+//! [`crate::control_plane_prefs`] and the launch defaults:
 //!
-//! - [`install_all`] — everything, unconditionally. What `fleet bootstrap` and
-//!   the Fleet Cloud container's entrypoint run: typing that command is a
-//!   request for the full control plane.
-//! - [`heal`] — only what is *missing* and was never deliberately switched off.
-//!   What `fleet webui` runs on startup, so a host nobody ever configured
-//!   through the UI still gets a guard hook, and one whose `~/.claude` was
-//!   wiped gets it back.
-//!
-//! Keeping both on one [`Feature`] table is the point: a feature added to the
-//! control plane in the future is installed by `bootstrap` and healed by
-//! `webui` from the same edit, instead of being added to one list and forgotten
-//! in the other.
+//! - [`install_all`] — every feature on, plus the default model and the
+//!   guidance voice. What `fleet bootstrap` and the Fleet Cloud container's
+//!   entrypoint run: typing that command is a request for the full control
+//!   plane, so it overrides an earlier opt-out.
+//! - [`heal`] — only the launch defaults that are missing. What `fleet webui`
+//!   runs on startup. A feature nobody switched off is already on (absence in
+//!   the prefs file means enabled), so heal has no switch to flip.
 //!
 //! `default_model` is deliberately *not* a [`Feature`]: it is a settings value,
-//! not a mode you can switch on and off, so there is no "is it installed" to
-//! probe and nothing for heal to decide. [`install_all`] and [`heal`] both
-//! record it as Fleet's own launch default ([`crate::claude_launch`]), and it
-//! is a no-op when no model was named.
+//! not a mode you can switch on and off. [`install_all`] and [`heal`] both
+//! record it as Fleet's own launch default, and it is a no-op when no model was
+//! named.
 
-use crate::control_plane_prefs::{is_disabled, Feature};
+use crate::control_plane_prefs::Feature;
 use crate::hooks::HookSetupPlan;
 
 /// One control-plane step: a stable label plus its outcome.
@@ -42,32 +40,12 @@ pub struct Settings {
     pub model: String,
 }
 
-/// Install one feature. The single place that knows which function installs
-/// what — [`install_all`] and [`heal`] both go through here.
-fn apply(feature: Feature, s: &Settings) -> Result<(), String> {
-    match feature {
-        Feature::GuardHook => crate::hooks::apply_guard_hook(),
-        Feature::ElicitationHook => crate::hooks::apply_elicitation_hook(),
-        Feature::PlanApprovalHook => crate::hooks::apply_plan_approval_hook(),
-        Feature::IdleHooks => crate::hooks::apply_idle_hooks(),
-        Feature::PrdContextHook => crate::hooks::apply_prd_context_hook(),
-        Feature::WakeupGuardHook => crate::hooks::apply_wakeup_guard_hook(),
-        Feature::InteractionMode => {
-            crate::interaction_mode::apply_interaction_mode(&s.title, &s.locale)
-        }
-        Feature::PrdDiscipline => crate::prd_discipline::apply_prd_discipline(&s.title, &s.locale),
-        Feature::WikiGuidance => crate::wiki_guidance::apply_wiki_guidance(&s.locale),
-        Feature::ModelGuidance => crate::model_guidance::apply_model_guidance(&s.locale),
-        Feature::SessionTitleGuidance => {
-            crate::session_title_guidance::apply_session_title_guidance(&s.title, &s.locale)
-        }
-    }
-}
-
-/// Whether `feature` is currently installed, read off one settings snapshot.
+/// Whether `feature` is in the *global* `~/.claude` config, read off one
+/// settings snapshot — which only an older Fleet build put there.
 ///
-/// Takes an already-computed [`HookSetupPlan`] rather than probing per feature,
-/// so heal reads `settings.json` once instead of ten times.
+/// [`crate::claude_launch`] reads it so a launch does not carry a feature the
+/// global config already delivers (a hook would fire twice), and the scope
+/// migration reads it to decide what the user had switched on.
 pub fn is_installed(feature: Feature, plan: &HookSetupPlan) -> bool {
     match feature {
         Feature::GuardHook => plan.guard_installed,
@@ -84,55 +62,13 @@ pub fn is_installed(feature: Feature, plan: &HookSetupPlan) -> bool {
     }
 }
 
-/// Whether an *installed* feature's on-disk text has drifted from what this
-/// build renders — true only for the five guidance files, which are generated
-/// artefacts, never for the hooks, whose "installed" check already reads the
-/// thing that matters (the subcommand in settings.json).
-///
-/// Without this, editing guidance wording shipped nothing to a `fleet serve`
-/// host: `is_installed` reads the sentinel block in `CLAUDE.md`, which a new
-/// wording does not change, so [`heal`] skipped the feature and the host kept
-/// the old file until somebody toggled it off and on by hand. (The desktop is
-/// unaffected — it re-applies every installed carrier on each App mount, see
-/// `gui::notification::reapply_all_guidance_if_installed`.)
-///
-/// Each arm only reports drift *within the same locale variant* — see the
-/// per-module `guidance_file_is_stale` for why a locale difference must not
-/// count as staleness here.
-pub fn is_stale(feature: Feature, s: &Settings) -> bool {
-    match feature {
-        Feature::InteractionMode => {
-            crate::interaction_mode::guidance_file_is_stale(&s.title, &s.locale)
-        }
-        Feature::PrdDiscipline => {
-            crate::prd_discipline::guidance_file_is_stale(&s.title, &s.locale)
-        }
-        Feature::WikiGuidance => crate::wiki_guidance::guidance_file_is_stale(&s.locale),
-        Feature::ModelGuidance => crate::model_guidance::guidance_file_is_stale(&s.locale),
-        Feature::SessionTitleGuidance => {
-            crate::session_title_guidance::guidance_file_is_stale(&s.title, &s.locale)
-        }
-        Feature::GuardHook
-        | Feature::ElicitationHook
-        | Feature::PlanApprovalHook
-        | Feature::IdleHooks
-        | Feature::PrdContextHook
-        | Feature::WakeupGuardHook => false,
-    }
-}
-
-/// Install every feature, whatever its current state.
-///
-/// Idempotent — hooks retain-then-push, guidance strips its sentinel block and
-/// reinserts — so this is safe to run on every container start. Note it also
-/// *clears* any recorded disablement, via the bookkeeping inside each apply:
-/// asking for the full control plane by name overrides an earlier opt-out.
+/// Switch every feature on and record the launch defaults.
 pub fn install_all(s: &Settings) -> Vec<Step> {
     let mut steps: Vec<Step> = Feature::ALL
         .iter()
         .map(|&f| Step {
             name: f.key(),
-            result: apply(f, s),
+            result: crate::control_plane_prefs::set_enabled(f, true),
         })
         .collect();
     steps.push(Step {
@@ -143,53 +79,15 @@ pub fn install_all(s: &Settings) -> Vec<Step> {
         name: "claude_launch_guidance",
         result: crate::claude_launch::reconcile_guidance(&s.title, &s.locale),
     });
-    steps.push(Step {
-        name: "no_commit_attribution",
-        result: crate::hooks::apply_no_commit_attribution(),
-    });
     steps
 }
 
-/// Install only what is missing and was not deliberately switched off.
-///
-/// Returns a step per feature it actually installed — an empty vec means the
-/// control plane was already whole, which is the common case and worth staying
-/// silent about.
-///
-/// The two skip reasons are not interchangeable:
-/// - *already installed* — nothing to do, unless [`is_stale`] finds the
-///   guidance file's text drifted from what this build renders, which is how a
-///   Fleet upgrade's new wording reaches a host that already has the feature.
-/// - *deliberately disabled* — the user turned it off (recorded by
-///   [`crate::control_plane_prefs`] when something called the remove path).
-///   Installing it here would override that choice on every restart.
+/// Record the launch defaults that are missing. Returns a step per thing it
+/// wrote — an empty vec means nothing was missing, which is the common case and
+/// worth staying silent about.
 pub fn heal(s: &Settings) -> Vec<Step> {
-    // Before deciding what is *missing*, fix what is merely *misaddressed*.
-    // The installed-checks below read the subcommand, not the path, so a hook
-    // left naming a long-gone `./target/debug/fleet` looks installed forever.
-    // Reported only when it moved something, to keep heal silent on a whole
-    // host.
-    let mut steps: Vec<Step> = match crate::hooks::repoint_fleet_hooks() {
-        Ok(0) => vec![],
-        other => vec![Step {
-            name: "repoint_fleet_hooks",
-            result: other.map(|_| ()),
-        }],
-    };
-
-    let plan = crate::hooks::plan_hook_setup();
-    steps.extend(
-        Feature::ALL
-            .iter()
-            .filter(|&&f| !is_disabled(f) && (!is_installed(f, &plan) || is_stale(f, s)))
-            .map(|&f| Step {
-                name: f.key(),
-                result: apply(f, s),
-            }),
-    );
-
-    // Applied outside the missing/disabled filter because it has no installed
-    // state to compare against — and it is a no-op unless a model was named.
+    let mut steps = Vec::new();
+    // It is a no-op unless a model was named.
     if !s.model.is_empty() {
         steps.push(Step {
             name: "default_model",
@@ -199,22 +97,11 @@ pub fn heal(s: &Settings) -> Vec<Step> {
 
     // Only when absent: this process's locale comes from `FLEET_LOCALE`, which
     // a hand-run `fleet webui` on a desktop host lacks, so re-rendering an
-    // existing file here would translate the desktop user's guidance.
+    // existing voice here would translate the desktop user's guidance.
     if !crate::claude_launch::guidance_rendered() {
         steps.push(Step {
             name: "claude_launch_guidance",
             result: crate::claude_launch::reconcile_guidance(&s.title, &s.locale),
-        });
-    }
-
-    // A settings value like default_model, so there is nothing in
-    // control-plane-prefs to consult — but unlike it there *is* something to
-    // probe, and heal has to stay silent on an already-whole host. Writing it
-    // unconditionally would print a step on every `fleet webui` start.
-    if !crate::hooks::no_commit_attribution_applied() {
-        steps.push(Step {
-            name: "no_commit_attribution",
-            result: crate::hooks::apply_no_commit_attribution(),
         });
     }
     steps
@@ -224,7 +111,7 @@ pub fn heal(s: &Settings) -> Vec<Step> {
 mod tests {
     use super::*;
 
-    /// A plan with everything installed — the baseline heal should no-op on.
+    /// A plan with everything installed.
     fn all_installed() -> HookSetupPlan {
         HookSetupPlan {
             to_add: vec![],
@@ -248,8 +135,8 @@ mod tests {
     #[test]
     fn is_installed_covers_every_feature() {
         // A feature whose probe was never wired reads as "not installed"
-        // forever, so heal would reinstall it on every single start. Catch that
-        // here rather than in a puzzling log full of repeated installs.
+        // forever, so a launch would carry it on top of the global copy and the
+        // hook would fire twice.
         let plan = all_installed();
         for f in Feature::ALL {
             assert!(
@@ -258,260 +145,6 @@ mod tests {
                 f.key()
             );
         }
-    }
-
-    /// Claims `FLEET_HOME` so an install lands in a temp dir, never the
-    /// developer's real `~/.claude` / `~/.fleet`.
-    struct HomeGuard {
-        dir: std::path::PathBuf,
-        // Released only after the temp dir is gone, so the next test never
-        // scans this one's leftovers.
-        _fleet: crate::paths::FleetHomeGuard,
-    }
-
-    impl HomeGuard {
-        fn new(tag: &str) -> Self {
-            // Minted under the lock (`_with`): `{pid}-{nanos}` is only unique
-            // because the lock serialises the tests racing to build it.
-            let fleet = crate::paths::fleet_home_guard_with(|| {
-                let dir = std::env::temp_dir().join(format!(
-                    "fleet-cpheal-{tag}-{}-{}",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos()
-                ));
-                std::fs::create_dir_all(&dir).unwrap();
-                dir
-            });
-            Self {
-                dir: fleet.home().to_path_buf(),
-                _fleet: fleet,
-            }
-        }
-    }
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
-
-    /// The apply paths need an installed `fleet` binary to write hook commands.
-    /// Without one, treat the test as skipped rather than failed — same
-    /// convention as the hooks tests.
-    fn skip_without_fleet_binary(steps: &[Step]) -> bool {
-        steps.iter().any(|s| {
-            s.result
-                .as_ref()
-                .err()
-                .is_some_and(|e| e.contains("Cannot find fleet binary"))
-        })
-    }
-
-    #[test]
-    fn heal_installs_everything_on_a_bare_host_then_goes_quiet() {
-        let _h = HomeGuard::new("bare");
-        let s = Settings {
-            locale: "en".into(),
-            title: String::new(),
-            model: String::new(),
-        };
-
-        let first = heal(&s);
-        if skip_without_fleet_binary(&first) {
-            eprintln!("skipped: no fleet binary on this host");
-            return;
-        }
-        // Every Feature, plus the one settings value heal probes for
-        // (no_commit_attribution) and the launch guidance file. default_model
-        // is absent because the model is blank here.
-        assert_eq!(
-            first.len(),
-            Feature::ALL.len() + 2,
-            "a bare host must get the whole control plane, got {:?}",
-            first.iter().map(|s| s.name).collect::<Vec<_>>()
-        );
-        assert!(
-            first.iter().any(|s| s.name == "no_commit_attribution"),
-            "a bare host must also get the commit-attribution setting turned off"
-        );
-        for step in &first {
-            assert!(
-                step.result.is_ok(),
-                "{} failed: {:?}",
-                step.name,
-                step.result
-            );
-        }
-
-        // Second run: everything is installed, so heal must do nothing. A
-        // non-empty result here means some probe never sees its own install,
-        // which would reinstall that feature on every single start.
-        let second = heal(&s);
-        let names: Vec<&str> = second.iter().map(|s| s.name).collect();
-        assert!(
-            second.is_empty(),
-            "heal must be quiet once whole, got {names:?}"
-        );
-    }
-
-    #[test]
-    fn heal_rewrites_a_guidance_file_whose_text_drifted() {
-        // What a Fleet upgrade looks like from a host's point of view: the
-        // sentinel block in CLAUDE.md still says "installed", but the file it
-        // points at holds the previous release's wording. heal must notice and
-        // rewrite it — before `is_stale` it stayed stale until the user
-        // toggled the feature off and on by hand.
-        let _h = HomeGuard::new("drift");
-        let s = Settings {
-            locale: "en".into(),
-            title: String::new(),
-            model: String::new(),
-        };
-
-        let first = heal(&s);
-        if skip_without_fleet_binary(&first) {
-            eprintln!("skipped: no fleet binary on this host");
-            return;
-        }
-        assert!(heal(&s).is_empty(), "heal must be quiet once whole");
-
-        let guidance = crate::session::get_claude_dir()
-            .expect("claude dir")
-            .join("fleet-interaction-mode.md");
-        // Same header (same locale variant), older body — what a reworded
-        // release looks like from here.
-        let fresh = crate::interaction_mode::render_guidance(&s.title, &s.locale);
-        let header = fresh.lines().next().expect("header line");
-        std::fs::write(
-            &guidance,
-            format!("{header}\n\nan older release wrote this\n"),
-        )
-        .expect("age the guidance file");
-
-        let third = heal(&s);
-        let names: Vec<&str> = third.iter().map(|s| s.name).collect();
-        assert_eq!(
-            names,
-            vec![Feature::InteractionMode.key()],
-            "only the drifted feature is re-applied"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&guidance).expect("read back"),
-            crate::interaction_mode::render_guidance(&s.title, &s.locale),
-            "heal must restore the wording this build renders"
-        );
-    }
-
-    #[test]
-    fn heal_does_not_rewrite_guidance_in_another_locale() {
-        // `fleet serve` resolves its locale from FLEET_LOCALE, which a hand-run
-        // one on a desktop host does not have, so it heals with "en" against a
-        // user whose guidance is Chinese. Refreshing on an exact-match check
-        // would translate their whole control plane on every start.
-        let _h = HomeGuard::new("otherlocale");
-        let zh = Settings {
-            locale: "zh".into(),
-            title: String::new(),
-            model: String::new(),
-        };
-
-        let first = heal(&zh);
-        if skip_without_fleet_binary(&first) {
-            eprintln!("skipped: no fleet binary on this host");
-            return;
-        }
-        let guidance = crate::session::get_claude_dir()
-            .expect("claude dir")
-            .join("fleet-interaction-mode.md");
-        let before = std::fs::read_to_string(&guidance).expect("zh guidance");
-
-        let en = Settings {
-            locale: "en".into(),
-            ..zh.clone()
-        };
-        let steps = heal(&en);
-        assert!(
-            !steps
-                .iter()
-                .any(|s| s.name == Feature::InteractionMode.key()),
-            "a locale difference is not staleness"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&guidance).expect("read back"),
-            before,
-            "the user's Chinese guidance must survive an en-defaulting heal"
-        );
-    }
-
-    #[test]
-    fn heal_leaves_a_deliberately_disabled_feature_alone() {
-        // The contract the whole prefs file exists for: switching the guard off
-        // must survive a restart. Before prefs, heal could not tell this state
-        // from "never installed" and would reinstate it on every boot.
-        let _h = HomeGuard::new("disabled");
-        let s = Settings {
-            locale: "en".into(),
-            title: String::new(),
-            model: String::new(),
-        };
-
-        let first = heal(&s);
-        if skip_without_fleet_binary(&first) {
-            eprintln!("skipped: no fleet binary on this host");
-            return;
-        }
-
-        // The user switches the guard off — remove_guard_hook records that.
-        crate::hooks::remove_guard_hook().expect("remove guard");
-        assert!(is_disabled(Feature::GuardHook), "removal must be recorded");
-
-        let after = heal(&s);
-        assert!(
-            !after.iter().any(|st| st.name == Feature::GuardHook.key()),
-            "heal must not reinstate a feature the user turned off"
-        );
-        assert!(
-            !crate::hooks::plan_hook_setup().guard_installed,
-            "and it must still be absent on disk"
-        );
-    }
-
-    #[test]
-    fn heal_reinstalls_a_feature_that_vanished_without_being_disabled() {
-        // The case a first-run marker could never fix: ~/.claude was reset (a
-        // wiped container layer, a settings.json rewrite), so the control plane
-        // is gone even though the host was configured once.
-        let _h = HomeGuard::new("vanished");
-        let s = Settings {
-            locale: "en".into(),
-            title: String::new(),
-            model: String::new(),
-        };
-
-        let first = heal(&s);
-        if skip_without_fleet_binary(&first) {
-            eprintln!("skipped: no fleet binary on this host");
-            return;
-        }
-
-        // Wipe ~/.claude the way a container layer reset would — no remove_*
-        // call, so nothing is recorded as disabled.
-        let claude = crate::session::get_claude_dir().expect("claude dir");
-        std::fs::remove_dir_all(&claude).expect("wipe ~/.claude");
-        assert!(
-            !is_disabled(Feature::GuardHook),
-            "a wipe is not a user opt-out"
-        );
-
-        let after = heal(&s);
-        assert!(
-            after.iter().any(|st| st.name == Feature::GuardHook.key()),
-            "heal must restore what a reset removed"
-        );
-        assert!(crate::hooks::plan_hook_setup().guard_installed);
     }
 
     #[test]
@@ -523,5 +156,45 @@ mod tests {
         for f in Feature::ALL {
             assert!(!is_installed(f, &bare), "{} must read as absent", f.key());
         }
+    }
+
+    #[test]
+    fn neither_entry_point_touches_the_global_claude_dir() {
+        // The whole point of the scope work: bootstrap and webui start used to
+        // write hooks and guidance into ~/.claude, which every claude on the
+        // machine then picked up.
+        let fleet = crate::paths::fleet_home_guard_with(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "fleet-cp-noglobal-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        });
+        let s = Settings {
+            locale: "zh".into(),
+            title: String::new(),
+            model: "opus".into(),
+        };
+        crate::control_plane_prefs::mark_disabled(Feature::GuardHook).unwrap();
+        for step in install_all(&s).into_iter().chain(heal(&s)) {
+            assert!(step.result.is_ok(), "{} failed: {:?}", step.name, step.result);
+        }
+        let claude = crate::session::get_claude_dir().expect("claude dir");
+        assert!(!claude.exists(), "{} must not be created", claude.display());
+        assert!(
+            !crate::control_plane_prefs::is_disabled(Feature::GuardHook),
+            "install_all switches everything on"
+        );
+        assert_eq!(
+            crate::claude_launch::load_config().default_model.as_deref(),
+            Some("opus")
+        );
+        assert!(heal(&s).iter().all(|st| st.name == "default_model"));
+        let _ = std::fs::remove_dir_all(fleet.home());
     }
 }

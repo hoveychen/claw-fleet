@@ -3237,9 +3237,15 @@ export const MOCK_SETUP_STATUS = {
 // ── Hooks setup plan ────────────────────────────────────────────────────────
 
 export const MOCK_HOOKS_PLAN = {
-  toAdd: [],
   hooksGloballyDisabled: false,
-  alreadyInstalled: true,
+  guardInstalled: true,
+  elicitationInstalled: true,
+  planApprovalInstalled: true,
+  interactionModeInstalled: true,
+  prdDisciplineInstalled: true,
+  wikiGuidanceInstalled: true,
+  modelGuidanceInstalled: true,
+  sessionTitleGuidanceInstalled: true,
 };
 
 // ── Audit events ───────────────────────────────────────────────────────────

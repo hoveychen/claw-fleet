@@ -104,8 +104,6 @@ describe("host facts", () => {
    * so `LIVE_ROUTES` gets them.
    */
   it.each([
-    "get_permissions_config",
-    "set_permissions_config",
     "get_decision_panel_config",
     "set_decision_panel_config",
     "get_auto_resume_config",
@@ -210,7 +208,6 @@ const KNOWN_WEB_GAPS = [
   // when the machine that matters is the one serving the page.
   "install_fleet_cli",
   "install_fleet_skill",
-  "apply_mcp_injector",
   // Write to a destination the *user* picks on the caller's filesystem, which a
   // tab cannot offer. Both are reached only from the desktop branch now: the
   // browser build downloads the artifact instead (`downloadWikiExport` /

@@ -130,7 +130,7 @@ pub(crate) struct GlobalCarriers {
 impl GlobalCarriers {
     pub(crate) fn probe() -> Self {
         Self {
-            plan: crate::hooks::plan_hook_setup(),
+            plan: crate::hooks::global_hook_setup(),
             mcp: crate::mcp_injector::fleet_server_registered(),
             lessons: crate::lessons_store::import_installed(),
         }
@@ -202,6 +202,18 @@ pub fn guidance_rendered() -> bool {
     load_config().locale.is_some()
 }
 
+/// The `(user title, locale)` Fleet's guidance is rendered with, as last
+/// reconciled. When no reconcile has run on this host yet (a `fleet serve`
+/// nobody configured), the defaults — so a session starts with guidance rather
+/// than none.
+pub fn guidance_voice() -> (String, String) {
+    let cfg = load_config();
+    (
+        cfg.user_title.unwrap_or_default(),
+        cfg.locale.unwrap_or_else(|| "en".to_string()),
+    )
+}
+
 /// The text handed to `--append-system-prompt-file`: lessons, then the
 /// concept guidance. `None` when there is nothing to add.
 fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
@@ -210,11 +222,7 @@ fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
     } else {
         crate::lessons_store::managed_file_content().unwrap_or_default()
     };
-    // No reconcile has run on this host yet (a `fleet serve` nobody configured):
-    // render with the defaults rather than start the session with no guidance.
-    let cfg = load_config();
-    let title = cfg.user_title.unwrap_or_default();
-    let locale = cfg.locale.unwrap_or_else(|| "en".to_string());
+    let (title, locale) = guidance_voice();
     let guidance = render_guidance_with(&title, &locale, |f| global.wants(f));
     let text = join_sections(vec![lessons, guidance]);
     (!text.is_empty()).then_some(text)
@@ -227,8 +235,12 @@ fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
 fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
     let mut v = json!({
         "permissions": { "allow": crate::permissions_injector::INJECT_RULES },
-        // Both spellings: only the old `includeCoAuthoredBy` actually reaches
-        // the system prompt (see `hooks::apply_no_commit_attribution`).
+        // Both spellings. Measured against Claude Code 2.1.263 on 2026-09-10:
+        // `attribution.commitTrailers: false` alone does not reach the
+        // system-prompt assembly — a fresh session still got `End git commit
+        // messages with: Co-Authored-By: …` — while `includeCoAuthoredBy:
+        // false` did. They do not conflict, so write both until upstream wires
+        // the new key up.
         "includeCoAuthoredBy": false,
         "attribution": { "commitTrailers": false, "sessionUrl": false },
     });

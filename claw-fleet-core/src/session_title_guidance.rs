@@ -162,52 +162,22 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     )
 }
 
-/// Write the guidance file and inject its `@import` sentinel block into
-/// `~/.claude/CLAUDE.md`. Idempotent.
-pub fn apply_session_title_guidance(user_title: &str, locale: &str) -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_inner(user_title, locale),
-        crate::control_plane_prefs::Feature::SessionTitleGuidance,
-        false,
-    )
+/// Switch session-title guidance on for Fleet-started sessions. The guidance is rendered
+/// into each launch's system prompt ([`crate::claude_launch`]) with the title
+/// and locale reconciled there; the arguments stay for the callers' sake.
+pub fn apply_session_title_guidance(_user_title: &str, _locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::SessionTitleGuidance, true)
 }
 
-fn apply_inner(user_title: &str, locale: &str) -> Result<(), String> {
-    let dir = claude_dir().ok_or("cannot determine home dir")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
-
-    // Always (re)write the guidance file — title or locale may have changed.
-    let guidance_path = guidance_file_path().ok_or("cannot determine home dir")?;
-    fs::write(&guidance_path, render_guidance(user_title, locale))
-        .map_err(|e| format!("write guidance file: {e}"))?;
-
-    // Locked read-modify-write — see `claude_md_lock`.
-    let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let block = format!(
-        "{begin}\n@{path}\n{end}\n",
-        begin = BEGIN_MARKER,
-        end = END_MARKER,
-        path = guidance_path.display(),
-    );
-    crate::claude_md_lock::with_lock(&claude_md, || {
-        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-        let new_content =
-            crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
-            .map_err(|e| format!("write CLAUDE.md: {e}"))
-    })
-}
-
-/// Strip the sentinel block and delete the guidance file. Idempotent.
+/// Switch session-title guidance off for Fleet-started sessions.
 pub fn remove_session_title_guidance() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_inner(),
-        crate::control_plane_prefs::Feature::SessionTitleGuidance,
-        true,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::SessionTitleGuidance, false)
 }
 
-fn remove_inner() -> Result<(), String> {
+/// Take the guidance an older Fleet wrote into `~/.claude` back out: strip the
+/// sentinel block from `CLAUDE.md` and delete the guidance file. Only the scope
+/// migration calls this; it records nothing in `control_plane_prefs`.
+pub(crate) fn remove_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         crate::claude_md_lock::with_lock(&claude_md, || {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
@@ -228,19 +198,21 @@ fn remove_inner() -> Result<(), String> {
     Ok(())
 }
 
-/// The `## Session title` section exactly as currently installed on disk, or
-/// `None` when the feature is not installed.
+/// The `## Session title` section, or `None` when the feature is switched off.
 ///
-/// For the one caller that needs the section but cannot reach the user's global
-/// `CLAUDE.md`: a chat-workspace session launches with `--setting-sources
-/// project`, which drops that file (and with it the `@import` sentinel block) to
-/// keep the 22k-token engineering doctrine out of a conversation — see
-/// [`crate::chat_workspace`]. Reading the rendered file back, rather than
-/// re-rendering, is what keeps the user's configured `title`/`locale` and the
-/// settings-panel toggle authoritative: `remove_session_title_guidance` deletes
-/// this file, so a switched-off feature reads as `None` here too.
-pub fn installed_section() -> Option<String> {
-    let content = fs::read_to_string(guidance_file_path()?).ok()?;
+/// For the one caller that needs the section without the rest of the
+/// guidance: a chat-workspace session gets no engineering doctrine at all, to
+/// keep 22k tokens out of a conversation — see [`crate::chat_workspace`].
+/// Rendered with the title / locale Fleet's launches use, and gated on
+/// [`crate::control_plane_prefs`] rather than on a file under `~/.claude`,
+/// which Fleet no longer writes.
+pub fn enabled_section() -> Option<String> {
+    use crate::control_plane_prefs::{is_enabled, Feature};
+    if !is_enabled(Feature::SessionTitleGuidance) {
+        return None;
+    }
+    let (title, locale) = crate::claude_launch::guidance_voice();
+    let content = render_guidance(&title, &locale);
     // Drop the managed-file `# …` header; keep from the `## …` heading on.
     let start = content
         .split_inclusive('\n')
@@ -252,30 +224,6 @@ pub fn installed_section() -> Option<String> {
         .find(|(_, line)| line.starts_with("## "))
         .map(|(at, _)| at)?;
     Some(content[start..].trim_end().to_string())
-}
-
-/// Whether the guidance file on disk needs rewriting with what this build
-/// renders. True when it is missing, and when its text drifted while staying
-/// the *same* locale variant.
-///
-/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
-/// nothing about the *wording* of the file it points at. A Fleet upgrade that
-/// edits the guidance text therefore reached no existing host, because the
-/// appliers only run on install/toggle. This is what lets `heal` notice.
-///
-/// The first-line guard is why a drifted locale is not "stale": `fleet serve`
-/// resolves its locale from `FLEET_LOCALE`, which a hand-run one on a desktop
-/// host does not have, so an exact-match check would let it rewrite the user's
-/// Chinese guidance in English on every start.
-pub fn guidance_file_is_stale(user_title: &str, locale: &str) -> bool {
-    let Some(path) = guidance_file_path() else {
-        return false;
-    };
-    let Ok(on_disk) = fs::read_to_string(&path) else {
-        return true; // missing or unreadable — rewrite it
-    };
-    let fresh = render_guidance(user_title, locale);
-    on_disk.lines().next() == fresh.lines().next() && on_disk != fresh
 }
 
 /// Whether the sentinel block is present in `~/.claude/CLAUDE.md`.

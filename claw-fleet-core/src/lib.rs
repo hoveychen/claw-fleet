@@ -76,7 +76,6 @@ pub mod idle;
 pub mod idle_spin;
 pub mod commit_trailer;
 pub mod image_api;
-pub mod injector_watchdog;
 pub mod interaction_mode;
 pub mod interaction_mode_diagnostics;
 pub mod interaction_mode_test;
@@ -189,7 +188,8 @@ pub mod paths {
     /// the same path — then one removes the directory the other is still
     /// writing into, and the victim fails with whatever errno the next syscall
     /// happens to produce (EEXIST, EINVAL, …), never with anything that names
-    /// the real cause. Observed 2026-09-16 in `injector_watchdog`.
+    /// the real cause. Observed 2026-09-16 in the (since removed)
+    /// `injector_watchdog` tests.
     pub fn fleet_home_guard_with(make_home: impl FnOnce() -> std::path::PathBuf) -> FleetHomeGuard {
         let lock = fleet_home_lock();
         let home = make_home();
@@ -232,6 +232,7 @@ pub mod remote_disconnect;
 pub mod remote_host;
 pub mod remote_workspace;
 pub mod scan_cache_disk;
+pub mod scope_migration;
 pub mod schedule;
 pub mod search_index;
 pub mod session;

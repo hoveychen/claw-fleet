@@ -198,17 +198,6 @@ pub fn serve(opts: ServeOptions) {
         on_listen,
     } = opts;
 
-    // Inject Fleet's permissions allowlist into ~/.claude/settings.json so
-    // fleet guard is the sole audit gate for this serve process. The matching
-    // release() is wired to SIGINT/SIGTERM below; a `kill -9` skips it, and
-    // the next Fleet startup's prune_dead_holders takes care of the stale pid.
-    // The release path is unconditional even when the toggle is off — it's a
-    // no-op when no lock exists, so it self-heals if the user flipped the
-    // toggle off mid-run after we'd already acquired.
-    //
-    // release() only deregisters the pid; the allowlist stays in settings.json
-    // so detached claude sessions survive this process. Un-injecting happens
-    // solely via permissions_injector::deactivate() (the settings-panel toggle).
     // Sweep `~/.fleet/` directories left behind by removed features. Also done
     // on desktop startup; a headless-only install never runs that path, and the
     // data is just as dead there.
@@ -216,35 +205,6 @@ pub fn serve(opts: ServeOptions) {
         eprintln!("[fleet serve] remove_retired_state_dirs failed: {e}");
     }
 
-    let serve_pid = std::process::id();
-    if crate::permissions_injector::load_config().enabled {
-        if let Err(e) = crate::permissions_injector::acquire(serve_pid) {
-            eprintln!("[fleet serve] permissions_injector::acquire failed: {e}");
-        }
-    }
-    // Mirror the permission injection for the MCP server registration. We are
-    // the fleet binary, so current_exe() is the right `command` to publish.
-    //
-    // Previously gated to debug builds only (v2 fleet__ask had UX gaps vs v1
-    // AskUserQuestion). Those gaps are now closed — the fleet-ask card renders
-    // option previews, the `mcp__fleet__*` permissions allow-list suppresses the
-    // per-call permission prompt, and the interaction-mode guidance no longer
-    // steers agents back to v1 — so the tool ships in every build, gated only by
-    // the user toggle. When the toggle is off we release() any stale entry left
-    // by an earlier install so the settings.json / .claude.json state self-heals.
-    if crate::mcp_injector::load_config().enabled {
-        match std::env::current_exe() {
-            Ok(p) => {
-                let path_str = p.to_string_lossy().to_string();
-                if let Err(e) = crate::mcp_injector::acquire(serve_pid, &path_str) {
-                    eprintln!("[fleet serve] mcp_injector::acquire failed: {e}");
-                }
-            }
-            Err(e) => eprintln!("[fleet serve] current_exe failed, skipping mcp_injector: {e}"),
-        }
-    } else {
-        let _ = crate::mcp_injector::release(serve_pid);
-    }
     // Remove only legacy token-less dsh servers. Current authenticated records
     // are retained for DshSource to adopt without interrupting an active turn.
     let reaped = crate::dsh_server::reap_orphans();
@@ -256,9 +216,8 @@ pub fn serve(opts: ServeOptions) {
     // under `nohup`) inherits SIGINT — and with nohup SIGHUP — as SIG_IGN, and
     // ctrlc refuses to install a handler when any of the three signals it manages
     // is not SIG_DFL. That failure is silent apart from the log line below, and it
-    // takes the whole exit path with it: the injector releases never run and the
-    // `dsh web` this process started is left reparented to init, still holding its
-    // port. Twelve such orphans had piled up on one machine. Fleet owns these
+    // takes the whole exit path with it: the `dsh web` this process started is
+    // left reparented to init, still holding its port. Twelve such orphans had piled up on one machine. Fleet owns these
     // signals in its own process, so an inherited ignore is cleared first.
     let cleared = crate::process_util::clear_inherited_signal_ignores();
     if !cleared.is_empty() {
@@ -269,24 +228,12 @@ pub fn serve(opts: ServeOptions) {
     }
 
     if let Err(e) = ctrlc::try_set_handler(move || {
-        let _ = crate::permissions_injector::release(serve_pid);
-        let _ = crate::mcp_injector::release(serve_pid);
         // The authenticated dsh service is machine-level and must survive a
         // `fleet serve` restart while a turn is still running.
         std::process::exit(0);
     }) {
         eprintln!("[fleet serve] ctrlc handler install failed: {e}");
     }
-
-    // Drift watchdog: every 30s, verify both injectors still own their
-    // expected regions of ~/.claude.json and ~/.claude/settings.json. If
-    // a third party (e.g. a CC upgrade) rewrote those files, the
-    // watchdog re-injects. No-ops when no holders are live or the
-    // per-injector toggle is off. Thread runs until process exit.
-    let watchdog_fleet_path = std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "fleet".to_string());
-    crate::injector_watchdog::start(watchdog_fleet_path);
 
     let sources = Arc::new(build_sources());
 
@@ -1284,10 +1231,6 @@ fn handle_request(
                 route_resume_triggers_config(ctx, request, &query, json_header, path)
             }
 
-            crate::routes::PERMISSIONS_CONFIG => {
-                route_permissions_config(ctx, request, &query, json_header, path)
-            }
-
             crate::routes::DECISION_PANEL_CONFIG => {
                 route_decision_panel_config(ctx, request, &query, json_header, path)
             }
@@ -1746,10 +1689,6 @@ fn handle_request(
 
             crate::routes::HOOKS_PLAN => route_hooks_plan(ctx, request, &query, json_header, path),
 
-            crate::routes::APPLY_HOOKS => {
-                route_apply_hooks(ctx, request, &query, json_header, path)
-            }
-
             crate::routes::SOURCES_CONFIG => {
                 route_sources_config(ctx, request, &query, json_header, path)
             }
@@ -1767,10 +1706,6 @@ fn handle_request(
 
             crate::routes::CLAUDE_BINARY_OVERRIDE => {
                 route_claude_binary_override(ctx, request, &query, json_header, path)
-            }
-
-            crate::routes::REMOVE_HOOKS => {
-                route_remove_hooks(ctx, request, &query, json_header, path)
             }
 
             // ── Guard hook endpoints ──────────────────────────────────────

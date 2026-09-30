@@ -304,7 +304,7 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     //   - get_claude_md_content, promote_memory — read/write a workspace file
     //     through `memory::` directly instead of the Backend trait, so they
     //     have no HTTP shape to mirror.
-    //   - install_fleet_cli, install_fleet_skill, apply_mcp_injector — write to
+    //   - install_fleet_cli, install_fleet_skill — write to
     //     the *caller's* machine.
     //   - export_wiki_doc — writes to a destination on the caller's own
     //     filesystem that the *user* chooses; a tab's nearest equivalent is a
