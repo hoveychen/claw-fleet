@@ -160,9 +160,6 @@ pub fn record_with_entrypoint(
         entrypoint: clean(entrypoint),
         ..get(session_id).unwrap_or_default()
     };
-    // Pin the machine-local cutoff on the first spawn so sessions predating the
-    // marker feature can be grandfathered into the Tasks list.
-    ensure_marker_since();
     write(session_id, &spec);
 }
 
@@ -234,7 +231,6 @@ pub fn note_spawn(session_id: &str, spawn: Spawn<'_>) {
     }
     spec.created_at_ms.get_or_insert(now);
     spec.last_spawn_at_ms = Some(now);
-    ensure_marker_since();
     write(session_id, &spec);
 }
 
@@ -617,12 +613,6 @@ pub fn effort_of(session_id: &str) -> Option<String> {
     get(session_id)?.effort
 }
 
-/// Path of the machine-local sentinel that pins the moment the always-write
-/// spawn marker went live on this host (see [`spawn_marker_cutoff_ms`]).
-fn marker_since_path() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".fleet").join("spawn-marker-since"))
-}
-
 /// Did Fleet spawn this exact session id? True iff a per-session note exists —
 /// written by [`record`] on every Fleet spawn path, even one with no
 /// model/effort override. This is the ground truth the Tasks list uses instead
@@ -643,41 +633,6 @@ pub fn was_fleet_spawned(session_id: &str) -> bool {
 pub fn forget(session_id: &str) {
     if let Some(path) = spec_path(session_id) {
         let _ = fs::remove_file(path);
-    }
-}
-
-/// Epoch-ms after which an entrypoint-Fleet-owned session that carries no spawn
-/// marker is a leaked `claude -p` child rather than a real Fleet session.
-/// Established on this machine at the first [`record`] once the marker feature
-/// shipped; `u64::MAX` (grandfather every prior session) until then.
-pub fn spawn_marker_cutoff_ms() -> u64 {
-    let Some(path) = marker_since_path() else {
-        return u64::MAX;
-    };
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .unwrap_or(u64::MAX)
-}
-
-/// Stamp the cutoff sentinel the first time Fleet records a spawn on this host.
-/// Idempotent: later spawns leave the original moment intact.
-fn ensure_marker_since() {
-    let Some(path) = marker_since_path() else {
-        return;
-    };
-    if path.exists() {
-        return;
-    }
-    let now_ms = now_ms();
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            crate::log_debug(&format!("launch_spec: create marker dir: {e}"));
-            return;
-        }
-    }
-    if let Err(e) = fs::write(&path, now_ms.to_string()) {
-        crate::log_debug(&format!("launch_spec: write marker sentinel: {e}"));
     }
 }
 
@@ -766,24 +721,6 @@ mod tests {
         // A session Fleet never spawned has no marker and no override.
         assert!(!was_fleet_spawned("never-spawned"));
         assert_eq!(model_of("never-spawned"), None);
-    }
-
-    /// The cutoff sentinel is established on this machine at the first `record`,
-    /// so sessions that predate the marker feature can be grandfathered in.
-    #[test]
-    fn first_record_establishes_the_marker_cutoff() {
-        let _home = TmpHome::new("cutoff");
-        assert_eq!(
-            spawn_marker_cutoff_ms(),
-            u64::MAX,
-            "no cutoff before any spawn"
-        );
-        record("c1", None, None);
-        assert_ne!(
-            spawn_marker_cutoff_ms(),
-            u64::MAX,
-            "cutoff stamped after first spawn"
-        );
     }
 
     /// Only one of the two flags is common (model set, effort left to default).

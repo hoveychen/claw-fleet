@@ -32,7 +32,10 @@ const CACHE_FILE_NAME: &str = "session-cache.json";
 // never runs for it. Verified on the live cloud container: after the fixed
 // binary shipped, `fleet agents` still printed `chat`, and deleting
 // `~/.fleet/session-cache.json` by hand was what made it print `Chat`.
-const CACHE_VERSION: u32 = 3;
+//
+// v4: `fleet_spawned` no longer grandfathers sessions older than the spawn
+// marker's cutoff — only a launch note counts.
+const CACHE_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {

@@ -117,16 +117,13 @@ pub struct SessionInfo {
     /// Fleet-spawned session inherits `CLAUDE_CODE_ENTRYPOINT` from the parent's
     /// environment, so its transcript looks Fleet-owned on disk even though
     /// Fleet never launched it. This is the ground truth: `true` iff Fleet left a
-    /// spawn marker for this id (see [`crate::launch_spec::was_fleet_spawned`]),
-    /// or the session predates the marker feature and is grandfathered in.
+    /// launch note for this id (see [`crate::launch_spec::was_fleet_spawned`]).
     /// The Tasks/launchpad list ANDs this with the entrypoint check so leaked
     /// `claude -p` children stop showing up as Fleet tasks.
     ///
     /// `#[serde(default)]`: payloads predating this field (a stale disk-cache
     /// entry, an older `fleet serve` over the wire) deserialize to `false`
-    /// rather than erroring. The disk cache additionally bumps `CACHE_VERSION`
-    /// so grandfathered sessions re-parse instead of being pinned to that
-    /// default.
+    /// rather than erroring.
     #[serde(default)]
     pub fleet_spawned: bool,
     pub parent_session_id: Option<String>,

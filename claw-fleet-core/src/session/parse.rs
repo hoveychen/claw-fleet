@@ -920,12 +920,10 @@ pub fn parse_session_info(
     // default, which is dynamic and would go stale silently.
     let effort = crate::launch_spec::effort_of(&session_id);
 
-    // Ground truth for "Fleet spawned this" — a marker Fleet writes at every
-    // spawn — OR a grandfather for sessions predating the marker feature. Lets
-    // the Tasks list reject a `claude -p` child that only inherited a Fleet
-    // `CLAUDE_CODE_ENTRYPOINT` from its parent's environment.
-    let fleet_spawned = crate::launch_spec::was_fleet_spawned(&session_id)
-        || created_at_ms < crate::launch_spec::spawn_marker_cutoff_ms();
+    // Ground truth for "Fleet spawned this": the launch note Fleet writes at
+    // every spawn. Lets the Tasks list reject a `claude -p` child that only
+    // inherited a Fleet `CLAUDE_CODE_ENTRYPOINT` from its parent's environment.
+    let fleet_spawned = crate::launch_spec::was_fleet_spawned(&session_id);
 
     Some(SessionInfo {
         id: session_id,

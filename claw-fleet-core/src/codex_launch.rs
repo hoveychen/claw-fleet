@@ -198,90 +198,8 @@ pub fn resolve_fleet_session_id_from_env() -> Option<String> {
         .and_then(|t| resolve_launch_token(&t))
 }
 
-// ── Spawn-pid notes (new-session liveness) ───────────────────────────────────
-//
-// A freshly spawned `codex exec` does NOT carry its thread id in argv — Codex
-// mints the id after launch — so a new session mid-first-turn is invisible to
-// the argv-based liveness check (`codex_source::codex_proc_alive`). Left
-// unpatched, the enqueue-drain gate reads a still-running new session as idle
-// and fires a *second* `codex exec resume` on it, corrupting the transcript
-// (the exact hazard `pending_message` exists to avoid).
-//
-// So at spawn time — the one moment Fleet holds both the freshly-minted thread
-// id and the child pid — we drop a `thread-id → pid` note. Liveness then means
-// "that pid is still a live Codex process" (checked against the scanned live
-// set, so a recycled pid belonging to some other process never reads as alive).
-// The note is deleted when the child exits, so a finished session is drainable.
-
-/// Directory holding `thread-id → spawn-pid` notes (`<thread-id>` file whose
-/// contents are the decimal pid). Lives under the Fleet dir alongside
-/// `codex-launch-tokens`.
-fn spawn_pid_dir() -> Option<std::path::PathBuf> {
-    crate::session::get_fleet_dir().map(|d| d.join("codex-spawn-pids"))
-}
-
-fn spawn_pid_path(thread_id: &str) -> Option<std::path::PathBuf> {
-    // Thread ids are Codex-minted uuids; reject anything that could escape the dir.
-    if thread_id.is_empty()
-        || thread_id.contains('/')
-        || thread_id.contains('\\')
-        || thread_id.contains("..")
-    {
-        return None;
-    }
-    spawn_pid_dir().map(|d| d.join(thread_id))
-}
-
-/// Record that Fleet spawned Codex thread `thread_id` as OS process `pid`, so the
-/// new-session liveness check can recognise it while its thread id is not yet in
-/// any argv.
-pub fn record_spawn_pid(thread_id: &str, pid: u32) {
-    let Some(path) = spawn_pid_path(thread_id) else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            crate::log_debug(&format!("codex_launch: create spawn-pid dir: {e}"));
-            return;
-        }
-    }
-    if let Err(e) = std::fs::write(&path, pid.to_string()) {
-        crate::log_debug(&format!("codex_launch: write spawn-pid {thread_id}: {e}"));
-    }
-}
-
-/// The pid Fleet recorded for a spawned Codex thread, or `None` if unknown (not a
-/// Fleet spawn, or the session has already exited and its note was cleared).
-pub fn resolve_spawn_pid(thread_id: &str) -> Option<u32> {
-    let path = spawn_pid_path(thread_id)?;
-    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
-}
-
-/// When Fleet recorded the spawn-pid note for this thread (= spawn time).
-/// Used by the stall watchdog as a silence floor: a freshly resumed turn may
-/// legitimately take a while before its first rollout write, and the rollout
-/// mtime alone would count that pre-spawn idle stretch as silence.
-pub fn spawn_pid_recorded_at(thread_id: &str) -> Option<std::time::SystemTime> {
-    let path = spawn_pid_path(thread_id)?;
-    std::fs::metadata(&path).ok()?.modified().ok()
-}
-
-/// Drop a spawned Codex thread's pid note (called when the child exits).
-/// Idempotent — a missing note is success.
-pub fn clear_spawn_pid(thread_id: &str) {
-    let Some(path) = spawn_pid_path(thread_id) else {
-        return;
-    };
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => crate::log_debug(&format!("codex_launch: clear spawn-pid {thread_id}: {e}")),
-    }
-}
-
 /// Directory holding the transient stdout sinks for Fleet-spawned Codex turns
-/// (`codex-live/<key>.jsonl`). Lives under the Fleet dir alongside the spawn-pid
-/// notes.
+/// (`codex-live/<key>.jsonl`). Lives under the Fleet dir.
 fn codex_live_dir() -> Option<std::path::PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("codex-live"))
 }
@@ -1351,20 +1269,16 @@ pub fn spawn_new_codex_session(
     let workspace_owned = workspace_path.to_string();
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + THREAD_STARTED_TIMEOUT;
-        // Thread id captured from `thread.started`, kept so we can drop its
-        // spawn-pid note once the child exits below.
-        let mut spawned_thread: Option<String> = None;
         if let Some(thread_id) = tail_thread_started(
             &sink_path_owned,
             &mut child,
             deadline,
             Duration::from_millis(50),
         ) {
-            // Note the spawn pid so new-session liveness can recognise this
-            // still-running session before its id lands in any argv.
-            record_spawn_pid(&thread_id, pid);
-            // Before the send: the receiver's `launch_spec::record` must not
-            // race this read-modify-write of the same note.
+            // The launch note's pid is what tells this session is alive
+            // while its thread id is in no argv yet. Before the send: the
+            // receiver's `launch_spec::record` must not race this
+            // read-modify-write of the same note.
             crate::launch_spec::note_spawn(
                 &thread_id,
                 crate::launch_spec::Spawn {
@@ -1376,23 +1290,17 @@ pub fn spawn_new_codex_session(
                     transcript: None,
                 },
             );
-            spawned_thread = Some(thread_id.clone());
             let _ = tx.send(thread_id);
         }
         drop(tx);
         // Reap the child and log its exit.
         let result = child.wait();
         let terminal = read_codex_turn_terminal(&sink_path_owned);
-        // Session is gone: drop the spawn-pid note so a later pid reuse can never
-        // read this dead session as alive.
-        if let Some(tid) = spawned_thread.take() {
-            clear_spawn_pid(&tid);
-            // Note: the turn-end relay (mark idle + consume handoff) is NOT fired
-            // here. It runs via codex's own `notify` hook → `fleet session
-            // codex-notify` → on_codex_turn_exit (injected by fleet_notify_args),
-            // which fires in codex's process and survives the Fleet app quitting —
-            // unlike this reaper thread, which dies with the spawning process.
-        }
+        // Note: the turn-end relay (mark idle + consume handoff) is NOT fired
+        // here. It runs via codex's own `notify` hook → `fleet session
+        // codex-notify` → on_codex_turn_exit (injected by fleet_notify_args),
+        // which fires in codex's process and survives the Fleet app quitting —
+        // unlike this reaper thread, which dies with the spawning process.
         // Transient stdout sink: drop it now the turn is over. (Leaks only if the
         // app dies first — harmless and tiny, and the child surviving is the point.)
         let _ = std::fs::remove_file(&sink_path_owned);

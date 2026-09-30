@@ -2061,8 +2061,7 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
         ide_name: source_info.ide_name,
         entrypoint,
         is_subagent: source_info.is_subagent,
-        fleet_spawned: crate::launch_spec::was_fleet_spawned(&thread.id)
-            || created_at_ms < crate::launch_spec::spawn_marker_cutoff_ms(),
+        fleet_spawned: crate::launch_spec::was_fleet_spawned(&thread.id),
         parent_session_id: source_info.parent_thread_id,
         agent_type,
         agent_description: None,
@@ -5480,7 +5479,9 @@ pub fn detect_stalled_codex_turns(
         let mtime = resolve_uri(&s.jsonl_path)
             .and_then(|p| fs::metadata(p).ok())
             .and_then(|m| m.modified().ok());
-        let spawn_at = crate::codex_launch::spawn_pid_recorded_at(&s.id);
+        let spawn_at = crate::launch_spec::get(&s.id)
+            .and_then(|spec| spec.last_spawn_at_ms)
+            .map(|ms| UNIX_EPOCH + Duration::from_millis(ms));
         let last_write = match (mtime, spawn_at) {
             (Some(a), Some(b)) => Some(a.max(b)),
             (a, b) => a.or(b),
@@ -5726,8 +5727,7 @@ fn parse_codex_session(rollout_path: &Path) -> Option<SessionInfo> {
     let uri = build_uri(rollout_path)?;
 
     // Computed before the literal so it reads `session_id` before `id:` moves it.
-    let fleet_spawned = crate::launch_spec::was_fleet_spawned(&session_id)
-        || created_at_ms < crate::launch_spec::spawn_marker_cutoff_ms();
+    let fleet_spawned = crate::launch_spec::was_fleet_spawned(&session_id);
 
     Some(SessionInfo {
         id: session_id,
