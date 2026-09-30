@@ -384,6 +384,10 @@ pub struct Coverage {
     pub scheduled: HashSet<String>,
     pub carded: HashSet<String>,
     pub handing_off: HashSet<String>,
+    /// Sessions something else will bring back on its own: a claim in the drive
+    /// store (server-error retry, rate-limit wait, a turn just spawned, another
+    /// takeover's hold) or a queued message the drain will deliver.
+    pub reserved: HashSet<String>,
 }
 
 impl Coverage {
@@ -396,6 +400,7 @@ impl Coverage {
             AttendanceState::Watching => format!("session {short} owns a live watch"),
             AttendanceState::Scheduled => format!("session {short} owns a pending schedule/loop"),
             AttendanceState::WaitingCard => format!("session {short} has a decision card waiting"),
+            AttendanceState::Reserved => format!("session {short} will be resumed automatically"),
             _ => format!("session {short} registered a handoff"),
         })
     }
@@ -415,6 +420,8 @@ impl Coverage {
                 AttendanceState::WaitingCard
             } else if self.handing_off.contains(s) {
                 AttendanceState::HandingOff
+            } else if self.reserved.contains(s) {
+                AttendanceState::Reserved
             } else {
                 continue;
             };
@@ -426,7 +433,7 @@ impl Coverage {
 
 // ── Attendance for the plan-tree view ───────────────────────────────────────
 
-/// How a plan's responsible session stands. The first five mean somebody is on
+/// How a plan's responsible session stands. The first six mean somebody is on
 /// the plan (the reviver's "covered"); the last three mean nobody is.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -437,6 +444,9 @@ pub enum AttendanceState {
     Scheduled,
     WaitingCard,
     HandingOff,
+    /// Nothing runs it now, but a retry, rate-limit wait or queued message will
+    /// resume it on its own (the drive lease's pending intents).
+    Reserved,
     /// Claimed recently, but the session is gone and left nothing armed.
     Idle,
     /// Like `Idle`, and the boss closed that session with the terminal button.
@@ -747,6 +757,17 @@ fn gather_coverage(owners: &HashSet<String>) -> Coverage {
     for sid in owners {
         if crate::handoff::read_pending(sid).is_some() {
             c.handing_off.insert(sid.clone());
+        }
+    }
+
+    // The drive store's claims: without them a successor was started while a
+    // retry was about to resume the predecessor (2026-09-25, 5/43 revives).
+    let queued = crate::pending_message::all_pending();
+    for sid in owners {
+        if queued.get(sid).is_some_and(|m| !m.is_empty())
+            || crate::session_driver::reservation(sid).is_some()
+        {
+            c.reserved.insert(sid.clone());
         }
     }
     c

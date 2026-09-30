@@ -164,7 +164,7 @@ export function cellStates(node: PlanNode): CellState[] {
  */
 export type Presence = "active" | "orphan" | "stale" | "snoozed" | "none";
 
-const COVERED = new Set(["running", "watching", "scheduled", "waitingCard", "handingOff"]);
+const COVERED = new Set(["running", "watching", "scheduled", "waitingCard", "handingOff", "reserved"]);
 
 export function isCovered(node: PlanNode): boolean {
   return node.attendance != null && COVERED.has(node.attendance.state);

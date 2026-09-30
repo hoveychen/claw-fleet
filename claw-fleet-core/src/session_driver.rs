@@ -622,6 +622,26 @@ pub fn snapshot(session_id: &str) -> DriveState {
     snapshot_with(session_id, &real_probes())
 }
 
+/// Who has claimed `session_id` in the drive store — a Running lease still
+/// inside its spawn grace or with its process up, or any registered intent
+/// (retry, rate-limit wait, takeover hold) — as `"<mechanism>: <reason>"`.
+/// Derived intents are left out: callers that scan whole stores (the reviver)
+/// already read their sources once for every session.
+pub fn reservation(session_id: &str) -> Option<String> {
+    reservation_with(session_id, &real_probes())
+}
+
+fn reservation_with(session_id: &str, probes: &Probes<'_>) -> Option<String> {
+    with_state(session_id, probes, |state, _| {
+        // `with_state` has already dropped a Running lease that stopped holding.
+        if let Some(r) = &state.running {
+            return Some(format!("{}: turn in flight", r.mechanism));
+        }
+        state.pending.first().map(|p| format!("{}: {}", p.mechanism, p.reason))
+    })
+    .flatten()
+}
+
 fn snapshot_with(session_id: &str, probes: &Probes<'_>) -> DriveState {
     let derived = (probes.derived)(session_id);
     with_state(session_id, probes, |state, _| with_derived(state, &derived)).unwrap_or_default()
@@ -825,6 +845,26 @@ mod tests {
             "only the running lease is stored, the derived intent is not"
         );
         drop(lease);
+    }
+
+    #[test]
+    fn reservation_names_stored_claims_only() {
+        let _home = temp_home();
+        let dead = |_: &str| false;
+        let derived = |_: &str| vec![derived_intent(DriverClass::Continue, "watch", "w", "r".into())];
+        assert_eq!(reservation_with("d4", &probes_deriving(&dead, &derived)), None);
+        let token = register_pending(
+            "d4",
+            RETRY,
+            PendingSpec { reason: "ENOTFOUND".into(), not_before_ms: None, ttl_ms: 60_000, yield_to_turn: true },
+        )
+        .unwrap();
+        assert_eq!(reservation_with("d4", &probes(&dead)).as_deref(), Some("server_error_retry: ENOTFOUND"));
+        withdraw_pending("d4", &token);
+        let lease = acquire_with("d4", Driver::manual("desktop"), None, &probes(&dead)).unwrap();
+        assert_eq!(reservation_with("d4", &probes(&dead)).as_deref(), Some("desktop: turn in flight"));
+        drop(lease);
+        assert_eq!(reservation_with("d4", &probes(&dead)), None);
     }
 
     #[test]

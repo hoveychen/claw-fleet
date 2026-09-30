@@ -68,6 +68,7 @@ function stateLabel(t: TFn, state: AttendanceState): string {
     scheduled: ["plans.att_scheduled", "已定时"],
     waitingCard: ["plans.att_waiting_card", "等您回复决策卡"],
     handingOff: ["plans.att_handing_off", "正在接力"],
+    reserved: ["plans.att_reserved", "即将自动续跑"],
     idle: ["plans.att_idle", "已停止"],
     bossClosed: ["plans.att_boss_closed", "已被您结束"],
     stale: ["plans.att_stale", "超过 7 天没人认领"],

@@ -83,6 +83,7 @@ const STATE_LABEL: Record<AttendanceState, string> = {
   scheduled: "已定时",
   waitingCard: "等您回复决策卡",
   handingOff: "正在接力",
+  reserved: "即将自动续跑",
   idle: "已停止",
   bossClosed: "已被您结束",
   stale: "超过 7 天没人认领",
