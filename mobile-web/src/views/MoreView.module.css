@@ -59,6 +59,17 @@
   color: var(--color-text-secondary);
 }
 
+/* A switch row whose label may be long (English copy): the label wraps, the
+   segment keeps its width instead of being pushed off the card. */
+.switchRow .rowLabel {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.switchRow .segment {
+  flex-shrink: 0;
+}
+
 /* Relay 地址：主机名没有空格，默认换行规则断不开，自建 relay 的长域名会把
    卡片撑破。允许任意位置折行，并右对齐跟其他数值列对齐。 */
 .relayValue {

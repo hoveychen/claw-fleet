@@ -77,7 +77,7 @@ export function ResumeSettingsSection({ client }: { client: FleetTransport | nul
         {rows.map(([label, on, set], i) => (
           <Fragment key={label}>
             {i > 0 && <div className={styles.divider} />}
-            <div className={styles.row}>
+            <div className={`${styles.row} ${styles.switchRow}`}>
               <span className={styles.rowLabel}>{label}</span>
               <div className={styles.segment}>
                 <button className={styles.segmentButton} data-active={!on} onClick={() => set(false)}>
