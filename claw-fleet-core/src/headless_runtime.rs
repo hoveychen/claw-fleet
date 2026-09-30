@@ -717,6 +717,50 @@ mod tests {
     }
 
     #[test]
+    fn semgap_recount_retry_pending_keeps_the_reviver_off_the_plan() {
+        // 2026-09-25 semgap-recount: predecessor 5f2a53c7 died of ENOTFOUND at
+        // 08:47:51Z (a DarkWake), the Mac slept, and on waking the reviver
+        // started successor a1520529 at 09:52:31Z; 29 s later the server-error
+        // retry resumed the predecessor and both drove the same plan. The retry
+        // was in budget the whole hour, so its intent stood before the sleep.
+        let _guard = isolated_fleet_home();
+        let sid = format!("semgap-{}", uuid::Uuid::new_v4());
+        sync_resume_intents(&[ResumeIntent {
+            session_id: sid.clone(),
+            mechanism: "server_error_retry",
+            reason: "getaddrinfo ENOTFOUND api.anthropic.com".into(),
+            not_before_ms: None,
+        }]);
+
+        // The reviver's tick: the plan's only owner counts as covered.
+        let owners = std::collections::HashSet::from([sid.clone()]);
+        let owner_list = vec![sid.clone()];
+        let coverage = crate::plan_revive::gather_coverage(&owners);
+        assert_eq!(
+            coverage.covering(&owner_list).map(|(_, s)| s),
+            Some(crate::plan_revive::AttendanceState::Reserved)
+        );
+        assert!(coverage.reason(&owner_list).is_some(), "covered, so no successor");
+        // Even a reviver that skipped the check is refused at the spawn.
+        assert!(crate::session_driver::acquire_takeover(
+            &sid,
+            crate::session_driver::Driver::takeover("plan_revive")
+        )
+        .is_err());
+
+        // The retry itself still goes ahead, and the plan is free again after.
+        let token = take_intent_token(&sid).expect("registered");
+        let lease = crate::session_driver::acquire(
+            &sid,
+            crate::session_driver::Driver::continue_("server_error_retry"),
+            Some(&token),
+        )
+        .expect("the retry is not blocked by its own intent");
+        drop(lease);
+        assert_eq!(crate::session_driver::reservation(&sid), None);
+    }
+
+    #[test]
     fn firing_consumes_the_own_intent() {
         let _guard = isolated_fleet_home();
         let sid = format!("fire-{}", uuid::Uuid::new_v4());

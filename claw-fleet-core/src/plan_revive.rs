@@ -688,7 +688,7 @@ pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> Wor
 }
 
 /// Gather [`Coverage`] for `owners` from the real stores.
-fn gather_coverage(owners: &HashSet<String>) -> Coverage {
+pub(crate) fn gather_coverage(owners: &HashSet<String>) -> Coverage {
     let now = plan_snooze::now_ms();
     let mut c = Coverage::default();
 
