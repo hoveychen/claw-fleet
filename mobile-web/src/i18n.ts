@@ -742,7 +742,7 @@ const DICT: Record<string, string> = {
   "{0} 张图片加载失败，点按重试": "{0} image(s) failed to load — tap to retry",
 
   // ── English coverage: entries below previously had only Chinese; English view would show Chinese ──
-  今日累计: "Today",
+  "今日 Fleet 花费": "Fleet spend today",
   未上报: "Not reported",
   "来自 {0}": "from {0}",
   "relay 未能转交（桌面离线）": "Relay could not deliver it (desktop offline)",
@@ -1015,7 +1015,7 @@ const DICT: Record<string, string> = {
   "用量加载失败：{0}": "Failed to load usage: {0}",
   "桌面端离线，拿不到今日用量。": "Desktop offline — today's usage is unavailable.",
   "{0} 输出 token": "{0} output tokens",
-  会话花费: "Agent sessions",
+  "Fleet 会话花费": "Fleet sessions",
   "Fleet 自身花费": "Fleet itself",
   "{0} 个会话": "{0} sessions",
   账号: "Account",

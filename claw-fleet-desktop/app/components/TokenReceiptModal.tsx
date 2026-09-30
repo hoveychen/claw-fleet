@@ -218,7 +218,7 @@ export function TokenReceiptModal({ onClose }: Props) {
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <div className={styles.title_block}>
-            <span className={styles.title}>{t("token_receipt.title", "用量分析")}</span>
+            <span className={styles.title}>{t("token_receipt.title", "Fleet 用量分析")}</span>
             {data && <span className={styles.window_label}>{data.label}</span>}
           </div>
           <div className={styles.range_bar} role="tablist">
@@ -324,7 +324,7 @@ function UsageBody({ data }: { data: UsageView }) {
       <div className={styles.footnote}>
         {t(
           "token_receipt.footnote",
-          "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
+          "仅统计 Fleet 启动的会话 · 价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
         )}
       </div>
     </>

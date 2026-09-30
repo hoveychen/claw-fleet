@@ -848,12 +848,13 @@
     "section_title": "实时"
   },
   "today_usage": {
-    "title": "今日累计",
+    "title": "今日 Fleet 花费",
+    "rail_label": "今日累计",
     "open_receipt": "查看用量分析",
     "loading": "统计中…"
   },
   "token_receipt": {
-    "title": "用量分析",
+    "title": "Fleet 用量分析",
     "loading": "统计中…",
     "no_usage": "今天还没有用量",
     "no_usage_range": "此区间还没有用量",
@@ -873,7 +874,7 @@
     "subtotal": "小计",
     "grand_total": "合计",
     "tokens": "tokens",
-    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
+    "footnote": "仅统计 Fleet 启动的会话 · 价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径",
     "kpi_cost": "花费",
     "kpi_tokens": "Tokens",
     "kpi_cache_hit": "缓存命中率",
@@ -2564,7 +2565,7 @@
     "dc_type_fleet_ask": "富交互卡",
     "dc_type_plan_approval": "计划审批",
     "dc_no_rec": "无推荐",
-    "total_cost": "总花费",
+    "total_cost": "Fleet 总花费",
     "dc_task_outcome": "完成/放弃",
     "task_reviews": "当日任务复盘",
     "no_task_reviews": "今天还没有任务被结束或放弃。",
