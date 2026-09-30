@@ -65,6 +65,27 @@ pub(crate) fn cmd_dsh_context(
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
 
+    // Ownership gate. The plugin runs in every dsh session on the machine (dsh
+    // has no per-session plugin channel), so a session the user opened himself
+    // must get nothing here — it has to behave as if Fleet were not installed.
+    // Checked before anything below because `claim_once` / `claim_tier` are
+    // consuming: an unowned call must not spend them. A side-question fork is
+    // never owned (it is not a session) but still needs its one-step stop.
+    let owned = session
+        .as_deref()
+        .is_some_and(claw_fleet_core::dsh_guidance::is_fleet_owned_dsh_session);
+    if !owned {
+        let mut payload = serde_json::json!({ "sections": [] });
+        if session
+            .as_deref()
+            .is_some_and(claw_fleet_core::session_explain::is_fork_session)
+        {
+            payload["oneShot"] = serde_json::Value::Bool(true);
+        }
+        println!("{payload}");
+        return;
+    }
+
     let mut sections = Vec::new();
 
     // Guidance blocks. `dsh_guidance_set` reads the same concept toggles the

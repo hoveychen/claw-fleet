@@ -341,6 +341,11 @@ fn fork_marker_path_in(root: &Path, fork_session_id: &str) -> Option<PathBuf> {
     Some(root.join("forks").join(fork_session_id))
 }
 
+/// Directory of the empty per-fork markers [`mark_fork_session`] writes.
+pub fn fork_marker_dir() -> Option<PathBuf> {
+    explain_dir().map(|d| d.join("forks"))
+}
+
 fn fork_marker_path(fork_session_id: &str) -> Option<PathBuf> {
     fork_marker_path_in(&explain_dir()?, fork_session_id)
 }

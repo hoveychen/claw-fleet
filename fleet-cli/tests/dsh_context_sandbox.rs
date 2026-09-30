@@ -68,18 +68,22 @@ fn only_a_fleet_spawned_session_is_told_to_leave_the_sandbox() {
          be absent, not null, so the plugin's `if (mode)` check cannot escalate \
          it by accident"
     );
-    // The sections must survive either way: the sandbox decision rides alongside
-    // them, it does not replace them.
-    for payload in [&owned, &hand_opened] {
-        let names: Vec<&str> = payload["sections"]
-            .as_array()
-            .expect("sections array")
-            .iter()
-            .filter_map(|s| s["name"].as_str())
-            .collect();
-        assert!(
-            names.contains(&"fleet-session-id"),
-            "the id block must still be injected, got {names:?}"
-        );
-    }
+    // The sandbox decision rides alongside the sections, it does not replace
+    // them. A hand-opened session gets no sections either: it must behave as if
+    // Fleet were not installed.
+    let names: Vec<&str> = owned["sections"]
+        .as_array()
+        .expect("sections array")
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"fleet-session-id"),
+        "the id block must still be injected, got {names:?}"
+    );
+    assert_eq!(
+        hand_opened["sections"].as_array().map(Vec::len),
+        Some(0),
+        "a hand-opened session must receive no sections"
+    );
 }
