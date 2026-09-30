@@ -10,6 +10,9 @@
  * from the scheduler that actually does the resuming.
  */
 import { invoke } from "@tauri-apps/api/core";
+import i18n from "i18next";
+
+import { retiredSuccessor } from "../../../shared-ts/retiredSession";
 
 import type { SessionInfo } from "../types";
 
@@ -62,20 +65,41 @@ export interface ResumeArgs {
   model?: string;
 }
 
+/** Ask whether to resume a session that `successor` has taken over. */
+function confirmRetired(successor: string): boolean {
+  return window.confirm(
+    i18n.t(
+      "session.retired_resume_confirm",
+      "这个会话已被 {{id}} 接替。继续它会让两个会话同时做同一份工作。仍要继续？",
+      { id: successor.slice(0, 8) },
+    ),
+  );
+}
+
 /** Fire the resume. Rejects with the backend's message; callers surface it via
- *  [`resumeErrorText`]. */
-export async function resumeSession({
-  sessionId,
-  workspacePath,
-  agentSource,
-  prompt,
-  model,
-}: ResumeArgs): Promise<void> {
-  await invoke("resume_rate_limited_session", {
+ *  [`resumeErrorText`]. A session another one has taken over asks the boss
+ *  first, and rejects with a "not resumed" message when they decline. */
+export async function resumeSession(
+  { sessionId, workspacePath, agentSource, prompt, model }: ResumeArgs,
+  confirm: (successor: string) => boolean = confirmRetired,
+): Promise<void> {
+  const args = {
     sessionId,
     workspacePath,
     agentSource,
     ...(prompt ? { prompt } : {}),
     ...(model ? { model } : {}),
-  });
+  };
+  try {
+    await invoke("resume_rate_limited_session", args);
+  } catch (err) {
+    const successor = retiredSuccessor(err);
+    if (!successor) throw err;
+    if (!confirm(successor)) {
+      const id = successor.slice(0, 8);
+      // `||`: i18next answers undefined until it is initialised.
+      throw i18n.t("session.retired_resume_declined", "未继续：已被 {{id}} 接替", { id }) || `未继续：已被 ${id} 接替`;
+    }
+    await invoke("resume_rate_limited_session", { ...args, allowRetired: true });
+  }
 }

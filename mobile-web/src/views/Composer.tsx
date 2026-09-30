@@ -22,6 +22,8 @@ import {
   X,
 } from "lucide-react";
 import { randomId } from "../clientId";
+import { retiredSuccessor } from "../../../shared-ts/retiredSession";
+import { retiredResumeQuestion } from "./apiErrorActions";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import { scopedKey, useDeviceDraft, useDeviceScope } from "../deviceScope";
 import { t } from "../i18n";
@@ -1587,6 +1589,23 @@ export function ResumeComposer({
     } catch (e) {
       // Regardless of failure, submit is no longer in flight: resume parent's polling.
       onSubmitInFlight?.(false);
+      // Taken over by another session: ask before putting a second agent on
+      // the work, and resend the same prompt only when the boss says so.
+      const successor = method === "resume_session" ? retiredSuccessor(e) : null;
+      if (successor) {
+        const id = successor.slice(0, 8);
+        if (window.confirm(retiredResumeQuestion(id))) {
+          try {
+            await client.request("resume_session", { ...params, idempotencyKey: randomId(), allowRetired: true });
+          } catch (e2) {
+            window.alert(e2 instanceof Error ? e2.message : t("恢复会话失败"));
+          }
+        } else {
+          window.alert(t("未继续：已被 {0} 接替", id));
+        }
+        setBusy(false);
+        return;
+      }
       // Desktop explicit rejection (path doesn't exist, invalid prompt, etc.): it
       // judged and declined, report the error honestly — even if already concluded
       // via ack, still alert (consistent with new session).

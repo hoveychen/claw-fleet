@@ -2988,6 +2988,8 @@
     "remote_codex_device_hint": "在任意设备打开下方链接并输入代码完成授权;远端主机会自动轮询直到通过。"
   },
   "session": {
+    "retired_resume_confirm": "这个会话已被 {{id}} 接替。继续它会让两个会话同时做同一份工作。仍要继续？",
+    "retired_resume_declined": "未继续：已被 {{id}} 接替",
     "remote_on_host": "文件读写在 {{host}} 上执行（rca）",
     "remote_short": "远端"
   },

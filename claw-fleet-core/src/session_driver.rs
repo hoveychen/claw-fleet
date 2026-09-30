@@ -647,9 +647,94 @@ fn snapshot_with(session_id: &str, probes: &Probes<'_>) -> DriveState {
     with_state(session_id, probes, |state, _| with_derived(state, &derived)).unwrap_or_default()
 }
 
+// ── Retired sessions ─────────────────────────────────────────────────────────
+
+/// A session some other session took the work over from, outside the handoff
+/// chain (which records its own links): a plan revive's successor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeoverRecord {
+    pub successor: String,
+    pub mechanism: String,
+    pub at_ms: u64,
+}
+
+fn retired_path(session_id: &str) -> Option<std::path::PathBuf> {
+    let file = state_path(session_id)?.file_name()?.to_owned();
+    crate::session::get_fleet_dir().map(|d| d.join("retired").join(file))
+}
+
+/// Record that `successor` took the work over from `replaced`. From then on
+/// automatic drivers leave `replaced` alone (see [`live_end`]).
+pub fn record_takeover(replaced: &str, successor: &str, mechanism: &str) {
+    let Some(path) = retired_path(replaced) else { return };
+    let rec = TakeoverRecord { successor: successor.to_string(), mechanism: mechanism.to_string(), at_ms: now_ms() };
+    let written = serde_json::to_vec_pretty(&rec)
+        .map_err(|e| e.to_string())
+        .and_then(|b| crate::atomic_json::write_atomic(&path, &b).map_err(|e| e.to_string()));
+    if let Err(e) = written {
+        crate::log_debug(&format!("[drive] record takeover of {replaced}: {e}"));
+    }
+}
+
+fn takeover_successor(session_id: &str) -> Option<String> {
+    let path = retired_path(session_id)?;
+    let rec: TakeoverRecord = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    Some(rec.successor)
+}
+
+/// The session that took over from `session_id` — its handoff successor, or
+/// the session a plan revive started in its place — or `None` when it was never
+/// replaced.
+pub fn successor_of(session_id: &str) -> Option<String> {
+    crate::handoff::successor_session_of(session_id).or_else(|| takeover_successor(session_id))
+}
+
+/// The live end of `session_id`'s succession (handoffs and takeovers mixed),
+/// or `None` when `session_id` itself is still the one doing the work.
+pub fn live_end(session_id: &str) -> Option<String> {
+    live_end_with(session_id, &successor_of)
+}
+
+fn live_end_with(session_id: &str, next: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    let mut current = next(session_id)?;
+    // Successions are short and acyclic; the bound only keeps a corrupted
+    // store from spinning forever.
+    for _ in 0..64 {
+        match next(&current) {
+            Some(n) if n != session_id => current = n,
+            _ => break,
+        }
+    }
+    Some(current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_end_follows_mixed_successions_and_survives_a_cycle() {
+        let links = |s: &str| match s {
+            "a" => Some("b".to_string()),
+            "b" => Some("c".to_string()),
+            "x" => Some("y".to_string()),
+            "y" => Some("x".to_string()),
+            _ => None,
+        };
+        assert_eq!(live_end_with("a", &links).as_deref(), Some("c"));
+        assert_eq!(live_end_with("c", &links), None);
+        assert_eq!(live_end_with("x", &links).as_deref(), Some("y"));
+    }
+
+    #[test]
+    fn a_recorded_takeover_retires_the_replaced_session() {
+        let _home = temp_home();
+        assert_eq!(takeover_successor("old"), None);
+        record_takeover("old", "new", "plan_revive");
+        assert_eq!(takeover_successor("old").as_deref(), Some("new"));
+        assert_eq!(takeover_successor("new"), None);
+    }
 
     fn pending(token: &str, class: DriverClass, yield_to_turn: bool) -> PendingIntent {
         PendingIntent {

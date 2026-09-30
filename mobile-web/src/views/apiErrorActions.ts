@@ -8,6 +8,8 @@
  * work, and a resume without an idempotency key can be delivered twice.
  */
 import type { ErrorAction, SyntheticErrorInfo } from "../../../shared-ts/syntheticError";
+import { retiredSuccessor } from "../../../shared-ts/retiredSession";
+import { t } from "../i18n";
 import type { FleetTransport } from "../relay";
 
 export interface ApiErrorSession {
@@ -32,6 +34,8 @@ export interface ActionEnv {
   openUrl?: (url: string) => void;
   /** Injected for the same reason; the real one is `crypto`-ish randomness. */
   newKey?: () => string;
+  /** Injected for the same reason; the real one is `window.confirm`. */
+  confirm?: (message: string) => boolean;
 }
 
 function defaultKey(): string {
@@ -45,8 +49,8 @@ export async function resumeOverRelay(
   extra: { prompt?: string; model?: string } = {},
 ): Promise<ActionOutcome> {
   const { session, client } = env;
-  try {
-    await client.request("resume_session", {
+  const send = (more: { allowRetired?: boolean } = {}) =>
+    client.request("resume_session", {
       sessionId: session.id,
       workspacePath: session.workspacePath,
       agentSource: session.agentSource ?? "",
@@ -56,11 +60,32 @@ export async function resumeOverRelay(
       // `claude --resume` against one transcript.
       idempotencyKey: (env.newKey ?? defaultKey)(),
       ...extra,
+      ...more,
     });
+  try {
+    await send();
     return { kind: "resumed" };
   } catch (e) {
-    return { kind: "failed", detail: String(e) };
+    // Taken over by another session: ask before putting a second agent on it.
+    const successor = retiredSuccessor(e);
+    if (!successor) return { kind: "failed", detail: String(e) };
+    const id = successor.slice(0, 8);
+    const ask = env.confirm ?? ((m: string) => window.confirm(m));
+    if (!ask(retiredResumeQuestion(id))) {
+      return { kind: "failed", detail: t("未继续：已被 {0} 接替", id) };
+    }
+    try {
+      await send({ allowRetired: true });
+      return { kind: "resumed" };
+    } catch (e2) {
+      return { kind: "failed", detail: String(e2) };
+    }
   }
+}
+
+/** The question asked before resuming a session `id` has taken over. */
+export function retiredResumeQuestion(id: string): string {
+  return t("这个会话已被 {0} 接替。继续它会让两个会话同时做同一份工作。仍要继续？", id);
 }
 
 /**

@@ -1010,6 +1010,12 @@ fn spawn_for_plan(
         None => crate::agent_source::spawn_session("claude", &spec)?,
     };
     let sid = resp.session_id.unwrap_or(sid);
+    if let Some(old) = replaces {
+        // Retire the replaced session: automatic drivers now leave it alone
+        // and the UI warns before the boss resumes it by hand (2026-09-29: the
+        // boss batch-continued a25d624f next to its revive d1aca5fb).
+        crate::session_driver::record_takeover(old, &sid, "plan_revive");
+    }
     let ws = Path::new(&view.workspace_path);
     let current = pt::resolve_current_task(ws, &view.plan_id, None).ok().flatten();
     if let Err(e) =

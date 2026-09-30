@@ -19,6 +19,17 @@ pub(crate) fn route_resume_session(
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
         Ok(req) => {
+            // Taken over by another session: the browser asks the boss first
+            // and resends with `allowRetired`.
+            if let Err(e) = crate::agent_source::guard_manual_resume(&req.session_id, req.allow_retired) {
+                let body = serde_json::json!({"error": e}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(409)
+                        .with_header(json_header),
+                );
+                return;
+            }
             // A "done" task resumed over HTTP is active again — drop
             // the done mark on the host where it lives so it
             // re-surfaces as needs-review.

@@ -2992,6 +2992,8 @@
     "remote_codex_device_hint": "Open the link on any device and enter the code; the remote host polls until approved."
   },
   "session": {
+    "retired_resume_confirm": "Taken over by {{id}}. Resuming it would put two sessions on the same work. Resume anyway?",
+    "retired_resume_declined": "Not resumed: taken over by {{id}}",
     "remote_on_host": "File I/O runs on {{host}} (rca)",
     "remote_short": "Remote"
   },
