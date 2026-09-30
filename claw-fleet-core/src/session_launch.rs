@@ -894,6 +894,17 @@ pub(crate) fn spawn_new_session_impl(
         true, // tee stdout to a live-thinking sidecar
         |_success| {},
     )?;
+    crate::launch_spec::note_spawn(
+        &session_id,
+        crate::launch_spec::Spawn {
+            source: "claude",
+            kind: crate::launch_spec::SpawnKind::New,
+            workspace: workspace_path,
+            pid: Some(pid),
+            parent: None,
+            transcript: None,
+        },
+    );
     crate::log_debug(&format!(
         "new_session: spawned pid {} session {} in {}",
         pid, session_id, workspace_path

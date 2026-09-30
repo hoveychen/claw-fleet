@@ -312,6 +312,17 @@ pub(crate) fn codex_fork_ask(
     let fleet_owned = crate::codex_source::codex_fleet_owned_cwd(&spec.session_id).is_some();
     let _forget = fleet_owned.then(|| {
         crate::launch_spec::record(&fork_id, model.as_deref(), effort.as_deref());
+        crate::launch_spec::note_spawn(
+            &fork_id,
+            crate::launch_spec::Spawn {
+                source: "codex",
+                kind: crate::launch_spec::SpawnKind::Fork,
+                workspace: &spec.workspace_path,
+                pid: None,
+                parent: Some(&spec.session_id),
+                transcript: None,
+            },
+        );
         ForgetLaunchSpec(fork_id.clone())
     });
     let fleet_owned_args = if fleet_owned {

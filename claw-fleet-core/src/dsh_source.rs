@@ -1350,6 +1350,18 @@ impl AgentSource for DshSource {
             spec.effort.as_deref(),
             Some(entrypoint),
         );
+        // No pid: every dsh session runs inside the one shared server.
+        crate::launch_spec::note_spawn(
+            &session_id,
+            crate::launch_spec::Spawn {
+                source: "dsh",
+                kind: crate::launch_spec::SpawnKind::New,
+                workspace: &spec.workspace_path,
+                pid: None,
+                parent: None,
+                transcript: None,
+            },
+        );
 
         let started = self.with_client(|client| {
             let mut payload = json!({ "cwd": spec.workspace_path, "sessionId": session_id });
@@ -1456,6 +1468,17 @@ impl AgentSource for DshSource {
             }
             return Err(e);
         }
+        crate::launch_spec::note_spawn(
+            &session_id,
+            crate::launch_spec::Spawn {
+                source: "dsh",
+                kind: crate::launch_spec::SpawnKind::Resume,
+                workspace: &spec.workspace_path,
+                pid: None,
+                parent: None,
+                transcript: None,
+            },
+        );
         Ok(())
     }
 

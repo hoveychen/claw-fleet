@@ -1348,6 +1348,7 @@ pub fn spawn_new_codex_session(
     let (tx, rx) = mpsc::channel::<String>();
     let stderr_log_owned = stderr_log.clone();
     let sink_path_owned = sink_path.clone();
+    let workspace_owned = workspace_path.to_string();
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + THREAD_STARTED_TIMEOUT;
         // Thread id captured from `thread.started`, kept so we can drop its
@@ -1362,6 +1363,19 @@ pub fn spawn_new_codex_session(
             // Note the spawn pid so new-session liveness can recognise this
             // still-running session before its id lands in any argv.
             record_spawn_pid(&thread_id, pid);
+            // Before the send: the receiver's `launch_spec::record` must not
+            // race this read-modify-write of the same note.
+            crate::launch_spec::note_spawn(
+                &thread_id,
+                crate::launch_spec::Spawn {
+                    source: "codex",
+                    kind: crate::launch_spec::SpawnKind::New,
+                    workspace: &workspace_owned,
+                    pid: Some(pid),
+                    parent: None,
+                    transcript: None,
+                },
+            );
             spawned_thread = Some(thread_id.clone());
             let _ = tx.send(thread_id);
         }
@@ -1627,6 +1641,17 @@ pub fn resume_codex_session(
         .spawn()
         .map_err(|e| format!("spawn codex resume failed: {e}"))?;
     let pid = child.id();
+    crate::launch_spec::note_spawn(
+        session_id,
+        crate::launch_spec::Spawn {
+            source: "codex",
+            kind: crate::launch_spec::SpawnKind::Resume,
+            workspace: &workspace_path,
+            pid: Some(pid),
+            parent: None,
+            transcript: None,
+        },
+    );
 
     // Reaper thread: reap the child, log its exit, and invoke `on_exit`. stdout
     // goes to the file sink (not a pipe), so — unlike before — nothing needs to

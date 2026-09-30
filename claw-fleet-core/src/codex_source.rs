@@ -259,6 +259,34 @@ fn lookup_thread_rollout_cwd(thread_id: &str) -> Option<(String, String)> {
     .ok()
 }
 
+/// Every thread in the SQLite index as `id → (rollout_path, cwd)`; empty when
+/// there is no index. One query, for callers resolving many ids at once.
+pub(crate) fn all_thread_rollout_cwds() -> std::collections::HashMap<String, (String, String)> {
+    let mut out = std::collections::HashMap::new();
+    let Some(db_path) = get_sqlite_path().filter(|p| p.exists()) else {
+        return out;
+    };
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return out;
+    };
+    let Ok(mut stmt) = conn.prepare("SELECT id, rollout_path, cwd FROM threads") else {
+        return out;
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            (row.get::<_, String>(1)?, row.get::<_, String>(2)?),
+        ))
+    });
+    if let Ok(rows) = rows {
+        out.extend(rows.flatten());
+    }
+    out
+}
+
 /// Locate a Codex thread's rollout file by thread id: the SQLite `threads`
 /// table first (authoritative, O(1)), then a filename scan of the sessions dir
 /// (`rollout-<timestamp>-<thread id>.jsonl[.zst]`) for threads the index has

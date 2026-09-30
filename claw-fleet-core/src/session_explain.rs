@@ -971,6 +971,17 @@ pub(crate) fn claude_fork_ask(
     // turn, so the fork lands on a later, matchable entry.
     let fork_session_id = uuid::Uuid::new_v4().to_string();
     crate::launch_spec::record(&fork_session_id, model.as_deref(), effort.as_deref());
+    crate::launch_spec::note_spawn(
+        &fork_session_id,
+        crate::launch_spec::Spawn {
+            source: "claude",
+            kind: crate::launch_spec::SpawnKind::Fork,
+            workspace: &spec.workspace_path,
+            pid: None,
+            parent: Some(&spec.session_id),
+            transcript: None,
+        },
+    );
     let _forget = ForgetLaunchSpec(fork_session_id.clone());
 
     let mut args = claude_fork_args(

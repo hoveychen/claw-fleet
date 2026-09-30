@@ -576,6 +576,7 @@ pub fn run<F: Fn() -> Vec<SessionInfo>>(scan: F, running: Arc<AtomicBool>) {
     reconcile_timers();
     // Take back whatever an older Fleet wrote into the global agent config.
     crate::scope_migration::run_and_log("headless");
+    crate::launch_spec::backfill_once();
     run_with_interval(scan, running, TICK_INTERVAL);
 }
 

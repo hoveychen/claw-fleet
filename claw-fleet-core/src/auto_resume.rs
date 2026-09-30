@@ -488,6 +488,17 @@ pub fn spawn_resume_tracked_prompt(
         &stderr_log,
         on_exit,
     )?;
+    crate::launch_spec::note_spawn(
+        session_id,
+        crate::launch_spec::Spawn {
+            source: "claude",
+            kind: crate::launch_spec::SpawnKind::Resume,
+            workspace: workspace_path,
+            pid: Some(pid),
+            parent: None,
+            transcript: None,
+        },
+    );
     crate::log_debug(&format!(
         "resume_session: spawned pid {} for session {}",
         pid, session_id
