@@ -1016,10 +1016,16 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Channel B (prompt-prepend) of codex guidance: if the codex **PRD** block is
-/// installed (its `~/.codex/AGENTS.md` sentinel is present) AND the workspace
-/// has active TASKS.md plans, prepend the same `<system-reminder>` block Claude
-/// gets via the `fleet prd-context` UserPromptSubmit hook to the codex prompt.
+/// Channel B (prompt-prepend) of codex guidance: unless the user switched PRD
+/// discipline off, and when the workspace has active TASKS.md plans, prepend
+/// the same `<system-reminder>` block Claude gets via the `fleet prd-context`
+/// UserPromptSubmit hook to the codex prompt.
+///
+/// The switch is read from the recorded opt-out
+/// ([`crate::control_plane_prefs`]), not from the `~/.codex/AGENTS.md`
+/// sentinel: Fleet is moving its codex guidance off the global AGENTS.md (a
+/// file every codex on the machine reads), and gating on that file would turn
+/// plan injection off silently the moment the block is gone.
 ///
 /// Because Fleet drives every codex turn with a fresh `codex exec` /
 /// `codex exec resume … -- <prompt>`, prepending here on each spawn and resume
@@ -1027,9 +1033,9 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
 /// chosen in P1 (B1 codex hooks are an experimental, already-renamed feature).
 ///
 /// Gated on the codex PRD concept specifically (active-plans is a TASKS.md / PRD
-/// concern): static (AGENTS.md PRD block) and dynamic (this) injection move
-/// together with the PRD toggle. No PRD block / no active plan → returns the
-/// prompt unchanged (AC3 graceful degradation).
+/// concern): static and dynamic (this) injection move together with the PRD
+/// toggle. PRD switched off / no active plan → returns the prompt unchanged
+/// (AC3 graceful degradation).
 ///
 /// A resume whose previous turn already carried byte-identical text prepends
 /// nothing — that copy is still in the thread's history. See
@@ -1040,7 +1046,8 @@ fn maybe_prepend_active_plans(
     session_id: Option<&str>,
     prompt: &str,
 ) -> String {
-    if !crate::codex_guidance::is_codex_prd_installed() {
+    if crate::control_plane_prefs::is_disabled(crate::control_plane_prefs::Feature::PrdDiscipline)
+    {
         return prompt.to_string();
     }
     let reminder =
@@ -1662,6 +1669,47 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// Plan injection follows the recorded PRD switch, not the global AGENTS.md:
+    /// with no AGENTS.md at all the plans still reach the prompt, and only an
+    /// explicit opt-out stops them.
+    #[test]
+    fn active_plans_prepend_follows_the_prd_switch_not_agents_md() {
+        let home = TmpHome::new("prd-gate");
+        let codex_home = home.dir.join("codex-home-without-agents-md");
+        std::fs::create_dir_all(&codex_home).unwrap();
+        let prev_codex = std::env::var_os("CODEX_HOME");
+        unsafe { std::env::set_var("CODEX_HOME", &codex_home) };
+
+        let ws = home.dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"demo\" v=\"2\" -->\n\n\
+**Plan:** Demo work\n\n\
+- [ ] **P1** — first task\n\n\
+<!-- fleet:prd:end id=\"demo\" -->\n",
+        )
+        .unwrap();
+        let ws = ws.to_string_lossy().to_string();
+
+        let on = maybe_prepend_active_plans(&ws, None, "do it");
+        crate::control_plane_prefs::mark_disabled(crate::control_plane_prefs::Feature::PrdDiscipline)
+            .unwrap();
+        let off = maybe_prepend_active_plans(&ws, None, "do it");
+
+        unsafe {
+            match prev_codex {
+                Some(p) => std::env::set_var("CODEX_HOME", p),
+                None => std::env::remove_var("CODEX_HOME"),
+            }
+        }
+        assert!(
+            on.contains("## Plan: demo") && on.ends_with("do it"),
+            "plans must be prepended without any AGENTS.md block, got {on:?}"
+        );
+        assert_eq!(off, "do it", "an explicit PRD opt-out must stop the prepend");
     }
 
     #[test]
