@@ -298,13 +298,69 @@ fn holder_alive(pid: u32, start_time: u64) -> bool {
 struct Probes<'a> {
     session_alive: &'a dyn Fn(&str) -> bool,
     holder_alive: &'a dyn Fn(u32, u64) -> bool,
+    /// Intents implied by other stores (see [`derived_pending`]). Merged into
+    /// every arbitration and snapshot, never written to the drive store.
+    derived: &'a dyn Fn(&str) -> Vec<PendingIntent>,
 }
 
 fn real_probes() -> Probes<'static> {
     Probes {
         session_alive: &crate::parked::session_alive,
         holder_alive: &holder_alive,
+        derived: &derived_pending,
     }
+}
+
+/// Token prefix of a derived intent. It is not in the store, so no holder can
+/// withdraw it and no turn can revoke it: it goes away with its source record.
+pub const DERIVED_TOKEN_PREFIX: &str = "derived:";
+
+fn derived_intent(class: DriverClass, mechanism: &str, source_id: &str, reason: String) -> PendingIntent {
+    PendingIntent {
+        token: format!("{DERIVED_TOKEN_PREFIX}{mechanism}:{source_id}"),
+        class,
+        mechanism: mechanism.to_string(),
+        reason,
+        holder_pid: 0,
+        holder_start_time: 0,
+        registered_at_ms: 0,
+        not_before_ms: None,
+        expires_at_ms: u64::MAX,
+        yield_to_turn: false,
+    }
+}
+
+/// Intents that already exist as records elsewhere, read at decision time
+/// instead of being registered a second time (two copies would drift):
+///
+/// - a **parked card** means the session is waiting for the user's answer —
+///   Answer class, so a continue resume cannot answer it with nothing;
+/// - a **queued message** will be delivered by the drain — Continue class: the
+///   drain already skips sessions a retry or a rate-limit wait is holding, so an
+///   Answer-class queue would deadlock with the retry;
+/// - a **live watch** will resume the session when it fires — Continue class.
+///
+/// Each of the three blocks a takeover, which is the gap this closes.
+fn derived_pending(session_id: &str) -> Vec<PendingIntent> {
+    let now = now_ms();
+    let mut out = Vec::new();
+    for c in crate::parked::list().into_iter().filter(|c| c.session_id == session_id) {
+        out.push(derived_intent(DriverClass::Answer, "parked_card", &c.id, "a card is waiting for an answer".into()));
+    }
+    if crate::pending_message::has_pending(session_id) {
+        out.push(derived_intent(DriverClass::Continue, "pending_message", session_id, "a message is queued".into()));
+    }
+    for w in crate::watch::list().into_iter().filter(|w| w.session_id == session_id && w.is_live(now)) {
+        out.push(derived_intent(DriverClass::Continue, "watch", &w.id, format!("watch {} is armed", w.id)));
+    }
+    out
+}
+
+/// `state` with the derived intents appended — the view [`decide`] sees.
+fn with_derived(state: &DriveState, derived: &[PendingIntent]) -> DriveState {
+    let mut view = state.clone();
+    view.pending.extend(derived.iter().cloned());
+    view
 }
 
 /// Read-modify-write one session's record under its cross-process lock, with
@@ -420,13 +476,15 @@ fn acquire_with(
     own_pending: Option<&str>,
     probes: &Probes<'_>,
 ) -> Result<Lease, Refusal> {
+    // Read outside the store lock: the sources have their own files.
+    let derived = (probes.derived)(session_id);
     let outcome = with_state(session_id, probes, |state, now| {
         let alive = (probes.session_alive)(session_id);
         let live = state.running.as_ref().map(|r| running_live(r, now, alive)).unwrap_or(false);
         if !live {
             state.running = None;
         }
-        match decide(state, live, alive, driver, own_pending) {
+        match decide(&with_derived(state, &derived), live, alive, driver, own_pending) {
             Decision::Refuse(r) => Err(r),
             Decision::Grant { revoke } => {
                 state.pending.retain(|p| {
@@ -473,13 +531,14 @@ pub fn acquire_takeover(session_id: &str, driver: Driver) -> Result<(), Refusal>
 
 fn acquire_takeover_with(session_id: &str, driver: Driver, probes: &Probes<'_>) -> Result<(), Refusal> {
     debug_assert_eq!(driver.class, DriverClass::Takeover);
+    let derived = (probes.derived)(session_id);
     let outcome = with_state(session_id, probes, |state, now| {
         let alive = (probes.session_alive)(session_id);
         let live = state.running.as_ref().map(|r| running_live(r, now, alive)).unwrap_or(false);
         if !live {
             state.running = None;
         }
-        match decide(state, live, alive, driver, None) {
+        match decide(&with_derived(state, &derived), live, alive, driver, None) {
             Decision::Refuse(r) => Err(r),
             Decision::Grant { .. } => {
                 state.pending.push(PendingIntent {
@@ -556,12 +615,16 @@ pub fn withdraw_pending(session_id: &str, token: &str) {
     with_state(session_id, &probes, |state, _| state.pending.retain(|p| p.token != token));
 }
 
-/// The session's current record, pruned (read-only view for the reviver and
-/// the UI). A Running lease is reported as recorded; use [`running_live`] to
-/// judge it.
+/// The session's current record, pruned, with the derived intents included
+/// (read-only view for the reviver and the UI). A Running lease is reported as
+/// recorded; use [`running_live`] to judge it.
 pub fn snapshot(session_id: &str) -> DriveState {
-    let probes = real_probes();
-    with_state(session_id, &probes, |state, _| state.clone()).unwrap_or_default()
+    snapshot_with(session_id, &real_probes())
+}
+
+fn snapshot_with(session_id: &str, probes: &Probes<'_>) -> DriveState {
+    let derived = (probes.derived)(session_id);
+    with_state(session_id, probes, |state, _| with_derived(state, &derived)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -720,7 +783,57 @@ mod tests {
     }
 
     fn probes<'a>(alive: &'a dyn Fn(&str) -> bool) -> Probes<'a> {
-        Probes { session_alive: alive, holder_alive: &|_, _| true }
+        Probes { session_alive: alive, holder_alive: &|_, _| true, derived: &|_| Vec::new() }
+    }
+
+    fn probes_deriving<'a>(
+        alive: &'a dyn Fn(&str) -> bool,
+        derived: &'a dyn Fn(&str) -> Vec<PendingIntent>,
+    ) -> Probes<'a> {
+        Probes { session_alive: alive, holder_alive: &|_, _| true, derived }
+    }
+
+    #[test]
+    fn derived_intents_block_takeover_and_are_never_stored() {
+        let _home = temp_home();
+        let dead = |_: &str| false;
+        for (class, mech) in [
+            (DriverClass::Continue, "watch"),
+            (DriverClass::Continue, "pending_message"),
+            (DriverClass::Answer, "parked_card"),
+        ] {
+            let derived = move |_: &str| vec![derived_intent(class, mech, "x", "r".into())];
+            let p = probes_deriving(&dead, &derived);
+            let err = acquire_takeover_with("d1", REVIVE, &p).unwrap_err();
+            assert!(matches!(&err, Refusal::Pending { mechanism, .. } if mechanism == mech), "{mech}: {err}");
+            assert!(!state_path("d1").unwrap().exists(), "{mech}: a refusal writes nothing");
+            assert_eq!(snapshot_with("d1", &p).pending.len(), 1, "{mech}: snapshot shows it");
+        }
+    }
+
+    #[test]
+    fn parked_card_blocks_continue_but_not_answer_or_manual() {
+        let _home = temp_home();
+        let dead = |_: &str| false;
+        let derived = |_: &str| vec![derived_intent(DriverClass::Answer, "parked_card", "c", "r".into())];
+        let p = probes_deriving(&dead, &derived);
+        assert!(acquire_with("d2", Driver::continue_("watch"), None, &p).is_err());
+        drop(acquire_with("d2", Driver::answer("parked_card"), None, &p).unwrap());
+        let lease = acquire_with("d2", Driver::manual("desktop"), None, &p).unwrap();
+        assert!(
+            state_path("d2").unwrap().exists() && snapshot_with("d2", &probes(&dead)).pending.is_empty(),
+            "only the running lease is stored, the derived intent is not"
+        );
+        drop(lease);
+    }
+
+    #[test]
+    fn armed_watch_does_not_block_a_retry_of_the_same_turn() {
+        let _home = temp_home();
+        let dead = |_: &str| false;
+        let derived = |_: &str| vec![derived_intent(DriverClass::Continue, "watch", "w", "r".into())];
+        let p = probes_deriving(&dead, &derived);
+        drop(acquire_with("d3", RETRY, None, &p).expect("equal class"));
     }
 
     #[test]
