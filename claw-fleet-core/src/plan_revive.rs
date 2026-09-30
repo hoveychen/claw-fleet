@@ -1045,6 +1045,13 @@ pub fn next_plan_after(blocks: &[pt::SourcedBlock], finished: &str) -> Option<St
     pt::next_plan_in_tree(blocks, finished).map(|t| t.plan_id)
 }
 
+/// The plan the finish button continues, and the plan it counts as finished,
+/// for the session whose focus is `focus`.
+pub fn finish_target(blocks: &[pt::SourcedBlock], focus: &TaskProgressRecord) -> Option<(String, String)> {
+    let finished = focus.plan_id.as_str();
+    next_plan_after(blocks, finished).map(|t| (t, finished.to_string()))
+}
+
 /// Opening prompt for a session started by the finish button. Product text.
 pub fn finish_prompt(view: &PlanView, finished_plan: &str, previous: Option<&str>) -> String {
     let pending = view.total.saturating_sub(view.done);
@@ -1619,6 +1626,7 @@ mod tests {
             plan_id: plan.into(),
             current_task: None,
             updated,
+            backtracked_from: None,
         }
     }
 
@@ -1658,6 +1666,27 @@ mod tests {
         );
         let ids: Vec<_> = v.iter().map(|v| v.plan_id.as_str()).collect();
         assert_eq!(ids, vec!["fresh"]);
+    }
+
+    #[test]
+    fn finish_continues_after_plan_check_moved_the_focus() {
+        // The session ticks a's last box; `plan check` moves its focus to b.
+        // The boss then presses finish: a is done, so b must be picked up.
+        let tree = vec![
+            block("root", None, PENDING),
+            block("a", Some("root"), DONE),
+            block("b", Some("root"), PENDING),
+        ];
+        let mut moved = rec("/w", "b", 0);
+        moved.backtracked_from = Some("a".into());
+        assert_eq!(finish_target(&tree, &moved), Some(("b".into(), "a".into())));
+        // Focus the session set itself on an unfinished plan: ask first, as before.
+        assert_eq!(finish_target(&tree, &rec("/w", "b", 0)), None);
+        // Focus still on the finished plan (no backtrack happened).
+        assert_eq!(finish_target(&tree, &rec("/w", "a", 0)), Some(("b".into(), "a".into())));
+        // The boss re-opened a box of the finished plan: nothing continues.
+        let reopened = vec![block("root", None, PENDING), block("a", Some("root"), PENDING), block("b", Some("root"), PENDING)];
+        assert_eq!(finish_target(&reopened, &moved), None);
     }
 
     #[test]

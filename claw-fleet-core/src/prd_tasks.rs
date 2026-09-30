@@ -2899,6 +2899,7 @@ trailing notes outside\n";
             plan_id: plan_id.to_string(),
             current_task: task.map(str::to_string),
             updated: 0,
+            backtracked_from: None,
         }
     }
 

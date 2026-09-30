@@ -31,6 +31,12 @@ pub struct TaskProgressRecord {
     pub current_task: Option<String>,
     /// Epoch milliseconds of the update — newest wins when reconciling.
     pub updated: u64,
+    /// Set only when `plan check` moved this focus here because the session
+    /// ticked the last box of this plan (the one named). Any later focus write
+    /// by the session itself clears it. The finish button reads it to tell
+    /// "my plan is done, the tree moved me on" from "my plan is unfinished".
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backtracked_from: Option<String>,
 }
 
 pub(crate) fn progress_dir() -> Option<PathBuf> {
@@ -55,6 +61,19 @@ pub fn set_current(
 ) -> Result<(), String> {
     let dir = progress_dir().ok_or("cannot determine home dir")?;
     set_current_in(&dir, session_id, workspace_path, plan_id, current_task)
+}
+
+/// [`set_current`] for a focus that `plan check` moved onto `plan_id` after
+/// the session finished `finished_plan`.
+pub fn set_backtracked(
+    session_id: &str,
+    workspace_path: &str,
+    plan_id: &str,
+    current_task: Option<String>,
+    finished_plan: &str,
+) -> Result<(), String> {
+    let dir = progress_dir().ok_or("cannot determine home dir")?;
+    write_in(&dir, session_id, workspace_path, plan_id, current_task, Some(finished_plan))
 }
 
 /// Read a session's current plan focus, if any.
@@ -84,12 +103,24 @@ pub(crate) fn set_current_in(
     plan_id: &str,
     current_task: Option<String>,
 ) -> Result<(), String> {
+    write_in(dir, session_id, workspace_path, plan_id, current_task, None)
+}
+
+pub(crate) fn write_in(
+    dir: &std::path::Path,
+    session_id: &str,
+    workspace_path: &str,
+    plan_id: &str,
+    current_task: Option<String>,
+    backtracked_from: Option<&str>,
+) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| format!("create task-progress dir: {e}"))?;
     let rec = TaskProgressRecord {
         workspace_path: workspace_path.to_string(),
         plan_id: plan_id.to_string(),
         current_task,
         updated: now_ms(),
+        backtracked_from: backtracked_from.map(str::to_string),
     };
     let json = serde_json::to_string(&rec).map_err(|e| format!("serialize: {e}"))?;
     fs::write(dir.join(format!("{session_id}.json")), json)
@@ -181,6 +212,7 @@ mod tests {
             plan_id: "auth".to_string(),
             current_task: Some("**P2** — swap".to_string()),
             updated: 123,
+            backtracked_from: None,
         };
         let json = serde_json::to_string(&rec).unwrap();
         // camelCase on the wire
@@ -198,6 +230,7 @@ mod tests {
             plan_id: "x".to_string(),
             current_task: None,
             updated: 1,
+            backtracked_from: None,
         };
         let json = serde_json::to_string(&rec).unwrap();
         assert!(!json.contains("currentTask"));
