@@ -1119,7 +1119,9 @@ pub fn finish_prompt(view: &PlanView, finished_plan: &str, previous: Option<&str
 /// session for it now. Best-effort — every failure is logged, never raised,
 /// because the caller is unblocking an agent waiting on the card.
 pub fn continue_after_finish(session_id: &str) {
-    if !PlanReviveConfig::load().enabled {
+    // Its own switch, independent of the reviver's: the boss may want the
+    // finish button to carry on while leaving orphaned plans alone, or not.
+    if !crate::resume_triggers::ResumeTriggersConfig::load().finish_continue {
         return;
     }
     let Some(focus) = crate::task_review::task_sessions(session_id)

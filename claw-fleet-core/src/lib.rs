@@ -218,6 +218,7 @@ pub mod plan_approval;
 pub mod plan_forest;
 pub mod plan_gate;
 pub mod plan_revive;
+pub mod resume_triggers;
 pub mod plan_snooze;
 pub mod plan_ops;
 pub mod plugins;

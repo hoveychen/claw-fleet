@@ -73,6 +73,9 @@ pub fn maybe_interrupt_stalled_codex(
     fired: &mut HashMap<String, u32>,
     last_fire: &mut HashMap<String, Instant>,
 ) {
+    if !crate::resume_triggers::ResumeTriggersConfig::load().codex_stall_watchdog {
+        return;
+    }
     let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
     for stall in crate::codex_source::detect_stalled_codex_turns(&snapshot) {
         let attempts = fired.get(&stall.session_id).copied().unwrap_or(0);
@@ -251,7 +254,10 @@ pub fn maybe_fire_auto_resume(
         desired_resume_intents(&sess, &config, &se_map, &fail_map)
     };
     sync_resume_intents(&desired);
-    if !config.enabled {
+    // No early return on `!config.enabled`: that only switches off the
+    // rate-limit resume (its candidate selection comes back empty), while the
+    // server-error retry below has its own switch.
+    if !config.enabled && !config.retry_server_errors {
         return;
     }
     let now = chrono::Utc::now();
@@ -725,10 +731,24 @@ mod tests {
     }
 
     #[test]
-    fn desired_intents_are_empty_when_the_feature_is_off() {
-        let cfg = crate::auto_resume::AutoResumeConfig { enabled: false, ..Default::default() };
+    fn desired_intents_follow_each_switch_separately() {
         let sessions = vec![rate_limited("rl"), intent_session("se", crate::session::SessionStatus::ServerErrored)];
-        assert!(desired_resume_intents(&sessions, &cfg, &HashMap::new(), &HashMap::new()).is_empty());
+        let ids = |cfg: &crate::auto_resume::AutoResumeConfig| -> Vec<String> {
+            desired_resume_intents(&sessions, cfg, &HashMap::new(), &HashMap::new())
+                .into_iter()
+                .map(|i| i.session_id)
+                .collect()
+        };
+        let rl_off = crate::auto_resume::AutoResumeConfig { enabled: false, ..Default::default() };
+        assert_eq!(ids(&rl_off), ["se"]);
+        let se_off = crate::auto_resume::AutoResumeConfig { retry_server_errors: false, ..Default::default() };
+        assert_eq!(ids(&se_off), ["rl"]);
+        let both_off = crate::auto_resume::AutoResumeConfig {
+            enabled: false,
+            retry_server_errors: false,
+            ..Default::default()
+        };
+        assert!(ids(&both_off).is_empty());
     }
 
     #[test]

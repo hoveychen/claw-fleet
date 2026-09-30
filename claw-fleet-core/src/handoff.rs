@@ -361,6 +361,11 @@ fn now_ms() -> u64 {
 
 // ── registration ──────────────────────────────────────────────────────────────
 
+/// Returned by [`register`] while the boss has switched handoff successors off.
+/// Worded for the agent that reads it: no successor will come.
+pub const HANDOFF_DISABLED_ERR: &str = "handoff successors are switched off in Fleet settings; \
+     no successor session will be started — keep working in this session or report to the boss";
+
 /// Register a handoff for `session_id`. Overwrites any previous un-consumed
 /// registration by the same session. Fails when the chain the session sits on
 /// has already reached `MAX_CHAIN_HOPS`.
@@ -379,6 +384,11 @@ pub fn register(
     goal_reason: Option<&str>,
     agent_source: &str,
 ) -> Result<PendingHandoff, String> {
+    // Refuse up front rather than accept and never spawn: an agent told "ok"
+    // ends its turn expecting a successor, and the plan would die with it.
+    if !crate::resume_triggers::ResumeTriggersConfig::load().handoff_successor {
+        return Err(HANDOFF_DISABLED_ERR.to_string());
+    }
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
     register_in(
@@ -920,6 +930,15 @@ fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
 /// session id when a relay fired. Errors never propagate to the hook exit
 /// code — callers log and move on.
 pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
+    // A registration made before the switch was turned off: drop it, so it
+    // cannot fire on some later Stop after the switch comes back on.
+    if !crate::resume_triggers::ResumeTriggersConfig::load().handoff_successor {
+        if read_pending(session_id).is_some() {
+            cancel_pending(session_id);
+            crate::log_debug(&format!("handoff: dropped {session_id}'s pending relay, {HANDOFF_DISABLED_ERR}"));
+        }
+        return Ok(None);
+    }
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
     let progress = crate::task_progress::progress_dir();
