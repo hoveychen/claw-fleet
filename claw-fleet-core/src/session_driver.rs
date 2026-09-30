@@ -324,6 +324,16 @@ fn with_state<R>(
         let mut state = loaded.clone();
         let now = now_ms();
         prune_pending(&mut state, now, probes.holder_alive);
+        // A lease whose holder exited without releasing it — the watch timer
+        // always does, it quits right after firing — is dropped once it is past
+        // the spawn grace and its process is gone. The process probe only runs
+        // for such a candidate.
+        if let Some(r) = &state.running {
+            let past_grace = now.saturating_sub(r.acquired_at_ms) >= SPAWN_GRACE_MS;
+            if past_grace && !running_live(r, now, (probes.session_alive)(session_id)) {
+                state.running = None;
+            }
+        }
         let out = f(&mut state, now);
         if state != loaded {
             store(&path, &state);
@@ -369,7 +379,39 @@ impl Drop for Lease {
 /// callback. `own_pending` is the caller's own intent token when it is the
 /// mechanism that registered one; it is consumed on success.
 pub fn acquire(session_id: &str, driver: Driver, own_pending: Option<&str>) -> Result<Lease, Refusal> {
+    sweep_throttled();
     acquire_with(session_id, driver, own_pending, &real_probes())
+}
+
+/// Minimum gap between two whole-store sweeps in one process.
+const SWEEP_EVERY_MS: u64 = 10 * 60 * 1000;
+
+/// Drop stale records across the whole store, at most once per
+/// [`SWEEP_EVERY_MS`] per process. Without it a record left by an exited
+/// holder would sit on disk until that one session was driven again.
+fn sweep_throttled() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let now = now_ms();
+    let last = LAST.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < SWEEP_EVERY_MS
+        || LAST.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_err()
+    {
+        return;
+    }
+    sweep_with(&real_probes());
+}
+
+fn sweep_with(probes: &Probes<'_>) {
+    let Some(dir) = drive_dir() else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".json")) else { continue };
+        // The file stem is the (sanitised) session id; `with_state` prunes and
+        // removes the file once nothing is left in it.
+        with_state(stem, probes, |_, _| ());
+    }
 }
 
 fn acquire_with(
@@ -743,6 +785,22 @@ mod tests {
         assert!(acquire_takeover_with("s5", Driver::takeover("finish_continue"), &p).is_err());
         // The replaced session stays reachable for the user.
         drop(acquire_with("s5", Driver::manual("m"), None, &p).unwrap());
+    }
+
+    #[test]
+    fn sweep_removes_a_lease_its_exited_holder_never_released() {
+        // Smoke 2026-09-30: every watch fire left `~/.fleet/drive/<sid>.json`
+        // behind, because the timer process exits right after resuming and its
+        // on_exit never runs.
+        let _home = temp_home();
+        let stale = DriveState { running: Some(running("watch", 0)), pending: vec![] };
+        let fresh = DriveState { running: Some(running("watch", now_ms())), pending: vec![] };
+        store(&state_path("old").unwrap(), &stale);
+        store(&state_path("new").unwrap(), &fresh);
+        let dead = |_: &str| false;
+        sweep_with(&probes(&dead));
+        assert!(!state_path("old").unwrap().exists(), "past grace, process gone");
+        assert!(state_path("new").unwrap().exists(), "still inside the spawn grace");
     }
 
     #[test]
