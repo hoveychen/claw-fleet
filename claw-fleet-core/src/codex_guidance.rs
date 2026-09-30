@@ -1,6 +1,12 @@
-//! Codex guidance injection — composes Fleet's per-concept guidance blocks into
-//! the global `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`) so Fleet-driven
-//! Codex sessions see the same discipline Claude sessions get.
+//! Codex guidance injection — composes Fleet's per-concept guidance blocks for
+//! the codex threads Fleet launches, so they see the same discipline Claude
+//! sessions get, while codex sessions the user starts by hand see none of it.
+//!
+//! The blocks used to live in the global `~/.codex/AGENTS.md` (or
+//! `$CODEX_HOME/AGENTS.md`), which every codex on the machine reads. They are
+//! now rendered into the Fleet-owned `~/.fleet/codex-guidance.md` and handed to
+//! each new thread as `developer_instructions` by [`crate::codex_launch`];
+//! AGENTS.md only has Fleet's old blocks stripped from it.
 //!
 //! # Per-concept blocks (unified reconcile)
 //!
@@ -21,10 +27,10 @@
 //!                                 [`crate::model_guidance`] (added in P2).
 //!
 //! [`reconcile_codex_agents_md`] is the single writer: given which concepts are
-//! enabled it composes exactly those blocks (in a stable order), strips any
-//! Fleet-managed block that should be absent, migrates away the **legacy**
-//! monolithic `fleet:codex-guidance` block, and preserves any user-authored
-//! AGENTS.md content outside the markers verbatim.  It is idempotent and
+//! enabled it composes exactly those blocks (in a stable order) into the launch
+//! guidance, and strips every Fleet-managed block — the **legacy** monolithic
+//! `fleet:codex-guidance` one included — from AGENTS.md, preserving any
+//! user-authored content outside the markers verbatim.  It is idempotent and
 //! order-independent, so the desktop can call it on toggle-change, on startup,
 //! and before every spawn without accumulating content.
 //!
@@ -789,11 +795,12 @@ pub struct CodexGuidanceSet {
     pub lessons: bool,
 }
 
-/// The single writer for `~/.codex/AGENTS.md`. Composes exactly the enabled
-/// concept blocks (stable order: PRD, interaction, wiki, model), strips every
-/// Fleet-managed block that should be absent (including the legacy monolithic
-/// block), and preserves user-authored content outside the markers. Idempotent
-/// and order-independent. Deletes the file if the result would be empty.
+/// The single writer for Fleet's codex guidance. Composes exactly the enabled
+/// concept blocks (stable order: PRD, interaction, wiki, model, lessons) into
+/// the launch guidance, and strips every Fleet-managed block from
+/// `~/.codex/AGENTS.md` while preserving user-authored content outside the
+/// markers. Idempotent and order-independent. Deletes AGENTS.md if nothing but
+/// Fleet's blocks was in it; never creates it.
 pub fn reconcile_codex_agents_md(
     set: CodexGuidanceSet,
     user_title: &str,
@@ -803,9 +810,18 @@ pub fn reconcile_codex_agents_md(
     let existing = fs::read_to_string(&agents_md).unwrap_or_default();
     let user_content = strip_all_fleet_blocks(&existing);
 
-    let blocks = render_blocks(set, user_title, locale);
-    write_launch_guidance(&blocks)?;
-    let new_content = compose(&user_content, &blocks);
+    write_launch_guidance(&render_blocks(set, user_title, locale))?;
+
+    // AGENTS.md itself only ever loses Fleet's blocks now: every codex on the
+    // machine reads it, so guidance written there changed the behaviour of
+    // codex sessions the user started by hand.
+    if existing.is_empty() && !agents_md.exists() {
+        return Ok(());
+    }
+    if user_content == existing {
+        return Ok(());
+    }
+    let new_content = compose(&user_content, "");
 
     if new_content.trim().is_empty() {
         // Nothing left (no user content, no blocks) — remove rather than leave a
@@ -896,7 +912,7 @@ fn render_blocks(set: CodexGuidanceSet, user_title: &str, locale: &str) -> Strin
     blocks
 }
 
-/// Mirror the Claude-side concept toggles onto codex's AGENTS.md. Reads which
+/// Mirror the Claude-side concept toggles onto codex's launch guidance. Reads which
 /// concepts are enabled from their Claude carriers (the `@import` sentinels in
 /// `~/.claude/CLAUDE.md`) and reconciles the matching codex blocks. This is the
 /// unified entry point: one concept toggle drives both carriers, so the desktop
@@ -941,24 +957,24 @@ pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Resu
     reconcile_codex_agents_md(set, user_title, locale)
 }
 
-/// Whether the codex PRD-discipline block is present in `~/.codex/AGENTS.md`.
+/// Whether the codex PRD-discipline block is in the launch guidance.
 pub fn is_codex_prd_installed() -> bool {
-    agents_md_contains(PRD_BEGIN)
+    launch_guidance_contains(PRD_BEGIN)
 }
 
-/// Whether the codex interaction-mode block is present in `~/.codex/AGENTS.md`.
+/// Whether the codex interaction-mode block is in the launch guidance.
 pub fn is_codex_interaction_installed() -> bool {
-    agents_md_contains(INTERACTION_BEGIN)
+    launch_guidance_contains(INTERACTION_BEGIN)
 }
 
-/// Whether the codex wiki block is present in `~/.codex/AGENTS.md`.
+/// Whether the codex wiki block is in the launch guidance.
 pub fn is_codex_wiki_installed() -> bool {
-    agents_md_contains(WIKI_BEGIN)
+    launch_guidance_contains(WIKI_BEGIN)
 }
 
-/// Whether the codex model block is present in `~/.codex/AGENTS.md`.
+/// Whether the codex model block is in the launch guidance.
 pub fn is_codex_model_installed() -> bool {
-    agents_md_contains(MODEL_BEGIN)
+    launch_guidance_contains(MODEL_BEGIN)
 }
 
 /// Whether any Fleet-managed codex block (per-concept or legacy) is present.
@@ -968,17 +984,12 @@ pub fn is_codex_guidance_installed() -> bool {
         || is_codex_interaction_installed()
         || is_codex_wiki_installed()
         || is_codex_model_installed()
-        || agents_md_contains(LEGACY_BEGIN)
+        || launch_guidance_contains(LEGACY_BEGIN)
 }
 
-fn agents_md_contains(needle: &str) -> bool {
-    let Some(agents_md) = agents_md_path() else {
-        return false;
-    };
-    let Ok(content) = fs::read_to_string(&agents_md) else {
-        return false;
-    };
-    content.contains(needle)
+/// Whether the launch guidance currently carries the block opened by `needle`.
+fn launch_guidance_contains(needle: &str) -> bool {
+    launch_guidance().is_some_and(|g| g.contains(needle))
 }
 
 /// Append `blocks` to `user_content` separated by one blank line. Either side
@@ -1435,15 +1446,16 @@ mod tests {
     fn reconcile_composes_only_enabled_blocks() {
         with_temp_codex_home(|base| {
             let agents = base.join("AGENTS.md");
+            let guidance = || launch_guidance().unwrap_or_default();
 
             // interaction only
             reconcile_codex_agents_md(set(false, true, false, false), "Boss", "en").unwrap();
-            let c = fs::read_to_string(&agents).unwrap();
+            let c = guidance();
             assert!(c.contains(INTERACTION_BEGIN) && !c.contains(PRD_BEGIN));
 
             // all four
             reconcile_codex_agents_md(set(true, true, true, true), "Boss", "en").unwrap();
-            let c = fs::read_to_string(&agents).unwrap();
+            let c = guidance();
             assert!(
                 c.contains(PRD_BEGIN)
                     && c.contains(INTERACTION_BEGIN)
@@ -1453,13 +1465,14 @@ mod tests {
 
             // prd + model only — interaction and wiki blocks must be gone
             reconcile_codex_agents_md(set(true, false, false, true), "Boss", "en").unwrap();
-            let c = fs::read_to_string(&agents).unwrap();
+            let c = guidance();
             assert!(c.contains(PRD_BEGIN) && c.contains(MODEL_BEGIN));
             assert!(!c.contains(INTERACTION_BEGIN) && !c.contains(WIKI_BEGIN));
 
-            // none — file removed
-            reconcile_codex_agents_md(set(false, false, false, false), "Boss", "en").unwrap();
-            assert!(!agents.exists(), "empty reconcile removes the file");
+            assert!(
+                !agents.exists(),
+                "reconcile must never create the AGENTS.md every codex reads"
+            );
         });
     }
 
@@ -1480,39 +1493,43 @@ mod tests {
 
     #[test]
     fn reconcile_is_idempotent() {
-        with_temp_codex_home(|base| {
-            let agents = base.join("AGENTS.md");
+        with_temp_codex_home(|_| {
             reconcile_codex_agents_md(set(true, true, true, true), "Boss", "en").unwrap();
-            let once = fs::read_to_string(&agents).unwrap();
+            let once = launch_guidance().unwrap();
             reconcile_codex_agents_md(set(true, true, true, true), "Boss", "en").unwrap();
-            let twice = fs::read_to_string(&agents).unwrap();
+            let twice = launch_guidance().unwrap();
             assert_eq!(once, twice, "composing twice must not accumulate content");
             assert!(!once.contains("\n\n\n"), "no triple newline");
         });
     }
 
+    /// An install from before the move still has Fleet's blocks in AGENTS.md:
+    /// they come out (current and legacy alike), the user's text stays, and
+    /// nothing is written back even with every concept enabled.
     #[test]
-    fn reconcile_preserves_user_content_and_migrates_legacy() {
+    fn reconcile_strips_fleet_blocks_from_agents_md_and_keeps_user_content() {
         with_temp_codex_home(|base| {
             let agents = base.join("AGENTS.md");
-            // Seed a legacy monolithic block plus user content.
             let seed = format!(
-                "# My project AGENTS\n\nkeep me.\n\n{LEGACY_BEGIN}\nold packed guidance\n{LEGACY_END}\n"
+                "# My project AGENTS\n\nkeep me.\n\n{LEGACY_BEGIN}\nold packed guidance\n{LEGACY_END}\n\n\
+{PRD_BEGIN}\nold prd\n{PRD_END}\n"
             );
             fs::write(&agents, seed).unwrap();
 
             reconcile_codex_agents_md(set(true, true, false, false), "Boss", "en").unwrap();
             let c = fs::read_to_string(&agents).unwrap();
-            assert!(c.contains("keep me."), "user content preserved");
-            assert!(
-                !c.contains(LEGACY_BEGIN),
-                "legacy monolithic block migrated away"
-            );
-            assert!(!c.contains("old packed guidance"));
-            assert!(
-                c.contains(PRD_BEGIN) && c.contains(INTERACTION_BEGIN),
-                "new blocks written"
-            );
+            assert_eq!(c, "# My project AGENTS\n\nkeep me.\n");
+            assert!(launch_guidance().unwrap().contains(PRD_BEGIN));
+        });
+    }
+
+    #[test]
+    fn reconcile_deletes_an_agents_md_that_held_only_fleet_blocks() {
+        with_temp_codex_home(|base| {
+            let agents = base.join("AGENTS.md");
+            fs::write(&agents, format!("{PRD_BEGIN}\nold prd\n{PRD_END}\n")).unwrap();
+            reconcile_codex_agents_md(set(true, false, false, false), "Boss", "en").unwrap();
+            assert!(!agents.exists());
         });
     }
 

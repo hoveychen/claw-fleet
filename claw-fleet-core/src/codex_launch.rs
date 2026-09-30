@@ -1822,13 +1822,14 @@ mod tests {
     /// explicit opt-out stops them.
     #[test]
     fn active_plans_prepend_follows_the_prd_switch_not_agents_md() {
-        let home = TmpHome::new("prd-gate");
-        let codex_home = home.dir.join("codex-home-without-agents-md");
+        let tmp = tempfile::tempdir().unwrap();
+        let home = crate::paths::fleet_home_guard(tmp.path());
+        let codex_home = home.home().join("codex-home-without-agents-md");
         std::fs::create_dir_all(&codex_home).unwrap();
         let prev_codex = std::env::var_os("CODEX_HOME");
         unsafe { std::env::set_var("CODEX_HOME", &codex_home) };
 
-        let ws = home.dir.join("ws");
+        let ws = home.home().join("ws");
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(
             ws.join("TASKS.md"),
