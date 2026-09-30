@@ -1,16 +1,14 @@
-//! Model-selection guidance — injects a short reference block into
-//! `~/.claude/CLAUDE.md` giving agents a capability/cost cheat-sheet for the
+//! Model-selection guidance — a short reference block giving agents a capability/cost cheat-sheet for the
 //! Claude and Codex model families, so they can pick a model deliberately when
 //! spawning subagents, workflow agents, or new sessions (`Agent` tool `model`,
 //! `Workflow` `agent()` `opts.model`/`opts.effort`, `fleet` spawn `--model`,
 //! `cws dispatch --model`/`--effort`).
 //!
-//! Install strategy mirrors `wiki_guidance` / `interaction_mode`:
-//!   1. Render `~/.claude/fleet-model-guidance.md` for the given locale.
-//!   2. Inject a sentinel-wrapped `@~/.claude/fleet-model-guidance.md` import
-//!      into `~/.claude/CLAUDE.md`.
-//!
-//! Uninstall removes both. All operations are idempotent.
+//! Delivery: rendered into each Fleet-started session's system prompt
+//! (`--append-system-prompt-file`, see [`crate::claude_launch`]). Older Fleet
+//! builds wrote it to `~/.claude/fleet-model-guidance.md` behind an `@import` in
+//! `~/.claude/CLAUDE.md`, which reached every claude on the machine;
+//! [`crate::scope_migration`] takes that back out.
 
 use std::fs;
 use std::path::PathBuf;
@@ -46,52 +44,20 @@ pub fn render_guidance(locale: &str) -> String {
     crate::model_catalog::render_sheet(locale)
 }
 
-/// Apply model guidance: write the guidance file and inject the `@import`
-/// sentinel block into `~/.claude/CLAUDE.md`. Idempotent.
-pub fn apply_model_guidance(locale: &str) -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        apply_model_guidance_inner(locale),
-        crate::control_plane_prefs::Feature::ModelGuidance,
-        false,
-    )
+/// Switch model guidance on for Fleet-started sessions. The guidance is rendered
+/// into each launch's system prompt ([`crate::claude_launch`]) with the locale reconciled there; the arguments stay for the callers' sake.
+pub fn apply_model_guidance(_locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::ModelGuidance, true)
 }
 
-fn apply_model_guidance_inner(locale: &str) -> Result<(), String> {
-    let dir = claude_dir().ok_or("cannot determine home dir")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
-
-    // Always (re)write the guidance file — locale may have changed.
-    let guidance_path = guidance_file_path().ok_or("cannot determine home dir")?;
-    fs::write(&guidance_path, render_guidance(locale))
-        .map_err(|e| format!("write guidance file: {e}"))?;
-
-    // Locked read-modify-write — see `claude_md_lock`.
-    let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let block = format!(
-        "{begin}\n@{path}\n{end}\n",
-        begin = BEGIN_MARKER,
-        end = END_MARKER,
-        path = guidance_path.display(),
-    );
-    crate::claude_md_lock::with_lock(&claude_md, || {
-        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-        let new_content =
-            crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
-            .map_err(|e| format!("write CLAUDE.md: {e}"))
-    })
-}
-
-/// Remove model guidance: strip the sentinel block and delete the guidance
-/// file. Idempotent (no-op if already clean).
+/// Switch model guidance off for Fleet-started sessions.
 pub fn remove_model_guidance() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_model_guidance_inner(),
-        crate::control_plane_prefs::Feature::ModelGuidance,
-        true,
-    )
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::ModelGuidance, false)
 }
 
+/// Take the guidance an older Fleet wrote into `~/.claude` back out: strip the
+/// sentinel block from `CLAUDE.md` and delete the guidance file. Only the scope
+/// migration calls this; it records nothing in `control_plane_prefs`.
 pub(crate) fn remove_model_guidance_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         crate::claude_md_lock::with_lock(&claude_md, || {
@@ -111,30 +77,6 @@ pub(crate) fn remove_model_guidance_inner() -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// Whether the guidance file on disk needs rewriting with what this build
-/// renders. True when it is missing, and when its text drifted while staying
-/// the *same* locale variant.
-///
-/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
-/// nothing about the *wording* of the file it points at. A Fleet upgrade that
-/// edits the guidance text therefore reached no existing host, because the
-/// appliers only run on install/toggle. This is what lets `heal` notice.
-///
-/// The first-line guard is why a drifted locale is not "stale": `fleet serve`
-/// resolves its locale from `FLEET_LOCALE`, which a hand-run one on a desktop
-/// host does not have, so an exact-match check would let it rewrite the user's
-/// Chinese guidance in English on every start.
-pub fn guidance_file_is_stale(locale: &str) -> bool {
-    let Some(path) = guidance_file_path() else {
-        return false;
-    };
-    let Ok(on_disk) = fs::read_to_string(&path) else {
-        return true; // missing or unreadable — rewrite it
-    };
-    let fresh = render_guidance(locale);
-    on_disk.lines().next() == fresh.lines().next() && on_disk != fresh
 }
 
 /// Whether the sentinel block is present in `~/.claude/CLAUDE.md`.

@@ -65,9 +65,11 @@ pub(crate) fn cmd_guard() {
     let agent_source = std::env::var("FLEET_AGENT_SOURCE").ok();
     let codex_fail_closed = is_headless_codex_source(agent_source.as_deref());
 
-    // A hand-copied Claude byline on a commit, after the user turned bylines
-    // off. Checked before classification so it also catches a commit chained
-    // with a Critical command (`git commit … && git push`).
+    // A hand-copied Claude byline on a commit. This hook only runs inside a
+    // Fleet-started session, and every one of those launches with bylines off
+    // (`claude_launch`'s `--settings`), so the switch is always on here.
+    // Checked before classification so it also catches a commit chained with a
+    // Critical command (`git commit … && git push`).
     if let Some(reason) = claw_fleet_core::commit_trailer::decide(
         hook_input.tool_name.as_deref(),
         hook_input
@@ -75,7 +77,7 @@ pub(crate) fn cmd_guard() {
             .as_ref()
             .and_then(|v| v.get("command"))
             .and_then(|c| c.as_str()),
-        claw_fleet_core::hooks::commit_trailers_disabled,
+        || true,
     ) {
         println!("{}", deny_hook_output(&reason));
         return;

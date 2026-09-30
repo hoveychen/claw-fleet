@@ -1426,36 +1426,13 @@ pub fn run() {
             // config — Fleet sessions get it as launch arguments now.
             claw_fleet_core::scope_migration::run_and_log("desktop");
 
-            // Install the idle hooks (Stop → `fleet session idle`,
-            // UserPromptSubmit → `fleet session resume`). The Stop hook is the
-            // trigger for handoff relays (`handoff::consume_and_spawn`) and the
-            // loop/watch reconcile — without it, a registered `fleet handoff`
-            // never spawns its successor and stranded `fleet loop`/`fleet watch`
-            // timers never re-arm. This ran at every launch inside the old
-            // `daemon_autostart::ensure_supervisor_daemon` alongside
-            // `ensure_fleet_cli_link` above; when the kanban daemon was removed
-            // (192b35b) the CLI-link half was kept here but this call was
-            // dropped, silently orphaning the handoff trigger on every fresh
-            // install. Restored here as its twin. Idempotent (retain-then-push).
+            // The idle hooks (Stop → `fleet session idle`, UserPromptSubmit →
+            // `fleet session resume`) have no UI switch: the Stop hook is what
+            // fires handoff relays and the loop/watch reconcile, so the desktop
+            // keeps them on for every session it launches — including on a host
+            // the migration found without them.
             if let Err(e) = claw_fleet_core::hooks::apply_idle_hooks() {
                 claw_fleet_core::log_debug(&format!("apply_idle_hooks failed: {e}"));
-            }
-
-            // Point every Fleet hook at the binary this launch resolves to.
-            // Hook commands bake an absolute path and nothing ever rewrote it —
-            // the appliers only run on install/toggle, and `control_plane::heal`
-            // (which the desktop does not run) decides "installed" from the
-            // subcommand, never the path. So a hook written by a dev build kept
-            // naming it forever, and this Mac ended up with eight Fleet hooks
-            // spread over three binaries of different ages. Must come after
-            // `ensure_fleet_cli_link` above, which is what makes
-            // `~/.fleet/bin/fleet` the current one.
-            match claw_fleet_core::hooks::repoint_fleet_hooks() {
-                Ok(0) => {}
-                Ok(n) => claw_fleet_core::log_debug(&format!(
-                    "repoint_fleet_hooks: moved {n} hook(s) onto the current fleet binary"
-                )),
-                Err(e) => claw_fleet_core::log_debug(&format!("repoint_fleet_hooks failed: {e}")),
             }
 
             // One-time migration: port/token/bin and the defunct event log all
@@ -1490,71 +1467,6 @@ pub fn run() {
                 claw_fleet_core::log_debug(&format!(
                     "reaped {reaped} orphaned dsh web process(es)"
                 ));
-            }
-
-            // Inject Fleet's permissions allowlist into ~/.claude/settings.json
-            // so fleet guard becomes the sole audit gate. prune_dead_holders
-            // inside acquire self-heals when a prior Fleet process died
-            // without releasing.
-            if claw_fleet_core::permissions_injector::load_config().enabled {
-                if let Err(e) = claw_fleet_core::permissions_injector::acquire(std::process::id()) {
-                    claw_fleet_core::log_debug(&format!(
-                        "permissions_injector::acquire failed: {e}"
-                    ));
-                }
-            }
-
-            // Inject `mcpServers.fleet` into ~/.claude.json so Claude Code's
-            // agent sees the `fleet__ask` MCP tool as soon as Fleet is up.
-            // Same refcount / restore-on-last-release contract as the
-            // permissions injector. Skipped when the fleet sibling binary
-            // can't be located (dev runs without a built fleet-cli) — the
-            // agent then falls back to native AskUserQuestion only.
-            //
-            // Previously debug-only: v2 fleet__ask had UX gaps vs v1 (no
-            // preview, per-call permission prompt, guidance defaulted to v1).
-            // Those are now closed — the fleet-ask card renders option previews,
-            // the `mcp__fleet__*` permissions allow-list suppresses the prompt,
-            // and the interaction-mode guidance no longer steers to v1 — so the
-            // tool ships in every build, gated only by the user toggle. When the
-            // toggle is off we release() any stale entry so an upgrade from an
-            // earlier build doesn't keep an orphaned mcpServers.fleet.
-            if claw_fleet_core::mcp_injector::load_config().enabled {
-                match crate::fleet_binary::resolve_fleet_binary() {
-                    Some(p) => {
-                        let path_str = p.to_string_lossy().to_string();
-                        if let Err(e) =
-                            claw_fleet_core::mcp_injector::acquire(std::process::id(), &path_str)
-                        {
-                            claw_fleet_core::log_debug(&format!(
-                                "mcp_injector::acquire failed: {e}"
-                            ));
-                        }
-                    }
-                    None => {
-                        claw_fleet_core::log_debug(
-                            "[mcp_injector] fleet sibling binary not found; skipping injection",
-                        );
-                    }
-                }
-            } else {
-                let _ = claw_fleet_core::mcp_injector::release(std::process::id());
-            }
-
-            // ── Injector drift watchdog ──────────────────────────────────
-            // Every 30s, verify both injections are still present on disk
-            // and re-write them if they've drifted (e.g. a Claude Code
-            // upgrade rewrote ~/.claude.json from scratch). The watchdog
-            // self-disables when there are no live holders, so it's safe
-            // to start unconditionally even when one or both injectors
-            // are toggled off — verify_and_reinject sees an empty holder
-            // list and no-ops. Thread runs until process exit; no handle
-            // to keep.
-            {
-                let fleet_path = crate::fleet_binary::resolve_fleet_binary()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "fleet".to_string());
-                claw_fleet_core::injector_watchdog::start(fleet_path);
             }
 
             // ── Usage occupancy sampler ──────────────────────────────────
@@ -1989,25 +1901,13 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            // Deregister this pid from both injector locks on every exit path.
-            // Unconditional — each is a no-op when no lock exists, so they
-            // self-heal if the toggle was flipped off mid-run.
-            //
-            // Note the asymmetry with setup()'s acquires: permissions_injector
-            // deliberately leaves ~/.claude/settings.json injected, because the
-            // claude sessions we spawned are detached and keep running after we
-            // quit — pulling the allow rules would strand them on permission
-            // prompts nothing is left to answer. Only the settings-panel toggle
-            // un-injects, via permissions_injector::deactivate().
-            if matches!(event, tauri::RunEvent::Exit) {
-                let _ = claw_fleet_core::permissions_injector::release(std::process::id());
-                let _ = claw_fleet_core::mcp_injector::release(std::process::id());
-                // dsh 0.1.2 is an authenticated machine service. It deliberately
-                // survives this GUI process so an app update/relaunch cannot
-                // interrupt every active dsh turn; the next Fleet adopts it from
-                // the owner-only registry.
-            }
+        .run(|_app_handle, _event| {
+            // Nothing to tear down on exit. Fleet's hooks, permissions and MCP
+            // server ride on each session's launch arguments, not on global
+            // config this process would have to take back. dsh 0.1.2 is an
+            // authenticated machine service that deliberately survives this GUI
+            // process so an app update/relaunch cannot interrupt every active
+            // dsh turn; the next Fleet adopts it from the owner-only registry.
         });
 }
 

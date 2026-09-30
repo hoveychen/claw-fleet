@@ -449,7 +449,7 @@ pub fn release(pid: u32) -> std::io::Result<()> {
 /// — which is exactly the case this function now repairs instead of causing.
 ///
 /// Returns `Ok(true)` if a re-injection actually wrote the file,
-/// `Ok(false)` if nothing was off. Used by [`crate::injector_watchdog`].
+/// `Ok(false)` if nothing was off. No caller left since the drift watchdog went.
 pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
     if !may_publish(fleet_path, config_is_isolated()) {
         return Err(ephemeral_publish_refused(fleet_path));

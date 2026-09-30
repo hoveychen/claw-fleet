@@ -360,6 +360,24 @@ mod tests {
             fs::write(self.claude().join("settings.json"), v.to_string()).unwrap();
         }
 
+        /// What an older Fleet's guidance apply left behind: the rendered file
+        /// plus its `@import` block appended to CLAUDE.md.
+        fn write_legacy_guidance(&self, name: &str) {
+            fs::create_dir_all(self.claude()).unwrap();
+            let file = self.claude().join(format!("fleet-{name}.md"));
+            fs::write(&file, "old guidance\n").unwrap();
+            let md = self.claude().join("CLAUDE.md");
+            let mut content = fs::read_to_string(&md).unwrap_or_default();
+            if !content.is_empty() {
+                content.push('\n');
+            }
+            content.push_str(&format!(
+                "<!-- fleet:{name}:begin -->\n@{}\n<!-- fleet:{name}:end -->\n",
+                file.display()
+            ));
+            fs::write(&md, content).unwrap();
+        }
+
         fn claude_json(&self) -> Value {
             fs::read_to_string(crate::session::get_claude_config_json().unwrap())
                 .ok()
@@ -416,7 +434,7 @@ mod tests {
     fn a_fleet_host_keeps_its_switches_and_loses_every_global_write() {
         let h = Home::new("legacy");
         h.write_settings(&legacy_settings());
-        crate::interaction_mode::apply_interaction_mode("Boss", "en").unwrap();
+        h.write_legacy_guidance("interaction-mode");
         fs::write(
             crate::session::get_claude_config_json().unwrap(),
             json!({ "numStartups": 3, "mcpServers": {
@@ -497,7 +515,7 @@ mod tests {
             "hooks": { "Stop": [ { "hooks": [fleet_hook("session idle")] } ] },
         }));
         fs::write(h.claude().join("CLAUDE.md"), "# Mine\n\nbe terse\n").unwrap();
-        crate::prd_discipline::apply_prd_discipline("Boss", "en").unwrap();
+        h.write_legacy_guidance("prd-discipline");
 
         for s in quiet() {
             assert!(s.result.is_ok(), "{} failed: {:?}", s.name, s.result);

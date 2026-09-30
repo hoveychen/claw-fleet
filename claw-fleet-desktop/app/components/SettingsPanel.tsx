@@ -18,7 +18,6 @@ import {
   modeDefault,
   type FeatureState,
 } from "../storage";
-import { runControlPlaneSelfHeal } from "../controlPlaneSelfHeal";
 import { TriStateToggle } from "./TriStateToggle";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { AccountInfo } from "./AccountInfo";
@@ -439,14 +438,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [hooksError, setHooksError] = useState("");
 
   useEffect(() => {
-    invoke<HookSetupPlan>("get_hooks_setup_plan").then((plan) => {
-      setHooksPlan(plan);
-      // Same self-heal the app shell runs on every start (App.tsx) — kept here
-      // too because opening settings is exactly when a stale disk state is most
-      // visible, and every command in it is idempotent. The list itself lives
-      // in one place so the two callers cannot drift.
-      runControlPlaneSelfHeal((command) => invoke(command), plan);
-    }).catch(() => {});
+    invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
   }, []);
 
   const handleInstallHooks = useCallback(async () => {

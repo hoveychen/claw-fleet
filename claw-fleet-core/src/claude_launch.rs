@@ -235,8 +235,12 @@ fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
 fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
     let mut v = json!({
         "permissions": { "allow": crate::permissions_injector::INJECT_RULES },
-        // Both spellings: only the old `includeCoAuthoredBy` actually reaches
-        // the system prompt (see `hooks::apply_no_commit_attribution`).
+        // Both spellings. Measured against Claude Code 2.1.263 on 2026-09-10:
+        // `attribution.commitTrailers: false` alone does not reach the
+        // system-prompt assembly — a fresh session still got `End git commit
+        // messages with: Co-Authored-By: …` — while `includeCoAuthoredBy:
+        // false` did. They do not conflict, so write both until upstream wires
+        // the new key up.
         "includeCoAuthoredBy": false,
         "attribution": { "commitTrailers": false, "sessionUrl": false },
     });

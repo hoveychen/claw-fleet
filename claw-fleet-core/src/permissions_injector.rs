@@ -419,7 +419,7 @@ fn strip_fleet_rules_in(v: &mut serde_json::Value) -> bool {
 /// without disturbing user-added entries.
 ///
 /// Returns `Ok(true)` if a re-injection actually wrote the file,
-/// `Ok(false)` otherwise. Used by [`crate::injector_watchdog`].
+/// `Ok(false)` otherwise. No caller left since the drift watchdog went.
 pub fn verify_and_reinject() -> std::io::Result<bool> {
     let Some(mut lock) = read_lock() else {
         return Ok(false);

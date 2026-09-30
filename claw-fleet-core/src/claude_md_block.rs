@@ -1,30 +1,14 @@
 //! The `<!-- fleet:<name>:begin -->` … `<!-- fleet:<name>:end -->` sentinel
-//! block that every guidance carrier injects into `~/.claude/CLAUDE.md`.
+//! block that older Fleet builds injected into `~/.claude/CLAUDE.md`, one per
+//! guidance carrier (interaction mode, PRD discipline, wiki, model, session
+//! title). Only [`strip`] is left: the scope migration uses it to take the
+//! blocks back out. The writer side (`compose`) went with the global writes.
 //!
-//! Five carriers (interaction mode, PRD discipline, wiki, model, session title)
-//! each maintain one block, and each used to carry its own byte-identical copy
-//! of the strip/compose pair. They live here once, so the blank-line accounting
-//! below is decided in one place instead of five.
-//!
-//! **The accounting, and why it is load-bearing.** A carrier re-applies by
-//! stripping its old block and appending a fresh one after a blank-line
-//! separator. Removing the block used to leave that separator behind, so every
-//! re-apply of whichever block was *not* last moved one blank line to the top
-//! of the file and appended the block at the bottom. Nothing ever collected
-//! them: the old code only collapsed a run of blank lines at the very end. On a
-//! real host that had been re-applying for weeks, `CLAUDE.md` was 117 lines of
-//! which 102 were blank — the five `@import`s were pushed under a 98-line hole.
-//!
-//! Two rules keep it flat, and both are deliberately conservative about content
-//! that is not ours:
-//!
-//! 1. [`strip`] removes the blank line that immediately *followed* the block,
-//!    because that separator was written by the same composer that wrote the
-//!    block — it belongs to the block, not to the user's prose.
-//! 2. [`compose`] trims leading and trailing newlines off what is left. A
-//!    CLAUDE.md never legitimately starts with blank lines, so trimming the top
-//!    both prevents the growth and heals a file that already grew. Blank lines
-//!    *between* the user's own paragraphs are never touched.
+//! **Why [`strip`] also takes the blank line after the block.** The composer
+//! that wrote a block appended it after a blank-line separator, so that
+//! separator belongs to the block, not to the user's prose. Leaving it behind
+//! was how one real host's `CLAUDE.md` grew to 117 lines of which 102 were
+//! blank. Blank lines *between* the user's own paragraphs are never touched.
 
 /// Remove the block delimited by `begin`/`end`, along with the blank separator
 /// line that followed it. Content outside the block — including another
@@ -59,18 +43,6 @@ pub(crate) fn strip(content: &str, begin: &str, end: &str) -> String {
         out.push_str(line);
     }
     out
-}
-
-/// Re-attach `block` to `existing`: strip any prior copy, then append after
-/// exactly one blank line. `block` is expected to end in a newline.
-pub(crate) fn compose(existing: &str, block: &str, begin: &str, end: &str) -> String {
-    let stripped = strip(existing, begin, end);
-    let base = stripped.trim_start_matches('\n').trim_end_matches('\n');
-    if base.is_empty() {
-        block.to_string()
-    } else {
-        format!("{base}\n\n{block}")
-    }
 }
 
 #[cfg(test)]
@@ -120,35 +92,5 @@ mod tests {
     fn strip_takes_only_one_blank_line() {
         let content = format!("{}\n\n\nuser prose\n", block());
         assert_eq!(strip(&content, BEGIN, END), "\n\nuser prose\n");
-    }
-
-    /// The invariant that matters in production: re-applying forever must not
-    /// change the file after the first time.
-    #[test]
-    fn compose_is_idempotent_wherever_the_block_sits() {
-        for existing in [
-            String::new(),
-            "user stuff\n".to_string(),
-            format!("user stuff\n\n{}", block()),
-            // The shape that used to grow: our block first, another after it.
-            format!("{}\n{OTHER}", block()),
-        ] {
-            let once = compose(&existing, &block(), BEGIN, END);
-            let twice = compose(&once, &block(), BEGIN, END);
-            assert_eq!(once, twice, "composing twice changed {existing:?}");
-            assert!(!once.contains("\n\n\n"), "blank run in {once:?}");
-            assert!(!once.starts_with('\n'), "leading blank in {once:?}");
-            assert!(once.ends_with(&block()), "block must land last: {once:?}");
-        }
-    }
-
-    /// A file that already grew heals on the next apply rather than staying
-    /// bloated forever — the 98-line hole is not something a user can be asked
-    /// to go delete by hand.
-    #[test]
-    fn compose_heals_an_already_bloated_file() {
-        let existing = format!("{}{OTHER}", "\n".repeat(98));
-        let out = compose(&existing, &block(), BEGIN, END);
-        assert_eq!(out, format!("{OTHER}\n{}", block()));
     }
 }
