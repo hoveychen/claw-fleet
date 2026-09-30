@@ -505,9 +505,34 @@ impl TickState {
             &self.server_errors,
         );
         maybe_drain_pending_messages(&self.sessions);
+        reconcile_timers();
         // Wake a fresh session for plans nobody is responsible for any more.
         // Self-throttled and off-thread; see `plan_revive`.
         crate::plan_revive::maybe_tick_in_background();
+    }
+}
+
+/// Re-arm watch / schedule / loop timers whose detached process died. Until
+/// this ran on every tick, only a Stop hook did it, so a timer killed by a
+/// reboot waited for some session to end a turn: watch 36ae214f's deadline
+/// passed at 2026-09-26 07:29Z and its timeout reached the session 21 hours
+/// later. Each reconcile only touches records its heartbeat or due time says
+/// are stranded, so calling it every 30s re-arms nothing that is alive. Runs
+/// before the reviver so a late watch reaches its own session first.
+pub fn reconcile_timers() {
+    // The timer stores live under the real home, not the test's FLEET_HOME: a
+    // unit-test tick would re-arm the developer's own watches.
+    if cfg!(test) {
+        return;
+    }
+    for (kind, ids) in [
+        ("watch", crate::watch::reconcile()),
+        ("schedule", crate::schedule::reconcile()),
+        ("loop", crate::agent_loop::reconcile()),
+    ] {
+        if !ids.is_empty() {
+            log_debug(&format!("reconcile: re-armed {} stranded {kind} timer(s): {}", ids.len(), ids.join(", ")));
+        }
     }
 }
 

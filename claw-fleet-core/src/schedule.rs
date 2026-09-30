@@ -142,6 +142,16 @@ pub struct ScheduleRecord {
     /// `fleet schedule list` can tell an abandoned schedule from one that ran.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gate_timed_out: bool,
+    /// Last time a live timer polled this schedule's gate (ms). A gated
+    /// schedule stays due-and-pending while its gate is closed, so being
+    /// overdue does not tell reconcile that the timer died; this heartbeat
+    /// does. `0` = never polled.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub last_poll_at: u64,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 /// Default seconds between gate polls once a gated schedule is due. Same value
@@ -371,6 +381,7 @@ fn create_in(
             .map(|g| g.poll_secs.max(crate::watch::MIN_POLL_SECS)),
         gate_timeout_secs: gate.as_ref().map(|g| g.timeout_secs),
         gate_timed_out: false,
+        last_poll_at: 0,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -955,6 +966,15 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                 return;
             }
             SchedStep::Nap { ms } => {
+                // Polling a closed gate: heartbeat so reconcile knows a timer is
+                // alive. Before the due time reconcile ignores the schedule, so
+                // there is nothing to write.
+                let now = now_ms();
+                if rec.has_gate() && rec.is_due(now) {
+                    if let Some(dir) = schedules_dir() {
+                        touch_in(&dir, id, generation, now);
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 continue;
             }
@@ -1021,18 +1041,39 @@ pub fn reconcile() -> Vec<String> {
 
 fn reconcile_in(dir: &Path, now: u64, arm: &mut dyn FnMut(&ScheduleRecord)) -> Vec<String> {
     let mut rearmed = Vec::new();
-    for rec in list_in(dir) {
+    for mut rec in list_in(dir) {
         if !rec.is_pending() {
             continue;
         }
-        // Overdue past the grace window ⇒ no live timer is driving it (dead timer
-        // or a fire the machine slept through). Arm a fresh timer to fire it now.
-        if rec.is_due(now) && now.saturating_sub(rec.fire_at) > STRANDED_GRACE_MS {
+        // Overdue past the grace window with no recent gate poll ⇒ no live timer
+        // is driving it (dead timer, or a fire the machine slept through). The
+        // heartbeat matters for a gated schedule only: an ungated one fires the
+        // moment it is due, so it never stays overdue under a live timer.
+        let overdue = rec.is_due(now) && now.saturating_sub(rec.fire_at) > STRANDED_GRACE_MS;
+        if !overdue || now.saturating_sub(rec.last_poll_at) <= STRANDED_GRACE_MS {
+            continue;
+        }
+        // Bump the generation so a zombie timer exits on its next wake and
+        // exactly one timer drives; the fresh one heartbeats from here.
+        rec.generation += 1;
+        rec.last_poll_at = now;
+        if write_record(dir, &rec).is_ok() {
             arm(&rec);
             rearmed.push(rec.id.clone());
         }
     }
     rearmed
+}
+
+/// Stamp the gate-poll heartbeat, only for a still-pending record at the
+/// timer's generation — a superseded or fired timer must not write.
+fn touch_in(dir: &Path, id: &str, generation: u64, now: u64) {
+    if let Some(mut rec) = get_in(dir, id) {
+        if rec.is_pending() && rec.generation == generation {
+            rec.last_poll_at = now;
+            let _ = write_record(dir, &rec);
+        }
+    }
 }
 
 fn arm_timer_with(fleet_bin: &str, rec: &ScheduleRecord) -> Result<u32, String> {
@@ -1956,6 +1997,32 @@ mod tests {
 
     /// A gate is stamped onto the record; its poll floor is applied; a blank
     /// gate command is dropped (no gate at all).
+    #[test]
+    fn reconcile_leaves_a_polling_gated_timer_alone() {
+        // A gated schedule stays due-and-pending while its live timer polls
+        // the gate, so "overdue" alone cannot mean "stranded": each sweep must
+        // not add another timer polling the same gate.
+        let d = dir();
+        let rec = create_in(
+            d.path(), "/ws", "p", None, 100_000, None, None, None, None,
+            Some(gate("false", 30, 24 * 3600)), "gated", 0,
+        )
+        .unwrap();
+        let mut armed = 0;
+        // Stranded at first (nothing ever polled it): armed once.
+        reconcile_in(d.path(), rec.fire_at + STRANDED_GRACE_MS + 1, &mut |_| armed += 1);
+        assert_eq!(armed, 1);
+        // Its timer then polls the gate and heartbeats; later sweeps skip it.
+        let t = rec.fire_at + STRANDED_GRACE_MS + 30_000;
+        touch_in(d.path(), "gated", get_in(d.path(), "gated").unwrap().generation, t);
+        reconcile_in(d.path(), t + 30_000, &mut |_| armed += 1);
+        reconcile_in(d.path(), t + 60_000, &mut |_| armed += 1);
+        assert_eq!(armed, 1, "a heartbeating gated timer is never doubled");
+        // The timer dies: once its heartbeat is stale, it is re-armed.
+        reconcile_in(d.path(), t + STRANDED_GRACE_MS + 1, &mut |_| armed += 1);
+        assert_eq!(armed, 2);
+    }
+
     #[test]
     fn create_stamps_gate_and_clamps_poll_floor() {
         let d = dir();
