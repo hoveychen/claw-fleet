@@ -205,7 +205,6 @@
       "fired": "已触发"
     }
   },
-  "filter_placeholder": "过滤会话…",
   "active": "活跃",
   "recent": "最近",
   "no_sessions": "未找到会话。",
@@ -305,9 +304,6 @@
   "language": "语言",
   "view_list": "列表",
   "view_gallery": "画廊",
-  "view_sessions": "会话",
-  "view_mode_list_tooltip": "列表视图",
-  "view_mode_gallery_tooltip": "画廊视图",
   "keep_awake_on_tooltip": "防休眠已开启——系统不会闲置休眠，点击关闭",
   "keep_awake_off_tooltip": "保持系统唤醒（相当于 caffeinate -i）",
   "view_audit": "审计",
@@ -390,12 +386,6 @@
   "launcher": {
     "add_files": "文件…",
     "add_directory": "目录…"
-  },
-  "gallery_show_all": "全部显示",
-  "gallery_show_active": "仅活跃",
-  "gallery": {
-    "subs": "个子进程",
-    "idle_subs": "{{n}} 个空闲"
   },
   "account": {
     "panel_title": "账户",
@@ -1033,7 +1023,6 @@
   "confirm": "确认",
   "save": "保存",
   "edit": "编辑",
-  "search_matches": "条匹配",
   "window": {
     "maximize": "最大化",
     "minimize": "最小化",

@@ -6,7 +6,7 @@ import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { agentToolsForSources, toolForAgentSource, type SourceInfo } from "../modelChoices";
-import { useUIStore, useSessionsStore, useDetailStore } from "../store";
+import { useUIStore, useSessionsStore } from "../store";
 import styles from "./ScheduleView.module.css";
 
 // ── Create shortcut helpers ──────────────────────────────────────────────────
@@ -275,16 +275,9 @@ export function ScheduleView() {
     invoke<SourceInfo[]>("get_sources_config").then(setSources).catch(() => {});
   }, []);
 
-  // Jump from a fired schedule to the session it produced. The detail store's
-  // open() needs the SessionInfo, looked up from the global scan by id; if the
-  // session isn't in the scan, fall back to landing on the session list.
+  // Jump from a fired schedule to the session it produced, on the Tasks page.
   const openFiredSession = useCallback((sessionId: string) => {
-    const s = useSessionsStore.getState().sessions.find((x) => x.id === sessionId);
-    if (s) {
-      useDetailStore.getState().open(s);
-    } else {
-      useUIStore.getState().setViewMode(useUIStore.getState().lastSessionViewMode);
-    }
+    useUIStore.getState().requestOpenTask(sessionId);
   }, []);
 
   // One-line report for a loop iteration: the session's last assistant message

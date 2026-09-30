@@ -1,16 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
+import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { openSettings, runningProcTotal, useAuditStore, useDetailStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettings, runningProcTotal, useAuditStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
-import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
-import { GalleryView } from "./GalleryView";
-import { SessionEmptyState } from "./EmptyState";
 import { MascotEyes } from "./MascotEyes";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
@@ -25,14 +22,11 @@ import { FilesView } from "./FilesView";
 import { TerminalView } from "./TerminalView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
-import { SessionCard } from "./SessionCard";
-import { SessionsPage } from "./SessionsBanner";
 import { HistoryView } from "./HistoryView";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
 import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
-import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
@@ -46,14 +40,12 @@ const DEFAULT_WIDTH = 280;
 
 export function SessionList() {
   const { t } = useTranslation();
-  const { sessions, refresh, setSessions, scanReady, setScanReady } = useSessionsStore();
-  const { session: viewedSession, open } = useDetailStore();
+  const { refresh, setSessions, setScanReady } = useSessionsStore();
   const {
     simplifiedMode,
     viewMode,
     setViewMode,
     setNavGroup,
-    lastSessionViewMode,
     theme,
     setTheme,
     sidebarCollapsed,
@@ -65,7 +57,6 @@ export function SessionList() {
   // When off, not even the nav item shows, rather than letting users click in and get rejected by backend.
   const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
-  const isSessionView = viewMode === "list" || viewMode === "gallery";
   // Views that own a secondary sidebar (two-level sidebar). Re-clicking the nav item of
   // the already-active one collapses/expands its sidebar instead of being a
   // no-op; every other view just switches as usual.
@@ -102,8 +93,6 @@ export function SessionList() {
     fleet: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
     work: { alert: 0, running: runningProcCount, dot: false },
   };
-  const [filter, setFilter] = useState("");
-  const [showAll, setShowAll] = useState(false);
   const {
     width: sidebarWidth,
     isDragging,
@@ -153,102 +142,6 @@ export function SessionList() {
     };
   }, []);
 
-  const { searching, ftsMatchPaths } = useSessionSearch(filter);
-
-  const filtered = sessions.filter((s) => {
-    if (isWorkflowAgent(s)) return false; // hidden from the list (open via DAG node only)
-    if (!filter) return true;
-    const q = filter.toLowerCase();
-    const clientMatch =
-      s.workspaceName.toLowerCase().includes(q) ||
-      s.slug?.toLowerCase().includes(q) ||
-      s.agentDescription?.toLowerCase().includes(q);
-    return clientMatch || ftsMatchPaths.has(s.jsonlPath);
-  });
-
-  // Promote idle main sessions that have active subagents → delegating
-  const activeSubagentParentIds = new Set(
-    filtered
-      .filter(
-        (s) =>
-          s.isSubagent &&
-          s.parentSessionId &&
-          ["thinking", "executing", "streaming", "processing", "waitingInput", "active"].includes(s.status)
-      )
-      .map((s) => s.parentSessionId!)
-  );
-  const promoted = filtered.map((s) =>
-    !s.isSubagent &&
-    ["idle", "active", "waitingInput", "processing"].includes(s.status) &&
-    activeSubagentParentIds.has(s.id)
-      ? { ...s, status: "delegating" as const }
-      : s
-  );
-
-  const active = promoted.filter((s) =>
-    ["thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating"].includes(s.status)
-  );
-  const idle = promoted
-    .filter((s) => s.status === "idle")
-    .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-
-  function buildTree(list: SessionInfo[]) {
-    const mains = list.filter((s) => !s.isSubagent);
-    const subagentsByParent = new Map<string, SessionInfo[]>();
-    for (const s of list) {
-      if (s.isSubagent && s.parentSessionId) {
-        const arr = subagentsByParent.get(s.parentSessionId) ?? [];
-        arr.push(s);
-        subagentsByParent.set(s.parentSessionId, arr);
-      }
-    }
-    const orphans = list.filter(
-      (s) =>
-        s.isSubagent &&
-        (!s.parentSessionId ||
-          !subagentsByParent.has(s.parentSessionId) ||
-          !mains.find((m) => m.id === s.parentSessionId))
-    );
-    const result: { session: SessionInfo; indented: boolean; extend: boolean }[] = [];
-    for (const main of mains) {
-      result.push({ session: main, indented: false, extend: false });
-      for (const sub of subagentsByParent.get(main.id) ?? []) {
-        result.push({ session: sub, indented: true, extend: false });
-      }
-    }
-    for (const orphan of orphans) {
-      result.push({ session: orphan, indented: false, extend: false });
-    }
-    // Mark each indented row whose successor is also indented so the L-bracket
-    // thread runs through the full height instead of stopping at the elbow.
-    for (let i = 0; i < result.length - 1; i++) {
-      if (result[i].indented && result[i + 1].indented) {
-        result[i].extend = true;
-      }
-    }
-    return result;
-  }
-
-  function renderGroup(list: SessionInfo[]) {
-    return buildTree(list).map(({ session: s, indented, extend }) => {
-      const className = indented
-        ? `${styles.indented}${extend ? ` ${styles.indented_extend}` : ""}`
-        : undefined;
-      return (
-        <div key={s.jsonlPath} className={className}>
-          <SessionCard
-            session={s}
-            isSelected={viewedSession?.jsonlPath === s.jsonlPath}
-            onClick={() => {
-              const isFtsHit = filter.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
-              open(s, isFtsHit ? filter.trim() : undefined);
-            }}
-          />
-        </div>
-      );
-    });
-  }
-
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
 
@@ -257,15 +150,6 @@ export function SessionList() {
   // (both groups flattened) render the exact same buttons.
   const fleetItems = (
     <>
-      <button
-        className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
-        onClick={() => {
-          if (!isSessionView) setViewMode(lastSessionViewMode);
-        }}
-      >
-        <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
-        <span className={styles.nav_label}>{t("view_sessions")}</span>
-      </button>
       <button
         className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
         onClick={() => navTo("audit")}
@@ -575,49 +459,7 @@ export function SessionList() {
       </aside>}
 
       {/* Main content area */}
-      {viewMode === "list" ? (
-        <SessionsPage
-          filter={filter}
-          onFilterChange={setFilter}
-          activeCount={active.length}
-          totalCount={sessions.length}
-          showAll={showAll}
-          onToggleShowAll={() => setShowAll((v) => !v)}
-          ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
-          searching={searching}
-        >
-          <div className={styles.list}>
-            {showAll ? (
-              <>
-                {active.length > 0 && (
-                  <section>
-                    <div className={styles.group_label}>{t("active")}</div>
-                    {renderGroup(active)}
-                  </section>
-                )}
-                {idle.length > 0 && (
-                  <section>
-                    <div className={styles.group_label}>{t("recent")}</div>
-                    {renderGroup(idle)}
-                  </section>
-                )}
-                {promoted.length === 0 && (
-                  <SessionEmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
-                )}
-              </>
-            ) : (
-              <>
-                {active.length > 0 && renderGroup(active)}
-                {active.length === 0 && (
-                  <SessionEmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
-                )}
-              </>
-            )}
-          </div>
-        </SessionsPage>
-      ) : viewMode === "gallery" ? (
-        <GalleryView />
-      ) : viewMode === "history" ? (
+      {viewMode === "history" ? (
         <HistoryView />
       ) : viewMode === "audit" ? (
         <AuditView />

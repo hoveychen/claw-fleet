@@ -17,7 +17,7 @@ import {
   treeRollup,
 } from "./planMatrix";
 import type { MatrixMetrics, MatrixRow, Presence, TreeRollup } from "./planMatrix";
-import { useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { useSessionsStore, useUIStore } from "../store";
 import { preferredSessionTitle } from "../types";
 import type {
   AttendanceState,
@@ -172,17 +172,11 @@ export function PlansView() {
     updatePlansView({ selectedWorkspace: newest.path });
   }, [selectedWorkspace, workspaces, updatePlansView]);
 
-  // Jump from a relay leg into that session's detail. Mirrors ScheduleView's
-  // openFiredSession: the detail store needs the SessionInfo from the global
-  // scan, and a leg whose transcript is gone falls back to the session list.
+  // Jump from a relay leg into that session's detail on the Tasks page, which
+  // resolves the id against the scan (a gone transcript shows its orphan pane).
   const openSession = useCallback((sessionId: string) => {
-    const s = useSessionsStore.getState().sessions.find((x) => x.id === sessionId);
-    if (s) {
-      setOpenChain(null);
-      useDetailStore.getState().open(s);
-    } else {
-      useUIStore.getState().setViewMode(useUIStore.getState().lastSessionViewMode);
-    }
+    setOpenChain(null);
+    useUIStore.getState().requestOpenTask(sessionId);
   }, []);
 
   const load = useCallback(

@@ -33,7 +33,7 @@ describe("nav group partition", () => {
   });
 
   it("routes the monitoring / management pages to 舰队", () => {
-    for (const view of ["gallery", "list", "audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
+    for (const view of ["audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
       expect(navGroupOf(view)).toBe("fleet");
     }
   });

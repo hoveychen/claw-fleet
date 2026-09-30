@@ -134,7 +134,6 @@ describe("primary nav page browsing context", () => {
     const { useUIStore } = await import("./store");
     const { updateMainViewState } = useUIStore.getState();
 
-    updateMainViewState("gallery", { query: "worker", showAll: true, idleExpanded: true });
     updateMainViewState("audit", {
       tab: "rules",
       filter: "high",
@@ -187,7 +186,6 @@ describe("primary nav page browsing context", () => {
     updateMainViewState("mobile", { editingUrl: true, urlDraft: "wss://relay.example" });
 
     const state = useUIStore.getState().mainViewState;
-    expect(state.gallery).toMatchObject({ query: "worker", showAll: true, idleExpanded: true });
     expect(state.audit).toEqual({
       tab: "rules",
       filter: "high",
@@ -307,7 +305,7 @@ describe("nav sidebar mode tab (Fleet / Work)", () => {
     expect(ui().viewMode).toBe("history");
 
     ui().setNavGroup("fleet");
-    expect(ui().viewMode).toBe("gallery");
+    expect(ui().viewMode).toBe("report");
 
     // If requestOpenTask wasn't recorded, we'd revert to the previous page (plans).
     ui().setNavGroup("work");
@@ -341,7 +339,7 @@ describe("nav sidebar mode tab (Fleet / Work)", () => {
     const { useUIStore } = await import("./store");
 
     expect(useUIStore.getState().lastViewByNavGroup).toEqual({
-      fleet: "gallery",
+      fleet: "report",
       work: "history",
     });
   });
@@ -372,57 +370,30 @@ describe("nav sidebar mode tab (Fleet / Work)", () => {
 });
 
 /**
- * gallery is the default session layout, but two paths used to silently pin
- * users to `list` instead: (1) navigateToSessionDetail force-switched to list
- * on every notification/tray click, persisting it as the new default even
- * though the detail drawer renders under gallery too; (2) users who already
- * had `list` on disk from that bug never got flipped to the new default.
+ * The Sessions page (list / gallery) is gone: every listed session is one Fleet
+ * launched, so its detail lives on the Tasks page. A page value stored by an
+ * older build must not strand the main area on a page nothing renders.
  */
-describe("gallery default session view", () => {
+describe("retired Sessions page", () => {
   beforeEach(() => {
     vi.resetModules();
   });
 
-  it("keeps gallery view when opening non-Fleet sessions in gallery, does not force switch to list", async () => {
+  it("a stored list/gallery page boots onto the Tasks page", async () => {
+    const { setItem } = await import("./storage");
+    setItem("viewMode", "gallery");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().viewMode).toBe("history");
+  });
+
+  it("a tray / notification click opens the session on the Tasks page", async () => {
     const { useUIStore, navigateToSessionDetail } = await import("./store");
+    useUIStore.getState().setViewMode("audit");
 
-    useUIStore.getState().setViewMode("gallery");
-    expect(useUIStore.getState().viewMode).toBe("gallery");
+    navigateToSessionDetail({ id: "sub-1", isSubagent: true } as SessionInfo);
 
-    const nonFleet = {
-      entrypoint: "cli",
-      isSubagent: false,
-      fleetSpawned: false,
-      jsonlPath: "/tmp/x.jsonl",
-    } as SessionInfo;
-
-    // open() already lands on a session view on its own; the caller must not
-    // clobber an existing gallery view with a hard `list`.
-    navigateToSessionDetail(nonFleet);
-
-    expect(useUIStore.getState().viewMode).toBe("gallery");
-  });
-
-  it("one-time migration of existing list view to gallery for old users", async () => {
-    const { setItem, getItem, migrateSessionViewDefault } = await import("./storage");
-    setItem("viewMode", "list");
-    setItem("lastSessionViewMode", "list");
-
-    migrateSessionViewDefault();
-
-    expect(getItem("viewMode")).toBe("gallery");
-    expect(getItem("lastSessionViewMode")).toBe("gallery");
-    expect(getItem("gallery-default-migrated")).toBe("true");
-  });
-
-  it("after migration, respects user's new list choice", async () => {
-    const { setItem, getItem, migrateSessionViewDefault } = await import("./storage");
-    setItem("gallery-default-migrated", "true");
-    setItem("viewMode", "list");
-
-    migrateSessionViewDefault();
-
-    expect(getItem("viewMode")).toBe("list");
+    expect(useUIStore.getState().viewMode).toBe("history");
+    expect(useUIStore.getState().openTaskNav?.sessionId).toBe("sub-1");
   });
 });
 

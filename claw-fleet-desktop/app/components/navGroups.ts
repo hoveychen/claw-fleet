@@ -1,7 +1,7 @@
 import type { ViewMode } from "../viewModes";
 
 /** The two top-level modes the sidebar tab strip switches between.
- *  - `fleet`: watching and administering the fleet — sessions, audit,
+ *  - `fleet`: watching and administering the fleet — audit,
  *    the daily report, memory rules, skills, phone pairing.
  *  - `work`: what you reach for while an agent is actually working —
  *    tasks, repos, the wiki, deliverables, schedules, plan trees. */
@@ -16,14 +16,14 @@ export const NAV_GROUPS: readonly NavGroup[] = ["fleet", "work"];
  *  open" cannot drift apart. Every {@link ViewMode} must appear exactly once;
  *  navGroups.test.ts asserts the partition. */
 export const NAV_GROUP_VIEWS: Record<NavGroup, readonly ViewMode[]> = {
-  fleet: ["list", "gallery", "audit", "report", "memory", "skills", "plugins", "mobile"],
+  fleet: ["audit", "report", "memory", "skills", "plugins", "mobile"],
   work: ["history", "files", "terminal", "wiki", "artifacts", "schedule", "plans"],
 };
 
 /** Where a tab lands when it has no remembered last page (first click ever, or
  *  a stored value that no longer belongs to the group). */
 export const NAV_GROUP_HOME: Record<NavGroup, ViewMode> = {
-  fleet: "gallery",
+  fleet: "report",
   work: "history",
 };
 
@@ -35,7 +35,7 @@ const GROUP_BY_VIEW: ReadonlyMap<ViewMode, NavGroup> = new Map(
 
 /** Which tab owns `view`. The active tab is *derived* from the current viewMode
  *  rather than stored alongside it: cross-page hops that bypass the nav
- *  (AuditView → sessions, the wiki `[[slug]]` mention jump, Wizard → tasks, a
+ *  (AuditView → tasks, the wiki `[[slug]]` mention jump, Wizard → tasks, a
  *  tray click → tasks) then move the tab for free instead of leaving it
  *  pointing at a group that isn't on screen. Falls back to the first group so
  *  an unmapped view still renders something. */

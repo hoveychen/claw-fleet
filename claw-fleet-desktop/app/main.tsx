@@ -82,16 +82,11 @@ async function boot() {
   // time this file runs. The old runtime wrapper could not work at all;
   // `tauriCoreProbe.ts`'s header has the autopsy.
 
-  const { initStorage, migrateSessionViewDefault, migrateFeatureTristate } =
+  const { initStorage, migrateFeatureTristate } =
     await import("./storage");
 
   // Load persisted settings into memory before anything reads them.
   await initStorage();
-
-  // Roll out gallery as the default session view for existing users whose disk
-  // still carries a stale "list". Must run before the UIStore is constructed
-  // (i.e. before ./App is imported below).
-  migrateSessionViewDefault();
 
   // Reset the changed-default feature keys to the "default" (unset) state once,
   // so existing users follow the new central defaults instead of a stale binary
