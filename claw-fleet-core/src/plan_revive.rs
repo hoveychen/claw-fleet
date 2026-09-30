@@ -33,6 +33,9 @@
 //!   still open keeps the ask-first path above.
 //! - [`MAX_FRUITLESS`] revivals in a row without a checkbox ticked snooze the
 //!   plan and raise a card, so a plan that keeps failing cannot burn sessions.
+//! - A revived session that dies on an account-level API error (see
+//!   [`ACCOUNT_ERRORS`]) pauses the whole reviver behind one card: every other
+//!   spawn would hit the same wall. That death does not count as fruitless.
 //!
 //! Runs from the 30 s ticker in both hosts (desktop and `fleet serve`). The
 //! whole tick runs under an exclusive file lock on the state store, so two
@@ -68,6 +71,18 @@ const OPT_REVIVE: &str = "起新会话继续";
 const OPT_RETRY: &str = "再唤醒一次";
 const OPT_WEEK: &str = "静默 7 天";
 const OPT_FOREVER: &str = "别再管这个计划";
+const OPT_RESUME: &str = "登录已修好，恢复唤醒";
+const OPT_TURN_OFF: &str = "关闭自动唤醒";
+
+/// Claude Code's `error` tag on the synthetic turn it writes when a request is
+/// refused for the account rather than the request: nothing a fresh session
+/// does differently gets past it. Seen on this machine (2026-09-30 tally over
+/// every transcript): 128 × `authentication_failed` (OAuth expired / 403) and
+/// 14 × `oauth_org_not_allowed`. `rate_limit` and `server_error` (offline,
+/// e.g. a dark wake) clear up on their own and stay out.
+const ACCOUNT_ERRORS: &[&str] = &["authentication_failed", "oauth_org_not_allowed"];
+/// Re-raise the pause card this long after it went unanswered.
+const PAUSE_REASK_MS: u64 = 24 * 3600 * 1000;
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +157,20 @@ pub struct PlanReviveState {
 #[serde(default)]
 struct StateFile {
     plans: BTreeMap<String, PlanReviveState>,
+    /// Set while the reviver is held back by an account-level error.
+    pause: Option<RevivePause>,
+}
+
+/// Why the reviver stopped spawning, and the card asking the boss to resume.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+struct RevivePause {
+    since_ms: u64,
+    /// The revived session that died, and the error text it died on.
+    session_id: String,
+    reason: String,
+    card_id: Option<String>,
+    asked_ms: Option<u64>,
 }
 
 fn state_path() -> Option<PathBuf> {
@@ -642,7 +671,9 @@ pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> Wor
         &gather_coverage,
         &|plan| state.plans.get(&plan_snooze::plan_key(ws, plan)).cloned(),
         &|plan| plan_snooze::active(ws, plan).is_some(),
-        PlanReviveConfig::load().enabled,
+        // A paused reviver will not spawn either; the plan tree says so the
+        // same way it does for the settings toggle.
+        PlanReviveConfig::load().enabled && state.pause.is_none(),
     )
 }
 
@@ -841,6 +872,36 @@ fn transcript_of(sid: &str) -> Option<String> {
     None
 }
 
+/// The account-level error a session died on, if it died on one before any
+/// real reply: its main-chain assistant turns are all Claude Code's synthetic
+/// error turns and at least one carries an [`ACCOUNT_ERRORS`] tag. A session
+/// that got a single real reply is not dead, whatever failed later.
+fn died_on_account_error(transcript: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(transcript).ok()?;
+    let mut found = None;
+    for line in std::io::BufReader::new(file).split(b'\n').map_while(Result::ok) {
+        let Ok(e) = serde_json::from_slice::<serde_json::Value>(&line) else { continue };
+        if e["type"] != "assistant" || e["isSidechain"] == true {
+            continue;
+        }
+        if e["isApiErrorMessage"] != true {
+            return None;
+        }
+        if found.is_none() && e["error"].as_str().is_some_and(|t| ACCOUNT_ERRORS.contains(&t)) {
+            let text = e["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|b| b["text"].as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            found = Some(text);
+        }
+    }
+    found
+}
+
 /// The revived session's opening prompt. Product text (Chinese).
 pub fn revive_prompt(view: &PlanView, boss_note: Option<&str>, previous: Option<&str>) -> String {
     let pending = view.total.saturating_sub(view.done);
@@ -1025,6 +1086,106 @@ pub fn continue_after_finish(session_id: &str) {
         )),
         Err(e) => crate::log_debug(&format!("finish continuation: spawn for {target}: {e}")),
     }
+}
+
+fn build_pause_card(pause: &RevivePause) -> ElicitationRequest {
+    let question = format!(
+        "唤醒会话一启动就鉴权失败，Fleet 已暂停自动唤醒。\n---\n\
+         刚起的唤醒会话 `{sid}` 第一条请求就被拒：{reason}\n\n\
+         这是账号层面的问题，再起多少个会话都会死在同一处，所以 Fleet 停下了所有计划的自动唤醒；\
+         这次失败不算进「连续 3 次没推进」。\n\n\
+         登录修好后要恢复吗？",
+        sid = pause.session_id,
+        reason = pause.reason,
+    );
+    ElicitationRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: pause.session_id.clone(),
+        workspace_name: "Fleet".to_string(),
+        ai_title: Some("计划自动唤醒已暂停".to_string()),
+        questions: vec![ElicitationQuestion {
+            question,
+            header: "唤醒已暂停".to_string(),
+            options: vec![
+                ElicitationOption {
+                    label: OPT_RESUME.into(),
+                    description: "解除暂停，没人负责的计划照常在 30 分钟后起新会话".into(),
+                    preview: None,
+                },
+                ElicitationOption {
+                    label: OPT_TURN_OFF.into(),
+                    description: "关掉设置里的计划自动唤醒，要用时再手动打开".into(),
+                    preview: None,
+                },
+            ],
+            multi_select: false,
+        }],
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
+        turn_completion: false,
+    }
+}
+
+/// Advance the pause by one tick: notice a revived session that died on an
+/// account error, collect the boss's answer, (re-)raise the card. Returns
+/// whether spawning is held back this tick.
+fn tick_pause(state: &mut StateFile, now: u64, transcript: &dyn Fn(&str) -> Option<PathBuf>) -> bool {
+    // Answer first, so "resume" takes effect in this very tick.
+    if let Some(card) = state.pause.as_ref().and_then(|p| p.card_id.clone()) {
+        if let Some(resp) = crate::elicitation::try_read_response(&card) {
+            crate::elicitation::cleanup(&card);
+            let answer = resp.answers.values().map(|s| s.trim()).find(|s| !s.is_empty());
+            match (resp.declined, answer) {
+                (true, _) => {
+                    if let Some(p) = state.pause.as_mut() {
+                        p.card_id = None;
+                    }
+                }
+                (false, Some(OPT_TURN_OFF)) => {
+                    state.pause = None;
+                    if let Err(e) = (PlanReviveConfig { enabled: false }).save() {
+                        crate::log_debug(&format!("plan revive: turn off: {e}"));
+                    }
+                    return true;
+                }
+                // Resume, or free text: the boss is back and wants it going.
+                _ => state.pause = None,
+            }
+        } else if crate::elicitation::read_request(&card).is_none() {
+            if let Some(p) = state.pause.as_mut() {
+                p.card_id = None;
+            }
+        }
+    }
+
+    // A revived session that died on an account error: the error is the
+    // account's, not the plan's, so give the attempt back.
+    for st in state.plans.values_mut() {
+        let Some(sid) = st.revived_session_id.clone() else { continue };
+        let Some(reason) = transcript(&sid).and_then(|t| died_on_account_error(&t)) else {
+            continue;
+        };
+        st.attempts = st.attempts.saturating_sub(1);
+        st.revived_session_id = None;
+        if state.pause.is_none() {
+            crate::log_debug(&format!("plan revive: paused, {sid} died on: {reason}"));
+            state.pause = Some(RevivePause { since_ms: now, session_id: sid, reason, ..Default::default() });
+        }
+    }
+
+    let Some(pause) = state.pause.as_mut() else { return false };
+    let due = pause.asked_ms.is_none_or(|t| now.saturating_sub(t) >= PAUSE_REASK_MS);
+    if pause.card_id.is_none() && due {
+        let card = build_pause_card(pause);
+        match crate::elicitation::write_request(&card) {
+            Ok(()) => {
+                pause.card_id = Some(card.id);
+                pause.asked_ms = Some(now);
+            }
+            Err(e) => crate::log_debug(&format!("plan revive: pause card: {e}")),
+        }
+    }
+    true
 }
 
 fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
@@ -1223,8 +1384,12 @@ fn tick_locked(path: &Path) {
         }
     }
 
+    let paused = tick_pause(&mut state, now, &|sid| transcript_of(sid).map(PathBuf::from));
+
     let owners: HashSet<String> = views.iter().flat_map(|v| v.owners.iter().cloned()).collect();
-    if views.is_empty() {
+    // While paused nothing is decided, so every plan's clock and counters stay
+    // where the pause found them.
+    if views.is_empty() || paused {
         write_state(path, &state, &views);
         return;
     }
@@ -1315,6 +1480,7 @@ fn write_state(path: &Path, state: &StateFile, views: &[PlanView]) {
             .filter(|(k, s)| live.contains(*k) || s.ask_card_id.is_some())
             .map(|(k, s)| (k.clone(), s.clone()))
             .collect(),
+        pause: state.pause.clone(),
     };
     match serde_json::to_vec_pretty(&kept) {
         Ok(bytes) => {
@@ -1358,6 +1524,7 @@ pub fn dry_run() -> Vec<OrphanReport> {
     );
     let owners: HashSet<String> = views.iter().flat_map(|v| v.owners.iter().cloned()).collect();
     let coverage = gather_coverage(&owners);
+    let pause = state_path().and_then(|p| load_state(&p)).and_then(|s| s.pause);
     views
         .into_iter()
         .map(|v| {
@@ -1371,6 +1538,8 @@ pub fn dry_run() -> Vec<OrphanReport> {
                 "orphan, unclaimed explore deliverable (would ask first)".to_string()
             } else if v.boss_closed.is_some() {
                 "orphan, closed by boss (would ask first)".to_string()
+            } else if let Some(p) = &pause {
+                format!("orphan, reviver paused ({})", p.reason)
             } else {
                 "orphan".to_string()
             };
@@ -1856,6 +2025,45 @@ mod tests {
         assert_eq!(apply_answer(&mut st, false, Some("先把 P3 拆成两步"), 0), None);
         assert_eq!(st.boss_note.as_deref(), Some("先把 P3 拆成两步"));
         assert!(st.boss_approved);
+    }
+
+    #[test]
+    fn a_session_that_only_got_account_errors_counts_as_dead() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |name: &str, lines: &[&str]| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, lines.join("\n")).unwrap();
+            p
+        };
+        let user = r#"{"type":"user","message":{"content":"go"}}"#;
+        let auth = r#"{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed","message":{"model":"<synthetic>","content":[{"type":"text","text":"Failed to authenticate. API Error: 403"}]}}"#;
+        let org = r#"{"type":"assistant","isApiErrorMessage":true,"error":"oauth_org_not_allowed","message":{"content":[{"type":"text","text":"org disabled"}]}}"#;
+        let offline = r#"{"type":"assistant","isApiErrorMessage":true,"error":"server_error","message":{"content":[{"type":"text","text":"ENOTFOUND"}]}}"#;
+        let real = r#"{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"on it"}]}}"#;
+        let side = r#"{"type":"assistant","isSidechain":true,"message":{"content":[]}}"#;
+
+        let dead = write("dead.jsonl", &[user, auth, user, auth]);
+        assert_eq!(died_on_account_error(&dead).as_deref(), Some("Failed to authenticate. API Error: 403"));
+        assert!(died_on_account_error(&write("org.jsonl", &[user, org])).is_some());
+        // Offline is not an account error; the plan's own counter handles it.
+        assert_eq!(died_on_account_error(&write("off.jsonl", &[user, offline])), None);
+        // One real reply means it got going, whatever failed after.
+        assert_eq!(died_on_account_error(&write("ok.jsonl", &[user, real, auth])), None);
+        assert_eq!(died_on_account_error(&write("late.jsonl", &[user, auth, side, real])), None);
+        assert_eq!(died_on_account_error(&dir.path().join("missing.jsonl")), None);
+    }
+
+    #[test]
+    fn a_pause_survives_the_state_round_trip() {
+        let st = StateFile {
+            plans: BTreeMap::new(),
+            pause: Some(RevivePause { since_ms: 1, session_id: "s".into(), reason: "403".into(), ..Default::default() }),
+        };
+        let back: StateFile = serde_json::from_slice(&serde_json::to_vec(&st).unwrap()).unwrap();
+        assert_eq!(back.pause, st.pause);
+        // Files written before the field existed still load.
+        let old: StateFile = serde_json::from_str(r#"{"plans":{}}"#).unwrap();
+        assert_eq!(old.pause, None);
     }
 
     #[test]
