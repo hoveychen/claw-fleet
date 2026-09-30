@@ -439,6 +439,14 @@ pub fn list_lessons() -> Vec<ManagedLesson> {
     parse_blocks(&content)
 }
 
+/// The managed lessons file's text when it holds at least one lesson — what a
+/// Fleet launch appends to the session's system prompt
+/// ([`crate::claude_launch`]). `None` when there is nothing to hand over.
+pub fn managed_file_content() -> Option<String> {
+    let content = fs::read_to_string(lessons_file_path()?).ok()?;
+    has_any_block(&content).then_some(content)
+}
+
 /// Ensure the `@fleet-lessons.md` import sentinel is present in CLAUDE.md.
 fn ensure_import_installed() -> Result<(), String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;

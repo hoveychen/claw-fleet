@@ -1100,34 +1100,6 @@ fn is_idle_resume_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "session resume")
 }
 
-// ── Default model (settings.json `model`) ───────────────────────────────────
-
-/// Pin Claude Code's default model in `~/.claude/settings.json`.
-///
-/// A headless host has no interactive `/model` picker, and Fleet only passes
-/// `--model` when the caller named one (`push_session_override_args`) — so a
-/// spawn with no explicit model lands on whatever Claude Code itself defaults
-/// to. `settings.json`'s `model` key is the only lever that moves that default,
-/// and on the Fleet Cloud container `~/.claude` is on the ephemeral layer, so
-/// the write has to happen on every start (`fleet bootstrap`, which the
-/// entrypoint runs before serving).
-///
-/// Accepts either an alias (`opus`, `sonnet`) or a full id (`claude-opus-5`) —
-/// the value is handed to Claude Code verbatim. A blank value is a no-op, which
-/// is what leaves a host on the CLI's own default.
-pub fn apply_default_model(model: &str) -> Result<(), String> {
-    let model = model.trim();
-    if model.is_empty() {
-        return Ok(());
-    }
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings
-        .as_object_mut()
-        .ok_or("settings is not an object")?;
-    obj.insert("model".to_string(), json!(model));
-    write_settings(&settings)
-}
-
 // ── Commit attribution (settings.json `attribution`) ────────────────────────
 
 /// Turn off Claude Code's commit/PR bylines in `~/.claude/settings.json`.
@@ -1591,6 +1563,121 @@ pub(crate) fn truncate_to_tail(
         let _ = fs::remove_file(&tmp);
     }
     result.map(|()| true)
+}
+
+// ── Per-launch hooks (the `--settings` file of a Fleet-started session) ─────
+
+/// One `fleet <subcommand>` hook group a feature contributes.
+struct LaunchHook {
+    event: &'static str,
+    matcher: Option<&'static str>,
+    subcommand: &'static str,
+    timeout_ms: u64,
+}
+
+/// The hook groups each feature installs — the same groups, matchers and
+/// timeouts the `apply_*` functions above write into the global settings.json.
+fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [LaunchHook] {
+    use crate::control_plane_prefs::Feature;
+    const fn hook(
+        event: &'static str,
+        matcher: Option<&'static str>,
+        subcommand: &'static str,
+        timeout_ms: u64,
+    ) -> LaunchHook {
+        LaunchHook {
+            event,
+            matcher,
+            subcommand,
+            timeout_ms,
+        }
+    }
+    const GUARD: &[LaunchHook] = &[hook("PreToolUse", Some(GUARD_MATCHER), "guard", 120_000)];
+    const ELICITATION: &[LaunchHook] = &[hook(
+        "PreToolUse",
+        Some("AskUserQuestion"),
+        "elicitation",
+        120_000,
+    )];
+    const PLAN_APPROVAL: &[LaunchHook] = &[hook(
+        "PreToolUse",
+        Some("ExitPlanMode"),
+        "plan-approval",
+        600_000,
+    )];
+    const PRD_CONTEXT: &[LaunchHook] = &[
+        hook("UserPromptSubmit", None, "prd-context", 10_000),
+        hook("SessionStart", Some(NOTES_HINT_MATCHER), "notes-hint", 10_000),
+        hook(
+            "SessionStart",
+            Some(RECENT_SESSIONS_MATCHER),
+            "recent-sessions",
+            20_000,
+        ),
+        hook("PostToolUse", None, "ctx-reminder", 10_000),
+    ];
+    const WAKEUP_GUARD: &[LaunchHook] = &[hook(
+        "PreToolUse",
+        Some(crate::wakeup_guard::WAKEUP_GUARD_MATCHER),
+        "wakeup-guard",
+        5_000,
+    )];
+    const IDLE: &[LaunchHook] = &[
+        hook("Stop", None, "session idle", 5_000),
+        hook("UserPromptSubmit", None, "session resume", 5_000),
+    ];
+    match feature {
+        Feature::GuardHook => GUARD,
+        Feature::ElicitationHook => ELICITATION,
+        Feature::PlanApprovalHook => PLAN_APPROVAL,
+        Feature::PrdContextHook => PRD_CONTEXT,
+        Feature::WakeupGuardHook => WAKEUP_GUARD,
+        Feature::IdleHooks => IDLE,
+        Feature::InteractionMode
+        | Feature::PrdDiscipline
+        | Feature::WikiGuidance
+        | Feature::ModelGuidance
+        | Feature::SessionTitleGuidance => &[],
+    }
+}
+
+/// The `hooks` object for a Fleet-started session's `--settings` file: the
+/// hooks.jsonl event append on every observed event, plus the groups of every
+/// hook feature `enabled` says is on.
+///
+/// Claude Code merges `--settings` hooks with the user's own (measured on
+/// 2.1.284: both fire), so this carries Fleet's hooks only and leaves the
+/// user's settings.json untouched.
+pub(crate) fn launch_hooks(
+    fleet_bin: &str,
+    enabled: impl Fn(crate::control_plane_prefs::Feature) -> bool,
+) -> Value {
+    let mut hooks: Map<String, Value> = Map::new();
+    let mut push = |event: &str, group: Value| {
+        let slot = hooks.entry(event.to_string()).or_insert_with(|| json!([]));
+        if let Some(arr) = slot.as_array_mut() {
+            arr.push(group);
+        }
+    };
+    for &event in FLEET_HOOK_EVENTS {
+        push(event, fleet_hook_group());
+    }
+    for feature in crate::control_plane_prefs::Feature::ALL {
+        if !enabled(feature) {
+            continue;
+        }
+        for h in launch_hooks_for(feature) {
+            // `_with` skips the per-hook debug line: this runs on every spawn.
+            let mut entry = fleet_subcommand_hook_with(cfg!(windows), fleet_bin, h.subcommand);
+            entry["timeout"] = json!(h.timeout_ms);
+            let mut group = json!({ "hooks": [entry] });
+            if let Some(m) = h.matcher {
+                group["matcher"] = json!(m);
+            }
+            push(h.event, group);
+        }
+    }
+    Value::Object(hooks)
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -2683,59 +2770,6 @@ mod tests {
             wrote,
             "write_settings must create ~/.claude and write settings.json on a fresh host: {res:?}"
         );
-    }
-
-    #[test]
-    fn apply_default_model_sets_model_and_leaves_siblings_alone() {
-        // The Fleet Cloud container re-runs `fleet bootstrap` on every start
-        // (~/.claude is ephemeral), so this write has to be idempotent, must
-        // not disturb the hook groups the other bootstrap steps just wrote, and
-        // must treat a blank model as "keep the CLI's own default".
-        let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-hooks-defaultmodel-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        let _ = fs::create_dir_all(&tmp);
-        let prev = std::env::var_os("FLEET_HOME");
-        // SAFETY: serialised by the fleet_home_lock.
-        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
-
-        let outcome = (|| -> Result<(), String> {
-            write_settings(&json!({ "hooks": { "PreToolUse": [] } }))?;
-
-            apply_default_model("opus")?;
-            let after = read_settings().ok_or("settings unreadable after apply")?;
-            if after.get("model").and_then(|m| m.as_str()) != Some("opus") {
-                return Err(format!("model not written: {after}"));
-            }
-            if after.get("hooks").is_none() {
-                return Err("apply_default_model clobbered the hooks key".into());
-            }
-
-            // Blank = no-op, not a wipe of the previously pinned model.
-            apply_default_model("  ")?;
-            let after = read_settings().ok_or("settings unreadable after blank apply")?;
-            if after.get("model").and_then(|m| m.as_str()) != Some("opus") {
-                return Err(format!("blank model must not change settings: {after}"));
-            }
-            Ok(())
-        })();
-
-        // Restore env before asserting so a failure can't leak FLEET_HOME.
-        unsafe {
-            match prev {
-                Some(p) => std::env::set_var("FLEET_HOME", p),
-                None => std::env::remove_var("FLEET_HOME"),
-            }
-        }
-        let _ = fs::remove_dir_all(&tmp);
-
-        outcome.expect("apply_default_model must pin the model without touching siblings");
     }
 
     #[test]

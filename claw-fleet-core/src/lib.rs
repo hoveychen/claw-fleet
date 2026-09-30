@@ -27,6 +27,7 @@ pub mod codex_image;
 pub mod codex_launch;
 pub mod codex_source;
 pub mod codex_usage_history;
+pub mod claude_launch;
 pub mod connectivity;
 pub mod console;
 pub mod consumer_heartbeat;

@@ -18,8 +18,9 @@
 //!
 //! `default_model` is deliberately *not* a [`Feature`]: it is a settings value,
 //! not a mode you can switch on and off, so there is no "is it installed" to
-//! probe and nothing for heal to decide. [`install_all`] and [`heal`] both apply
-//! it, and it is a no-op when no model was named.
+//! probe and nothing for heal to decide. [`install_all`] and [`heal`] both
+//! record it as Fleet's own launch default ([`crate::claude_launch`]), and it
+//! is a no-op when no model was named.
 
 use crate::control_plane_prefs::{is_disabled, Feature};
 use crate::hooks::HookSetupPlan;
@@ -136,7 +137,11 @@ pub fn install_all(s: &Settings) -> Vec<Step> {
         .collect();
     steps.push(Step {
         name: "default_model",
-        result: crate::hooks::apply_default_model(&s.model),
+        result: crate::claude_launch::set_default_model(&s.model),
+    });
+    steps.push(Step {
+        name: "claude_launch_guidance",
+        result: crate::claude_launch::reconcile_guidance(&s.title, &s.locale),
     });
     steps.push(Step {
         name: "no_commit_attribution",
@@ -188,7 +193,17 @@ pub fn heal(s: &Settings) -> Vec<Step> {
     if !s.model.is_empty() {
         steps.push(Step {
             name: "default_model",
-            result: crate::hooks::apply_default_model(&s.model),
+            result: crate::claude_launch::set_default_model(&s.model),
+        });
+    }
+
+    // Only when absent: this process's locale comes from `FLEET_LOCALE`, which
+    // a hand-run `fleet webui` on a desktop host lacks, so re-rendering an
+    // existing file here would translate the desktop user's guidance.
+    if !crate::claude_launch::guidance_rendered() {
+        steps.push(Step {
+            name: "claude_launch_guidance",
+            result: crate::claude_launch::reconcile_guidance(&s.title, &s.locale),
         });
     }
 
@@ -310,11 +325,11 @@ mod tests {
             return;
         }
         // Every Feature, plus the one settings value heal probes for
-        // (no_commit_attribution). default_model is absent because the model is
-        // blank here.
+        // (no_commit_attribution) and the launch guidance file. default_model
+        // is absent because the model is blank here.
         assert_eq!(
             first.len(),
-            Feature::ALL.len() + 1,
+            Feature::ALL.len() + 2,
             "a bare host must get the whole control plane, got {:?}",
             first.iter().map(|s| s.name).collect::<Vec<_>>()
         );
