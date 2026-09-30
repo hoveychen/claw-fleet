@@ -531,7 +531,7 @@ pub fn reconcile_timers() {
         ("loop", crate::agent_loop::reconcile()),
     ] {
         if !ids.is_empty() {
-            log_debug(&format!("tick: re-armed {} stranded {kind} timer(s): {}", ids.len(), ids.join(", ")));
+            log_debug(&format!("reconcile: re-armed {} stranded {kind} timer(s): {}", ids.len(), ids.join(", ")));
         }
     }
 }

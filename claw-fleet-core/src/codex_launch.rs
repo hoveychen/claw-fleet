@@ -578,25 +578,11 @@ pub fn on_codex_turn_exit(session_id: &str) {
             "codex turn exit: handoff relay failed for {session_id}: {e}"
         )),
     }
-    // Re-arm any loop timer stranded by a reboot/kill — cheap, idempotent,
-    // duplicate-safe via the loop generation. Piggy-backs on the turn boundary
-    // exactly like the Claude Stop hook does.
-    let rearmed = crate::agent_loop::reconcile();
-    if !rearmed.is_empty() {
-        crate::log_debug(&format!(
-            "codex turn exit: re-armed {} stranded loop timer(s)",
-            rearmed.len()
-        ));
-    }
-    // Same for one-shot schedules — re-arm stranded/overdue timers so a schedule
-    // fires even if the codex session it was created from is what next yields.
-    let sched_rearmed = crate::schedule::reconcile();
-    if !sched_rearmed.is_empty() {
-        crate::log_debug(&format!(
-            "codex turn exit: re-armed {} stranded schedule timer(s)",
-            sched_rearmed.len()
-        ));
-    }
+    // Re-arm watch / schedule / loop timers stranded by a reboot/kill, exactly
+    // like the Claude Stop hook does. This used to skip watches, so with neither
+    // the desktop nor `fleet serve` ticking, a codex-only machine never revived
+    // a dead watch timer.
+    crate::headless_runtime::reconcile_timers();
 }
 
 /// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
