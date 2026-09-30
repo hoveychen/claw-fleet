@@ -124,8 +124,10 @@ describe("WatchStatusRow progress", () => {
     expect(renderRow(watch({ progress: "3/8", progressFraction: 0.375 }))?.textContent).toBe("38%");
     expect(container.querySelector("svg.lucide-radar")).toBeNull();
     expect(container.querySelector('svg[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("38");
+    // The status line goes in whole: CSS ellipsizes it only once the row runs
+    // out of width (d5df26c3), so its tail ("已读 124 篇") survives on a wide row.
     expect(renderRow(watch({ progress: "building the frontend bundle" }))?.textContent).toBe(
-      "building the…",
+      "building the frontend bundle",
     );
     expect(renderRow(watch({ expectBy: Date.now() + 30 * MIN }))?.textContent).toBe("30m/1h");
   });
