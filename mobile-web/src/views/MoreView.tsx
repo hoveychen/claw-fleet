@@ -25,6 +25,8 @@ import { canScanPairing, scanPairing } from "../nativeScan";
 import { scanAvailability } from "../scanAvailability";
 import { PairPasteForm } from "./PairPasteForm";
 import { PairScanner } from "./PairScanner";
+import { ResumeSettingsSection } from "./ResumeSettingsSection";
+import type { FleetTransport } from "../transport";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import { useConfirm } from "../confirmDialog";
@@ -97,6 +99,8 @@ interface Props {
   onAddDevice: (paired: PairedLink) => void;
   /** Clear all pairings and reload. */
   onUnpairAll: () => void;
+  /** Active host transport, for the host-side continuation switches. */
+  client: FleetTransport | null;
 }
 
 export function MoreView({
@@ -129,6 +133,7 @@ export function MoreView({
   onMuteDevice,
   onAddDevice,
   onUnpairAll,
+  client,
 }: Props) {
   const { lang, setLang, t } = useI18n();
   const confirm = useConfirm();
@@ -357,6 +362,8 @@ export function MoreView({
           )}
         </div>
       </div>
+
+      <ResumeSettingsSection client={client} />
 
       {/* ── Connection & Notifications ── */}
       <div className={styles.section}>

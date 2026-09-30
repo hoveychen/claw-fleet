@@ -901,10 +901,13 @@ async function handleIPC(
     // so the default `return null` crashed the whole settings page in mock
     // mode. Minimal truthy shapes keep it renderable for screenshots.
     case "get_auto_resume_config":
-      return { enabled: true, maxWaitHours: 12 };
+      return { enabled: true, maxWaitHours: 12, retryServerErrors: true, maxServerErrorRetries: 3 };
 
     case "get_plan_revive_config":
       return { enabled: true };
+
+    case "get_resume_triggers_config":
+      return { finishContinue: true, codexStallWatchdog: true, planGate: true, handoffSuccessor: true };
 
     case "list_llm_providers":
       return [

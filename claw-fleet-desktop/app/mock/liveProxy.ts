@@ -491,6 +491,17 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: a.config,
   }),
 
+  get_resume_triggers_config: () => ({
+    method: "GET",
+    path: "/resume_triggers_config",
+  }),
+
+  set_resume_triggers_config: (a) => ({
+    method: "POST",
+    path: "/resume_triggers_config",
+    body: a.config,
+  }),
+
   get_permissions_config: () => ({
     method: "GET",
     path: "/permissions_config",

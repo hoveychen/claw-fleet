@@ -29,7 +29,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { AgentSourceIcon } from "./SessionCard";
 import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
-import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
+import type { RemoteWorkspace, RemoteWorkspacesConfig, ResumeTriggersConfig } from "../types";
 import { sshTargetOf, type HostHealth, type SshHost } from "../sshHosts";
 
 
@@ -141,6 +141,29 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
     </svg>
   ),
 };
+
+/** A labelled on/off row in the house style (label, dim description, slider). */
+function ToggleRow({ label, desc, checked, onChange }: {
+  label: string;
+  desc: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className={styles.row}>
+      <div>
+        <span className={styles.row_label}>{label}</span>
+        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+          {desc}
+        </span>
+      </div>
+      <label className={styles.toggle}>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className={styles.toggle_slider} />
+      </label>
+    </div>
+  );
+}
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const simplifiedMode = useUIStore((s) => s.simplifiedMode);
@@ -1112,19 +1135,29 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   ), [claudeCodexPairActive]);
 
   // ── Auto-resume config ──────────────────────────────────────────────────
-  const [autoResume, setAutoResume] = useState<{ enabled: boolean; maxWaitHours: number }>({
+  // Mirrors `auto_resume::AutoResumeConfig`; every field is kept so a save
+  // round-trips the ones this panel does not edit (maxServerErrorRetries).
+  type AutoResumeConfig = {
+    enabled: boolean;
+    maxWaitHours: number;
+    retryServerErrors: boolean;
+    maxServerErrorRetries: number;
+  };
+  const [autoResume, setAutoResume] = useState<AutoResumeConfig>({
     enabled: true,
     maxWaitHours: 12,
+    retryServerErrors: true,
+    maxServerErrorRetries: 3,
   });
 
   useEffect(() => {
-    invoke<{ enabled: boolean; maxWaitHours: number }>("get_auto_resume_config")
+    invoke<AutoResumeConfig>("get_auto_resume_config")
       .then(setAutoResume)
       .catch(() => {});
   }, []);
 
   const handleAutoResumeChange = useCallback(
-    (patch: Partial<{ enabled: boolean; maxWaitHours: number }>) => {
+    (patch: Partial<AutoResumeConfig>) => {
       setAutoResume((prev) => {
         const next = { ...prev, ...patch };
         invoke("set_auto_resume_config", { config: next }).catch(() => {});
@@ -1146,6 +1179,28 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const handlePlanReviveChange = useCallback((enabled: boolean) => {
     setPlanRevive(enabled);
     invoke("set_plan_revive_config", { config: { enabled } }).catch(() => {});
+  }, []);
+
+  // ── Remaining continuation switches (`resume_triggers`) ─────────────────
+  const [triggers, setTriggers] = useState<ResumeTriggersConfig>({
+    finishContinue: true,
+    codexStallWatchdog: true,
+    planGate: true,
+    handoffSuccessor: true,
+  });
+
+  useEffect(() => {
+    invoke<ResumeTriggersConfig>("get_resume_triggers_config")
+      .then(setTriggers)
+      .catch(() => {});
+  }, []);
+
+  const handleTriggersChange = useCallback((patch: Partial<ResumeTriggersConfig>) => {
+    setTriggers((prev) => {
+      const next = { ...prev, ...patch };
+      invoke("set_resume_triggers_config", { config: next }).catch(() => {});
+      return next;
+    });
   }, []);
 
   // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
@@ -1284,22 +1339,33 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   </label>
                 </div>
 
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.auto_resume")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.auto_resume_desc")}
-                    </span>
+                {keepAwakeSupported && (
+                  <div className={styles.row}>
+                    <div>
+                      <span className={styles.row_label}>{t("settings.keep_awake")}</span>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        {t("settings.keep_awake_desc")}
+                      </span>
+                    </div>
+                    <label className={styles.toggle}>
+                      <input
+                        type="checkbox"
+                        checked={keepAwake}
+                        onChange={(e) => setKeepAwake(e.target.checked)}
+                      />
+                      <span className={styles.toggle_slider} />
+                    </label>
                   </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={autoResume.enabled}
-                      onChange={(e) => handleAutoResumeChange({ enabled: e.target.checked })}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
+                )}
+
+                {/* Every automatic continuation, one switch each. */}
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.auto_continue")}</div>
+                <ToggleRow
+                  label={t("settings.auto_resume")}
+                  desc={t("settings.auto_resume_desc")}
+                  checked={autoResume.enabled}
+                  onChange={(v) => handleAutoResumeChange({ enabled: v })}
+                />
                 {autoResume.enabled && (
                   <div className={styles.row}>
                     <div>
@@ -1321,42 +1387,42 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     />
                   </div>
                 )}
-
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.plan_revive")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.plan_revive_desc")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={planRevive}
-                      onChange={(e) => handlePlanReviveChange(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
-
-                {keepAwakeSupported && (
-                  <div className={styles.row}>
-                    <div>
-                      <span className={styles.row_label}>{t("settings.keep_awake")}</span>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                        {t("settings.keep_awake_desc")}
-                      </span>
-                    </div>
-                    <label className={styles.toggle}>
-                      <input
-                        type="checkbox"
-                        checked={keepAwake}
-                        onChange={(e) => setKeepAwake(e.target.checked)}
-                      />
-                      <span className={styles.toggle_slider} />
-                    </label>
-                  </div>
-                )}
+                <ToggleRow
+                  label={t("settings.retry_server_errors")}
+                  desc={t("settings.retry_server_errors_desc")}
+                  checked={autoResume.retryServerErrors}
+                  onChange={(v) => handleAutoResumeChange({ retryServerErrors: v })}
+                />
+                <ToggleRow
+                  label={t("settings.plan_revive")}
+                  desc={t("settings.plan_revive_desc")}
+                  checked={planRevive}
+                  onChange={handlePlanReviveChange}
+                />
+                <ToggleRow
+                  label={t("settings.finish_continue")}
+                  desc={t("settings.finish_continue_desc")}
+                  checked={triggers.finishContinue}
+                  onChange={(v) => handleTriggersChange({ finishContinue: v })}
+                />
+                <ToggleRow
+                  label={t("settings.plan_gate")}
+                  desc={t("settings.plan_gate_desc")}
+                  checked={triggers.planGate}
+                  onChange={(v) => handleTriggersChange({ planGate: v })}
+                />
+                <ToggleRow
+                  label={t("settings.handoff_successor")}
+                  desc={t("settings.handoff_successor_desc")}
+                  checked={triggers.handoffSuccessor}
+                  onChange={(v) => handleTriggersChange({ handoffSuccessor: v })}
+                />
+                <ToggleRow
+                  label={t("settings.codex_stall_watchdog")}
+                  desc={t("settings.codex_stall_watchdog_desc")}
+                  checked={triggers.codexStallWatchdog}
+                  onChange={(v) => handleTriggersChange({ codexStallWatchdog: v })}
+                />
 
               </div>
             )}

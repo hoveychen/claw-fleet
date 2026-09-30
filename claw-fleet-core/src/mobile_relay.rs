@@ -2204,6 +2204,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "stop"
             | "stop_workspace"
             | "session_mark"
+            | "set_resume_settings"
             | "session_explain_ask"
             | "upload_attachment"
             | "decision_answer"
@@ -2541,6 +2542,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "artifact_blob" => serve_artifact_blob(params),
         "chat_workspace" => serve_chat_workspace(params),
         "sources_config" => serve_sources_config(params),
+        "resume_settings" => serve_resume_settings(params),
         "codex_profiles" => serve_codex_profiles(params),
         "dsh_models" => serve_dsh_models(params),
         "model_catalog" => serve_model_catalog(params),
@@ -2559,6 +2561,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop" => serve_stop(params),
         "stop_workspace" => serve_stop_workspace(params),
         "session_mark" => serve_session_mark(params),
+        "set_resume_settings" => serve_set_resume_settings(params),
         // Forks a session and spends money; a lost reply must not fork twice.
         "session_explain_ask" => {
             idempotent_write(method, params, || serve_session_explain_ask(params))
@@ -3476,6 +3479,18 @@ fn serve_chat_workspace(_params: &Value) -> Result<Value, String> {
 fn serve_sources_config(_params: &Value) -> Result<Value, String> {
     let sources = crate::agent_source::get_sources_config_local();
     serde_json::to_value(sources).map_err(|e| e.to_string())
+}
+
+/// Every automatic-continuation switch on the host, for the phone's settings
+/// page. Mirrors the desktop's three `get_*_config` commands in one call.
+fn serve_resume_settings(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::resume_triggers::load_all()).map_err(|e| e.to_string())
+}
+
+/// Save the parts of the host's continuation switches the phone changed.
+fn serve_set_resume_settings(params: &Value) -> Result<Value, String> {
+    let stored = crate::resume_triggers::save_parts(params)?;
+    serde_json::to_value(stored).map_err(|e| e.to_string())
 }
 
 /// The desktop host's Codex profile-v2 files, for the mobile composer's model
@@ -4804,6 +4819,7 @@ mod tests {
             "stop",
             "stop_workspace",
             "session_mark",
+            "set_resume_settings",
             "session_explain_ask",
             "upload_attachment",
             "decision_answer",

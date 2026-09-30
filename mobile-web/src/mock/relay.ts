@@ -42,6 +42,13 @@ import {
 } from "./data";
 
 import scenes from "../../../scripts/site/fixtures/scenes.json";
+
+/** Host continuation switches (`resume_settings`); `set_resume_settings` merges into it. */
+let mockResumeSettings: Record<string, unknown> = {
+  autoResume: { enabled: true, maxWaitHours: 12, retryServerErrors: true, maxServerErrorRetries: 3 },
+  planRevive: { enabled: true },
+  triggers: { finishContinue: true, codexStallWatchdog: true, planGate: true, handoffSuccessor: true },
+};
 const websiteLang = new URLSearchParams(location.search).get("website");
 const websiteScene = websiteLang === "zh" || websiteLang === "en" ? scenes[websiteLang] : null;
 if (websiteScene) {
@@ -163,6 +170,11 @@ export class MockRelayClient extends RelayClient {
         );
       case "chat_workspace":
         return { path: MOCK_CHAT_WORKSPACE };
+      case "resume_settings":
+        return mockResumeSettings;
+      case "set_resume_settings":
+        mockResumeSettings = { ...mockResumeSettings, ...params };
+        return mockResumeSettings;
       case "plan_forest":
         return MOCK_PLAN_FOREST;
       // The session-detail "Plans" tab reads the flat per-session shape; derive
