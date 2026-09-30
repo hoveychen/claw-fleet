@@ -154,35 +154,19 @@ pub fn is_disabled(feature: Feature) -> bool {
     load().disabled.contains(feature.key())
 }
 
-/// Correct one concept's Claude-carrier read for the case where the *negative*
-/// answer is not backed by a recorded opt-out.
+/// Whether `feature` is on — the one question every Fleet launch asks.
 ///
-/// `read` is what looking at `~/.claude/CLAUDE.md` just said; `installed` is
-/// whether the mirrored carrier (codex `AGENTS.md` block, dsh cordis plugin) is
-/// currently in place. Returns what to treat as the truth.
+/// This file, not the `@import` sentinels in `~/.claude/CLAUDE.md`, is the
+/// source of truth for what Fleet injects into the sessions it starts. A
+/// sentinel read was never trustworthy as that answer: six writers rewrite
+/// CLAUDE.md on every startup, and on 2026-09-07 one mid-incident read left
+/// dsh sessions without their Fleet context for a day. It is also going away
+/// — Fleet is moving its guidance out of the user's global CLAUDE.md and into
+/// per-launch arguments, so the file will no longer carry any sentinel.
 ///
-/// The two directions are not symmetric, which is the whole reason this exists:
-///
-/// * Re-installing is idempotent — a rewrite of identical content costs nothing.
-/// * Uninstalling is **sticky**. The next self-heal pass restores CLAUDE.md's
-///   `@import`, but nothing re-installs the mirrored carrier, so a harness runs
-///   without its Fleet guidance until a human notices.
-///
-/// On 2026-09-07 that asymmetry cost the user a day of dsh sessions: CLAUDE.md
-/// lost its blocks to a writer race (since fixed by [`crate::claude_md_lock`]),
-/// the startup reconcile read the file mid-incident, and `~/.dsh/cordis.patch.yml`
-/// stayed `[]` long after CLAUDE.md had healed. So a negative read only counts
-/// when [`is_disabled`] agrees — that flag is written only by an explicit
-/// remove, through [`note_intent`].
-pub fn believe_installed(read: bool, feature: Feature, installed: bool) -> bool {
-    if read {
-        return true;
-    }
-    if is_disabled(feature) {
-        return false;
-    }
-    // Unbelieved negative read: keep whatever is on disk, in either direction.
-    installed
+/// Default-on: a feature is off only after an explicit remove recorded it.
+pub fn is_enabled(feature: Feature) -> bool {
+    !is_disabled(feature)
 }
 
 /// Pair a successful install/uninstall with a note about what the user meant.

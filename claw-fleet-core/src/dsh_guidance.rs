@@ -906,7 +906,8 @@ pub fn render_dsh_sections(
     out
 }
 
-/// Which concepts are currently enabled, read from their Claude carriers.
+/// Which concepts are currently enabled, read from
+/// [`crate::control_plane_prefs`] — the switches every harness shares.
 ///
 /// Shared by [`reconcile_dsh_from_claude_state`] (which writes AGENTS.md) and
 /// `fleet dsh-context` (which feeds the plugin), so the two channels cannot
@@ -914,11 +915,12 @@ pub fn render_dsh_sections(
 /// whether dsh exists at all, since an empty lesson list and "no dsh" are
 /// different states.
 pub fn dsh_guidance_set(dsh_present: bool) -> DshGuidanceSet {
+    use crate::control_plane_prefs::{is_enabled, Feature};
     DshGuidanceSet {
-        prd: crate::prd_discipline::is_prd_discipline_installed(),
-        interaction: crate::interaction_mode::is_interaction_mode_installed(),
-        wiki: crate::wiki_guidance::is_wiki_guidance_installed(),
-        model: crate::model_guidance::is_model_guidance_installed(),
+        prd: is_enabled(Feature::PrdDiscipline),
+        interaction: is_enabled(Feature::InteractionMode),
+        wiki: is_enabled(Feature::WikiGuidance),
+        model: is_enabled(Feature::ModelGuidance),
         lessons: dsh_present && !crate::lessons_store::list_lessons().is_empty(),
     }
 }
@@ -977,9 +979,8 @@ pub fn reconcile_dsh_agents_md(
     Ok(())
 }
 
-/// Mirror the Claude-side concept toggles onto dsh's AGENTS.md, reading which
-/// concepts are enabled from their Claude carriers (the `@import` sentinels in
-/// `~/.claude/CLAUDE.md`). The dsh analogue of
+/// Mirror the concept switches in [`crate::control_plane_prefs`] onto dsh's
+/// carriers. The dsh analogue of
 /// [`crate::codex_guidance::reconcile_codex_from_claude_state`]; both are called
 /// together after any concept toggle and on startup.
 ///
@@ -1009,16 +1010,7 @@ pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result
     // delivers both halves of PRD injection now. Reported rather than swallowed:
     // there is no fallback channel any more, so a silent failure here would mean
     // dsh sessions quietly running without any Fleet context at all.
-    //
-    // `believe_installed` is why a single CLAUDE.md read cannot uninstall the
-    // plugin: without a recorded opt-out, a negative read leaves whatever is on
-    // disk in place. Uninstalling here is sticky — nothing re-installs the plugin
-    // on a later pass — so it takes the durable record of intent, not one stat.
-    let prd = crate::control_plane_prefs::believe_installed(
-        set.prd,
-        crate::control_plane_prefs::Feature::PrdDiscipline,
-        crate::dsh_plugin::is_dsh_plugin_installed(),
-    );
+    let prd = set.prd;
     crate::dsh_plugin::reconcile_dsh_patch(prd, user_title, locale)
 }
 

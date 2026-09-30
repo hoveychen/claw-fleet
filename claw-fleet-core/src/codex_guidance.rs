@@ -912,46 +912,21 @@ fn render_blocks(set: CodexGuidanceSet, user_title: &str, locale: &str) -> Strin
     blocks
 }
 
-/// Mirror the Claude-side concept toggles onto codex's launch guidance. Reads which
-/// concepts are enabled from their Claude carriers (the `@import` sentinels in
-/// `~/.claude/CLAUDE.md`) and reconciles the matching codex blocks. This is the
-/// unified entry point: one concept toggle drives both carriers, so the desktop
-/// calls this after any concept toggle and on startup. Idempotent and
-/// order-independent — the Claude write always lands first, then this reads it.
+/// Render codex's launch guidance from the concept switches in
+/// [`crate::control_plane_prefs`] — the same switches every other harness
+/// reads, so one toggle drives claude, codex and dsh alike. The desktop calls
+/// this after any concept toggle and on startup. Idempotent.
 pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Result<(), String> {
     // Only mirror lessons onto codex when codex is actually in use — don't
-    // conjure a ~/.codex/AGENTS.md for a Claude-only user who happened to add a
-    // lesson. Codex has no @import, so an existing codex home is the signal.
+    // conjure launch guidance for a Claude-only user who happened to add a
+    // lesson. An existing codex home is the signal.
     let codex_present = codex_home().map(|d| d.exists()).unwrap_or(false);
-    // Each concept's Claude-side read goes through `believe_installed`: an
-    // unrecorded negative read keeps the codex block that is already on disk
-    // instead of stripping it. Stripping is the sticky direction — a later pass
-    // restores CLAUDE.md's `@import` but never re-writes AGENTS.md — so it takes
-    // an explicit opt-out, not a single stat of a file six writers rewrite at
-    // every startup. `lessons` is not a toggle (it tracks the lesson list), so
-    // it is read as-is.
-    use crate::control_plane_prefs::{believe_installed, Feature};
+    use crate::control_plane_prefs::{is_enabled, Feature};
     let set = CodexGuidanceSet {
-        prd: believe_installed(
-            crate::prd_discipline::is_prd_discipline_installed(),
-            Feature::PrdDiscipline,
-            is_codex_prd_installed(),
-        ),
-        interaction: believe_installed(
-            crate::interaction_mode::is_interaction_mode_installed(),
-            Feature::InteractionMode,
-            is_codex_interaction_installed(),
-        ),
-        wiki: believe_installed(
-            crate::wiki_guidance::is_wiki_guidance_installed(),
-            Feature::WikiGuidance,
-            is_codex_wiki_installed(),
-        ),
-        model: believe_installed(
-            crate::model_guidance::is_model_guidance_installed(),
-            Feature::ModelGuidance,
-            is_codex_model_installed(),
-        ),
+        prd: is_enabled(Feature::PrdDiscipline),
+        interaction: is_enabled(Feature::InteractionMode),
+        wiki: is_enabled(Feature::WikiGuidance),
+        model: is_enabled(Feature::ModelGuidance),
         lessons: codex_present && !crate::lessons_store::list_lessons().is_empty(),
     };
     reconcile_codex_agents_md(set, user_title, locale)
