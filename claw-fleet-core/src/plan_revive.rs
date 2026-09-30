@@ -159,6 +159,9 @@ struct StateFile {
     plans: BTreeMap<String, PlanReviveState>,
     /// Set while the reviver is held back by an account-level error.
     pause: Option<RevivePause>,
+    /// When the last pass ran, across every host process. A gap far beyond
+    /// [`PASS_INTERVAL_MS`] means the machine slept (or no host ran).
+    last_pass_ms: Option<u64>,
 }
 
 /// Why the reviver stopped spawning, and the card asking the boss to resume.
@@ -1397,6 +1400,37 @@ fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
 /// ~5 s wall in a debug build over 18 candidate plans), and the grace window
 /// is 30 minutes, so the 30 s ticker cadence would be pure waste.
 const PASS_INTERVAL_MS: u64 = 5 * 60 * 1000;
+/// A gap between passes longer than this is read as the machine asleep.
+const SLEEP_GAP_MS: u64 = 3 * PASS_INTERVAL_MS;
+
+/// Stop the orphan clocks for the time nobody could have worked: the whole
+/// interval since the last pass when the machine is offline now, or the part
+/// of a sleep-sized gap beyond one pass interval. Pushing each
+/// `orphan_since_ms` forward by that much means a plan is revived only after
+/// [`ORPHAN_GRACE_MS`] of time its owner could have used. Until this, a Mac
+/// waking from an hour of sleep saw every orphan clock expired at once and
+/// revived a plan whose owner was only waiting for the network: 2026-09-25
+/// semgap-recount, predecessor 5f2a53c7 dead of ENOTFOUND at 08:47:51Z,
+/// replacement a1520529 woken at 09:52:31Z, 25 seconds after the lid opened.
+fn freeze_orphan_clocks(state: &mut StateFile, now: u64, online: bool) {
+    let gap = state.last_pass_ms.map_or(0, |t| now.saturating_sub(t));
+    state.last_pass_ms = Some(now);
+    let lost = if !online {
+        gap
+    } else if gap > SLEEP_GAP_MS {
+        gap - PASS_INTERVAL_MS
+    } else {
+        0
+    };
+    if lost == 0 {
+        return;
+    }
+    for st in state.plans.values_mut() {
+        if let Some(since) = st.orphan_since_ms.as_mut() {
+            *since = since.saturating_add(lost).min(now);
+        }
+    }
+}
 
 static LAST_PASS_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static PASS_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1499,6 +1533,15 @@ fn tick_locked(path: &Path) {
     // While paused nothing is decided, so every plan's clock and counters stay
     // where the pause found them.
     if views.is_empty() || paused {
+        state.last_pass_ms = Some(now);
+        write_state(path, &state, &views);
+        return;
+    }
+    // Offline, a revived session would die on its first request and the
+    // owner could not have worked either: stop the clocks and spawn nothing.
+    let online = crate::connectivity::is_online();
+    freeze_orphan_clocks(&mut state, now, online);
+    if !online {
         write_state(path, &state, &views);
         return;
     }
@@ -1590,6 +1633,7 @@ fn write_state(path: &Path, state: &StateFile, views: &[PlanView]) {
             .map(|(k, s)| (k.clone(), s.clone()))
             .collect(),
         pause: state.pause.clone(),
+        last_pass_ms: state.last_pass_ms,
     };
     match serde_json::to_vec_pretty(&kept) {
         Ok(bytes) => {
@@ -1723,6 +1767,35 @@ mod tests {
         );
         let ids: Vec<_> = v.iter().map(|v| v.plan_id.as_str()).collect();
         assert_eq!(ids, vec!["fresh"]);
+    }
+
+    #[test]
+    fn sleep_and_offline_time_do_not_count_toward_the_orphan_grace() {
+        let min = 60 * 1000;
+        let mut state = StateFile::default();
+        state.plans.insert("k".into(), PlanReviveState { orphan_since_ms: Some(0), ..Default::default() });
+        state.last_pass_ms = Some(10 * min);
+        // semgap-recount shape: orphaned, then an hour asleep. The first pass
+        // after waking must not find the grace already spent.
+        freeze_orphan_clocks(&mut state, 75 * min, true);
+        let since = state.plans["k"].orphan_since_ms.unwrap();
+        assert_eq!(since, 60 * min, "only one pass interval of the gap counts");
+        assert!(75 * min - since < ORPHAN_GRACE_MS);
+        // Normal cadence: the clock runs.
+        freeze_orphan_clocks(&mut state, 80 * min, true);
+        assert_eq!(state.plans["k"].orphan_since_ms, Some(60 * min));
+        // Offline: the whole interval is lost, and the clock never passes now.
+        freeze_orphan_clocks(&mut state, 85 * min, false);
+        assert_eq!(state.plans["k"].orphan_since_ms, Some(65 * min));
+        state.plans.get_mut("k").unwrap().orphan_since_ms = Some(88 * min);
+        freeze_orphan_clocks(&mut state, 90 * min, false);
+        assert_eq!(state.plans["k"].orphan_since_ms, Some(90 * min));
+        assert_eq!(state.last_pass_ms, Some(90 * min));
+        // First pass ever: nothing to measure.
+        let mut fresh = StateFile::default();
+        fresh.plans.insert("k".into(), PlanReviveState { orphan_since_ms: Some(0), ..Default::default() });
+        freeze_orphan_clocks(&mut fresh, 999 * min, true);
+        assert_eq!(fresh.plans["k"].orphan_since_ms, Some(0));
     }
 
     #[test]
@@ -2206,6 +2279,7 @@ mod tests {
         let st = StateFile {
             plans: BTreeMap::new(),
             pause: Some(RevivePause { since_ms: 1, session_id: "s".into(), reason: "403".into(), ..Default::default() }),
+            last_pass_ms: None,
         };
         let back: StateFile = serde_json::from_slice(&serde_json::to_vec(&st).unwrap()).unwrap();
         assert_eq!(back.pause, st.pause);

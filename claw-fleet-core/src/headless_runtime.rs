@@ -366,6 +366,19 @@ pub fn maybe_fire_auto_resume(
     if se_slots == 0 {
         return;
     }
+    // Offline, a retry dies on the same network error and spends one of the
+    // episode's retries: session 765f46e9 lost its budget to DarkWakes one
+    // night, every attempt `ENOTFOUND api.anthropic.com`. Hold the retries,
+    // uncounted, until the network is back. Probe only when one is due, and
+    // outside the session lock (the probe can take seconds).
+    let any_due = sessions
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|s| !s.proc_alive && crate::auto_resume::should_retry_server_error(s, &config));
+    if any_due && !crate::connectivity::is_online() {
+        return;
+    }
     let se_candidates: Vec<(String, String, String)> = {
         let sess = sessions.lock().unwrap();
         let mut fire_map = last_fire.lock().unwrap();
