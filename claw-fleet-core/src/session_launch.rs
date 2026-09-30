@@ -738,9 +738,8 @@ pub fn push_session_override_args(
 /// `claude -p "<prompt>" --session-id <uuid> [--model <m>] [--effort <e>]`
 /// detached in `workspace_path`. Returns as soon as the child is spawned; the
 /// session's JSONL will be created by the claude process itself and discovered
-/// by the scanner. The pre-assigned `--session-id` keeps the session id in the
-/// process argv, which is what lets the scanner attribute the pid to exactly
-/// this session (and detect its death) — see `resolve_pid` in session.rs.
+/// by the scanner. The pid lands in the session's launch note, which is how
+/// the scanner tells it is alive (`launch_spec::LaunchSpec::live_pid`).
 pub fn spawn_new_session(
     workspace_path: &str,
     prompt: &str,
@@ -894,6 +893,17 @@ pub(crate) fn spawn_new_session_impl(
         true, // tee stdout to a live-thinking sidecar
         |_success| {},
     )?;
+    crate::launch_spec::note_spawn(
+        &session_id,
+        crate::launch_spec::Spawn {
+            source: "claude",
+            kind: crate::launch_spec::SpawnKind::New,
+            workspace: workspace_path,
+            pid: Some(pid),
+            parent: None,
+            transcript: None,
+        },
+    );
     crate::log_debug(&format!(
         "new_session: spawned pid {} session {} in {}",
         pid, session_id, workspace_path

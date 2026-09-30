@@ -150,9 +150,6 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
     if let Some(ref thinking) = s.thinking_level {
         kv("Thinking:", thinking);
     }
-    if let Some(ref ide) = s.ide_name {
-        kv("IDE:", ide);
-    }
     kv("Subagent:", if s.is_subagent { "Yes" } else { "No" });
     if let Some(ref parent) = s.parent_session_id {
         kv("Parent Session:", short_id(parent));
@@ -262,10 +259,9 @@ pub(crate) fn cmd_interrupt(id_prefix: &str) {
 
     if !s.pid_precise {
         eprintln!(
-            "Error: multiple claude processes share workspace '{}', so the PID \
-             for {} is ambiguous — interrupting could abort another session's \
-             turn. Use `fleet stop` if you really mean to signal them all.",
-            s.workspace_name,
+            "Error: the PID on {} is not its own (a subagent reports its \
+             parent's, dsh its shared server's) — interrupting could abort \
+             another session's turn. Use `fleet stop` if you really mean it.",
             short_id(&s.id)
         );
         std::process::exit(1);
@@ -298,9 +294,10 @@ pub(crate) fn cmd_stop(id_prefix: &str, force: bool) {
 
     if !s.pid_precise {
         eprintln!(
-            "Warning: multiple claude processes share workspace '{}'. \
-             Stopping may affect other sessions in the same workspace.",
-            s.workspace_name
+            "Warning: the PID on {} is not its own (a subagent reports its \
+             parent's, dsh its shared server's). Stopping affects more than \
+             this session.",
+            short_id(&s.id)
         );
     }
 

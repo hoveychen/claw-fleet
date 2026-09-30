@@ -32,7 +32,11 @@ const CACHE_FILE_NAME: &str = "session-cache.json";
 // never runs for it. Verified on the live cloud container: after the fixed
 // binary shipped, `fleet agents` still printed `chat`, and deleting
 // `~/.fleet/session-cache.json` by hand was what made it print `Chat`.
-const CACHE_VERSION: u32 = 3;
+//
+// v4: `fleet_spawned` no longer grandfathers sessions older than the spawn
+// marker's cutoff — only a launch note counts.
+// v5: `ide_name` dropped from `SessionInfo`; the IDE lock scan is gone.
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -114,7 +118,6 @@ mod tests {
             id: id.into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,

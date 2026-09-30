@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::agent_source::{AgentSource, ResumeSpec, WatchStrategy};
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
-use crate::session::{get_claude_dir, CliProcess, SessionInfo, SessionStatus};
+use crate::session::{get_claude_dir, SessionInfo, SessionStatus};
 use crate::ui_types::SourceUsageSummary;
 
 /// The `agent_source` id stamped on every Claude Code session (see
@@ -88,15 +88,11 @@ impl AgentSource for ClaudeCodeSource {
         if projects.is_dir() {
             paths.push(projects);
         }
-        let ide = dir.join("ide");
-        if ide.is_dir() {
-            paths.push(ide);
-        }
         paths
     }
 
     fn trigger_extensions(&self) -> Vec<&'static str> {
-        vec!["jsonl", "lock"]
+        vec!["jsonl"]
     }
 
     fn fetch_account(&self) -> Result<Value, String> {
@@ -116,10 +112,6 @@ impl AgentSource for ClaudeCodeSource {
 
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         crate::session::kill_pid_impl(pid)
-    }
-
-    fn kill_workspace(&self, workspace_path: &str) -> Result<(), String> {
-        crate::session::kill_workspace_impl(workspace_path)
     }
 
     fn list_memories(&self) -> Vec<WorkspaceMemory> {
@@ -187,19 +179,15 @@ impl AgentSource for ClaudeCodeSource {
 /// CLI process set. Split from [`refresh_dead_claude_liveness`] so tests can
 /// inject a synthetic process slice instead of scanning the real table. Returns
 /// true iff any session was clamped.
-fn reconcile_claude_liveness(sessions: &mut [SessionInfo], processes: &[CliProcess]) -> bool {
+fn reconcile_claude_liveness(sessions: &mut [SessionInfo], alive: &dyn Fn(&str) -> bool) -> bool {
     let mut changed = false;
     for s in sessions.iter_mut() {
         if s.agent_source != FLEET_AGENT_SOURCE_CLAUDE || !s.proc_alive {
             continue;
         }
-        // Still alive? A live CLI process whose argv names exactly this session
-        // id — the same signal `apply_pid_liveness` stamps `proc_alive` from. A
-        // session id is globally unique, so this needs no cwd filter.
-        if processes
-            .iter()
-            .any(|p| p.resume_session_id.as_deref() == Some(s.id.as_str()))
-        {
+        // Still alive? The process Fleet spawned for this session — the same
+        // signal `apply_pid_liveness` stamps `proc_alive` from.
+        if alive(&s.id) {
             continue;
         }
         s.proc_alive = false;
@@ -265,8 +253,7 @@ pub fn refresh_dead_claude_liveness(sessions: &mut [SessionInfo]) -> bool {
     {
         return false;
     }
-    let processes = crate::session::scan_cli_processes();
-    reconcile_claude_liveness(sessions, &processes)
+    reconcile_claude_liveness(sessions, &|id| crate::launch_spec::live_pid(id).is_some())
 }
 
 #[cfg(test)]
@@ -282,16 +269,6 @@ mod liveness_tests {
         s
     }
 
-    fn proc(session_id: &str) -> CliProcess {
-        CliProcess {
-            pid: 1,
-            ppid: None,
-            cwd: "/w".into(),
-            resume_session_id: Some(session_id.to_string()),
-            headless: true,
-        }
-    }
-
     #[test]
     fn clamps_dead_claude_session_and_preserves_rate_limited() {
         // A rate-limited Claude session whose process has exited: proc_alive must
@@ -304,7 +281,7 @@ mod liveness_tests {
             true,
         )];
         // No process names this session → it is gone.
-        assert!(reconcile_claude_liveness(&mut sessions, &[]));
+        assert!(reconcile_claude_liveness(&mut sessions, &|_| false));
         assert!(!sessions[0].proc_alive, "dead session proc_alive cleared");
         assert_eq!(
             sessions[0].status,
@@ -321,7 +298,7 @@ mod liveness_tests {
             SessionStatus::Thinking,
             true,
         )];
-        assert!(reconcile_claude_liveness(&mut sessions, &[]));
+        assert!(reconcile_claude_liveness(&mut sessions, &|_| false));
         assert!(!sessions[0].proc_alive);
         assert_eq!(sessions[0].status, SessionStatus::Idle);
     }
@@ -335,7 +312,7 @@ mod liveness_tests {
             true,
         )];
         // A live process names this session → still running.
-        assert!(!reconcile_claude_liveness(&mut sessions, &[proc("alive")]));
+        assert!(!reconcile_claude_liveness(&mut sessions, &|id| id == "alive"));
         assert!(sessions[0].proc_alive);
     }
 
@@ -343,7 +320,7 @@ mod liveness_tests {
     fn ignores_non_claude_sources() {
         // A codex session with a stale flag must be left to the codex reconciler.
         let mut sessions = vec![mk("codex-dead", "codex", SessionStatus::Thinking, true)];
-        assert!(!reconcile_claude_liveness(&mut sessions, &[]));
+        assert!(!reconcile_claude_liveness(&mut sessions, &|_| false));
         assert!(
             sessions[0].proc_alive,
             "codex session left for its own path"

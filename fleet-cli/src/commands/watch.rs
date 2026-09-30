@@ -184,31 +184,14 @@ fn create(
         );
         std::process::exit(2);
     }
-    // IDE / interactive session guard: resuming a session that is open in an IDE
-    // headlessly (`claude --resume -p`) spawns a SECOND process on the same
-    // session id — the exact hazard auto-resume refuses. A full scan (one-time,
-    // at registration) is the authoritative signal: `SessionInfo.ide_name` is
-    // Some only for IDE-attached, non-Fleet-owned sessions — Fleet's own headless
-    // spawns have it stripped (`strip_ide_name_from_fleet_spawns`). Allow on a
-    // scan miss: a just-spawned session may not be scannable yet, and blocking a
-    // legitimate headless session is worse than missing a rare IDE edge case.
     let sources = claw_fleet_core::agent_source::build_sources();
     let sessions = claw_fleet_core::session::scan_all_sources(&sources);
-    if let Some(ide) = ide_block_reason(&sid, &sessions) {
-        eprintln!(
-            "Error: this session is attached to {ide}; resuming it headlessly \
-             would spawn a duplicate process on the same session id. `fleet \
-             watch` is for headless Fleet sessions — the interactive one stays \
-             alive across turns and doesn't need it."
-        );
-        std::process::exit(2);
-    }
 
     // An explicitly named id has to exist: a typo would register a watch whose
     // fire resumes nothing, and the failure would only surface hours later when
-    // the condition fired. The env path stays permissive on a scan miss for the
-    // reason above (a just-spawned session may not be scannable yet) — there the
-    // id came from the harness itself, not from a hand-typed flag.
+    // the condition fired. The env path stays permissive on a scan miss (a
+    // just-spawned session may not be scannable yet) — there the id came from
+    // the harness itself, not from a hand-typed flag.
     if explicit.is_some() && !sessions.iter().any(|s| s.id == sid) {
         eprintln!(
             "Error: no session with id {sid} was found on this machine, so a watch \
@@ -344,49 +327,9 @@ fn explicit_sid(session: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The IDE a session is attached to, if any — the reason to refuse registering a
-/// watch on it. Pure over a scanned session list so the guard is testable without
-/// a live scan. Returns `None` when the session isn't found (allow — never
-/// false-refuse a headless session that hasn't been scanned yet) or when its
-/// `ide_name` is `None` (a headless / Fleet-owned session, safe to resume).
-fn ide_block_reason(
-    sid: &str,
-    sessions: &[claw_fleet_core::session::SessionInfo],
-) -> Option<String> {
-    sessions
-        .iter()
-        .find(|s| s.id == sid)
-        .and_then(|s| s.ide_name.clone())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claw_fleet_core::session::SessionInfo;
-
-    fn sess(id: &str, ide: Option<&str>) -> SessionInfo {
-        SessionInfo {
-            id: id.to_string(),
-            ide_name: ide.map(str::to_string),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn ide_attached_session_is_blocked() {
-        let sessions = vec![sess("s1", Some("Visual Studio Code"))];
-        assert_eq!(
-            ide_block_reason("s1", &sessions).as_deref(),
-            Some("Visual Studio Code")
-        );
-    }
-
-    #[test]
-    fn headless_session_is_allowed() {
-        // ide_name None ⇒ headless / Fleet-owned (stripped) ⇒ resumable
-        let sessions = vec![sess("s1", None)];
-        assert_eq!(ide_block_reason("s1", &sessions), None);
-    }
 
     #[test]
     fn blank_session_flag_falls_back_to_the_env() {
@@ -398,10 +341,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_scan_miss_allows_rather_than_false_refuses() {
-        // the registering session isn't in the scan (too fresh) — must not block
-        let sessions = vec![sess("other", Some("Cursor"))];
-        assert_eq!(ide_block_reason("s1", &sessions), None);
-    }
 }

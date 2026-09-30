@@ -229,38 +229,6 @@ pub(crate) fn route_stop(
     }
 }
 
-pub(crate) fn route_stop_workspace(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    let path_param = query
-        .get("path")
-        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-        .unwrap_or_default();
-    if path_param.is_empty() {
-        let _ = request.respond(tiny_http::Response::empty(400));
-        return;
-    }
-    match crate::session::kill_workspace_impl(&path_param) {
-        Ok(()) => {
-            let _ = request.respond(
-                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
-            );
-        }
-        Err(e) => {
-            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
-            let _ = request.respond(
-                tiny_http::Response::from_string(body)
-                    .with_status_code(500)
-                    .with_header(json_header),
-            );
-        }
-    }
-}
-
 pub(crate) fn route_sources_prefix(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -507,7 +475,7 @@ pub(crate) fn route_setup_status(
     let sources = ctx.sources;
 
     let sessions = ctx.snapshot.sessions();
-    let detected_tools = crate::detect_installed_tools(&sessions);
+    let detected_tools = crate::detect_installed_tools();
     let (cli_installed, cli_path) = crate::check_cli_installed();
     let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
     let logged_in = crate::account::read_keychain_credentials().is_ok();

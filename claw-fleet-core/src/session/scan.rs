@@ -2,12 +2,9 @@ use super::*;
 
 // ── Scan cache ───────────────────────────────────────────────────────────────
 
-/// Caches expensive operations across rescans: process-table lookups and
-/// already-parsed session files whose mtime hasn't changed.
+/// Caches expensive operations across rescans: already-parsed session files
+/// whose mtime hasn't changed.
 pub struct ScanCache {
-    /// Cached `scan_cli_processes()` result + timestamp.
-    /// `None` timestamp = never scanned, force refresh on first read.
-    pub process_cache: Mutex<(Option<Instant>, Vec<CliProcess>)>,
     /// JSONL path → (mtime_ms, SessionInfo).
     pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
     /// JSONL path → how far that transcript has been folded, plus the running
@@ -45,7 +42,6 @@ impl ScanCache {
         // subtraction panics on Windows runners with low uptime
         // ("overflow when subtracting duration from instant").
         Self {
-            process_cache: Mutex::new((None, Vec::new())),
             session_cache: Mutex::new(crate::scan_cache_disk::load()),
             incr_cache: Mutex::new(HashMap::new()),
             last_persisted_at: Mutex::new(None),
@@ -299,22 +295,89 @@ fn touched_within_keep_window(path: &Path) -> bool {
     now_ms.saturating_sub(modified_ms) <= MISSING_WS_KEEP_MS
 }
 
+/// A registered Claude session whose transcript was found.
+struct RegisteredTranscript {
+    id: String,
+    transcript: PathBuf,
+    workspace: Option<String>,
+    /// The spawned process, while it runs ([`crate::launch_spec::LaunchSpec::live_pid`]).
+    live_pid: Option<u32>,
+}
+
+/// How long after a spawn a note with no transcript on record is still worth
+/// searching every project dir for. Past that, the spawn never wrote one.
+const TRANSCRIPT_SEARCH_WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// The transcripts of every Claude session in the launch registry, grouped by
+/// project dir.
+///
+/// A note's stored transcript is trusted when the file exists; one that is
+/// gone was cleaned up and is not looked for again. A note with none on record
+/// is resolved from its workspace (`projects/<encoded>/<id>.jsonl`), and, while
+/// the spawn is recent, by searching the project dirs — the encoding of a
+/// long workspace path is a hash only Claude Code knows. A found path is
+/// written back so the next scan is a single `stat`.
+fn registered_claude_transcripts(
+    projects_dir: &Path,
+) -> std::collections::BTreeMap<PathBuf, Vec<RegisteredTranscript>> {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let name_of = |id: &str| format!("{id}.jsonl");
+    let mut groups: std::collections::BTreeMap<PathBuf, Vec<RegisteredTranscript>> =
+        Default::default();
+    for (id, spec) in crate::launch_spec::registry() {
+        if spec.source.as_deref() != Some("claude") {
+            continue;
+        }
+        let found = match spec.transcript.as_deref() {
+            Some(stored) => Some(PathBuf::from(stored)).filter(|p| p.is_file()),
+            None => {
+                let guessed = spec
+                    .workspace
+                    .as_deref()
+                    .map(|w| projects_dir.join(encode_workspace_path(w)).join(name_of(&id)))
+                    .filter(|p| p.is_file());
+                let recent = spec
+                    .last_spawn_at_ms
+                    .is_some_and(|t| now_ms.saturating_sub(t) <= TRANSCRIPT_SEARCH_WINDOW_MS);
+                let found = guessed.or_else(|| {
+                    recent
+                        .then(|| {
+                            fs::read_dir(projects_dir)
+                                .ok()?
+                                .flatten()
+                                .map(|e| e.path().join(name_of(&id)))
+                                .find(|p| p.is_file())
+                        })
+                        .flatten()
+                });
+                if let Some(p) = &found {
+                    crate::launch_spec::note_transcript(&id, &p.to_string_lossy());
+                }
+                found
+            }
+        };
+        let Some(transcript) = found else {
+            continue;
+        };
+        let Some(dir) = transcript.parent().map(Path::to_path_buf) else {
+            continue;
+        };
+        let live_pid = spec.live_pid();
+        groups.entry(dir).or_default().push(RegisteredTranscript {
+            id,
+            transcript,
+            workspace: spec.workspace,
+            live_pid,
+        });
+    }
+    groups
+}
+
 pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
-    let ide_sessions = scan_ide_sessions(claude_dir);
-
-    // Reuse cached process list if fresh (< 10 s).
-    let cli_processes = {
-        let mut guard = scan_cache.process_cache.lock().unwrap();
-        let stale = guard
-            .0
-            .map_or(true, |t| t.elapsed() > Duration::from_secs(10));
-        if stale {
-            guard.1 = scan_cli_processes();
-            guard.0 = Some(Instant::now());
-        }
-        guard.1.clone()
-    };
 
     // One pass over hooks.jsonl yields both the state map and the outstanding
     // background tasks — the file is huge, so the scan must not read it twice.
@@ -322,18 +385,15 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     let hook_states = &hook_snapshot.states;
     let session_cache_snapshot = scan_cache.session_cache.lock().unwrap().clone();
 
+    // Only the sessions Fleet started are listed: walk the launch registry,
+    // not `projects/`. A `claude` the user opened by hand has no note and is
+    // never read.
     let projects_dir = claude_dir.join("projects");
-    let Ok(workspace_entries) = fs::read_dir(&projects_dir) else {
-        return sessions;
-    };
+    let groups = registered_claude_transcripts(&projects_dir);
     // Every slug below decodes against the filesystem; list each level once.
     let _sweep = super::paths::DecodeSweep::begin();
 
-    for workspace_entry in workspace_entries.flatten() {
-        let workspace_dir = workspace_entry.path();
-        if !workspace_dir.is_dir() {
-            continue;
-        }
+    for (workspace_dir, members) in groups {
 
         let encoded = workspace_dir
             .file_name()
@@ -341,28 +401,14 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             .unwrap_or_default()
             .to_string();
 
-        // Find associated IDE session by encoding the lock file paths and comparing to the
-        // directory name directly.  This avoids the lossy decode round-trip: a workspace named
-        // "claw-fleet" encodes to "-Users-…-claw-fleet" but decodes to "/Users/…/claw/fleet".
-        let ide = ide_sessions.iter().find(|ide| {
-            ide.workspace_folders
-                .iter()
-                .any(|f| encode_workspace_path(f) == encoded)
-        });
-
-        // Use the exact path from the lock file when available; fall back to the
-        // lossy decode, healed against the transcripts' own `cwd` when it names
-        // nothing on disk (issue #105 — see `heal_workspace_path`). An IDE
-        // holding the folder open used to be the only thing keeping such a
-        // workspace correct here, so closing the editor was enough to poison the
-        // cache with a shredded path and break every later resume.
-        let workspace_path = ide
-            .and_then(|s| {
-                s.workspace_folders
-                    .iter()
-                    .find(|f| encode_workspace_path(f) == encoded)
-            })
-            .cloned()
+        // The workspace Fleet spawned in is exact; fall back to the lossy
+        // decode, healed against the transcripts' own `cwd` when it names
+        // nothing on disk (issue #105 — see `heal_workspace_path`).
+        let workspace_path = members
+            .iter()
+            .filter_map(|m| m.workspace.as_deref())
+            .find(|w| encode_workspace_path(w) == encoded)
+            .map(str::to_string)
             .unwrap_or_else(|| {
                 heal_workspace_path(&workspace_dir, decode_workspace_path(&encoded))
             });
@@ -387,23 +433,21 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         let workspace_missing = !crate::tcc::is_tcc_protected(ws_path) && !ws_path.is_dir();
 
         let ws_name = workspace_name(&workspace_path);
-        let ide_name = ide.map(|s| s.ide_name.clone());
 
-        // Collect all CLI processes for this workspace (may be >1 when subagents are running).
-        // PID: use Claude CLI process only (not the IDE PID — killing the IDE PID would
-        // terminate the editor itself, not just the Claude session).
-        let procs_in_cwd: Vec<CliProcess> = cli_processes
+        // Liveness is the launch note's pid (and its start time), per session.
+        let live_pids: HashMap<&str, u32> = members
             .iter()
-            .filter(|p| same_workspace_path(&p.cwd, &workspace_path))
-            .cloned()
+            .filter_map(|m| Some((m.id.as_str(), m.live_pid?)))
             .collect();
 
-        let Ok(entries) = fs::read_dir(&workspace_dir) else {
-            continue;
-        };
+        // Each registered session's transcript, then its subagent dir
+        // (`<id>/subagents/…`), which the loop below tells apart by kind.
+        let paths: Vec<PathBuf> = members
+            .iter()
+            .flat_map(|m| [m.transcript.clone(), workspace_dir.join(&m.id)])
+            .collect();
 
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in paths {
 
             // Workspace gone: keep only transcripts still being written to.
             if workspace_missing && !touched_within_keep_window(&path) {
@@ -418,12 +462,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     .unwrap_or_default()
                     .to_string();
 
-                let (session_pid, pid_precise) = resolve_pid(&procs_in_cwd, &session_id);
-                // Definitive liveness signal for Fleet-spawned sessions: a
-                // live process whose argv names exactly this session id.
-                let exact_proc_alive = procs_in_cwd
-                    .iter()
-                    .any(|p| p.resume_session_id.as_deref() == Some(session_id.as_str()));
+                // The process Fleet spawned for exactly this session: its pid
+                // is always precise, and its liveness is the definitive signal.
+                let session_pid = live_pids.get(session_id.as_str()).copied();
+                let pid_precise = session_pid.is_some();
+                let exact_proc_alive = session_pid.is_some();
 
                 // Try session cache first (skip re-reading unchanged files).
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
@@ -450,7 +493,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         .unwrap_or_default();
                     info.pid = session_pid;
                     info.pid_precise = pid_precise;
-                    info.ide_name = ide_name.clone();
                     sessions.push(info);
                 } else {
                     let key = path.to_string_lossy().to_string();
@@ -465,7 +507,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         session_id.clone(),
                         workspace_path.clone(),
                         ws_name.clone(),
-                        ide_name.clone(),
                         false,
                         None,
                         None,
@@ -567,9 +608,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     let meta_model = meta.as_ref().and_then(|m| m.model.clone());
                     let meta_thinking_level = meta.and_then(|m| m.thinking_level.clone());
 
-                    // Subagents share the parent's PID resolution; never precise on their own
-                    // since we can't kill just the subagent independently.
-                    let (sub_pid, _) = resolve_pid(&procs_in_cwd, &parent_session_id);
+                    // Subagents run in the parent's process; never precise on their
+                    // own since we can't kill just the subagent independently.
+                    let sub_pid = live_pids.get(parent_session_id.as_str()).copied();
 
                     // Try session cache first for subagents too.
                     if let Some((mut info, age)) =
@@ -581,7 +622,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         info.workspace_name = ws_name.clone();
                         info.pid = sub_pid;
                         info.pid_precise = false;
-                        info.ide_name = ide_name.clone();
                         sessions.push(info);
                     } else {
                         let key = agent_path.to_string_lossy().to_string();
@@ -594,7 +634,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                             agent_id.clone(),
                             workspace_path.clone(),
                             ws_name.clone(),
-                            ide_name.clone(),
                             true,
                             Some(parent_session_id.clone()),
                             agent_type,
@@ -619,8 +658,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             }
         }
     }
-
-    strip_ide_name_from_fleet_spawns(&mut sessions);
 
     promote_delegating_parents(&mut sessions);
     aggregate_subagent_rollup(&mut sessions);
@@ -848,7 +885,6 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         id: id.into(),
         workspace_path: "/ws".into(),
         workspace_name: "ws".into(),
-        ide_name: None,
         entrypoint: None,
         is_subagent: false,
         fleet_spawned: false,

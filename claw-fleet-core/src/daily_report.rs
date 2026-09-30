@@ -1832,7 +1832,6 @@ fn make_session_info_for_date(
         id: session_id,
         workspace_path: workspace_path.to_string(),
         workspace_name: workspace_name.to_string(),
-        ide_name: None,
         entrypoint: None,
         is_subagent,
         // Reporting projection with no entrypoint — never a launchpad task.
@@ -2741,7 +2740,6 @@ mod tests {
             id: "s1".to_string(),
             workspace_path: "/project-a".to_string(),
             workspace_name: "project-a".to_string(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
@@ -2800,7 +2798,6 @@ mod tests {
             id: "s2".to_string(),
             workspace_path: "/project-b".to_string(),
             workspace_name: "project-b".to_string(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: true,
             fleet_spawned: false,

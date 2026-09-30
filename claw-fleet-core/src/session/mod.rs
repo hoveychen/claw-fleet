@@ -9,23 +9,6 @@ use serde_json::Value;
 
 use crate::hooks::HookState;
 
-// ── Lock file ────────────────────────────────────────────────────────────────
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct LockFile {
-    pub pid: u32,
-    #[serde(rename = "workspaceFolders", default)]
-    pub workspace_folders: Vec<String>,
-    #[serde(rename = "ideName", default)]
-    pub ide_name: String,
-}
-
-pub struct IdeSession {
-    pub pid: u32,
-    pub workspace_folders: Vec<String>,
-    pub ide_name: String,
-}
-
 // ── Exported types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -102,7 +85,6 @@ pub struct SessionInfo {
     pub id: String,
     pub workspace_path: String,
     pub workspace_name: String,
-    pub ide_name: Option<String>,
     /// Launch identity persisted by the Claude CLI into every `user` record
     /// (from the `CLAUDE_CODE_ENTRYPOINT` env var at spawn time): "cli",
     /// "claude-vscode", `session_launch::NEW_SESSION_ENTRYPOINT`, … Taken
@@ -117,16 +99,13 @@ pub struct SessionInfo {
     /// Fleet-spawned session inherits `CLAUDE_CODE_ENTRYPOINT` from the parent's
     /// environment, so its transcript looks Fleet-owned on disk even though
     /// Fleet never launched it. This is the ground truth: `true` iff Fleet left a
-    /// spawn marker for this id (see [`crate::launch_spec::was_fleet_spawned`]),
-    /// or the session predates the marker feature and is grandfathered in.
+    /// launch note for this id (see [`crate::launch_spec::was_fleet_spawned`]).
     /// The Tasks/launchpad list ANDs this with the entrypoint check so leaked
     /// `claude -p` children stop showing up as Fleet tasks.
     ///
     /// `#[serde(default)]`: payloads predating this field (a stale disk-cache
     /// entry, an older `fleet serve` over the wire) deserialize to `false`
-    /// rather than erroring. The disk cache additionally bumps `CACHE_VERSION`
-    /// so grandfathered sessions re-parse instead of being pinned to that
-    /// default.
+    /// rather than erroring.
     #[serde(default)]
     pub fleet_spawned: bool,
     pub parent_session_id: Option<String>,
@@ -760,45 +739,11 @@ mod tests {
         assert!(!detect_server_error(&[user_msg(), wrong_model]));
     }
 
-    #[test]
-    fn ide_badge_stays_off_fleet_spawned_sessions() {
-        // A VS Code lock in the workspace must not decorate (or auto-resume-
-        // exclude) launchpad/handoff headless sessions that merely share the
-        // cwd; genuinely interactive sessions keep the badge.
-        let mut vscode = make_session(SessionStatus::Idle);
-        vscode.entrypoint = Some("claude-vscode".into());
-        vscode.ide_name = Some("Visual Studio Code".into());
-        let mut launchpad = make_session(SessionStatus::Idle);
-        launchpad.entrypoint = Some(crate::session_launch::NEW_SESSION_ENTRYPOINT.into());
-        launchpad.ide_name = Some("Visual Studio Code".into());
-        let mut handoff = make_session(SessionStatus::Idle);
-        handoff.entrypoint = Some(crate::handoff::HANDOFF_ENTRYPOINT.into());
-        handoff.ide_name = Some("Visual Studio Code".into());
-
-        let mut sessions = vec![vscode, launchpad, handoff];
-        strip_ide_name_from_fleet_spawns(&mut sessions);
-
-        assert_eq!(
-            sessions[0].ide_name.as_deref(),
-            Some("Visual Studio Code"),
-            "interactive IDE session must keep its badge"
-        );
-        assert_eq!(
-            sessions[1].ide_name, None,
-            "launchpad-spawned session must not inherit the workspace IDE badge"
-        );
-        assert_eq!(
-            sessions[2].ide_name, None,
-            "handoff-spawned session must not inherit the workspace IDE badge"
-        );
-    }
-
     fn make_session(status: SessionStatus) -> SessionInfo {
         SessionInfo {
             id: "test-session".into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
@@ -1710,7 +1655,6 @@ mod tests {
             "sid".to_string(),
             "/tmp/ws".to_string(),
             "ws".to_string(),
-            None,
             false,
             None,
             None,
@@ -1831,7 +1775,6 @@ mod tests {
             id.to_string(),
             "/tmp/ws".to_string(),
             "ws".to_string(),
-            None,
             false,
             None,
             None,
@@ -2641,12 +2584,6 @@ mod tests {
         assert_eq!(s.status, SessionStatus::Thinking);
     }
 
-    // ── resolve_pid tests ───────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_pid_empty() {
-        assert_eq!(resolve_pid(&[], "sess1"), (None, false));
-    }
 
     fn argv(args: &[&str]) -> Vec<std::ffi::OsString> {
         args.iter().map(std::ffi::OsString::from).collect()
@@ -2730,83 +2667,6 @@ mod tests {
         // not be treated as headless, or we'd block turns we know nothing about.
         assert!(!is_headless_session_in(&procs, "who-dis"));
         assert!(!is_headless_session_in(&[], "headless-one"));
-    }
-
-    #[test]
-    fn resolve_pid_exact_resume_match() {
-        let procs = vec![
-            CliProcess {
-                pid: 100,
-                ppid: None,
-                cwd: "/tmp".into(),
-                resume_session_id: Some("sess1".into()),
-                headless: false,
-            },
-            CliProcess {
-                pid: 200,
-                ppid: None,
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-        ];
-        assert_eq!(resolve_pid(&procs, "sess1"), (Some(100), true));
-    }
-
-    #[test]
-    fn resolve_pid_single_process() {
-        let procs = vec![CliProcess {
-            pid: 42,
-            ppid: None,
-            cwd: "/tmp".into(),
-            resume_session_id: None,
-            headless: false,
-        }];
-        assert_eq!(resolve_pid(&procs, "other"), (Some(42), true));
-    }
-
-    #[test]
-    fn resolve_pid_parent_child_filtering() {
-        let procs = vec![
-            CliProcess {
-                pid: 100,
-                ppid: Some(1),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-            CliProcess {
-                pid: 200,
-                ppid: Some(100),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-        ];
-        assert_eq!(resolve_pid(&procs, "any"), (Some(100), true));
-    }
-
-    #[test]
-    fn resolve_pid_multiple_roots_imprecise() {
-        let procs = vec![
-            CliProcess {
-                pid: 100,
-                ppid: Some(1),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-            CliProcess {
-                pid: 200,
-                ppid: Some(2),
-                cwd: "/tmp".into(),
-                resume_session_id: None,
-                headless: false,
-            },
-        ];
-        let (pid, precise) = resolve_pid(&procs, "any");
-        assert!(pid.is_some());
-        assert!(!precise);
     }
 
     // ── workspace_name / encode / decode tests ──────────────────────────────
@@ -3629,6 +3489,9 @@ mod tests {
             Some(SystemTime::now() - Duration::from_secs(30 * 24 * 3600)),
         );
 
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        register_claude(live_id, &projects.join(&live_encoded));
+        register_claude(gone_id, &projects.join(&gone_encoded));
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -3687,6 +3550,8 @@ mod tests {
         let us_id = "33333333-3333-3333-3333-333333333333";
         write_session(&projects.join(&us_encoded), us_id);
 
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        register_claude(us_id, &projects.join(&us_encoded));
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -3764,6 +3629,9 @@ mod tests {
             SystemTime::now() - Duration::from_secs(30 * 24 * 3600),
         );
 
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        register_claude(live_id, &gone_dir);
+        register_claude(zombie_id, &gone_dir);
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -3777,6 +3645,80 @@ mod tests {
         assert!(
             !ids.contains(&zombie_id),
             "a long-dead transcript of a removed worktree must stay hidden: {ids:?}"
+        );
+    }
+
+    /// Note a Claude session in the launch registry the way a Fleet spawn
+    /// does, with its transcript at `<proj_dir>/<id>.jsonl`.
+    fn register_claude(id: &str, proj_dir: &std::path::Path) {
+        let transcript = proj_dir.join(format!("{id}.jsonl"));
+        crate::launch_spec::note_spawn(
+            id,
+            crate::launch_spec::Spawn {
+                source: "claude",
+                kind: crate::launch_spec::SpawnKind::New,
+                workspace: "",
+                pid: None,
+                parent: None,
+                transcript: Some(&transcript.to_string_lossy()),
+            },
+        );
+    }
+
+    /// The point of the launch registry: a `claude` the user opened by hand
+    /// writes a transcript like any other, but has no note, so the scan never
+    /// lists it. A Fleet session's subagents are listed with it although they
+    /// have no note of their own.
+    #[test]
+    fn scan_lists_only_registered_sessions_and_their_subagents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_dir = tmp.path().join("claude_home");
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let proj = claude_dir
+            .join("projects")
+            .join(super::paths::encode_workspace_path(&ws.to_string_lossy()));
+        let line = json!({
+            "type": "user",
+            "message": {"role": "user", "content": "hi"},
+            "timestamp": "2026-09-30T00:00:00.000Z"
+        });
+        let fleet_id = "66666666-6666-6666-6666-666666666666";
+        let hand_id = "77777777-7777-7777-7777-777777777777";
+        let sub_dir = proj.join(fleet_id).join("subagents");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::create_dir_all(proj.join(hand_id).join("subagents")).unwrap();
+        for p in [
+            proj.join(format!("{fleet_id}.jsonl")),
+            proj.join(format!("{hand_id}.jsonl")),
+            sub_dir.join("agent-a1.jsonl"),
+            proj.join(hand_id).join("subagents").join("agent-b1.jsonl"),
+        ] {
+            fs::write(&p, format!("{line}\n")).unwrap();
+        }
+
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("fleet_home"));
+        // Registered with only a workspace: the transcript is found from it
+        // and written back to the note.
+        crate::launch_spec::note_spawn(
+            fleet_id,
+            crate::launch_spec::Spawn {
+                source: "claude",
+                kind: crate::launch_spec::SpawnKind::New,
+                workspace: &ws.to_string_lossy(),
+                pid: None,
+                parent: None,
+                transcript: None,
+            },
+        );
+        let sessions = scan_claude_sessions(&claude_dir, &ScanCache::new());
+        let mut ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec![fleet_id, "agent-a1"], "only the Fleet session and its subagent");
+        assert_eq!(
+            crate::launch_spec::get(fleet_id).and_then(|s| s.transcript),
+            Some(proj.join(format!("{fleet_id}.jsonl")).to_string_lossy().into_owned()),
+            "the transcript a scan found is written back to the note"
         );
     }
 }

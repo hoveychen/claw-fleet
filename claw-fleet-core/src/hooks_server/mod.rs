@@ -1204,13 +1204,6 @@ fn handle_request(
 
             crate::routes::STOP => route_stop(ctx, request, &query, json_header, path),
 
-            // `/stop_workspace` kills every agent process (and its tree) rooted
-            // in a workspace, for clients whose pid is imprecise. `?path=` is
-            // percent-encoded (slashes as %2F).
-            crate::routes::STOP_WORKSPACE => {
-                route_stop_workspace(ctx, request, &query, json_header, path)
-            }
-
             // ── Host settings the Settings panel reads and writes ────────────
             // GET returns the current config, POST saves it (side effects
             // included) and answers with the stored value. The desktop reads

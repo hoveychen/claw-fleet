@@ -720,13 +720,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { id: q(a.id), force: q(a.force) },
   }),
 
-  kill_workspace_sessions: (a) => ({
-    method: "GET",
-    path: "/stop_workspace",
-    empty: true,
-    query: { path: q(a.workspacePath) },
-  }),
-
   list_browse_paths: () => ({
     method: "GET",
     path: "/browse_paths",

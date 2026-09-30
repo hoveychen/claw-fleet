@@ -575,6 +575,14 @@ impl LocalBackend {
                             if !all_trigger_exts.contains(ext) {
                                 continue;
                             }
+                            // Only Fleet's own sessions are listed, so a
+                            // transcript no launch note claims is not worth a
+                            // rescan (a `claude` the user runs by hand).
+                            if matches!(ext, "jsonl" | "zst")
+                                && !claw_fleet_core::launch_spec::transcript_path_is_registered(path)
+                            {
+                                continue;
+                            }
 
                             // Mark only the source(s) whose watch dirs contain this path.
                             for (idx, dirs) in &source_watch_dirs {
@@ -2229,20 +2237,6 @@ impl LocalBackend {
         Ok(())
     }
 
-    pub fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
-        claw_fleet_core::session::kill_workspace_impl(&workspace_path)?;
-        // Trigger a rescan after a delay.
-        let app = self.app.clone();
-        let sessions = self.sessions.clone();
-        let sources = self.sources.clone();
-        let outcomes = self.session_outcomes.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(500));
-            rescan_and_emit(&sources, &app, &sessions, &outcomes);
-        });
-        Ok(())
-    }
-
     pub fn resume_session(
         &self,
         session_id: String,
@@ -2615,7 +2609,7 @@ impl LocalBackend {
             .map(|d| d.is_dir())
             .unwrap_or(false);
         let sessions = self.sessions.lock().unwrap().clone();
-        let detected_tools = crate::detect_installed_tools(&sessions);
+        let detected_tools = crate::detect_installed_tools();
         let logged_in = crate::account::read_keychain_credentials().is_ok();
         let has_sessions = !sessions.is_empty();
 
@@ -4649,7 +4643,6 @@ mod tests {
             id: id.into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             parent_session_id: None,

@@ -55,9 +55,6 @@ export function InspectModal({ session, onClose }: Props) {
             )}
           </div>
           <div className={styles.header_right}>
-            {session.ideName && (
-              <span className={styles.ide}>{session.ideName}</span>
-            )}
             <span className={styles.tokens}>
               {session.totalOutputTokens.toLocaleString()} {t("tokens_out")}
             </span>

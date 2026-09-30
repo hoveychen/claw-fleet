@@ -46,6 +46,65 @@ pub struct LaunchSpec {
     /// parse — they simply report no entrypoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
+
+    // Everything below is written by [`note_spawn`], so the record alone can
+    // answer which sessions Fleet started, where, and whether they still run —
+    // no directory walk or process-table scan needed. All optional: notes
+    // written before these fields existed parse and are filled in by
+    // [`note_spawn`] on the next resume, or by [`note_transcript`] once a scan
+    // finds the transcript.
+    /// The agent CLI: `"claude"`, `"codex"` or `"dsh"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The workspace directory the latest spawn ran in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Where the session's transcript lives. Stored rather than derived: Claude
+    /// Code hashes project-dir names over 200 characters with a
+    /// runtime-dependent hash, and Codex dates its rollout paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<String>,
+    /// The latest spawn's process id, `None` when the agent does not run in a
+    /// process of its own (dsh sessions live inside a shared server).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// The start time of [`Self::pid`] (seconds since the epoch), so a reused
+    /// pid is not mistaken for the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start_time: Option<u64>,
+    /// How the session came to be: `"new"` or `"fork"`. A resume keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The session a fork was taken from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    /// When Fleet first spawned the session (epoch ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at_ms: Option<u64>,
+    /// When Fleet last spawned a process for it — first run or resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_spawn_at_ms: Option<u64>,
+}
+
+/// How a spawn relates to the session it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnKind {
+    New,
+    Resume,
+    Fork,
+}
+
+/// One spawn, as [`note_spawn`] records it.
+#[derive(Debug, Clone, Copy)]
+pub struct Spawn<'a> {
+    pub source: &'a str,
+    pub kind: SpawnKind,
+    pub workspace: &'a str,
+    pub pid: Option<u32>,
+    /// The session a fork was taken from; ignored for other kinds.
+    pub parent: Option<&'a str>,
+    /// The transcript path, when the spawn already knows it.
+    pub transcript: Option<&'a str>,
 }
 
 /// Directory holding one `<session-id>.json` note per Fleet-spawned session.
@@ -94,31 +153,402 @@ pub fn record_with_entrypoint(
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
+    // The spawn half of the note (pid, workspace, …) survives a re-record.
     let spec = LaunchSpec {
         model: clean(model),
         effort: clean(effort),
         entrypoint: clean(entrypoint),
+        ..get(session_id).unwrap_or_default()
     };
+    write(session_id, &spec);
+}
+
+fn write(session_id: &str, spec: &LaunchSpec) {
     let Some(path) = spec_path(session_id) else {
         return;
     };
-    // Pin the machine-local cutoff on the first spawn so sessions predating the
-    // marker feature can be grandfathered into the Tasks list.
-    ensure_marker_since();
     if let Some(parent) = path.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
             crate::log_debug(&format!("launch_spec: create dir: {e}"));
             return;
         }
     }
-    match serde_json::to_string(&spec) {
+    match serde_json::to_string(spec) {
         Ok(json) => {
-            if let Err(e) = fs::write(&path, json) {
+            // Write-then-rename: every scan reads these notes, and one caught
+            // between `fs::write`'s truncate and its write parses as nothing —
+            // the session drops out of the registry for that scan.
+            static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let tmp = path.with_extension(format!("json.{}-{seq}.tmp", std::process::id()));
+            let res = fs::write(&tmp, json).and_then(|()| fs::rename(&tmp, &path));
+            if let Err(e) = res {
+                let _ = fs::remove_file(&tmp);
                 crate::log_debug(&format!("launch_spec: write {session_id}: {e}"));
             }
         }
         Err(e) => crate::log_debug(&format!("launch_spec: serialize {session_id}: {e}")),
     }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Record a spawn in the session's note — call it right after the process
+/// starts, on every spawn path, next to [`record`] / [`resume_spec`].
+///
+/// Merges into what is there: the latest spawn's workspace, pid and time
+/// replace the previous ones, while the creation kind, parent and creation
+/// time stay those of the first spawn. A resume of a session with no note
+/// (one Fleet did not start) creates one — Fleet runs it from now on.
+pub fn note_spawn(session_id: &str, spawn: Spawn<'_>) {
+    let mut spec = get(session_id).unwrap_or_default();
+    let now = now_ms();
+    spec.source = Some(spawn.source.to_string());
+    if !spawn.workspace.trim().is_empty() {
+        spec.workspace = Some(spawn.workspace.to_string());
+    }
+    if let Some(t) = spawn.transcript.filter(|t| !t.is_empty()) {
+        spec.transcript = Some(t.to_string());
+    }
+    spec.pid = spawn.pid;
+    spec.pid_start_time = spawn.pid.and_then(crate::session::process_start_time);
+    if spec.kind.is_none() {
+        spec.kind = Some(
+            match spawn.kind {
+                SpawnKind::Fork => "fork",
+                SpawnKind::New | SpawnKind::Resume => "new",
+            }
+            .to_string(),
+        );
+    }
+    if spawn.kind == SpawnKind::Fork && spec.parent_session_id.is_none() {
+        spec.parent_session_id = spawn.parent.map(str::to_string);
+    }
+    spec.created_at_ms.get_or_insert(now);
+    spec.last_spawn_at_ms = Some(now);
+    write(session_id, &spec);
+}
+
+/// Store the transcript path a scan found for a note that lacked it. No-op
+/// for a session with no note, or one already pointing at `path`.
+pub fn note_transcript(session_id: &str, path: &str) {
+    let Some(mut spec) = get(session_id) else {
+        return;
+    };
+    if spec.transcript.as_deref() == Some(path) {
+        return;
+    }
+    spec.transcript = Some(path.to_string());
+    write(session_id, &spec);
+}
+
+/// Store the workspace a scan found for a note that lacked one (dsh notes
+/// written before [`note_spawn`] existed). Never overwrites a recorded one.
+pub fn note_workspace(session_id: &str, workspace: &str) {
+    let Some(mut spec) = get(session_id) else {
+        return;
+    };
+    if spec.workspace.is_some() || workspace.trim().is_empty() {
+        return;
+    }
+    spec.workspace = Some(workspace.to_string());
+    write(session_id, &spec);
+}
+
+/// Every note on disk, keyed by session id, in no particular order.
+pub fn all() -> Vec<(String, LaunchSpec)> {
+    let Some(dir) = spec_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let id = name.strip_suffix(".json")?.to_string();
+            let spec = serde_json::from_str(&fs::read_to_string(e.path()).ok()?).ok()?;
+            Some((id, spec))
+        })
+        .collect()
+}
+
+/// The sessions a scan lists: every note except forks, which are side
+/// questions rather than sessions of their own.
+///
+/// This is what every source's `scan_sessions` iterates, so it runs on every
+/// poll. Notes are re-read only when their file changed since the last call
+/// (keyed on mtime + length); an unchanged registry costs one `read_dir` and a
+/// `stat` per note.
+pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    type Cached = HashMap<String, (SystemTime, u64, LaunchSpec)>;
+    static CACHE: Mutex<Option<(PathBuf, Cached)>> = Mutex::new(None);
+
+    // Whichever process lists sessions first on a host fills in the notes
+    // written before `note_spawn` existed — the CLI may run before any desktop.
+    static BACKFILL: std::sync::Once = std::sync::Once::new();
+    BACKFILL.call_once(|| {
+        backfill_once();
+    });
+
+    let Some(dir) = spec_dir() else {
+        return HashMap::new();
+    };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return HashMap::new();
+    };
+    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    // A different directory (tests swap FLEET_HOME) invalidates everything.
+    if guard.as_ref().is_some_and(|(d, _)| *d != dir) {
+        *guard = None;
+    }
+    let old = guard.take().map(|(_, c)| c).unwrap_or_default();
+    let mut fresh: Cached = HashMap::with_capacity(old.len());
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Some(id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        let len = meta.len();
+        if let Some((m, l, spec)) = old.get(id) {
+            if *m == mtime && *l == len {
+                fresh.insert(id.to_string(), (mtime, len, spec.clone()));
+                continue;
+            }
+        }
+        let Some(spec) = fs::read_to_string(entry.path())
+            .ok()
+            .and_then(|s| serde_json::from_str::<LaunchSpec>(&s).ok())
+        else {
+            continue;
+        };
+        fresh.insert(id.to_string(), (mtime, len, spec));
+    }
+    let out = fresh
+        .iter()
+        .filter(|(_, (_, _, s))| s.kind.as_deref() != Some("fork"))
+        .map(|(id, (_, _, s))| (id.clone(), s.clone()))
+        .collect();
+    *guard = Some((dir, fresh));
+    out
+}
+
+impl LaunchSpec {
+    /// The latest spawn's pid, if that process is still running. The recorded
+    /// start time must match, so a pid the OS has since handed to another
+    /// process does not count. This is the whole liveness check — no process
+    /// table scan.
+    pub fn live_pid(&self) -> Option<u32> {
+        let pid = self.pid?;
+        let started = self.pid_start_time?;
+        (crate::session::process_start_time(pid) == Some(started)).then_some(pid)
+    }
+}
+
+/// [`LaunchSpec::live_pid`] for one session: the pid of the process Fleet
+/// last spawned for it, while that process runs.
+pub fn live_pid(session_id: &str) -> Option<u32> {
+    get(session_id)?.live_pid()
+}
+
+/// Could the transcript at `path` belong to a session Fleet started? For the
+/// file watcher, so a `claude`/`codex` the user runs by hand does not trigger
+/// rescans. Cheap — one `stat` per candidate id, no registry read.
+///
+/// Candidates are every path component (a Claude subagent lives under
+/// `<session-id>/subagents/`), the file stem (`<session-id>.jsonl`) and the
+/// stem's trailing uuid (Codex's `rollout-<time>-<thread-id>.jsonl[.zst]`).
+pub fn transcript_path_is_registered(path: &std::path::Path) -> bool {
+    const UUID_LEN: usize = 36;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let stem = name
+        .strip_suffix(".zst")
+        .unwrap_or(name)
+        .strip_suffix(".jsonl")
+        .unwrap_or(name);
+    let tail = stem
+        .len()
+        .checked_sub(UUID_LEN)
+        .and_then(|i| stem.get(i..))
+        .unwrap_or(stem);
+    [stem, tail]
+        .into_iter()
+        .chain(
+            path.components()
+                .filter_map(|c| c.as_os_str().to_str())
+                .filter(|c| c.len() >= UUID_LEN),
+        )
+        .any(was_fleet_spawned)
+}
+
+/// Keep only the sessions Fleet started: those with a note in `registry`,
+/// plus every subagent whose parent chain reaches one of them (a subagent is
+/// spawned by the agent itself and never gets a note of its own).
+pub fn retain_registered(
+    sessions: &mut Vec<crate::session::SessionInfo>,
+    registry: &std::collections::HashMap<String, LaunchSpec>,
+) {
+    let mut kept: std::collections::HashSet<String> = sessions
+        .iter()
+        .filter(|s| registry.contains_key(&s.id))
+        .map(|s| s.id.clone())
+        .collect();
+    // Subagents can nest; widen until no parent adds a child.
+    loop {
+        let before = kept.len();
+        for s in sessions.iter() {
+            if let Some(parent) = &s.parent_session_id {
+                if kept.contains(parent) {
+                    kept.insert(s.id.clone());
+                }
+            }
+        }
+        if kept.len() == before {
+            break;
+        }
+    }
+    sessions.retain(|s| kept.contains(&s.id));
+}
+
+const BACKFILL_MARKER: &str = "launch-spec-backfill-v1.done";
+
+/// Fill in `source`, `transcript` and `workspace` on notes written before
+/// [`note_spawn`] existed, once per host. Returns how many notes it filled.
+///
+/// A note is matched to the agent whose store knows its id: a Claude
+/// transcript `~/.claude/projects/*/<id>.jsonl`, a thread in Codex's SQLite
+/// index, and otherwise dsh when the note carries an `entrypoint` — only dsh
+/// spawns record one. A note none of them know (a fork that outlived its
+/// process, a session whose transcript was deleted) is left as it is.
+pub fn backfill_once() -> usize {
+    let Some(marker) = crate::session::get_fleet_dir()
+        .map(|d| d.join("migrations").join(BACKFILL_MARKER))
+    else {
+        return 0;
+    };
+    if marker.exists() {
+        return 0;
+    }
+    let filled = backfill(&claude_transcripts(), &crate::codex_source::all_thread_rollout_cwds());
+    backfill_pids(&running_session_pids());
+    if let Some(parent) = marker.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Err(e) = fs::write(&marker, now_ms().to_string()) {
+        crate::log_debug(&format!("launch_spec: write backfill marker: {e}"));
+    }
+    filled
+}
+
+fn backfill(
+    claude: &std::collections::HashMap<String, PathBuf>,
+    codex: &std::collections::HashMap<String, (String, String)>,
+) -> usize {
+    let mut filled = 0;
+    for (id, mut spec) in all() {
+        if spec.source.is_some() {
+            continue;
+        }
+        if let Some(path) = claude.get(&id) {
+            spec.source = Some("claude".into());
+            spec.transcript = Some(path.to_string_lossy().into_owned());
+            spec.workspace = spec.workspace.or_else(|| transcript_cwd(path));
+        } else if let Some((rollout, cwd)) = codex.get(&id) {
+            spec.source = Some("codex".into());
+            spec.transcript = Some(rollout.clone());
+            spec.workspace = spec.workspace.or_else(|| Some(cwd.clone()));
+        } else if spec.entrypoint.is_some() {
+            spec.source = Some("dsh".into());
+        } else {
+            continue;
+        }
+        write(&id, &spec);
+        filled += 1;
+    }
+    filled
+}
+
+/// Sessions running right now whose argv names them, keyed by id — one
+/// process-table scan, once per host, so the sessions an older build spawned
+/// (and recorded no pid for) keep reading as alive after the upgrade.
+fn running_session_pids() -> std::collections::HashMap<String, u32> {
+    let mut out: std::collections::HashMap<String, u32> = crate::session::scan_cli_processes()
+        .into_iter()
+        .filter_map(|p| Some((p.resume_session_id?, p.pid)))
+        .collect();
+    out.extend(crate::codex_source::running_thread_pids());
+    out
+}
+
+/// Stamp `pids` onto the notes that have no pid yet.
+fn backfill_pids(pids: &std::collections::HashMap<String, u32>) {
+    for (id, pid) in pids {
+        let Some(mut spec) = get(id) else {
+            continue;
+        };
+        if spec.pid.is_some() {
+            continue;
+        }
+        let Some(started) = crate::session::process_start_time(*pid) else {
+            continue;
+        };
+        spec.pid = Some(*pid);
+        spec.pid_start_time = Some(started);
+        write(id, &spec);
+    }
+}
+
+/// Every `~/.claude/projects/*/<id>.jsonl`, keyed by id.
+fn claude_transcripts() -> std::collections::HashMap<String, PathBuf> {
+    let mut out = std::collections::HashMap::new();
+    let Some(projects) = crate::session::get_claude_dir().map(|d| d.join("projects")) else {
+        return out;
+    };
+    let Ok(dirs) = fs::read_dir(projects) else {
+        return out;
+    };
+    for dir in dirs.flatten() {
+        let Ok(files) = fs::read_dir(dir.path()) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().is_some_and(|e| e == "jsonl") {
+                if let Some(id) = path.file_stem().and_then(|s| s.to_str()) {
+                    out.insert(id.to_string(), path);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The `cwd` of the first transcript record that has one.
+fn transcript_cwd(path: &std::path::Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    std::io::BufReader::new(file)
+        .lines()
+        .take(50)
+        .map_while(Result::ok)
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(&l).ok())
+        .find_map(|v| v.get("cwd").and_then(|c| c.as_str()).map(str::to_string))
 }
 
 /// The effective `(model, effort)` for a **resume**, re-recording the note.
@@ -183,12 +613,6 @@ pub fn effort_of(session_id: &str) -> Option<String> {
     get(session_id)?.effort
 }
 
-/// Path of the machine-local sentinel that pins the moment the always-write
-/// spawn marker went live on this host (see [`spawn_marker_cutoff_ms`]).
-fn marker_since_path() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".fleet").join("spawn-marker-since"))
-}
-
 /// Did Fleet spawn this exact session id? True iff a per-session note exists —
 /// written by [`record`] on every Fleet spawn path, even one with no
 /// model/effort override. This is the ground truth the Tasks list uses instead
@@ -209,44 +633,6 @@ pub fn was_fleet_spawned(session_id: &str) -> bool {
 pub fn forget(session_id: &str) {
     if let Some(path) = spec_path(session_id) {
         let _ = fs::remove_file(path);
-    }
-}
-
-/// Epoch-ms after which an entrypoint-Fleet-owned session that carries no spawn
-/// marker is a leaked `claude -p` child rather than a real Fleet session.
-/// Established on this machine at the first [`record`] once the marker feature
-/// shipped; `u64::MAX` (grandfather every prior session) until then.
-pub fn spawn_marker_cutoff_ms() -> u64 {
-    let Some(path) = marker_since_path() else {
-        return u64::MAX;
-    };
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .unwrap_or(u64::MAX)
-}
-
-/// Stamp the cutoff sentinel the first time Fleet records a spawn on this host.
-/// Idempotent: later spawns leave the original moment intact.
-fn ensure_marker_since() {
-    let Some(path) = marker_since_path() else {
-        return;
-    };
-    if path.exists() {
-        return;
-    }
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            crate::log_debug(&format!("launch_spec: create marker dir: {e}"));
-            return;
-        }
-    }
-    if let Err(e) = fs::write(&path, now_ms.to_string()) {
-        crate::log_debug(&format!("launch_spec: write marker sentinel: {e}"));
     }
 }
 
@@ -337,24 +723,6 @@ mod tests {
         assert_eq!(model_of("never-spawned"), None);
     }
 
-    /// The cutoff sentinel is established on this machine at the first `record`,
-    /// so sessions that predate the marker feature can be grandfathered in.
-    #[test]
-    fn first_record_establishes_the_marker_cutoff() {
-        let _home = TmpHome::new("cutoff");
-        assert_eq!(
-            spawn_marker_cutoff_ms(),
-            u64::MAX,
-            "no cutoff before any spawn"
-        );
-        record("c1", None, None);
-        assert_ne!(
-            spawn_marker_cutoff_ms(),
-            u64::MAX,
-            "cutoff stamped after first spawn"
-        );
-    }
-
     /// Only one of the two flags is common (model set, effort left to default).
     #[test]
     fn records_a_partial_spec() {
@@ -423,5 +791,198 @@ mod tests {
             record(bad, Some("claude-opus-4-8"), None);
             assert_eq!(get(bad), None);
         }
+    }
+
+    fn spawn<'a>(source: &'a str, kind: SpawnKind, ws: &'a str, pid: Option<u32>) -> Spawn<'a> {
+        Spawn {
+            source,
+            kind,
+            workspace: ws,
+            pid,
+            parent: None,
+            transcript: None,
+        }
+    }
+
+    /// The first spawn fixes how the session came to be; a resume moves the
+    /// pid, workspace and spawn time on, and neither side wipes the flags.
+    #[test]
+    fn note_spawn_merges_with_the_launch_flags() {
+        let _home = TmpHome::new("merge");
+        let me = std::process::id();
+        record("s", Some("opus[1m]"), Some("high"));
+        note_spawn("s", spawn("claude", SpawnKind::New, "/w1", Some(me)));
+        let first = get("s").unwrap();
+        assert_eq!(first.model.as_deref(), Some("opus[1m]"));
+        assert_eq!(first.source.as_deref(), Some("claude"));
+        assert_eq!(first.kind.as_deref(), Some("new"));
+        assert_eq!(first.pid, Some(me));
+        assert!(first.pid_start_time.is_some(), "a live pid has a start time");
+        let created = first.created_at_ms.unwrap();
+
+        // A resume re-records the flags, then notes its own spawn.
+        resume_spec("s", None, None);
+        assert_eq!(get("s").unwrap().pid, Some(me), "re-recording keeps the pid");
+        note_spawn("s", spawn("claude", SpawnKind::Resume, "/w2", None));
+        let after = get("s").unwrap();
+        assert_eq!(after.model.as_deref(), Some("opus[1m]"));
+        assert_eq!(after.effort.as_deref(), Some("high"));
+        assert_eq!(after.kind.as_deref(), Some("new"), "a resume keeps the kind");
+        assert_eq!(after.created_at_ms, Some(created));
+        assert_eq!(after.workspace.as_deref(), Some("/w2"));
+        assert_eq!(after.pid, None, "the new spawn's pid replaces the old one");
+        assert!(after.last_spawn_at_ms.unwrap() >= created);
+    }
+
+    #[test]
+    fn a_fork_records_its_parent() {
+        let _home = TmpHome::new("fork");
+        note_spawn(
+            "f",
+            Spawn {
+                parent: Some("p"),
+                ..spawn("codex", SpawnKind::Fork, "/w", None)
+            },
+        );
+        let f = get("f").unwrap();
+        assert_eq!(f.kind.as_deref(), Some("fork"));
+        assert_eq!(f.parent_session_id.as_deref(), Some("p"));
+        assert!(all().iter().any(|(id, _)| id == "f"));
+    }
+
+    /// Old notes are matched to the store that knows their id; a note nobody
+    /// knows is left alone, and so is one that already has a source.
+    #[test]
+    fn backfill_matches_old_notes_to_their_agent() {
+        let home = TmpHome::new("backfill");
+        let jsonl = home.dir.join("c.jsonl");
+        fs::write(
+            &jsonl,
+            "{\"type\":\"summary\"}\n{\"type\":\"user\",\"cwd\":\"/ws/claude\"}\n",
+        )
+        .unwrap();
+        record("c", Some("opus"), None);
+        record("x", None, None);
+        record_with_entrypoint("d", None, None, Some("claw-fleet-newsession"));
+        record("k", None, None);
+        record("n", None, None);
+        note_spawn("n", spawn("claude", SpawnKind::New, "/ws/new", None));
+
+        let claude = [("c".to_string(), jsonl.clone())].into_iter().collect();
+        let codex = [("x".to_string(), ("/r/x.jsonl".to_string(), "/ws/codex".to_string()))]
+            .into_iter()
+            .collect();
+        assert_eq!(backfill(&claude, &codex), 3);
+
+        let c = get("c").unwrap();
+        assert_eq!(c.source.as_deref(), Some("claude"));
+        assert_eq!(c.workspace.as_deref(), Some("/ws/claude"));
+        assert_eq!(c.transcript.as_deref(), jsonl.to_str());
+        assert_eq!(c.model.as_deref(), Some("opus"));
+        let x = get("x").unwrap();
+        assert_eq!(x.source.as_deref(), Some("codex"));
+        assert_eq!(x.transcript.as_deref(), Some("/r/x.jsonl"));
+        assert_eq!(x.workspace.as_deref(), Some("/ws/codex"));
+        assert_eq!(get("d").unwrap().source.as_deref(), Some("dsh"));
+        assert_eq!(get("k").unwrap().source, None);
+        assert_eq!(get("n").unwrap().workspace.as_deref(), Some("/ws/new"));
+    }
+
+    /// Forks are side questions, not sessions: the registry leaves them out.
+    #[test]
+    fn registry_skips_forks_and_rereads_changed_notes() {
+        let _home = TmpHome::new("registry");
+        let spawn = |kind| Spawn {
+            source: "claude",
+            kind,
+            workspace: "/w",
+            pid: None,
+            parent: Some("p"),
+            transcript: None,
+        };
+        note_spawn("n1", spawn(SpawnKind::New));
+        note_spawn("f1", spawn(SpawnKind::Fork));
+        let reg = registry();
+        assert!(reg.contains_key("n1"));
+        assert!(!reg.contains_key("f1"));
+        assert_eq!(reg["n1"].transcript, None);
+        note_transcript("n1", "/w/n1.jsonl");
+        assert_eq!(registry()["n1"].transcript.as_deref(), Some("/w/n1.jsonl"));
+    }
+
+    #[test]
+    fn retain_registered_keeps_nested_subagents_of_registered_sessions() {
+        let _home = TmpHome::new("retain");
+        record("root", None, None);
+        let mk = |id: &str, parent: Option<&str>| crate::session::SessionInfo {
+            id: id.into(),
+            parent_session_id: parent.map(str::to_string),
+            ..Default::default()
+        };
+        let mut sessions = vec![
+            mk("child", Some("root")),
+            mk("grandchild", Some("child")),
+            mk("root", None),
+            mk("stranger", None),
+            mk("stranger-child", Some("stranger")),
+        ];
+        retain_registered(&mut sessions, &registry());
+        let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["child", "grandchild", "root"]);
+    }
+
+    #[test]
+    fn transcript_path_is_registered_recognises_claude_and_codex_layouts() {
+        let _home = TmpHome::new("watchgate");
+        let claude = "11111111-2222-3333-4444-555555555555";
+        let codex = "019a0000-aaaa-bbbb-cccc-dddddddddddd";
+        record(claude, None, None);
+        record(codex, None, None);
+        let yes = [
+            format!("/h/.claude/projects/-w/{claude}.jsonl"),
+            format!("/h/.claude/projects/-w/{claude}/subagents/agent-a1.jsonl"),
+            format!("/h/.codex/sessions/2026/09/30/rollout-2026-09-30T10-00-00-{codex}.jsonl"),
+            format!("/h/.codex/sessions/2026/09/30/rollout-2026-09-30T10-00-00-{codex}.jsonl.zst"),
+        ];
+        for p in &yes {
+            assert!(transcript_path_is_registered(std::path::Path::new(p)), "{p}");
+        }
+        let hand = "/h/.claude/projects/-w/99999999-2222-3333-4444-555555555555.jsonl";
+        assert!(!transcript_path_is_registered(std::path::Path::new(hand)));
+    }
+
+    #[test]
+    fn live_pid_needs_the_recorded_start_time_to_match() {
+        let _home = TmpHome::new("livepid");
+        let me = std::process::id();
+        note_spawn(
+            "alive",
+            Spawn {
+                source: "claude",
+                kind: SpawnKind::New,
+                workspace: "/w",
+                pid: Some(me),
+                parent: None,
+                transcript: None,
+            },
+        );
+        assert_eq!(live_pid("alive"), Some(me));
+        // Same pid, different start time: the pid was reused.
+        let mut spec = get("alive").unwrap();
+        spec.pid_start_time = spec.pid_start_time.map(|t| t - 1);
+        write("alive", &spec);
+        assert_eq!(live_pid("alive"), None);
+        record("no-pid", None, None);
+        assert_eq!(live_pid("no-pid"), None);
+    }
+
+    #[test]
+    fn backfill_pids_fills_only_notes_without_one() {
+        let _home = TmpHome::new("pidfill");
+        let me = std::process::id();
+        record("old", None, None);
+        backfill_pids(&[("old".to_string(), me), ("unknown".to_string(), me)].into());
+        assert_eq!(live_pid("old"), Some(me));
+        assert!(get("unknown").is_none(), "a session with no note gets none");
     }
 }

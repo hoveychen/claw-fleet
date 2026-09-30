@@ -20,7 +20,6 @@ export interface ApiErrorContext {
   workspacePath: string;
   agentSource: string;
   isSubagent?: boolean;
-  ideName?: string | null;
 }
 
 /**
@@ -53,7 +52,6 @@ export function ApiErrorActions({
   const resumable = ctx
     ? canResumeSession({
         isSubagent: ctx.isSubagent ?? false,
-        ideName: ctx.ideName ?? null,
         agentSource: ctx.agentSource,
       })
     : false;

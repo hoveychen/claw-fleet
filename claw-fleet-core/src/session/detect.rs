@@ -56,44 +56,6 @@ pub(crate) fn extract_resume_id(cmd: &[std::ffi::OsString]) -> Option<String> {
     None
 }
 
-/// Resolve a PID for a specific session given all processes sharing the same cwd.
-///
-/// Matching priority (highest → lowest):
-/// 1. Exact `--resume <session_id>` / `--session-id <session_id>` match →
-///    always precise.
-/// 2. Parent-child filtering: drop any claude process whose parent is also a
-///    claude process in this workspace (those are subagent child processes).
-///    If exactly one "root" process remains → precise.
-/// 3. Single process → precise regardless.
-/// 4. Multiple unresolvable processes → imprecise (first as representative).
-pub(crate) fn resolve_pid(procs: &[CliProcess], session_id: &str) -> (Option<u32>, bool) {
-    if procs.is_empty() {
-        return (None, false);
-    }
-
-    // Rule 1: exact --resume match.
-    if let Some(p) = procs
-        .iter()
-        .find(|p| p.resume_session_id.as_deref() == Some(session_id))
-    {
-        return (Some(p.pid), true);
-    }
-
-    // Rule 2: filter out child claude processes (subagents).
-    // A process is a "child" if its parent PID is also in this workspace's process set.
-    let pid_set: std::collections::HashSet<u32> = procs.iter().map(|p| p.pid).collect();
-    let roots: Vec<&CliProcess> = procs
-        .iter()
-        .filter(|p| !p.ppid.map_or(false, |ppid| pid_set.contains(&ppid)))
-        .collect();
-
-    match roots.len() {
-        0 => (Some(procs[0].pid), false), // shouldn't happen; fall back
-        1 => (Some(roots[0].pid), true),
-        _ => (Some(roots[0].pid), false), // still ambiguous after filtering
-    }
-}
-
 /// Scan all running `claude` processes.
 /// Uses sysinfo for cross-platform support (macOS, Linux, Windows).
 pub fn scan_cli_processes() -> Vec<CliProcess> {
@@ -153,7 +115,7 @@ pub fn scan_cli_processes() -> Vec<CliProcess> {
 /// Is `session_id` being run by a headless (`claude -p`) process right now?
 ///
 /// Pure half, so the decision is testable without real processes. Only an argv
-/// that names this exact session counts — `resolve_pid`'s looser cwd-based
+/// that names this exact session counts — looser cwd-based
 /// heuristics would happily hand back a *sibling* session's process, and
 /// mistaking an interactive session for a headless one would block a turn that
 /// had every right to end.
@@ -173,54 +135,6 @@ pub fn is_headless_session_in(procs: &[CliProcess], session_id: &str) -> bool {
 /// only know their own session id.
 pub fn is_headless_session(session_id: &str) -> bool {
     is_headless_session_in(&scan_cli_processes(), session_id)
-}
-
-// ── IDE session scanning ─────────────────────────────────────────────────────
-
-pub fn scan_ide_sessions(claude_dir: &Path) -> Vec<IdeSession> {
-    let ide_dir = claude_dir.join("ide");
-    let mut sessions = Vec::new();
-
-    let Ok(entries) = fs::read_dir(&ide_dir) else {
-        return sessions;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("lock") {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(lock): Result<LockFile, _> = serde_json::from_str(&content) else {
-            continue;
-        };
-        if is_process_alive(lock.pid) {
-            sessions.push(IdeSession {
-                pid: lock.pid,
-                workspace_folders: lock.workspace_folders,
-                ide_name: lock.ide_name,
-            });
-        }
-    }
-    sessions
-}
-
-/// A workspace-level IDE lock describes the interactive session running
-/// *inside* that IDE — not every session that happens to share the workspace.
-/// The scan stamps the lock's `ide_name` per workspace, so without this pass a
-/// launchpad-spawned headless session in a workspace that also has VS Code
-/// open would wear a "Visual Studio Code" badge — and be skipped by
-/// auto-resume, which treats `ide_name.is_some()` as "IDE-attached".
-/// Fleet-owned entrypoints are headless by construction, so they never keep
-/// the badge.
-pub(crate) fn strip_ide_name_from_fleet_spawns(sessions: &mut [SessionInfo]) {
-    for session in sessions {
-        if crate::session_launch::is_fleet_owned_entrypoint(session.entrypoint.as_deref()) {
-            session.ide_name = None;
-        }
-    }
 }
 
 // ── JSONL parsing ────────────────────────────────────────────────────────────

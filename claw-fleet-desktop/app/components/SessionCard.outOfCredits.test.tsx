@@ -40,7 +40,6 @@ function session(outOfCredits: string | null): SessionInfo {
     ...MOCK_SESSIONS[0],
     id: SESSION_ID,
     isSubagent: false,
-    ideName: null,
     workspacePath: "/srv/billing",
     workspaceName: "billing",
     agentSource: "codex",

@@ -279,7 +279,6 @@ pub const SOURCES_CLAUDE_ACCOUNT: &str = "/sources/claude/account";
 pub const SOURCES_CONFIG: &str = "/sources_config";
 pub const SPAWN_SESSION: &str = "/spawn_session";
 pub const STOP: &str = "/stop";
-pub const STOP_WORKSPACE: &str = "/stop_workspace";
 pub const TAIL: &str = "/tail";
 pub const TASK_PLANS: &str = "/task_plans";
 pub const TEST_DECISION_END_TO_END: &str = "/test_decision_end_to_end";

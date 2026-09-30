@@ -23,21 +23,18 @@ export const RESUMABLE_SOURCES = ["claude-code", "codex"];
 /** Enough of a session to decide whether a resume is even offerable. Kept
  *  structural so callers holding a partial session (or a card context) can ask
  *  without materialising a whole `SessionInfo`. */
-export type ResumableSession = Pick<SessionInfo, "isSubagent" | "ideName" | "agentSource">;
+export type ResumableSession = Pick<SessionInfo, "isSubagent" | "agentSource">;
 
 /**
  * Whether a resume control should be shown at all.
  *
  * Mirrors the auto-resume scheduler's gate:
  *  - a subagent's `agent-*` transcript cannot be resumed;
- *  - a session attached to an interactive IDE (VS Code, the Claude app) should
- *    be resumed from the editor — firing a detached headless resume behind it
- *    puts two agents on one transcript;
  *  - the source has to support headless resume.
  */
 export function canResumeSession(session: ResumableSession): boolean {
   return (
-    !session.isSubagent && !session.ideName && RESUMABLE_SOURCES.includes(session.agentSource)
+    !session.isSubagent && RESUMABLE_SOURCES.includes(session.agentSource)
   );
 }
 

@@ -515,10 +515,9 @@ pub fn handle_control(args: &Value, action: &str) -> Result<String, String> {
             }
             if !target.pid_precise {
                 return Err(format!(
-                    "several processes share workspace '{}', so the pid for {} is ambiguous — \
-                     interrupting could abort another session's turn. Use action=stop if you \
-                     really mean to signal them all.",
-                    target.workspace_name,
+                    "the pid on {} is not its own (a subagent reports its parent's, dsh its \
+                     shared server's) — interrupting could abort another session's turn. Use \
+                     action=stop if you really mean it.",
                     short_id(&target.id)
                 ));
             }

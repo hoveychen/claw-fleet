@@ -309,7 +309,6 @@ async function handleIPC(
     case "set_source_enabled":
     case "interrupt_session":
     case "kill_session":
-    case "kill_workspace_sessions":
     case "show_main_window":
     case "respond_to_guard":
     case "respond_to_elicitation":
@@ -1260,7 +1259,6 @@ async function handleIPC(
         id,
         workspacePath: ws,
         workspaceName: name,
-        ideName: null,
         isSubagent: false,
         parentSessionId: null,
         agentType: null,

@@ -117,6 +117,8 @@ fn arrange(list_delay_ms: u64, log: Option<&std::path::Path>) -> Option<tempfile
     claw_fleet_core::process_util::which("node")?;
     let fleet_home = tempfile::tempdir().expect("temp fleet home");
     std::env::set_var("FLEET_HOME", fleet_home.path());
+    // The roster lists only sessions Fleet started: note the fixture's one.
+    claw_fleet_core::launch_spec::record("session-fake-slow", None, None);
     std::env::set_var("FLEET_DSH_BIN", fixture());
     std::env::set_var("FAKE_DSH_LIST_DELAY_MS", list_delay_ms.to_string());
     std::env::set_var("FAKE_DSH_HISTORY_DELAY_MS", HISTORY_DELAY_MS.to_string());

@@ -72,18 +72,11 @@ describe("runStop", () => {
     expect(calls).toEqual([{ method: "stop", params: { pid: 42 } }]);
   });
 
-  it("imprecise pid stops whole workspace, confirmation explains that clearly", async () => {
+  it("imprecise pid still stops by pid — there is no workspace-wide fallback", async () => {
     const { transport, calls } = fakeTransport();
     const s = { ...fleetOwned, pidPrecise: false };
-    const confirm = vi.fn(yes);
-    await expect(runStop(transport, s, confirm)).resolves.toBe(true);
-    // Test environment's t() uses English, so we match either form — key is this
-    // confirmation must say "all sessions in the workspace will stop", not reuse
-    // the text for stopping just one session.
-    expect(confirm.mock.calls[0][0]).toMatch(/目录下的所有会话|ALL sessions/);
-    expect(calls).toEqual([
-      { method: "stop_workspace", params: { workspacePath: "/Users/x/workspace/proj" } },
-    ]);
+    await expect(runStop(transport, s, yes)).resolves.toBe(true);
+    expect(calls).toEqual([{ method: "stop", params: { pid: 42 } }]);
   });
 
   it("user cancels on confirmation prompt → send no requests", async () => {

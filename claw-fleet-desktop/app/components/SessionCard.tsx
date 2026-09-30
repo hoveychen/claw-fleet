@@ -73,9 +73,6 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   // Only show the resume button for sessions that can actually be resumed —
   // mirrors the auto-resume gate in `auto_resume.rs::should_auto_resume`:
   //  - not a subagent (`agent-*` transcripts can't be resumed)
-  //  - not attached to an interactive IDE (ideName == null); an IDE session
-  //    (VS Code / Claude app) should be resumed from the editor, not
-  //    by firing a detached headless resume behind it
   //  - a source that supports headless resume. `should_auto_resume` no longer
   //    gates on source (M2 dismantled the claude-code-only door); resume is
   //    dispatched by `agentSource` (claude → `claude --resume`, codex →

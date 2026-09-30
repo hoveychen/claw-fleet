@@ -2202,7 +2202,6 @@ fn is_ackable_method(method: &str) -> bool {
             | "cancel_pending_message"
             | "interrupt"
             | "stop"
-            | "stop_workspace"
             | "session_mark"
             | "set_resume_settings"
             | "session_explain_ask"
@@ -2559,7 +2558,6 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "cancel_pending_message" => serve_cancel_pending_message(params),
         "interrupt" => serve_interrupt(params),
         "stop" => serve_stop(params),
-        "stop_workspace" => serve_stop_workspace(params),
         "session_mark" => serve_session_mark(params),
         "set_resume_settings" => serve_set_resume_settings(params),
         // Forks a session and spends money; a lost reply must not fork twice.
@@ -3740,16 +3738,6 @@ fn serve_stop(params: &Value) -> Result<Value, String> {
     }
 }
 
-fn serve_stop_workspace(params: &Value) -> Result<Value, String> {
-    let path = params
-        .get("workspacePath")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or("missing workspacePath")?;
-    crate::session::kill_workspace_impl(path)?;
-    Ok(json!({ "ok": true }))
-}
-
 fn serve_session_mark(params: &Value) -> Result<Value, String> {
     let req: crate::session_mark::SetSessionMarkRequest = serde_json::from_value(params.clone())
         .map_err(|e| format!("bad session_mark params: {e}"))?;
@@ -4817,7 +4805,6 @@ mod tests {
             "cancel_pending_message",
             "interrupt",
             "stop",
-            "stop_workspace",
             "session_mark",
             "set_resume_settings",
             "session_explain_ask",
@@ -6228,19 +6215,6 @@ mod tests {
                     }
                 }
             }
-        });
-    }
-
-    #[test]
-    fn request_stop_workspace_requires_path() {
-        with_temp_home(|| {
-            let reply = request_raw("stop_workspace", json!({}));
-            assert_eq!(reply["ok"], false);
-            assert!(
-                reply["error"].as_str().unwrap().contains("workspacePath"),
-                "error must mention workspacePath: {}",
-                reply["error"]
-            );
         });
     }
 

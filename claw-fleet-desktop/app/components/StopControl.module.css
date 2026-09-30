@@ -35,11 +35,6 @@
   color: var(--badge-streaming-fg);
 }
 
-/* Imprecise pid — stopping takes the whole workspace with it. */
-.btn_warn {
-  color: var(--badge-executing-fg);
-}
-
 /* Spent: the process is gone, nothing left to stop. */
 .btn_spent {
   font-size: 9px;

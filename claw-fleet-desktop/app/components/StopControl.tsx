@@ -45,9 +45,8 @@ export type StopMode = "interrupt" | "stop" | "spent";
  *
  * dsh is the case: every dsh session's turn runs inside one shared `dsh web`,
  * so the pid on its `SessionInfo` is that *server's*. Signalling it would stop
- * every dsh session on the machine and take Fleet's own server down with them —
- * and the `!pidPrecise` fallback below is no better, since it kills by
- * workspace. `session.cancel` is the per-session lever, reached through
+ * every dsh session on the machine and take Fleet's own server down with them.
+ * `session.cancel` is the per-session lever, reached through
  * `interrupt_agent_session`.
  */
 export function usesSourceInterrupt(s: SessionInfo): boolean {
@@ -97,12 +96,9 @@ export async function performStop(
   }
   if (mode === "interrupt") {
     await invoke("interrupt_session", { pid: session.pid });
-  } else if (session.pidPrecise) {
+  } else {
     const ok = await ask(t("stop_confirm", { name: session.workspaceName }), { kind: "warning" });
     if (ok) await invoke("kill_session", { pid: session.pid });
-  } else {
-    const ok = await ask(t("stop_imprecise_confirm", { workspace: session.workspaceName }), { kind: "warning" });
-    if (ok) await invoke("kill_workspace_sessions", { workspacePath: session.workspacePath });
   }
 }
 
@@ -140,9 +136,7 @@ export function StopControl({
         : t("interrupt_session")
       : mode === "spent"
         ? t("stop_spent")
-        : session.pidPrecise
-          ? t("stop_session")
-          : t("stop_session_imprecise");
+        : t("stop_session");
 
   return (
     <button
@@ -152,7 +146,6 @@ export function StopControl({
         variant === "solid" ? styles.btn_solid : "",
         styles[`btn_${mode}`],
         busy ? styles.btn_busy : "",
-        mode === "stop" && !session.pidPrecise ? styles.btn_warn : "",
       ]
         .filter(Boolean)
         .join(" ")}

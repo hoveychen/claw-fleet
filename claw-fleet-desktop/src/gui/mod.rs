@@ -1423,6 +1423,8 @@ pub fn run() {
             // Take back whatever an older Fleet wrote into the global agent
             // config — Fleet sessions get it as launch arguments now.
             claw_fleet_core::scope_migration::run_and_log("desktop");
+            // Older launch notes predate the fields session discovery reads.
+            claw_fleet_core::launch_spec::backfill_once();
 
             // The idle hooks (Stop → `fleet session idle`, UserPromptSubmit →
             // `fleet session resume`) have no UI switch: the Stop hook is what
@@ -1650,7 +1652,6 @@ pub fn run() {
             interrupt_session,
             interrupt_agent_session,
             kill_session,
-            kill_workspace_sessions,
             resume_rate_limited_session,
             enqueue_session_message,
             cancel_session_pending_message,

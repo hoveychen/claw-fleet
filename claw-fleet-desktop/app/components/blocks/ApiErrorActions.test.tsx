@@ -173,10 +173,4 @@ describe("ApiErrorActions", () => {
     // The classification is still worth showing.
     expect(container!.textContent).toContain("OAuth session expired");
   });
-
-  it("does not resume for an IDE-attached session", () => {
-    // Resuming behind VS Code would put two agents on one transcript.
-    const el = draw({ info: SERVER, ctx: { ...CTX, ideName: "vscode" } });
-    expect(actionsOf(el)).toEqual(["openUrl"]);
-  });
 });

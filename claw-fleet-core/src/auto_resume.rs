@@ -145,8 +145,6 @@ pub fn limit_recovered(
 /// Returns `true` only when ALL of:
 /// - `config.enabled`
 /// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
-/// - the session is NOT attached to an interactive IDE (`ide_name == None`);
-///   IDE (VS Code / Claude app) sessions must not be resumed headlessly
 /// - the session is in `RateLimited` state with a `rate_limit` payload
 /// - EITHER `now >= resets_at + RESET_GRACE` (the hint wait has elapsed plus a
 ///   grace window so we don't race the reset boundary) OR [`limit_recovered`]
@@ -190,15 +188,6 @@ pub fn auto_resume_eligible<'a>(
     // `claude --resume agent-X` always fails, leaving the session RateLimited
     // so it re-fires forever. Never treat a subagent as a resume candidate.
     if session.is_subagent {
-        return None;
-    }
-    // Only Fleet-spawned headless sessions are auto-resumable. A session running
-    // inside an interactive IDE (VS Code / Claude app) writes an ide
-    // lock file, so `ide_name` is Some — firing `claude --resume <id> -p continue`
-    // as a detached headless process behind the user's open editor is not what
-    // they want. Headless Fleet-spawned `claude --print` sessions have no lock
-    // (`ide_name == None`) and are the only ones we resume.
-    if session.ide_name.is_some() {
         return None;
     }
     // Source is no longer a hard gate here: the resume *form* is dispatched by
@@ -288,9 +277,6 @@ pub fn select_resume_candidates(
 /// debounce and per-session attempt cap allow. Eligibility requires ALL of:
 /// - `config.retry_server_errors` (the feature is on; independent of `enabled`)
 /// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
-/// - the session is NOT attached to an interactive IDE (`ide_name == None`) —
-///   same rule as auto-resume: never fire a detached headless `claude --resume`
-///   behind the user's open editor
 /// - the session is in `ServerErrored` state
 pub fn should_retry_server_error(
     session: &crate::session::SessionInfo,
@@ -299,10 +285,9 @@ pub fn should_retry_server_error(
     if !config.retry_server_errors {
         return false;
     }
-    // Same non-resumable gates as auto-resume: subagent transcripts can't be
-    // resumed, and IDE-attached sessions must not be resumed headlessly behind
-    // the user's editor.
-    if session.is_subagent || session.ide_name.is_some() {
+    // Same non-resumable gate as auto-resume: subagent transcripts can't be
+    // resumed.
+    if session.is_subagent {
         return false;
     }
     session.status == crate::session::SessionStatus::ServerErrored
@@ -488,6 +473,17 @@ pub fn spawn_resume_tracked_prompt(
         &stderr_log,
         on_exit,
     )?;
+    crate::launch_spec::note_spawn(
+        session_id,
+        crate::launch_spec::Spawn {
+            source: "claude",
+            kind: crate::launch_spec::SpawnKind::Resume,
+            workspace: workspace_path,
+            pid: Some(pid),
+            parent: None,
+            transcript: None,
+        },
+    );
     crate::log_debug(&format!(
         "resume_session: spawned pid {} for session {}",
         pid, session_id
@@ -550,7 +546,6 @@ mod tests {
             // would make every eligibility test vacuously pass.
             workspace_path: std::env::temp_dir().to_string_lossy().into_owned(),
             workspace_name: "w".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
@@ -764,23 +759,6 @@ mod tests {
             ..Default::default()
         };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 5)));
-        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
-    }
-
-    #[test]
-    fn blocked_when_ide_attached() {
-        // A session running inside an interactive IDE (VS Code / Claude app)
-        // writes an ide lock, so `ide_name` is Some. Headlessly firing
-        // `claude --resume <id> -p continue` behind the user's editor is exactly
-        // what we must not do — auto-resume is only for Fleet-spawned headless
-        // sessions (`ide_name == None`).
-        let cfg = AutoResumeConfig {
-            enabled: true,
-            max_wait_hours: 12,
-            ..Default::default()
-        };
-        let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
-        s.ide_name = Some("Visual Studio Code".into());
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
@@ -1052,14 +1030,6 @@ mod tests {
         let cfg = AutoResumeConfig::default();
         let mut s = mk_server_errored();
         s.is_subagent = true;
-        assert!(!should_retry_server_error(&s, &cfg));
-    }
-
-    #[test]
-    fn server_error_retry_blocked_when_ide_attached() {
-        let cfg = AutoResumeConfig::default();
-        let mut s = mk_server_errored();
-        s.ide_name = Some("Visual Studio Code".into());
         assert!(!should_retry_server_error(&s, &cfg));
     }
 
