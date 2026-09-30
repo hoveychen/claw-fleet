@@ -1390,6 +1390,70 @@ mod tests {
         );
     }
 
+    fn drive_home() -> crate::paths::FleetHomeGuard {
+        crate::paths::fleet_home_guard_with(|| {
+            let d = std::env::temp_dir()
+                .join(format!("fleet-dispatch-lease-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
+            let _ = std::fs::create_dir_all(&d);
+            d
+        })
+    }
+
+    fn reserve(sid: &str, driver: crate::session_driver::Driver, yield_to_turn: bool) -> String {
+        crate::session_driver::register_pending(
+            sid,
+            driver,
+            crate::session_driver::PendingSpec {
+                reason: "test".into(),
+                not_before_ms: None,
+                ttl_ms: 60_000,
+                yield_to_turn,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn dispatcher_refuses_a_continue_while_an_answer_is_pending() {
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let sid = uuid::Uuid::new_v4().to_string();
+        reserve(&sid, Driver::answer("parked_card"), false);
+        let err = super::resume_session(
+            "claude",
+            &ResumeSpec { session_id: sid, ..Default::default() },
+            Driver::continue_("server_error_retry"),
+            Box::new(|_| {}),
+        )
+        .unwrap_err();
+        assert!(err.starts_with("drive lease:"), "refused before any spawn: {err}");
+    }
+
+    #[test]
+    fn spawn_takeover_is_refused_while_the_replaced_session_is_reserved() {
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let sid = uuid::Uuid::new_v4().to_string();
+        reserve(&sid, Driver::continue_("server_error_retry"), true);
+        let err = super::spawn_takeover("claude", &SpawnSpec::default(), &sid, Driver::takeover("plan_revive"))
+            .unwrap_err();
+        assert!(err.starts_with("drive lease:"), "refused before any spawn: {err}");
+    }
+
+    #[test]
+    fn manual_resume_revokes_a_pending_retry() {
+        use crate::session_driver::Driver;
+        let _home = drive_home();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let token = reserve(&sid, Driver::continue_("server_error_retry"), true);
+        // The lease the dispatcher takes for a manual resume; once released the
+        // superseded retry stays revoked.
+        let lease = crate::session_driver::acquire(&sid, Driver::manual("desktop_resume"), None).unwrap();
+        assert!(!crate::session_driver::pending_held(&sid, &token));
+        drop(lease);
+        assert!(crate::session_driver::snapshot(&sid).running.is_none());
+    }
+
     #[test]
     fn normalize_tool_maps_blank_and_claude_code_to_claude() {
         assert_eq!(super::normalize_tool(""), "claude");
