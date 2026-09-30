@@ -3620,6 +3620,9 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
 fn serve_resume_session(params: &Value) -> Result<Value, String> {
     let req: crate::auto_resume::ResumeSessionRequest = serde_json::from_value(params.clone())
         .map_err(|e| format!("bad resume_session params: {e}"))?;
+    // Taken over by another session: the phone asks the boss first and resends
+    // with `allowRetired`.
+    crate::agent_source::guard_manual_resume(&req.session_id, req.allow_retired)?;
     // Idempotent-resend guard: `resume_session` is an ackable write, so a lost ack
     // makes the phone resend it. Without this, a resend fires a *second*
     // `claude --resume` on the same session — the double-submit that stacks two

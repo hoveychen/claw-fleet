@@ -891,6 +891,9 @@ const DICT: Record<string, string> = {
   默认权限: "Default permissions",
   沿用权限: "Inherit permissions",
   恢复会话失败: "Failed to resume session",
+  "这个会话已被 {0} 接替。继续它会让两个会话同时做同一份工作。仍要继续？":
+    "Taken over by {0}. Resuming it would put two sessions on the same work. Resume anyway?",
+  "未继续：已被 {0} 接替": "Not resumed: taken over by {0}",
   "发送中…": "Sending…",
   已发送: "Sent",
   继续会话: "Resume session",

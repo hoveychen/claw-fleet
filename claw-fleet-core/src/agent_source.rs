@@ -630,6 +630,21 @@ fn refuse_if_retired(session_id: &str, driver: crate::session_driver::Driver) ->
     }
 }
 
+/// The front ends' gate before a manual resume: a retired session is refused
+/// with a [`RETIRED_ERR_PREFIX`] error naming its successor unless the boss
+/// already confirmed (`allow_retired`). The front end shows "taken over by X,
+/// continue anyway?" and resends with the flag; the dispatcher itself lets
+/// every manual resume through.
+pub fn guard_manual_resume(session_id: &str, allow_retired: bool) -> Result<(), String> {
+    if allow_retired {
+        return Ok(());
+    }
+    match crate::session_driver::live_end(session_id) {
+        Some(end) => Err(format!("{RETIRED_ERR_PREFIX} session {session_id} was taken over by {end}")),
+        None => Ok(()),
+    }
+}
+
 fn sources_for_tool(tool: &str) -> Vec<Box<dyn AgentSource>> {
     // Claude and Codex both launch from local files. Do not probe or construct
     // the dsh source while dispatching either harness.
@@ -1457,6 +1472,10 @@ mod tests {
             assert!(err.starts_with(super::RETIRED_ERR_PREFIX) && err.contains("successor"), "{err}");
         }
         assert!(super::refuse_if_retired(&old, Driver::manual("desktop_resume")).is_ok());
+        // The front ends' gate asks once, then lets the confirmed resend through.
+        let asked = super::guard_manual_resume(&old, false).unwrap_err();
+        assert!(asked.starts_with(super::RETIRED_ERR_PREFIX) && asked.ends_with("taken over by successor"), "{asked}");
+        assert!(super::guard_manual_resume(&old, true).is_ok());
         assert!(super::refuse_if_retired("never-replaced", Driver::continue_("watch")).is_ok());
     }
 

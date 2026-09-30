@@ -45,8 +45,12 @@ pub(crate) fn resume_rate_limited_session(
     effort: Option<String>,
     permission_mode: Option<String>,
     agent_source: Option<String>,
+    allow_retired: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    // Taken over by another session: the app asks the boss first and resends
+    // with `allowRetired`.
+    claw_fleet_core::agent_source::guard_manual_resume(&session_id, allow_retired.unwrap_or(false))?;
     state.backend.resume_session(
         session_id,
         workspace_path,

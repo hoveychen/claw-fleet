@@ -58,6 +58,23 @@ describe("apiErrorActions", () => {
     expect(params).not.toHaveProperty("prompt");
   });
 
+  it("asks before resuming a session another one took over, and resends only on yes", async () => {
+    const refusal = new Error("retired: session s-1 was taken over by 1234567890ab");
+    const request = vi.fn(async (_m: string, p: Record<string, unknown>) => {
+      if (!p.allowRetired) throw refusal;
+      return {};
+    });
+    const asked: string[] = [];
+    const no = await resumeOverRelay({ ...env(request), confirm: (m) => (asked.push(m), false) });
+    expect(no).toMatchObject({ kind: "failed" });
+    expect(asked[0]).toContain("12345678");
+    expect(request).toHaveBeenCalledTimes(1);
+
+    const yes = await resumeOverRelay({ ...env(request), confirm: () => true });
+    expect(yes).toEqual({ kind: "resumed" });
+    expect(request.mock.calls[2][1]).toMatchObject({ sessionId: "s-1", allowRetired: true });
+  });
+
   it("sends /compact for an over-long context", async () => {
     const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({}));
     await runApiErrorAction("compact", env(request, info("invalid_request", "Prompt is too long")));

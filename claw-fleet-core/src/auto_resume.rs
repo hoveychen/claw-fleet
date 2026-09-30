@@ -367,6 +367,10 @@ pub fn record_resume_outcome(
 pub struct ResumeSessionRequest {
     pub session_id: String,
     pub workspace_path: String,
+    /// The boss confirmed resuming a session another one has taken over
+    /// ([`crate::agent_source::guard_manual_resume`]).
+    #[serde(default)]
+    pub allow_retired: bool,
     /// Follow-up prompt for the resumed turn; `None`/empty = "continue".
     #[serde(default)]
     pub prompt: Option<String>,
