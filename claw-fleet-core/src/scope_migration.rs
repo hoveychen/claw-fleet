@@ -10,8 +10,8 @@
 //! starts as launch arguments ([`crate::claude_launch`],
 //! [`crate::codex_launch`]); this module removes the global copies.
 //!
-//! Two phases, each recorded by its own marker under `~/.fleet/migrations/` so
-//! a failure part-way retries only what is left:
+//! Three phases, each recorded by its own marker under `~/.fleet/migrations/`
+//! so a failure part-way retries only what is left:
 //!
 //! 1. **Snapshot.** What is installed on disk is the only record of which
 //!    features the user had on, and phase 2 erases it. So first, on a host
@@ -22,8 +22,14 @@
 //! 2. **Strip.** Every global write goes, through the modules' `_inner`
 //!    removers, which record nothing in prefs: this is Fleet moving its config,
 //!    not the user switching features off.
-//!
-//! The permission allow rules are not handled here yet.
+//! 3. **Permissions.** Fleet's `permissions.allow` rules go last, and only once
+//!    no Fleet session started by an older build is still running. Those
+//!    sessions got the rules from the global file alone, and Claude Code
+//!    re-reads permissions while it runs: pulling them mid-session leaves a
+//!    headless session on a prompt nobody can answer. Sessions started since
+//!    carry the rules in their own `--settings` and are not waited for.
+//!    Until then [`run`] retries this phase on every call — the desktop and
+//!    `fleet serve` tickers call it every 30s.
 
 use std::fs;
 use std::path::PathBuf;
@@ -33,7 +39,15 @@ use crate::control_plane_prefs::{is_disabled, mark_disabled, Feature};
 
 const MIGRATIONS_DIR: &str = "migrations";
 const SNAPSHOT_MARKER: &str = "scope-per-launch-v1.snapshot";
+const STRIP_MARKER: &str = "scope-per-launch-v1.strip";
 const DONE_MARKER: &str = "scope-per-launch-v1.done";
+
+/// The env var every Fleet spawn sets (`session_launch`); nothing else sets it
+/// to this value, so it identifies a Fleet-started `claude` process.
+const FLEET_SPAWN_ENV: &str = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0";
+
+/// Minimum time between two process scans while phase 3 waits.
+const LEGACY_SCAN_INTERVAL_SECS: u64 = 60;
 
 fn marker(name: &str) -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join(MIGRATIONS_DIR).join(name))
@@ -157,13 +171,82 @@ fn remove_claude_md_if_blank() -> Result<(), String> {
     })
 }
 
-/// Run whatever is left of the migration. Cheap once done — two `stat`s — so
-/// every long-lived Fleet process calls it at startup.
+/// Whether a process is a Fleet session that depends on the global allow
+/// rules: a `claude` Fleet spawned (by env) without a `--settings` file from
+/// [`crate::claude_launch`], i.e. by a build that predates per-launch settings.
+fn is_legacy_fleet_session(cmd: &[String], env: &[String]) -> bool {
+    let is_claude = cmd
+        .first()
+        .map(|c| c.rsplit(['/', '\\']).next().unwrap_or(c))
+        .is_some_and(|b| b == "claude" || b == "claude.exe");
+    let fleet_spawned = env.iter().any(|e| e == FLEET_SPAWN_ENV);
+    let per_launch = cmd.windows(2).any(|w| {
+        w[0] == "--settings" && w[1].replace('\\', "/").contains("/claude-launch/")
+    });
+    is_claude && fleet_spawned && !per_launch
+}
+
+fn legacy_fleet_sessions_alive() -> bool {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut sys = System::new();
+    // cmd + environ only: refreshing cwd for every process on macOS raises TCC
+    // prompts for unrelated apps (see `orphan_reaper`).
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing()
+            .with_cmd(UpdateKind::Always)
+            .with_environ(UpdateKind::Always),
+    );
+    let strings = |v: &[std::ffi::OsString]| -> Vec<String> {
+        v.iter().map(|s| s.to_string_lossy().into_owned()).collect()
+    };
+    sys.processes()
+        .values()
+        .any(|p| is_legacy_fleet_session(&strings(p.cmd()), &strings(p.environ())))
+}
+
+/// [`legacy_fleet_sessions_alive`], but a busy answer is reused for a minute:
+/// the scan reads every process's environment, and phase 3 can wait hours.
+fn legacy_sessions_alive_throttled() -> bool {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST_BUSY_SCAN: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let last = LAST_BUSY_SCAN.load(Ordering::Relaxed);
+    if last != 0 && now.saturating_sub(last) < LEGACY_SCAN_INTERVAL_SECS {
+        return true;
+    }
+    let alive = legacy_fleet_sessions_alive();
+    LAST_BUSY_SCAN.store(if alive { now } else { 0 }, Ordering::Relaxed);
+    alive
+}
+
+/// Phase 3, unless older Fleet sessions are still alive.
+fn permissions(legacy_alive: &dyn Fn() -> bool) -> Option<Step> {
+    if legacy_alive() {
+        return None;
+    }
+    Some(Step {
+        name: "permissions",
+        result: crate::permissions_injector::deactivate()
+            .map_err(|e| format!("settings.json permissions: {e}")),
+    })
+}
+
+/// Run whatever is left of the migration. Cheap once done — one `stat` — so
+/// every long-lived Fleet process calls it at startup and on its ticker.
 ///
 /// Returns the steps taken this call; empty when there was nothing left to do.
 /// A phase whose steps did not all succeed is not marked done and runs again
 /// next time.
 pub fn run() -> Vec<Step> {
+    run_with(&legacy_sessions_alive_throttled)
+}
+
+fn run_with(legacy_alive: &dyn Fn() -> bool) -> Vec<Step> {
     if has_marker(DONE_MARKER) {
         return Vec::new();
     }
@@ -186,9 +269,27 @@ pub fn run() -> Vec<Step> {
         }
     }
 
-    let stripped = strip();
-    let ok = stripped.iter().all(|s| s.result.is_ok());
-    steps.extend(stripped);
+    if !has_marker(STRIP_MARKER) {
+        let stripped = strip();
+        let ok = stripped.iter().all(|s| s.result.is_ok());
+        steps.extend(stripped);
+        if !ok {
+            return steps;
+        }
+        if let Err(e) = set_marker(STRIP_MARKER) {
+            steps.push(Step {
+                name: "strip_marker",
+                result: Err(e),
+            });
+            return steps;
+        }
+    }
+
+    let Some(perms) = permissions(legacy_alive) else {
+        return steps;
+    };
+    let ok = perms.result.is_ok();
+    steps.push(perms);
     if ok {
         if let Err(e) = set_marker(DONE_MARKER) {
             steps.push(Step {
@@ -273,6 +374,12 @@ mod tests {
         }
     }
 
+    /// No older Fleet session alive — the tests must not depend on what the
+    /// developer's machine is running.
+    fn quiet() -> Vec<Step> {
+        run_with(&|| false)
+    }
+
     const BIN: &str = "/Applications/Claw Fleet.app/Contents/MacOS/fleet";
 
     fn fleet_hook(sub: &str) -> Value {
@@ -320,7 +427,7 @@ mod tests {
         )
         .unwrap();
 
-        let steps = run();
+        let steps = quiet();
         for s in &steps {
             assert!(s.result.is_ok(), "{} failed: {:?}", s.name, s.result);
         }
@@ -366,14 +473,14 @@ mod tests {
             json!({ "numStartups": 3, "mcpServers": { "other": { "command": "x" } } })
         );
 
-        assert!(run().is_empty(), "done means done");
+        assert!(quiet().is_empty(), "done means done");
     }
 
     #[test]
     fn a_host_without_fleet_config_keeps_every_feature_on() {
         let h = Home::new("fresh");
         h.write_settings(&json!({ "theme": "dark" }));
-        for s in run() {
+        for s in quiet() {
             assert!(s.result.is_ok(), "{} failed: {:?}", s.name, s.result);
         }
         for f in Feature::ALL {
@@ -392,7 +499,7 @@ mod tests {
         fs::write(h.claude().join("CLAUDE.md"), "# Mine\n\nbe terse\n").unwrap();
         crate::prd_discipline::apply_prd_discipline("Boss", "en").unwrap();
 
-        for s in run() {
+        for s in quiet() {
             assert!(s.result.is_ok(), "{} failed: {:?}", s.name, s.result);
         }
         assert_eq!(
@@ -409,7 +516,7 @@ mod tests {
         let h = Home::new("mcp");
         let theirs = json!({ "mcpServers": { "fleet": { "command": "/usr/bin/fleet-of-ships" } } });
         fs::write(crate::session::get_claude_config_json().unwrap(), theirs.to_string()).unwrap();
-        for s in run() {
+        for s in quiet() {
             assert!(s.result.is_ok(), "{} failed: {:?}", s.name, s.result);
         }
         assert_eq!(h.claude_json(), theirs);
@@ -424,9 +531,51 @@ mod tests {
         set_marker(SNAPSHOT_MARKER).unwrap();
         crate::hooks::strip_all_fleet_hooks().unwrap();
 
-        for s in run() {
+        for s in quiet() {
             assert!(s.result.is_ok(), "{} failed: {:?}", s.name, s.result);
         }
         assert!(!is_disabled(Feature::GuardHook));
+    }
+
+    #[test]
+    fn the_allow_rules_wait_for_older_fleet_sessions_to_exit() {
+        let h = Home::new("perms");
+        h.write_settings(&json!({
+            "permissions": { "allow": ["Bash(*)", "Bash(ls)"], "deny": ["Bash(rm:*)"] },
+            "hooks": { "Stop": [ { "hooks": [fleet_hook("session idle")] } ] },
+        }));
+
+        let busy = run_with(&|| true);
+        assert!(busy.iter().all(|s| s.name != "permissions"));
+        assert_eq!(
+            h.settings(),
+            json!({ "permissions": { "allow": ["Bash(*)", "Bash(ls)"], "deny": ["Bash(rm:*)"] } }),
+            "hooks go at once, the rules stay while older sessions run"
+        );
+        assert!(!has_marker(DONE_MARKER));
+
+        let later = run_with(&|| false);
+        assert_eq!(later.iter().map(|s| s.name).collect::<Vec<_>>(), vec!["permissions"]);
+        assert_eq!(
+            h.settings(),
+            json!({ "permissions": { "allow": ["Bash(ls)"], "deny": ["Bash(rm:*)"] } })
+        );
+        assert!(has_marker(DONE_MARKER));
+    }
+
+    #[test]
+    fn only_fleet_spawned_claude_without_launch_settings_is_waited_for() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let fleet_env = v(&["HOME=/u", FLEET_SPAWN_ENV]);
+        assert!(is_legacy_fleet_session(
+            &v(&["/usr/local/bin/claude", "-p", "--resume", "x"]),
+            &fleet_env
+        ));
+        assert!(!is_legacy_fleet_session(
+            &v(&["claude", "--settings", "/u/.fleet/claude-launch/settings.json"]),
+            &fleet_env
+        ), "a per-launch session carries its own rules");
+        assert!(!is_legacy_fleet_session(&v(&["claude"]), &v(&["HOME=/u"])), "hand-opened");
+        assert!(!is_legacy_fleet_session(&v(&["/bin/sleep", "60"]), &fleet_env));
     }
 }

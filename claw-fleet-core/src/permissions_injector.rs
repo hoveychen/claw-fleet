@@ -264,12 +264,6 @@ fn set_allow(v: &mut serde_json::Value, allow: Vec<String>) {
         .insert("allow".to_string(), serde_json::json!(allow));
 }
 
-fn strip_permissions(v: &mut serde_json::Value) {
-    if let Some(obj) = v.as_object_mut() {
-        obj.remove("permissions");
-    }
-}
-
 /// Drop holder entries whose process is no longer alive **or** whose
 /// `start_time_secs` no longer matches the live process at that pid.
 /// Delegates to [`crate::session::prune_dead_holders`]; the start_time
@@ -358,23 +352,64 @@ pub fn release(pid: u32) -> std::io::Result<()> {
     write_lock(&lock)
 }
 
-/// The one and only cleanup path: restore settings.json to the snapshot taken
-/// when the lock was first created, then drop the lock.
+/// The one and only cleanup path: take every rule Fleet injects back out of
+/// `permissions.allow`, then drop the lock.
 ///
-/// Unconditional — it does not wait for peer holders to leave, because the
-/// toggle it backs (`permissions-config.json`'s `enabled`) is global: once the
-/// user turns the injection off, every Fleet process reads `enabled == false`
-/// and its watchdog stops re-injecting. A peer's later `release` is a no-op
-/// because the lock is already gone.
+/// Strips by rule rather than restoring the lock's snapshot, because the
+/// snapshot cannot be trusted on a long-lived host. An older build deleted the
+/// lock on exit, so the next start re-snapshotted a settings.json that already
+/// carried Fleet's rules — `original_allow` then lists `Bash(*)` and friends as
+/// the user's own, and a restore keeps them forever. The cost is a user who had
+/// written one of these exact rules by hand before installing Fleet: it goes
+/// too. [`INJECT_RULES`] has held the same rule names since it was introduced,
+/// so there is no older spelling to also strip.
 ///
-/// Safe to call when no lock exists (returns `Ok(())`).
+/// Everything else under `permissions` (`deny`, `ask`, `additionalDirectories`,
+/// the user's own allow rules) stays; the key itself goes only once empty. The
+/// file is deleted only when Fleet created it and nothing else is left.
+///
+/// Works without a lock too — a host whose lock went missing still has the
+/// rules on disk.
 pub fn deactivate() -> std::io::Result<()> {
-    let Some(lock) = read_lock() else {
-        return Ok(());
+    let lock = read_lock();
+    let (mut current, exists) = read_settings()?;
+    if exists && strip_fleet_rules_in(&mut current) {
+        let fleet_created_it = lock.as_ref().is_some_and(|l| !l.original_existed);
+        let now_empty = current.as_object().is_some_and(|o| o.is_empty());
+        if fleet_created_it && now_empty {
+            delete_settings()?;
+        } else {
+            write_settings(&current)?;
+        }
+    }
+    delete_lock()
+}
+
+/// Remove every [`INJECT_RULES`] entry from `permissions.allow`, dropping
+/// `allow` and then `permissions` once they are empty. Returns whether
+/// anything changed.
+fn strip_fleet_rules_in(v: &mut serde_json::Value) -> bool {
+    let Some(obj) = v.as_object_mut() else {
+        return false;
     };
-    restore_from_snapshot(&lock)?;
-    delete_lock()?;
-    Ok(())
+    let Some(perms) = obj.get_mut("permissions").and_then(|p| p.as_object_mut()) else {
+        return false;
+    };
+    let Some(allow) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) else {
+        return false;
+    };
+    let before = allow.len();
+    allow.retain(|r| !r.as_str().is_some_and(|s| INJECT_RULES.contains(&s)));
+    if allow.len() == before {
+        return false;
+    }
+    if allow.is_empty() {
+        perms.remove("allow");
+    }
+    if perms.is_empty() {
+        obj.remove("permissions");
+    }
+    true
 }
 
 /// Watchdog hook: if the lock still has at least one live holder but
@@ -416,81 +451,6 @@ pub fn verify_and_reinject() -> std::io::Result<bool> {
     write_settings(&new_settings)?;
     write_lock(&lock)?;
     Ok(true)
-}
-
-fn restore_from_snapshot(lock: &PermissionsLock) -> std::io::Result<()> {
-    if !lock.original_existed {
-        // Settings.json didn't exist before Fleet touched it.  Strip our entries;
-        // if nothing else is left, delete the file entirely.
-        let (mut current, exists) = read_settings()?;
-        if !exists {
-            return Ok(());
-        }
-        let (current_allow, _) = extract_allow(&current);
-        let stripped: Vec<String> = current_allow
-            .into_iter()
-            .filter(|s| !INJECT_RULES.contains(&s.as_str()))
-            .collect();
-        // If permissions.allow is now empty and permissions only had allow, drop permissions.
-        let perms_obj_keys_only_allow = current
-            .get("permissions")
-            .and_then(|p| p.as_object())
-            .map(|o| o.len() == 1 && o.contains_key("allow"))
-            .unwrap_or(false);
-        if stripped.is_empty() && perms_obj_keys_only_allow {
-            strip_permissions(&mut current);
-        } else {
-            set_allow(&mut current, stripped);
-        }
-        // If the resulting file is an empty object, delete it.
-        let is_empty_obj = current.as_object().map(|o| o.is_empty()).unwrap_or(false);
-        if is_empty_obj {
-            delete_settings()?;
-        } else {
-            write_settings(&current)?;
-        }
-        return Ok(());
-    }
-
-    // Settings.json existed originally.  Restore the original allow exactly.
-    let (mut current, exists) = read_settings()?;
-    if !exists {
-        // User (or something else) deleted settings.json while Fleet was running.
-        // Recreate it with the original snapshot rather than silently swallowing
-        // the deletion: that matches the explicit "Fleet restores on shutdown"
-        // contract better than no-op-ing here.
-        let mut fresh = serde_json::Value::Object(Default::default());
-        if lock.original_had_permissions {
-            set_allow(&mut fresh, lock.original_allow.clone());
-        }
-        let is_empty_obj = fresh.as_object().map(|o| o.is_empty()).unwrap_or(true);
-        if !is_empty_obj {
-            write_settings(&fresh)?;
-        }
-        return Ok(());
-    }
-
-    if !lock.original_had_permissions {
-        strip_permissions(&mut current);
-        write_settings(&current)?;
-        return Ok(());
-    }
-
-    let originals: std::collections::HashSet<&str> =
-        lock.original_allow.iter().map(|s| s.as_str()).collect();
-    let (current_allow, _) = extract_allow(&current);
-    let restored: Vec<String> = current_allow
-        .into_iter()
-        .filter(|s| {
-            if originals.contains(s.as_str()) {
-                return true;
-            }
-            !INJECT_RULES.contains(&s.as_str())
-        })
-        .collect();
-    set_allow(&mut current, restored);
-    write_settings(&current)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -767,12 +727,64 @@ mod tests {
     }
 
     #[test]
-    fn deactivate_no_lock_is_noop() {
+    fn deactivate_no_lock_leaves_a_clean_file_alone() {
         let _env = setup();
         write_settings_for_test(&serde_json::json!({ "theme": "dark" }));
         deactivate().unwrap();
         let v = read_settings_for_test().expect("untouched");
-        assert_eq!(v.get("theme").and_then(|t| t.as_str()), Some("dark"));
+        assert_eq!(v, serde_json::json!({ "theme": "dark" }));
+    }
+
+    /// A lost lock used to make deactivate a no-op, stranding the rules.
+    #[test]
+    fn deactivate_without_a_lock_still_strips_fleet_rules() {
+        let _env = setup();
+        write_settings_for_test(&serde_json::json!({
+            "permissions": { "allow": ["Bash(*)", "Bash(ls)", "mcp__fleet__fleet__ask"] },
+        }));
+        deactivate().unwrap();
+        assert_eq!(allow_of(&read_settings_for_test().unwrap()), vec!["Bash(ls)"]);
+    }
+
+    /// With no `permissions` before Fleet, restoring used to drop the whole
+    /// object — taking `deny` and `additionalDirectories` the user added since.
+    #[test]
+    fn deactivate_keeps_other_permission_keys_added_since() {
+        let _env = setup();
+        write_settings_for_test(&serde_json::json!({ "theme": "dark" }));
+        acquire(1234).unwrap();
+        let mut v = read_settings_for_test().unwrap();
+        v["permissions"]["deny"] = serde_json::json!(["Bash(rm -rf:*)"]);
+        v["permissions"]["additionalDirectories"] = serde_json::json!(["/tmp"]);
+        write_settings_for_test(&v);
+
+        deactivate().unwrap();
+        assert_eq!(
+            read_settings_for_test().unwrap(),
+            serde_json::json!({
+                "theme": "dark",
+                "permissions": {
+                    "deny": ["Bash(rm -rf:*)"],
+                    "additionalDirectories": ["/tmp"],
+                },
+            })
+        );
+    }
+
+    /// The snapshot on a long-lived host lists Fleet's own rules as the
+    /// user's (taken after an older build's injection); they must go anyway.
+    #[test]
+    fn deactivate_strips_fleet_rules_the_snapshot_claims_as_original() {
+        let _env = setup();
+        write_settings_for_test(&serde_json::json!({
+            "permissions": { "allow": ["Bash(*)", "Read(*)", "Bash(ls)", "mcp__fleet__fleet__ask"] },
+        }));
+        acquire(1234).unwrap();
+        assert!(read_lock().unwrap().original_allow.contains(&"Bash(*)".to_string()));
+
+        deactivate().unwrap();
+        assert_eq!(allow_of(&read_settings_for_test().unwrap()), vec!["Bash(ls)"]);
+        assert!(read_lock().is_none());
     }
 
     /// End-to-end payoff of the snapshot fix: a crash between two runs must not

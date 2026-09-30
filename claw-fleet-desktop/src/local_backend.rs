@@ -903,6 +903,9 @@ impl LocalBackend {
                     );
                     claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess_ar);
                     claw_fleet_core::headless_runtime::reconcile_timers();
+                    // The scope migration's last phase waits for older Fleet
+                    // sessions to exit; see `scope_migration::run`.
+                    claw_fleet_core::scope_migration::run_and_log("desktop");
                     // Wake a fresh session for plans nobody is responsible for
                     // any more. Self-throttled and off-thread; see `plan_revive`.
                     claw_fleet_core::plan_revive::maybe_tick_in_background();

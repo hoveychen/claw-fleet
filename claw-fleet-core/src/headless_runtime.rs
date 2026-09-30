@@ -525,6 +525,11 @@ impl TickState {
         );
         maybe_drain_pending_messages(&self.sessions);
         reconcile_timers();
+        // Its last phase waits for older Fleet sessions to exit, so it retries
+        // here; one `stat` once done. Skipped in unit tests, like the timers.
+        if !cfg!(test) {
+            crate::scope_migration::run_and_log("headless");
+        }
         // Wake a fresh session for plans nobody is responsible for any more.
         // Self-throttled and off-thread; see `plan_revive`.
         crate::plan_revive::maybe_tick_in_background();
