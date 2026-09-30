@@ -23,7 +23,11 @@
 //!   pre-attributes it to the plan.
 //! - A plan whose newest session was closed by the boss — the card's terminal
 //!   button, or a 「已完成」 mark in the session list — is not revived
-//!   directly: Fleet raises a card and asks first.
+//!   directly: Fleet raises a card and asks first. One closed with
+//!   「放弃任务」 is left alone altogether — no revival, no card.
+//! - An exec child of an explore plan that nobody has claimed yet is the
+//!   explore plan's deliverable, written for the boss to read before any of it
+//!   is built, so it is never started unasked either: Fleet asks first.
 //! - Pressing 「结束任务」 on a session whose plan is fully done continues the
 //!   tree at once, in DFS order ([`continue_after_finish`]); a plan with boxes
 //!   still open keeps the ask-first path above.
@@ -108,6 +112,8 @@ pub enum AskKind {
     BossClosed,
     /// [`MAX_FRUITLESS`] revivals made no progress; Fleet snoozed and asks.
     Fruitless,
+    /// An unclaimed child of an explore plan; asking before starting it.
+    ExploreChild,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -169,8 +175,20 @@ pub struct PlanView {
     pub owners: Vec<String>,
     /// The session holding the newest claim, after following handoff links.
     pub newest_owner: String,
-    /// `true` when the boss closed `newest_owner` (see [`closed_by_boss`]).
-    pub boss_closed: bool,
+    /// How the boss closed `newest_owner`, if they did (see [`closed_by_boss`]).
+    pub boss_closed: Option<BossClose>,
+    /// Nobody has claimed this plan yet and it sits under an explore plan, so
+    /// it is output the boss has not signed off on (see the module docs).
+    pub needs_go_ahead: bool,
+}
+
+/// How the boss closed a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BossClose {
+    /// 「结束任务」, or a 「已完成」 mark in the session list.
+    Finished,
+    /// 「放弃任务」: the boss called the work off.
+    Abandoned,
 }
 
 /// Build the candidate views from every focus record. `successor` follows a
@@ -180,7 +198,7 @@ pub fn collect_views(
     records: &[(String, TaskProgressRecord)],
     now: u64,
     successor: &dyn Fn(&str) -> Option<String>,
-    closed: &dyn Fn(&str) -> bool,
+    closed: &dyn Fn(&str) -> Option<BossClose>,
     load_blocks: &dyn Fn(&str) -> Vec<pt::SourcedBlock>,
 ) -> Vec<PlanView> {
     let mut by_ws: BTreeMap<String, Vec<&(String, TaskProgressRecord)>> = BTreeMap::new();
@@ -199,8 +217,12 @@ pub fn collect_views(
         let blocks = load_blocks(&ws);
         let mut parent: HashMap<&str, &str> = HashMap::new();
         let mut pending: HashSet<&str> = HashSet::new();
+        let mut explore: HashSet<&str> = HashSet::new();
         for b in &blocks {
             let Some(id) = b.id.as_deref() else { continue };
+            if b.kind == pt::PlanKind::Explore {
+                explore.insert(id);
+            }
             if let Some(p) = b.parent.as_deref() {
                 parent.insert(id, p);
             }
@@ -247,6 +269,7 @@ pub fn collect_views(
                 .copied()
                 .filter(|r| family.contains(r.1.plan_id.as_str()))
                 .collect();
+            let mut needs_go_ahead = false;
             if claims.is_empty() {
                 // Never claimed: a child plan written down but not started yet.
                 // Its parent is skipped above (it has a pending descendant), so
@@ -256,6 +279,9 @@ pub fn collect_views(
                 let mut cur = id;
                 let mut hops = 0;
                 while let Some(p) = parent.get(cur) {
+                    // Any explore plan between this one and the lender makes
+                    // it (part of) an explore deliverable.
+                    needs_go_ahead |= explore.contains(p);
                     let own: Vec<_> =
                         recs.iter().copied().filter(|r| r.1.plan_id == *p).collect();
                     if !own.is_empty() {
@@ -286,6 +312,7 @@ pub fn collect_views(
                 total,
                 next_task: pt::first_pending_task(&b.body),
                 boss_closed: closed(&newest_owner),
+                needs_go_ahead,
                 newest_owner,
                 owners,
             });
@@ -298,17 +325,24 @@ pub fn collect_views(
 /// card's button, or a `Done` mark set in the session list. The list mark is
 /// how the boss usually closes sessions in bulk; honouring only the button
 /// woke plans the boss had already put away (seen 2026-09-25..27).
-fn closed_by_boss(sid: &str) -> bool {
+fn closed_by_boss(sid: &str) -> Option<BossClose> {
     match (crate::task_outcome::outcome_dir(), crate::session_mark::mark_dir()) {
         (Some(outcomes), Some(marks)) => closed_by_boss_in(&outcomes, &marks, sid),
-        _ => false,
+        _ => None,
     }
 }
 
-fn closed_by_boss_in(outcomes: &Path, marks: &Path, sid: &str) -> bool {
-    crate::task_outcome::read_in(outcomes, sid).is_some()
-        || crate::session_mark::read_in(marks, sid).map(|r| r.mark)
-            == Some(crate::session_mark::SessionMark::Done)
+fn closed_by_boss_in(outcomes: &Path, marks: &Path, sid: &str) -> Option<BossClose> {
+    use crate::task_outcome::TaskOutcome;
+    // The terminal button stamps a `Done` mark too, so the outcome is read
+    // first: an abandon must not pass for an ordinary close.
+    match crate::task_outcome::read_in(outcomes, sid).map(|r| r.outcome) {
+        Some(TaskOutcome::Abandoned) => Some(BossClose::Abandoned),
+        Some(TaskOutcome::Completed) => Some(BossClose::Finished),
+        None => (crate::session_mark::read_in(marks, sid).map(|r| r.mark)
+            == Some(crate::session_mark::SessionMark::Done))
+        .then_some(BossClose::Finished),
+    }
 }
 
 // ── Coverage ────────────────────────────────────────────────────────────────
@@ -510,7 +544,7 @@ pub fn resolve_attendance(
     blocks: &[pt::SourcedBlock],
     now: u64,
     successor: &dyn Fn(&str) -> Option<String>,
-    closed: &dyn Fn(&str) -> bool,
+    closed: &dyn Fn(&str) -> Option<BossClose>,
     coverage: &dyn Fn(&HashSet<String>) -> Coverage,
     revive_state: &dyn Fn(&str) -> Option<PlanReviveState>,
     snoozed: &dyn Fn(&str) -> bool,
@@ -535,7 +569,7 @@ pub fn resolve_attendance(
         }
         let state = if now.saturating_sub(claimed_at) >= RECENCY_MS {
             AttendanceState::Stale
-        } else if closed(newest) {
+        } else if closed(newest).is_some() {
             AttendanceState::BossClosed
         } else {
             AttendanceState::Idle
@@ -560,7 +594,8 @@ pub fn resolve_attendance(
         let a = attend(&v.owners, &v.newest_owner, at);
         let covered = a.state.is_covered();
         out.plans.insert(v.plan_id.clone(), a);
-        if covered || snoozed(&v.plan_id) {
+        // An abandoned plan gets no outlook: the reviver leaves it alone.
+        if covered || snoozed(&v.plan_id) || v.boss_closed == Some(BossClose::Abandoned) {
             continue;
         }
         let outlook = if !enabled {
@@ -569,7 +604,7 @@ pub fn resolve_attendance(
             let st = revive_state(&v.plan_id).unwrap_or_default();
             if st.ask_card_id.is_some() {
                 ReviveOutlook::Asked
-            } else if v.boss_closed && !st.boss_approved {
+            } else if (v.boss_closed.is_some() || v.needs_go_ahead) && !st.boss_approved {
                 ReviveOutlook::AskBoss
             } else {
                 let since = st.orphan_since_ms.unwrap_or(now);
@@ -693,6 +728,7 @@ pub enum Step {
     Idle,
     Revive,
     AskBossClosed,
+    AskGoAhead,
     GiveUp,
 }
 
@@ -712,7 +748,7 @@ pub fn decide(
     if view.done > st.done_at_last_revive {
         st.attempts = 0;
     }
-    if snoozed || covered {
+    if snoozed || covered || view.boss_closed == Some(BossClose::Abandoned) {
         st.orphan_since_ms = None;
         return Step::Idle;
     }
@@ -720,8 +756,13 @@ pub fn decide(
     if now.saturating_sub(since) < ORPHAN_GRACE_MS {
         return Step::Idle;
     }
-    if view.boss_closed && !st.boss_approved {
-        return Step::AskBossClosed;
+    if !st.boss_approved {
+        if view.needs_go_ahead {
+            return Step::AskGoAhead;
+        }
+        if view.boss_closed.is_some() {
+            return Step::AskBossClosed;
+        }
     }
     if st.attempts >= MAX_FRUITLESS {
         return Step::GiveUp;
@@ -973,7 +1014,8 @@ pub fn continue_after_finish(session_id: &str) {
         next_task: pt::first_pending_task(&block.body),
         owners: owner_list,
         newest_owner: session_id.to_string(),
-        boss_closed: false,
+        boss_closed: None,
+        needs_go_ahead: false,
     };
     let prompt = finish_prompt(&view, &focus.plan_id, transcript_of(session_id).as_deref());
     match spawn_for_plan(&view, prompt, "接续") {
@@ -1005,6 +1047,26 @@ fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
             ElicitationOption {
                 label: OPT_REVIVE.into(),
                 description: "起一个新会话认领这个计划，从下一个 P 接着做".into(),
+                preview: None,
+            },
+        ),
+        AskKind::ExploreChild => (
+            "计划唤醒",
+            format!(
+                "探索产出的计划 {label} 还没人开工，要起新会话执行吗？\n---\n\
+                 它挂在一个 explore 计划下面，是调研得出的待办，还没有任何会话认领过。\
+                 Fleet 不替你拍板开工，先来问你。\n\n\
+                 - 进度：{done}/{total}，下一个：{next}\n\
+                 - 做调研的会话：`{owner}`\n\n\
+                 要让新会话开始执行吗？",
+                label = plan_label(view),
+                done = view.done,
+                total = view.total,
+                owner = view.newest_owner,
+            ),
+            ElicitationOption {
+                label: OPT_REVIVE.into(),
+                description: "起一个新会话认领这个计划，从第一个 P 开始做".into(),
                 preview: None,
             },
         ),
@@ -1209,11 +1271,11 @@ fn tick_locked(path: &Path) {
                     st.orphan_since_ms = Some(now);
                 }
             },
-            step @ (Step::AskBossClosed | Step::GiveUp) => {
-                let kind = if step == Step::AskBossClosed {
-                    AskKind::BossClosed
-                } else {
-                    AskKind::Fruitless
+            step @ (Step::AskBossClosed | Step::AskGoAhead | Step::GiveUp) => {
+                let kind = match step {
+                    Step::AskBossClosed => AskKind::BossClosed,
+                    Step::AskGoAhead => AskKind::ExploreChild,
+                    _ => AskKind::Fruitless,
                 };
                 if kind == AskKind::Fruitless {
                     let _ = plan_snooze::snooze(
@@ -1303,7 +1365,11 @@ pub fn dry_run() -> Vec<OrphanReport> {
                 format!("snoozed: {}", snooze_summary(&s, now))
             } else if let Some(why) = coverage.reason(&v.owners) {
                 format!("covered: {why}")
-            } else if v.boss_closed {
+            } else if v.boss_closed == Some(BossClose::Abandoned) {
+                "orphan, abandoned by boss (left alone)".to_string()
+            } else if v.needs_go_ahead {
+                "orphan, unclaimed explore deliverable (would ask first)".to_string()
+            } else if v.boss_closed.is_some() {
                 "orphan, closed by boss (would ask first)".to_string()
             } else {
                 "orphan".to_string()
@@ -1361,7 +1427,7 @@ mod tests {
         blocks: Vec<pt::SourcedBlock>,
         now: u64,
     ) -> Vec<PlanView> {
-        collect_views(records, now, &|_| None, &|_| false, &|_| blocks.clone())
+        collect_views(records, now, &|_| None, &|_| None, &|_| blocks.clone())
     }
 
     #[test]
@@ -1502,12 +1568,12 @@ mod tests {
             &records,
             now,
             &|sid| (sid == "s1").then(|| "s2".to_string()),
-            &|sid| sid == "s2",
+            &|sid| (sid == "s2").then_some(BossClose::Finished),
             &|_| blocks.clone(),
         );
         assert_eq!(v[0].owners, vec!["s1".to_string(), "s2".to_string()]);
         assert_eq!(v[0].newest_owner, "s2");
-        assert!(v[0].boss_closed);
+        assert_eq!(v[0].boss_closed, Some(BossClose::Finished));
     }
 
     #[test]
@@ -1534,7 +1600,7 @@ mod tests {
             blocks,
             now,
             &|_| None,
-            &|sid| closed.contains(&sid),
+            &|sid| closed.contains(&sid).then_some(BossClose::Finished),
             &|_| {
                 let mut c = Coverage::default();
                 cov(&mut c);
@@ -1578,7 +1644,7 @@ mod tests {
             &blocks,
             now,
             &|sid| (sid == "s-old").then(|| "s-new".to_string()),
-            &|_| false,
+            &|_| None,
             &|_| {
                 let mut c = Coverage::default();
                 c.alive.insert("s-new".into());
@@ -1624,6 +1690,7 @@ mod tests {
     }
 
     fn view(done: u32, boss_closed: bool) -> PlanView {
+        let boss_closed = boss_closed.then_some(BossClose::Finished);
         PlanView {
             workspace_path: "/w".into(),
             plan_id: "p".into(),
@@ -1634,6 +1701,7 @@ mod tests {
             owners: vec!["s".into()],
             newest_owner: "s".into(),
             boss_closed,
+            needs_go_ahead: false,
         }
     }
 
@@ -1642,11 +1710,11 @@ mod tests {
         use crate::session_mark::SessionMark;
         let root = tempfile::tempdir().unwrap();
         let (outcomes, marks) = (root.path().join("outcome"), root.path().join("mark"));
-        assert!(!closed_by_boss_in(&outcomes, &marks, "s"));
+        assert_eq!(closed_by_boss_in(&outcomes, &marks, "s"), None);
         crate::session_mark::set_mark_in(&marks, "s", "/w", Some(SessionMark::Pending)).unwrap();
-        assert!(!closed_by_boss_in(&outcomes, &marks, "s"), "a pending mark is not a close");
+        assert_eq!(closed_by_boss_in(&outcomes, &marks, "s"), None, "a pending mark is not a close");
         crate::session_mark::set_mark_in(&marks, "s", "/w", Some(SessionMark::Done)).unwrap();
-        assert!(closed_by_boss_in(&outcomes, &marks, "s"));
+        assert_eq!(closed_by_boss_in(&outcomes, &marks, "s"), Some(BossClose::Finished));
         crate::task_outcome::set_outcome_in(
             &outcomes,
             "t",
@@ -1656,7 +1724,63 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(closed_by_boss_in(&outcomes, &marks, "t"));
+        // The terminal button also stamps a Done mark; the abandon still wins.
+        crate::session_mark::set_mark_in(&marks, "t", "/w", Some(SessionMark::Done)).unwrap();
+        assert_eq!(closed_by_boss_in(&outcomes, &marks, "t"), Some(BossClose::Abandoned));
+    }
+
+    #[test]
+    fn abandoned_plans_are_left_alone() {
+        let mut st = PlanReviveState::default();
+        let mut v = view(1, false);
+        v.boss_closed = Some(BossClose::Abandoned);
+        decide(&v, false, false, &mut st, 0, true);
+        assert_eq!(decide(&v, false, false, &mut st, 3 * ORPHAN_GRACE_MS, true), Step::Idle);
+        assert_eq!(st.orphan_since_ms, None, "no orphan clock runs for it");
+
+        let now = 100 * H;
+        let records = vec![("s1".to_string(), rec("/w", "p", now - H))];
+        let a = resolve_attendance(
+            &records,
+            &[block("p", None, PENDING)],
+            now,
+            &|_| None,
+            &|_| Some(BossClose::Abandoned),
+            &|_| Coverage::default(),
+            &|_| None,
+            &|_| false,
+            true,
+        );
+        assert_eq!(a.plans["p"].state, AttendanceState::BossClosed);
+        assert!(a.outlook.is_empty(), "no revive or ask outlook");
+    }
+
+    #[test]
+    fn an_unclaimed_explore_deliverable_asks_before_starting() {
+        let now = 100 * H;
+        let records = vec![("s-x".to_string(), rec("/w", "x", now - H))];
+        let mut x = block("x", None, DONE);
+        x.kind = pt::PlanKind::Explore;
+        let blocks = vec![x, block("impl", Some("x"), PENDING)];
+        let v = views(&records, blocks.clone(), now);
+        assert_eq!(v.len(), 1);
+        assert_eq!((v[0].plan_id.as_str(), v[0].needs_go_ahead), ("impl", true));
+
+        let mut st = PlanReviveState::default();
+        decide(&v[0], false, false, &mut st, 0, true);
+        assert_eq!(decide(&v[0], false, false, &mut st, ORPHAN_GRACE_MS, true), Step::AskGoAhead);
+        st.ask_card_id = Some("c".into());
+        st.ask_kind = Some(AskKind::ExploreChild);
+        assert_eq!(apply_answer(&mut st, false, Some(OPT_REVIVE), ORPHAN_GRACE_MS), None);
+        assert_eq!(decide(&v[0], false, false, &mut st, ORPHAN_GRACE_MS, true), Step::Revive);
+
+        // Once somebody has claimed it, it is ordinary work.
+        let mut claimed = records.clone();
+        claimed.push(("s-i".to_string(), rec("/w", "impl", now - H)));
+        assert!(!views(&claimed, blocks.clone(), now)[0].needs_go_ahead);
+        // An exec parent lends its claim without any ask.
+        let exec = vec![block("x", None, DONE), block("impl", Some("x"), PENDING)];
+        assert!(!views(&records, exec, now)[0].needs_go_ahead);
     }
 
     #[test]
