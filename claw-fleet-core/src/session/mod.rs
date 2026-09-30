@@ -9,23 +9,6 @@ use serde_json::Value;
 
 use crate::hooks::HookState;
 
-// ── Lock file ────────────────────────────────────────────────────────────────
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct LockFile {
-    pub pid: u32,
-    #[serde(rename = "workspaceFolders", default)]
-    pub workspace_folders: Vec<String>,
-    #[serde(rename = "ideName", default)]
-    pub ide_name: String,
-}
-
-pub struct IdeSession {
-    pub pid: u32,
-    pub workspace_folders: Vec<String>,
-    pub ide_name: String,
-}
-
 // ── Exported types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -102,7 +85,6 @@ pub struct SessionInfo {
     pub id: String,
     pub workspace_path: String,
     pub workspace_name: String,
-    pub ide_name: Option<String>,
     /// Launch identity persisted by the Claude CLI into every `user` record
     /// (from the `CLAUDE_CODE_ENTRYPOINT` env var at spawn time): "cli",
     /// "claude-vscode", `session_launch::NEW_SESSION_ENTRYPOINT`, … Taken
@@ -757,45 +739,11 @@ mod tests {
         assert!(!detect_server_error(&[user_msg(), wrong_model]));
     }
 
-    #[test]
-    fn ide_badge_stays_off_fleet_spawned_sessions() {
-        // A VS Code lock in the workspace must not decorate (or auto-resume-
-        // exclude) launchpad/handoff headless sessions that merely share the
-        // cwd; genuinely interactive sessions keep the badge.
-        let mut vscode = make_session(SessionStatus::Idle);
-        vscode.entrypoint = Some("claude-vscode".into());
-        vscode.ide_name = Some("Visual Studio Code".into());
-        let mut launchpad = make_session(SessionStatus::Idle);
-        launchpad.entrypoint = Some(crate::session_launch::NEW_SESSION_ENTRYPOINT.into());
-        launchpad.ide_name = Some("Visual Studio Code".into());
-        let mut handoff = make_session(SessionStatus::Idle);
-        handoff.entrypoint = Some(crate::handoff::HANDOFF_ENTRYPOINT.into());
-        handoff.ide_name = Some("Visual Studio Code".into());
-
-        let mut sessions = vec![vscode, launchpad, handoff];
-        strip_ide_name_from_fleet_spawns(&mut sessions);
-
-        assert_eq!(
-            sessions[0].ide_name.as_deref(),
-            Some("Visual Studio Code"),
-            "interactive IDE session must keep its badge"
-        );
-        assert_eq!(
-            sessions[1].ide_name, None,
-            "launchpad-spawned session must not inherit the workspace IDE badge"
-        );
-        assert_eq!(
-            sessions[2].ide_name, None,
-            "handoff-spawned session must not inherit the workspace IDE badge"
-        );
-    }
-
     fn make_session(status: SessionStatus) -> SessionInfo {
         SessionInfo {
             id: "test-session".into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
@@ -1707,7 +1655,6 @@ mod tests {
             "sid".to_string(),
             "/tmp/ws".to_string(),
             "ws".to_string(),
-            None,
             false,
             None,
             None,
@@ -1828,7 +1775,6 @@ mod tests {
             id.to_string(),
             "/tmp/ws".to_string(),
             "ws".to_string(),
-            None,
             false,
             None,
             None,

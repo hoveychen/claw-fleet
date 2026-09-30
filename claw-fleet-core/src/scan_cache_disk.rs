@@ -35,7 +35,8 @@ const CACHE_FILE_NAME: &str = "session-cache.json";
 //
 // v4: `fleet_spawned` no longer grandfathers sessions older than the spawn
 // marker's cutoff — only a launch note counts.
-const CACHE_VERSION: u32 = 4;
+// v5: `ide_name` dropped from `SessionInfo`; the IDE lock scan is gone.
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -117,7 +118,6 @@ mod tests {
             id: id.into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,

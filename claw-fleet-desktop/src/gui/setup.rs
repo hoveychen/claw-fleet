@@ -16,7 +16,7 @@ pub(crate) async fn check_setup_status(
     let claude_dir_exists = session::get_claude_dir()
         .map(|d| d.is_dir())
         .unwrap_or(false);
-    let detected_tools = detect_installed_tools(&sessions);
+    let detected_tools = detect_installed_tools();
     let logged_in = account::read_keychain_credentials().is_ok();
     let has_sessions = !sessions.is_empty();
     Ok(ui_types::SetupStatus {

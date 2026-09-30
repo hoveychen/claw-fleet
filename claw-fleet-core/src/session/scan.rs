@@ -378,7 +378,6 @@ fn registered_claude_transcripts(
 
 pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
-    let ide_sessions = scan_ide_sessions(claude_dir);
 
     // One pass over hooks.jsonl yields both the state map and the outstanding
     // background tasks — the file is huge, so the scan must not read it twice.
@@ -402,36 +401,14 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             .unwrap_or_default()
             .to_string();
 
-        // Find associated IDE session by encoding the lock file paths and comparing to the
-        // directory name directly.  This avoids the lossy decode round-trip: a workspace named
-        // "claw-fleet" encodes to "-Users-…-claw-fleet" but decodes to "/Users/…/claw/fleet".
-        let ide = ide_sessions.iter().find(|ide| {
-            ide.workspace_folders
-                .iter()
-                .any(|f| encode_workspace_path(f) == encoded)
-        });
-
-        // Use the exact path from the lock file when available; fall back to the
-        // lossy decode, healed against the transcripts' own `cwd` when it names
-        // nothing on disk (issue #105 — see `heal_workspace_path`). An IDE
-        // holding the folder open used to be the only thing keeping such a
-        // workspace correct here, so closing the editor was enough to poison the
-        // cache with a shredded path and break every later resume.
-        let workspace_path = ide
-            .and_then(|s| {
-                s.workspace_folders
-                    .iter()
-                    .find(|f| encode_workspace_path(f) == encoded)
-            })
-            .cloned()
-            // The workspace Fleet spawned in is exact; the decode is lossy.
-            .or_else(|| {
-                members
-                    .iter()
-                    .filter_map(|m| m.workspace.as_deref())
-                    .find(|w| encode_workspace_path(w) == encoded)
-                    .map(str::to_string)
-            })
+        // The workspace Fleet spawned in is exact; fall back to the lossy
+        // decode, healed against the transcripts' own `cwd` when it names
+        // nothing on disk (issue #105 — see `heal_workspace_path`).
+        let workspace_path = members
+            .iter()
+            .filter_map(|m| m.workspace.as_deref())
+            .find(|w| encode_workspace_path(w) == encoded)
+            .map(str::to_string)
             .unwrap_or_else(|| {
                 heal_workspace_path(&workspace_dir, decode_workspace_path(&encoded))
             });
@@ -456,7 +433,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         let workspace_missing = !crate::tcc::is_tcc_protected(ws_path) && !ws_path.is_dir();
 
         let ws_name = workspace_name(&workspace_path);
-        let ide_name = ide.map(|s| s.ide_name.clone());
 
         // Liveness is the launch note's pid (and its start time), per session.
         let live_pids: HashMap<&str, u32> = members
@@ -517,7 +493,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         .unwrap_or_default();
                     info.pid = session_pid;
                     info.pid_precise = pid_precise;
-                    info.ide_name = ide_name.clone();
                     sessions.push(info);
                 } else {
                     let key = path.to_string_lossy().to_string();
@@ -532,7 +507,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         session_id.clone(),
                         workspace_path.clone(),
                         ws_name.clone(),
-                        ide_name.clone(),
                         false,
                         None,
                         None,
@@ -648,7 +622,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         info.workspace_name = ws_name.clone();
                         info.pid = sub_pid;
                         info.pid_precise = false;
-                        info.ide_name = ide_name.clone();
                         sessions.push(info);
                     } else {
                         let key = agent_path.to_string_lossy().to_string();
@@ -661,7 +634,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                             agent_id.clone(),
                             workspace_path.clone(),
                             ws_name.clone(),
-                            ide_name.clone(),
                             true,
                             Some(parent_session_id.clone()),
                             agent_type,
@@ -686,8 +658,6 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             }
         }
     }
-
-    strip_ide_name_from_fleet_spawns(&mut sessions);
 
     promote_delegating_parents(&mut sessions);
     aggregate_subagent_rollup(&mut sessions);
@@ -915,7 +885,6 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         id: id.into(),
         workspace_path: "/ws".into(),
         workspace_name: "ws".into(),
-        ide_name: None,
         entrypoint: None,
         is_subagent: false,
         fleet_spawned: false,

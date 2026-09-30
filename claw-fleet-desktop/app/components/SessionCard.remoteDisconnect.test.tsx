@@ -46,7 +46,6 @@ function session(remoteDisconnect: RemoteDisconnect | null): SessionInfo {
     ...MOCK_SESSIONS[0],
     id: DISCONNECT_SESSION_ID,
     isSubagent: false,
-    ideName: null,
     workspacePath: "/srv/remote-repo",
     workspaceName: "remote-repo",
     status: remoteDisconnect ? "remoteDisconnected" : "idle",

@@ -150,9 +150,6 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
     if let Some(ref thinking) = s.thinking_level {
         kv("Thinking:", thinking);
     }
-    if let Some(ref ide) = s.ide_name {
-        kv("IDE:", ide);
-    }
     kv("Subagent:", if s.is_subagent { "Yes" } else { "No" });
     if let Some(ref parent) = s.parent_session_id {
         kv("Parent Session:", short_id(parent));

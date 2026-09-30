@@ -878,7 +878,6 @@ export function SessionDetail({
       workspacePath: s.workspacePath,
       agentSource: s.agentSource,
       isSubagent: s.isSubagent,
-      ideName: s.ideName,
     };
   }, [liveSession, session]);
 
@@ -1741,9 +1740,6 @@ export function SessionDetail({
                       >
                         ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
                       </span>
-                    )}
-                    {liveSession.ideName && (
-                      <span className={styles.meta_chip}>{liveSession.ideName}</span>
                     )}
                     {liveSession.slug && (
                       <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>

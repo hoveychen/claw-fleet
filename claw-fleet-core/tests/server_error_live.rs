@@ -28,7 +28,6 @@ fn real_transcript_terminal_server_error_is_detected() {
         stem,
         "/tmp/se-validate".to_string(),
         "se-validate".to_string(),
-        None,  // ide_name
         false, // is_subagent
         None,  // parent_session_id
         None,  // agent_type

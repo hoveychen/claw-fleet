@@ -76,14 +76,6 @@
   font-style: italic;
 }
 
-.ide {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  background: var(--color-bg-secondary);
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-}
-
 .tokens {
   font-size: 11px;
   color: var(--color-text-dim);

@@ -269,7 +269,6 @@ pub mod workflow_sidecar;
 pub mod workspace_browse;
 pub mod zip_stream;
 
-use session::SessionInfo;
 use std::fs;
 
 pub fn log_debug(msg: &str) {
@@ -331,8 +330,21 @@ mod log_debug_tests {
 // ── Shared functions (used by both GUI app and fleet-cli probe) ──────────────
 
 /// Detect which Claude-related tools are installed on the local machine.
-pub fn detect_installed_tools(sessions: &[SessionInfo]) -> ui_types::DetectedTools {
+pub fn detect_installed_tools() -> ui_types::DetectedTools {
     let home = session::real_home_dir();
+    // The Claude Code IDE extensions drop a lock per open editor window into
+    // `~/.claude/ide/`, naming the IDE. Only the names are read here — an
+    // inventory of installed editors, not a list of sessions.
+    let ide_names: Vec<String> = session::get_claude_dir()
+        .and_then(|d| std::fs::read_dir(d.join("ide")).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("lock"))
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .filter_map(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .filter_map(|v| v.get("ideName")?.as_str().map(str::to_lowercase))
+        .collect();
 
     let (cli, _) = check_cli_installed();
 
@@ -351,26 +363,20 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> ui_types::DetectedToo
                     })
                 })
         })
-    }) || sessions.iter().any(|s| {
-        s.ide_name.as_deref().map_or(false, |name| {
-            let n = name.to_lowercase();
-            n.contains("vscode") || n.contains("vs code")
-        })
-    });
+    }) || ide_names
+        .iter()
+        .any(|n| n.contains("vscode") || n.contains("vs code"));
 
-    let jetbrains = sessions.iter().any(|s| {
-        s.ide_name.as_deref().map_or(false, |name| {
-            let n = name.to_lowercase();
-            n.contains("intellij")
-                || n.contains("webstorm")
-                || n.contains("pycharm")
-                || n.contains("goland")
-                || n.contains("rustrover")
-                || n.contains("phpstorm")
-                || n.contains("rider")
-                || n.contains("clion")
-                || n.contains("jetbrains")
-        })
+    let jetbrains = ide_names.iter().any(|n| {
+        n.contains("intellij")
+            || n.contains("webstorm")
+            || n.contains("pycharm")
+            || n.contains("goland")
+            || n.contains("rustrover")
+            || n.contains("phpstorm")
+            || n.contains("rider")
+            || n.contains("clion")
+            || n.contains("jetbrains")
     });
 
     let desktop = {

@@ -2609,7 +2609,7 @@ impl LocalBackend {
             .map(|d| d.is_dir())
             .unwrap_or(false);
         let sessions = self.sessions.lock().unwrap().clone();
-        let detected_tools = crate::detect_installed_tools(&sessions);
+        let detected_tools = crate::detect_installed_tools();
         let logged_in = crate::account::read_keychain_credentials().is_ok();
         let has_sessions = !sessions.is_empty();
 
@@ -4643,7 +4643,6 @@ mod tests {
             id: id.into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             parent_session_id: None,

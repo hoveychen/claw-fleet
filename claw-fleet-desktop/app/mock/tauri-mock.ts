@@ -1259,7 +1259,6 @@ async function handleIPC(
         id,
         workspacePath: ws,
         workspaceName: name,
-        ideName: null,
         isSubagent: false,
         parentSessionId: null,
         agentType: null,

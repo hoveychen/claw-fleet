@@ -88,15 +88,11 @@ impl AgentSource for ClaudeCodeSource {
         if projects.is_dir() {
             paths.push(projects);
         }
-        let ide = dir.join("ide");
-        if ide.is_dir() {
-            paths.push(ide);
-        }
         paths
     }
 
     fn trigger_extensions(&self) -> Vec<&'static str> {
-        vec!["jsonl", "lock"]
+        vec!["jsonl"]
     }
 
     fn fetch_account(&self) -> Result<Value, String> {

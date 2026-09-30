@@ -368,7 +368,6 @@ mod tests {
             id: id.into(),
             workspace_path: "/tmp/test".into(),
             workspace_name: workspace_name.into(),
-            ide_name: None,
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,

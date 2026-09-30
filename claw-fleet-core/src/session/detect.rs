@@ -137,54 +137,6 @@ pub fn is_headless_session(session_id: &str) -> bool {
     is_headless_session_in(&scan_cli_processes(), session_id)
 }
 
-// ── IDE session scanning ─────────────────────────────────────────────────────
-
-pub fn scan_ide_sessions(claude_dir: &Path) -> Vec<IdeSession> {
-    let ide_dir = claude_dir.join("ide");
-    let mut sessions = Vec::new();
-
-    let Ok(entries) = fs::read_dir(&ide_dir) else {
-        return sessions;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("lock") {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(lock): Result<LockFile, _> = serde_json::from_str(&content) else {
-            continue;
-        };
-        if is_process_alive(lock.pid) {
-            sessions.push(IdeSession {
-                pid: lock.pid,
-                workspace_folders: lock.workspace_folders,
-                ide_name: lock.ide_name,
-            });
-        }
-    }
-    sessions
-}
-
-/// A workspace-level IDE lock describes the interactive session running
-/// *inside* that IDE — not every session that happens to share the workspace.
-/// The scan stamps the lock's `ide_name` per workspace, so without this pass a
-/// launchpad-spawned headless session in a workspace that also has VS Code
-/// open would wear a "Visual Studio Code" badge — and be skipped by
-/// auto-resume, which treats `ide_name.is_some()` as "IDE-attached".
-/// Fleet-owned entrypoints are headless by construction, so they never keep
-/// the badge.
-pub(crate) fn strip_ide_name_from_fleet_spawns(sessions: &mut [SessionInfo]) {
-    for session in sessions {
-        if crate::session_launch::is_fleet_owned_entrypoint(session.entrypoint.as_deref()) {
-            session.ide_name = None;
-        }
-    }
-}
-
 // ── JSONL parsing ────────────────────────────────────────────────────────────
 
 /// Compute seconds between now and the most recent `user` or `assistant`

@@ -1639,7 +1639,6 @@ fn extract_thread_id_from_args(args: &[String]) -> Option<String> {
 
 /// Parsed Codex source info.
 struct SourceInfo {
-    ide_name: Option<String>,
     is_subagent: bool,
     parent_thread_id: Option<String>,
     agent_nickname: Option<String>,
@@ -1653,7 +1652,6 @@ fn parse_source(source: &str) -> SourceInfo {
     if let Ok(parsed) = serde_json::from_str::<Value>(source) {
         if let Some(spawn) = parsed.get("subagent").and_then(|s| s.get("thread_spawn")) {
             return SourceInfo {
-                ide_name: None,
                 is_subagent: true,
                 parent_thread_id: spawn
                     .get("parent_thread_id")
@@ -1672,12 +1670,6 @@ fn parse_source(source: &str) -> SourceInfo {
     }
 
     // Plain string source.
-    let ide_name = match source.to_lowercase().as_str() {
-        "vscode" | "vs_code" => Some("VS Code".to_string()),
-        "jetbrains" => Some("JetBrains".to_string()),
-        "xcode" => Some("Xcode".to_string()),
-        _ => None,
-    };
     // NOTE: plain "exec" is NOT a subagent — it is the headless mode Fleet
     // launches every top-level codex session with (`codex exec`), so ~all
     // Fleet-owned codex sessions carry source="exec". Real codex subagents
@@ -1690,7 +1682,6 @@ fn parse_source(source: &str) -> SourceInfo {
     let is_subagent = matches!(source.to_lowercase().as_str(), "sub_agent" | "subagent");
 
     SourceInfo {
-        ide_name,
         is_subagent,
         parent_thread_id: None,
         agent_nickname: None,
@@ -2058,7 +2049,6 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
         id: thread.id.clone(),
         workspace_path: thread.cwd.clone(),
         workspace_name,
-        ide_name: source_info.ide_name,
         entrypoint,
         is_subagent: source_info.is_subagent,
         fleet_spawned: crate::launch_spec::was_fleet_spawned(&thread.id),
@@ -4334,11 +4324,11 @@ mod tests {
         crate::codex_image::mark_internal_thread(image_id);
 
         let sessions = vec![
-            crate::SessionInfo {
+            crate::session::SessionInfo {
                 id: image_id.into(),
                 ..Default::default()
             },
-            crate::SessionInfo {
+            crate::session::SessionInfo {
                 id: real_id.into(),
                 ..Default::default()
             },
@@ -5733,7 +5723,6 @@ fn parse_codex_session(rollout_path: &Path) -> Option<SessionInfo> {
         id: session_id,
         workspace_path,
         workspace_name,
-        ide_name: source_info.ide_name,
         entrypoint,
         is_subagent: source_info.is_subagent,
         fleet_spawned,

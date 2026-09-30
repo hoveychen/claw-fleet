@@ -475,7 +475,7 @@ pub(crate) fn route_setup_status(
     let sources = ctx.sources;
 
     let sessions = ctx.snapshot.sessions();
-    let detected_tools = crate::detect_installed_tools(&sessions);
+    let detected_tools = crate::detect_installed_tools();
     let (cli_installed, cli_path) = crate::check_cli_installed();
     let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
     let logged_in = crate::account::read_keychain_credentials().is_ok();

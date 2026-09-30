@@ -241,8 +241,7 @@ export function GalleryView() {
           s.workspaceName.toLowerCase().includes(q) ||
           s.aiTitle?.toLowerCase().includes(q) ||
           s.slug?.toLowerCase().includes(q) ||
-          s.agentDescription?.toLowerCase().includes(q) ||
-          s.ideName?.toLowerCase().includes(q);
+          s.agentDescription?.toLowerCase().includes(q);
         return clientMatch || ftsMatchPaths.has(s.jsonlPath);
       })
     : filterSource;

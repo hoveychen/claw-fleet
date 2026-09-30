@@ -877,9 +877,6 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                  unset). `fleet watch` reanimates the calling session.",
             )?;
             // Subagent transcripts (`agent-*`) can't be independently resumed.
-            // (The IDE-attached guard the CLI runs is moot here: control tools are
-            // registered only for Fleet-owned sessions, whose `ide_name` is
-            // stripped, so it would always pass — we skip the full scan.)
             if sid.starts_with("agent-") {
                 return Err(format!(
                     "this looks like a subagent session ({sid}); subagents are awaited by their \

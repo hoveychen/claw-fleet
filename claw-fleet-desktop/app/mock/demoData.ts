@@ -26,7 +26,6 @@ function mkDemo(
 ): SessionInfo {
   return {
     workspacePath: `/Users/dev/code/${o.workspaceName}`,
-    ideName: "VS Code",
     entrypoint: null,
     isSubagent: false,
     fleetSpawned: false,

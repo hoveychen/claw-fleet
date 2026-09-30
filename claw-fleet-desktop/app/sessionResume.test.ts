@@ -17,7 +17,6 @@ function session(over: Partial<SessionInfo> = {}): SessionInfo {
     id: "s1",
     workspacePath: "/w",
     workspaceName: "w",
-    ideName: null,
     entrypoint: NEW_SESSION_ENTRYPOINT,
     isSubagent: false,
     parentSessionId: null,
