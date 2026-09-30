@@ -48,7 +48,10 @@ pub struct LaunchSpec {
     pub entrypoint: Option<String>,
 }
 
-fn spec_dir() -> Option<PathBuf> {
+/// Directory holding one `<session-id>.json` note per Fleet-spawned session.
+/// Public so the dsh plugin can be told where to look before it spends a
+/// `fleet` process on a session Fleet never started.
+pub fn spec_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("launch-spec"))
 }
 

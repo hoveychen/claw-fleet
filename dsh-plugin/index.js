@@ -29,6 +29,8 @@
 // paying it.
 
 import { execFile } from 'node:child_process'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'fleet-context'
@@ -401,6 +403,50 @@ function sectionMessage(section) {
 }
 
 /**
+ * Whether this dsh session is one Fleet drives, decided from marker files
+ * alone so a session the user opened himself never costs a `fleet` process.
+ *
+ * `'owned'` — Fleet spawned it, or it is a subagent whose delegation chain
+ * starts at such a session (its marker is written here the first time, so a
+ * grandchild finds its parent). `'fork'` — a side-question fork, which is never
+ * owned but still needs the CLI's one-step stop. `'foreign'` — anything else:
+ * inject nothing. `'unknown'` — an older Fleet wrote this entry's config
+ * without the marker dirs; ask the CLI, which gates on its own.
+ *
+ * The same rule lives in `dsh_guidance::is_fleet_owned_dsh_session`; the dirs
+ * come from Fleet's config so the two halves read the same paths.
+ *
+ * @param {{launchSpecDir?: string, forkMarkerDir?: string, lineageDir?: string}} config
+ * @param {string} sessionId
+ * @param {unknown} parentId - the session header's `parentSession`
+ * @returns {'owned' | 'fork' | 'foreign' | 'unknown'}
+ */
+export function ownership(config, sessionId, parentId) {
+  const { launchSpecDir, forkMarkerDir, lineageDir } = config
+  if (!launchSpecDir || !forkMarkerDir || !lineageDir) return 'unknown'
+  if (!safeId(sessionId)) return 'foreign'
+  const owned = (id) =>
+    existsSync(join(launchSpecDir, `${id}.json`)) || existsSync(join(lineageDir, id))
+  if (owned(sessionId)) return 'owned'
+  if (existsSync(join(forkMarkerDir, sessionId))) return 'fork'
+  if (typeof parentId === 'string' && safeId(parentId) && owned(parentId)) {
+    try {
+      mkdirSync(lineageDir, { recursive: true })
+      writeFileSync(join(lineageDir, sessionId), '')
+    } catch {
+      // Unwritable: this step still counts as owned, the next one re-derives it.
+    }
+    return 'owned'
+  }
+  return 'foreign'
+}
+
+/** A session id that is safe to use as a single path component. */
+function safeId(id) {
+  return typeof id === 'string' && id.length > 0 && !/[\\/]|\.\./.test(id)
+}
+
+/**
  * Register the pre-step listener for the lifetime of `ctx`.
  *
  * @param {any} ctx - plugin context; the listener is disposed with it
@@ -416,6 +462,9 @@ export function apply(ctx, config) {
     timeoutMs: config?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     userTitle: config?.userTitle,
     locale: config?.locale,
+    launchSpecDir: config?.launchSpecDir,
+    forkMarkerDir: config?.forkMarkerDir,
+    lineageDir: config?.lineageDir,
   }
 
   ctx.on(
@@ -426,6 +475,12 @@ export function apply(ctx, config) {
 
       const cwd = agent.session.header.cwd
       if (typeof cwd !== 'string' || cwd.length === 0) return decision
+
+      // A session the user opened himself must behave as if Fleet were not
+      // installed: no guidance, no plan, not even a `fleet` process per step.
+      if (ownership(resolved, agent.session.id, agent.session.header.parentSession) === 'foreign') {
+        return decision
+      }
 
       const { sections, sandboxMode, oneShot } = await fetchContext(
         resolved,

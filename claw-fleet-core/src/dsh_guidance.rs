@@ -761,6 +761,32 @@ pub const SECTION_SESSION_ID: &str = "fleet-session-id";
 /// session cwd.
 const SANDBOX_FULL_ACCESS: &str = "danger-full-access";
 
+/// Directory of empty `<session-id>` markers for dsh subagents whose delegation
+/// chain starts at a Fleet-spawned session.
+///
+/// dsh delegates by spawning a real session with its own id, and Fleet never
+/// records those, so [`crate::launch_spec::was_fleet_spawned`] alone would cut
+/// a Fleet session's subagents off from the rules their parent works under.
+/// The plugin sees the child's `parentSession` header and writes the marker
+/// the first time the parent is found to be owned; a grandchild then finds its
+/// own parent here. Nothing else writes it, and nothing reads it but
+/// [`is_fleet_owned_dsh_session`] and the plugin.
+pub fn dsh_lineage_dir() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("dsh-lineage"))
+}
+
+/// Does Fleet drive this dsh session — spawned it, or a session it spawned
+/// delegated to it? Only such sessions get Fleet's injected context; one the
+/// user opened in dsh himself must behave as if Fleet were not installed.
+pub fn is_fleet_owned_dsh_session(session_id: &str) -> bool {
+    let sid = session_id.trim();
+    if sid.is_empty() || sid.contains('/') || sid.contains('\\') || sid.contains("..") {
+        return false;
+    }
+    crate::launch_spec::was_fleet_spawned(sid)
+        || dsh_lineage_dir().is_some_and(|d| d.join(sid).exists())
+}
+
 /// The dsh sandbox mode Fleet asks a session to switch to, or `None` to leave
 /// the session on dsh's own default.
 ///

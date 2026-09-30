@@ -111,9 +111,29 @@ pub fn materialize() -> Result<PathBuf, String> {
 /// would silently render the guidance in English and address the user as "Boss".
 /// The desktop already holds the real values when it reconciles, so they travel
 /// with the entry and refresh on every reconcile.
+/// Where the plugin looks to decide, without spawning `fleet`, whether a dsh
+/// session belongs to Fleet at all. Resolved by the same helpers the CLI's own
+/// gate uses, so the two halves cannot disagree about a path.
+struct OwnershipDirs {
+    launch_spec: std::path::PathBuf,
+    forks: std::path::PathBuf,
+    lineage: std::path::PathBuf,
+}
+
+impl OwnershipDirs {
+    fn resolve() -> Option<Self> {
+        Some(Self {
+            launch_spec: crate::launch_spec::spec_dir()?,
+            forks: crate::session_explain::fork_marker_dir()?,
+            lineage: crate::dsh_guidance::dsh_lineage_dir()?,
+        })
+    }
+}
+
 fn render_block(
     entry_path: &std::path::Path,
     fleet_bin: Option<&std::path::Path>,
+    owners: Option<&OwnershipDirs>,
     user_title: &str,
     locale: &str,
 ) -> String {
@@ -146,6 +166,22 @@ fn render_block(
         "        fleetVersion: {}\n",
         yaml_scalar(env!("CARGO_PKG_VERSION"))
     ));
+    // Without these the plugin cannot tell a session the user opened himself
+    // from one Fleet drives, and falls back to asking `fleet` every step — the
+    // CLI still gates, this only saves a process per step of the user's own
+    // sessions. See `dsh_guidance::is_fleet_owned_dsh_session`.
+    if let Some(dirs) = owners {
+        for (key, dir) in [
+            ("launchSpecDir", &dirs.launch_spec),
+            ("forkMarkerDir", &dirs.forks),
+            ("lineageDir", &dirs.lineage),
+        ] {
+            out.push_str(&format!(
+                "        {key}: {}\n",
+                yaml_scalar(&dir.to_string_lossy())
+            ));
+        }
+    }
     out.push_str(&format!("        userTitle: {}\n", yaml_scalar(user_title)));
     out.push_str(&format!("        locale: {}\n", yaml_scalar(locale)));
     out.push_str(SENTINEL_END);
@@ -213,7 +249,8 @@ pub fn reconcile_dsh_patch(enabled: bool, user_title: &str, locale: &str) -> Res
             }
             publishable
         });
-        let block = render_block(&entry, fleet_bin.as_deref(), user_title, locale);
+        let owners = OwnershipDirs::resolve();
+        let block = render_block(&entry, fleet_bin.as_deref(), owners.as_ref(), user_title, locale);
         if has_user_entries(&user) {
             format!("{}\n{block}", user.trim_end())
         } else {
@@ -264,6 +301,7 @@ mod tests {
         let block = render_block(
             std::path::Path::new("/home/u/.fleet/dsh-plugin/index.js"),
             Some(std::path::Path::new("/usr/local/bin/fleet")),
+            None,
             "老板",
             "zh",
         );
@@ -285,11 +323,26 @@ mod tests {
     /// are wrong for anyone who configured otherwise.
     #[test]
     fn block_omits_only_the_fleet_binary_when_none_was_found() {
-        let block = render_block(std::path::Path::new("/p/index.js"), None, "老板", "zh");
+        let block = render_block(std::path::Path::new("/p/index.js"), None, None, "老板", "zh");
         assert!(!block.contains("fleetBin"));
         assert!(block.contains("config:"));
         assert!(block.contains("userTitle: \"老板\""));
         assert!(block.contains("locale: \"zh\""));
+    }
+
+    #[test]
+    fn block_carries_the_ownership_dirs_the_plugin_gates_on() {
+        let dirs = OwnershipDirs {
+            launch_spec: "/h/.fleet/launch-spec".into(),
+            forks: "/h/.fleet/explain/forks".into(),
+            lineage: "/h/.fleet/dsh-lineage".into(),
+        };
+        let block = render_block(std::path::Path::new("/p/index.js"), None, Some(&dirs), "Boss", "en");
+        assert!(block.contains("launchSpecDir: \"/h/.fleet/launch-spec\""));
+        assert!(block.contains("forkMarkerDir: \"/h/.fleet/explain/forks\""));
+        assert!(block.contains("lineageDir: \"/h/.fleet/dsh-lineage\""));
+        let bare = render_block(std::path::Path::new("/p/index.js"), None, None, "Boss", "en");
+        assert!(!bare.contains("launchSpecDir"));
     }
 
     #[test]
@@ -303,7 +356,7 @@ mod tests {
     fn strip_block_removes_only_the_fleet_region() {
         let text = format!(
             "- id: mine\n  name: user-plugin\n{}\n{}",
-            render_block(std::path::Path::new("/p/index.js"), None, "Boss", "en").trim_end(),
+            render_block(std::path::Path::new("/p/index.js"), None, None, "Boss", "en").trim_end(),
             "- id: after\n  name: other\n"
         );
         let stripped = strip_block(&text);
@@ -337,7 +390,7 @@ mod tests {
     /// must never leave a file that dsh would throw on.
     #[test]
     fn install_then_uninstall_round_trips_user_entries() {
-        let block = render_block(std::path::Path::new("/p/index.js"), None, "Boss", "en");
+        let block = render_block(std::path::Path::new("/p/index.js"), None, None, "Boss", "en");
 
         // Fresh file (dsh's template is a lone `[]`).
         let installed = {

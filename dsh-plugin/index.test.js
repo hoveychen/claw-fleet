@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 
@@ -11,6 +11,7 @@ import {
   fetchSections,
   latestInjectedText,
   name,
+  ownership,
   readContextPressure,
   sourceKind,
   startsTurn,
@@ -750,5 +751,46 @@ describe('one-shot forks', () => {
       step: undefined,
     })
     assert.equal(decision.kind, 'enter')
+  })
+})
+
+describe('ownership', () => {
+  const root = mkdtempSync('/tmp/fleet-dsh-own-')
+  after(() => rmSync(root, { recursive: true, force: true }))
+  const config = {
+    launchSpecDir: join(root, 'launch-spec'),
+    forkMarkerDir: join(root, 'forks'),
+    lineageDir: join(root, 'lineage'),
+  }
+  mkdirSync(config.launchSpecDir, { recursive: true })
+  mkdirSync(config.forkMarkerDir, { recursive: true })
+  writeFileSync(join(config.launchSpecDir, 'session-fleet.json'), '{}')
+  writeFileSync(join(config.forkMarkerDir, 'session-fork'), '')
+
+  test('a session the user opened himself is foreign', () => {
+    assert.equal(ownership(config, 'session-mine', undefined), 'foreign')
+    assert.equal(ownership(config, 'session-mine-child', 'session-mine'), 'foreign')
+  })
+
+  test('a Fleet-spawned session is owned', () => {
+    assert.equal(ownership(config, 'session-fleet', undefined), 'owned')
+  })
+
+  test('ownership passes down the delegation chain', () => {
+    assert.equal(ownership(config, 'child', 'session-fleet'), 'owned')
+    assert.ok(existsSync(join(config.lineageDir, 'child')))
+    assert.equal(ownership(config, 'grandchild', 'child'), 'owned')
+  })
+
+  test('a fork is reported apart from ownership', () => {
+    assert.equal(ownership(config, 'session-fork', undefined), 'fork')
+  })
+
+  test('an entry without the marker dirs defers to the CLI', () => {
+    assert.equal(ownership({}, 'session-mine', undefined), 'unknown')
+  })
+
+  test('a path-shaped id is never owned', () => {
+    assert.equal(ownership(config, '../session-fleet', undefined), 'foreign')
   })
 })
