@@ -803,6 +803,63 @@ pub fn reconcile_codex_agents_md(
     let existing = fs::read_to_string(&agents_md).unwrap_or_default();
     let user_content = strip_all_fleet_blocks(&existing);
 
+    let blocks = render_blocks(set, user_title, locale);
+    write_launch_guidance(&blocks)?;
+    let new_content = compose(&user_content, &blocks);
+
+    if new_content.trim().is_empty() {
+        // Nothing left (no user content, no blocks) — remove rather than leave a
+        // stray empty AGENTS.md that shadows nested project docs.
+        if agents_md.exists() {
+            fs::remove_file(&agents_md).map_err(|e| format!("remove AGENTS.md: {e}"))?;
+        }
+        return Ok(());
+    }
+
+    let dir = codex_home().ok_or("cannot determine codex home")?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create codex home: {e}"))?;
+    fs::write(&agents_md, new_content).map_err(|e| format!("write AGENTS.md: {e}"))?;
+    Ok(())
+}
+
+/// Where the rendered guidance for Fleet-launched codex threads lives.
+///
+/// A Fleet-owned file that codex itself never reads: `codex_launch` hands its
+/// content to each new thread as `developer_instructions`, so the guidance
+/// reaches the sessions Fleet starts and nothing else on the machine.
+fn launch_guidance_path() -> Option<PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("codex-guidance.md"))
+}
+
+fn write_launch_guidance(blocks: &str) -> Result<(), String> {
+    let path = launch_guidance_path().ok_or("cannot determine fleet dir")?;
+    if blocks.trim().is_empty() {
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+        }
+        return Ok(());
+    }
+    if fs::read_to_string(&path).ok().as_deref() == Some(blocks) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    fs::write(&path, blocks).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+/// The guidance a new Fleet-launched codex thread starts with, as last written
+/// by [`reconcile_codex_agents_md`]. `None` when every concept is switched off
+/// or no reconcile has run yet.
+pub fn launch_guidance() -> Option<String> {
+    let text = fs::read_to_string(launch_guidance_path()?).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The enabled concept blocks, each in its sentinel markers, in stable order
+/// (PRD, interaction, wiki, model, lessons).
+fn render_blocks(set: CodexGuidanceSet, user_title: &str, locale: &str) -> String {
     let mut blocks = String::new();
     let mut push = |begin: &str, end: &str, body: String| {
         if !blocks.is_empty() {
@@ -836,22 +893,7 @@ pub fn reconcile_codex_agents_md(
             push(LESSONS_BEGIN, LESSONS_END, body);
         }
     }
-
-    let new_content = compose(&user_content, &blocks);
-
-    if new_content.trim().is_empty() {
-        // Nothing left (no user content, no blocks) — remove rather than leave a
-        // stray empty AGENTS.md that shadows nested project docs.
-        if agents_md.exists() {
-            fs::remove_file(&agents_md).map_err(|e| format!("remove AGENTS.md: {e}"))?;
-        }
-        return Ok(());
-    }
-
-    let dir = codex_home().ok_or("cannot determine codex home")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create codex home: {e}"))?;
-    fs::write(&agents_md, new_content).map_err(|e| format!("write AGENTS.md: {e}"))?;
-    Ok(())
+    blocks
 }
 
 /// Mirror the Claude-side concept toggles onto codex's AGENTS.md. Reads which
@@ -1314,10 +1356,18 @@ mod tests {
         fs::create_dir_all(&base).unwrap();
         let prev = std::env::var_os("CODEX_HOME");
         std::env::set_var("CODEX_HOME", &base);
+        // Reconcile also writes the launch guidance under the Fleet dir, which
+        // must not be the developer's real `~/.fleet`.
+        let prev_fleet = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", base.join("fleet-home"));
         let out = f(&base);
         match prev {
             Some(v) => std::env::set_var("CODEX_HOME", v),
             None => std::env::remove_var("CODEX_HOME"),
+        }
+        match prev_fleet {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
         }
         let _ = fs::remove_dir_all(&base);
         out
@@ -1410,6 +1460,21 @@ mod tests {
             // none — file removed
             reconcile_codex_agents_md(set(false, false, false, false), "Boss", "en").unwrap();
             assert!(!agents.exists(), "empty reconcile removes the file");
+        });
+    }
+
+    /// The launch guidance mirrors exactly the blocks reconcile composed, and
+    /// goes away with them.
+    #[test]
+    fn reconcile_writes_the_launch_guidance_for_fleet_threads() {
+        with_temp_codex_home(|_| {
+            reconcile_codex_agents_md(set(true, false, false, true), "Boss", "en").unwrap();
+            let g = launch_guidance().expect("guidance for enabled concepts");
+            assert!(g.contains(PRD_BEGIN) && g.contains(MODEL_BEGIN));
+            assert!(!g.contains(INTERACTION_BEGIN));
+
+            reconcile_codex_agents_md(set(false, false, false, false), "Boss", "en").unwrap();
+            assert_eq!(launch_guidance(), None, "all concepts off → no guidance");
         });
     }
 
