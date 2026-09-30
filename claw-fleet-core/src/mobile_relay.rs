@@ -3655,6 +3655,7 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
             permission_mode: req.permission_mode.clone(),
             images: Vec::new(),
         },
+        crate::session_driver::Driver::manual("mobile_resume"),
         Box::new(|_| {}),
     )?;
     // Record only after a successful dispatch: a failed resume must not block the

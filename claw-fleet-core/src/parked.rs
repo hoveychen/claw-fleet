@@ -555,6 +555,7 @@ pub(crate) fn resume_session(
             permission_mode: permission_mode.map(str::to_string),
             images: Vec::new(),
         },
+        crate::session_driver::Driver::answer("parked_card"),
         Box::new(|_| {}),
     )
 }

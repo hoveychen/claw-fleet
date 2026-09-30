@@ -1309,6 +1309,7 @@ mod tests {
                 prompt: "reply with exactly: SECOND".to_string(),
                 ..Default::default()
             },
+            crate::session_driver::Driver::manual("test"),
             Box::new(move |success| {
                 ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
                 done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1401,6 +1402,7 @@ mod tests {
                 prompt: "continue".to_string(),
                 ..Default::default()
             },
+            crate::session_driver::Driver::manual("test"),
             Box::new(move |success| {
                 ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
                 done_cb.store(true, std::sync::atomic::Ordering::SeqCst);

@@ -945,31 +945,49 @@ pub fn revive_prompt(view: &PlanView, boss_note: Option<&str>, previous: Option<
 
 fn spawn_revival(view: &PlanView, boss_note: Option<&str>) -> Result<String, String> {
     let prompt = revive_prompt(view, boss_note, transcript_of(&view.newest_owner).as_deref());
-    spawn_for_plan(view, prompt, "唤醒")
+    spawn_for_plan(view, prompt, "唤醒", Some(&view.newest_owner))
 }
 
 /// Spawn a fresh Claude session on `view`'s plan and attribute it there.
 /// `title_prefix` labels it in the session list (`唤醒：…`, `接续：…`).
-fn spawn_for_plan(view: &PlanView, prompt: String, title_prefix: &str) -> Result<String, String> {
+///
+/// `replaces` is the session this spawn takes the plan over from (a revive). It
+/// goes through the drive lease, which refuses while anything still drives or
+/// plans to bring that session back — a pending server-error retry, an armed
+/// watch, a card waiting for an answer. The finish-button continuation passes
+/// `None`: the session it follows was closed by the boss and the plan it starts
+/// is a different one.
+fn spawn_for_plan(
+    view: &PlanView,
+    prompt: String,
+    title_prefix: &str,
+    replaces: Option<&str>,
+) -> Result<String, String> {
     let sid = uuid::Uuid::new_v4().to_string();
     // Continue on the model the plan was being worked on, when it is a Claude
     // one: the reviver pre-assigns a Claude session id so it can attribute the
     // spawn to the plan, which Codex (self-minted thread ids) cannot take.
     let model = crate::session::resolve_session_model_spec(&view.newest_owner)
         .filter(|m| m.starts_with("claude-"));
-    let resp = crate::agent_source::spawn_session(
-        "claude",
-        &crate::agent_source::SpawnSpec {
-            workspace_path: view.workspace_path.clone(),
-            prompt,
-            model,
-            effort: None,
-            permission_mode: None,
-            session_id: Some(sid.clone()),
-            entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
-            images: Vec::new(),
-        },
-    )?;
+    let spec = crate::agent_source::SpawnSpec {
+        workspace_path: view.workspace_path.clone(),
+        prompt,
+        model,
+        effort: None,
+        permission_mode: None,
+        session_id: Some(sid.clone()),
+        entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
+        images: Vec::new(),
+    };
+    let resp = match replaces {
+        Some(old) => crate::agent_source::spawn_takeover(
+            "claude",
+            &spec,
+            old,
+            crate::session_driver::Driver::takeover("plan_revive"),
+        )?,
+        None => crate::agent_source::spawn_session("claude", &spec)?,
+    };
     let sid = resp.session_id.unwrap_or(sid);
     let ws = Path::new(&view.workspace_path);
     let current = pt::resolve_current_task(ws, &view.plan_id, None).ok().flatten();
@@ -1079,7 +1097,7 @@ pub fn continue_after_finish(session_id: &str) {
         needs_go_ahead: false,
     };
     let prompt = finish_prompt(&view, &focus.plan_id, transcript_of(session_id).as_deref());
-    match spawn_for_plan(&view, prompt, "接续") {
+    match spawn_for_plan(&view, prompt, "接续", None) {
         Ok(sid) => crate::log_debug(&format!(
             "finish continuation: {sid} picks up {target} after {}",
             focus.plan_id

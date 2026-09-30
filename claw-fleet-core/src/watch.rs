@@ -1225,6 +1225,7 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
             permission_mode: None,
             images: Vec::new(),
         },
+        crate::session_driver::Driver::continue_("watch"),
         Box::new(|_| {}),
     )
 }
