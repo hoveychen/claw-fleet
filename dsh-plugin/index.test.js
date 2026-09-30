@@ -12,6 +12,7 @@ import {
   latestInjectedText,
   name,
   readContextPressure,
+  sourceKind,
   startsTurn,
 } from './index.js'
 
@@ -39,6 +40,14 @@ function fakeAgent({ cwd = '/ws', id = 'session-1', events = [] } = {}) {
 
 /** A durable log entry standing in for one of this plugin's past injections. */
 function injected(sectionName, text) {
+  return {
+    type: 'user/message',
+    data: { source: { kind: sourceKind, sections: [{ name: sectionName, text }] } },
+  }
+}
+
+/** The same injection as a pre-v4 log recorded it: dsh's retired plugin wrapper. */
+function legacyInjected(sectionName, text) {
   return {
     type: 'user/message',
     data: { source: { kind: 'plugin', plugin: name, sections: [{ name: sectionName, text }] } },
@@ -313,6 +322,11 @@ describe('latestInjectedText', () => {
     assert.equal(latestInjectedText(agent, 'fleet-guidance-wiki'), undefined)
   })
 
+  test('still reads injections a pre-v4 log recorded in the old wrapper', () => {
+    const agent = fakeAgent({ events: [legacyInjected('fleet-prd', 'OLD SHAPE')] })
+    assert.equal(latestInjectedText(agent, 'fleet-prd'), 'OLD SHAPE')
+  })
+
   test("ignores another plugin's messages", () => {
     const agent = fakeAgent({
       events: [
@@ -374,8 +388,9 @@ describe('apply', () => {
 
     for (const message of [guidance, plans]) {
       assert.equal(message.role, 'user')
-      assert.equal(message.source.kind, 'plugin')
-      assert.equal(message.source.plugin, name)
+      // dsh 0.2 refuses `kind: 'plugin'`; the producer's own kind is required.
+      assert.equal(message.source.kind, `plugin:${name}`)
+      assert.equal(message.source.plugin, undefined)
       assert.equal(message.source.form, 'snapshot')
       assert.ok(Object.isFrozen(message), 'the message must be frozen')
       assert.ok(Object.isFrozen(message.content[0]), 'freezing must be deep')

@@ -33,6 +33,19 @@ import { execFile } from 'node:child_process'
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'fleet-context'
 
+/**
+ * `source.kind` stamped on every message this plugin injects.
+ *
+ * dsh 0.2 (session format v4) refuses the old `{kind: 'plugin', plugin}`
+ * wrapper outright — the turn fails with "format v4 message requires a
+ * producer-owned source kind" — and wants the producer's own kind instead. Its
+ * v3-to-v4 migration rewrites a third-party `{kind: 'plugin', plugin: X}` to
+ * `kind: 'plugin:X'`, so this is the same kind our migrated history carries.
+ * dsh 0.1 accepts any nonempty kind on a `user/message`, so one shape serves
+ * both.
+ */
+export const sourceKind = `plugin:${name}`
+
 /** The agent registry owns pre-step processing. */
 export const inject = ['agents']
 
@@ -267,7 +280,9 @@ export function latestInjectedText(agent, sectionName) {
     const event = events[i]
     if (event.type !== 'user/message') continue
     const source = event.data.source
-    if (source?.kind !== 'plugin' || source.plugin !== name) continue
+    // A log written before the v4 shape still carries the old wrapper.
+    const ours = source?.kind === sourceKind || (source?.kind === 'plugin' && source.plugin === name)
+    if (!ours) continue
     const section = source.sections?.find((s) => s.name === sectionName)
     if (section !== undefined) return section.text
   }
@@ -378,8 +393,7 @@ function sectionMessage(section) {
     role: 'user',
     content: [{ type: 'text', text: section.text }],
     source: {
-      kind: 'plugin',
-      plugin: name,
+      kind: sourceKind,
       form: 'snapshot',
       sections: [{ name: section.name, text: section.text }],
     },

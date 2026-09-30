@@ -369,7 +369,7 @@ mod tests {
         // A stale include_str! target would silently ship an empty plugin.
         assert!(PLUGIN_JS.contains("agent/pre-step"));
         assert!(PLUGIN_JS.contains("dsh-context"));
-        assert!(PLUGIN_JS.contains("kind: 'plugin'"));
+        assert!(PLUGIN_JS.contains("kind: sourceKind"));
         assert!(PLUGIN_PACKAGE_JSON.contains("\"type\": \"module\""));
     }
 }
