@@ -46,9 +46,15 @@ fn only_a_marked_fork_session_is_told_it_is_one_shot() {
     let forks = home.path().join(".fleet").join("explain").join("forks");
     std::fs::create_dir_all(&forks).unwrap();
     std::fs::write(forks.join("child-fork-1"), b"").unwrap();
+    // An ordinary session only counts as Fleet's once its spawn left a launch
+    // spec behind; without one it is a session the user opened by hand.
+    let specs = home.path().join(".fleet").join("launch-spec");
+    std::fs::create_dir_all(&specs).unwrap();
+    std::fs::write(specs.join("session-ordinary.json"), b"{}").unwrap();
 
     let fork = dsh_context(home.path(), "child-fork-1");
     let ordinary = dsh_context(home.path(), "session-ordinary");
+    let foreign = dsh_context(home.path(), "session-hand-opened");
 
     assert_eq!(
         fork.get("oneShot").and_then(|v| v.as_bool()),
@@ -61,17 +67,24 @@ fn only_a_marked_fork_session_is_told_it_is_one_shot() {
          an older plugin reads as 'keep running', and a `false` here would be \
          a second spelling of the same thing"
     );
-    // The flag rides alongside the sections; a fork still receives its context.
-    for payload in [&fork, &ordinary] {
-        let names: Vec<&str> = payload["sections"]
-            .as_array()
-            .expect("sections array")
-            .iter()
-            .filter_map(|s| s["name"].as_str())
-            .collect();
-        assert!(
-            names.contains(&"fleet-session-id"),
-            "the id block must still be injected, got {names:?}"
+    let names: Vec<&str> = ordinary["sections"]
+        .as_array()
+        .expect("sections array")
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"fleet-session-id"),
+        "a Fleet-launched session must receive its id block, got {names:?}"
+    );
+    // A fork carries its parent's history, context included, so it gets only
+    // the stop flag. A hand-opened session gets nothing at all.
+    for (label, payload) in [("fork", &fork), ("hand-opened", &foreign)] {
+        assert_eq!(
+            payload["sections"].as_array().map(Vec::len),
+            Some(0),
+            "a {label} session must receive no sections"
         );
     }
+    assert!(foreign.get("oneShot").is_none());
 }
