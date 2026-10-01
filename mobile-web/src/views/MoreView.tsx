@@ -36,6 +36,7 @@ import { BUILD_COMMIT } from "../buildCommit";
 import { relayOriginOf } from "../relayBase";
 import { RELAY_PRESETS, relayChoiceOf } from "../../../shared-ts/relayPresets";
 import styles from "./MoreView.module.css";
+import { Presence } from "../Presence";
 
 const LANG_CHOICES: Array<[Lang, string]> = [
   ["zh", "中文"],
@@ -214,22 +215,20 @@ export function MoreView({
       ? t("桌面端在线")
       : t("桌面端离线");
 
-  // Viewfinder full-screen cover (position: fixed) lives at top level, not inside
-  // devices section—when visible, "More" page stays below; cancel returns to it.
-  if (scanning) {
-    return (
-      <PairScanner
-        onPaired={(paired) => {
-          setScanning(false);
-          onAddDevice(paired);
-        }}
-        onClose={() => setScanning(false)}
-      />
-    );
-  }
-
   return (
     <div className={styles.view}>
+      {/* Viewfinder full-screen cover (position: fixed) lives at top level, not inside
+          the devices section — "More" stays mounted below it, so cancelling fades the
+          viewfinder out over the page it returns to. */}
+      <Presence when={scanning}>
+        <PairScanner
+          onPaired={(paired) => {
+            setScanning(false);
+            onAddDevice(paired);
+          }}
+          onClose={() => setScanning(false)}
+        />
+      </Presence>
       {/* ── Tools ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("工具")}</div>

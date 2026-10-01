@@ -177,6 +177,21 @@
   }
 }
 
+/* Collapsing: the sheet drops back the way it came, within EXIT_MS (140ms). */
+[data-exiting] .sheet {
+  animation: sheetOut 140ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+@keyframes sheetOut {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .peek,
   .sheet,
