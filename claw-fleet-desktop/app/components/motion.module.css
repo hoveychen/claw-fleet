@@ -2,9 +2,9 @@
    Pulled into other modules with `composes: <class> from "./motion.module.css"`
    on the element that should animate, so a component opts in without touching
    its TSX. Each class only runs when the element mounts — every overlay here is
-   conditionally rendered, so that is exactly when it opens. Closing is not
-   animated: an exit needs the element kept mounted after `open` goes false,
-   which is per-component state this file cannot add.
+   conditionally rendered, so that is exactly when it opens. Closing animates
+   only where the call site wraps the surface in <Presence> (see the Exit
+   section); elsewhere it still unmounts instantly.
 
    Scale uses the standalone `scale` property, never `transform`, because
    several surfaces centre themselves with `transform: translate(-50%, -50%)`
@@ -50,6 +50,50 @@
 @keyframes drawer_in {
   from { opacity: 0; translate: 16px 0; }
   to   { opacity: 1; translate: 0 0; }
+}
+
+/* ── Exit ─────────────────────────────────────────────────────────────────────
+   Played while a <Presence> (Presence.tsx) keeps a closed surface mounted. The
+   attribute sits on Presence's display:contents wrapper, or — for a surface
+   that portals out of it — on the surface's own root via useExiting(); hence
+   both the descendant and the same-element form. 140ms = EXIT_MS. `forwards`
+   holds the end frame until unmount; pointer-events stop a fading menu from
+   taking the click meant for what is underneath it. */
+:is([data-exiting].overlay_enter, [data-exiting] .overlay_enter) {
+  animation: overlay_out 140ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+:is([data-exiting].modal_enter, [data-exiting] .modal_enter) {
+  animation: modal_out 140ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+:is([data-exiting].pop_enter, [data-exiting] .pop_enter) {
+  animation: pop_out 120ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+:is([data-exiting].drawer_enter, [data-exiting] .drawer_enter) {
+  animation: drawer_out 140ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+@keyframes overlay_out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes modal_out {
+  from { opacity: 1; scale: 1; }
+  to   { opacity: 0; scale: 0.98; }
+}
+
+@keyframes pop_out {
+  from { opacity: 1; scale: 1; }
+  to   { opacity: 0; scale: 0.97; }
+}
+
+@keyframes drawer_out {
+  from { opacity: 1; translate: 0 0; }
+  to   { opacity: 0; translate: 12px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
