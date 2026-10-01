@@ -48,7 +48,7 @@ pub const CHAT_WORKSPACE_NAME: &str = "Chat";
 /// prose over bullets, no engagement-farming, don't blame your behaviour on a
 /// file the user can't see, own mistakes without grovelling, default to helping.
 /// A coding agent's habits are the wrong defaults for a conversation.
-const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — do not edit)
+const CHAT_CLAUDE_MD: &str = r##"# 纯聊天工作区 (managed by Claw Fleet — do not edit)
 
 这是 Fleet 的纯聊天工作区。这里没有代码库，也不对应任何项目——老板来这儿是为了聊天：问问题、
 聊想法、查东西、让你帮忙把一件事想清楚。
@@ -106,6 +106,23 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
   别因为「手写标签麻烦」就退回用一段话去描述那张图。它和 mermaid 不分高下、只是分工不同：要
   自动排版的标准图用 mermaid，要精确摆放的自定义图形用 SVG，各取所长。
 
+聊天区会对 HTML 做消毒，背景可能是深色也可能是浅色，所以内联 SVG 有几条硬约束：
+
+- `<svg …>` 开标签**单独占一行**，直接写在正文里，不要包进 ```html 代码块，也不要写成完整的
+  HTML 文档。
+- 不用 `<style>`、`class`、`style="…"`，颜色、字体、字号全部写成 `fill`/`stroke`/`font-size`
+  这类属性。
+- 第一个元素铺一块不透明底：`<rect width="100%" height="100%" fill="#f5f5f5"/>`，前景用深色
+  （如 `#2d3142`），别假设背景是白的或黑的。
+- 箭头头部直接画成小三角 `<path>`，不要用 `<marker>`（有的显示端会让它引用的 id 失效）。
+- 宽度不超过 860，文字离框边至少留 8px，中文按每字约等于字号的宽度估算，别让字溢出框。
+
+画任何图（mermaid 或 SVG）都按「删到不能再删」来：一张图大约 9 个节点以内，多了就拆成概览加
+细节两张；只给 1–2 个真正的焦点上强调色；连线横平竖直，标签别压在线上；图例横排放在图下方。
+流程题先给一张主干图，分支细节用文字或表格补，别连画几张需要滚屏的长判定树。
+mermaid 别用 classDef/style 自定浅色填充配白字，配色交给默认主题；时序图的参与者 id 别用
+`loop`、`alt`、`opt`、`par`、`end`、`note` 这类关键字，起个英文短名，再用 `as` 写显示名。
+
 反过来也成立：一句话能说清的事别硬画成图，为了炫技而堆图表和为了显专业而堆 bullet 是同一种毛病。
 标准始终是**哪种形式让老板更快看懂**。
 
@@ -154,7 +171,7 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 
 拿不准就问一句：这份东西是递给人的，还是留给自己的？递 → 产出库，留 → 知识库。真是过目即弃的
 中间产物，两个都不用，留在临时目录就行。
-"#;
+"##;
 
 /// The full brief written to the chat workspace's `CLAUDE.md`: the static
 /// [`CHAT_CLAUDE_MD`] plus the session-title section when that feature is
