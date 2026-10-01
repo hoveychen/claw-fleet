@@ -1,0 +1,71 @@
+/* ── Shared entrance motion ───────────────────────────────────────────────────
+   The mobile twin of claw-fleet-desktop/app/components/motion.module.css.
+   Pulled into other modules with `composes: <class> from "../motion.module.css"`
+   on the element that should animate, so a surface opts in without touching
+   its TSX. Each class only runs when the element mounts — every overlay here is
+   conditionally rendered, so that is exactly when it opens.
+
+   Scale and shift use the standalone `scale` / `translate` properties, never
+   `transform`, so a surface that positions itself with `transform` keeps it
+   mid-animation. Where `scale` is unsupported the entrance degrades to a fade. */
+
+/* Dimmed backdrop behind a sheet or dialog. */
+.overlay_enter {
+  animation: overlay_in var(--motion-base) var(--ease-out);
+}
+
+/* A centred dialog's panel: settles from slightly smaller. */
+.modal_enter {
+  animation: modal_in var(--motion-base) var(--ease-out);
+}
+
+/* A bottom sheet: rises a short way while fading in — a hint of where it came
+   from, not a full slide up the screen. */
+.sheet_enter {
+  animation: sheet_in var(--motion-base) var(--ease-out);
+}
+
+/* A full-screen page pushed over the tabs: nudges in from the right. */
+.page_enter {
+  animation: page_in var(--motion-base) var(--ease-out);
+}
+
+/* Small floats (toasts, toolbars): smaller and faster than a dialog. */
+.pop_enter {
+  animation: pop_in 140ms var(--ease-out);
+}
+
+@keyframes overlay_in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal_in {
+  from { opacity: 0; scale: 0.97; }
+  to   { opacity: 1; scale: 1; }
+}
+
+@keyframes sheet_in {
+  from { opacity: 0; translate: 0 16px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+
+@keyframes page_in {
+  from { opacity: 0; translate: var(--motion-shift) 0; }
+  to   { opacity: 1; translate: 0 0; }
+}
+
+@keyframes pop_in {
+  from { opacity: 0; scale: 0.96; }
+  to   { opacity: 1; scale: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay_enter,
+  .modal_enter,
+  .sheet_enter,
+  .page_enter,
+  .pop_enter {
+    animation: none;
+  }
+}
