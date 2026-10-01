@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal, Ellipsis, ChevronRight } from "lucide-react";
+import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal, Ellipsis, ChevronLeft, ChevronRight } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettings, runningProcTotal, useAuditStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -74,20 +74,21 @@ export function SessionList() {
   // Total running workspace commands across all repos — surfaced as a badge on
   // the Files nav item, mirroring the green per-repo badge in FilesView.
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
-  // The monitoring / management pages fold under a "More" disclosure at the
-  // bottom of the nav. It opens itself whenever one of its pages comes on screen
-  // (including hops that bypass the nav — an audit link, a tray click), so the
-  // active page is never hidden inside a closed menu.
+  // The less-frequent pages live on a "More" sub-page of the nav: clicking More
+  // swaps the whole list for its items under a back row. The nav follows the
+  // page on screen — it enters More whenever one of its pages comes up and
+  // leaves it when the page moves back to the top level, including hops that
+  // bypass the nav (an audit link, a tray click into Tasks).
   const moreActive = isInNavMore(viewMode);
-  const [moreOpen, setMoreOpen] = useState(moreActive);
+  const [inMore, setInMore] = useState(moreActive);
   useEffect(() => {
-    if (moreActive) setMoreOpen(true);
+    setInMore(moreActive);
   }, [moreActive]);
-  // Closed, the folded items take their badges with them, which is how an unread
-  // critical audit event goes unnoticed for an hour. Roll them up onto "More" as
-  // one quiet dot — a red count on a closed menu reads as an error, not a nudge;
-  // the exact count still sits on the Audit item once it is open.
-  const moreDot = !moreOpen && (hasNewReport || unreadCriticalCount > 0);
+  // On the top level the More items' badges are out of sight, which is how an
+  // unread critical audit event goes unnoticed for an hour. Roll them up onto
+  // the More entry as one quiet dot — a red count there reads as an error, not
+  // a nudge; the exact count still sits on the Audit item inside.
+  const moreDot = hasNewReport || unreadCriticalCount > 0;
   const {
     width: sidebarWidth,
     isDragging,
@@ -140,9 +141,26 @@ export function SessionList() {
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
 
-  // The items folded under "More".
+  // The items on the "More" sub-page.
   const moreItems = (
     <>
+      <button
+        className={`${styles.nav_item} ${viewMode === "schedule" ? styles.nav_active : ""}`}
+        onClick={() => navTo("schedule")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="3" width="11" height="10.5" rx="1.5"/><path d="M2.5 6.5H13.5"/><path d="M5.5 1.5V3.5"/><path d="M10.5 1.5V3.5"/><path d="M8 8.5v2l1.3.8"/></svg></span>
+        <span className={styles.nav_label}>{t("view_schedule", "计划")}</span>
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "plans" ? styles.nav_active : ""}`}
+        onClick={() => navTo("plans")}
+      >
+        <span className={styles.nav_icon}><ListTree size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_plans", "计划树")}</span>
+      </button>
+
+      <div className={styles.nav_divider} />
+
       <button
         className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
         onClick={() => navTo("audit")}
@@ -244,22 +262,6 @@ export function SessionList() {
         <span className={styles.nav_label}>{t("view_artifacts", "产出")}</span>
       </button>
 
-      <div className={styles.nav_divider} />
-
-      <button
-        className={`${styles.nav_item} ${viewMode === "schedule" ? styles.nav_active : ""}`}
-        onClick={() => navTo("schedule")}
-      >
-        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="3" width="11" height="10.5" rx="1.5"/><path d="M2.5 6.5H13.5"/><path d="M5.5 1.5V3.5"/><path d="M10.5 1.5V3.5"/><path d="M8 8.5v2l1.3.8"/></svg></span>
-        <span className={styles.nav_label}>{t("view_schedule", "计划")}</span>
-      </button>
-      <button
-        className={`${styles.nav_item} ${viewMode === "plans" ? styles.nav_active : ""}`}
-        onClick={() => navTo("plans")}
-      >
-        <span className={styles.nav_icon}><ListTree size={14} strokeWidth={1.5} /></span>
-        <span className={styles.nav_label}>{t("view_plans", "计划树")}</span>
-      </button>
     </>
   );
 
@@ -288,30 +290,47 @@ export function SessionList() {
           </svg>
         </button>
 
-        {/* Sidebar nav: the work pages at the top level, the monitoring /
-            administration pages (audit, report, memory, skills, phone) folded
-            under "More" at the bottom. Plugins are a source of skills, so they
-            live under the Skills entry as a segmented tab (SkillsSourceTabs),
-            not a separate nav item. The 64px rail uses the same structure, its
-            labels hidden. */}
+        {/* Sidebar nav: the work pages at the top level; schedules, plan trees
+            and the monitoring / administration pages (audit, report, memory,
+            skills, phone) on the "More" sub-page. Plugins are a source of
+            skills, so they live under the Skills entry as a segmented tab
+            (SkillsSourceTabs), not a separate nav item. The 64px rail uses the
+            same two levels, its labels hidden. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          {workItems}
-          <div className={styles.nav_divider} />
-          <button
-            type="button"
-            className={`${styles.nav_item} ${moreActive && !moreOpen ? styles.nav_active : ""}`}
-            onClick={() => setMoreOpen(!moreOpen)}
-            aria-expanded={moreOpen}
-            title={t("nav_more", "更多")}
-          >
-            <span className={styles.nav_icon}><Ellipsis size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("nav_more", "更多")}</span>
-            {moreDot && <span className={styles.nav_dot} />}
-            <span className={`${styles.nav_more_chevron}${moreOpen ? ` ${styles.nav_more_chevron_open}` : ""}`}>
-              <ChevronRight size={12} strokeWidth={1.75} />
-            </span>
-          </button>
-          {moreOpen && <div className={styles.nav_more_children}>{moreItems}</div>}
+          {inMore ? (
+            <>
+              <button
+                type="button"
+                className={`${styles.nav_item} ${styles.nav_back}`}
+                onClick={() => setInMore(false)}
+                title={t("nav_back", "返回")}
+                aria-label={t("nav_back", "返回")}
+              >
+                <span className={styles.nav_icon}><ChevronLeft size={14} strokeWidth={1.75} /></span>
+                <span className={styles.nav_label}>{t("nav_more", "更多")}</span>
+              </button>
+              <div className={styles.nav_divider} />
+              {moreItems}
+            </>
+          ) : (
+            <>
+              {workItems}
+              <div className={styles.nav_divider} />
+              <button
+                type="button"
+                className={`${styles.nav_item} ${moreActive ? styles.nav_active : ""}`}
+                onClick={() => setInMore(true)}
+                title={t("nav_more", "更多")}
+              >
+                <span className={styles.nav_icon}><Ellipsis size={14} strokeWidth={1.5} /></span>
+                <span className={styles.nav_label}>{t("nav_more", "更多")}</span>
+                {moreDot && <span className={styles.nav_dot} />}
+                <span className={styles.nav_more_chevron}>
+                  <ChevronRight size={12} strokeWidth={1.75} />
+                </span>
+              </button>
+            </>
+          )}
         </nav>
 
         <div className={styles.separator} />

@@ -28,14 +28,10 @@
   width: 100%;
 }
 
-/* The rail has no room for the disclosure chevron; the "More" icon alone
-   toggles the folded items, and the icons below it are the children. */
+/* The rail has no room for the drill-in chevron; the "More" icon alone opens
+   the sub-page, and the back row shows just its chevron. */
 .sidebar_collapsed .nav_more_chevron {
   display: none;
-}
-
-.sidebar_collapsed .nav_more_children .nav_item {
-  padding-left: 0;
 }
 
 /* The alert pill is anchored over a 64px-wide icon button, so it grows
@@ -354,28 +350,18 @@
   flex-shrink: 0;
 }
 
-/* "More" disclosure: chevron turns down while open; the folded items indent
-   one step so they read as children of the toggle. */
+/* "More" drill-in: a trailing chevron on the entry, and on the sub-page a back
+   row whose label names the page you are on. */
 .nav_more_chevron {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   opacity: 0.7;
-  transition: transform 0.14s ease;
 }
 
-.nav_more_chevron_open {
-  transform: rotate(90deg);
-}
-
-.nav_more_children {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.nav_more_children .nav_item {
-  padding-left: 24px;
+.nav_back {
+  color: var(--color-text);
+  font-weight: 600;
 }
 
 .nav_divider {
