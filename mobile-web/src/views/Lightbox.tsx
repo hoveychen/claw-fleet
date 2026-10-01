@@ -13,6 +13,7 @@ import { HistoryLayer } from "../useNavStack";
 import { t } from "../i18n";
 import { canShareFiles, saveImage } from "../imageSave";
 import styles from "./Lightbox.module.css";
+import { Presence } from "../Presence";
 
 // ── public API ────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,9 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
   return (
     <LightboxContext.Provider value={api}>
       {children}
-      {img && <LightboxOverlay src={img.src} alt={img.alt} onClose={close} />}
+      <Presence when={!!img}>
+        {img && <LightboxOverlay src={img.src} alt={img.alt} onClose={close} />}
+      </Presence>
     </LightboxContext.Provider>
   );
 }

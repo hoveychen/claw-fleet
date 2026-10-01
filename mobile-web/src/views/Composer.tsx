@@ -49,6 +49,7 @@ import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
+import { Presence } from "../Presence";
 
 // Model and effort choices were once hardcoded here and manually sync'd with the
 // desktop's modelChoices.ts. Both drifted: each claimed Codex efforts were
@@ -1329,9 +1330,8 @@ export function NewSessionSheet({
           </>
         )}
 
-        {picking && (
-          <>
-            <HistoryLayer onBack={() => setPicking(false)} />
+        {picking && <HistoryLayer onBack={() => setPicking(false)} />}
+        <Presence when={picking}>
             <DirPicker
               client={client}
               initialPath={customWorkspace.trim()}
@@ -1341,8 +1341,7 @@ export function NewSessionSheet({
               }}
               onClose={() => setPicking(false)}
             />
-          </>
-        )}
+        </Presence>
       </div>
     </div>
   );
@@ -1748,7 +1747,7 @@ export function ResumeComposer({
           />
         </div>
       )}
-      {pickerOpen && (
+      <Presence when={pickerOpen}>
         <div className={styles.resumePicker}>
           <div className={styles.pickerBackdrop} onClick={() => setPickerOpen(false)} />
           <div className={styles.pickerSheet} role="dialog" aria-label={t("运行配置")}>
@@ -1781,7 +1780,7 @@ export function ResumeComposer({
             </div>
           </div>
         </div>
-      )}
+      </Presence>
     </div>
   );
 }
