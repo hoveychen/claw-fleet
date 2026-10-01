@@ -1098,10 +1098,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
     const pairEntries = idbProbed;
     const scan = scanAvailability();
-    if (scanning) {
-      return <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />;
-    }
     return (
+      <>
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
         <h1>{t("Fleet 移动端")}</h1>
@@ -1131,6 +1129,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           </>
         )}
       </div>
+      {/* The viewfinder covers the gate rather than replacing it, so cancelling
+          can fade it out over the gate it returns to. */}
+      <Presence when={scanning}>
+        <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />
+      </Presence>
+      </>
     );
   }
 

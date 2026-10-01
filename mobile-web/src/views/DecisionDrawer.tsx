@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { HistoryLayer } from "../useNavStack";
+import { Presence } from "../Presence";
 import { DecisionsView, KIND_LABEL } from "./DecisionsView";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -81,11 +82,12 @@ export function DecisionDrawer(props: Props) {
     };
   });
 
-  if (expanded) {
-    return (
-      <>
-        {/* Back/swipe-back collapses the sheet before popping any page layer. */}
-        <HistoryLayer onBack={() => setExpanded(false)} />
+  return (
+    <>
+      {/* Back/swipe-back collapses the sheet before popping any page layer. */}
+      {expanded && <HistoryLayer onBack={() => setExpanded(false)} />}
+      {/* The sheet slides back down while the peek bar rises in its place. */}
+      <Presence when={expanded}>
         <div
           className={styles.scrim}
           onClick={() => setExpanded(false)}
@@ -116,26 +118,25 @@ export function DecisionDrawer(props: Props) {
             <DecisionsView {...props} onOpenSession={openSession} />
           </div>
         </div>
-      </>
-    );
-  }
-
-  return (
-    <button
-      ref={peekRef}
-      className={styles.peek}
-      data-clear-fab={props.clearFab}
-      onClick={() => setExpanded(true)}
-      aria-label={t("查看待处理决策")}
-    >
-      <span className={styles.peekDot} />
-      <span className={styles.peekMain}>
-        <span className={styles.peekKind}>{frontKind}</span>
-        {frontWs && <span className={styles.peekWs}>{frontWs}</span>}
-        {frontDevice && <span className={styles.peekDevice}>{frontDevice}</span>}
-      </span>
-      {count > 1 && <span className={styles.peekCount}>{t("共 {0} 张", count)}</span>}
-      <ChevronUp size={18} className={styles.peekChevron} />
-    </button>
+      </Presence>
+      {!expanded && (
+        <button
+          ref={peekRef}
+          className={styles.peek}
+          data-clear-fab={props.clearFab}
+          onClick={() => setExpanded(true)}
+          aria-label={t("查看待处理决策")}
+        >
+          <span className={styles.peekDot} />
+          <span className={styles.peekMain}>
+            <span className={styles.peekKind}>{frontKind}</span>
+            {frontWs && <span className={styles.peekWs}>{frontWs}</span>}
+            {frontDevice && <span className={styles.peekDevice}>{frontDevice}</span>}
+          </span>
+          {count > 1 && <span className={styles.peekCount}>{t("共 {0} 张", count)}</span>}
+          <ChevronUp size={18} className={styles.peekChevron} />
+        </button>
+      )}
+    </>
   );
 }
