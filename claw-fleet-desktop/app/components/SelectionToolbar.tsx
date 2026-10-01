@@ -9,6 +9,7 @@ import {
   type AssistantSelection,
 } from "../selectionExplain";
 import styles from "./SelectionToolbar.module.css";
+import { Presence } from "./Presence";
 
 /** Which side of the selection the bar sits on. `above` is the default; `below`
  *  when the pane has no room above (a passage on a card's first line). */
@@ -133,9 +134,8 @@ export function SelectionToolbar({
     if (custom) inputRef.current?.focus();
   }, [custom]);
 
-  if (!shown) return null;
   const fire = (preset: ExplainPreset, q?: string) => {
-    if (busy) return;
+    if (busy || !shown) return;
     onAsk(shown.sel, preset, q);
     setShown(null);
     setCustom(false);
@@ -145,7 +145,10 @@ export function SelectionToolbar({
   // the bar is about; the input does not, it needs the focus.
   const keep = (e: React.MouseEvent) => e.preventDefault();
 
+  // Presence keeps the bar on screen while it fades out after the selection
+  // collapses or a preset fires.
   return (
+    <Presence when={!!shown}>{shown && (
     <div
       className={styles.toolbar}
       style={{ left: shown.x, top: shown.y }}
@@ -210,5 +213,6 @@ export function SelectionToolbar({
         </>
       )}
     </div>
+    )}</Presence>
   );
 }
