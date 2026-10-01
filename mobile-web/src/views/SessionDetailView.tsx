@@ -108,6 +108,7 @@ import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
 import { ApiErrorCard } from "./ApiErrorCard";
 import { classifySyntheticError } from "../../../shared-ts/syntheticError";
+import { Presence } from "../Presence";
 
 const TAIL_POLL_MS = 2500;
 /** Consecutive failed polls before a view that already has messages says so.
@@ -1775,7 +1776,7 @@ export function SessionDetailView({
 
       <StatusRail pills={statusPills} onOpen={openTarget} />
 
-      {sheetOpen && (
+      <Presence when={sheetOpen}>
         <SessionSheet
           session={session}
           family={family}
@@ -1786,7 +1787,7 @@ export function SessionDetailView({
           onOpenPane={setPane}
           onOpenSession={(s) => onOpenSessionId(s.id)}
         />
-      )}
+      </Presence>
 
       {session.isSubagent && (
         <button

@@ -48,6 +48,7 @@ import styles from "./ArtifactsView.module.css";
 import { AppHeader } from "./AppHeader";
 import { PreviewBody, type PreviewSource } from "./ArtifactPreviewBody";
 import { ZipBrowser } from "./ZipBrowser";
+import { Presence } from "../Presence";
 
 interface Props {
   client: FleetTransport | null;
@@ -119,7 +120,9 @@ export function ArtifactsView({ client }: Props) {
         )}
       </div>
 
-      {open && <ArtifactDetail artifact={open} client={client} onBack={() => setOpenId(null)} />}
+      <Presence when={!!open}>
+        {open && <ArtifactDetail artifact={open} client={client} onBack={() => setOpenId(null)} />}
+      </Presence>
     </div>
   );
 }
