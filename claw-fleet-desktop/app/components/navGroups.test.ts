@@ -1,54 +1,33 @@
 import { describe, expect, it } from "vitest";
-import {
-  NAV_GROUPS,
-  NAV_GROUP_HOME,
-  NAV_GROUP_VIEWS,
-  isNavGroup,
-  navGroupOf,
-} from "./navGroups";
+import { NAV_HOME, NAV_MORE_VIEWS, isInNavMore } from "./navGroups";
 import { ALL_VIEW_MODES } from "../viewModes";
 
 /**
- * The sidebar's "Fleet" / "Work" tab strip renders each group's nav items from
- * NAV_GROUP_VIEWS and derives the highlighted tab through navGroupOf. Those two
- * only stay in sync because the lookup map is built from the same table—and
- * because the table covers every page. A new ViewMode added to the store and
- * forgotten here would silently render in neither tab's nav while still being
- * reachable through a cross-page hop, leaving the strip pointing at "Fleet" with
- * a "Work" page on screen. These tests are that guard.
+ * The sidebar lists the work pages at the top level and folds the monitoring /
+ * management pages under "More". The disclosure opens itself while one of its
+ * pages is on screen, which only works if the "More" table names real pages.
  */
-describe("nav group partition", () => {
-  it("assigns every view mode to exactly one group", () => {
-    const assigned = NAV_GROUPS.flatMap((g) => [...NAV_GROUP_VIEWS[g]]);
-    // No duplicates across (or within) groups.
-    expect(new Set(assigned).size).toBe(assigned.length);
-    // Complete coverage, both directions.
-    expect([...assigned].sort()).toEqual([...ALL_VIEW_MODES].sort());
-  });
-
-  it("puts each group's home page inside that group", () => {
-    for (const group of NAV_GROUPS) {
-      expect(navGroupOf(NAV_GROUP_HOME[group])).toBe(group);
+describe("nav More split", () => {
+  it("lists only real view modes, each once", () => {
+    expect(new Set(NAV_MORE_VIEWS).size).toBe(NAV_MORE_VIEWS.length);
+    for (const view of NAV_MORE_VIEWS) {
+      expect(ALL_VIEW_MODES).toContain(view);
     }
   });
 
-  it("routes the monitoring / management pages to 舰队", () => {
+  it("folds the monitoring / management pages under More", () => {
     for (const view of ["audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
-      expect(navGroupOf(view)).toBe("fleet");
+      expect(isInNavMore(view)).toBe(true);
     }
   });
 
-  it("routes the agent-work pages to 工作", () => {
-    for (const view of ["history", "files", "wiki", "schedule", "plans"] as const) {
-      expect(navGroupOf(view)).toBe("work");
+  it("keeps the agent-work pages at the top level", () => {
+    for (const view of ["history", "files", "terminal", "wiki", "artifacts", "schedule", "plans"] as const) {
+      expect(isInNavMore(view)).toBe(false);
     }
   });
 
-  it("rejects non-group values read back from storage", () => {
-    expect(isNavGroup("fleet")).toBe(true);
-    expect(isNavGroup("work")).toBe(true);
-    expect(isNavGroup("")).toBe(false);
-    expect(isNavGroup(undefined)).toBe(false);
-    expect(isNavGroup("gallery")).toBe(false);
+  it("lands home on a top-level page", () => {
+    expect(isInNavMore(NAV_HOME)).toBe(false);
   });
 });

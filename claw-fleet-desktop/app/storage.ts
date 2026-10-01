@@ -29,9 +29,6 @@ const ALL_KEYS = [
   // readable on boot, or that flash persists. The "simplified-mode" above
   // (user's explicit choice) takes precedence over this.
   "simplified-mode-host-default",
-  // Last page visited under each sidebar tab (Fleet / Work), as a JSON blob. The
-  // active tab itself is derived from "viewMode", so it is not stored.
-  "nav-group-last-view",
   // One-shot flag: legacy binary values for the tristate-migrated feature keys
   // have been reset to "default" (see migrateFeatureTristate). MUST be readable
   // on boot, otherwise the migration re-runs every launch and re-wipes whatever
@@ -151,9 +148,9 @@ const ALL_KEYS = [
 // Each ID represents a configurable feature card in onboarding.
 // Adding a new ID here will trigger a "What's New" overlay for existing users.
 export const ONBOARDING_FEATURES = [
-  // Not a toggle like the rest — it tells upgrading users that the sidebar now
-  // has two modes and which pages moved behind the Work tab.
-  "nav_modes",
+  // Not a toggle like the rest — it tells upgrading users that the Fleet / Work
+  // tabs are gone and the admin pages moved under More.
+  "nav_more",
   "appearance",
   "notifications",
   "hooks_guard_elicitation",

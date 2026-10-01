@@ -1231,12 +1231,10 @@
       "mock_a2": "Roll back the migration",
       "mock_a3": "Show me the failures"
     },
-    "nav_modes": {
-      "title": "Changed: the sidebar now has two modes",
-      "description": "A pair of tabs sits at the top of the nav, splitting what used to be one flat list of pages into two groups by purpose.",
-      "fleet": "For keeping watch: session monitoring, audit, the daily report, plus the memory, skills and phone-pairing settings pages.",
-      "work": "For getting work done: tasks, repos, the wiki, schedules and plan trees.",
-      "hint": "If a page seems missing, check the other mode. Each tab remembers the page you left it on; collapse the sidebar to the icon rail and both groups are listed together in one column."
+    "nav_more": {
+      "title": "Changed: one sidebar list, admin pages under More",
+      "description": "The Fleet / Work tabs are gone. Tasks, repos, terminal, wiki, deliverables, schedules and plan trees are listed directly; audit, the daily report, memory, skills and phone pairing fold under More at the bottom of the list.",
+      "hint": "More opens itself while one of its pages is on screen. Closed, it shows a red dot when there is a new daily report or an unread critical audit event."
     },
     "prd_mode": {
       "title": "New: PRD Discipline Mode",
@@ -1768,11 +1766,7 @@
       "desc": "This is the Tasks page — click \"New Session\" at the top of the task rail, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by directory."
     }
   },
-  "nav_group": {
-    "aria": "Mode",
-    "fleet": "Fleet",
-    "work": "Work"
-  },
+  "nav_more": "More",
   "sidebar": {
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
