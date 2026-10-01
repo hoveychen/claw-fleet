@@ -1070,6 +1070,7 @@ const DICT: Record<string, string> = {
   "打开页面": "Open page",
   "配额已恢复": "Quota reset",
   "模型列表加载中…": "Loading models…",
+  "没有可切换的模型": "No other models to switch to",
   "处理中…": "Working…",
   "已重新拉起，等会话接上…": "Resumed — waiting for the session to pick up…",
   "没能执行：": "Couldn't run it: ",
