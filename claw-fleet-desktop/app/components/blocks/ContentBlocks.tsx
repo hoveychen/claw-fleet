@@ -64,6 +64,9 @@ export interface BlocksProps {
   metaMap: Map<string, unknown>;
   /** Session decision records; supply asset ids for image-bearing cards. */
   decisionRecords: DecisionHistoryRecord[];
+  /** True while `decisionRecords` has not been read for this session yet, so a
+   *  decision card can wait for its record instead of reading as unanswered. */
+  decisionRecordsLoading?: boolean;
   isPartial: boolean;
   searchTerms?: string[] | null;
   /** Makes path-shaped inline-code spans clickable. */
@@ -77,7 +80,7 @@ export interface BlocksProps {
   rail?: boolean;
 }
 
-export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms, paths, rail }: BlocksProps) {
+export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, decisionRecordsLoading, isPartial, searchTerms, paths, rail }: BlocksProps) {
   const { t } = useTranslation();
   const elements: React.ReactNode[] = [];
   let i = 0;
@@ -176,6 +179,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
             result={result}
             meta={metaMap.get(toolBlock.id)}
             records={decisionRecords}
+            recordsLoading={decisionRecordsLoading}
             isPartial={isPartial && !result}
           />
         );

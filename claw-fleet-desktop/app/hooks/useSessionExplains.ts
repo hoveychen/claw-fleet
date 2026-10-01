@@ -28,17 +28,23 @@ import {
  * `all` is the unfiltered list — what the library facet lists, so a question
  * dismissed from the rail still has somewhere to be found and `restore` can
  * put it back.
+ *
+ * `loaded` is false until the list for the current session has been read once
+ * — it settles on a failed read too, so a skeleton keyed on it always ends.
  */
 export function useSessionExplains(sessionId: string | undefined): {
   explains: ExplainRecord[];
   all: ExplainRecord[];
   hidden: ReadonlySet<string>;
+  loaded: boolean;
   ask: (req: ExplainRequest) => Promise<ExplainRecord>;
   dismiss: (id: string) => void;
   restore: (id: string) => void;
 } {
   const [records, setRecords] = useState<ExplainRecord[]>([]);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  // Which session the list was last read (or failed to read) for.
+  const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined);
   const pollers = useRef(new Map<string, AbortController>());
   // The session the state belongs to, readable from async callbacks so a
   // reply that lands after a switch cannot seed the next session's rail.
@@ -90,8 +96,12 @@ export function useSessionExplains(sessionId: string | undefined): {
         // The store carries the dismissals, so the rail opens where it was left.
         setHidden(new Set(list.filter((r) => r.dismissed).map((r) => r.id)));
         for (const r of list) if (r.status === "running") track(sessionId, r.id);
+        setLoadedFor(sessionId);
       })
-      .catch((e) => console.error("list_explanations failed:", e));
+      .catch((e) => {
+        console.error("list_explanations failed:", e);
+        if (alive && current.current === sessionId) setLoadedFor(sessionId);
+      });
     return () => {
       alive = false;
       stopAll();
@@ -180,5 +190,7 @@ export function useSessionExplains(sessionId: string | undefined): {
   );
 
   const explains = useMemo(() => records.filter((r) => !hidden.has(r.id)), [records, hidden]);
-  return { explains, all: records, hidden, ask, dismiss, restore };
+  // No session means nothing to read, which is as settled as it gets.
+  const loaded = !sessionId || loadedFor === sessionId;
+  return { explains, all: records, hidden, loaded, ask, dismiss, restore };
 }

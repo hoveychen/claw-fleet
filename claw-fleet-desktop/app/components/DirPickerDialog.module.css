@@ -192,9 +192,14 @@
   transition: background 0.15s;
 }
 
-.cancel:hover {
+.cancel:hover:not(:disabled) {
   /* Sits on the modal surface, which --color-bg-hover matches in dark. */
   background: var(--color-bg-modal-hover);
+}
+
+.cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .confirm {

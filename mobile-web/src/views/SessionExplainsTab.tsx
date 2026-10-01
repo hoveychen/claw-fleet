@@ -6,6 +6,7 @@ import {
   MessageCircleQuestion,
   PencilLine,
   Scale,
+  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -54,6 +55,7 @@ const PRESET_LABEL: Record<ExplainPreset, string> = {
 export function SessionExplainsTab({
   explains,
   loaded,
+  error = false,
   openId,
   busy,
   onToggle,
@@ -63,6 +65,8 @@ export function SessionExplainsTab({
   explains: ExplainRecord[];
   /** The list has been read at least once; before that an empty list is silence, not 无. */
   loaded: boolean;
+  /** The list read failed; with nothing to show, say so instead of 无. */
+  error?: boolean;
   /** Any record id in the open chain — the id a fresh ask reports is enough. */
   openId: string | null;
   /** A question is being submitted; follow-up boxes wait. */
@@ -73,6 +77,15 @@ export function SessionExplainsTab({
   onFollowUp: (prev: ExplainRecord, question: string) => void;
 }) {
   if (!loaded && explains.length === 0) return <SkeletonList rows={4} />;
+  if (error && explains.length === 0) {
+    return (
+      <EmptyState
+        compact
+        icon={TriangleAlert}
+        title={t("加载失败（桌面端可能离线）")}
+      />
+    );
+  }
   if (explains.length === 0) {
     return (
       <EmptyState

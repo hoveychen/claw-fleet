@@ -18,10 +18,6 @@ import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
 import { SkeletonCard, SkeletonNumber } from "./loading";
 
-/** How long a missing today-usage reads as "first snapshot still on its way"
- *  before it falls back to the offline hint. App only exposes `null` for both. */
-const TODAY_GRACE_MS = 8_000;
-
 /** How much one device spent in "Today's Cumulative". `usage` is `null` = this device
  *  hasn't reported yet. */
 export interface DeviceUsageRow {
@@ -35,6 +31,10 @@ interface Props {
   /** Today's cumulative from App header, reused directly — avoid re-scanning sessions
    *  for the same number. */
   todayUsage: TodayUsage | null;
+  /** `todayUsage` is still on its way from some device (App's
+   *  todayUsagePending). False means a null `todayUsage` is final: the desktop
+   *  is offline or could not answer. */
+  todayPending?: boolean;
   /** Per-device breakdown totals. Empty array when only one device is configured —
    *  the breakdown is the total itself, and extra lines are just noise. */
   perDevice?: DeviceUsageRow[];
@@ -177,6 +177,7 @@ function UsageSourceValue({
 export function UsageView({
   client,
   todayUsage,
+  todayPending: todayPendingProp = false,
   perDevice = [],
   activeDeviceLabel = null,
   onBack,
@@ -206,15 +207,10 @@ export function UsageView({
     void refresh();
   }, [refresh]);
 
-  // `todayUsage === null` means either "no snapshot yet" or "desktop offline";
-  // show a skeleton for a short grace window before claiming offline.
-  const [todayGraceOver, setTodayGraceOver] = useState(false);
-  useEffect(() => {
-    if (todayUsage || !client) return;
-    const timer = setTimeout(() => setTodayGraceOver(true), TODAY_GRACE_MS);
-    return () => clearTimeout(timer);
-  }, [todayUsage, client]);
-  const todayPending = !todayUsage && !!client && !todayGraceOver;
+  // `todayUsage === null` means either "still on its way" or "unavailable";
+  // App tells them apart (deviceRuntime's todayUsagePending), which ends once
+  // every device is known offline or its first poll settled.
+  const todayPending = !todayUsage && todayPendingProp;
 
   const claude = data?.claude ?? null;
 

@@ -36,20 +36,30 @@ function load(): Promise<PickerHarness[]> {
   return inFlight;
 }
 
-/** The catalog, `[]` until it arrives. Callers treat `[]` as "not loaded yet"
- *  and fall back to showing only their own "default" entry. */
-export function useModelCatalog(): PickerHarness[] {
-  const [catalog, setCatalog] = useState<PickerHarness[]>(cached ?? []);
+/** The catalog plus whether the first fetch has settled. `loaded` turns true
+ *  on success *and* on failure, so a caller can tell "still loading" (skeleton)
+ *  from "loaded but empty / IPC down" (an unavailable note) without a timer. */
+export function useModelCatalogState(): { catalog: PickerHarness[]; loaded: boolean } {
+  const [state, setState] = useState<{ catalog: PickerHarness[]; loaded: boolean }>(() => ({
+    catalog: cached ?? [],
+    loaded: cached !== null,
+  }));
   useEffect(() => {
     let live = true;
     load().then((c) => {
-      if (live) setCatalog(c);
+      if (live) setState({ catalog: c, loaded: true });
     });
     return () => {
       live = false;
     };
   }, []);
-  return catalog;
+  return state;
+}
+
+/** The catalog, `[]` until it arrives. Callers that need to distinguish
+ *  "not loaded yet" from "loaded empty" use `useModelCatalogState`. */
+export function useModelCatalog(): PickerHarness[] {
+  return useModelCatalogState().catalog;
 }
 
 /** Test seam: drop the cache so a test can serve a different catalog. */

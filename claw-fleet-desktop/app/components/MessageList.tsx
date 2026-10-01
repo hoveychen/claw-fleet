@@ -154,6 +154,7 @@ interface MsgProps {
   resultMap: Map<string, ToolResultBlock>;
   metaMap: Map<string, unknown>;
   decisionRecords: DecisionHistoryRecord[];
+  decisionRecordsLoading?: boolean;
   searchTerms?: string[] | null;
   msgIdx?: number;
   /** The hit the search navigation is currently parked on. */
@@ -166,7 +167,7 @@ interface MsgProps {
   apiErrorCtx?: ApiErrorContext | null;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths, turnUsage, apiErrorCtx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, decisionRecordsLoading, searchTerms, msgIdx, isActiveMatch, paths, turnUsage, apiErrorCtx }: MsgProps) {
   const { t } = useTranslation();
   // Declared before the early returns below so the hook order stays fixed
   // across the compact-summary / meta-fold branches.
@@ -336,6 +337,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             resultMap={resultMap}
             metaMap={metaMap}
             decisionRecords={decisionRecords}
+            decisionRecordsLoading={decisionRecordsLoading}
             isPartial={isPartial}
             searchTerms={searchTerms}
             paths={paths}
@@ -510,6 +512,10 @@ interface Props {
   /** Decision records for this session. Inline decision cards read them for the
    *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
   decisionRecords?: DecisionHistoryRecord[];
+  /** True until `decisionRecords` has been read for this session (success or
+   *  failure). Decision cards without a matching record wait instead of
+   *  reading as unanswered. */
+  decisionRecordsLoading?: boolean;
   /** Pull older messages from disk. Awaited, so the reveal happens after the
    *  fetch lands. Omit when the caller has no deeper history to offer. */
   onLoadEarlier?: () => Promise<void> | void;
@@ -547,6 +553,7 @@ export function MessageList({
   status,
   liveThinking,
   decisionRecords,
+  decisionRecordsLoading = false,
   onLoadEarlier,
   fullyLoaded = true,
   isLoadingEarlier = false,
@@ -921,6 +928,7 @@ export function MessageList({
                   resultMap={resultMap}
                   metaMap={metaMap}
                   decisionRecords={records}
+                  decisionRecordsLoading={decisionRecordsLoading}
                   searchTerms={searchTerms}
                   paths={paths}
                   defaultOpen={unitIdx === renderUnits.length - 1}
@@ -958,6 +966,7 @@ export function MessageList({
               resultMap={resultMap}
               metaMap={metaMap}
               decisionRecords={records}
+              decisionRecordsLoading={decisionRecordsLoading}
               searchTerms={searchTerms}
               msgIdx={globalStart}
               isActiveMatch={globalStart === searchMatchIndex}

@@ -45,9 +45,18 @@
   font-size: 13px;
   cursor: pointer;
   transition: background 0.15s;
+  /* Inline-flex so a pending <Spinner> sits beside the label. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.btn:hover {
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn:hover:not(:disabled) {
   /* Sits on the modal surface, which --color-bg-hover matches in dark. */
   background: var(--color-bg-modal-hover);
 }
@@ -58,7 +67,7 @@
   border-color: var(--color-error-solid);
 }
 
-.btn_danger:hover {
+.btn_danger:hover:not(:disabled) {
   background: var(--color-error-solid-hover);
   border-color: var(--color-error-solid-hover);
 }

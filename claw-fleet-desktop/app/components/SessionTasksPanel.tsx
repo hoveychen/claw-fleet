@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TaskPlanDetail } from "../types";
 import { TaskLine } from "./TaskLine";
+import { SkeletonList } from "./loading";
 import styles from "./SessionTasksPanel.module.css";
 
 /**
@@ -26,7 +27,29 @@ import styles from "./SessionTasksPanel.module.css";
  * plan tree drawer uses — the two surfaces read the same items and had drifted
  * into two different treatments of them.
  */
-export function SessionTasksPanel({ plans }: { plans: TaskPlanDetail[] }) {
+export function SessionTasksPanel({
+  plans,
+  loaded = true,
+}: {
+  plans: TaskPlanDetail[];
+  /** False until the plans have been read for this session (success or
+   *  failure). Defaults to true for callers holding a settled list. */
+  loaded?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (plans.length === 0) {
+    return (
+      <div className={styles.panel}>
+        {loaded ? (
+          <p className={styles.empty}>
+            {t("detail.tasks_empty", "这个会话没有关联的任务计划。")}
+          </p>
+        ) : (
+          <SkeletonList rows={4} />
+        )}
+      </div>
+    );
+  }
   return (
     <div className={styles.panel}>
       {plans.map((plan, pi) => (

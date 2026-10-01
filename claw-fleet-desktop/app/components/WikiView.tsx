@@ -435,7 +435,7 @@ export function WikiView() {
     updateMainViewState("wiki", { collapsedFolders: [...next] });
   };
 
-  const [, handleDelete] = usePending(async () => {
+  const [deleting, handleDelete] = usePending(async () => {
     if (!confirmDelete) return;
     try {
       if (confirmDelete.kind === "doc") {
@@ -538,7 +538,7 @@ export function WikiView() {
   };
 
   // usePending drops a second Enter / click while the first move is out.
-  const [, handleMoveSubmit] = usePending(async (to: string) => {
+  const [movingDoc, handleMoveSubmit] = usePending(async (to: string) => {
     if (!moveTarget) return;
     try {
       await moveDoc(moveTarget.slug, to);
@@ -589,7 +589,7 @@ export function WikiView() {
     [load],
   );
 
-  const [, handleRenameFolderSubmit] = usePending(async (to: string) => {
+  const [renamingFolder, handleRenameFolderSubmit] = usePending(async (to: string) => {
     if (renameFolder === null) return;
     try {
       await moveFolder(renameFolder, to);
@@ -929,6 +929,7 @@ export function WikiView() {
           error={folderError}
           onConfirm={handleRenameFolderSubmit}
           onCancel={() => setRenameFolder(null)}
+          busy={renamingFolder}
         />
       )}</Presence>
 
@@ -944,6 +945,7 @@ export function WikiView() {
           error={moveDialogError}
           onConfirm={handleMoveSubmit}
           onCancel={() => setMoveTarget(null)}
+          busy={movingDoc}
         />
       )}</Presence>
 
@@ -967,6 +969,7 @@ export function WikiView() {
           }
           onConfirm={() => void handleDelete()}
           onCancel={() => setConfirmDelete(null)}
+          busy={deleting}
         />
       )}</Presence>
       </>}

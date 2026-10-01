@@ -38,12 +38,24 @@ export interface DeviceRuntimeState {
   connected: boolean;
   /** Whether the desktop is online. */
   agentOnline: boolean;
+  /** Whether the current connection has heard the desktop's status at all —
+   *  online **or** offline. `agentOnline` starts out false, so without this the
+   *  first moment of every connect would read as "desktop offline". Set by the
+   *  first agent report (the relay's `authed` frame carries `agent_online`, the
+   *  same-origin stream reports on open), by any sessions frame or snapshot
+   *  reply, or by `agentReportTimeout` — the offline path for a transport that
+   *  never reports, so "waiting for the desktop" cannot last forever. Cleared
+   *  when the connection drops: the next connection needs its own report. */
+  agentReported: boolean;
   sessions: SessionInfo[];
   /** Whether the first sessions frame arrived — distinguishes "waiting for first" from "got empty". */
   sessionsLoaded: boolean;
   decisions: PendingDecision[];
   decisionsLoaded: boolean;
   todayUsage: TodayUsage | null;
+  /** The `today_usage` poll has settled at least once (answered or failed), so
+   *  a still-null `todayUsage` is final rather than "on its way". */
+  usageSettled: boolean;
   /** Latest sessions frame type (full/delta) and cumulative counts (diagnostic). */
   sessionsFrame: { last: "full" | "delta" | null; full: number; delta: number };
   rttSplit: RttSplit | null;
@@ -70,11 +82,13 @@ export function emptyDeviceState(): DeviceRuntimeState {
   return {
     connected: false,
     agentOnline: false,
+    agentReported: false,
     sessions: [],
     sessionsLoaded: false,
     decisions: [],
     decisionsLoaded: false,
     todayUsage: null,
+    usageSettled: false,
     sessionsFrame: { last: null, full: 0, delta: 0 },
     rttSplit: null,
     congestion: "good",
@@ -97,6 +111,9 @@ export type DeviceAction =
   | { type: "detach" }
   | { type: "status"; connected: boolean }
   | { type: "agentOnline"; online: boolean }
+  /** No agent report arrived within the grace window after connecting: treat
+   *  the desktop as reported offline instead of waiting forever. */
+  | { type: "agentReportTimeout" }
   | { type: "sessions"; list: SessionInfo[] }
   /** Cold-start cache draw: only works before live data arrives, doesn't overwrite fresh data. */
   | { type: "cachedSessions"; list: SessionInfo[] }
@@ -112,6 +129,8 @@ export type DeviceAction =
       now: number;
     }
   | { type: "usage"; usage: TodayUsage }
+  /** A `today_usage` request failed; the previous value (if any) stays. */
+  | { type: "usageFailed" }
   | { type: "rtt"; sample: { totalMs: number; phoneRelayMs: number | null; desktopHandleMs: number | null } }
   | { type: "reconnect"; now: number }
   /** A request went out and never came back. */
@@ -131,15 +150,20 @@ export function deviceReducer(
     case "detach":
       return state;
     case "status":
-      return state.connected === action.connected
-        ? state
-        : { ...state, connected: action.connected };
+      if (state.connected === action.connected) return state;
+      // A dropped connection forgets its agent report: the next one has to hear
+      // the desktop's status afresh before "offline" can be claimed.
+      return action.connected
+        ? { ...state, connected: true }
+        : { ...state, connected: false, agentReported: false };
     case "agentOnline":
-      return state.agentOnline === action.online
+      return state.agentOnline === action.online && state.agentReported
         ? state
-        : { ...state, agentOnline: action.online };
+        : { ...state, agentOnline: action.online, agentReported: true };
+    case "agentReportTimeout":
+      return state.agentReported ? state : { ...state, agentReported: true };
     case "sessions":
-      return { ...state, sessions: action.list, sessionsLoaded: true };
+      return { ...state, sessions: action.list, sessionsLoaded: true, agentReported: true };
     case "cachedSessions":
       // Once live snapshot arrives, don't touch it — cache is always older than live.
       return state.sessionsLoaded || state.sessions.length > 0
@@ -210,6 +234,7 @@ export function deviceReducer(
         answeredAt,
         trustedAgentKey,
         decisionsLoaded: true,
+        agentReported: true,
         snapshotSources: recordSnapshotSource(state.snapshotSources, {
           key: agentKey,
           agent: action.agent,
@@ -220,7 +245,9 @@ export function deviceReducer(
       };
     }
     case "usage":
-      return { ...state, todayUsage: action.usage };
+      return { ...state, todayUsage: action.usage, usageSettled: true };
+    case "usageFailed":
+      return state.usageSettled ? state : { ...state, usageSettled: true };
     case "rtt": {
       // A reply arrived, so whatever was unanswered before is no longer
       // evidence of anything: reset the run rather than letting one old
@@ -416,4 +443,32 @@ export function offlineDeviceCount(states: DeviceStates, order: string[]): numbe
 
 export function anySessionsLoaded(states: DeviceStates, order: string[]): boolean {
   return order.some((id) => states[id]?.sessionsLoaded);
+}
+
+/** Grace window after a connection comes up for the desktop's status to be
+ *  reported. Normally the report rides on the handshake itself, so this only
+ *  bounds a transport that never reports — past it the device reads as
+ *  "desktop offline" (see `agentReportTimeout`). */
+export const AGENT_REPORT_TIMEOUT_MS = 3000;
+
+/** Connected, but the desktop's status not heard yet: "connecting", not
+ *  "desktop offline". Bounded by AGENT_REPORT_TIMEOUT_MS. */
+export function awaitingAgentReport(s: DeviceRuntimeState | undefined): boolean {
+  return !!s && s.connected && !s.agentReported;
+}
+
+/** This device's today-usage could still arrive: its agent status is not in
+ *  yet, or the agent is online and the first `today_usage` poll has not
+ *  settled. False once the device is known offline or the poll answered or
+ *  failed, so a placeholder keyed on it always ends. */
+export function deviceUsagePending(s: DeviceRuntimeState | undefined): boolean {
+  if (!s || s.todayUsage) return false;
+  return awaitingAgentReport(s) || (s.connected && s.agentOnline && !s.usageSettled);
+}
+
+/** No device has reported today's usage yet but at least one still could —
+ *  the merged total is "on its way", not "unavailable". */
+export function todayUsagePending(states: DeviceStates, order: string[]): boolean {
+  if (totalUsage(states, order)) return false;
+  return order.some((id) => deviceUsagePending(states[id]));
 }

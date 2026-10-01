@@ -16,7 +16,7 @@ import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { agentToolsForSources, type SourceInfo } from "../modelChoices";
-import { useChatWorkspace } from "../hooks/useChatWorkspace";
+import { useChatWorkspaceState } from "../hooks/useChatWorkspace";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
@@ -27,12 +27,6 @@ import { rcaErrorMessage } from "../rcaErrors";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { Presence } from "./Presence";
 import { Skeleton, Spinner } from "./loading";
-
-/** How long an unresolved chat workspace may read as "still preparing".
- *  `useChatWorkspace` reports `null` both before its answer and after a failed
- *  one, so this cap is what stops the pill spinning for good on a host that
- *  cannot hand a chat directory back. */
-const CHAT_PATH_LOADING_CAP_MS = 8_000;
 
 export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
@@ -323,14 +317,10 @@ export function NewSessionForm({
 
   // The pure-chat workspace. Unlike a project it has no prior sessions to be
   // discovered from, so it must be pinned explicitly.
-  const chatPath = useChatWorkspace();
-  const [chatPathGaveUp, setChatPathGaveUp] = useState(false);
-  useEffect(() => {
-    if (chatPath) return;
-    const id = setTimeout(() => setChatPathGaveUp(true), CHAT_PATH_LOADING_CAP_MS);
-    return () => clearTimeout(id);
-  }, [chatPath]);
-  const chatPathLoading = !chatPath && !chatPathGaveUp;
+  // `loaded` settles on failure too, so a host that cannot hand a chat
+  // directory back stops the pill spinning instead of leaving it up for good.
+  const { path: chatPath, loaded: chatPathLoaded } = useChatWorkspaceState();
+  const chatPathLoading = !chatPath && !chatPathLoaded;
 
   // Distinct workspaces from known sessions, most recently active first.
   // Worktree checkouts collapse onto their repo root — see distinctWorkspaces.
@@ -407,11 +397,12 @@ export function NewSessionForm({
   // own disk (the pre-existing behaviour).
   const [browsingHost, setBrowsingHost] = useState<SshHost | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
-  const registering = useRef(false);
 
   // Picking a directory on a host IS the registration. The user never types the
   // path, so it cannot disagree between the two machines — which was the whole
   // failure mode of the settings-page form this replaces.
+  // Rejects with the user-facing message so DirPickerDialog can show it in
+  // place and stay open.
   const registerRemoteWorkspace = async (host: SshHost, path: string) => {
     setRegisterError(null);
     try {
@@ -420,16 +411,17 @@ export function NewSessionForm({
       });
       setRemoteWorkspaces(cfg.workspaces ?? []);
       setWorkspace(path);
-      return true;
     } catch (e) {
       // The identity-path constraint bites here: the same absolute path must be
       // creatable on THIS machine too, and macOS cannot make `/home/...`. Say
       // which path and why, right where the choice was made — the alternative
       // is a spawn that fails much later with no way back to this dialog.
-      setRegisterError(
-        t("new_session.remote_register_failed", { path, error: rcaErrorMessage(e, t) }),
-      );
-      return false;
+      const message = t("new_session.remote_register_failed", {
+        path,
+        error: rcaErrorMessage(e, t),
+      });
+      setRegisterError(message);
+      throw new Error(message);
     }
   };
   const remotePaths = useMemo(
@@ -856,21 +848,15 @@ export function NewSessionForm({
               return;
             }
             if (browsingHost) {
-              // A second click while the first registration is still in
-              // flight would register the same path twice.
-              if (registering.current) return;
-              registering.current = true;
-              // Keep the dialog open if registration fails — the error names a
-              // path the user can navigate away from, and closing would strand
-              // them with no way back.
-              void registerRemoteWorkspace(browsingHost, path).then((ok) => {
-                registering.current = false;
-                if (ok) {
-                  setPickingDir(null);
-                  setBrowsingHost(null);
-                }
+              // Returning the promise lets the picker show a spinner and drop a
+              // second click while registration is in flight (which would
+              // register the same path twice). A rejection keeps the dialog
+              // open with the error shown — it names a path the user can
+              // navigate away from, and closing would strand them.
+              return registerRemoteWorkspace(browsingHost, path).then(() => {
+                setPickingDir(null);
+                setBrowsingHost(null);
               });
-              return;
             }
             setWorkspace(path);
             setPickingDir(null);

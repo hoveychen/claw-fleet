@@ -952,6 +952,7 @@ export function HistoryView() {
       // so the active segment's count is that same set already folded by chain.
       // Nothing before the first scan: a 0 there reads as "you have no tasks".
       count={scanReady ? markCounts[markFilter] : null}
+      countLoading={!scanReady}
       search={{
         value: query,
         onChange: setQuery,

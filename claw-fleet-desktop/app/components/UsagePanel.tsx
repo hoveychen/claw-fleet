@@ -517,6 +517,15 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   const [setupResolved, setSetupResolved] = useState(false);
   const [sourcesResolved, setSourcesResolved] = useState(false);
   const ring = useUsageRing();
+  // The ring is null both before the first answer and when the answers carry
+  // no usage windows (e.g. API-key auth). Only a source that has never landed
+  // data and is fetching right now counts as loading; refreshes on top of an
+  // existing answer do not, so the "—" for genuinely-no-data never flickers.
+  const claudeFirstLoad = useUsageStore((s) => s.claude.loading && s.claude.lastUpdated === null);
+  const codexFirstLoad = useUsageStore((s) => s.codex.loading && s.codex.lastUpdated === null);
+  const ringLoading = useDelayedFlag(
+    !ring && ((hasClaude && claudeFirstLoad) || ((hasCodex || !setupResolved) && codexFirstLoad)),
+  );
   // Auto-load Claude usage when collapsed (so tile has data without expanding panel)
   const loadUsage = useUsageStore((s) => s.load);
   useEffect(() => {
@@ -548,7 +557,13 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   if (collapsed) {
     if (!ring) {
       return (
-        <RailStatTile value="—" label={t("account.usage")} title={t("account.loading")} accent />
+        <RailStatTile
+          value="—"
+          label={t("account.usage")}
+          title={ringLoading ? t("account.loading") : t("account.no_usage_data")}
+          loading={ringLoading}
+          accent
+        />
       );
     }
     const detail = ring.sources

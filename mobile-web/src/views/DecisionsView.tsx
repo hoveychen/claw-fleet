@@ -1819,10 +1819,13 @@ function HtmlPreview({
   // thumbnails in Boss's screenshot). Hold the iframe back behind a shimmer
   // until the assets settle; an errored asset stops being "pending" so the
   // iframe mounts and the tap-to-retry surface below can take over.
+  // Without a client nothing is fetched, so nothing is pending: mount the
+  // iframe as-is and say why the images are missing rather than shimmer forever.
   const assetsPending = useMemo(
-    () => names.some((n) => !states[n] || states[n].status === "loading"),
-    [names, states],
+    () => !!client && names.some((n) => !states[n] || states[n].status === "loading"),
+    [client, names, states],
   );
+  const assetsOffline = !client && names.length > 0;
 
   // `sandbox="allow-scripts"` without `allow-same-origin` (same as the desktop
   // AutoHeightFrame): the document keeps an opaque origin — no DOM/storage
@@ -1876,6 +1879,9 @@ function HtmlPreview({
         >
           {t("{0} 张图片加载失败，点按重试", String(failed.length))}
         </button>
+      )}
+      {assetsOffline && (
+        <div className={styles.assetOffline}>{t("桌面端未连接，预览里的图片暂时无法加载")}</div>
       )}
     </>
   );

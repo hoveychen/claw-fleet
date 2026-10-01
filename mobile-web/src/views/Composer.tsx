@@ -29,16 +29,16 @@ import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
 import { waitForSessionId } from "../spawnConfirm";
 import { isSessionLive, type SessionInfo } from "../types";
-import { useChatWorkspace } from "../useChatWorkspace";
+import { useChatWorkspaceState } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
 import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
-import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModels } from "../dshModels";
+import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModelsState } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import {
   effortChoicesFor,
   cliFloorFor,
   modelChoicesFor,
-  useModelCatalog,
+  useModelCatalogState,
 } from "../useModelCatalog";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
@@ -56,29 +56,6 @@ import { Presence } from "../Presence";
 // `minimal/low/medium/high`, but testing showed no Codex model accepts `minimal`,
 // yet all accept `xhigh`/`max`. Now unified via `claw-fleet-core/models.toml` and
 // `model_catalog`; see ../useModelCatalog.
-
-/** Relay requests answer or time out within this (REQUEST_TIMEOUT_MS is 15s),
- *  plus a little slack. */
-const REPLY_WINDOW_MS = 16_000;
-
-/**
- * True while `client` exists, the value it was asked for is still `empty`, and
- * the request can still answer. The relay-backed hooks used here
- * (useModelCatalog, useChatWorkspace, …) fold "in flight" and "failed" into the
- * same empty value; a request either answers or times out within
- * REPLY_WINDOW_MS, so past that window an empty value is final and the loader
- * goes away instead of spinning forever.
- */
-export function useAwaitingReply(client: FleetTransport | null, empty: boolean): boolean {
-  const [expired, setExpired] = useState(false);
-  useEffect(() => {
-    setExpired(false);
-    if (!client) return;
-    const timer = window.setTimeout(() => setExpired(true), REPLY_WINDOW_MS);
-    return () => window.clearTimeout(timer);
-  }, [client]);
-  return !!client && empty && !expired;
-}
 
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
@@ -454,7 +431,7 @@ function OptionSelects({
   const codexProfiles = useCodexProfiles(isCodex ? client : null);
   // dsh's model catalog is determined by the host's provider config; Fleet
   // hard-codes no entries.
-  const dshCatalog = useDshModels(isDsh ? client : null);
+  const { catalog: dshCatalog, loaded: dshLoaded } = useDshModelsState(isDsh ? client : null);
   const dshGroups = useMemo(
     () => (isDsh ? dshModelGroups(dshCatalog) : []),
     [isDsh, dshCatalog],
@@ -469,13 +446,11 @@ function OptionSelects({
         : { efforts: [], defaultEffort: "" },
     [isDsh, dshCatalog, model],
   );
-  const catalog = useModelCatalog(client);
+  const { catalog, loaded: catalogLoaded } = useModelCatalogState(client);
   // Until the list lands the select holds only "默认模型", which reads as "no
-  // other models exist": mark the field as loading instead.
-  const modelsLoading = useAwaitingReply(
-    client,
-    isDsh ? dshCatalog === null : catalog.length === 0,
-  );
+  // other models exist": mark the field as loading instead. `loaded` turns true
+  // on failure too, so the spinner always ends.
+  const modelsLoading = !!client && !(isDsh ? dshLoaded : catalogLoaded);
   const modelChoices = isCodex
     ? [
         ...modelChoicesFor(catalog, "codex", t("默认模型")),
@@ -845,10 +820,10 @@ export function NewSessionSheet({
 }: NewSessionProps) {
   // Chat-only workspace: not project-bound, no "recent sessions" to discover; must
   // be explicitly nailed as the first option.
-  const chatPath = useChatWorkspace(client);
+  const { path: chatPath, loaded: chatPathLoaded } = useChatWorkspaceState(client);
   // Hold the 纯聊天 row's place while its path is fetched, so it does not pop in
   // and push the rows below it down.
-  const chatPathLoading = useAwaitingReply(client, chatPath === null);
+  const chatPathLoading = !!client && !chatPathLoaded;
 
   const recentRows = recentWorkspaceRows(sessions, chatPath);
   const recents = recentRows.map((r): [string, string] => [r.path, r.name]);
@@ -979,10 +954,10 @@ export function NewSessionSheet({
     },
   });
   const toolLabel = t(toolChoices.find(([value]) => value === tool)?.[1] ?? tool);
-  const sheetCatalog = useModelCatalog(client);
+  const { catalog: sheetCatalog, loaded: sheetCatalogLoaded } = useModelCatalogState(client);
   // A picked model shows its raw id until the catalog maps it to a label; hold
   // the chip text instead of flashing the id.
-  const sheetCatalogLoading = useAwaitingReply(client, sheetCatalog.length === 0);
+  const sheetCatalogLoading = !!client && !sheetCatalogLoaded;
   const chipLabelLoading = !!model && tool !== "dsh" && sheetCatalogLoading;
   const modelLabel = model
     ? (modelChoicesFor(sheetCatalog, tool === "codex" ? "codex" : "claude", "").find(
@@ -1485,9 +1460,9 @@ export function ResumeComposer({
   const fileRef = useRef<HTMLInputElement>(null);
   // Current config shown in the pill. dsh's model catalog comes from the host at runtime; if we
   // don't recognize an id, display it as-is — a real but unfamiliar id beats a wrong friendly name.
-  const resumeCatalog = useModelCatalog(client);
+  const { catalog: resumeCatalog, loaded: resumeCatalogLoaded } = useModelCatalogState(client);
   // The model chip would show the raw id, then swap to the friendly label.
-  const resumeCatalogLoading = useAwaitingReply(client, resumeCatalog.length === 0);
+  const resumeCatalogLoading = !!client && !resumeCatalogLoaded;
   const modelChipLoading = !!model && tool !== "dsh" && resumeCatalogLoading;
   const modelLabel = useMemo(() => {
     if (tool === "dsh") return model;

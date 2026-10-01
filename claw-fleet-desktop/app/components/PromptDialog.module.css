@@ -77,6 +77,14 @@
   font-size: 13px;
   cursor: pointer;
   transition: background 0.15s;
+  /* Inline-flex so a pending <Spinner> sits beside the label. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn:disabled {
+  cursor: default;
 }
 
 .btn:hover:not(:disabled) {

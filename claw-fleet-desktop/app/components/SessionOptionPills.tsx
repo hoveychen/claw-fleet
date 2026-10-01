@@ -16,16 +16,11 @@ import {
   type CodexProfile,
   type ModelChoice,
 } from "../modelChoices";
-import { useModelCatalog } from "../useModelCatalog";
+import { useModelCatalogState } from "../useModelCatalog";
 import type { DshModelCatalog } from "../generated/types";
 import { PillMenu, type PillMenuItem } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { Spinner } from "./loading";
-
-/** How long an empty model catalog may read as "still loading". The hook
- *  returns `[]` both before the first answer and after a failed one, so this
- *  cap is what keeps an IPC failure from spinning the pills forever. */
-const CATALOG_LOADING_CAP_MS = 8_000;
 
 /** The model / effort / permission-mode ghost pills shared by the new-session
  *  modal and the history panel's resume composer. `""` means "don't pass the
@@ -79,14 +74,10 @@ export function SessionOptionPills({
   const isDsh = tool === "dsh";
   // Fleet's own model catalog (models.toml) — one source for both the model and
   // the effort menus, replacing the two lists this file used to hardcode.
-  const catalog = useModelCatalog();
-  const [catalogGaveUp, setCatalogGaveUp] = useState(false);
-  useEffect(() => {
-    if (catalog.length > 0) return;
-    const id = setTimeout(() => setCatalogGaveUp(true), CATALOG_LOADING_CAP_MS);
-    return () => clearTimeout(id);
-  }, [catalog.length]);
-  const catalogLoading = !isDsh && catalog.length === 0 && !catalogGaveUp;
+  // `catalogLoaded` settles on failure too, so an IPC error ends the loading
+  // rows instead of spinning the pills forever.
+  const { catalog, loaded: catalogLoaded } = useModelCatalogState();
+  const catalogLoading = !isDsh && catalog.length === 0 && !catalogLoaded;
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   // Third-party Codex models are discovered from the host's profile files
   // rather than hardcoded — a `[model_providers.<id>]` block names no models,

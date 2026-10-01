@@ -109,6 +109,11 @@ function tickSessions() {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// `?mock&slow=<ms>` delays every command by that much. The fixtures answer
+// instantly, which skips past every skeleton and pending state — this makes
+// them visible for screenshots.
+const SLOW_MS = Number(new URLSearchParams(window.location.search).get("slow") ?? 0);
+
 /** Command-aware canned LLM risk analysis for the guard card (markdown). */
 function guardAnalysisFor(command: string): string {
   if (/rm\s+-rf|drop\s+table|truncate/i.test(command)) {
@@ -1622,7 +1627,8 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
     if (qaMode && shouldDelayMockQaCommand(cmd)) {
       await delay(MOCK_QA_DELAY_MS);
     }
-    const a = (args ?? {}) as Record<string, unknown>;
+    if (SLOW_MS > 0) await delay(SLOW_MS);
+    const a =(args ?? {}) as Record<string, unknown>;
     if (LIVE_MODE) {
       const live = await liveInvoke(cmd, a);
       if (live.handled) return live.value;

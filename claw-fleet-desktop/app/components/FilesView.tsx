@@ -322,6 +322,8 @@ export function FilesView() {
       className={styles.mem_scope}
       title={t("files.panel_title")}
       count={workspaces.length > 0 ? workspaces.length : null}
+      // Either source still in flight means the total is not final yet.
+      countLoading={!scanReady || extraPaths === null}
       actions={
         <>
           <button
@@ -436,8 +438,9 @@ export function FilesView() {
       <Presence when={Boolean(pickingDir)}>{pickingDir && (
         <DirPickerDialog
           initialPath={selected ?? ""}
-          onPick={(path) => {
-            void addPath(path);
+          // Awaited so the picker shows its spinner until the path is registered.
+          onPick={async (path) => {
+            await addPath(path);
             setPickingDir(false);
           }}
           onCancel={() => setPickingDir(false)}

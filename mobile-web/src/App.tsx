@@ -32,10 +32,12 @@ import {
   anyAgentOnline,
   anyConnected,
   anySessionsLoaded,
+  awaitingAgentReport,
   itemKey,
   devicesReducer,
   emptyDeviceState,
   offlineDeviceCount,
+  todayUsagePending,
   totalUsage,
   usageByDevice,
   worstCongestion,
@@ -180,55 +182,6 @@ const SAME_ORIGIN_DEVICE: PairedDevice = {
  *  creating a new object on every render would cause all the destructured arrays below
  *  to change reference on every render. */
 const EMPTY_DEVICE_STATE = emptyDeviceState();
-
-/** How long after the socket comes up a still-missing agent status reads as
- *  "not known yet" rather than "desktop offline". The relay reports the agent
- *  right after the handshake; this only covers that gap. */
-const AGENT_SETTLE_MS = 3000;
-
-/**
- * Devices whose socket is up but whose desktop agent has not been reported
- * yet. `agentOnline` starts out `false`, so without this the first seconds of
- * every connect read as "desktop offline". A device leaves the set as soon as
- * the agent (or a sessions frame) shows up, or after AGENT_SETTLE_MS — at that
- * point a missing agent really is offline. A connection that has already seen
- * the agent never re-enters it: a later drop is a real report.
- */
-function useSettlingAgents(states: DeviceStates, order: string[]): Set<string> {
-  const connectedAt = useRef(new Map<string, number>());
-  const seenAgent = useRef(new Set<string>());
-  const [, rerender] = useReducer((x: number) => x + 1, 0);
-  const now = Date.now();
-  const settling = new Set<string>();
-  let nextExpiry = Infinity;
-  for (const id of order) {
-    const s = states[id];
-    if (!s?.connected) {
-      connectedAt.current.delete(id);
-      seenAgent.current.delete(id);
-      continue;
-    }
-    if (s.agentOnline || s.sessionsLoaded) seenAgent.current.add(id);
-    if (seenAgent.current.has(id)) continue;
-    let since = connectedAt.current.get(id);
-    if (since === undefined) {
-      since = now;
-      connectedAt.current.set(id, since);
-    }
-    const left = since + AGENT_SETTLE_MS - now;
-    if (left > 0) {
-      settling.add(id);
-      nextExpiry = Math.min(nextExpiry, left);
-    }
-  }
-  // Re-render when the earliest grace window runs out, so it ends on its own.
-  useEffect(() => {
-    if (!Number.isFinite(nextExpiry)) return;
-    const timer = window.setTimeout(rerender, nextExpiry + 20);
-    return () => window.clearTimeout(timer);
-  }, [nextExpiry]);
-  return settling;
-}
 
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // Subscribe to language changes. Re-rendering the App root propagates the change
@@ -666,7 +619,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   /** The indicator light on each line of the device switcher. It shows **this device's**
    *  connectivity, opposite from the header's "best of all" light — the switcher's purpose
    *  is to let users see which device dropped. */
-  const settlingAgents = useSettlingAgents(states, deviceOrder);
   const deviceStatusOf = useCallback(
     (id: string) => {
       const s = states[id];
@@ -674,13 +626,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ? {
             connected: s.connected,
             agentOnline: s.agentOnline,
-            agentPending: settlingAgents.has(id),
+            agentPending: awaitingAgentReport(s),
             // A rejected key will not come back by retrying; everything else does.
             retrying: !s.connected && !s.authError,
           }
         : undefined;
     },
-    [states, settlingAgents],
+    [states],
   );
   // The three values in the header show the **overall** state: one device being offline
   // shouldn't show offline for the whole page, and perceived congestion is the worst
@@ -690,6 +642,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const agentOnline = anyAgentOnline(states, deviceOrder);
   const congestion = worstCongestion(states, deviceOrder);
   const todayUsage = totalUsage(states, deviceOrder);
+  // Today's usage could still arrive from some device (agent status not in yet,
+  // or the first poll not settled). False once every device is known offline or
+  // its poll answered/failed, so the placeholders below always end.
+  const usagePending = todayUsagePending(states, deviceOrder);
   /** Per-device cost summaries (the rows that expand in the usage page). Labels come
    *  from the device book, same as the device switcher. */
   const usageRows = useMemo(
@@ -706,7 +662,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   // Socket up, agent not reported yet: still connecting, not "desktop offline".
   const agentPending =
-    connected && !agentOnline && deviceOrder.some((id) => settlingAgents.has(id));
+    connected && !agentOnline && deviceOrder.some((id) => awaitingAgentReport(states[id]));
   const connKind = agentPending ? "connecting" : connIconKind(connected, agentOnline, congestion);
   const connText =
     connKind === "connecting"
@@ -1222,6 +1178,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         registerHandle={registerHandle}
         hasPendingDecisions={(states[d.id]?.decisions.length ?? 0) > 0}
         agentOnline={states[d.id]?.agentOnline ?? false}
+        agentReported={states[d.id]?.agentReported ?? false}
         isActive={d.id === activeDeviceId}
         index={i}
         visibility={visibility}
@@ -1246,9 +1203,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onSwitch={switchDevice}
           onManage={() => setTab("more")}
         />
-        {/* Agent online but the first `today_usage` reply not in yet: hold the
-            pill's place instead of popping it in and shifting the header. */}
-        {!todayUsage && agentOnline && (
+        {/* First `today_usage` reply not in yet: hold the pill's place instead
+            of popping it in and shifting the header. */}
+        {!todayUsage && usagePending && (
           <span className={styles.usage}>
             <SkeletonNumber width={40} />
             <SkeletonNumber width={28} />
@@ -1560,6 +1517,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <UsageView
           client={client}
           todayUsage={todayUsage}
+          todayPending={usagePending}
           perDevice={usageRows}
           activeDeviceLabel={deviceLabelOf(activeDeviceId)}
           onBack={() => setShowUsage(false)}
@@ -1591,7 +1549,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
                   !!s &&
                   s.connected &&
                   !s.sessionsLoaded &&
-                  (s.agentOnline || settlingAgents.has(newSessionTargetId))
+                  (s.agentOnline || awaitingAgentReport(s))
                 );
               })()}
               onClose={() => {

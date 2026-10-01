@@ -9,25 +9,40 @@ import { useEffect, useMemo, useState } from "react";
 import type { FleetTransport } from "./transport";
 
 /** `null` means we haven't fetched it yet — relay not connected, request in flight, or desktop version
- *  too old to recognize this method. Callers must treat null as "unknown", not "no chat workspace". */
+ *  too old to recognize this method. Callers must treat null as "unknown", not "no chat workspace".
+ *  Use `useChatWorkspaceState` to tell "in flight" from "settled without a path". */
 export function useChatWorkspace(client: FleetTransport | null): string | null {
+  return useChatWorkspaceState(client).path;
+}
+
+/** The path plus `loaded`: true once the request for the current `client` has settled, on success
+ *  **and** on failure, so a placeholder keyed on `!!client && !loaded` always ends. Stays false while
+ *  `client` is null. */
+export function useChatWorkspaceState(client: FleetTransport | null): {
+  path: string | null;
+  loaded: boolean;
+} {
   const [path, setPath] = useState<string | null>(null);
+  const [settledFor, setSettledFor] = useState<FleetTransport | null>(null);
   useEffect(() => {
     if (!client) return;
     let alive = true;
     client
       .request<{ path: string }>("chat_workspace")
       .then((r) => {
-        if (alive) setPath(r.path);
+        if (alive) setPath(r?.path ?? null);
       })
       .catch(() => {
         if (alive) setPath(null);
+      })
+      .finally(() => {
+        if (alive) setSettledFor(client);
       });
     return () => {
       alive = false;
     };
   }, [client]);
-  return path;
+  return { path, loaded: !!client && settledFor === client };
 }
 
 /**

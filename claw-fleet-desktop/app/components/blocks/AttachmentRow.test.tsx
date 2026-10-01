@@ -63,6 +63,15 @@ describe("AttachmentRow", () => {
     await mount(["/Users/u/Pictures/gone.jpg"]);
     expect(srcs()).toEqual([]);
     expect(chips()).toEqual(["/Users/u/Pictures/gone.jpg"]);
+    // Marked as a broken image, not passed off as a plain file chip.
+    expect(container!.querySelector("span[data-failed]")).not.toBeNull();
+  });
+
+  it("holds the thumb slot while the read is in flight", async () => {
+    invoke.mockReturnValue(new Promise(() => {}));
+    await mount(["/Users/u/Pictures/slow.jpg"]);
+    expect(container!.querySelector('[data-testid="attachment-thumb-pending"]')).not.toBeNull();
+    expect(chips()).toEqual([]);
   });
 
   it("never reads a non-image", async () => {

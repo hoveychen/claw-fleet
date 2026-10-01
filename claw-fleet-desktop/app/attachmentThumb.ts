@@ -24,9 +24,9 @@
  *    implemented on both transports, capped at `IMAGE_PREVIEW_CAP`, and it
  *    works when the path is on a remote host that no `file://` URL could reach.
  *
- * Failure is silent on purpose, unlike the markdown case: there the image *is*
- * the content and a blank is the bug, whereas here the chip already names the
- * file and a missing thumbnail costs nothing.
+ * Failure stays quiet, unlike the markdown case: there the image *is* the
+ * content and a blank is the bug, whereas here the chip already names the file.
+ * `useAttachmentThumbState` still reports it, so a caller can mark the chip.
  */
 
 import { useEffect, useState } from "react";
@@ -51,17 +51,40 @@ export function storeThumbUrl(a: ThumbSource): string | null {
   return userAttachmentUrl(a.path);
 }
 
+/** What `useAttachmentThumbState` knows about an attachment's thumbnail. */
+export interface AttachmentThumbState {
+  /** The thumbnail URL, or null when there is none (yet). */
+  src: string | null;
+  /** A `read_external_file` read is in flight — a thumbnail may still arrive. */
+  pending: boolean;
+  /** The name says image, but the read failed or came back as something other
+   *  than an image. Lets a caller show a "broken image" chip rather than a
+   *  plain file chip. */
+  failed: boolean;
+}
+
 /** `src` for an attachment chip's thumbnail, or null when there is none. */
 export function useAttachmentThumb(a: ThumbSource): string | null {
+  return useAttachmentThumbState(a).src;
+}
+
+/**
+ * The thumbnail plus its load state. `pending` ends on success *and* on
+ * failure, so a skeleton keyed on it can never stay up for good.
+ */
+export function useAttachmentThumbState(a: ThumbSource): AttachmentThumbState {
   const { path, name, previewUrl } = a;
   const direct = previewUrl ?? storeThumbUrl({ path, name });
-  const [read, setRead] = useState<string | null>(null);
+  const needsRead = !direct && isRenderableImage(name);
+  // The settled read, tagged with the path it was for so a chip handed a new
+  // path reads as pending again instead of showing the previous answer.
+  const [read, setRead] = useState<{ path: string; src: string | null } | null>(null);
 
   useEffect(() => {
     // Nothing to read when the caller already has a URL, and nothing worth
     // reading when the name says it is not an image — `read_external_file`
     // would haul a 40 MiB zip across the transport to answer "binary".
-    if (direct || !isRenderableImage(name)) {
+    if (!needsRead) {
       setRead(null);
       return;
     }
@@ -69,17 +92,27 @@ export function useAttachmentThumb(a: ThumbSource): string | null {
     setRead(null);
     invoke<ExplorerFileContent>("read_external_file", { path })
       .then((content) => {
-        if (live && content.kind === "image") {
-          setRead(`data:${content.mime};base64,${content.base64}`);
-        }
+        if (!live) return;
+        setRead({
+          path,
+          src: content.kind === "image" ? `data:${content.mime};base64,${content.base64}` : null,
+        });
       })
       .catch(() => {
-        // A chip with no thumbnail, which is what it looked like anyway.
+        // The chip still names the file; the caller decides how to mark it.
+        if (live) setRead({ path, src: null });
       });
     return () => {
       live = false;
     };
-  }, [direct, path, name]);
+  }, [needsRead, path]);
 
-  return direct ?? read;
+  if (direct) return { src: direct, pending: false, failed: false };
+  if (!needsRead) return { src: null, pending: false, failed: false };
+  const settled = read !== null && read.path === path;
+  return {
+    src: settled ? read.src : null,
+    pending: !settled,
+    failed: settled && read.src === null,
+  };
 }

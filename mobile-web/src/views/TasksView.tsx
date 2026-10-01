@@ -487,7 +487,7 @@ interface Props {
   /** Whether at least one `sessions` snapshot has arrived since connecting.
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
-  /** Link up but no agent status reported yet (App's useSettlingAgents):
+  /** Link up but no agent status reported yet (deviceRuntime.awaitingAgentReport):
    *  `agentOnline` is still its initial `false` and must not read as offline. */
   agentPending?: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;

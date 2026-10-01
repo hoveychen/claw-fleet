@@ -1266,7 +1266,12 @@ export function SessionDetailView({
   const [sheetOpen, setSheetOpen] = useState(false);
   // Side questions about passages of the transcript. The list is read over
   // the relay per session; the one just asked opens in the 追问 pane.
-  const { explains, loaded: explainsLoaded, ask: askExplainRecord } = useSessionExplains(client, session.id);
+  const {
+    explains,
+    loaded: explainsLoaded,
+    error: explainsError,
+    ask: askExplainRecord,
+  } = useSessionExplains(client, session.id);
   const [openExplain, setOpenExplain] = useState<string | null>(null);
   const [explainBusy, setExplainBusy] = useState(false);
   const openTarget = useCallback((target: PillTarget) => {
@@ -1804,7 +1809,8 @@ export function SessionDetailView({
           family={family}
           pendingDecisions={pendingDecisions}
           client={client}
-          explainCount={explainsLoaded ? explains.length : undefined}
+          explainCount={explainsLoaded && !explainsError ? explains.length : undefined}
+          explainLoading={!!client && !explainsLoaded}
           onClose={() => setSheetOpen(false)}
           onOpenPane={setPane}
           onOpenSession={(s) => onOpenSessionId(s.id)}
@@ -1846,7 +1852,10 @@ export function SessionDetailView({
             {pane === "explains" && (
               <SessionExplainsTab
                 explains={explains}
-                loaded={explainsLoaded}
+                // No client means nothing is in flight: show the offline
+                // failure rather than a skeleton that would never end.
+                loaded={explainsLoaded || !client}
+                error={explainsError || !client}
                 openId={openExplain}
                 busy={explainBusy}
                 onToggle={setOpenExplain}

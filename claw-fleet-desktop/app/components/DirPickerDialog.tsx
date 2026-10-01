@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive } from "lucide-react";
 import styles from "./DirPickerDialog.module.css";
 import { Skeleton, SkeletonList, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 /** Mirrors `claw_fleet_core::workspace_browse::BrowseDirResponse`. */
 interface BrowseEntry {
@@ -29,7 +31,11 @@ interface Props {
    *  disk — the rca executor a workspace will run on. Everything else about the
    *  dialog is identical because both sides answer the same shape. */
   sshTarget?: string;
-  onPick: (path: string) => void;
+  /** May return a promise (e.g. registering the path somewhere). While it is
+   *  pending the dialog shows a spinner and refuses confirm / cancel; if it
+   *  rejects, the dialog stays open and shows the rejection so the user can
+   *  pick again. Closing on success stays the caller's job. */
+  onPick: (path: string) => void | Promise<unknown>;
   onCancel: () => void;
 }
 
@@ -119,6 +125,21 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
     }
   };
 
+  // usePending drops a second confirm while the first pick is still out.
+  const [picking, pick] = usePending(async (path: string) => {
+    setError(null);
+    try {
+      await onPick(path);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  });
+  // A synchronous onPick settles within the same tick; only a real wait shows.
+  const showPickSpinner = useDelayedFlag(picking);
+  const cancel = () => {
+    if (!picking) onCancel();
+  };
+
   // Long paths matter at their tail (which directory am I in), not their head.
   const crumbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -128,15 +149,19 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape" && !picking) onCancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  }, [onCancel, picking]);
 
   return (
-    <div className={styles.overlay} onClick={onCancel}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.overlay} onClick={cancel}>
+      <div
+        className={styles.dialog}
+        onClick={(e) => e.stopPropagation()}
+        aria-busy={picking || undefined}
+      >
         <div className={styles.title}>{t("dir_picker.title")}</div>
         <div className={styles.crumb} ref={crumbRef}>
           {data ? (
@@ -255,17 +280,19 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
         )}
 
         <div className={styles.actions}>
-          <button className={styles.cancel} onClick={onCancel}>
+          <button className={styles.cancel} onClick={cancel} disabled={picking}>
             {t("cancel")}
           </button>
           <button
             className={styles.confirm}
             // Locked while a folder loads: `data.path` is still the previous
             // directory then, not the one the user just stepped into.
-            disabled={!data || loading}
-            onClick={() => data && !loading && onPick(data.path)}
+            disabled={!data || loading || picking}
+            onClick={() => data && !loading && void pick(data.path)}
           >
-            {loading && !data && <Spinner size={12} className={styles.btn_spinner} />}
+            {((loading && !data) || showPickSpinner) && (
+              <Spinner size={12} className={styles.btn_spinner} />
+            )}
             {t("dir_picker.confirm")}
           </button>
         </div>

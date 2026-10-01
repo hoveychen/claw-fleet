@@ -37,6 +37,7 @@ export function SessionFacetPanel({
   session,
   decisionRecords,
   taskPlans,
+  taskPlansLoaded = true,
   bgTasks,
   workflowTrees,
   sessions,
@@ -47,6 +48,9 @@ export function SessionFacetPanel({
   session: SessionInfo;
   decisionRecords: DecisionHistoryRecord[];
   taskPlans: TaskPlanDetail[];
+  /** False until `taskPlans` has been read for this session (success or
+   *  failure); the tasks facet shows a skeleton rather than an empty panel. */
+  taskPlansLoaded?: boolean;
   bgTasks: BackgroundTask[];
   workflowTrees: WorkflowTree[];
   /** The live session list — a background task of kind `subagent` correlates to
@@ -58,6 +62,8 @@ export function SessionFacetPanel({
    *  Bundled because it is five props that only one facet reads. */
   library: {
     explains: ExplainRecord[];
+    /** False until the side questions have been read once for this session. */
+    explainsLoaded?: boolean;
     hiddenExplains: ReadonlySet<string>;
     docs: DocHistoryEntry[];
     subagents: SessionInfo[];
@@ -75,6 +81,7 @@ export function SessionFacetPanel({
       return (
         <SessionLibraryPanel
           explains={library.explains}
+          explainsLoaded={library.explainsLoaded}
           hiddenExplains={library.hiddenExplains}
           docs={library.docs}
           subagents={library.subagents}
@@ -117,7 +124,7 @@ export function SessionFacetPanel({
       }[tokenPanelForAgentSource(session.agentSource)];
 
     case "tasks":
-      return <SessionTasksPanel plans={taskPlans} />;
+      return <SessionTasksPanel plans={taskPlans} loaded={taskPlansLoaded} />;
 
     case "bgtasks":
       return (

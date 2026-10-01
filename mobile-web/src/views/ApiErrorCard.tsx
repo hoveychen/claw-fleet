@@ -7,14 +7,13 @@ import {
 } from "../../../shared-ts/syntheticError";
 import { t } from "../i18n";
 import type { FleetTransport } from "../relay";
-import { modelChoicesFor, useModelCatalog } from "../useModelCatalog";
+import { modelChoicesFor, useModelCatalogState } from "../useModelCatalog";
 import {
   resumeOverRelay,
   runApiErrorAction,
   type ActionOutcome,
   type ApiErrorSession,
 } from "./apiErrorActions";
-import { useAwaitingReply } from "./Composer";
 import { Skeleton, Spinner } from "./loading";
 import styles from "./SessionDetailView.module.css";
 
@@ -46,8 +45,8 @@ export function ApiErrorCard({
   const [busy, setBusy] = useState<ErrorAction | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
-  const catalog = useModelCatalog(client ?? null);
-  const catalogLoading = useAwaitingReply(client ?? null, catalog.length === 0);
+  const { catalog, loaded: catalogLoaded } = useModelCatalogState(client ?? null);
+  const catalogLoading = !!client && !catalogLoaded;
   const countdown = useCountdown(info);
 
   const canAct = !!session && !!client;

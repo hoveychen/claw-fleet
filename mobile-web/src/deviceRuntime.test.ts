@@ -5,10 +5,12 @@ import {
   allDecisionsLoaded,
   anyAgentOnline,
   anyConnected,
+  awaitingAgentReport,
   devicesReducer,
   emptyDeviceState,
   itemKey,
   offlineDeviceCount,
+  todayUsagePending,
   totalUsage,
   usageByDevice,
   worstCongestion,
@@ -370,5 +372,65 @@ describe("the header signal reflects requests that never came back", () => {
       { deviceId: B, type: "deadLink" },
     ]);
     expect(worstCongestion(states, [A, B])).toBe("stalled");
+  });
+});
+
+describe("agent report and usage settling", () => {
+  it("waits for the agent report only while connected and unreported", () => {
+    let states = run([{ deviceId: A, type: "status", connected: true }]);
+    expect(awaitingAgentReport(states[A])).toBe(true);
+    // An offline report ends the wait just like an online one.
+    states = run([{ deviceId: A, type: "agentOnline", online: false }], states);
+    expect(awaitingAgentReport(states[A])).toBe(false);
+    expect(states[A].agentOnline).toBe(false);
+  });
+
+  it("ends the wait on timeout when no report ever arrives", () => {
+    const states = run([
+      { deviceId: A, type: "status", connected: true },
+      { deviceId: A, type: "agentReportTimeout" },
+    ]);
+    expect(awaitingAgentReport(states[A])).toBe(false);
+    expect(todayUsagePending(states, [A])).toBe(false);
+  });
+
+  it("forgets the report when the connection drops", () => {
+    const states = run([
+      { deviceId: A, type: "status", connected: true },
+      { deviceId: A, type: "agentOnline", online: true },
+      { deviceId: A, type: "status", connected: false },
+      { deviceId: A, type: "status", connected: true },
+    ]);
+    expect(awaitingAgentReport(states[A])).toBe(true);
+  });
+
+  it("keeps usage pending until the first poll answers or fails", () => {
+    let states = run([
+      { deviceId: A, type: "status", connected: true },
+      { deviceId: A, type: "agentOnline", online: true },
+    ]);
+    expect(todayUsagePending(states, [A])).toBe(true);
+    states = run([{ deviceId: A, type: "usageFailed" }], states);
+    expect(todayUsagePending(states, [A])).toBe(false);
+    expect(states[A].todayUsage).toBeNull();
+  });
+
+  it("is not pending for a device reported offline", () => {
+    const states = run([
+      { deviceId: A, type: "status", connected: true },
+      { deviceId: A, type: "agentOnline", online: false },
+    ]);
+    expect(todayUsagePending(states, [A])).toBe(false);
+  });
+
+  it("is not pending once any device has reported usage", () => {
+    const states = run([
+      { deviceId: A, type: "status", connected: true },
+      { deviceId: A, type: "agentOnline", online: true },
+      { deviceId: B, type: "status", connected: true },
+      { deviceId: B, type: "agentOnline", online: true },
+      { deviceId: B, type: "usage", usage: usage(1) },
+    ]);
+    expect(todayUsagePending(states, ORDER)).toBe(false);
   });
 });

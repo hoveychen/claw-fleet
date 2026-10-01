@@ -68,8 +68,8 @@ interface Props {
   pushOptedOut: boolean;
   onEnablePush: () => void | Promise<void>;
   onDisablePush: () => void | Promise<void>;
-  /** Link is up but the agent has not been reported yet (see App's
-   *  useSettlingAgents): still connecting, not "desktop offline". */
+  /** Link is up but the agent has not been reported yet (see
+   *  deviceRuntime.awaitingAgentReport): still connecting, not "desktop offline". */
   agentPending?: boolean;
   onOpenRepo: () => void;
   onOpenPlans: () => void;

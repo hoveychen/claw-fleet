@@ -100,6 +100,7 @@ export function SessionSheet({
   pendingDecisions,
   client,
   explainCount,
+  explainLoading,
   onClose,
   onOpenPane,
   onOpenSession,
@@ -109,6 +110,9 @@ export function SessionSheet({
    *  the detail page reads the list over the relay and passes the count once
    *  it has it; `undefined` until then, which the row renders as silence. */
   explainCount?: number;
+  /** The side-question list is still being read. Omitted: inferred from
+   *  `explainCount` being undefined while a client exists. */
+  explainLoading?: boolean;
   /** Main process + all subagents (caller assembles, sorts, caps per desktop rules).
    *  Empty means this is a standalone session with no subagents; that section
    *  doesn't appear. */
@@ -214,7 +218,7 @@ export function SessionSheet({
     value:
       explainCount === undefined ? undefined : explainCount === 0 ? "empty" : t("{0} 条", explainCount),
     // The detail page is reading the list right now (only possible with a client).
-    loading: explainCount === undefined && client !== null,
+    loading: explainLoading ?? (explainCount === undefined && client !== null),
   });
   progressRows.push({
     pane: "handoff",

@@ -581,6 +581,7 @@ export function SessionDetail({
     explains,
     all: allExplains,
     hidden: hiddenExplains,
+    loaded: explainsLoaded,
     ask: askExplainRecord,
     dismiss: dismissExplain,
     restore: restoreExplain,
@@ -596,6 +597,10 @@ export function SessionDetail({
      is the exception: see the render for why the warn state stays out. */
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
+  // Which `workspace\0session` key `taskPlans` was last read (or failed to
+  // read) for. Until it matches the one on screen, an empty list means "not
+  // read yet", not "no plans".
+  const [taskPlansReadFor, setTaskPlansReadFor] = useState<string | null>(null);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
 
   // Claude Code Workflow runs for this session → reconstructed DAG, surfaced as
@@ -930,24 +935,32 @@ export function SessionDetail({
     };
   }, [wikiDocs, wikiLoaded, wikiInFlight, openAuxDoc]);
 
+  const taskPlansKey = workspacePath && sessionId ? `${workspacePath}\0${sessionId}` : null;
   useEffect(() => {
     if (!workspacePath || !sessionId) {
       setTaskPlans([]);
       return;
     }
     let cancelled = false;
+    const key = `${workspacePath}\0${sessionId}`;
     invoke<TaskPlanDetail[]>("get_task_plans", { workspacePath, sessionId })
       .then((r) => {
-        if (!cancelled) setTaskPlans(r ?? []);
+        if (cancelled) return;
+        setTaskPlans(r ?? []);
+        setTaskPlansReadFor(key);
       })
       .catch(() => {
-        if (!cancelled) setTaskPlans([]);
+        if (cancelled) return;
+        setTaskPlans([]);
+        setTaskPlansReadFor(key);
       });
     return () => {
       cancelled = true;
     };
   }, [workspacePath, sessionId]);
   const hasTaskPlans = taskPlans.length > 0;
+  // No session/workspace means nothing to read, which counts as settled.
+  const taskPlansLoaded = taskPlansKey === null || taskPlansReadFor === taskPlansKey;
 
   // Claude Code gives every session a private scratch dir and tells it to keep
   // temp files there rather than in /tmp. Probe the top level once per session:
@@ -1878,6 +1891,7 @@ export function SessionDetail({
                       status={liveSession?.status ?? null}
                       liveThinking={shownLiveThinking}
                       decisionRecords={decisionRecords}
+                      decisionRecordsLoading={decisionsReadFor !== liveSession?.id}
                       onLoadEarlier={loadEarlier}
                       fullyLoaded={fullyLoaded}
                       isLoadingEarlier={isLoadingEarlier}
@@ -1986,12 +2000,14 @@ export function SessionDetail({
                       session={liveSession}
                       decisionRecords={decisionRecords}
                       taskPlans={taskPlans}
+                      taskPlansLoaded={taskPlansLoaded}
                       bgTasks={bgTasks}
                       workflowTrees={workflowTrees}
                       sessions={sessions}
                       onOpenAgent={openAgentSession}
                       library={{
                         explains: allExplains,
+                        explainsLoaded,
                         hiddenExplains,
                         docs: docHistory,
                         subagents: allSubagents,
