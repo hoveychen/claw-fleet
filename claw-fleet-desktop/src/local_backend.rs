@@ -2137,7 +2137,7 @@ impl LocalBackend {
     }
 
     /// fleet__ask depth-3 test: spawn `claude -p "<prompt>"` with
-    /// `--allowed-tools "mcp__fleet__ask"` so the Agent actually invokes
+    /// `--allowed-tools "mcp__fleet__fleet__ask"` so the Agent actually invokes
     /// the MCP tool. Mirrors `test_decision_via_claude_cli`.
     pub fn test_fleet_ask_via_claude_cli(
         &self,

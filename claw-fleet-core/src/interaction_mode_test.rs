@@ -468,13 +468,13 @@ pub(crate) fn build_claude_command(
 
 /// Claude CLI test for the `fleet__ask` MCP tool: same evidence-based
 /// shape as `run_claude_cli_test`, but steers the model toward
-/// `mcp__fleet__ask` (Claude Code's canonical name for the
-/// `fleet__ask` MCP tool) and watches `mcp_ipc::list_pending_requests()`
+/// `mcp__fleet__fleet__ask` (Claude Code's canonical name for the
+/// `fleet__ask` tool on the `fleet` MCP server) and watches `mcp_ipc::list_pending_requests()`
 /// for the test card instead of the AskUserQuestion elicitation dir.
 pub fn run_fleet_ask_claude_cli_test(timeout: Duration) -> Result<TestRunResult, String> {
     run_cli_test_inner(
         ElicitationKind::FleetAsk,
-        "mcp__fleet__ask",
+        "mcp__fleet__fleet__ask",
         "fleet_ask_claude_cli",
         "诊断测试：请只调用一次 fleet__ask MCP 工具，问我「现在心情如何」，提供两个选项（开心 / 一般），不要做其他任何事。",
         timeout,
@@ -617,7 +617,7 @@ mod tests {
         // Card landed but we killed claude on timeout (it was waiting on
         // Boss's answer). This is the normal happy path when Boss doesn't
         // click within the window — still wired end-to-end.
-        let msg = build_cli_message("mcp__fleet__ask", None, true, true, Duration::from_secs(60));
+        let msg = build_cli_message("mcp__fleet__fleet__ask", None, true, true, Duration::from_secs(60));
         assert!(
             msg.starts_with("✅"),
             "timeout-with-card must be success: {msg}"
