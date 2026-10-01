@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "./PageShell";
+import { SkeletonCard, SkeletonText, Skeleton, Spinner } from "./loading";
 import { useUIStore } from "../store";
 import { RELAY_PRESETS, relayChoiceOf, type RelayChoice } from "../../../shared-ts/relayPresets";
 import styles from "./MobileView.module.css";
@@ -71,6 +72,12 @@ export function MobileView() {
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);
   const [status, setStatus] = useState<MobileRelayStatus | null>(null);
   const [qrSvg, setQrSvg] = useState<string | null>(null);
+  // True while a QR render is in flight, so the panel shows a skeleton instead
+  // of the grey "QR" box that also stands for "no code".
+  const [qrLoading, setQrLoading] = useState(false);
+  // The status poll's first tick failed (backend without mobile relay): fall
+  // back to the "not connected" row instead of a skeleton that never resolves.
+  const [statusFailed, setStatusFailed] = useState(false);
   const { urlDraft, editingUrl } = useUIStore((s) => s.mainViewState.mobile);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setUrlDraft = (value: string) => updateMainViewState("mobile", { urlDraft: value });
@@ -78,6 +85,10 @@ export function MobileView() {
     updateMainViewState("mobile", { editingUrl: value });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which control started the in-flight write, so only that one spins.
+  const [pendingAction, setPendingAction] = useState<
+    "enabled" | "relay" | "save" | "rotate" | null
+  >(null);
   // The desktop's own build commit, compared against each phone's appCommit to
   // flag a stale mobile deploy. Fetched once — it's a compile-time constant.
   const [desktopCommit, setDesktopCommit] = useState<string | null>(null);
@@ -90,10 +101,13 @@ export function MobileView() {
     // Carry the desktop's current UI language into the QR so a fresh scan opens
     // the phone in the same language (core accepts only "zh"/"en").
     const lang = i18n.language.startsWith("zh") ? "zh" : "en";
+    setQrLoading(true);
     try {
       setQrSvg(await invoke<string>("mobile_relay_qr_svg", { lang }));
     } catch {
       setQrSvg(null);
+    } finally {
+      setQrLoading(false);
     }
   }, [i18n]);
 
@@ -131,6 +145,7 @@ export function MobileView() {
         if (alive) setStatus(s);
       } catch {
         /* remote backend without mobile relay support */
+        if (alive) setStatusFailed(true);
       }
     };
     void tick();
@@ -142,9 +157,13 @@ export function MobileView() {
   }, []);
 
   const applyConfig = useCallback(
-    async (next: Partial<MobileRelayConfig>) => {
-      if (!config) return;
+    async (
+      next: Partial<MobileRelayConfig>,
+      action: "enabled" | "relay" | "save" = "enabled",
+    ) => {
+      if (!config || busy) return;
       setBusy(true);
+      setPendingAction(action);
       setError(null);
       try {
         // Leave secret empty: backend preserves existing value or generates on first enable (works without returning plaintext)
@@ -158,13 +177,16 @@ export function MobileView() {
         setError(String(e));
       } finally {
         setBusy(false);
+        setPendingAction(null);
       }
     },
-    [config, refreshQr],
+    [config, busy, refreshQr],
   );
 
   const rotate = useCallback(async () => {
+    if (busy) return;
     setBusy(true);
+    setPendingAction("rotate");
     setError(null);
     try {
       const stored = await invoke<MobileRelayConfig>("rotate_mobile_relay_secret");
@@ -174,8 +196,9 @@ export function MobileView() {
       setError(String(e));
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
-  }, [refreshQr]);
+  }, [busy, refreshQr]);
 
   // Even before the config loads the page wears its shell — otherwise the banner
   // (and with it the window's drag region) would blink in only once the invoke
@@ -183,7 +206,20 @@ export function MobileView() {
   if (!config) {
     return (
       <PageShell view="mobile" title={t("mobile_title", "移动端")}>
-        <div className={styles.container}>{error ?? "…"}</div>
+        <div className={styles.container}>
+          {error ? (
+            error
+          ) : (
+            // Shaped like the real panel: subtitle, enable toggle, status, QR.
+            <div className={styles.panel}>
+              <SkeletonText lines={2} />
+              <SkeletonCard height={46} />
+              <div style={{ marginTop: 14 }}>
+                <SkeletonCard height={298} />
+              </div>
+            </div>
+          )}
+        </div>
       </PageShell>
     );
   }
@@ -207,16 +243,26 @@ export function MobileView() {
 
         <label className={styles.toggleRow}>
           <span>{t("mobile_enable", "启用移动端通道")}</span>
-          <input
-            type="checkbox"
-            checked={config.enabled}
-            disabled={busy}
-            onChange={(e) => void applyConfig({ enabled: e.target.checked })}
-          />
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {pendingAction === "enabled" && <Spinner size={12} />}
+            <input
+              type="checkbox"
+              checked={config.enabled}
+              disabled={busy}
+              onChange={(e) => void applyConfig({ enabled: e.target.checked })}
+            />
+          </span>
         </label>
 
         {config.enabled && (
           <>
+            {!status && !statusFailed ? (
+              // First poll still out: neither a green nor a red verdict yet.
+              <div className={styles.statusRow}>
+                <Skeleton circle height={8} />
+                <Skeleton inline width={180} height={10} />
+              </div>
+            ) : (
             <div className={styles.statusRow}>
               <span
                 className={styles.dot}
@@ -233,6 +279,7 @@ export function MobileView() {
                 </span>
               )}
             </div>
+            )}
 
             {status?.connected && (status?.devices?.length ?? 0) > 0 && (
               <div className={styles.devices}>
@@ -283,7 +330,11 @@ export function MobileView() {
               </div>
             )}
 
-            {qrSvg ? (
+            {qrLoading && !qrSvg ? (
+              <div className={styles.qrWrap}>
+                <SkeletonCard height={256} width={256} />
+              </div>
+            ) : qrSvg ? (
               <div className={styles.qrWrap}>
                 <div className={styles.qr} dangerouslySetInnerHTML={{ __html: qrSvg }} />
                 <p className={styles.qrHint}>
@@ -301,6 +352,7 @@ export function MobileView() {
 
             <div className={styles.fieldRow}>
               <span className={styles.fieldLabel}>{t("mobile_relay_url", "Relay 地址")}</span>
+              {pendingAction === "relay" && <Spinner size={12} />}
               <select
                 className={styles.relaySelect}
                 value={relayChoice}
@@ -316,7 +368,7 @@ export function MobileView() {
                   }
                   setEditingUrl(false);
                   const preset = RELAY_PRESETS.find((p) => p.key === choice);
-                  if (preset) void applyConfig({ relayUrl: preset.url });
+                  if (preset) void applyConfig({ relayUrl: preset.url }, "relay");
                 }}
               >
                 <option value="global">
@@ -343,9 +395,10 @@ export function MobileView() {
                   disabled={busy || !urlDraft.trim()}
                   onClick={() => {
                     setEditingUrl(false);
-                    void applyConfig({ relayUrl: urlDraft.trim() });
+                    void applyConfig({ relayUrl: urlDraft.trim() }, "save");
                   }}
                 >
+                  {pendingAction === "save" && <><Spinner size={12} />{" "}</>}
                   {t("save", "保存")}
                 </button>
               </div>
@@ -374,6 +427,7 @@ export function MobileView() {
 
             <div className={styles.dangerZone}>
               <button className={styles.dangerButton} disabled={busy} onClick={() => void rotate()}>
+                {pendingAction === "rotate" && <><Spinner size={12} />{" "}</>}
                 {t("mobile_rotate", "重新生成配对密钥")}
               </button>
               <span className={styles.dangerHint}>

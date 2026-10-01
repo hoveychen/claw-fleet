@@ -5,6 +5,7 @@ import type { ReviewDoc, ReviewDocContent } from "../types";
 import { ProgressiveMarkdown } from "../markdown/ProgressiveMarkdown";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { AutoHeightFrame } from "./AutoHeightFrame";
+import { SkeletonText } from "./loading";
 import { framePreviewSrcDoc } from "../decisionFrame";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import styles from "./ReviewDocsColumn.module.css";
@@ -113,9 +114,7 @@ function ReviewDocsColumnInner({
       </div>
       <div className={styles.body}>
         {!active || active.state === "loading" ? (
-          <div className={styles.status}>
-            {t("review_docs.loading", "Loading…")}
-          </div>
+          <SkeletonText lines={8} />
         ) : active.state === "error" ? (
           <div className={styles.error}>
             {t("review_docs.error", "Couldn't load this document")}

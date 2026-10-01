@@ -14,6 +14,7 @@
 }
 
 .board {
+  position: relative; /* anchors the refresh <TopProgress> */
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -38,14 +39,6 @@
 .refresh:hover {
   color: var(--color-text);
   background: var(--color-bg-card-hover);
-}
-.spin {
-  animation: plans_spin 0.9s linear infinite;
-}
-@keyframes plans_spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* ── Workspace rail ─────────────────────────────────────────────────────── */

@@ -9,7 +9,7 @@
 // only when tapped — the stored bytes for the lightbox.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Paperclip, X } from "lucide-react";
+import { Paperclip, X } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import {
@@ -20,6 +20,7 @@ import {
   type AttachmentRef,
 } from "../userAttachments";
 import { useLightbox } from "./Lightbox";
+import { Skeleton, Spinner } from "./loading";
 import styles from "./AttachmentThumb.module.css";
 
 /**
@@ -140,12 +141,12 @@ export function AttachmentThumbs({
           <span key={p.id} className={styles.tile} aria-busy="true" title={p.name}>
             <img src={p.previewUrl} alt="" className={`${styles.img} ${styles.uploadingImg}`} />
             <span className={styles.busy}>
-              <LoaderCircle size={14} className={styles.spin} aria-label={t("上传中…")} />
+              <Spinner size={14} className={styles.onDark} label={t("上传中…")} />
             </span>
           </span>
         ) : (
           <span key={p.id} className={styles.chip} aria-busy="true" title={p.name}>
-            <LoaderCircle size={12} className={`${styles.chipIcon} ${styles.spin}`} />
+            <Spinner size={12} className={styles.chipIcon} />
             <span className={styles.chipName}>{p.name}</span>
           </span>
         ),
@@ -246,6 +247,7 @@ function AttachmentThumb({
       open(hit, alt);
       return;
     }
+    if (loadingFull) return;
     setLoadingFull(true);
     void fetchAttachmentImage(client, refr, true)
       .then((img) => {
@@ -259,7 +261,7 @@ function AttachmentThumb({
         if (src) open(src, alt);
       })
       .finally(() => setLoadingFull(false));
-  }, [alt, client, local, open, refr, src]);
+  }, [alt, client, local, open, refr, src, loadingFull]);
 
   // A failed pull stays visible as its filename: collapsing it to nothing would
   // turn every upstream fault — offline desktop, pruned store, corrupt file —
@@ -299,6 +301,7 @@ function AttachmentThumb({
         title={alt}
         aria-label={alt}
         onClick={shown ? enlarge : undefined}
+        aria-busy={loadingFull || !shown || undefined}
         data-testid="attachment-thumb"
       >
         {shown ? (
@@ -309,9 +312,13 @@ function AttachmentThumb({
             onError={() => (local ? setPreviewDead(true) : setFailed(true))}
           />
         ) : (
-          <span className={styles.placeholder}>{t("加载中…")}</span>
+          <Skeleton className={styles.placeholder} width="100%" height="100%" radius={0} />
         )}
-        {loadingFull && <span className={styles.busy}>{t("加载中…")}</span>}
+        {loadingFull && (
+          <span className={styles.busy}>
+            <Spinner size={14} className={styles.onDark} />
+          </span>
+        )}
       </button>
       {onRemove && (
         <button

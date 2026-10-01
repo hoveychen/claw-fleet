@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import { useSessionsStore } from "../store";
 import { useCollapsed } from "./useCollapsed";
+import { SkeletonCard, SkeletonNumber } from "./loading";
 import styles from "./TokenSpeedChart.module.css";
 
 function formatTime(ms: number): string {
@@ -59,14 +60,16 @@ export function CostSpeedChart({ compact = false }: { compact?: boolean } = {}) 
           <span className={styles.title}>{t("cost_chart.title")}</span>
         </span>
         <span className={styles.current}>
-          ${currentRate.toFixed(2)}{" "}
+          {costHistory.length > 0 ? `$${currentRate.toFixed(2)}` : <SkeletonNumber width={40} />}{" "}
           <span className={styles.unit}>{t("cost_chart.unit")}</span>
         </span>
       </button>
 
       {!collapsed && (
+        // A sample lands on every scan tick, so fewer than two means the chart
+        // is still waiting for its first line — a placeholder, not "no data".
         costHistory.length < 2 ? (
-          <div className={styles.no_data}>{t("chart.no_data")}</div>
+          <SkeletonCard height={compact ? 56 : 80} />
         ) : (
           <>
             <ResponsiveContainer width="100%" height={compact ? 56 : 80}>

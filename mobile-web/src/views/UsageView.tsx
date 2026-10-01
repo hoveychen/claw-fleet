@@ -16,6 +16,11 @@ import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
+import { SkeletonCard, SkeletonNumber } from "./loading";
+
+/** How long a missing today-usage reads as "first snapshot still on its way"
+ *  before it falls back to the offline hint. App only exposes `null` for both. */
+const TODAY_GRACE_MS = 8_000;
 
 /** How much one device spent in "Today's Cumulative". `usage` is `null` = this device
  *  hasn't reported yet. */
@@ -201,6 +206,16 @@ export function UsageView({
     void refresh();
   }, [refresh]);
 
+  // `todayUsage === null` means either "no snapshot yet" or "desktop offline";
+  // show a skeleton for a short grace window before claiming offline.
+  const [todayGraceOver, setTodayGraceOver] = useState(false);
+  useEffect(() => {
+    if (todayUsage || !client) return;
+    const timer = setTimeout(() => setTodayGraceOver(true), TODAY_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [todayUsage, client]);
+  const todayPending = !todayUsage && !!client && !todayGraceOver;
+
   const claude = data?.claude ?? null;
 
   return (
@@ -263,6 +278,11 @@ export function UsageView({
                   </>
                 )}
               </>
+            ) : todayPending ? (
+              <div className={styles.today}>
+                <SkeletonNumber className={styles.todayCost} width={72} />
+                <SkeletonNumber className={styles.todayTokens} width={56} />
+              </div>
             ) : (
               <div className={styles.hint}>{t("桌面端离线，拿不到今日用量。")}</div>
             )}
@@ -270,7 +290,13 @@ export function UsageView({
         </div>
 
         {error && <div className={styles.hint}>{t("用量加载失败：{0}", error)}</div>}
-        {!error && !data && loading && <div className={styles.hint}>{t("加载中…")}</div>}
+        {/* First load: hold the Claude account card's place (rows + two bars). */}
+        {!error && !data && client && (
+          <div className={styles.section}>
+            <SectionHead label="Claude Code" device={activeDeviceLabel} />
+            <SkeletonCard height={190} />
+          </div>
+        )}
 
         {/* ── Claude Account ── */}
         {data && (

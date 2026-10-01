@@ -42,6 +42,7 @@ import {
   type ZipEntry,
 } from "../../../shared-ts/zipDir";
 import { PreviewBody, type PreviewSource } from "./ArtifactPreviewBody";
+import { SkeletonCard, SkeletonList } from "./loading";
 import styles from "./ZipBrowser.module.css";
 import artifactStyles from "./ArtifactsView.module.css";
 
@@ -235,8 +236,8 @@ export function ZipBrowser({
   const dir = root ? zipDirAt(root, cwd) : null;
   if (!dir) {
     return (
-      <div className={artifactStyles.noPreview}>
-        <div className={artifactStyles.noPreviewHint}>{t("加载中…")}</div>
+      <div className={styles.root}>
+        <SkeletonList rows={8} avatar meta={false} />
       </div>
     );
   }
@@ -266,16 +267,20 @@ export function ZipBrowser({
           <PreviewBody
             src={memberSource ?? EMPTY_SOURCE}
             fallback={
-              <div className={artifactStyles.noPreview}>
-                <div className={artifactStyles.noPreviewTitle}>
-                  {memberError ?? (memberSource ? t("这个格式手机上看不了") : t("加载中…"))}
-                </div>
-                {memberSource && !memberError && (
-                  <div className={artifactStyles.noPreviewHint}>
-                    {t("可以分享出去，或到桌面端用系统应用打开。")}
+              !memberError && !memberSource ? (
+                <SkeletonCard height="100%" />
+              ) : (
+                <div className={artifactStyles.noPreview}>
+                  <div className={artifactStyles.noPreviewTitle}>
+                    {memberError ?? t("这个格式手机上看不了")}
                   </div>
-                )}
-              </div>
+                  {memberSource && !memberError && (
+                    <div className={artifactStyles.noPreviewHint}>
+                      {t("可以分享出去，或到桌面端用系统应用打开。")}
+                    </div>
+                  )}
+                </div>
+              )
             }
           />
         </div>

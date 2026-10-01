@@ -28,6 +28,7 @@ export function HandoffChainRow({
   const [open, setOpen] = useState(false);
   const [chain, setChain] = useState<HandoffChain | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const info = session.handoff!;
 
   const openModal = async (e: React.SyntheticEvent) => {
@@ -35,13 +36,15 @@ export function HandoffChainRow({
     setOpen(true);
     if (!chain && !loading) {
       setLoading(true);
+      setFailed(false);
       try {
         const c = await invoke<HandoffChain | null>("get_handoff_chain", {
           sessionId: session.id,
         });
         setChain(c ?? null);
       } catch {
-        // modal shows the loading label going away; chip stays usable
+        // The modal says so; the chip stays usable and the next open retries.
+        setFailed(true);
       }
       setLoading(false);
     }
@@ -67,6 +70,7 @@ export function HandoffChainRow({
         <HandoffChainModal
           chain={chain}
           loading={loading}
+          failed={failed}
           currentSessionId={session.id}
           hop={info.hop}
           len={info.chainLen}

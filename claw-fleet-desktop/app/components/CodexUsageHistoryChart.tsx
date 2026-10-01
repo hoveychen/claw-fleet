@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import { codexRateLimitLabel, codexWindowLabel, type TFunc } from "../codexUsage";
 import styles from "./UsageHistoryChart.module.css";
+import { SkeletonCard } from "./loading";
 
 // Mirrors claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint
 // (camelCase on the wire, like the rest of the codex-facing types). The
@@ -107,6 +108,9 @@ export function CodexUsageHistoryChart({ height = 200 }: { height?: number } = {
   const { t } = useTranslation();
   const [points, setPoints] = useState<CodexUsageHistoryPoint[]>([]);
   const [now, setNow] = useState<number>(() => Date.now());
+  // False until the first fetch settles, so the chart shows a placeholder
+  // rather than flashing "no history" before anything was asked.
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,10 +122,13 @@ export function CodexUsageHistoryChart({ height = 200 }: { height?: number } = {
           if (!cancelled) {
             setPoints(rows);
             setNow(toMs);
+            setLoaded(true);
           }
         })
         .catch(() => {
           /* codex not installed / not logged in — keep the last good series */
+          // A failed first fetch settles into the empty state, not a loader.
+          if (!cancelled) setLoaded(true);
         });
     };
     fetchHistory();
@@ -176,7 +183,9 @@ export function CodexUsageHistoryChart({ height = 200 }: { height?: number } = {
         </div>
       </div>
 
-      {!hasData ? (
+      {!loaded ? (
+        <SkeletonCard height={height} />
+      ) : !hasData ? (
         <p className={styles.empty}>{t("account.no_history")}</p>
       ) : (
         <ResponsiveContainer width="100%" height={height}>

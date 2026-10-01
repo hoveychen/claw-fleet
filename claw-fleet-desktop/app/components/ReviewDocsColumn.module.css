@@ -77,12 +77,6 @@
   border: none;
 }
 
-.status {
-  color: var(--color-text-muted, #888);
-  font-size: 12px;
-  padding: 8px 0;
-}
-
 .error {
   color: var(--color-error, #c0392b);
   font-size: 13px;

@@ -53,6 +53,8 @@ export function FileTabPane({
   const { t } = useTranslation();
   const requestFileNav = useUIStore((s) => s.requestFileNav);
   const [content, setContent] = useState<ExplorerFileContent | null>(null);
+  // `content` alone cannot tell "still reading" from "the read failed".
+  const [readSettled, setReadSettled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const path = doc.ref;
 
@@ -72,10 +74,15 @@ export function FileTabPane({
     [path],
   );
 
-  const load = useCallback(
-    (absPath: string) => invoke<ExplorerFileContent>("read_external_file", { path: absPath }),
-    [],
-  );
+  const load = useCallback((absPath: string) => {
+    setReadSettled(false);
+    return invoke<ExplorerFileContent>("read_external_file", { path: absPath });
+  }, []);
+
+  const onLoaded = useCallback((c: ExplorerFileContent | null) => {
+    setContent(c);
+    setReadSettled(true);
+  }, []);
 
   const build = buildFileMenu({
     doc,
@@ -91,7 +98,10 @@ export function FileTabPane({
   // Facts from the read rather than from a listing: an absolute path clicked out
   // of agent prose has no directory entry behind it.
   const facts: AuxFact[] = [{ text: dirname(path) }];
-  if (content) {
+  if (!readSettled) {
+    // Size and line count arrive with the read; hold their place meanwhile.
+    facts.push({ text: "", pending: 48 }, { text: "", pending: 36 });
+  } else if (content) {
     facts.push({ text: formatBytes(content.sizeBytes), strong: true });
     if (content.kind === "text") {
       facts.push({
@@ -123,7 +133,7 @@ export function FileTabPane({
       />
       {error && <p className={styles.error_line}>{error}</p>}
       <div className={styles.body}>
-        <FilePreview file={entry} load={load} onLoaded={setContent} />
+        <FilePreview file={entry} load={load} onLoaded={onLoaded} />
       </div>
     </AuxPane>
   );

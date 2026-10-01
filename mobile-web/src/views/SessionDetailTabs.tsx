@@ -26,19 +26,24 @@ import { useAgentNav } from "./AgentNavContext";
 import { DecisionQa, Md } from "./DecisionQa";
 import { tokenRequestFor, toolForAgentSource } from "../agentSource";
 import type { DshSessionCost, DshTokenBreakdown } from "../generated/types";
+import { SkeletonList, SkeletonNumber, SkeletonText, Spinner } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 import styles from "./SessionDetailTabs.module.css";
 
-/** One-shot fetch helper: "loading" → data | "error". */
+type RelayState<T> = T | "loading" | "error" | "offline";
+
+/** One-shot fetch helper: "loading" → data | "error". With no client yet
+ *  (relay still connecting) the state is "offline", never "error". */
 function useRelayData<T>(
   client: FleetTransport | null,
   method: string,
   params: Record<string, unknown>,
-): T | "loading" | "error" {
-  const [state, setState] = useState<T | "loading" | "error">("loading");
+): RelayState<T> {
+  const [state, setState] = useState<RelayState<T>>(client ? "loading" : "offline");
   const key = JSON.stringify(params);
   useEffect(() => {
     if (!client) {
-      setState("error");
+      setState("offline");
       return;
     }
     let cancelled = false;
@@ -56,6 +61,49 @@ function useRelayData<T>(
     };
   }, [client, method, key]);
   return state;
+}
+
+function isPending<T>(s: RelayState<T>): s is "loading" | "error" | "offline" {
+  return s === "loading" || s === "error" || s === "offline";
+}
+
+/** The non-data states every tab shares: skeleton while loading, a hint when
+ *  the relay is not connected yet, the error line when the request failed. */
+function TabStatus({
+  state,
+  skeleton,
+  errorText,
+}: {
+  state: "loading" | "error" | "offline";
+  skeleton?: React.ReactNode;
+  errorText?: string;
+}) {
+  if (state === "loading") return <>{skeleton ?? <SkeletonList rows={4} />}</>;
+  if (state === "offline") return <Hint>{t("尚未连接 relay")}</Hint>;
+  return <Hint>{errorText ?? t("加载失败（桌面端可能离线）")}</Hint>;
+}
+
+/** Placeholder for the four-tile token grid. */
+function StatGridSkeleton() {
+  return (
+    <div className={styles.stack}>
+      <div className={styles.statGrid}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className={styles.statTile}>
+            <div className={styles.statValue}>
+              <SkeletonNumber width={52} />
+            </div>
+            <div className={styles.statLabel}>
+              <SkeletonNumber width={56} height={9} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className={styles.costLine}>
+        <SkeletonNumber width={120} />
+      </div>
+    </div>
+  );
 }
 
 function Hint({ children }: { children: React.ReactNode }) {
@@ -139,8 +187,7 @@ export function DecisionHistoryTab({
   });
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  if (data === "loading") return <Hint>{t("加载决策历史…")}</Hint>;
-  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={5} />} />;
   if (data.length === 0)
     return <EmptyState compact icon={CheckCircle2} title={t("该会话没有决策记录")} />;
 
@@ -249,8 +296,7 @@ export function TaskPlansTab({
     sessionId: session.id,
   });
 
-  if (data === "loading") return <Hint>{t("加载计划中…")}</Hint>;
-  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={6} meta={false} />} />;
   if (data.length === 0)
     return <EmptyState compact icon={ListTodo} title={t("该会话没有 TASKS.md 计划")} />;
 
@@ -341,8 +387,14 @@ function DshTokenTab({
     uri: session.jsonlPath,
   });
 
-  if (data === "loading") return <Hint>{t("分析 token 用量…")}</Hint>;
-  if (data === "error") return <Hint>{t("分析失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data))
+    return (
+      <TabStatus
+        state={data}
+        skeleton={<StatGridSkeleton />}
+        errorText={t("分析失败（桌面端可能离线）")}
+      />
+    );
 
   const unpriced =
     typeof cost === "object" ? cost.unpricedCalls + cost.unpriceableCalls : 0;
@@ -363,6 +415,11 @@ function DshTokenTab({
           </div>
         ))}
       </div>
+      {cost === "loading" && (
+        <div className={styles.costLine}>
+          {t("花费")} <SkeletonNumber width={64} />
+        </div>
+      )}
       {typeof cost === "object" && (
         <div className={styles.costLine}>
           {t("花费")}{" "}
@@ -417,8 +474,14 @@ function ClaudeTokenTab({
   const req = tokenRequestFor(session);
   const data = useRelayData<TokenBreakdown>(client, req.method, req.params);
 
-  if (data === "loading") return <Hint>{t("分析 token 用量…")}</Hint>;
-  if (data === "error") return <Hint>{t("分析失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data))
+    return (
+      <TabStatus
+        state={data}
+        skeleton={<StatGridSkeleton />}
+        errorText={t("分析失败（桌面端可能离线）")}
+      />
+    );
 
   const u = data.totalsUsage ?? {};
   const rows: Array<[string, string]> = [
@@ -472,8 +535,7 @@ export function WorkflowTab({
     path: session.jsonlPath,
   });
 
-  if (data === "loading") return <Hint>{t("加载 workflow…")}</Hint>;
-  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={4} />} />;
   if (data.length === 0)
     return <EmptyState compact icon={Workflow} title={t("该会话没有 workflow 运行")} />;
 
@@ -529,8 +591,7 @@ export function NotesTab({
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  if (data === "loading") return <Hint>{t("加载笔记…")}</Hint>;
-  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={5} />} />;
   if (data.length === 0)
     return <EmptyState compact icon={NotebookPen} title={t("该会话没有留下笔记")} />;
 
@@ -596,15 +657,28 @@ function NoteHits({
     query,
   });
   const [open, setOpen] = useState<string | null>(null);
+  // Every keystroke refetches: keep the previous hits on screen with an
+  // inline spinner instead of blanking the list to a loading line.
+  const [lastHits, setLastHits] = useState<NoteMatch[] | null>(null);
+  useEffect(() => {
+    if (!isPending(hits)) setLastHits(hits);
+  }, [hits]);
+  const searching = useDelayedFlag(hits === "loading");
 
-  if (hits === "loading") return <Hint>{t("搜索中…")}</Hint>;
-  if (hits === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
-  if (hits.length === 0)
+  if (hits === "loading" && !lastHits) return <SkeletonList rows={3} />;
+  if (hits !== "loading" && isPending(hits)) return <TabStatus state={hits} />;
+  const shown = isPending(hits) ? lastHits! : hits;
+  if (shown.length === 0 && hits !== "loading")
     return <EmptyState compact icon={NotebookPen} title={t("没有匹配的行")} />;
 
   return (
     <>
-      {hits.map((m) => {
+      {searching && (
+        <div className={styles.dimNote}>
+          <Spinner size={12} label={t("搜索中…")} />
+        </div>
+      )}
+      {shown.map((m) => {
         const id = `${m.sessionId}:${m.path}:${m.line}`;
         const isOpen = open === id;
         return (
@@ -716,8 +790,8 @@ function NoteBody({
     sessionId: file.sessionId,
     path: file.path,
   });
-  if (text === "loading") return <Hint>{t("读取中…")}</Hint>;
-  if (text === "error") return <Hint>{t("读取失败")}</Hint>;
+  if (isPending(text))
+    return <TabStatus state={text} skeleton={<SkeletonText lines={4} />} errorText={t("读取失败")} />;
   return (
     <div className={styles.markdown}>
       <ReactMarkdown
@@ -743,8 +817,7 @@ export function HandoffTab({
     sessionId: session.id,
   });
 
-  if (data === "loading") return <Hint>{t("加载接力链…")}</Hint>;
-  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={4} />} />;
   // The relay resolves a null reply to an empty placeholder object, so a real
   // chain is only present when it carries a chainId.
   if (!data || !data.chainId) return <EmptyState compact icon={Waypoints} title={t("该会话不在任何接力链上")} />;

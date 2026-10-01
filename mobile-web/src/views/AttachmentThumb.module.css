@@ -35,10 +35,10 @@
   object-fit: cover;
 }
 
+/* Shimmer filling the tile's minimum box until the thumbnail lands. */
 .placeholder {
-  padding: 0 10px;
-  font-size: var(--t-meta, 11px);
-  color: var(--color-text-dim);
+  position: absolute;
+  inset: 0;
 }
 
 /* Shown over the tile while the full-size bytes are on their way, so a tap on a
@@ -148,12 +148,8 @@
   opacity: 0.55;
 }
 
-.spin {
-  animation: attachment_spin 0.9s linear infinite;
-}
-
-@keyframes attachment_spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* The shared ring's accent arc on the dark scrim: go white so it reads. */
+.busy .onDark {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
 }

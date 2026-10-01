@@ -46,6 +46,7 @@ import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 import { Presence } from "./Presence";
+import { SkeletonCard, SkeletonText } from "./loading";
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
@@ -232,9 +233,9 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
       )}
 
       {(decision.analyzing || decision.analysis) && (
-        <div className={`${styles.analysis} ${decision.analyzing ? styles.analysis_loading : ""}`}>
+        <div className={styles.analysis}>
           {decision.analyzing
-            ? t("guard.analyzing", "Analyzing command...")
+            ? <SkeletonText lines={3} />
             : <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(decision.analysis ?? "")}</ReactMarkdown>}
         </div>
       )}
@@ -516,7 +517,16 @@ function LastUserInputRegion({
     setExpanded(autoExpand);
   }, [requestId, autoExpand]);
 
-  if (loading || !input || !entries.length) return null;
+  // Reading the transcript tail: hold the collapsed bar's slot so the question
+  // below does not shift down when it lands.
+  if (loading) {
+    return (
+      <div className={styles.preceding}>
+        <SkeletonCard height={26} />
+      </div>
+    );
+  }
+  if (!input || !entries.length) return null;
 
   const label =
     input.kind === "answer"
@@ -824,7 +834,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
         {explainInline && (
-          <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+          <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} />
         )}
       </div>
       </div>
@@ -1726,7 +1736,7 @@ export function FleetAskCard({
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
         {explainInline && (
-          <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+          <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} />
         )}
 
         {q.images && q.images.length > 0 ? (

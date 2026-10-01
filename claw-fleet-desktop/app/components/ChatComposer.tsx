@@ -16,6 +16,8 @@ import { useAttachmentThumb } from "../attachmentThumb";
 import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions } from "./useWikiMentions";
+import { Spinner } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./ChatComposer.module.css";
 import { Presence } from "./Presence";
 
@@ -297,6 +299,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // An add-menu item still settling (a native picker, an upload). The menu has
+  // already closed by then, so the "+" button is what says it is in flight.
+  const [addBusy, setAddBusy] = useState(false);
+  const showAddBusy = useDelayedFlag(addBusy);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuSide = useAutoFlip(menuOpen, "above", menuRef, menuWrapRef);
@@ -651,12 +657,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const triggerAttach = useCallback(() => {
+    if (addBusy) return;
     if (addMenuItems && addMenuItems.length > 0) {
       setMenuOpen((v) => !v);
     } else {
       handlePickFiles();
     }
-  }, [addMenuItems, handlePickFiles]);
+  }, [addBusy, addMenuItems, handlePickFiles]);
 
   const hero = Boolean(contextSlot || toolbarSlot);
 
@@ -673,7 +680,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         aria-expanded={
           addMenuItems && addMenuItems.length > 0 ? menuOpen : undefined
         }
+        aria-busy={addBusy || undefined}
       >
+        {showAddBusy ? (
+          <Spinner size={12} />
+        ) : (
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -685,6 +696,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
+        )}
       </button>
       <Presence when={Boolean(addMenuItems && addMenuItems.length > 0 && menuOpen)}>{addMenuItems && addMenuItems.length > 0 && menuOpen && (
         <div
@@ -700,7 +712,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               className={styles.menu_item}
               onClick={async () => {
                 setMenuOpen(false);
-                await item.onSelect();
+                setAddBusy(true);
+                try {
+                  await item.onSelect();
+                } finally {
+                  setAddBusy(false);
+                }
               }}
               disabled={disabled}
             >
@@ -743,13 +760,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const sendControl = onSubmit ? (
     <button
       type="button"
-      className={styles.send_btn}
+      className={`${styles.send_btn} ${submitting ? styles.send_btn_pending : ""}`}
       onClick={onSubmit}
       disabled={submitting || submitDisabled || disabled}
       title={t("composer.send", "Send (Enter)")}
       aria-label={t("composer.send", "Send (Enter)")}
+      aria-busy={submitting || undefined}
     >
-      {submitLabel ?? (
+      {/* In flight: the ring replaces the arrow (and leads a custom label),
+          so the button says "sending" instead of just greying out. */}
+      {submitting && <Spinner size={14} className={styles.send_spinner} />}
+      {submitting && !submitLabel ? null : submitLabel ?? (
         <svg
           viewBox="0 0 24 24"
           fill="none"

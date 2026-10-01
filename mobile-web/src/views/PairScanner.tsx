@@ -25,6 +25,7 @@ import { useI18n } from "../i18n";
 import type { PairedLink } from "../pairingLink";
 import { readPairingFromFrame } from "../scanFrame";
 import { scanAvailability } from "../scanAvailability";
+import { Spinner } from "./loading";
 import styles from "./PairScanner.module.css";
 
 /** Decode throttle: decoding every frame saturates the main thread on low-end devices,
@@ -138,7 +139,12 @@ export function PairScanner({
       <div className={styles.reticle} />
       <div className={styles.bar}>
         <p className={styles.hint}>
-          {status === "starting" && t("正在打开摄像头…")}
+          {status === "starting" && (
+            <>
+              <Spinner size={12} className={styles.startSpinner} />
+              {t("正在打开摄像头…")}
+            </>
+          )}
           {status === "scanning" &&
             (wrongCode
               ? t("这个二维码不是配对码。请对准桌面端「移动端」板块里的那张。")

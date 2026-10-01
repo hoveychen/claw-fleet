@@ -37,11 +37,11 @@ describe("ReviewDocsColumn", () => {
     expect(html.match(/role="tab"/g)?.length).toBe(2);
   });
 
-  it("shows the loading state before a body resolves", () => {
+  it("shows the loading skeleton before a body resolves", () => {
     const html = renderToStaticMarkup(
       <ReviewDocsColumn docs={docs} sessionId="s1" />,
     );
-    expect(html).toContain("Loading…");
+    expect(html).toContain('aria-busy="true"');
   });
 
   it("renders nothing when there are no docs", () => {

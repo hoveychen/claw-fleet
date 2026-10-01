@@ -16,7 +16,10 @@ import styles from "./markdown.module.css";
  */
 
 export interface WikiLinkContext {
-  hasSlug: (slug: string) => boolean;
+  /** `true` / `false` once the doc list is known; `null` while it is still
+   *  loading (or being re-read), so a ref is not branded dead before the
+   *  answer arrives. */
+  hasSlug: (slug: string) => boolean | null;
   openSlug: (slug: string) => void;
 }
 
@@ -76,14 +79,18 @@ function wikiSlugFromHref(href: string | undefined): string | null {
 }
 
 /** Link renderer: external URLs → system browser (same policy as safeLinks);
- *  wiki refs → in-app navigation, unknown slugs grayed out; everything else
- *  stays inert. */
+ *  wiki refs → in-app navigation, unknown slugs grayed out (only once the list
+ *  is known — until then a ref looks and acts live); everything else stays
+ *  inert. */
 export function wikiLinkComponent(wiki: WikiLinkContext): Components["a"] {
   return function WikiLink({ href, children }) {
     const isExternal = !!href && /^https?:\/\//i.test(href);
     const slug = isExternal ? null : wikiSlugFromHref(href);
-    const isLive = slug !== null && wiki.hasSlug(slug);
-    const isDead = slug !== null && !isLive;
+    const known = slug !== null ? wiki.hasSlug(slug) : null;
+    // Unknown yet (list still loading): render as a normal link. Clicking it
+    // opens the target, whose own view resolves found / not found.
+    const isLive = slug !== null && known !== false;
+    const isDead = slug !== null && known === false;
     // External links obey the same "tab, or browser on ⌘/middle" rule as
     // anywhere else — this renderer only differs in also knowing about slugs.
     const openInTab = useWebLinkTarget();

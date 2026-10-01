@@ -9,6 +9,15 @@ import type {
 } from "../types";
 import styles from "./TokenReceiptModal.module.css";
 import { useExiting } from "./Presence";
+import {
+  Skeleton,
+  SkeletonCard,
+  SkeletonList,
+  SkeletonNumber,
+  TopProgress,
+  loadingStyles,
+} from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 interface Props {
   onClose: () => void;
@@ -173,6 +182,10 @@ export function TokenReceiptModal({ onClose }: Props) {
   const [range, setRange] = useState<RangeKey>("today");
   const [data, setData] = useState<UsageView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  // A range switch keeps the previous window's numbers on screen (dimmed)
+  // under a progress bar instead of blanking the whole panel.
+  const refreshing = useDelayedFlag(loading && data !== null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -184,7 +197,7 @@ export function TokenReceiptModal({ onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
+    setLoading(true);
     setError(null);
     const req =
       range === "today"
@@ -202,6 +215,9 @@ export function TokenReceiptModal({ onClose }: Props) {
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -218,10 +234,15 @@ export function TokenReceiptModal({ onClose }: Props) {
   return (
     <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <TopProgress active={refreshing} />
         <div className={styles.header}>
           <div className={styles.title_block}>
             <span className={styles.title}>{t("token_receipt.title", "Fleet 用量分析")}</span>
-            {data && <span className={styles.window_label}>{data.label}</span>}
+            {data ? (
+              <span className={styles.window_label}>{data.label}</span>
+            ) : (
+              !error && <Skeleton inline width={150} height={9} />
+            )}
           </div>
           <div className={styles.range_bar} role="tablist">
             {ranges.map((r) => (
@@ -241,20 +262,38 @@ export function TokenReceiptModal({ onClose }: Props) {
           </button>
         </div>
 
-        <div className={styles.body}>
+        <div className={`${styles.body} ${loading && data ? loadingStyles.stale : ""}`}>
           {error && <div className={styles.empty}>{error}</div>}
-          {!error && !data && (
-            <div className={styles.empty}>{t("token_receipt.loading", "统计中…")}</div>
-          )}
-          {data && data.lines.length === 0 && (
+          {!error && !data && <UsageSkeleton />}
+          {!error && data && data.lines.length === 0 && (
             <div className={styles.empty}>
               {t("token_receipt.no_usage_range", "此区间还没有用量")}
             </div>
           )}
-          {data && data.lines.length > 0 && <UsageBody data={data} />}
+          {!error && data && data.lines.length > 0 && <UsageBody data={data} />}
         </div>
       </div>
     </div>
+  );
+}
+
+/** First-load placeholder laid out like UsageBody: KPI strip, mix bar, model table. */
+function UsageSkeleton() {
+  return (
+    <>
+      <div className={styles.kpis}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className={styles.kpi}>
+            <Skeleton width={48} height={8} />
+            <div className={styles.kpi_value}>
+              <SkeletonNumber width={72} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <SkeletonCard height={40} />
+      <SkeletonList rows={4} meta={false} rowHeight={28} />
+    </>
   );
 }
 

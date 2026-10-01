@@ -1,4 +1,5 @@
 .root {
+  position: relative; /* anchors the range-switch TopProgress */
   display: flex;
   flex-direction: column;
   gap: 14px;

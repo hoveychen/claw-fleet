@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { SessionTokenBreakdown, SourceBuckets, TaskTokenBreakdown } from "../types";
 import styles from "./TokenSpendPanel.module.css";
+import { Skeleton, SkeletonList, SkeletonNumber } from "./loading";
 
 interface Props {
   jsonlPath: string;
@@ -68,11 +69,34 @@ export function TokenSpendPanel({ jsonlPath, workspacePath }: Props) {
     return () => { cancelled = true; };
   }, [jsonlPath, workspacePath]);
 
-  if (loading) return <div className={styles.empty}>{t("token_spend.loading") || "Loading…"}</div>;
+  if (loading) return <TokenPanelSkeleton />;
   if (error) return <div className={styles.empty}>{error}</div>;
   if (!data) return <div className={styles.empty}>{t("token_spend.no_data") || "No data"}</div>;
 
   return <TokenSpendView data={data} />;
+}
+
+/**
+ * First-load stand-in shared by the Claude, Codex and dsh token panels: the
+ * three KPI cards, the stacked bar and the legend rows, at their real sizes, so
+ * the panel does not jump when the breakdown lands.
+ */
+export function TokenPanelSkeleton() {
+  return (
+    <div className={styles.panel}>
+      <div className={styles.kpi_row}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} className={styles.kpi_card}>
+            <Skeleton width="60%" height={9} />
+            <SkeletonNumber width={72} height={22} />
+            <Skeleton width="45%" height={9} />
+          </div>
+        ))}
+      </div>
+      <Skeleton height={22} radius={4} />
+      <SkeletonList rows={5} meta={false} />
+    </div>
+  );
 }
 
 function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {

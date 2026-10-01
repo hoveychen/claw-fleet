@@ -1,4 +1,4 @@
-import { Languages, LoaderCircle, MessageCircleQuestion, PencilLine, Scale } from "lucide-react";
+import { Languages, MessageCircleQuestion, PencilLine, Scale } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -10,6 +10,7 @@ import {
 } from "../selectionExplain";
 import styles from "./SelectionToolbar.module.css";
 import { Presence } from "./Presence";
+import { Spinner } from "./loading";
 
 /** Which side of the selection the bar sits on. `above` is the default; `below`
  *  when the pane has no room above (a passage on a card's first line). */
@@ -60,6 +61,12 @@ export function SelectionToolbar({
   );
   const [custom, setCustom] = useState(false);
   const [question, setQuestion] = useState("");
+  // The preset whose ask is still being posted, so a bar reopened during the
+  // wait shows which one is in flight instead of a row of greyed buttons.
+  const [pending, setPending] = useState<ExplainPreset | null>(null);
+  useEffect(() => {
+    if (!busy) setPending(null);
+  }, [busy]);
   const customRef = useRef(custom);
   customRef.current = custom;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +143,7 @@ export function SelectionToolbar({
 
   const fire = (preset: ExplainPreset, q?: string) => {
     if (busy || !shown) return;
+    setPending(preset);
     onAsk(shown.sel, preset, q);
     setShown(null);
     setCustom(false);
@@ -182,22 +190,34 @@ export function SelectionToolbar({
             aria-label={t("detail.explain_custom", "自定义提问")}
           />
           <button type="submit" className={styles.btn} disabled={busy || !question.trim()}>
-            {busy ? <LoaderCircle size={12} className={styles.spin} aria-hidden="true" /> : null}
+            {busy ? <Spinner size={12} /> : null}
             {t("detail.explain_send", "发送")}
           </button>
         </form>
       ) : (
         <>
           <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("explain")} disabled={busy}>
-            <MessageCircleQuestion size={12} strokeWidth={1.8} aria-hidden="true" />
+            {pending === "explain" ? (
+              <Spinner size={12} />
+            ) : (
+              <MessageCircleQuestion size={12} strokeWidth={1.8} aria-hidden="true" />
+            )}
             {t("detail.explain_preset_explain", "解释")}
           </button>
           <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("translate")} disabled={busy}>
-            <Languages size={12} strokeWidth={1.8} aria-hidden="true" />
+            {pending === "translate" ? (
+              <Spinner size={12} />
+            ) : (
+              <Languages size={12} strokeWidth={1.8} aria-hidden="true" />
+            )}
             {t("detail.explain_preset_translate", "翻译")}
           </button>
           <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("rationale")} disabled={busy}>
-            <Scale size={12} strokeWidth={1.8} aria-hidden="true" />
+            {pending === "rationale" ? (
+              <Spinner size={12} />
+            ) : (
+              <Scale size={12} strokeWidth={1.8} aria-hidden="true" />
+            )}
             {t("detail.explain_preset_rationale", "为什么")}
           </button>
           <button
@@ -207,7 +227,11 @@ export function SelectionToolbar({
             onClick={() => setCustom(true)}
             disabled={busy}
           >
-            <PencilLine size={12} strokeWidth={1.8} aria-hidden="true" />
+            {pending === "custom" ? (
+              <Spinner size={12} />
+            ) : (
+              <PencilLine size={12} strokeWidth={1.8} aria-hidden="true" />
+            )}
             {t("detail.explain_custom", "自定义提问")}
           </button>
         </>

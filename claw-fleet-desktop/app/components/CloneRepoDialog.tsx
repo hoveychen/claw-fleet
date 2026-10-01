@@ -3,6 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen } from "lucide-react";
+import { Spinner } from "./loading";
 import { DirPickerDialog } from "./DirPickerDialog";
 import { ProcTerminal } from "./ProcTerminal";
 import type { ProcRecord } from "../types";
@@ -202,7 +203,13 @@ export function CloneRepoDialog({ initialParent, useBackendPicker, onDone, onCan
             {t("cancel")}
           </button>
           <button className={styles.confirm} onClick={() => void submit()} disabled={!ready}>
-            {busy ? t("files.clone.cloning") : t("files.clone.submit")}
+            {busy ? (
+              <>
+                <Spinner size={12} /> {t("files.clone.cloning")}
+              </>
+            ) : (
+              t("files.clone.submit")
+            )}
           </button>
         </div>
       </div>

@@ -12,6 +12,8 @@ import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
 import { Presence } from "./Presence";
+import { SkeletonCard, SkeletonList, Skeleton, Spinner, TopProgress } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 const MARKETPLACE_DOCS_URL =
   "https://code.claude.com/docs/en/plugin-marketplaces";
@@ -195,6 +197,20 @@ export function PluginsView() {
     if (!loaded) load();
   }, [loaded, load]);
 
+  // Reloads after a mutation keep the current list on screen and run a top
+  // progress bar; the first load alone renders the skeleton.
+  const [refreshing, setRefreshing] = useState(0);
+  const showRefreshing = useDelayedFlag(refreshing > 0);
+  const trackRefresh = useCallback(async (work: () => Promise<void>) => {
+    setRefreshing((n) => n + 1);
+    try {
+      await work();
+    } finally {
+      setRefreshing((n) => n - 1);
+    }
+  }, []);
+  const reload = useCallback(() => trackRefresh(load), [trackRefresh, load]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return plugins;
@@ -237,15 +253,17 @@ export function PluginsView() {
     null,
   );
 
-  // Same mutations the detail pane fires; reload (setLoaded false) on success.
-  const runPluginMutation = async (cmd: string, args: Record<string, unknown>) => {
-    try {
-      await invoke<void>(cmd, args);
-      setLoaded(false);
-    } catch (e) {
-      window.alert(typeof e === "string" ? e : String(e));
-    }
-  };
+  // Same mutations the detail pane fires; reload on success. The menu closes on
+  // select, so the top progress bar spans the mutation and the reload.
+  const runPluginMutation = (cmd: string, args: Record<string, unknown>) =>
+    trackRefresh(async () => {
+      try {
+        await invoke<void>(cmd, args);
+        await load();
+      } catch (e) {
+        window.alert(typeof e === "string" ? e : String(e));
+      }
+    });
 
   const pluginMenuItems = (plugin: PluginItem): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
@@ -373,12 +391,14 @@ export function PluginsView() {
       subBar={
         <MarketplaceBar
           marketplaces={marketplaces}
-          onChanged={() => setLoaded(false)}
+          loaded={loaded}
+          onChanged={reload}
         />
       }
       secondary={
-        <div className={styles.list_pane}>
-          {!loaded && <p className={styles.empty}>{t("plugins.loading")}</p>}
+        <div className={`${styles.list_pane} ${styles.list_pane_positioned}`}>
+          <TopProgress active={showRefreshing} />
+          {!loaded && <SkeletonList rows={10} avatar />}
           {loaded && plugins.length === 0 && (
             <EmptyState
               icon={<Blocks size={28} strokeWidth={1.5} />}
@@ -427,15 +447,14 @@ export function PluginsView() {
       }
     >
       {selected ? (
-        <PluginDetail
-          plugin={selected}
-          onChanged={() => {
-            setLoaded(false);
-          }}
-        />
+        <PluginDetail plugin={selected} onChanged={reload} />
+      ) : !loaded ? (
+        <div className={styles.detail_body}>
+          <SkeletonCard height={160} />
+        </div>
       ) : (
         <div className={styles.placeholder}>
-          {loaded && plugins.length > 0
+          {plugins.length > 0
             ? t("plugins.pick_plugin")
             : t("plugins.no_plugins")}
         </div>
@@ -449,10 +468,14 @@ function PluginDetail({
   onChanged,
 }: {
   plugin: PluginItem;
-  onChanged: () => void;
+  onChanged: () => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [pending, setPending] = useState(false);
+  // Which action is in flight: only that button spins, the others just lock.
+  const [pendingAction, setPendingAction] = useState<
+    "install" | "toggle" | "uninstall" | null
+  >(null);
+  const pending = pendingAction !== null;
   const [toggleError, setToggleError] = useState<string | null>(null);
 
   // Clear stale error when navigating to a different plugin.
@@ -470,24 +493,29 @@ function PluginDetail({
   }, [plugin.manifestPath]);
 
   const runMutation = useCallback(
-    async (cmd: string, args: Record<string, unknown>) => {
-      setPending(true);
+    async (
+      action: "install" | "toggle" | "uninstall",
+      cmd: string,
+      args: Record<string, unknown>,
+    ) => {
+      if (pendingAction) return;
+      setPendingAction(action);
       setToggleError(null);
       try {
         await invoke<void>(cmd, args);
-        onChanged();
+        await onChanged();
       } catch (e) {
         setToggleError(typeof e === "string" ? e : String(e));
       } finally {
-        setPending(false);
+        setPendingAction(null);
       }
     },
-    [onChanged],
+    [onChanged, pendingAction],
   );
 
   const onToggle = useCallback(
     () =>
-      runMutation("set_plugin_enabled", {
+      runMutation("toggle", "set_plugin_enabled", {
         pluginId: plugin.pluginId,
         enabled: !plugin.enabled,
       }),
@@ -495,12 +523,12 @@ function PluginDetail({
   );
 
   const onInstall = useCallback(
-    () => runMutation("install_plugin", { pluginId: plugin.pluginId }),
+    () => runMutation("install", "install_plugin", { pluginId: plugin.pluginId }),
     [runMutation, plugin.pluginId],
   );
 
   const onUninstall = useCallback(
-    () => runMutation("uninstall_plugin", { pluginId: plugin.pluginId }),
+    () => runMutation("uninstall", "uninstall_plugin", { pluginId: plugin.pluginId }),
     [runMutation, plugin.pluginId],
   );
 
@@ -583,7 +611,8 @@ function PluginDetail({
               disabled={pending}
               type="button"
             >
-              {pending ? t("plugins.toggle_pending") : t("plugins.install_btn")}
+              {pendingAction === "install" && <Spinner size={12} className={styles.btn_spinner} />}
+              {pendingAction === "install" ? t("plugins.toggle_pending") : t("plugins.install_btn")}
             </button>
           )}
           {plugin.isDownloaded && (
@@ -593,7 +622,8 @@ function PluginDetail({
               disabled={pending}
               type="button"
             >
-              {pending
+              {pendingAction === "toggle" && <Spinner size={12} className={styles.btn_spinner} />}
+              {pendingAction === "toggle"
                 ? t("plugins.toggle_pending")
                 : plugin.enabled
                   ? t("plugins.toggle_disable")
@@ -607,7 +637,8 @@ function PluginDetail({
               disabled={pending}
               type="button"
             >
-              {pending ? t("plugins.toggle_pending") : t("plugins.uninstall_btn")}
+              {pendingAction === "uninstall" && <Spinner size={12} className={styles.btn_spinner} />}
+              {pendingAction === "uninstall" ? t("plugins.toggle_pending") : t("plugins.uninstall_btn")}
             </button>
           )}
           {canRevealPath() && plugin.isDownloaded && (
@@ -743,27 +774,31 @@ function PluginDetail({
 
 function MarketplaceBar({
   marketplaces,
+  loaded,
   onChanged,
 }: {
   marketplaces: MarketplaceItem[];
-  onChanged: () => void;
+  loaded: boolean;
+  onChanged: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [adding, setAdding] = useState(false);
   const [source, setSource] = useState("");
   const [pending, setPending] = useState(false);
+  // Marketplace whose × is in flight, so that chip alone shows the spinner.
+  const [removingName, setRemovingName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = useCallback(async () => {
     const trimmed = source.trim();
-    if (!trimmed) return;
+    if (!trimmed || pending) return;
     setPending(true);
     setError(null);
     try {
       await invoke<void>("add_marketplace", { source: trimmed });
+      await onChanged();
       setSource("");
       setAdding(false);
-      onChanged();
     } catch (e) {
       setError(typeof e === "string" ? e : String(e));
     } finally {
@@ -776,19 +811,21 @@ function MarketplaceBar({
       const confirmed = window.confirm(
         t("plugins.remove_marketplace_confirm", { name }),
       );
-      if (!confirmed) return;
+      if (!confirmed || pending) return;
       setPending(true);
+      setRemovingName(name);
       setError(null);
       try {
         await invoke<void>("remove_marketplace", { name });
-        onChanged();
+        await onChanged();
       } catch (e) {
         setError(typeof e === "string" ? e : String(e));
       } finally {
         setPending(false);
+        setRemovingName(null);
       }
     },
-    [onChanged, t],
+    [onChanged, pending, t],
   );
 
   return (
@@ -796,7 +833,8 @@ function MarketplaceBar({
       <span className={pluginStyles.marketplace_label}>
         {t("plugins.marketplaces_label")}
       </span>
-      {marketplaces.length === 0 && (
+      {!loaded && <Skeleton inline width={140} height={14} radius={999} />}
+      {loaded && marketplaces.length === 0 && (
         <span style={{ fontStyle: "italic" }}>
           {t("plugins.no_marketplaces")}
         </span>
@@ -811,7 +849,7 @@ function MarketplaceBar({
             disabled={pending}
             title="×"
           >
-            ×
+            {removingName === mk.name ? <Spinner size={10} /> : "×"}
           </button>
         </span>
       ))}
@@ -850,6 +888,7 @@ function MarketplaceBar({
             onClick={submit}
             disabled={pending || source.trim().length === 0}
           >
+            {pending && <Spinner size={12} className={styles.btn_spinner} />}
             {pending
               ? t("plugins.toggle_pending")
               : t("plugins.add_marketplace_submit")}

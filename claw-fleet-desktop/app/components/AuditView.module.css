@@ -190,6 +190,8 @@
 /* ── List (the MAIN container — Audit's rail is on the right) ─────────────── */
 
 .list_pane {
+  /* Anchors the refresh <TopProgress>. */
+  position: relative;
   flex: 1;
   overflow-y: auto;
   padding: 10px 10px 20px;
@@ -1075,4 +1077,32 @@
 :global([data-platform="macos"][data-theme="light"]) .card_active:hover {
   background: rgba(0, 0, 0, 0.08);
   border-color: rgba(0, 0, 0, 0.1);
+}
+
+/* ── Pending states ───────────────────────────────────────────────────────── */
+
+/* Buttons that can show a leading <Spinner> while their action runs. */
+.busy_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.delete_btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.toggle_pending .toggle_slider {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* Sits just left of the switch so the row does not reflow while it spins. */
+.toggle_spinner {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  margin-top: -6px;
 }

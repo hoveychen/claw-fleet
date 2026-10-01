@@ -57,6 +57,13 @@
 .close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
 .close_btn:disabled { opacity: 0.6; cursor: progress; }
 
+/* Room for the spinner that leads the label while the bundle is written. */
+.export_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .header_actions {
   display: flex;
   align-items: center;

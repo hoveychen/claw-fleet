@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { isWebBuild } from "../hostEnv";
 import { ClaudeIcon, CodexIcon } from "./SessionCard";
 import styles from "./AccountInfo.module.css";
+import { SkeletonCard, SkeletonText, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 
 interface AccountInfoData {
   email: string;
@@ -27,7 +29,9 @@ interface CodexUsageData {
 export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
-  const [isMacOS, setIsMacOS] = useState(false);
+  // null until `get_platform` answers, so the setup modal does not show the
+  // non-macOS hint first and then swap it for the install button.
+  const [platform, setPlatform] = useState<string | null>(null);
   const [showAiModal, setShowAiModal] = useState(false);
   const [cliInstallState, setCliInstallState] = useState<"idle" | "installing" | "done" | "error">("idle");
   const [cliInstallMsg, setCliInstallMsg] = useState<string | null>(null);
@@ -36,16 +40,22 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
   const [info, setInfo] = useState<AccountInfoData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logPath, setLogPath] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Starts true: the mount effect fetches immediately, and a false first frame
+  // would render an empty panel before the placeholder.
+  const [loading, setLoading] = useState(true);
 
   // Codex account state
   const [codexInfo, setCodexInfo] = useState<CodexUsageData | null>(null);
   const [codexError, setCodexError] = useState<string | null>(null);
   const [codexLoading, setCodexLoading] = useState(false);
   const [hasCodex, setHasCodex] = useState(false);
+  // True until `check_setup_status` says whether a Codex block exists at all.
+  const [codexDetecting, setCodexDetecting] = useState(true);
 
   useEffect(() => {
-    invoke<string>("get_platform").then((p) => setIsMacOS(p === "macos"));
+    invoke<string>("get_platform")
+      .then((p) => setPlatform(p))
+      .catch(() => setPlatform(""));
     loadAccount();
     invoke<{ detected_tools: { codex: boolean } }>("check_setup_status")
       .then((s) => {
@@ -54,7 +64,8 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
           loadCodexAccount();
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setCodexDetecting(false));
   }, []);
 
   async function loadAccount() {
@@ -128,7 +139,7 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
 
   const panelContent = (
     <>
-      {loading && <p className={styles.dim}>{t("account.loading")}</p>}
+      {loading && !info && !error && <SkeletonCard height={110} />}
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
@@ -153,10 +164,16 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
         </section>
       )}
 
+      {codexDetecting && (
+        <>
+          <div className={styles.section_divider} />
+          <SkeletonCard height={60} />
+        </>
+      )}
       {hasCodex && (
         <>
           <div className={styles.section_divider} />
-          {codexLoading && <p className={styles.dim}>{t("account.loading")}</p>}
+          {codexLoading && !codexInfo && <SkeletonCard height={60} />}
           {codexError && (
             <div className={styles.error}>
               <p>{codexError}</p>
@@ -193,7 +210,7 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
         {showAiModal && (
           <AiSetupModal
             onClose={() => setShowAiModal(false)}
-            isMacOS={isMacOS}
+            platform={platform}
             cliInstallState={cliInstallState}
             cliInstallMsg={cliInstallMsg}
             onInstallCLI={installCLI}
@@ -217,7 +234,7 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
       {showAiModal && (
         <AiSetupModal
           onClose={() => setShowAiModal(false)}
-          isMacOS={isMacOS}
+          platform={platform}
           cliInstallState={cliInstallState}
           cliInstallMsg={cliInstallMsg}
           onInstallCLI={installCLI}
@@ -241,14 +258,16 @@ interface SkillInstallResult {
 
 interface AiSetupModalProps {
   onClose: () => void;
-  isMacOS: boolean;
+  /** null while `get_platform` is still in flight. */
+  platform: string | null;
   cliInstallState: "idle" | "installing" | "done" | "error";
   cliInstallMsg: string | null;
   onInstallCLI: () => void;
 }
 
-function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInstallCLI }: AiSetupModalProps) {
+function AiSetupModal({ onClose, platform, cliInstallState, cliInstallMsg, onInstallCLI }: AiSetupModalProps) {
   const { t } = useTranslation();
+  const isMacOS = platform === "macos";
   const [detectedTools, setDetectedTools] = useState<DetectedTool[] | null>(null);
   const [skillState, setSkillState] = useState<"idle" | "installing" | "done" | "error">("idle");
   const [installResult, setInstallResult] = useState<SkillInstallResult | null>(null);
@@ -260,6 +279,8 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
       .then(setDetectedTools)
       .catch(() => setDetectedTools([]));
   }, []);
+
+  const [saving, saveSkillFileOnce] = usePending(saveSkillFile);
 
   async function saveSkillFile() {
     setSaveMsg(null);
@@ -294,6 +315,8 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
   }
 
   const noToolsDetected = detectedTools !== null && detectedTools.length === 0;
+  // Install stays blocked until detection says whether there is anywhere to install to.
+  const detecting = detectedTools === null;
 
   return (
     <div className={styles.modal_overlay} onClick={onClose}>
@@ -316,13 +339,16 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
             <span className={styles.step_title}>{t("account.ai_step1_title")}</span>
           </div>
           <p className={styles.step_desc}>{t("account.ai_step1_desc")}</p>
-          {isMacOS ? (
+          {platform === null ? (
+            <SkeletonText lines={1} />
+          ) : isMacOS ? (
             <div className={styles.step_action}>
               <button
                 className={styles.step_btn}
                 onClick={onInstallCLI}
                 disabled={cliInstallState === "installing" || cliInstallState === "done"}
               >
+                {cliInstallState === "installing" && <Spinner size={12} />}
                 {cliInstallState === "installing"
                   ? t("account.cli_installing")
                   : cliInstallState === "done"
@@ -383,8 +409,11 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
             <button
               className={styles.step_btn}
               onClick={installSkill}
-              disabled={noToolsDetected || skillState === "installing" || skillState === "done"}
+              disabled={
+                detecting || noToolsDetected || skillState === "installing" || skillState === "done"
+              }
             >
+              {(detecting || skillState === "installing") && <Spinner size={12} />}
               {skillState === "installing"
                 ? t("account.ai_skill_installing")
                 : skillState === "done"
@@ -392,7 +421,12 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
                 : t("account.ai_skill_install_btn")}
             </button>
             )}
-            <button className={styles.step_btn_secondary} onClick={saveSkillFile}>
+            <button
+              className={styles.step_btn_secondary}
+              onClick={() => void saveSkillFileOnce()}
+              disabled={saving}
+            >
+              {saving && <Spinner size={12} />}
               {t("account.ai_skill_save_btn")}
             </button>
           </div>

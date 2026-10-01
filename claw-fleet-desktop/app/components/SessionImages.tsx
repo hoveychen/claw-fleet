@@ -5,6 +5,7 @@ import { imageFileName, sessionImageUrl } from "../sessionImages";
 import { ImageLightbox } from "./ImageLightbox";
 import styles from "./SessionImages.module.css";
 import { Presence } from "./Presence";
+import { Skeleton } from "./loading";
 
 interface GeneratedImage {
   path: string;
@@ -59,18 +60,48 @@ export function SessionImages({ sessionId }: Props) {
           const name = imageFileName(img.path);
           const url = sessionImageUrl(sessionId, name);
           return (
-            <button
+            <Thumb
               key={img.path}
-              className={styles.thumb}
+              url={url}
+              name={name}
               title={img.path}
-              onClick={() => setZoomed({ src: url, name })}
-            >
-              <img src={url} alt={name} loading="lazy" />
-            </button>
+              onOpen={() => setZoomed({ src: url, name })}
+            />
           );
         })}
       </div>
       <Presence when={Boolean(zoomed)}>{zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}</Presence>
     </div>
+  );
+}
+
+/** One thumbnail. Holds a square shimmer until the image decodes, so the strip
+ *  does not show empty bordered slivers that then widen one by one. */
+function Thumb({
+  url,
+  name,
+  title,
+  onOpen,
+}: {
+  url: string;
+  name: string;
+  title: string;
+  onOpen: () => void;
+}) {
+  const [ready, setReady] = useState(false);
+  return (
+    <button className={styles.thumb} title={title} onClick={onOpen}>
+      {!ready && <Skeleton className={styles.thumb_skeleton} width="100%" height="100%" radius={0} />}
+      <img
+        src={url}
+        alt={name}
+        loading="lazy"
+        className={ready ? undefined : styles.img_pending}
+        // A broken image clears the shimmer too: the browser's own broken-image
+        // glyph is the error state, and a shimmer must never outlive the request.
+        onLoad={() => setReady(true)}
+        onError={() => setReady(true)}
+      />
+    </button>
   );
 }

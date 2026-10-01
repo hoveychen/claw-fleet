@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { TextBlock } from "./blocks/TextBlock";
@@ -9,6 +9,9 @@ import { formatBytes } from "../formatBytes";
 import type { NoteFile, NoteMatch } from "../types";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
+import notesStyles from "./NotesView.module.css";
+import { SkeletonList, SkeletonText, Spinner } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 /**
  * Read-only browser for the session's checkpoint notes (`~/.fleet/notes/`).
@@ -27,9 +30,16 @@ import skillStyles from "./SkillsView.module.css";
  */
 export function NotesView({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
-  const [files, setFiles] = useState<NoteFile[]>([]);
+  // null until the first listing answers, so "no notes" is never shown for a
+  // list that simply has not arrived yet.
+  const [files, setFiles] = useState<NoteFile[] | null>(null);
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<NoteMatch[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const showSearching = useDelayedFlag(searching);
+  // Which read is current: a slow read of an earlier pick must not land over
+  // the note picked after it.
+  const readSeq = useRef(0);
   /* Only identity is needed to read a note back, and a search hit carries just
      that (no bytes / mtime) — so the selection is the pair, not a NoteFile. */
   const [active, setActive] = useState<{ sessionId: string; path: string } | null>(null);
@@ -43,6 +53,7 @@ export function NotesView({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    setFiles(null);
     invoke<NoteFile[]>("list_session_notes", { sessionId })
       .then((list) => {
         if (!cancelled) setFiles(list ?? []);
@@ -64,9 +75,13 @@ export function NotesView({ sessionId }: { sessionId: string }) {
     const q = query.trim();
     if (!q) {
       setMatches(null);
+      setSearching(false);
       return;
     }
     let cancelled = false;
+    // Covers the debounce too: from the keystroke on, the list on screen is
+    // for an older query.
+    setSearching(true);
     const timer = setTimeout(() => {
       invoke<NoteMatch[]>("search_session_notes", { sessionId, query: q })
         .then((hits) => {
@@ -74,6 +89,9 @@ export function NotesView({ sessionId }: { sessionId: string }) {
         })
         .catch(() => {
           if (!cancelled) setMatches([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
         });
     }, 250);
     return () => {
@@ -87,14 +105,19 @@ export function NotesView({ sessionId }: { sessionId: string }) {
       setActive({ sessionId: file.sessionId, path: file.path });
       setContent(null);
       setError(null);
+      const seq = ++readSeq.current;
       // The owner, not the session on screen: an inherited `checkpoint.md`
       // must read back as the predecessor wrote it.
       invoke<string>("read_session_note", {
         sessionId: file.sessionId,
         path: file.path,
       })
-        .then(setContent)
-        .catch((e) => setError(String(e)));
+        .then((c) => {
+          if (seq === readSeq.current) setContent(c);
+        })
+        .catch((e) => {
+          if (seq === readSeq.current) setError(String(e));
+        });
     },
     [],
   );
@@ -103,7 +126,7 @@ export function NotesView({ sessionId }: { sessionId: string }) {
      sees them in, and the order that puts "what this run recorded" on top. */
   const groups = useMemo(() => {
     const byOwner = new Map<string, NoteFile[]>();
-    for (const f of files) {
+    for (const f of files ?? []) {
       const bucket = byOwner.get(f.sessionId);
       if (bucket) bucket.push(f);
       else byOwner.set(f.sessionId, [f]);
@@ -118,17 +141,26 @@ export function NotesView({ sessionId }: { sessionId: string }) {
   return (
     <div className={skillStyles.detail_split}>
       <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
-        {files.length > 0 && (
-          <input
-            className={skillStyles.tree_filter}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("detail.notes_search_placeholder")}
-            spellCheck={false}
-          />
+        {files && files.length > 0 && (
+          <div className={notesStyles.filter_wrap}>
+            <input
+              className={skillStyles.tree_filter}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("detail.notes_search_placeholder")}
+              spellCheck={false}
+            />
+            {showSearching && (
+              <span className={notesStyles.filter_spinner}>
+                <Spinner size={12} />
+              </span>
+            )}
+          </div>
         )}
 
-        {files.length === 0 ? (
+        {files === null ? (
+          <SkeletonList rows={6} meta={false} rowHeight={26} />
+        ) : files.length === 0 ? (
           <div className={skillStyles.tree_empty}>{t("detail.notes_empty")}</div>
         ) : matches != null ? (
           /* Searching: the tree becomes the hit list. Each row is one matched
@@ -192,7 +224,7 @@ export function NotesView({ sessionId }: { sessionId: string }) {
         ) : error ? (
           <p className={styles.empty}>{error}</p>
         ) : content == null ? (
-          <p className={styles.empty}>{t("detail.notes_loading")}</p>
+          <SkeletonText lines={8} />
         ) : (
           /* The same term the hit list matched on, so the reader lands on a
              page where the line they clicked is already marked. */

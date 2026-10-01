@@ -43,18 +43,14 @@
 .searchSpinner {
   position: absolute;
   right: 11px;
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  display: inline-flex;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Centered wait while full-text search results are still in flight. */
+.searchPending {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
 }
 
 /* Mark filter + grouping switcher share one line: the mark segments take the
@@ -594,12 +590,6 @@
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: 8px;
-}
-
-.syncingSpin {
-  flex-shrink: 0;
-  color: var(--color-accent);
-  animation: spin 0.7s linear infinite;
 }
 
 /* 合并列表里的归属设备。与 .handoff 同一档次的次要信息，用同样的字号与颜色，

@@ -876,3 +876,11 @@
 
 /* Resize handle lives in ResizeHandle.module.css (shared with the secondary
    sidebars); .sidebar's position: relative anchors it. */
+
+/* Main area held while the host-features probe decides whether the restored
+   terminal page exists; carries the TopProgress bar. */
+.main_pending {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}

@@ -14,6 +14,7 @@ import type { DocHistoryEntry } from "../docHistory";
 import type { ExplainRecord } from "../explainApi";
 import type { SessionInfo } from "../types";
 import styles from "./SessionDetail.module.css";
+import { SkeletonList } from "./loading";
 
 const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
@@ -44,6 +45,7 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
  */
 export function SessionLibraryPanel({
   explains,
+  explainsLoaded = true,
   hiddenExplains,
   docs,
   subagents,
@@ -56,6 +58,9 @@ export function SessionLibraryPanel({
   /** Every side question on disk for this session, including ones dismissed
    *  from the rail. */
   explains: ExplainRecord[];
+  /** False until the side-question records have been read once. Defaults to
+   *  true for callers that hold a settled list. */
+  explainsLoaded?: boolean;
   /** Which of them are currently not in the rail — the rows worth a "put it
    *  back" affordance rather than "scroll to it". */
   hiddenExplains: ReadonlySet<string>;
@@ -73,6 +78,16 @@ export function SessionLibraryPanel({
   const { t } = useTranslation();
   const empty = explains.length === 0 && docs.length === 0 && subagents.length === 0;
 
+  // The side questions are the one group read from disk; until they are, an
+  // otherwise empty library is not yet known to be empty.
+  if (empty && !explainsLoaded) {
+    return (
+      <div className={styles.library_panel}>
+        <SkeletonList rows={5} meta={false} rowHeight={28} />
+      </div>
+    );
+  }
+
   if (empty) {
     return (
       <div className={styles.library_panel}>
@@ -88,6 +103,9 @@ export function SessionLibraryPanel({
 
   return (
     <div className={styles.library_panel}>
+      {!explainsLoaded && explains.length === 0 && (
+        <SkeletonList rows={2} meta={false} rowHeight={28} />
+      )}
       {explains.length > 0 && (
         <section className={styles.library_group}>
           <h4 className={styles.library_group_head}>

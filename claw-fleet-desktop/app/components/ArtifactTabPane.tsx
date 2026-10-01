@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -12,6 +12,9 @@ import type { AuxDoc } from "../detailAux";
 import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildArtifactMenu, type AuxCardTail } from "./auxDocMenu";
 import { loadArtifact } from "./blocks/ingestLookup";
+import { usePending } from "../hooks/usePending";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
+import { Skeleton, SkeletonCard, TopProgress } from "./loading";
 import { ArtifactStage, type Artifact } from "./ArtifactsView";
 import { timeAgo } from "./SessionRow";
 import styles from "./TabPanes.module.css";
@@ -35,7 +38,6 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
   const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = doc.ref;
 
@@ -54,9 +56,10 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
 
   const title = artifact?.title ?? doc.label;
 
-  const doExport = useCallback(async () => {
+  // `usePending` drops a second click while the save panel / copy is still
+  // outstanding — the menu item stays clickable even when the bar button is not.
+  const [exporting, doExport] = usePending(async () => {
     if (!artifact) return;
-    setExporting(true);
     try {
       // A browser tab cannot be given a destination path — `save()` answers
       // null there and the action would silently do nothing. Hand the browser a
@@ -72,17 +75,10 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
       setError(null);
     } catch (e) {
       setError(t("artifacts.export_failed", "导出失败：{{error}}", { error: String(e) }));
-    } finally {
-      setExporting(false);
     }
-  }, [artifact, t]);
+  });
 
-  const doDelete = useCallback(async () => {
-    if (
-      !window.confirm(t("artifacts.delete_confirm", "删除「{{title}}」？", { title }))
-    ) {
-      return;
-    }
+  const [deleting, runDelete] = usePending(async () => {
     try {
       await invoke("delete_artifact", { id });
       // The card reading a deliverable that no longer exists is the one state
@@ -91,7 +87,14 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
     } catch (e) {
       setError(t("artifacts.delete_failed", "删除失败：{{error}}", { error: String(e) }));
     }
-  }, [id, t, tail, title]);
+  });
+  const showDeleting = useDelayedFlag(deleting);
+  // Confirmed outside the pending wrapper, so a cancelled dialog never shows
+  // the progress bar.
+  const doDelete = () => {
+    if (!window.confirm(t("artifacts.delete_confirm", "删除「{{title}}」？", { title }))) return;
+    void runDelete();
+  };
 
   const build = buildArtifactMenu({
     doc,
@@ -102,17 +105,27 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
     exporting,
     onExport: () => void doExport(),
     onOpenPage: () => requestArtifactNav(id),
-    onDelete: () => void doDelete(),
+    onDelete: doDelete,
   });
 
   if (!artifact) {
+    // Before the first fetch settles, "deleted" would be a lie — so the card
+    // holds its eventual shape (header, then the stage) instead.
+    if (!loaded) {
+      return (
+        <AuxPane menuItems={build.menu} className={styles.pane}>
+          <div className={styles.skeleton_bar}>
+            <Skeleton width="58%" height={11} />
+            <Skeleton width="38%" height={8} />
+          </div>
+          <SkeletonCard height={220} />
+        </AuxPane>
+      );
+    }
     return (
       <AuxPane menuItems={build.menu} className={styles.pane}>
         <div className={styles.missing}>
-          {/* Before the first fetch settles, "deleted" would be a lie. */}
-          {loaded
-            ? t("tabs.artifact_missing", "这份产出已被删除")
-            : t("artifacts.loading", "Loading…")}
+          {t("tabs.artifact_missing", "这份产出已被删除")}
           <code className={styles.missing_key}>{id}</code>
         </div>
       </AuxPane>
@@ -127,6 +140,8 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
 
   return (
     <AuxPane menuItems={build.menu} className={styles.pane}>
+      {/* The delete runs from the menu, which has already closed by now. */}
+      <TopProgress active={showDeleting} />
       <AuxDocBar
         kind="artifact"
         icon={<Package size={14} strokeWidth={1.8} />}

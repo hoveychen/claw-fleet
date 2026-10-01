@@ -38,6 +38,74 @@ if (isMockMode && params.has("website")) {
 
 stampHostClasses();
 
+// Theme-neutral grey: before storage loads, the user's theme (and App.css with
+// its tokens) is not known yet, so the boot skeleton must read on either a dark
+// or a light window background.
+const BOOT_BLOCK: React.CSSProperties = {
+  background: "rgba(128, 128, 128, 0.14)",
+  borderRadius: 6,
+};
+
+/** App-shaped placeholder painted while `boot()` loads storage, i18n and the
+ *  `App` chunk: a sidebar rail with nav rows and a main column with a header
+ *  and list rows. Self-contained (inline styles, no i18n) because none of the
+ *  app's CSS or translations exist yet. */
+function BootSkeleton() {
+  const bar = (width: number | string, height: number, extra?: React.CSSProperties) => (
+    <div style={{ ...BOOT_BLOCK, width, height, ...extra }} />
+  );
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label="Loading"
+      style={{ display: "flex", height: "100vh", overflow: "hidden" }}
+    >
+      <div
+        style={{
+          width: 220,
+          flexShrink: 0,
+          padding: "44px 14px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          borderRight: "1px solid rgba(128, 128, 128, 0.16)",
+        }}
+      >
+        {["70%", "84%", "62%", "76%", "58%", "68%"].map((w, i) => (
+          <div key={i}>{bar(w, 12)}</div>
+        ))}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          padding: "44px 24px 24px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        {bar(180, 18)}
+        {["62%", "78%", "54%", "70%", "66%", "58%"].map((w, i) => (
+          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8, padding: "6px 0" }}>
+            {bar(w, 12)}
+            {bar("32%", 9)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
+let appMounted = false;
+// Short boots (warm cache) go straight to the app; only a boot still running
+// after this delay paints the skeleton, so a fast start never flashes it.
+const bootSkeletonTimer = window.setTimeout(() => {
+  if (!appMounted) root.render(<BootSkeleton />);
+}, 120);
+
 async function boot() {
   let triggerPromoScene: ((scene: NonNullable<typeof promoScene>) => void) | null = null;
   let triggerMockQaScenario: (() => void) | null = null;
@@ -102,7 +170,9 @@ async function boot() {
 
   const { default: App } = await import("./App");
 
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  appMounted = true;
+  window.clearTimeout(bootSkeletonTimer);
+  root.render(
     <React.StrictMode>
       <App />
     </React.StrictMode>,
@@ -116,4 +186,14 @@ async function boot() {
   }
 }
 
-boot();
+// A failed boot must not leave the skeleton spinning forever: show the error.
+boot().catch((e) => {
+  console.error("boot failed", e);
+  appMounted = true;
+  window.clearTimeout(bootSkeletonTimer);
+  root.render(
+    <div role="alert" style={{ padding: 24, font: "13px system-ui, sans-serif", opacity: 0.8 }}>
+      Fleet failed to start: {String(e)}
+    </div>,
+  );
+});

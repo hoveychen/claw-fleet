@@ -18,10 +18,13 @@ import type { HandoffChain } from "../types";
 import { AgentSourceIcon, formatModel } from "./SessionCard";
 import styles from "./HandoffChainModal.module.css";
 import { useExiting } from "./Presence";
+import { SkeletonList, Spinner } from "./loading";
 
 interface Props {
   chain: HandoffChain | null;
   loading: boolean;
+  /** The chain fetch failed. Without it a failure left the modal blank. */
+  failed?: boolean;
   /** The session whose detail opened this modal — its leg is highlighted. */
   currentSessionId: string;
   hop: number;
@@ -46,6 +49,7 @@ interface Props {
 export function HandoffChainModal({
   chain,
   loading,
+  failed = false,
   currentSessionId,
   hop,
   len,
@@ -107,7 +111,12 @@ export function HandoffChainModal({
           </span>
         </div>
         <div className={styles.scroll_area}>
-          {loading && <div className={styles.handoff_note}>{t("card.handoff_loading")}</div>}
+          {loading && <SkeletonList rows={Math.min(Math.max(len, 2), 6)} />}
+          {!loading && failed && !chain && (
+            <div className={styles.handoff_note}>
+              {t("card.handoff_load_failed", "接力链加载失败")}
+            </div>
+          )}
           {!loading && chain && <ChainGoal chain={chain} />}
           {!loading && chain && legIds.map((sid, i) => (
             <div key={sid}>
@@ -316,7 +325,13 @@ function ExportBundleButton({ sessionId }: { sessionId: string }) {
           {t("card.handoff_export_failed", { defaultValue: "导出失败" })}
         </span>
       )}
-      <button className={styles.close_btn} onClick={run} disabled={busy}>
+      <button
+        className={`${styles.close_btn} ${styles.export_btn}`}
+        onClick={run}
+        disabled={busy}
+        aria-busy={busy || undefined}
+      >
+        {busy && <Spinner size={12} />}
         {busy
           ? t("card.handoff_export_busy", { defaultValue: "导出中…" })
           : t("card.handoff_export", { defaultValue: "导出调试包" })}

@@ -60,15 +60,6 @@
   color: var(--color-text-dim);
 }
 
-.no_data {
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: var(--color-text-dim);
-}
-
 .window_total {
   margin-top: 4px;
   text-align: right;

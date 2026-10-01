@@ -10,6 +10,7 @@ import { RailStatTile } from "./RailStatTile";
 import { TokenReceiptModal } from "./TokenReceiptModal";
 import styles from "./TodayUsageBadge.module.css";
 import { Presence } from "./Presence";
+import { SkeletonNumber } from "./loading";
 
 /** Compact token count: 1.2M / 34.5K / 780. */
 function fmtTokens(n: number): string {
@@ -29,6 +30,9 @@ export function TodayUsageBadge({
   const { t } = useTranslation();
   const [usage, setUsage] = useState<TodayUsage | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
+  // Set when a fetch fails before any payload arrived, so the skeleton gives
+  // way to a dash instead of shimmering forever on a backend that is down.
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,9 +43,13 @@ export function TodayUsageBadge({
         // `today_usage` collects a copy per event and per 15s tick, and each
         // copy parks one of Tauri's 10 async-runtime threads. See singleFlight.
         const u = await singleFlight("today_usage", () => invoke<TodayUsage>("today_usage"));
-        if (!cancelled) setUsage(u);
+        if (!cancelled) {
+          setUsage(u);
+          setFailed(false);
+        }
       } catch {
         /* backend not ready / remote offline — keep last value */
+        if (!cancelled) setFailed(true);
       }
     };
     void fetchUsage();
@@ -98,6 +106,7 @@ export function TodayUsageBadge({
             tooltip and in the receipt this opens. */}
         <RailStatTile
           value={loaded ? fmtRailMoney(cost) : "—"}
+          loading={!loaded && !failed}
           label={railLabel}
           title={`${title}\n${openHint}`}
           onClick={() => setShowReceipt(true)}
@@ -117,9 +126,11 @@ export function TodayUsageBadge({
         title={openHint}
         onClick={() => setShowReceipt(true)}
       >
-        <span className={styles.cost}>{loaded ? `$${cost.toFixed(2)}` : "—"}</span>
+        <span className={styles.cost}>
+          {loaded ? `$${cost.toFixed(2)}` : failed ? "—" : <SkeletonNumber width={52} />}
+        </span>
         <span className={styles.tokens}>
-          {loaded ? `${fmtTokens(tokens)} tok` : loadingText}
+          {loaded ? `${fmtTokens(tokens)} tok` : failed ? "" : <SkeletonNumber width={44} />}
         </span>
       </button>
       {receipt}

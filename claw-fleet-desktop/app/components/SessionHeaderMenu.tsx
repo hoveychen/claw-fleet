@@ -27,6 +27,7 @@ import { exportChainBundle } from "../chainBundle";
 import { isWebBuild } from "../hostEnv";
 import type { AuxFacet, AuxFacetItem } from "../detailAux";
 import { Presence } from "./Presence";
+import { Spinner } from "./loading";
 
 /** One icon per facet, so the menu reads as a list of destinations rather than
  *  a wall of text. Keyed by facet id — adding a facet without an icon still
@@ -177,7 +178,7 @@ export function SessionHeaderMenu({
       id: "export-bundle",
       dividerBefore: true,
       label: exporting ? t("card.handoff_export_busy") : t("card.handoff_export"),
-      icon: <Package size={13} />,
+      icon: exporting ? <Spinner size={12} /> : <Package size={13} />,
       onSelect: () => {
         if (!exporting) exportBundle();
       },
@@ -200,6 +201,7 @@ export function SessionHeaderMenu({
         aria-label={t("detail.more")}
         aria-haspopup="menu"
         aria-expanded={anchor != null}
+        aria-busy={exporting || undefined}
         onClick={() => {
           if (anchor) {
             setAnchor(null);
@@ -212,7 +214,8 @@ export function SessionHeaderMenu({
           setAnchor({ x: r.left, y: r.bottom + 4 });
         }}
       >
-        <MoreHorizontal size={15} />
+        {/* The export outlives the menu, so the button itself carries the spinner. */}
+        {exporting ? <Spinner size={12} /> : <MoreHorizontal size={15} />}
       </button>
       <Presence when={Boolean(anchor)}>{anchor && (
         <ContextMenu anchor={anchor} items={items} onClose={() => setAnchor(null)} />

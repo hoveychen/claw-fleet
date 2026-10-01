@@ -16,6 +16,7 @@ import { exportWikiDoc, WikiDocBody } from "./WikiView";
 import { printWikiDoc } from "./wikiPrint";
 import { timeAgo } from "./SessionRow";
 import styles from "./TabPanes.module.css";
+import { Skeleton, SkeletonText } from "./loading";
 
 /**
  * One wiki doc as an auxiliary-rail reader.
@@ -65,6 +66,8 @@ export function WikiTabPane({
     return {
       hasSlug: (s: string) => {
         if (slugs.has(s)) return true;
+        // A re-read is running: not known yet, so not dead yet either.
+        if (inFlight) return null;
         // Same one-shot list as this pane's own slug: a link to a doc published
         // after the app opened is live, not dead. Deferred because hasSlug runs
         // inside the markdown render.
@@ -73,7 +76,7 @@ export function WikiTabPane({
       },
       openSlug: onOpenSlug,
     };
-  }, [docs, onOpenSlug]);
+  }, [docs, inFlight, onOpenSlug]);
 
   // Hand the doc to the full page, which owns the destructive actions.
   const openInWikiPage = () => revealSlugInWikiPage(slug);
@@ -113,19 +116,26 @@ export function WikiTabPane({
     // Before the first fetch settles — or while the re-read the miss just asked
     // for is still running — "not found" would be a lie.
     const settled = loaded && !inFlight;
+    if (!settled) {
+      return (
+        <AuxPane menuItems={build.menu} className={styles.pane}>
+          <div className={styles.skeleton_bar}>
+            <Skeleton width="58%" height={11} />
+            <Skeleton width="38%" height={8} />
+          </div>
+          <SkeletonText lines={10} />
+        </AuxPane>
+      );
+    }
     return (
       <AuxPane menuItems={build.menu} className={styles.pane}>
         <div className={styles.missing}>
-          {settled
-            ? t("tabs.wiki_missing", "该文档未发布，或已被删除")
-            : t("wiki.loading", "Loading…")}
+          {t("tabs.wiki_missing", "该文档未发布，或已被删除")}
           <code className={styles.missing_key}>{slug}</code>
-          {settled && (
-            <button type="button" className={styles.blocked_btn} onClick={openInWikiPage}>
-              <BookOpen size={12} strokeWidth={1.7} />
-              {t("tabs.wiki_open_page", "在知识库中打开")}
-            </button>
-          )}
+          <button type="button" className={styles.blocked_btn} onClick={openInWikiPage}>
+            <BookOpen size={12} strokeWidth={1.7} />
+            {t("tabs.wiki_open_page", "在知识库中打开")}
+          </button>
         </div>
       </AuxPane>
     );

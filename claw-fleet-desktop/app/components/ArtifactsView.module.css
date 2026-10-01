@@ -102,7 +102,8 @@
 }
 
 .tree_row:hover .tree_actions,
-.tree_actions:focus-within {
+.tree_actions:focus-within,
+.tree_actions_busy {
   opacity: 1;
 }
 
@@ -261,6 +262,12 @@
 
 .star_on {
   color: var(--color-warning);
+}
+
+/* First-load placeholder cards: same box as a real card, inert. */
+.card_skeleton {
+  cursor: default;
+  pointer-events: none;
 }
 
 .card_body {
@@ -619,6 +626,8 @@
 }
 
 .stage {
+  /* Anchors the load skeleton laid over a frame or image. */
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -643,6 +652,26 @@
   max-height: 100%;
   border-radius: var(--radius-md);
   background: var(--canvas-fixed-light);
+}
+
+/* Laid over a frame or image until it fires `load`, inset by the stage's own
+   padding so it sits exactly where the document will. */
+.stage_skeleton {
+  position: absolute;
+  inset: var(--space-7);
+  z-index: 1;
+}
+
+/* An image still decoding stays mounted (so it loads) but unseen. */
+.stage_media_pending {
+  opacity: 0;
+}
+
+/* The Office chunk's Suspense placeholder fills the stretched stage. */
+.stage_fill {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* A PDF has no intrinsic size to shrink-wrap; give the frame the whole stage. */
@@ -831,6 +860,9 @@
 }
 
 .version_restore {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   flex: 0 0 auto;
   margin-right: var(--space-2);
   padding: 0 var(--space-2);
@@ -895,6 +927,14 @@
 .card_dragging,
 .row_dragging td {
   opacity: 0.45;
+}
+
+/* Zero-height positioned anchor for the refetch progress bar: PageShell's
+   <main> is not positioned itself. */
+.progress_anchor {
+  position: relative;
+  height: 0;
+  flex: none;
 }
 
 .error_line {

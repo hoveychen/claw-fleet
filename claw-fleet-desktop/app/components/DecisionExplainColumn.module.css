@@ -179,6 +179,9 @@
 
 .follow_send {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   border: none;
   background: var(--color-accent);
   color: var(--color-on-accent);

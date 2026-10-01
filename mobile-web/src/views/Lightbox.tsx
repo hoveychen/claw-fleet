@@ -12,6 +12,8 @@ import { Download, Share, X } from "lucide-react";
 import { HistoryLayer } from "../useNavStack";
 import { t } from "../i18n";
 import { canShareFiles, saveImage } from "../imageSave";
+import { Spinner } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 import styles from "./Lightbox.module.css";
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -264,6 +266,16 @@ function LightboxOverlay({
   // Where the OS share sheet is reachable (iOS, Android, Harmony) the button is
   // a share button; a plain download (desktop browsers) keeps the download icon.
   const shareable = useMemo(() => canShareFiles(), []);
+
+  // A large image can take a moment to decode; until it paints the overlay is
+  // just black, which reads as "nothing happened".
+  const [painted, setPainted] = useState(false);
+  useEffect(() => {
+    const el = imgRef.current;
+    setPainted(!!el && el.complete && el.naturalWidth > 0);
+  }, [src]);
+  const showImgWait = useDelayedFlag(!painted);
+
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const statusTimer = useRef<number | undefined>(undefined);
@@ -298,7 +310,21 @@ function LightboxOverlay({
     >
       {/* Hardware/gesture back closes the lightbox, consistent with other overlays. */}
       <HistoryLayer onBack={onClose} />
-      <img ref={imgRef} className={styles.image} src={src} alt={alt} draggable={false} />
+      <img
+        ref={imgRef}
+        className={styles.image}
+        src={src}
+        alt={alt}
+        draggable={false}
+        onLoad={() => setPainted(true)}
+        // A broken image is not loading: stop the spinner and show the broken box.
+        onError={() => setPainted(true)}
+      />
+      {showImgWait && (
+        <span className={styles.imgWait}>
+          <Spinner size={20} className={styles.onDark} label={t("加载中…")} />
+        </span>
+      )}
       <button
         type="button"
         className={styles.close}
@@ -317,7 +343,13 @@ function LightboxOverlay({
         disabled={saving}
         onClick={() => void onSave()}
       >
-        {shareable ? <Share size={20} /> : <Download size={20} />}
+        {saving ? (
+          <Spinner size={16} className={styles.onDark} />
+        ) : shareable ? (
+          <Share size={20} />
+        ) : (
+          <Download size={20} />
+        )}
       </button>
       <div className={status ? styles.status : styles.hint} role={status ? "status" : undefined}>
         {status ?? t("双击放大 · 捏合缩放 · 单击关闭")}

@@ -20,6 +20,12 @@ import { useModelCatalog } from "../useModelCatalog";
 import type { DshModelCatalog } from "../generated/types";
 import { PillMenu, type PillMenuItem } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
+import { Spinner } from "./loading";
+
+/** How long an empty model catalog may read as "still loading". The hook
+ *  returns `[]` both before the first answer and after a failed one, so this
+ *  cap is what keeps an IPC failure from spinning the pills forever. */
+const CATALOG_LOADING_CAP_MS = 8_000;
 
 /** The model / effort / permission-mode ghost pills shared by the new-session
  *  modal and the history panel's resume composer. `""` means "don't pass the
@@ -74,6 +80,13 @@ export function SessionOptionPills({
   // Fleet's own model catalog (models.toml) — one source for both the model and
   // the effort menus, replacing the two lists this file used to hardcode.
   const catalog = useModelCatalog();
+  const [catalogGaveUp, setCatalogGaveUp] = useState(false);
+  useEffect(() => {
+    if (catalog.length > 0) return;
+    const id = setTimeout(() => setCatalogGaveUp(true), CATALOG_LOADING_CAP_MS);
+    return () => clearTimeout(id);
+  }, [catalog.length]);
+  const catalogLoading = !isDsh && catalog.length === 0 && !catalogGaveUp;
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   // Third-party Codex models are discovered from the host's profile files
   // rather than hardcoded — a `[model_providers.<id>]` block names no models,
@@ -81,14 +94,21 @@ export function SessionOptionPills({
   // Claude picker never shows them) and best-effort: a failure leaves the
   // built-in list intact rather than emptying the picker.
   const [codexProfiles, setCodexProfiles] = useState<CodexProfile[]>([]);
+  // In flight → the model menu ends in a loading row, so profile models
+  // appearing a beat later do not look like the list changing under the user.
+  const [codexProfilesLoading, setCodexProfilesLoading] = useState(false);
   useEffect(() => {
     if (!isCodex) return;
     let live = true;
+    setCodexProfilesLoading(true);
     invoke<CodexProfile[]>("list_codex_profiles")
       .then((p) => {
         if (live) setCodexProfiles(p ?? []);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (live) setCodexProfilesLoading(false);
+      });
     return () => {
       live = false;
     };
@@ -272,7 +292,12 @@ export function SessionOptionPills({
   // degrades to "stale + why", never to a bare "default".
   const dshStatusHeader = () => (
     <>
-      {dshLoading && <div className={pillStyles.menu_note}>{t("new_session.model_loading")}</div>}
+      {dshLoading && (
+        <div className={`${pillStyles.menu_note} ${pillStyles.menu_loading}`} role="status">
+          <Spinner size={12} />
+          <span>{t("new_session.model_loading")}</span>
+        </div>
+      )}
       {(dshError !== null || dshFailures.length > 0) && (
         <div className={pillStyles.menu_error}>
           <span className={pillStyles.menu_error_text}>
@@ -330,6 +355,7 @@ export function SessionOptionPills({
         testId="model-pill"
         disabled={disabled}
         items={modelItems}
+        loading={catalogLoading || (isCodex && codexProfilesLoading)}
         onOpen={isDsh ? () => loadDshCatalog() : undefined}
         menuHeader={
           isDsh
@@ -349,6 +375,7 @@ export function SessionOptionPills({
         title={t("new_session.effort")}
         testId="effort-pill"
         disabled={disabled}
+        loading={catalogLoading}
         items={[
           {
             id: "",

@@ -23,6 +23,7 @@ import { TerminalView } from "./TerminalView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
 import { HistoryView } from "./HistoryView";
+import { TopProgress } from "./loading";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
 import { TodayUsageBadge } from "./TodayUsageBadge";
@@ -490,7 +491,16 @@ export function SessionList() {
         // `loadHostFeatures` navigates a restored `terminal` viewMode back home
         // when the flag is off; this guard covers the frame before that answer
         // lands, so the page never flashes a shell the backend would refuse.
-        terminalEnabled ? <TerminalView /> : null
+        // That answer always lands (a failed probe fails closed and navigates
+        // home), so "off while on this page" can only mean "not answered yet":
+        // show the progress bar rather than a blank main area.
+        terminalEnabled ? (
+          <TerminalView />
+        ) : (
+          <div className={styles.main_pending}>
+            <TopProgress active />
+          </div>
+        )
       ) : viewMode === "plugins" ? (
         <PluginsView />
       ) : viewMode === "mobile" ? (

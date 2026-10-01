@@ -5,7 +5,7 @@
 .main { width: min(1180px, 100%); margin: 0 auto; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 30px; padding-top: 28px; }
 .rail { display: flex; flex-direction: column; gap: 4px; align-self: start; position: sticky; top: 84px; }
 .rail button { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-left: 2px solid transparent; color: var(--color-text-secondary); text-align: left; }
-.rail button span { margin-left: auto; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.rail button > span { margin-left: auto; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
 .rail button[data-active="true"] { border-left-color: var(--color-accent); color: var(--color-text); background: var(--color-accent-soft); }
 .content { min-width: 0; }
 .sectionHead { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 2px 15px; border-bottom: 1px solid var(--color-border-strong); }
@@ -27,9 +27,6 @@
 .statusText { padding: 2px 7px; background: var(--color-bg-secondary); border-radius: 3px; color: var(--color-text-secondary); }
 .statusText[data-status="running"] { color: var(--color-accent); }
 .chevron { color: var(--color-text-dim); }
-.loading { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--color-text-secondary); padding: 60px 20px; }
-.spinning { animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
 .errorBanner { display: flex; align-items: center; gap: 9px; padding: 10px 12px; margin: 14px 0; border: 1px solid color-mix(in srgb, var(--color-error) 45%, transparent); background: color-mix(in srgb, var(--color-error) 9%, transparent); color: var(--color-error); font-size: var(--t-aux, 12px); }
 .errorBanner span { flex: 1; }
 .errorBanner button { text-decoration: underline; }
@@ -44,13 +41,14 @@
 .detailHeader { padding-left: max(16px, calc((100vw - 1180px) / 2)); padding-right: max(16px, calc((100vw - 1180px) / 2)); }
 .back { display: flex; align-items: center; gap: 5px; color: var(--color-text-secondary); font-size: var(--t-aux, 12px); }
 .detailHeaderTitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-weight: 650; }
-.detailMain { width: min(1180px, 100%); margin: 0 auto; padding-top: 30px; }
+.detailMain { position: relative; width: min(1180px, 100%); margin: 0 auto; padding-top: 30px; }
+.detailSkeleton { display: flex; flex-direction: column; gap: 22px; }
 .detailIntro { border-bottom: 1px solid var(--color-border-strong); padding-bottom: 22px; }
 .detailIntro p { max-width: 780px; color: var(--color-text-secondary); white-space: pre-wrap; }
 .detailFacts { display: flex; flex-wrap: wrap; gap: 8px; }
-.detailFacts span { font-family: var(--font-mono); font-size: var(--t-meta, 11px); padding: 4px 7px; border: 1px solid var(--color-border); color: var(--color-text-secondary); }
-.detailFacts span[data-status="running"] { border-color: var(--color-accent); color: var(--color-accent); }
-.detailFacts span[data-status="waiting_for_input"] { border-color: var(--color-warning); color: var(--color-warning); }
+.detailFacts > span { font-family: var(--font-mono); font-size: var(--t-meta, 11px); padding: 4px 7px; border: 1px solid var(--color-border); color: var(--color-text-secondary); }
+.detailFacts > span[data-status="running"] { border-color: var(--color-accent); color: var(--color-accent); }
+.detailFacts > span[data-status="waiting_for_input"] { border-color: var(--color-warning); color: var(--color-warning); }
 .detailGrid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 28px; margin-top: 24px; }
 .detailGrid h2 { font-size: var(--t-aux, 12px); text-transform: uppercase; letter-spacing: .09em; color: var(--color-text-secondary); margin: 0 0 12px; }
 .transcript { min-width: 0; }
@@ -73,9 +71,11 @@
 .optionRow button[data-active="true"] { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-soft); }
 .responder input { padding: 7px 9px; border-radius: 3px; font-size: var(--t-ui, 14px); }
 .responseActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.responseActions button { padding: 5px 9px; color: var(--color-text-secondary); font-size: var(--t-meta, 11px); }
+.responseActions button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; color: var(--color-text-secondary); font-size: var(--t-meta, 11px); }
 .responseActions button[data-primary] { background: var(--color-accent); color: #fff; }
 .responseActions button:disabled { opacity: .45; }
+/* Accent-filled primary: draw the shared spinner in the button's white. */
+.responseActions button[data-primary] > span { border-color: rgba(255, 255, 255, 0.35); border-top-color: #fff; }
 .submitError { display: block; color: var(--color-error); margin-top: 6px; }
 .muted { color: var(--color-text-dim); font-size: var(--t-aux, 12px); padding: 12px 0; }
 @media (max-width: 720px) {

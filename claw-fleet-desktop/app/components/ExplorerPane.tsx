@@ -7,6 +7,7 @@ import { CopyButton } from "./CopyButton";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
+import { SkeletonList, SkeletonText, Spinner } from "./loading";
 
 // ── Types (mirror claw-fleet-core/src/file_explorer.rs) ─────────────────────
 
@@ -106,16 +107,29 @@ export function FileTree({
   const { t } = useTranslation();
   const [children, setChildren] = useState<Record<string, ExplorerEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Folders whose first listing is in flight — their chevron becomes a spinner.
+  const [opening, setOpening] = useState<Set<string>>(new Set());
+  // The top level could not be read. Without this the skeleton would never end.
+  const [topFailed, setTopFailed] = useState(false);
 
   // A new `loadDir` identity means a new source (root switched, ignore toggled,
   // session changed) — drop the cached levels and re-read the top.
   useEffect(() => {
     setChildren({});
     setExpanded(new Set());
+    setOpening(new Set());
+    setTopFailed(false);
     let stale = false;
-    loadDir("").then((entries) => {
-      if (!stale && entries) setChildren({ "": entries });
-    });
+    loadDir("").then(
+      (entries) => {
+        if (stale) return;
+        if (entries) setChildren({ "": entries });
+        else setTopFailed(true);
+      },
+      () => {
+        if (!stale) setTopFailed(true);
+      },
+    );
     return () => {
       stale = true;
     };
@@ -207,12 +221,23 @@ export function FileTree({
         return;
       }
       if (!children[rel]) {
-        const entries = await loadDir(rel);
+        if (opening.has(rel)) return; // a second click while the first is listing
+        setOpening((prev) => new Set(prev).add(rel));
+        let entries: ExplorerEntry[] | null = null;
+        try {
+          entries = await loadDir(rel);
+        } finally {
+          setOpening((prev) => {
+            const next = new Set(prev);
+            next.delete(rel);
+            return next;
+          });
+        }
         if (entries) setChildren((prev) => ({ ...prev, [rel]: entries }));
       }
       setExpanded((prev) => new Set(prev).add(rel));
     },
-    [expanded, children, loadDir],
+    [expanded, children, loadDir, opening],
   );
 
   const renderLevel = (rel: string, depth: number): ReactNode[] => {
@@ -230,7 +255,9 @@ export function FileTree({
             onClick={() => void toggleDir(entry.relativePath)}
             title={entry.relativePath}
           >
-            <span className={skillStyles.tree_chevron}>{isOpen ? "▾" : "▸"}</span>
+            <span className={skillStyles.tree_chevron}>
+              {opening.has(entry.relativePath) ? <Spinner size={10} /> : isOpen ? "▾" : "▸"}
+            </span>
             <span className={skillStyles.tree_name}>{entry.name}/</span>
           </button>
         );
@@ -256,7 +283,12 @@ export function FileTree({
 
   return (
     <>
-      {topLevel === undefined && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
+      {topLevel === undefined &&
+        (topFailed ? (
+          <p className={skillStyles.tree_empty}>{t("files.read_error")}</p>
+        ) : (
+          <SkeletonList rows={8} meta={false} rowHeight={26} />
+        ))}
       {topLevel && topLevel.length === 0 && (
         <p className={skillStyles.tree_empty}>{t("files.empty_dir")}</p>
       )}
@@ -318,7 +350,9 @@ export function FilePreview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, relPath]);
 
-  if (loading) return <p className={styles.loading}>{t("files.loading")}</p>;
+  // A different file's preview would be wrong for this one, so a switch clears
+  // to the skeleton rather than keeping the old body on screen.
+  if (loading) return <SkeletonText lines={10} className={styles.content_markdown} />;
   if (error || content === null) return <p className={styles.empty}>{t("files.read_error")}</p>;
 
   if (content.kind === "binary") {

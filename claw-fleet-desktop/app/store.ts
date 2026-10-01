@@ -1165,14 +1165,27 @@ export const useAuditStore = create<AuditState>((set, get) => ({
 interface ReportState {
   currentReport: DailyReport | null;
   heatmapData: DailyReportStats[];
+  /** False until the first `loadHeatmap` settles: an empty `heatmapData` before
+   *  then is "not asked yet", not "no activity". */
+  heatmapLoaded: boolean;
   selectedDate: string;
   loading: boolean;
+  /** Date whose load / generate last finished (with or without a report).
+   *  `currentReport === null` only means "no report" once this matches the
+   *  selected date — before that it is the window before the first fetch. */
+  reportSettledDate: string | null;
   generatingSummary: boolean;
   generatingLessons: boolean;
+  /** Date whose AI summary / lessons generation last failed, or null. Lets the
+   *  cards leave their loading state and offer a retry instead of spinning on. */
+  summaryFailedDate: string | null;
+  lessonsFailedDate: string | null;
 
   // Lessons already recorded in the managed ~/.claude/fleet-lessons.md. Used to
   // show "added" state in the report card and to drive the Memory-panel list.
   managedLessons: ManagedLesson[];
+  /** False until `loadManagedLessons` has answered once (success or failure). */
+  managedLessonsLoaded: boolean;
 
   // The selected day's per-task retrospectives (one per task that reached a
   // terminal state that day). Keyed by nothing — reloaded whenever the date
@@ -1256,12 +1269,17 @@ const popupInFlight = new Set<string>();
 export const useReportStore = create<ReportState>((set, get) => ({
   currentReport: null,
   heatmapData: [],
+  heatmapLoaded: false,
   selectedDate: yesterday(),
   loading: false,
+  reportSettledDate: null,
   generatingSummary: false,
   generatingLessons: false,
+  summaryFailedDate: null,
+  lessonsFailedDate: null,
 
   managedLessons: [],
+  managedLessonsLoaded: false,
 
   taskReviews: [],
   taskReviewsDate: "",
@@ -1282,18 +1300,18 @@ export const useReportStore = create<ReportState>((set, get) => ({
     try {
       const report = await invoke<DailyReport | null>("get_daily_report", { date });
       if (report) {
-        set({ currentReport: report, loading: false });
+        set({ currentReport: report, loading: false, reportSettledDate: date });
       } else {
         // No cached report — generate in background automatically
         try {
           const generated = await invoke<DailyReport>("generate_daily_report", { date });
-          set({ currentReport: generated, loading: false });
+          set({ currentReport: generated, loading: false, reportSettledDate: date });
         } catch {
-          set({ currentReport: null, loading: false });
+          set({ currentReport: null, loading: false, reportSettledDate: date });
         }
       }
     } catch {
-      set({ currentReport: null, loading: false });
+      set({ currentReport: null, loading: false, reportSettledDate: date });
     }
   },
 
@@ -1303,11 +1321,12 @@ export const useReportStore = create<ReportState>((set, get) => ({
       const latest = latestDateWithData(stats);
       set((s) => ({
         heatmapData: stats,
+        heatmapLoaded: true,
         latestReportDate: latest,
         hasNewReport: latest !== "" && latest > s.lastSeenReportDate,
       }));
     } catch {
-      set({ heatmapData: [] });
+      set({ heatmapData: [], heatmapLoaded: true });
     }
   },
 
@@ -1345,7 +1364,13 @@ export const useReportStore = create<ReportState>((set, get) => ({
       if (!report?.aiSummary) return;
       if (get().reportPopupDate) return;
       setItem(REPORT_LAST_POPPED_KEY, date);
-      set({ currentReport: report, selectedDate: date, reportPopupDate: date, loading: false });
+      set({
+        currentReport: report,
+        selectedDate: date,
+        reportPopupDate: date,
+        loading: false,
+        reportSettledDate: date,
+      });
     } catch {
       // Best-effort: a failed read just means no popup this time.
     } finally {
@@ -1369,14 +1394,14 @@ export const useReportStore = create<ReportState>((set, get) => ({
     set({ loading: true });
     try {
       const report = await invoke<DailyReport>("generate_daily_report", { date });
-      set({ currentReport: report, loading: false, selectedDate: date });
+      set({ currentReport: report, loading: false, selectedDate: date, reportSettledDate: date });
     } catch {
-      set({ loading: false });
+      set({ loading: false, reportSettledDate: date });
     }
   },
 
   generateSummary: async (date: string) => {
-    set({ generatingSummary: true });
+    set({ generatingSummary: true, summaryFailedDate: null });
     try {
       const summary = await invoke<string>("generate_daily_report_ai_summary", { date });
       set((s) => ({
@@ -1384,12 +1409,12 @@ export const useReportStore = create<ReportState>((set, get) => ({
         currentReport: s.currentReport ? { ...s.currentReport, aiSummary: summary } : null,
       }));
     } catch {
-      set({ generatingSummary: false });
+      set({ generatingSummary: false, summaryFailedDate: date });
     }
   },
 
   generateLessons: async (date: string) => {
-    set({ generatingLessons: true });
+    set({ generatingLessons: true, lessonsFailedDate: null });
     try {
       const lessons = await invoke<Lesson[]>("generate_daily_report_lessons", { date });
       set((s) => ({
@@ -1399,7 +1424,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
           : null,
       }));
     } catch {
-      set({ generatingLessons: false });
+      set({ generatingLessons: false, lessonsFailedDate: date });
     }
   },
 
@@ -1411,9 +1436,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
   loadManagedLessons: async () => {
     try {
       const lessons = await invoke<ManagedLesson[]>("list_managed_lessons");
-      set({ managedLessons: lessons });
+      set({ managedLessons: lessons, managedLessonsLoaded: true });
     } catch {
       // leave existing list on failure
+      set({ managedLessonsLoaded: true });
     }
   },
 

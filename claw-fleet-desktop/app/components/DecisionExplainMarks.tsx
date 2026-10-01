@@ -15,6 +15,8 @@ import {
 import { cacheHitRatio, costLabel, type AssistantSelection } from "../selectionExplain";
 import { useSessionsStore } from "../store";
 import { TextBlock } from "./blocks/TextBlock";
+import { SkeletonCard } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./DecisionExplainMarks.module.css";
 
 /**
@@ -46,6 +48,9 @@ export type DecisionExplain = {
    */
   followUp: (prev: ExplainRecord, question: string) => void;
   answers: ExplainRecord[];
+  /** The stored records for this card are still being read; `answers` being
+   *  empty means "not known yet", not "none asked". */
+  loading?: boolean;
   dismiss: (id: string) => void;
 };
 
@@ -107,6 +112,7 @@ export function useDecisionExplainMarks(
   const workspacePath = session?.workspacePath;
   const [answers, setAnswers] = useState<ExplainRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [listing, setListing] = useState(false);
   const pollers = useRef(new Map<string, AbortController>());
   // The session the state belongs to, readable from async callbacks so a
   // reply that lands after a switch cannot seed the next card's answers.
@@ -142,6 +148,7 @@ export function useDecisionExplainMarks(
   // old one's records.
   useEffect(() => {
     setAnswers([]);
+    setListing(Boolean(sessionId));
     let alive = true;
     if (sessionId) {
       const parsed = cardTimestamp ? Date.parse(cardTimestamp) : NaN;
@@ -160,7 +167,10 @@ export function useDecisionExplainMarks(
           });
           for (const r of mine) if (r.status === "running") track(sessionId, r.id);
         })
-        .catch((e) => console.error("list_explanations failed:", e));
+        .catch((e) => console.error("list_explanations failed:", e))
+        .finally(() => {
+          if (alive) setListing(false);
+        });
     }
     return () => {
       alive = false;
@@ -257,20 +267,41 @@ export function useDecisionExplainMarks(
     }
   }, []);
 
-  return { enabled: Boolean(sessionId && sessionPath), busy, ask, followUp, answers, dismiss };
+  return {
+    enabled: Boolean(sessionId && sessionPath),
+    busy,
+    ask,
+    followUp,
+    answers,
+    loading: listing,
+    dismiss,
+  };
 }
 
 /** The answers asked from inside a card's question, under it: the quoted
  *  text, then the answer growing as the record is re-read. */
 export function DecisionExplainAnswers({
   answers,
+  loading = false,
   onDismiss,
 }: {
   answers: ExplainRecord[];
+  /** The stored answers are still being read (see `DecisionExplain.loading`). */
+  loading?: boolean;
   onDismiss: (id: string) => void;
 }) {
   const { t } = useTranslation();
-  if (answers.length === 0) return null;
+  // Delayed: the read is a local store hit, and most cards have no side
+  // questions — a placeholder that flashed on every card switch would be the
+  // very jump it exists to prevent.
+  const showSkeleton = useDelayedFlag(loading && answers.length === 0);
+  if (answers.length === 0) {
+    return showSkeleton ? (
+      <div className={styles.list}>
+        <SkeletonCard height={56} />
+      </div>
+    ) : null;
+  }
   return (
     <div className={styles.list} data-testid="decision-explain-answers">
       {answers.map((rec) => {

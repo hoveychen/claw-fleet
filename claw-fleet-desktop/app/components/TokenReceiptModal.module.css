@@ -16,6 +16,7 @@
 
 .modal {
   composes: modal_enter from "./motion.module.css";
+  position: relative; /* anchors the range-switch TopProgress */
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);

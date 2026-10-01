@@ -19,6 +19,7 @@ import { FleetBody } from "./FleetBody";
 import { isDecisionTool } from "./workRuns";
 import { readDecisionQuestions, resolveAnswers } from "./decisionCall";
 import { DecisionQa } from "./DecisionQa";
+import { SkeletonText, Spinner } from "./loading";
 import styles from "./ToolDetailPanel.module.css";
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
@@ -426,7 +427,12 @@ export function ToolDetailPanel({
 
   return (
     <div className={styles.panel}>
-      {!detail && !error && <div className={styles.empty}>{t("加载中…")}</div>}
+      {!detail && !error &&
+        (client ? (
+          <SkeletonText lines={4} />
+        ) : (
+          <div className={styles.empty}>{t("桌面端离线")}</div>
+        ))}
       {error && <div className={styles.empty}>{error}</div>}
       {detail && (
         <>
@@ -449,8 +455,14 @@ export function ToolDetailPanel({
             </div>
           )}
           {detail.truncated && (
-            <button className={styles.loadFull} onClick={() => void loadFull()}>
-              {loadingFull ? t("加载中…") : t("加载完整输出")}
+            <button
+              className={styles.loadFull}
+              onClick={() => void loadFull()}
+              disabled={loadingFull}
+              aria-busy={loadingFull || undefined}
+            >
+              {loadingFull && <Spinner size={10} className={styles.loadFullSpinner} />}
+              {t("加载完整输出")}
             </button>
           )}
         </>

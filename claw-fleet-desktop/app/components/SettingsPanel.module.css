@@ -310,6 +310,10 @@
 }
 
 .sources_restart_btn {
+  /* Inline-flex so a pending <Spinner> sits beside the label. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 12px;
   background: var(--color-accent);
   border: none;
@@ -421,4 +425,34 @@
 
 .account_embed {
   margin-top: 4px;
+}
+
+/* ── Loading affordances ─────────────────────────────────────────────────── */
+
+/* Buttons that may carry a pending <Spinner> before their label. */
+.inline_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* The shared spinner's accent arc vanishes on an accent-filled button; flip
+   it to the on-accent colour there. */
+.sources_restart_btn > [aria-hidden="true"],
+.hooks_install_btn > [aria-hidden="true"] {
+  border-color: color-mix(in srgb, var(--color-on-accent) 35%, transparent);
+  border-top-color: var(--color-on-accent);
+}
+
+/* Spinner standing next to a select / picker while its options load. */
+.inline_spinner {
+  margin: 0 8px;
+}
+
+/* A source switch with room for its pending spinner. */
+.toggle_with_spinner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

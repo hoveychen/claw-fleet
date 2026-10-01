@@ -43,6 +43,17 @@
   opacity: 0.7;
 }
 
+/* Options still arriving: a quiet row at the end of the list instead of a menu
+   that looks complete with whatever has loaded so far. */
+.menu_loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--color-text-dim);
+  font-size: 12px;
+}
+
 .menu {
   composes: pop_enter from "./motion.module.css";
   position: absolute;

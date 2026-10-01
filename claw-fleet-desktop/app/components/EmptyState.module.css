@@ -60,13 +60,7 @@
   color: var(--color-text-dim);
 }
 
-.spinner {
-  color: var(--color-text-muted);
-  animation: empty-spin 1s linear infinite;
-}
-
-@keyframes empty-spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* First-scan placeholder: session-row skeletons in the list's own gutter. */
+.skeleton {
+  padding: 8px 12px;
 }

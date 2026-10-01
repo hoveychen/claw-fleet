@@ -212,3 +212,8 @@
   opacity: 0.45;
   cursor: default;
 }
+
+/* Spinner sitting before a text button's label while its action runs. */
+.btn_spinner {
+  margin-right: 6px;
+}

@@ -368,6 +368,7 @@
 
 .stopIcon {
   flex: 0 0 auto;
+  display: inline-flex;
 }
 
 .stopText {
@@ -388,7 +389,3 @@
   color: var(--color-text-dim);
 }
 
-.stopBusy {
-  flex: 0 0 auto;
-  color: var(--color-text-dim);
-}

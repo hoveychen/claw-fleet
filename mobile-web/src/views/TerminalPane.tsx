@@ -24,6 +24,8 @@ import {
   writeProcInput,
   type ProcRecord,
 } from "../terminal";
+import { Spinner } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 import styles from "./TerminalPane.module.css";
 
 const POLL_MS = 300;
@@ -88,6 +90,9 @@ export default function TerminalPane({
   // Show "back to bottom" button only when not at bottom; keep that space empty
   // normally so it doesn't obstruct output.
   const [atBottom, setAtBottom] = useState(true);
+  // First output poll still out: the canvas is blank, which reads as "dead".
+  const [awaitingFirst, setAwaitingFirst] = useState(true);
+  const showFirstWait = useDelayedFlag(awaitingFirst);
   const theme = useResolvedTheme();
 
   // Store in ref: when parent passes inline closures, don't rebuild the entire
@@ -106,6 +111,7 @@ export default function TerminalPane({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    setAwaitingFirst(true);
 
     const term = new Terminal({
       fontSize: 12,
@@ -144,7 +150,8 @@ export default function TerminalPane({
     // send next poll until previous reply arrives" gate — without it on slow
     // links, the same echo could appear on screen twice).
     const pump = createOutputPump({
-      read: (offset) => readProcOutput(client, proc.id, offset),
+      read: (offset) =>
+        readProcOutput(client, proc.id, offset).finally(() => setAwaitingFirst(false)),
       write: (bytes) => term.write(bytes),
       onRecord: (record) => onRecordRef.current?.(record),
     });
@@ -263,6 +270,11 @@ export default function TerminalPane({
           termRef.current?.focus();
         }}
       />
+      {showFirstWait && (
+        <div className={styles.firstWait}>
+          <Spinner size={16} label={t("加载中…")} />
+        </div>
+      )}
       {/* Explicit pagination controls. Touch scrolling works in desktop Chrome's
           mobile emulation, but different WebViews (HarmonyOS ArkWeb, various
           embedded WebViews) handle touch inconsistently. Not scrolling history

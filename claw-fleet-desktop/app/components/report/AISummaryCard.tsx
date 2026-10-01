@@ -6,6 +6,7 @@ import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plu
 import { useReportStore } from "../../store";
 import type { DailyMetrics } from "../../types";
 import styles from "./ReportView.module.css";
+import { SkeletonText } from "../loading";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -23,7 +24,10 @@ export function AISummaryCard({
   metrics: DailyMetrics;
 }) {
   const { t } = useTranslation();
-  const { generatingSummary, generateSummary } = useReportStore();
+  const { generatingSummary, generateSummary, summaryFailedDate } = useReportStore();
+  // Generation runs once per date (see the effect below); when it fails the
+  // card must leave its loading state, or it would shimmer forever.
+  const failed = !summary && !generatingSummary && summaryFailedDate === date;
   const triggeredRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -90,9 +94,16 @@ export function AISummaryCard({
             </div>
           )}
         </div>
-      ) : (
+      ) : failed ? (
         <div className={styles.summary_empty}>
-          <p>{t("report.generating")}</p>
+          <p>{t("report.summary_failed", "AI 摘要生成失败")}</p>
+          <button className={styles.empty_retry_btn} onClick={() => generateSummary(date)}>
+            {t("account.retry")}
+          </button>
+        </div>
+      ) : (
+        <div className={styles.summary_skeleton}>
+          <SkeletonText lines={4} />
         </div>
       )}
     </div>

@@ -7,13 +7,14 @@ import {
   PencilLine,
   Scale,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cacheHitRatio, costLabel, groupExplainThreads, quoteSnippet } from "../../../shared-ts/sessionExplain";
 import { dateLocale, t } from "../i18n";
 import type { ExplainPreset, ExplainRecord } from "../sessionExplain";
 import { Md } from "./DecisionQa";
 import { EmptyState } from "./EmptyState";
+import { SkeletonList, Spinner } from "./loading";
 import tabStyles from "./SessionDetailTabs.module.css";
 import styles from "./SessionExplainsTab.module.css";
 
@@ -71,7 +72,7 @@ export function SessionExplainsTab({
   onLocate: (rec: ExplainRecord) => void;
   onFollowUp: (prev: ExplainRecord, question: string) => void;
 }) {
-  if (!loaded && explains.length === 0) return <div className={tabStyles.hint}>{t("加载追问…")}</div>;
+  if (!loaded && explains.length === 0) return <SkeletonList rows={4} />;
   if (explains.length === 0) {
     return (
       <EmptyState
@@ -123,6 +124,11 @@ function ExplainCard({
   onFollowUp: (question: string) => void;
 }) {
   const [followUp, setFollowUp] = useState("");
+  // This card's own follow-up is in flight (the parent's `busy` covers any card).
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    if (!busy) setSent(false);
+  }, [busy]);
   // The head summarises the chain: its opening question, but the *latest*
   // turn's state — a chain whose follow-up is still forking reads as running.
   const first = records[0];
@@ -193,6 +199,7 @@ function ExplainCard({
                 e.preventDefault();
                 const q = followUp.trim();
                 if (!q || busy) return;
+                setSent(true);
                 onFollowUp(q);
                 setFollowUp("");
               }}
@@ -205,7 +212,13 @@ function ExplainCard({
                 aria-label={t("继续追问")}
                 enterKeyHint="send"
               />
-              <button type="submit" className={styles.followSend} disabled={busy || !followUp.trim()}>
+              <button
+                type="submit"
+                className={styles.followSend}
+                disabled={busy || !followUp.trim()}
+                aria-busy={(busy && sent) || undefined}
+              >
+                {busy && sent && <Spinner size={12} />}
                 {t("发送")}
               </button>
             </form>

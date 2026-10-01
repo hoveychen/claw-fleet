@@ -1,4 +1,5 @@
 import styles from "./RailStatTile.module.css";
+import { SkeletonNumber } from "./loading";
 
 interface Props {
   /** Already-formatted number — use `fmtRailMoney` / `fmtRailCount` so it fits. */
@@ -13,6 +14,8 @@ interface Props {
   dataWizard?: string;
   /** Paint the value in the accent color (used by the usage-percent tile). */
   accent?: boolean;
+  /** First value not in yet: show a number skeleton instead of `value`. */
+  loading?: boolean;
 }
 
 /** One number tile in the 64px collapsed sidebar rail: a big value over a
@@ -20,11 +23,13 @@ interface Props {
  *  this box, which is why the collapsed stack rendered at three different
  *  value sizes with three different paddings — they all share this now, so
  *  spacing and typography stay identical no matter which tiles are visible. */
-export function RailStatTile({ value, label, title, onClick, dataWizard, accent }: Props) {
+export function RailStatTile({ value, label, title, onClick, dataWizard, accent, loading }: Props) {
   const className = `${styles.tile}${accent ? ` ${styles.tile_accent}` : ""}`;
   const body = (
     <>
-      <span className={styles.value}>{value}</span>
+      <span className={styles.value}>
+        {loading ? <SkeletonNumber width={28} /> : value}
+      </span>
       <span className={styles.label}>{label}</span>
     </>
   );

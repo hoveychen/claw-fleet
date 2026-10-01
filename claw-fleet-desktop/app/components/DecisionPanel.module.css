@@ -752,11 +752,6 @@
   margin-bottom: 8px;
 }
 
-.analysis_loading {
-  color: var(--color-text-secondary);
-  font-style: italic;
-}
-
 /* Markdown reset inside analysis & question blocks */
 .analysis p,
 .elicitation_question_text p {
@@ -871,6 +866,11 @@
 
 .btn:hover {
   background: var(--color-bg-card-hover);
+}
+
+/* Pending-action ring placed before a button's label. */
+.btn_spinner {
+  margin-right: var(--space-1);
 }
 
 .btn_allow {

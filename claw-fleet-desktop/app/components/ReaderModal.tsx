@@ -12,6 +12,8 @@ import { normalizeSlug } from "../wikiSlug";
 import styles from "./ReaderModal.module.css";
 import { Presence } from "./Presence";
 import { useExiting } from "./Presence";
+import { Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 
 interface Props {
   /** Markdown source of the message — `messageToText`'s output, the same
@@ -77,14 +79,14 @@ export function ReaderModal({ text, title, paths, onClose }: Props) {
   // WKWebView, so a frontend-only call would do nothing at all on macOS. What
   // reaches the page is decided by the print stylesheet, which hides everything
   // except this reader's body.
-  const print = async () => {
+  const [printing, print] = usePending(async () => {
     setPrintError(false);
     try {
       await invoke("print_webview");
     } catch {
       setPrintError(true);
     }
-  };
+  });
 
   const onPublished = (doc: WikiDoc, appended: boolean) => {
     setPublishing(false);
@@ -120,11 +122,12 @@ export function ReaderModal({ text, title, paths, onClose }: Props) {
             <button
               type="button"
               className={`${styles.action} ${printError ? styles.action_failed : ""}`}
-              onClick={print}
+              onClick={() => void print()}
+              disabled={printing}
               title={printError ? t("detail.reader_print_failed") : t("detail.reader_print")}
               aria-label={t("detail.reader_print")}
             >
-              <Printer size={14} strokeWidth={1.75} />
+              {printing ? <Spinner size={12} /> : <Printer size={14} strokeWidth={1.75} />}
             </button>
             <CopyButton text={text} />
             <button

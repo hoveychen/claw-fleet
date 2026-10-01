@@ -6,6 +6,8 @@ import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plu
 import { useReportStore } from "../../store";
 import type { Lesson } from "../../types";
 import styles from "./ReportView.module.css";
+import { SkeletonList, Spinner } from "../loading";
+import { usePending } from "../../hooks/usePending";
 
 export function LessonsCard({
   date,
@@ -15,7 +17,18 @@ export function LessonsCard({
   lessons: Lesson[] | null;
 }) {
   const { t } = useTranslation();
-  const { generatingLessons, generateLessons, appendLessonToClaudeMd, managedLessons, loadManagedLessons } = useReportStore();
+  const {
+    generatingLessons,
+    generateLessons,
+    lessonsFailedDate,
+    appendLessonToClaudeMd,
+    managedLessons,
+    managedLessonsLoaded,
+    loadManagedLessons,
+  } = useReportStore();
+  // Same once-per-date trigger as the AI summary: a failed run must surface,
+  // not leave the list on its loading placeholder.
+  const failed = lessons === null && !generatingLessons && lessonsFailedDate === date;
   const triggeredRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -36,17 +49,18 @@ export function LessonsCard({
       (m) => m.sessionId === lesson.sessionId && m.content === lesson.content,
     );
 
-  const handleAdd = async (lesson: Lesson) => {
-    await appendLessonToClaudeMd(lesson);
-  };
-
   return (
     <div className={styles.section}>
       <h3 className={styles.section_title}>{t("report.lessons")}</h3>
-      {lessons === null ? (
+      {failed ? (
         <div className={styles.lessons_empty}>
-          <p>{t("report.generating")}</p>
+          <p>{t("report.lessons_failed", "经验教训生成失败")}</p>
+          <button className={styles.empty_retry_btn} onClick={() => generateLessons(date)}>
+            {t("account.retry")}
+          </button>
         </div>
+      ) : lessons === null ? (
+        <SkeletonList rows={3} rowHeight={64} />
       ) : lessons.length === 0 ? (
         <div className={styles.lessons_empty}>
           <p>{t("report.no_lessons_found")}</p>
@@ -64,18 +78,43 @@ export function LessonsCard({
                   {lesson.workspaceName} · {lesson.sessionId}
                 </div>
               </div>
-              <button
-                className={styles.lesson_add_btn}
-                onClick={() => handleAdd(lesson)}
-                disabled={added}
-              >
-                {added ? t("report.lesson_added") : t("report.add_to_claude_md")}
-              </button>
+              <LessonAddButton
+                added={added}
+                // Until the managed list answers, "added" is unknown: hold the
+                // button in a pending state instead of offering a duplicate add.
+                checking={!managedLessonsLoaded}
+                onAdd={() => appendLessonToClaudeMd(lesson)}
+              />
             </div>
             );
           })}
         </div>
       )}
     </div>
+  );
+}
+
+function LessonAddButton({
+  added,
+  checking,
+  onAdd,
+}: {
+  added: boolean;
+  checking: boolean;
+  onAdd: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [pending, add] = usePending(onAdd);
+  const busy = pending || checking;
+  return (
+    <button
+      className={styles.lesson_add_btn}
+      onClick={() => void add()}
+      disabled={added || busy}
+      aria-busy={busy || undefined}
+    >
+      {busy && !added && <Spinner size={12} />}
+      {added ? t("report.lesson_added") : t("report.add_to_claude_md")}
+    </button>
   );
 }

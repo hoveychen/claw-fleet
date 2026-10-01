@@ -32,6 +32,8 @@ import type {
 import { TaskLine, taskTip } from "./TaskLine";
 import styles from "./PlansView.module.css";
 import { Presence as ExitPresence } from "./Presence";
+import { SkeletonList, Spinner, TopProgress } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,9 +146,18 @@ export function PlansView() {
     useUIStore((s) => s.mainViewState.plans);
   const updatePlansView = useUIStore((s) => s.updatePlansView);
 
-  const [forest, setForest] = useState<PlanForest | null>(null);
+  // The forest and error are stamped with the repo they were fetched for, and
+  // only count while that repo is still selected: on a repo switch the old
+  // repo's tree must not stay on screen under the new selection (it would read
+  // as the new repo's plans), so the board drops to its skeleton instead. This
+  // also discards a late response for the previous repo.
+  const [forestState, setForestState] = useState<{ ws: string; data: PlanForest } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{ ws: string; msg: string } | null>(null);
+  const forest = forestState && forestState.ws === selectedWorkspace ? forestState.data : null;
+  const error = errorState && errorState.ws === selectedWorkspace ? errorState.msg : null;
+  const showRefreshing = useDelayedFlag(loading && forest !== null);
+  const showLoadingIcon = useDelayedFlag(loading);
   const [openChain, setOpenChain] = useState<HandoffChain | null>(null);
   // Which plan the drawer shows, and which of its items to open on arrival
   // (set when the click landed on a specific cell). Deliberately not persisted:
@@ -184,14 +195,16 @@ export function PlansView() {
   const load = useCallback(
     async (silent = false) => {
       if (!selectedWorkspace) return;
+      const ws = selectedWorkspace;
       if (!silent) setLoading(true);
       try {
-        setForest(await invoke<PlanForest>("get_plan_forest", { workspacePath: selectedWorkspace }));
-        setError(null);
+        const data = await invoke<PlanForest>("get_plan_forest", { workspacePath: ws });
+        setForestState({ ws, data });
+        setErrorState(null);
       } catch (e) {
         if (!silent) {
-          setForest(null);
-          setError(String(e));
+          setForestState(null);
+          setErrorState({ ws, msg: String(e) });
         }
       } finally {
         if (!silent) setLoading(false);
@@ -316,6 +329,7 @@ export function PlansView() {
       view="plans"
       title={t("plans.title", "计划树")}
       count={forest ? liveRoots.length : null}
+      countLoading={!forest && !error && !!selectedWorkspace}
       search={{
         value: query,
         onChange: (v) => updatePlansView({ query: v }),
@@ -324,8 +338,13 @@ export function PlansView() {
       // `actions`, not `bannerCenter`: in the column banner bannerCenter gets a
       // whole row of its own, which left this lone button stranded under the search.
       actions={
-        <button className={styles.refresh} onClick={() => void load()} title={t("plans.refresh", "刷新")}>
-          <RefreshCw size={14} strokeWidth={2} className={loading ? styles.spin : undefined} />
+        <button
+          className={styles.refresh}
+          onClick={() => void load()}
+          disabled={loading}
+          title={t("plans.refresh", "刷新")}
+        >
+          {showLoadingIcon ? <Spinner size={12} /> : <RefreshCw size={14} strokeWidth={2} />}
         </button>
       }
       secondary={
@@ -346,7 +365,10 @@ export function PlansView() {
     >
       <div className={styles.main}>
         <div className={styles.board}>
+          <TopProgress active={showRefreshing} />
           {error && <div className={styles.error}>{error}</div>}
+
+          {!error && !forest && selectedWorkspace && <SkeletonList rows={8} avatar />}
 
           {!error && forest && liveRoots.length === 0 && doneRoots.length === 0 && (
             <EmptyState

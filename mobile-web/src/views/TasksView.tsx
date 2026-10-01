@@ -18,7 +18,6 @@ import {
   List,
   MonitorSmartphone,
   Inbox,
-  Loader2,
   CreditCard,
   Radar,
   Search,
@@ -32,6 +31,8 @@ import {
 } from "lucide-react";
 import { AgentSourceIcon } from "./AgentSourceIcon";
 import { EmptyState } from "./EmptyState";
+import { SkeletonCard, Spinner } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
@@ -486,6 +487,9 @@ interface Props {
   /** Whether at least one `sessions` snapshot has arrived since connecting.
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
+  /** Link up but no agent status reported yet (App's useSettlingAgents):
+   *  `agentOnline` is still its initial `false` and must not read as offline. */
+  agentPending?: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;
   /** Display label for this device. Prop absent = only one configured, so badge and
    *  "device · directory" filter don't appear—single-device users shouldn't pay
@@ -502,6 +506,7 @@ export function TasksView({
   connected,
   agentOnline,
   sessionsLoaded,
+  agentPending = false,
   onOpenSession,
 }: Props) {
   const confirm = useConfirm();
@@ -838,17 +843,31 @@ export function TasksView({
   // (can we even get data?), then whether first snapshot arrived, then genuine "no
   // tasks". Only the last is truly empty; others are transient/actionable states with
   // own messaging and spinner.
+  // Connecting usually takes a second or two; only after a long wait does the
+  // skeleton grow the "check your network" hint.
+  const slowConnect = useDelayedFlag(all.length === 0 && !connected, 6000);
+  const listSkeleton = (
+    <div className={styles.list} role="status" aria-busy="true" aria-label={t("正在加载任务…")}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <SkeletonCard key={i} height={84} />
+      ))}
+    </div>
+  );
   if (all.length === 0) {
     if (!connected) {
       return (
-        <EmptyState
-          spin
-          icon={Loader2}
-          title={t("正在连接…")}
-          description={t("正在连接中转服务。若长时间停在这里，请检查手机网络。")}
-        />
+        <>
+          {listSkeleton}
+          {slowConnect && (
+            <div className={styles.syncingHint}>
+              {t("正在连接中转服务。若长时间停在这里，请检查手机网络。")}
+            </div>
+          )}
+        </>
       );
     }
+    // Socket up, agent status not reported yet: still loading, not offline.
+    if (!agentOnline && agentPending) return listSkeleton;
     if (!agentOnline) {
       return (
         <EmptyState
@@ -858,16 +877,7 @@ export function TasksView({
         />
       );
     }
-    if (!sessionsLoaded) {
-      return (
-        <EmptyState
-          spin
-          icon={Loader2}
-          title={t("正在加载任务…")}
-          description={t("桌面端在线，正在接收首屏快照，通常一两秒内到达。")}
-        />
-      );
-    }
+    if (!sessionsLoaded) return listSkeleton;
     return (
       <EmptyState
         icon={Inbox}
@@ -1090,14 +1100,8 @@ export function TasksView({
               disabled={busyOp === itemKey(s.deviceId, s.id)}
               onClick={() => void handleStop(s)}
             >
-              {busyOp === itemKey(s.deviceId, s.id) ? (
-                "…"
-              ) : (
-                <>
-                  <Square size={12} />
-                  {mode === "interrupt" ? t("中断") : t("停止")}
-                </>
-              )}
+              {busyOp === itemKey(s.deviceId, s.id) ? <Spinner size={12} /> : <Square size={12} />}
+              {mode === "interrupt" ? t("中断") : t("停止")}
             </button>
           )}
         </div>
@@ -1154,7 +1158,11 @@ export function TasksView({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          {searching && <span className={styles.searchSpinner} />}
+          {searching && (
+            <span className={styles.searchSpinner}>
+              <Spinner size={13} />
+            </span>
+          )}
         </div>
         <div className={styles.segmentRow}>
         <div className={styles.segment}>
@@ -1206,12 +1214,18 @@ export function TasksView({
 
       {!sessionsLoaded && all.length > 0 && (
         <div className={styles.syncingHint}>
-          <Loader2 size={12} className={styles.syncingSpin} />
+          <Spinner size={12} />
           {t("显示上次缓存，正在同步…")}
         </div>
       )}
 
-      {visible.length === 0 && (
+      {/* Full-text hits are still on their way: "no matches" would be premature. */}
+      {visible.length === 0 && searching && (
+        <div className={styles.searchPending}>
+          <Spinner size={16} label={t("搜索中…")} />
+        </div>
+      )}
+      {visible.length === 0 && !searching && (
         <EmptyState compact icon={SearchX} title={t("没有匹配的会话")} />
       )}
 

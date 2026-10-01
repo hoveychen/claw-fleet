@@ -20,6 +20,7 @@ import { AudioLines, RotateCcw, Send, Square, TriangleAlert, X } from "lucide-re
 import { t } from "../i18n";
 import { voiceErrorHint, voiceErrorText } from "../useVoiceInput";
 import { formatDuration, pressIntent, type VoiceRecorderApi } from "../useVoiceRecorder";
+import { Spinner } from "./loading";
 import styles from "./VoiceBar.module.css";
 
 /** Waveform bar count. Fixed number, CSS staggers animation phases — no need for
@@ -157,7 +158,10 @@ export function VoiceBar({ rec }: { rec: VoiceRecorderApi }) {
         >
           <X size={18} />
         </button>
-        <span className={styles.finalizing}>{t("准备中…")}</span>
+        <span className={styles.finalizing}>
+          <Spinner size={12} className={styles.waitSpinner} />
+          {t("准备中…")}
+        </span>
       </div>
     );
   }
@@ -168,7 +172,10 @@ export function VoiceBar({ rec }: { rec: VoiceRecorderApi }) {
   if (!rec.recording) {
     return (
       <div className={styles.bar} role="status">
-        <span className={styles.finalizing}>{t("整理最后一句…")}</span>
+        <span className={styles.finalizing}>
+          <Spinner size={12} className={styles.waitSpinner} />
+          {t("整理最后一句…")}
+        </span>
       </div>
     );
   }

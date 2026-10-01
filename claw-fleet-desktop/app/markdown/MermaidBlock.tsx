@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SkeletonCard } from "../components/loading";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
@@ -85,13 +86,25 @@ export function MermaidBlock({ code }: { code: string }) {
     );
   }
 
+  // First render: the chunk import plus layout takes a beat. Hold a
+  // diagram-sized box so the prose below doesn't jump when the SVG lands.
+  // A theme flip re-renders with the old SVG still on screen, so this only
+  // ever shows before the first diagram.
+  if (svg === null) {
+    return (
+      <div className={styles.diagram}>
+        <SkeletonCard height={180} />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={hostRef}
       className={styles.diagram}
       // Trusted: the SVG string comes straight out of mermaid's own sanitizing
       // renderer (securityLevel "strict"), not from the model.
-      dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
+      dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
 }

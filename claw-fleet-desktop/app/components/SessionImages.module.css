@@ -30,6 +30,18 @@
   cursor: pointer;
   line-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.thumb_skeleton {
+  position: absolute;
+  inset: 0;
+}
+
+/* Until it decodes an image has no intrinsic width; hold a square slot. */
+.thumb img.img_pending {
+  width: 72px;
+  opacity: 0;
 }
 
 .thumb:hover {

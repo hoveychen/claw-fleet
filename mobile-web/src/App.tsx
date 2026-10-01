@@ -20,6 +20,8 @@ import type { FleetTransport, TransportHandlers } from "./transport";
 import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
 import { formatRttSplit } from "./connQuality";
 import { ConnIcon, connIconKind } from "./views/ConnIcon";
+import { SkeletonNumber, Spinner, TopProgress } from "./views/loading";
+import { usePending } from "./usePending";
 import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import { HIDDEN_DISCONNECT_MS, type VisibilityState } from "./connectionPolicy";
 import { setAppBadge } from "./appBadge";
@@ -177,6 +179,55 @@ const SAME_ORIGIN_DEVICE: PairedDevice = {
  *  creating a new object on every render would cause all the destructured arrays below
  *  to change reference on every render. */
 const EMPTY_DEVICE_STATE = emptyDeviceState();
+
+/** How long after the socket comes up a still-missing agent status reads as
+ *  "not known yet" rather than "desktop offline". The relay reports the agent
+ *  right after the handshake; this only covers that gap. */
+const AGENT_SETTLE_MS = 3000;
+
+/**
+ * Devices whose socket is up but whose desktop agent has not been reported
+ * yet. `agentOnline` starts out `false`, so without this the first seconds of
+ * every connect read as "desktop offline". A device leaves the set as soon as
+ * the agent (or a sessions frame) shows up, or after AGENT_SETTLE_MS — at that
+ * point a missing agent really is offline. A connection that has already seen
+ * the agent never re-enters it: a later drop is a real report.
+ */
+function useSettlingAgents(states: DeviceStates, order: string[]): Set<string> {
+  const connectedAt = useRef(new Map<string, number>());
+  const seenAgent = useRef(new Set<string>());
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
+  const now = Date.now();
+  const settling = new Set<string>();
+  let nextExpiry = Infinity;
+  for (const id of order) {
+    const s = states[id];
+    if (!s?.connected) {
+      connectedAt.current.delete(id);
+      seenAgent.current.delete(id);
+      continue;
+    }
+    if (s.agentOnline || s.sessionsLoaded) seenAgent.current.add(id);
+    if (seenAgent.current.has(id)) continue;
+    let since = connectedAt.current.get(id);
+    if (since === undefined) {
+      since = now;
+      connectedAt.current.set(id, since);
+    }
+    const left = since + AGENT_SETTLE_MS - now;
+    if (left > 0) {
+      settling.add(id);
+      nextExpiry = Math.min(nextExpiry, left);
+    }
+  }
+  // Re-render when the earliest grace window runs out, so it ends on its own.
+  useEffect(() => {
+    if (!Number.isFinite(nextExpiry)) return;
+    const timer = window.setTimeout(rerender, nextExpiry + 20);
+    return () => window.clearTimeout(timer);
+  }, [nextExpiry]);
+  return settling;
+}
 
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // Subscribe to language changes. Re-rendering the App root propagates the change
@@ -482,7 +533,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   useEffect(() => {
     return onShareReceived((share) => {
       void (async () => {
-        const files = await sharedFilesToFiles(share.files);
+        // Reading the shared files can take a moment (large images); show the
+        // bar so the share does not look ignored until the sheet appears.
+        setShareLoading(true);
+        let files: File[];
+        try {
+          files = await sharedFilesToFiles(share.files);
+        } finally {
+          setShareLoading(false);
+        }
         // Files that became real attachments don't need naming in the prose —
         // the chips already show them. Only the ones we failed to read stay in
         // the text, so the user still knows something came along.
@@ -501,6 +560,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   const [tab, setTab] = useState<Tab>("decisions");
+  /** An Android share is being read into attachments before the sheet opens. */
+  const [shareLoading, setShareLoading] = useState(false);
   /** Whether the device switcher dropdown in the header is open. */
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   /// Decision card to focus when notification is clicked. The nonce ensures clicking
@@ -604,12 +665,21 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   /** The indicator light on each line of the device switcher. It shows **this device's**
    *  connectivity, opposite from the header's "best of all" light — the switcher's purpose
    *  is to let users see which device dropped. */
+  const settlingAgents = useSettlingAgents(states, deviceOrder);
   const deviceStatusOf = useCallback(
     (id: string) => {
       const s = states[id];
-      return s ? { connected: s.connected, agentOnline: s.agentOnline } : undefined;
+      return s
+        ? {
+            connected: s.connected,
+            agentOnline: s.agentOnline,
+            agentPending: settlingAgents.has(id),
+            // A rejected key will not come back by retrying; everything else does.
+            retrying: !s.connected && !s.authError,
+          }
+        : undefined;
     },
-    [states],
+    [states, settlingAgents],
   );
   // The three values in the header show the **overall** state: one device being offline
   // shouldn't show offline for the whole page, and perceived congestion is the worst
@@ -633,7 +703,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // is downgraded to title + aria-label (still accessible to screen readers and long-press,
   // just not taking up layout space).
 
-  const connKind = connIconKind(connected, agentOnline, congestion);
+  // Socket up, agent not reported yet: still connecting, not "desktop offline".
+  const agentPending =
+    connected && !agentOnline && deviceOrder.some((id) => settlingAgents.has(id));
+  const connKind = agentPending ? "connecting" : connIconKind(connected, agentOnline, congestion);
   const connText =
     connKind === "connecting"
       ? t("连接中…")
@@ -868,6 +941,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     setPushOptedOut(false, ids);
     setPushMuted(Object.fromEntries(ids.map((id) => [id, false])));
   }, [client, relayBase, activeDeviceId, runtimeDevices]);
+  const [enablingPush, enablePushFromBanner] = usePending(handleEnablePush);
 
   /** Master toggle OFF: unsubscribe all devices. If we only unsubscribed the current
    *  one, the others would keep pushing — but the user just said "stop notifications". */
@@ -1075,9 +1149,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <div className={styles.gateLogo}>F</div>
         <h1>{t("Fleet 移动端")}</h1>
         <p>
-          {idbProbed
-            ? t("扫描桌面端 Fleet「移动端」板块里的二维码完成配对。")
-            : t("正在恢复配对…")}
+          {idbProbed ? (
+            t("扫描桌面端 Fleet「移动端」板块里的二维码完成配对。")
+          ) : (
+            <>
+              <Spinner size={12} /> {t("正在恢复配对…")}
+            </>
+          )}
         </p>
         {pairEntries && (
           <>
@@ -1154,6 +1232,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     ))}
     <div className={styles.app}>
       <header className={styles.header}>
+        <TopProgress active={shareLoading} />
         {/* Title position = current device. With multiple devices registered, it's a
             switcher; with one, it's just that device's name. */}
 
@@ -1166,6 +1245,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onSwitch={switchDevice}
           onManage={() => setTab("more")}
         />
+        {/* Agent online but the first `today_usage` reply not in yet: hold the
+            pill's place instead of popping it in and shifting the header. */}
+        {!todayUsage && agentOnline && (
+          <span className={styles.usage}>
+            <SkeletonNumber width={40} />
+            <SkeletonNumber width={28} />
+          </span>
+        )}
         {todayUsage && (
           <span
             className={styles.usage}
@@ -1182,12 +1269,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
         <span
           className={styles.connIcon}
-          data-kind={connKind}
+          data-kind={agentPending ? "agent-pending" : connKind}
           role="img"
           aria-label={connText}
           title={rttSplit ? `${connText} · ${formatRttSplit(rttSplit, t)}` : connText}
         >
-          <ConnIcon kind={connKind} />
+          {agentPending ? <Spinner size={14} /> : <ConnIcon kind={connKind} />}
         </span>
       </header>
 
@@ -1241,7 +1328,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           ) : (
             <>
               <span>{t("开启通知，第一时间收到新决策卡。")}</span>
-              <button className={styles.pushButton} onClick={handleEnablePush}>
+              <button
+                className={styles.pushButton}
+                onClick={() => void enablePushFromBanner()}
+                disabled={enablingPush}
+                aria-busy={enablingPush || undefined}
+              >
+                {enablingPush && <Spinner size={12} className={styles.pushSpinner} />}
                 {t("开启")}
               </button>
             </>
@@ -1270,6 +1363,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             connected={connected}
             agentOnline={agentOnline}
             decisionsLoaded={decisionsLoaded}
+            agentPending={agentPending}
             workspaceOf={workspaceOf}
             onAnswered={markAnswered}
             onOpenSession={openSessionRoot}
@@ -1285,6 +1379,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             connected={connected}
             agentOnline={agentOnline}
             sessionsLoaded={sessionsLoaded}
+            agentPending={agentPending}
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
           />
         ) : tab === "artifacts" ? (
@@ -1319,6 +1414,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             pushOptedOut={pushOptedOut}
             onEnablePush={handleEnablePush}
             onDisablePush={handleDisablePush}
+            agentPending={agentPending}
             onOpenRepo={() => setShowRepo(true)}
             onOpenPlans={() => setShowPlans(true)}
             onOpenWiki={() => setShowWiki(true)}
@@ -1491,6 +1587,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               onTargetDevice={setNewSessionDeviceId}
               initialFiles={sharedFiles}
               relayReady={states[newSessionTargetId]?.connected ?? false}
+              recentsPending={(() => {
+                const s = states[newSessionTargetId];
+                return (
+                  !!s &&
+                  s.connected &&
+                  !s.sessionsLoaded &&
+                  (s.agentOnline || settlingAgents.has(newSessionTargetId))
+                );
+              })()}
               onClose={() => {
                 setShowNewSession(false);
                 // Next open goes back to "whichever device the current scope names",

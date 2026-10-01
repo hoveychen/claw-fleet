@@ -47,6 +47,8 @@ import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
 import { Presence } from "./Presence";
+import { Skeleton, SkeletonList, Spinner, loadingStyles } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 // ── Types (mirror claw-fleet-core/src/file_explorer.rs) ─────────────────────
 
@@ -124,6 +126,7 @@ function parentDir(p: string): string {
 export function FilesView() {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
+  const scanReady = useSessionsStore((s) => s.scanReady);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
   const fileNav = useUIStore((s) => s.fileNav);
@@ -131,8 +134,13 @@ export function FilesView() {
   // Directories the user added by hand or cloned. Backend state, not UI state:
   // they widen the explorer's permission gate, and a repo with no sessions is
   // only browsable because the backend recorded it. Fetched on mount so a
-  // cloned repo's card is still here after a restart.
-  const [extraPaths, setExtraPaths] = useState<string[]>([]);
+  // cloned repo's card is still here after a restart. `null` until the first
+  // fetch settles, so the list can tell "not loaded" from "none added".
+  const [extraPaths, setExtraPaths] = useState<string[] | null>(null);
+  // A path the backend is registering / dropping right now. The card list only
+  // changes once the backend answers, so these stand in for it meanwhile.
+  const [addingPath, setAddingPath] = useState<string | null>(null);
+  const [removingPath, setRemovingPath] = useState<string | null>(null);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setSelected = (selectedWorkspace: string | null) =>
     updateMainViewState("files", { selectedWorkspace });
@@ -161,10 +169,13 @@ export function FilesView() {
 
   // Drop a hand-added path (zero-count card) back out of the session view.
   const removePath = async (path: string) => {
+    setRemovingPath(path);
     try {
       setExtraPaths(await invoke<string[]>("remove_browse_path", { path }));
     } catch {
       return;
+    } finally {
+      setRemovingPath(null);
     }
     if (selected === path) setSelected(null);
   };
@@ -199,7 +210,7 @@ export function FilesView() {
     });
     // Only hand-added dirs (zero session count, tracked in extraPaths) can be
     // removed — session-derived cards reappear on the next scan anyway.
-    if (ws.count === 0 && extraPaths.includes(ws.path)) {
+    if (ws.count === 0 && (extraPaths ?? []).includes(ws.path)) {
       items.push({
         id: "remove",
         label: t("files.remove_path", "从列表移除"),
@@ -254,11 +265,15 @@ export function FilesView() {
       (a, b) => b.count - a.count || a.name.localeCompare(b.name),
     );
     // Hand-added dirs the session list doesn't already cover, newest first.
-    const extras = extraPaths
+    const extras = (extraPaths ?? [])
       .filter((p) => !byPath.has(p))
       .map((p) => ({ path: p, name: basename(p), count: 0 }));
     return [...extras, ...derived];
   }, [sessions, extraPaths]);
+
+  // Nothing to list yet and at least one source still in flight: neither the
+  // session scan nor the hand-added paths can be read as "no workspaces".
+  const listLoading = workspaces.length === 0 && (!scanReady || extraPaths === null);
 
   // Any selected path resolves to a browsable workspace even when it isn't a
   // card — a raw worktree path from agent prose (the list only keeps repo
@@ -278,10 +293,13 @@ export function FilesView() {
   // once the backend has accepted it — otherwise the card opens onto the very
   // "not a known session workspace" error this replaced.
   const addPath = async (path: string) => {
+    setAddingPath(path);
     try {
       setExtraPaths(await invoke<string[]>("add_browse_path", { path }));
     } catch {
       return;
+    } finally {
+      setAddingPath(null);
     }
     setSelected(path);
   };
@@ -326,18 +344,35 @@ export function FilesView() {
       }
       secondary={
         <div className={styles.list_pane}>
-          {workspaces.length === 0 && (
-            <EmptyState
-              icon={<FolderOpen size={28} strokeWidth={1.5} />}
-              title={t("files.no_workspaces_title")}
-              subtitle={t("files.no_workspaces_subtitle")}
-            />
+          {listLoading ? (
+            <SkeletonList rows={8} />
+          ) : (
+            workspaces.length === 0 &&
+            !addingPath && (
+              <EmptyState
+                icon={<FolderOpen size={28} strokeWidth={1.5} />}
+                title={t("files.no_workspaces_title")}
+                subtitle={t("files.no_workspaces_subtitle")}
+              />
+            )
           )}
           <div className={styles.card_list}>
+            {addingPath && !workspaces.some((w) => w.path === addingPath) && (
+              <div className={`${styles.card} ${loadingStyles.stale}`} aria-busy="true">
+                <div className={styles.card_body}>
+                  <div className={styles.card_title}>{basename(addingPath)}</div>
+                  <div className={styles.card_hook}>{addingPath}</div>
+                </div>
+                <Spinner size={12} label={t("loading")} />
+              </div>
+            )}
             {workspaces.map((ws) => (
               <button
                 key={ws.path}
-                className={`${styles.card} ${selected === ws.path ? styles.card_active : ""}`}
+                className={`${styles.card} ${selected === ws.path ? styles.card_active : ""} ${
+                  removingPath === ws.path ? loadingStyles.stale : ""
+                }`}
+                aria-busy={removingPath === ws.path || undefined}
                 onClick={() => setSelected(ws.path)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -349,7 +384,9 @@ export function FilesView() {
                   <div className={styles.card_title}>{ws.name}</div>
                   <div className={styles.card_hook}>{ws.path}</div>
                 </div>
-                {(runningCounts.get(ws.path) ?? 0) > 0 && (
+                {removingPath === ws.path ? (
+                  <Spinner size={12} label={t("loading")} />
+                ) : (runningCounts.get(ws.path) ?? 0) > 0 && (
                   <span
                     className={fileStyles.ws_badge}
                     title={t("files.proc_running")}
@@ -460,6 +497,10 @@ function WorkspaceExplorer({
   // of them want it and neither owns it: it is a property of the click, and
   // without it the page can only name the one guess it happened to open.
   const [navTried, setNavTried] = useState<string[]>([]);
+  // The suffix search behind a failed reveal, while it runs. A clicked path
+  // otherwise gets no feedback until the backend walk comes back.
+  const [revealSearch, setRevealSearch] = useState<string | null>(null);
+  const showRevealSearch = useDelayedFlag(revealSearch !== null);
 
   const procCount = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace).length,
@@ -583,6 +624,7 @@ function WorkspaceExplorer({
     async (relPath: string) => {
       if (!activeRoot) return;
       let candidates: string[] = [];
+      setRevealSearch(relPath);
       try {
         candidates = await invoke<string[]>("find_explorer_path", {
           workspace,
@@ -591,6 +633,9 @@ function WorkspaceExplorer({
         });
       } catch {
         candidates = []; // treat a failed search as "found nothing"
+      } finally {
+        // A newer search may have started meanwhile; only clear our own.
+        setRevealSearch((cur) => (cur === relPath ? null : cur));
       }
       const plan = planRevealFallback(relPath, candidates);
       const prefix = activeRoot.path.endsWith("/") ? activeRoot.path : `${activeRoot.path}/`;
@@ -709,6 +754,17 @@ function WorkspaceExplorer({
         />
       ) : (
         <>
+          {roots === null && (
+            <div
+              className={fileStyles.root_pills}
+              role="status"
+              aria-busy="true"
+              aria-label={t("loading")}
+            >
+              <Skeleton inline width={88} height={20} radius="var(--radius-pill)" />
+              <Skeleton inline width={120} height={20} radius="var(--radius-pill)" />
+            </div>
+          )}
           {roots && roots.length > 1 && (
             <div className={fileStyles.root_pills}>
               {roots.map((root) => (
@@ -740,7 +796,7 @@ function WorkspaceExplorer({
           <div className={skillStyles.detail_split}>
             <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
               <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
-              {roots === null && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
+              {roots === null && <SkeletonList rows={10} meta={false} />}
               {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
               {activeRoot && (
                 <FileTree
@@ -770,6 +826,11 @@ function WorkspaceExplorer({
                   tried={navTried}
                   onClose={() => setExternalPath(null)}
                 />
+              ) : showRevealSearch && revealSearch ? (
+                <div className={fileStyles.reveal_searching} role="status">
+                  <Spinner size={12} />
+                  {t("files.reveal_searching", "正在仓库里查找 {{path}}…", { path: revealSearch })}
+                </div>
               ) : activeFile && activeRoot ? (
                 <FilePreview file={activeFile} load={readFile} />
               ) : (
@@ -984,6 +1045,11 @@ function GitStatusBar({
 }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<GitStatus | null>(null);
+  // False until the first git_status settles: before that a null `status`
+  // means "not asked yet", not "not a git repo".
+  const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const showRefreshing = useDelayedFlag(refreshing);
   const [busy, setBusy] = useState<null | "push" | "pull">(null);
   const [confirm, setConfirm] = useState<null | "push" | "pull">(null);
   const [opMsg, setOpMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -991,9 +1057,14 @@ function GitStatusBar({
   const [showFiles, setShowFiles] = useState(false);
 
   const refresh = useCallback(() => {
+    setRefreshing(true);
     invoke<GitStatus>("git_status", { workspace, root })
       .then(setStatus)
-      .catch(() => setStatus(null));
+      .catch(() => setStatus(null))
+      .finally(() => {
+        setLoaded(true);
+        setRefreshing(false);
+      });
   }, [workspace, root]);
 
   useEffect(() => {
@@ -1024,6 +1095,19 @@ function GitStatusBar({
     },
     [workspace, root, refresh, t],
   );
+
+  // First fetch in flight: hold the bar's place with chip-shaped placeholders
+  // so it doesn't pop in and push the tree down.
+  if (!loaded) {
+    return (
+      <div className={fileStyles.scm_bar} role="status" aria-busy="true" aria-label={t("loading")}>
+        <Skeleton inline width={180} height={18} radius="var(--radius-pill)" />
+        <Skeleton inline width={64} height={18} radius="var(--radius-pill)" />
+        <div className={fileStyles.scm_spacer} />
+        <Skeleton inline width={150} height={22} radius="var(--radius-pill)" />
+      </div>
+    );
+  }
 
   // Nothing to show for non-git roots (plain directories).
   if (!status || !status.isGit) return null;
@@ -1095,7 +1179,7 @@ function GitStatusBar({
       <div className={fileStyles.scm_actions}>
         <button
           className={fileStyles.scm_btn}
-          disabled={busy !== null}
+          disabled={busy !== null || refreshing}
           onClick={() => {
             setOpMsg(null);
             refresh();
@@ -1103,7 +1187,7 @@ function GitStatusBar({
           title={t("files.scm.refresh")}
           aria-label={t("files.scm.refresh")}
         >
-          <RefreshCw size={12} strokeWidth={1.5} />
+          {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={12} strokeWidth={1.5} />}
         </button>
         <button
           className={fileStyles.scm_btn}
@@ -1111,7 +1195,7 @@ function GitStatusBar({
           onClick={() => setConfirm("pull")}
           title={t("files.scm.pull")}
         >
-          <ArrowDown size={12} strokeWidth={1.5} />
+          {busy === "pull" ? <Spinner size={12} /> : <ArrowDown size={12} strokeWidth={1.5} />}
           {busy === "pull" ? t("files.scm.pulling") : t("files.scm.pull")}
         </button>
         <button
@@ -1120,7 +1204,7 @@ function GitStatusBar({
           onClick={() => setConfirm("push")}
           title={t("files.scm.push")}
         >
-          <Upload size={12} strokeWidth={1.5} />
+          {busy === "push" ? <Spinner size={12} /> : <Upload size={12} strokeWidth={1.5} />}
           {busy === "push" ? t("files.scm.pushing") : t("files.scm.push")}
         </button>
       </div>

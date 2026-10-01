@@ -50,6 +50,7 @@ import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { DetailPane } from "./sessionStatusPills";
 import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
 import { WatchRing } from "./WatchRing";
+import { SkeletonNumber, Spinner } from "./loading";
 import styles from "./SessionSheet.module.css";
 
 /** A clickable row: name on the left, current readout on the right.
@@ -77,6 +78,8 @@ interface PaneRow {
   /** Readout gets accent emphasis — only for "it's waiting on you" cases. */
   hot?: boolean;
   progress?: { done: number; total: number };
+  /** The readout is being fetched right now: a placeholder, not silence. */
+  loading?: boolean;
 }
 
 /** A text row to copy. Part of the same batch as the old ☰ menu items, following
@@ -210,6 +213,8 @@ export function SessionSheet({
     label: t("追问"),
     value:
       explainCount === undefined ? undefined : explainCount === 0 ? "empty" : t("{0} 条", explainCount),
+    // The detail page is reading the list right now (only possible with a client).
+    loading: explainCount === undefined && client !== null,
   });
   progressRows.push({
     pane: "handoff",
@@ -278,6 +283,10 @@ export function SessionSheet({
       {r.value === "empty" ? (
         <span className={styles.rowValue} data-empty="">
           {t("无")}
+        </span>
+      ) : r.loading ? (
+        <span className={styles.rowValue}>
+          <SkeletonNumber width={32} />
         </span>
       ) : (
         r.value !== undefined && (
@@ -371,7 +380,13 @@ export function SessionSheet({
                 disabled={stopping}
                 onClick={() => void doStop()}
               >
-                <Square size={14} className={styles.stopIcon} />
+                {stopping ? (
+                  <span className={styles.stopIcon}>
+                    <Spinner size={14} />
+                  </span>
+                ) : (
+                  <Square size={14} className={styles.stopIcon} />
+                )}
                 <span className={styles.stopText}>
                   <span className={styles.stopLabel}>
                     {mode === "interrupt" ? t("中断当前回合") : t("停止这个会话")}
@@ -385,7 +400,6 @@ export function SessionSheet({
                       : t("结束这个进程，之后要用恢复命令才能继续")}
                   </span>
                 </span>
-                {stopping && <span className={styles.stopBusy}>…</span>}
               </button>
             )}
 

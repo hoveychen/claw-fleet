@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -9,6 +9,7 @@ import { useModelCatalog } from "../../useModelCatalog";
 import { canResumeSession, resumeErrorText, resumeSession } from "../sessionResume";
 import { ProcTerminal } from "../ProcTerminal";
 import { ApiErrorBlock } from "./ApiErrorBlock";
+import { Skeleton } from "../loading";
 import styles from "./ApiErrorBlock.module.css";
 
 /** What a failed-turn card needs to know about the session it sits in. Passed
@@ -59,6 +60,17 @@ export function ApiErrorActions({
   const harness = ctx?.agentSource === "codex" ? "codex" : "claude";
   const models = useMemo(() => modelChoicesFor(catalog, harness), [catalog, harness]);
   const cliHint = cliUpgradeFor(catalog, harness);
+  // `useModelCatalog` answers `[]` both before it loads and when the load
+  // failed, so the picker cannot tell the two apart. The catalog is a local
+  // IPC read that lands in milliseconds; past this deadline an empty list is
+  // taken as final rather than leaving the placeholder up for good.
+  const [catalogGaveUp, setCatalogGaveUp] = useState(false);
+  const waitingForModels = picking && models.length === 0 && !catalogGaveUp;
+  useEffect(() => {
+    if (!waitingForModels) return;
+    const id = setTimeout(() => setCatalogGaveUp(true), 8000);
+    return () => clearTimeout(id);
+  }, [waitingForModels]);
 
   /** Run a resume, reporting whatever the backend said if it refused. */
   const fire = useCallback(
@@ -148,7 +160,17 @@ export function ApiErrorActions({
         <div className={styles.picker} data-testid="api-error-model-picker">
           <span className={styles.pickerLabel}>{t("detail.api_error.pick_model", "换成")}</span>
           {models.length === 0 ? (
-            <span className={styles.note}>{t("detail.api_error.no_models", "模型列表加载中…")}</span>
+            catalogGaveUp ? (
+              <span className={styles.note}>
+                {t("detail.api_error.models_unavailable", "读不到模型列表")}
+              </span>
+            ) : (
+              <span role="status" aria-busy="true" className={styles.pickerSkeleton}>
+                {[64, 84, 72].map((w) => (
+                  <Skeleton key={w} inline width={w} height={22} radius="var(--radius-pill)" />
+                ))}
+              </span>
+            )
           ) : (
             models.map((m) => (
               <button

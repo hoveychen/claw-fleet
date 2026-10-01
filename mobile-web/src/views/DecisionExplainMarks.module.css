@@ -127,17 +127,16 @@
   font-weight: 600;
   padding: 0 12px;
   border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .followSend:disabled {
   opacity: 0.5;
 }
 
-.waiting,
 .error {
   margin-top: 6px;
   font-size: var(--t-aux, 12px);
-  color: var(--color-text-dim);
-}
-.error {
   color: var(--color-error);
 }

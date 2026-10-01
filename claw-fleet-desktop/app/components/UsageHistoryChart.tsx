@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { useSessionsStore } from "../store";
 import styles from "./UsageHistoryChart.module.css";
+import { SkeletonCard } from "./loading";
 
 // Mirrors claw_fleet_core::account::UsageHistoryPoint (snake_case on the wire,
 // like the rest of the account/* types). Utilization values are 0–1 fractions.
@@ -268,6 +269,9 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
   const [threshold, setThreshold] = useState<number>(loadThreshold);
   // `now` advances on each refresh so the 24h window and markers stay current.
   const [now, setNow] = useState<number>(() => Date.now());
+  // False until the first fetch settles, so the chart shows a placeholder
+  // rather than flashing "no history" before anything was asked.
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -279,10 +283,13 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
           if (!cancelled) {
             setPoints(rows);
             setNow(toMs);
+            setLoaded(true);
           }
         })
         .catch(() => {
           /* offline / not logged in — keep the last good series */
+          // A failed first fetch settles into the empty state, not a loader.
+          if (!cancelled) setLoaded(true);
         });
     };
     fetchHistory();
@@ -361,7 +368,9 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
         </label>
       </div>
 
-      {!hasData ? (
+      {!loaded ? (
+        <SkeletonCard height={height} />
+      ) : !hasData ? (
         <p className={styles.empty}>{t("account.no_history")}</p>
       ) : (
         <ResponsiveContainer width="100%" height={height}>

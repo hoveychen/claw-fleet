@@ -6,6 +6,7 @@ import { History } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import styles from "./SkillHistory.module.css";
+import { SkeletonList, SkeletonText } from "./loading";
 
 interface Props {
   jsonlPath: string;
@@ -30,21 +31,34 @@ interface DetailState {
 
 export function SkillHistory({ jsonlPath, mode = "inline" }: Props) {
   const { t } = useTranslation();
-  const [history, setHistory] = useState<SkillInvocation[]>([]);
+  // null until the first answer: "no skills used" must not show for a history
+  // that has not been read yet.
+  const [history, setHistory] = useState<SkillInvocation[] | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<string, DetailState>>({});
   const skillIndexRef = useRef<Map<string, SkillItem> | null>(null);
 
   useEffect(() => {
+    let stale = false;
+    setHistory(null);
     invoke<SkillInvocation[]>("get_skill_history", { jsonlPath })
-      .then(setHistory)
-      .catch(() => {});
+      .then((h) => {
+        if (!stale) setHistory(h ?? []);
+      })
+      // A failed read has no error surface here; it settles to the empty state
+      // rather than leaving a skeleton up for good.
+      .catch(() => {
+        if (!stale) setHistory([]);
+      });
+    return () => {
+      stale = true;
+    };
   }, [jsonlPath]);
 
   const groups = useMemo(() => {
     const main: { item: SkillInvocation; idx: number }[] = [];
     const sub: { item: SkillInvocation; idx: number }[] = [];
-    history.forEach((item, idx) => {
+    (history ?? []).forEach((item, idx) => {
       (item.isSubagent ? sub : main).push({ item, idx });
     });
     return { main, sub };
@@ -116,6 +130,17 @@ export function SkillHistory({ jsonlPath, mode = "inline" }: Props) {
       setExpanded(idx);
       loadDetail(skill);
     }
+  }
+
+  if (history === null) {
+    // Inline mode keeps its self-hiding contract: most sessions have no skill
+    // history, so a placeholder there would be chrome that then vanishes.
+    if (mode === "inline") return null;
+    return (
+      <div className={styles.root}>
+        <SkeletonList rows={6} meta={false} rowHeight={28} />
+      </div>
+    );
   }
 
   if (history.length === 0) {
@@ -197,9 +222,7 @@ function Section({ label, entries, expanded, details, onToggle, t }: SectionProp
               {isOpen && (
                 <div className={styles.detail}>
                   {!detail || detail.loading ? (
-                    <div className={styles.detail_loading}>
-                      {t("skill_history.loading_detail")}
-                    </div>
+                    <SkeletonText lines={4} />
                   ) : detail.error ? (
                     <div className={styles.detail_error}>{detail.error}</div>
                   ) : (

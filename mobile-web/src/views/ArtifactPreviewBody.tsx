@@ -13,10 +13,10 @@
 import { Suspense, lazy } from "react";
 import ReactMarkdown from "react-markdown";
 
-import { t } from "../i18n";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { isOfficePreview, type PreviewKind } from "../artifacts";
+import { SkeletonCard } from "./loading";
 import styles from "./ArtifactsView.module.css";
 import mdStyles from "./markdownBody.module.css";
 
@@ -91,7 +91,7 @@ export function PreviewBody({
   if (kind === "text" && text !== null) return <pre className={styles.textPre}>{text}</pre>;
   if (isOfficePreview(kind) && blob !== null) {
     return (
-      <Suspense fallback={<div className={styles.noPreviewHint}>{t("加载中…")}</div>}>
+      <Suspense fallback={<SkeletonCard className={styles.stageSkeleton} height="100%" />}>
         <OfficePreview kind={kind} blob={blob} />
       </Suspense>
     );

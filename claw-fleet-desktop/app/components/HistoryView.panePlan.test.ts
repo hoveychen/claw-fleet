@@ -99,10 +99,15 @@ describe("panePlan", () => {
   });
 
   // Before the first scan lands every id looks orphaned. Accusing a session of
-  // being missing then would flash the notice on every cold start.
-  it("holds the resting state until the first scan lands", () => {
+  // being missing then would flash the notice on every cold start — and the
+  // composer it used to fall back to flashed "new session" instead.
+  it("holds a loading placeholder until the first scan lands", () => {
     expect(
       plan({ openId: "s1", scanReady: false, decisions: [card("c1", "s1")] }),
-    ).toEqual({ kind: "resting" });
+    ).toEqual({ kind: "loading" });
+  });
+
+  it("keeps the composer with nothing open, scan or no scan", () => {
+    expect(plan({ scanReady: false })).toEqual({ kind: "resting" });
   });
 });

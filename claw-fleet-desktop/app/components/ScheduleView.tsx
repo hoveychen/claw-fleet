@@ -8,6 +8,8 @@ import { SessionOptionPills } from "./SessionOptionPills";
 import { agentToolsForSources, toolForAgentSource, type SourceInfo } from "../modelChoices";
 import { useUIStore, useSessionsStore } from "../store";
 import styles from "./ScheduleView.module.css";
+import { SkeletonList, Spinner } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 // ── Create shortcut helpers ──────────────────────────────────────────────────
 // The "Create" button is a shortcut, not a form: the user only picks a time, then
@@ -189,8 +191,22 @@ export function ScheduleView() {
     return () => clearInterval(id);
   }, [load]);
 
+  // Manual refresh only: the 8s poll stays silent.
+  const [refreshing, setRefreshing] = useState(false);
+  const showRefreshing = useDelayedFlag(refreshing);
+  const refresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load, refreshing]);
+
   const cancel = useCallback(
     async (task: FutureTask) => {
+      if (cancelling.has(task.id)) return;
       setCancelling((prev) => new Set(prev).add(task.id));
       try {
         await invoke(task.kind === "loop" ? "cancel_loop" : "cancel_schedule", {
@@ -205,7 +221,7 @@ export function ScheduleView() {
         });
       }
     },
-    [load],
+    [cancelling, load],
   );
 
   // "Run Now": open a pre-filled new-session draft on the task page, seeded
@@ -306,8 +322,13 @@ export function ScheduleView() {
             <Plus size={14} strokeWidth={2.4} />
             {t("schedule.create", "新建")}
           </button>
-          <button className={styles.refresh} onClick={load} title={t("schedule.refresh", "刷新")}>
-            <RefreshCw size={14} strokeWidth={2} />
+          <button
+            className={styles.refresh}
+            onClick={refresh}
+            disabled={refreshing}
+            title={t("schedule.refresh", "刷新")}
+          >
+            {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={14} strokeWidth={2} />}
           </button>
         </div>
       }
@@ -334,6 +355,7 @@ export function ScheduleView() {
         />
       )}
       <div className={styles.list}>
+        {!loaded && <SkeletonList rows={6} avatar />}
         {loaded && tasks.length === 0 && (
           <EmptyState
             icon={<CalendarClock size={28} strokeWidth={1.5} />}
@@ -488,7 +510,7 @@ function EditModal({
   const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
-    if (!prompt.trim() || !fireLocal) return;
+    if (saving || !prompt.trim() || !fireLocal) return;
     setSaving(true);
     setError(null);
     const update: ScheduleUpdate = {
@@ -569,6 +591,7 @@ function EditModal({
             onClick={save}
             disabled={saving || !prompt.trim() || !fireLocal}
           >
+            {saving && <Spinner size={12} className={styles.btn_spinner} />}
             {saving ? t("schedule.saving", "保存中") : t("schedule.save", "保存")}
           </button>
         </div>
@@ -804,7 +827,7 @@ function TaskRow({
           onClick={onCancel}
           title={t("schedule.cancel", "取消")}
         >
-          <Trash2 size={13} strokeWidth={2} />
+          {cancelling ? <Spinner size={12} /> : <Trash2 size={13} strokeWidth={2} />}
           {cancelling ? t("schedule.cancelling", "取消中") : t("schedule.cancel", "取消")}
         </button>
       </div>

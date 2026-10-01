@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { CodexTokenBreakdown } from "../types";
 import styles from "./TokenSpendPanel.module.css";
+import { TokenPanelSkeleton } from "./TokenSpendPanel";
 
 interface Props {
   jsonlPath: string;
@@ -54,8 +55,7 @@ export function CodexTokenPanel({ jsonlPath }: Props) {
     };
   }, [jsonlPath]);
 
-  if (loading)
-    return <div className={styles.empty}>{t("codex_token.loading") || "Loading…"}</div>;
+  if (loading) return <TokenPanelSkeleton />;
   if (error) return <div className={styles.empty}>{error}</div>;
   if (!data) return <div className={styles.empty}>{t("codex_token.no_data") || "No data"}</div>;
 

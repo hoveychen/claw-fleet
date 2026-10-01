@@ -1,11 +1,12 @@
 import { LoaderCircle, Quote } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExplainRecord } from "../explainApi";
 import { cacheHitRatio, costLabel, groupExplainThreads } from "../selectionExplain";
 import type { DecisionExplain } from "./DecisionExplainMarks";
 import { TextBlock } from "./blocks/TextBlock";
+import { Spinner } from "./loading";
 import styles from "./DecisionExplainColumn.module.css";
 
 /**
@@ -127,6 +128,12 @@ function ExplainFollowUp({
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState("");
+  // This form sent the ask now in flight (`busy` is shared by every thread,
+  // so only the one that asked should spin).
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    if (!busy) setSent(false);
+  }, [busy]);
   if (!canAsk) return null;
   return (
     <form
@@ -135,6 +142,7 @@ function ExplainFollowUp({
         e.preventDefault();
         const q = draft.trim();
         if (!q || busy) return;
+        setSent(true);
         onSubmit(q);
         setDraft("");
       }}
@@ -146,7 +154,13 @@ function ExplainFollowUp({
         placeholder={t("detail.explain_follow_up_placeholder", "继续追问这段话…")}
         aria-label={t("detail.explain_follow_up", "继续追问")}
       />
-      <button type="submit" className={styles.follow_send} disabled={busy || !draft.trim()}>
+      <button
+        type="submit"
+        className={styles.follow_send}
+        disabled={busy || !draft.trim()}
+        aria-busy={(sent && busy) || undefined}
+      >
+        {sent && busy && <Spinner size={10} />}
         {t("detail.explain_send", "发送")}
       </button>
     </form>

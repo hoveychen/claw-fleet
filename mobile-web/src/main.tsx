@@ -10,6 +10,7 @@ import { initWakeLock } from "./wakeLock";
 import { installNativeWakeLock } from "./wakeLockNative";
 import { lockZoom } from "./lockZoom";
 import { ConfirmProvider } from "./confirmDialog";
+import { Skeleton, SkeletonCard } from "./views/loading";
 import "./index.css";
 
 initTheme();
@@ -40,12 +41,33 @@ if (!cloudMode && "serviceWorker" in navigator) {
 // Rollup must drop the other branch. When routed through hostMode's const layer it won't drop —
 // verified: dist-webui still outputs a relay-*.js chunk (can find resolveRelayBase and
 // fleet-relay/hkdf/v1). IS_WEBUI works fine elsewhere, only this spot is sensitive to folding.
+const root = createRoot(document.getElementById("root")!);
+
+// Cold start: the transport chunk below is a top-level await, and until it lands
+// #root would stay blank. Paint the app's rough shape (header + a few cards)
+// meanwhile; the real tree replaces it in the same root.
+root.render(
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      padding: "calc(10px + var(--safe-top, 0px)) 12px 12px",
+    }}
+  >
+    <Skeleton height={24} width="40%" style={{ marginBottom: 8 }} />
+    {[0, 1, 2].map((i) => (
+      <SkeletonCard key={i} height={96} />
+    ))}
+  </div>,
+);
+
 const { makeTransport }: { makeTransport: TransportFactory } =
   import.meta.env.VITE_FLEET_HOST === "webui"
     ? await import("./transportWebui")
     : await import("./transportRelay");
 
-createRoot(document.getElementById("root")!).render(
+root.render(
   <StrictMode>
     {/* Outermost error boundary. Inside are two finer layers (per tab, per decision card); this layer
         catches what they don't surround — the app shell itself, various overlays, and cloud forms. Without it,

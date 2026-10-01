@@ -12,6 +12,7 @@ import { fetchRepoDetail, pullRepo, pushRepo } from "../repo";
 import { useConfirm } from "../confirmDialog";
 import styles from "./RepoDetailView.module.css";
 import { AppHeader } from "./AppHeader";
+import { SkeletonCard, Spinner } from "./loading";
 
 interface Props {
   repo: RepoSummary;
@@ -68,7 +69,22 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
 
       <div className={styles.body}>
         {error && <div className={styles.hint}>{t("仓库加载失败：{0}", error)}</div>}
-        {!error && detail === null && <div className={styles.hint}>{t("加载中…")}</div>}
+        {/* No client = relay not connected; the fetch never starts, so do not spin. */}
+        {!error && detail === null && !client && (
+          <div className={styles.hint}>{t("桌面端离线")}</div>
+        )}
+        {!error && detail === null && client && (
+          <>
+            <div className={styles.section}>
+              <div className={styles.sectionLabel}>{t("当前分支")}</div>
+              <SkeletonCard height={132} />
+            </div>
+            <div className={styles.section}>
+              <div className={styles.sectionLabel}>{t("最近提交")}</div>
+              <SkeletonCard height={220} />
+            </div>
+          </>
+        )}
 
         {!error && detail && (
           <>
@@ -137,6 +153,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                   disabled={busy !== null || !client}
                   onClick={() => void runOp("pull")}
                 >
+                  {busy === "pull" && <Spinner size={12} className={styles.opSpinner} />}
                   {busy === "pull" ? t("拉取中…") : t("Pull")}
                 </button>
                 <button
@@ -145,6 +162,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                   disabled={busy !== null || !client}
                   onClick={() => void runOp("push")}
                 >
+                  {busy === "push" && <Spinner size={12} className={styles.opSpinner} />}
                   {busy === "push" ? t("推送中…") : t("Push")}
                 </button>
               </div>

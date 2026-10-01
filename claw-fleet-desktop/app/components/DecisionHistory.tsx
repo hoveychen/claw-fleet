@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { createContext, useContext, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -15,6 +15,7 @@ import type {
 } from "../types";
 import { History } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { SkeletonList } from "./loading";
 import { AttachmentRow } from "./blocks/AttachmentRow";
 import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import styles from "./DecisionHistory.module.css";
@@ -37,8 +38,17 @@ function useRecordMarkdown(sessionId: string): { block: Components; inline: Comp
   );
 }
 
+/**
+ * Whether the records handed to DecisionHistory have been read yet. Provided by
+ * SessionDetail, whose facet panel forwards the list but not its fetch state.
+ * Defaults to true so a caller holding a settled list needs nothing.
+ */
+export const DecisionRecordsLoadedContext = createContext(true);
+
 interface Props {
   records: DecisionHistoryRecord[];
+  /** Overrides DecisionRecordsLoadedContext. */
+  loaded?: boolean;
   /**
    * "inline" (default): collapsible header, fits between Skill history and
    * the message scroll. "tab": no header, list is always expanded — used
@@ -350,8 +360,10 @@ function recordSummary(rec: DecisionHistoryRecord): string {
   return rec.aiTitle ?? rec.workspaceName ?? "Plan approval";
 }
 
-export function DecisionHistory({ records, mode = "inline" }: Props) {
+export function DecisionHistory({ records, loaded: loadedProp, mode = "inline" }: Props) {
   const { t } = useTranslation();
+  const loadedCtx = useContext(DecisionRecordsLoadedContext);
+  const loaded = loadedProp ?? loadedCtx;
   const [expanded, setExpanded] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -382,14 +394,15 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
           <span className={styles.chevron}>{expanded ? "▾" : "▸"}</span>
         </button>
       )}
-      {isTab && records.length === 0 && (
+      {isTab && !loaded && <SkeletonList rows={6} meta={false} rowHeight={30} />}
+      {isTab && loaded && records.length === 0 && (
         <EmptyState
           icon={<History size={28} strokeWidth={1.5} />}
           title={t("empty_state.decision_title")}
           subtitle={t("empty_state.decision_subtitle")}
         />
       )}
-      {showList && records.length > 0 && (
+      {showList && (loaded || !isTab) && records.length > 0 && (
         <div className={styles.list}>
           {ordered.map((rec) => {
             const open = openId === rec.id;

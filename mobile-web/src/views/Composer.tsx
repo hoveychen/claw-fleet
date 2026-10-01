@@ -14,7 +14,6 @@ import {
 import {
   Check,
   FolderSearch,
-  LoaderCircle,
   MapPin,
   Plus,
   Send,
@@ -49,12 +48,36 @@ import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
+import { Skeleton, SkeletonList, Spinner } from "./loading";
 
 // Model and effort choices were once hardcoded here and manually sync'd with the
 // desktop's modelChoices.ts. Both drifted: each claimed Codex efforts were
 // `minimal/low/medium/high`, but testing showed no Codex model accepts `minimal`,
 // yet all accept `xhigh`/`max`. Now unified via `claw-fleet-core/models.toml` and
 // `model_catalog`; see ../useModelCatalog.
+
+/** Relay requests answer or time out within this (REQUEST_TIMEOUT_MS is 15s),
+ *  plus a little slack. */
+const REPLY_WINDOW_MS = 16_000;
+
+/**
+ * True while `client` exists, the value it was asked for is still `empty`, and
+ * the request can still answer. The relay-backed hooks used here
+ * (useModelCatalog, useChatWorkspace, …) fold "in flight" and "failed" into the
+ * same empty value; a request either answers or times out within
+ * REPLY_WINDOW_MS, so past that window an empty value is final and the loader
+ * goes away instead of spinning forever.
+ */
+export function useAwaitingReply(client: FleetTransport | null, empty: boolean): boolean {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    setExpired(false);
+    if (!client) return;
+    const timer = window.setTimeout(() => setExpired(true), REPLY_WINDOW_MS);
+    return () => window.clearTimeout(timer);
+  }, [client]);
+  return !!client && empty && !expired;
+}
 
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
@@ -446,6 +469,12 @@ function OptionSelects({
     [isDsh, dshCatalog, model],
   );
   const catalog = useModelCatalog(client);
+  // Until the list lands the select holds only "默认模型", which reads as "no
+  // other models exist": mark the field as loading instead.
+  const modelsLoading = useAwaitingReply(
+    client,
+    isDsh ? dshCatalog === null : catalog.length === 0,
+  );
   const modelChoices = isCodex
     ? [
         ...modelChoicesFor(catalog, "codex", t("默认模型")),
@@ -478,7 +507,9 @@ function OptionSelects({
     <>
     <div className={styles.optionRow}>
       <label className={styles.optionField}>
-        <span>{t("模型")}</span>
+        <span>
+          {t("模型")} {modelsLoading && <Spinner size={10} label={t("加载中…")} />}
+        </span>
         <select
           className={styles.optionSelect}
           value={model}
@@ -523,7 +554,9 @@ function OptionSelects({
         </select>
       </label>
       <label className={styles.optionField}>
-        <span>{t("思考强度")}</span>
+        <span>
+          {t("思考强度")} {modelsLoading && <Spinner size={10} label={t("加载中…")} />}
+        </span>
         <select
           className={styles.optionSelect}
           value={effort}
@@ -610,6 +643,12 @@ interface NewSessionProps {
    * when upload would immediately hit "relay not connected yet".
    */
   relayReady?: boolean;
+  /**
+   * The target device's first sessions frame is still on its way (link up,
+   * agent online or not yet reported). The "最近" list holds skeleton rows
+   * meanwhile instead of looking empty.
+   */
+  recentsPending?: boolean;
   onClose: () => void;
 }
 
@@ -798,11 +837,15 @@ export function NewSessionSheet({
   onTargetDevice,
   initialFiles,
   relayReady,
+  recentsPending,
   onClose,
 }: NewSessionProps) {
   // Chat-only workspace: not project-bound, no "recent sessions" to discover; must
   // be explicitly nailed as the first option.
   const chatPath = useChatWorkspace(client);
+  // Hold the 纯聊天 row's place while its path is fetched, so it does not pop in
+  // and push the rows below it down.
+  const chatPathLoading = useAwaitingReply(client, chatPath === null);
 
   const recentRows = recentWorkspaceRows(sessions, chatPath);
   const recents = recentRows.map((r): [string, string] => [r.path, r.name]);
@@ -934,6 +977,10 @@ export function NewSessionSheet({
   });
   const toolLabel = t(toolChoices.find(([value]) => value === tool)?.[1] ?? tool);
   const sheetCatalog = useModelCatalog(client);
+  // A picked model shows its raw id until the catalog maps it to a label; hold
+  // the chip text instead of flashing the id.
+  const sheetCatalogLoading = useAwaitingReply(client, sheetCatalog.length === 0);
+  const chipLabelLoading = !!model && tool !== "dsh" && sheetCatalogLoading;
   const modelLabel = model
     ? (modelChoicesFor(sheetCatalog, tool === "codex" ? "codex" : "claude", "").find(
         ([value]) => value === model,
@@ -1076,6 +1123,10 @@ export function NewSessionSheet({
                 {workspace === row.path && <Check size={17} className={styles.recentCheck} />}
               </button>
             ))}
+            {recentsPending && recentRows.length === 0 && (
+              <SkeletonList rows={3} meta={false} rowHeight={46} />
+            )}
+            {!chatPath && chatPathLoading && <SkeletonList rows={1} meta rowHeight={46} />}
             {chatPath && (
               <button
                 className={styles.recentRow}
@@ -1113,7 +1164,11 @@ export function NewSessionSheet({
             </button>
             <button className={styles.resumeChip} onClick={() => setPicker("config")}>
               <SlidersHorizontal size={13} />
-              {configSummary.title}
+              {chipLabelLoading ? (
+                <Skeleton inline width={120} height={10} />
+              ) : (
+                configSummary.title
+              )}
             </button>
           </div>
           {(attachments.length > 0 || pending.length > 0) && !voice.active && (
@@ -1139,7 +1194,7 @@ export function NewSessionSheet({
                 aria-label={uploading ? t("上传中…") : t("附件")}
               >
                 {uploading ? (
-                  <LoaderCircle size={19} className={styles.spin} />
+                  <Spinner size={17} />
                 ) : (
                   <Plus size={20} />
                 )}
@@ -1169,7 +1224,7 @@ export function NewSessionSheet({
                 {created ? (
                   <Check size={17} />
                 ) : busy ? (
-                  <LoaderCircle size={17} className={styles.spin} />
+                  <Spinner size={16} className={styles.sendSpinner} />
                 ) : (
                   <Send size={16} />
                 )}
@@ -1430,6 +1485,9 @@ export function ResumeComposer({
   // Current config shown in the pill. dsh's model catalog comes from the host at runtime; if we
   // don't recognize an id, display it as-is — a real but unfamiliar id beats a wrong friendly name.
   const resumeCatalog = useModelCatalog(client);
+  // The model chip would show the raw id, then swap to the friendly label.
+  const resumeCatalogLoading = useAwaitingReply(client, resumeCatalog.length === 0);
+  const modelChipLoading = !!model && tool !== "dsh" && resumeCatalogLoading;
   const modelLabel = useMemo(() => {
     if (tool === "dsh") return model;
     const table = modelChoicesFor(resumeCatalog, tool === "codex" ? "codex" : "claude", "");
@@ -1663,14 +1721,15 @@ export function ResumeComposer({
           settings, so showing unchangeable pills would only mislead. */}
       {!enqueueing && !voice.active && (
         <div className={styles.resumeChips}>
-          {configChips.map((label) => (
+          {configChips.map((label, i) => (
             <button
               key={label}
               type="button"
               className={styles.resumeChip}
               onClick={() => setPickerOpen(true)}
             >
-              {label}
+              {/* The first chip carries the model label. */}
+              {i === 0 && modelChipLoading ? <Skeleton inline width={84} height={10} /> : label}
             </button>
           ))}
         </div>
@@ -1686,7 +1745,7 @@ export function ResumeComposer({
             aria-label={uploading ? t("上传中…") : t("附件")}
           >
             {uploading ? (
-              <LoaderCircle size={19} className={styles.spin} />
+              <Spinner size={17} />
             ) : (
               <Plus size={20} />
             )}
@@ -1727,7 +1786,7 @@ export function ResumeComposer({
             }
           >
             {busy ? (
-              <LoaderCircle size={17} className={styles.spin} />
+              <Spinner size={16} className={styles.sendSpinner} />
             ) : sent ? (
               <Check size={17} />
             ) : (

@@ -14,6 +14,7 @@ import { useEffect } from "react";
 import { Check, ChevronDown, Laptop, Monitor, Server, Settings2 } from "lucide-react";
 import type { PairedDevice } from "../devices";
 import { t } from "../i18n";
+import { Spinner } from "./loading";
 import styles from "./DeviceSwitcher.module.css";
 
 /** A device's connectivity status now; only the two bits the switcher displays. */
@@ -22,6 +23,11 @@ export interface DeviceStatus {
   connected: boolean;
   /** Whether that machine's desktop agent is online. */
   agentOnline: boolean;
+  /** Link is up but the agent's status has not been reported yet — `agentOnline`
+   *  is still its initial `false`, which must not read as "desktop offline". */
+  agentPending?: boolean;
+  /** Link is down and the transport is still retrying (not, say, a rejected key). */
+  retrying?: boolean;
 }
 
 /** Platform key → icon. Unrecognized platforms get a generic monitor, not no
@@ -32,12 +38,20 @@ function PlatformIcon({ platform, size = 18 }: { platform?: string; size?: numbe
   return <Monitor size={size} />;
 }
 
+/** Still finding out: retrying the link, or link up and agent not reported. */
+function isConnecting(status: DeviceStatus | undefined): boolean {
+  if (!status) return false;
+  return status.connected ? !status.agentOnline && !!status.agentPending : !!status.retrying;
+}
+
 function statusText(status: DeviceStatus | undefined): string {
+  if (isConnecting(status)) return t("连接中…");
   if (!status?.connected) return t("未连接");
   return status.agentOnline ? t("在线") : t("桌面端离线");
 }
 
-function statusKind(status: DeviceStatus | undefined): "online" | "offline" | "down" {
+function statusKind(status: DeviceStatus | undefined): "online" | "offline" | "down" | "connecting" {
+  if (isConnecting(status)) return "connecting";
   if (!status?.connected) return "down";
   return status.agentOnline ? "online" : "offline";
 }
@@ -123,7 +137,7 @@ export function DeviceSwitcher({
                   <span className={styles.rowText}>
                     <span className={styles.rowLabel}>{d.label || t("未命名设备")}</span>
                     <span className={styles.rowStatus} data-kind={statusKind(status)}>
-                      <span className={styles.dot} />
+                      {isConnecting(status) ? <Spinner size={10} /> : <span className={styles.dot} />}
                       {statusText(status)}
                     </span>
                   </span>

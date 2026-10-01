@@ -8,6 +8,7 @@ import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { RAILS } from "./pageShellConfig";
 import { SimpleNavigation } from "./SimpleNavigation";
 import styles from "./PageShell.module.css";
+import { SkeletonNumber } from "./loading";
 
 interface SearchProps {
   value: string;
@@ -24,6 +25,8 @@ interface Props {
   title: string;
   /** Rendered dim beside the title. `null`/`undefined` = nothing. */
   count?: number | null;
+  /** The count has not arrived yet: render a number skeleton, never a fake 0. */
+  countLoading?: boolean;
   search?: SearchProps;
   /** Free-form banner content between the search box and the actions. */
   bannerCenter?: ReactNode;
@@ -87,6 +90,7 @@ export function PageShell({
   view,
   title,
   count,
+  countLoading,
   search,
   bannerCenter,
   actions,
@@ -131,7 +135,13 @@ export function PageShell({
       >
         <div className={styles.title_row}>
           <h1 className={styles.title}>{title}</h1>
-          {count != null && <span className={styles.count}>{count}</span>}
+          {countLoading ? (
+            <span className={styles.count}>
+              <SkeletonNumber width={18} />
+            </span>
+          ) : (
+            count != null && <span className={styles.count}>{count}</span>
+          )}
         </div>
         {search && (
           <div className={styles.search_wrap}>

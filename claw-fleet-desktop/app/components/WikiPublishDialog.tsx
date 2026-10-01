@@ -6,6 +6,7 @@ import type { WikiDoc } from "./WikiView";
 import { normalizeSlug } from "../wikiSlug";
 import styles from "./WikiPublishDialog.module.css";
 import { useExiting } from "./Presence";
+import { Spinner } from "./loading";
 
 interface Props {
   /** Markdown to publish — the reader's message body. */
@@ -78,6 +79,8 @@ export function WikiPublishDialog({
   // Refuse the slug outright rather than quietly mangling that doc.
   const slugTaken = existing !== null && existing.kind !== "markdown";
   const canSubmit = normalized.length > 0 && !slugTaken && !busy && docs !== null;
+  // Waiting on the existing-doc lookup (not failed) or on the publish itself.
+  const pending = busy || (docs === null && error === null);
 
   const publish = async () => {
     if (!canSubmit) return;
@@ -214,7 +217,9 @@ export function WikiPublishDialog({
             className={`${styles.btn} ${styles.btn_primary}`}
             onClick={publish}
             disabled={!canSubmit}
+            aria-busy={pending || undefined}
           >
+            {pending && <Spinner size={12} className={styles.spinner_on_accent} />}
             {existing && append ? t("wiki.publish_append_cta") : t("wiki.publish_cta")}
           </button>
         </div>

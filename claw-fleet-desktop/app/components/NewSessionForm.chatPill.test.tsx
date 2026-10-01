@@ -49,7 +49,9 @@ beforeEach(() => {
   mockState.chatResponse = null;
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {} });
-  useSessionsStore.setState({ sessions: [] });
+  // These cases are about the form once the first scan has landed; before it
+  // the workspace pill and hint are placeholders (see `seedPending`).
+  useSessionsStore.setState({ sessions: [], scanReady: true });
 });
 
 afterEach(() => {

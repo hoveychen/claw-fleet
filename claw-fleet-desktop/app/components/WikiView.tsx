@@ -47,6 +47,16 @@ import { useUIStore } from "../store";
 import { printWikiDoc } from "./wikiPrint";
 import styles from "./WikiView.module.css";
 import { Presence } from "./Presence";
+import {
+  SkeletonCard,
+  SkeletonList,
+  SkeletonNumber,
+  SkeletonText,
+  Spinner,
+  TopProgress,
+} from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
+import { usePending } from "../hooks/usePending";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
 
@@ -315,7 +325,11 @@ export function WikiView() {
     | null
   >(null);
 
+  // Reads in flight. A counter, not a flag: a refresh clicked while a move's
+  // reload is still out must not clear the busy state when the first returns.
+  const [reloads, setReloads] = useState(0);
   const load = useCallback(async () => {
+    setReloads((n) => n + 1);
     try {
       const data = await invoke<WikiDoc[]>("list_wiki_docs");
       setDocs(data);
@@ -323,6 +337,7 @@ export function WikiView() {
       // keep whatever we had
     } finally {
       setLoaded(true);
+      setReloads((n) => n - 1);
     }
   }, []);
 
@@ -342,21 +357,27 @@ export function WikiView() {
   // Full-text hits from the backend, keyed by slug. `null` while idle or
   // before the debounced search for the current query lands.
   const [hits, setHits] = useState<Map<string, WikiSearchHit> | null>(null);
+  // The query the last search answer (hits or failure) was for; while it lags
+  // the typed query, the backend search is still pending.
+  const [hitsFor, setHitsFor] = useState<string | null>(null);
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       setHits(null);
+      setHitsFor(null);
       return;
     }
     const timer = setTimeout(() => {
       invoke<WikiSearchHit[]>("search_wiki_docs", { query: q })
         .then((res) => setHits(new Map(res.map((h) => [h.slug, h]))))
-        .catch(() => setHits(null));
+        .catch(() => setHits(null))
+        .finally(() => setHitsFor(q));
     }, 250);
     return () => clearTimeout(timer);
   }, [query]);
 
   const searching = query.trim().length > 0;
+  const showSearchPending = useDelayedFlag(searching && hitsFor !== query.trim());
 
   // Workspace-filtered set drives the folder rail — the tree stays stable while
   // searching (search narrows the grid, not the rail's folder list).
@@ -394,13 +415,14 @@ export function WikiView() {
   const previewRef = useRef<HTMLDivElement>(null);
   useFadeOnChange(previewRef, selected?.slug ?? null);
 
-  const wikiLinks = useMemo(() => {
+  const wikiLinks = useMemo<WikiLinkContext>(() => {
     const slugs = new Set(docs.map((d) => d.slug));
     return {
-      hasSlug: (slug: string) => slugs.has(slug),
+      // null = not known yet: a ref must not render dead before the list lands.
+      hasSlug: (slug: string) => (loaded ? slugs.has(slug) : null),
       openSlug: setSelectedSlug,
     };
-  }, [docs]);
+  }, [docs, loaded]);
 
   // Folder rail tree — folders only, off the workspace-filtered set.
   const tree = useMemo(() => buildTree(wsFiltered), [wsFiltered]);
@@ -413,7 +435,7 @@ export function WikiView() {
     updateMainViewState("wiki", { collapsedFolders: [...next] });
   };
 
-  const handleDelete = async () => {
+  const [, handleDelete] = usePending(async () => {
     if (!confirmDelete) return;
     try {
       if (confirmDelete.kind === "doc") {
@@ -439,7 +461,7 @@ export function WikiView() {
     }
     setConfirmDelete(null);
     load();
-  };
+  });
 
   // ── Moving a doc ───────────────────────────────────────────────────────────
   // Moving a doc IS re-keying it — the slug's directory prefix is the only
@@ -449,6 +471,7 @@ export function WikiView() {
   const [dragSlug, setDragSlug] = useState<string | null>(null);
   const [dropPath, setDropPath] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
 
   const moveDoc = useCallback(
     async (from: string, to: string) => {
@@ -494,10 +517,13 @@ export function WikiView() {
     const to = folderPath ? `${folderPath}/${slugBasename(from)}` : slugBasename(from);
     if (to === from) return;
     setMoveError(null);
+    setMoving(true);
     try {
       await moveDoc(from, to);
     } catch (e) {
       setMoveError(String(e));
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -511,7 +537,8 @@ export function WikiView() {
     setMoveTarget(doc);
   };
 
-  const handleMoveSubmit = async (to: string) => {
+  // usePending drops a second Enter / click while the first move is out.
+  const [, handleMoveSubmit] = usePending(async (to: string) => {
     if (!moveTarget) return;
     try {
       await moveDoc(moveTarget.slug, to);
@@ -520,7 +547,7 @@ export function WikiView() {
       // Keep the dialog open so the rejected slug stays editable.
       setMoveDialogError(String(e));
     }
-  };
+  });
 
   // ── Folder ops ─────────────────────────────────────────────────────────────
   const [folderCtx, setFolderCtx] = useState<{ path: string; anchor: ContextMenuAnchor } | null>(
@@ -562,7 +589,7 @@ export function WikiView() {
     [load],
   );
 
-  const handleRenameFolderSubmit = async (to: string) => {
+  const [, handleRenameFolderSubmit] = usePending(async (to: string) => {
     if (renameFolder === null) return;
     try {
       await moveFolder(renameFolder, to);
@@ -570,7 +597,7 @@ export function WikiView() {
     } catch (e) {
       setFolderError(String(e));
     }
-  };
+  });
 
   const folderMenuItems = (path: string): ContextMenuItem[] => [
     {
@@ -802,6 +829,12 @@ export function WikiView() {
   // of the grid's sort dropdown, so it stays a stable "jump to what changed".
   const recentDocs = [...wsFiltered].sort((a, b) => b.updatedMs - a.updatedMs).slice(0, 6);
 
+  // Busy while the list is re-read (refresh, after a move) or a drag-drop move
+  // is out, with the old grid still on screen.
+  const reloading = loaded && reloads > 0;
+  const showReloading = useDelayedFlag(reloading);
+  const gridBusy = useDelayedFlag(reloading || moving);
+
   // Breadcrumb-ish label for the grid header.
   const scopeLabel = searching
     ? t("wiki.scope_search", "搜索结果")
@@ -833,8 +866,13 @@ export function WikiView() {
         </select>
       }
       actions={
-        <button className={styles.icon_btn} onClick={load} title={t("wiki.refresh", "Refresh")}>
-          <RefreshCw size={13} strokeWidth={1.7} />
+        <button
+          className={styles.icon_btn}
+          onClick={load}
+          disabled={reloading}
+          title={t("wiki.refresh", "Refresh")}
+        >
+          {showReloading ? <Spinner size={13} /> : <RefreshCw size={13} strokeWidth={1.7} />}
         </button>
       }
       secondary={
@@ -853,8 +891,11 @@ export function WikiView() {
             <span className={styles.folder_chevron} />
             <Library size={13} strokeWidth={1.7} className={styles.folder_icon} />
             <span className={styles.folder_name}>{t("wiki.scope_all", "全部文档")}</span>
-            <span className={styles.folder_count}>{wsFiltered.length}</span>
+            <span className={styles.folder_count}>
+              {loaded ? wsFiltered.length : <SkeletonNumber width={14} />}
+            </span>
           </button>
+          {!loaded && <SkeletonList rows={5} meta={false} rowHeight={28} />}
           {loaded && wsFiltered.length > 0 && renderFolderNodes(tree, 0)}
         </div>
       }
@@ -924,7 +965,7 @@ export function WikiView() {
                     version: confirmDelete.version,
                   })
           }
-          onConfirm={handleDelete}
+          onConfirm={() => void handleDelete()}
           onCancel={() => setConfirmDelete(null)}
         />
       )}</Presence>
@@ -932,11 +973,20 @@ export function WikiView() {
     >
       <div className={styles.layout}>
         <div className={`${styles.grid_pane} ${selected ? styles.grid_pane_split : ""}`}>
+          <TopProgress active={gridBusy} />
           <div className={styles.grid_header}>
             <span className={styles.grid_scope} title={scopeLabel}>
               {scopeLabel}
             </span>
-            <span className={styles.grid_scope_count}>{gridDocs.length}</span>
+            <span className={styles.grid_scope_count}>
+              {!loaded ? (
+                <SkeletonNumber width={14} />
+              ) : showSearchPending ? (
+                <Spinner size={11} label={t("wiki.searching", "搜索中…")} />
+              ) : (
+                gridDocs.length
+              )}
+            </span>
             <span className={styles.grid_header_spacer} />
             <select
               className={styles.sort_select}
@@ -955,7 +1005,15 @@ export function WikiView() {
               {t("wiki.move_failed", "Move failed: {{error}}", { error: moveError })}
             </p>
           )}
-          {!loaded && <p className={styles.empty}>{t("wiki.loading", "Loading…")}</p>}
+          {!loaded && (
+            <div className={styles.grid_scroll}>
+              <div className={styles.grid}>
+                {Array.from({ length: 8 }, (_, i) => (
+                  <SkeletonCard key={i} height={100} />
+                ))}
+              </div>
+            </div>
+          )}
           {loaded && gridDocs.length === 0 && (
             <EmptyState
               icon={<BookOpen size={28} strokeWidth={1.5} />}
@@ -1058,6 +1116,14 @@ function WikiDetail({
     if (await copyDocRef(doc.slug)) setCopied(true);
   };
 
+  const [printing, handleExportPdf] = usePending(async () => {
+    try {
+      await printWikiDoc(doc, effectiveVersion, wikiLinks);
+    } catch (e) {
+      console.error("wiki pdf export failed:", e);
+    }
+  });
+
   const [exporting, setExporting] = useState(false);
   const handleExport = async () => {
     setExporting(true);
@@ -1068,9 +1134,6 @@ function WikiDetail({
     } finally {
       setExporting(false);
     }
-  };
-  const handleExportPdf = () => {
-    printWikiDoc(doc, effectiveVersion, wikiLinks).catch((e) => console.error("wiki pdf export failed:", e));
   };
 
   return (
@@ -1125,16 +1188,17 @@ function WikiDetail({
             disabled={exporting}
             title={t("wiki.export", "Export this version to a file")}
           >
-            <Download size={12} strokeWidth={1.7} />
+            {exporting ? <Spinner size={12} /> : <Download size={12} strokeWidth={1.7} />}
             {t("wiki.export_short", "Export")}
           </button>
           {!isWebBuild() && (
             <button
               className={styles.action_btn}
-              onClick={handleExportPdf}
+              onClick={() => void handleExportPdf()}
+              disabled={printing}
               title={t("wiki.export_pdf", "Export this version as PDF (print panel → Save as PDF)")}
             >
-              <Printer size={12} strokeWidth={1.7} />
+              {printing ? <Spinner size={12} /> : <Printer size={12} strokeWidth={1.7} />}
               {t("wiki.export_pdf_short", "PDF")}
             </button>
           )}
@@ -1184,16 +1248,21 @@ export function WikiDocBody({
   version: string;
   wikiLinks: WikiLinkContext;
 }) {
-  const { t } = useTranslation();
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which `slug/version` the HTML frame has finished loading.
+  const frameKey = `${doc.slug}/${version}`;
+  const [frameLoaded, setFrameLoaded] = useState<string | null>(null);
 
   useEffect(() => {
     if (doc.kind !== "markdown") {
       setMarkdown(null);
       return;
     }
+    // Drop the previous doc's text: it is the wrong content for this one, so
+    // the skeleton replaces it rather than sitting under a spinner.
+    setMarkdown(null);
     setLoading(true);
     setError(null);
     let stale = false;
@@ -1219,20 +1288,25 @@ export function WikiDocBody({
   if (doc.kind !== "markdown") {
     // allow-scripts but NOT allow-same-origin: demos can run JS while staying a
     // cross-origin document with no reach into Tauri IPC.
+    // `load` fires for error pages too, so the bar cannot run forever.
     return (
-      <iframe
-        key={`${doc.slug}/${version}`}
-        className={styles.html_frame}
-        sandbox="allow-scripts"
-        src={wikiFileUrl(doc.slug, version, doc.entry)}
-        title={doc.title}
-      />
+      <div className={styles.html_frame_wrap}>
+        <TopProgress active={frameLoaded !== frameKey} />
+        <iframe
+          key={frameKey}
+          className={styles.html_frame}
+          sandbox="allow-scripts"
+          src={wikiFileUrl(doc.slug, version, doc.entry)}
+          title={doc.title}
+          onLoad={() => setFrameLoaded(frameKey)}
+        />
+      </div>
     );
   }
 
   return (
     <div className={styles.markdown_body}>
-      {loading && <p className={styles.loading}>{t("wiki.loading", "Loading…")}</p>}
+      {loading && <SkeletonText lines={8} />}
       {error && <p className={styles.error}>{error}</p>}
       {markdown !== null && (
         <div className={styles.content_markdown}>

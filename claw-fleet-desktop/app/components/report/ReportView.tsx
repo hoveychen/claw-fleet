@@ -19,6 +19,8 @@ import { PageShell } from "../PageShell";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "../ContextMenu";
 import styles from "./ReportView.module.css";
 import { Presence } from "../Presence";
+import { SkeletonCard, SkeletonList, Spinner, TopProgress, loadingStyles } from "../loading";
+import { useDelayedFlag } from "../../hooks/useDelayedFlag";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -100,12 +102,20 @@ function DateList() {
     timelineLoading,
     timelineHasMore,
     heatmapData,
+    heatmapLoaded,
     loadReport,
     loadTimelinePage,
     resetTimeline,
     generateReport,
   } = useReportStore();
   const sentinelRef = useRef<HTMLDivElement>(null);
+  // True from mount until the first timeline page has been asked for and
+  // answered. `timelineLoading` alone stays false until the heatmap lands, which
+  // left the list blank before it switched to its loading state.
+  const [firstPagePending, setFirstPagePending] = useState(true);
+  // Row whose "regenerate" is in flight, so the clicked row itself shows it.
+  const [regenDate, setRegenDate] = useState<string | null>(null);
+  const footerBusy = useDelayedFlag(timelineLoading);
 
   // Row context menu — anchor + subject held together, mirroring WikiView.
   const [ctxMenu, setCtxMenu] = useState<{ report: DailyReport; anchor: ContextMenuAnchor } | null>(
@@ -119,7 +129,12 @@ function DateList() {
           ? t("report.regenerate", "重新生成报告")
           : t("report.generate", "生成报告"),
       icon: <RefreshCw size={13} strokeWidth={1.7} />,
-      onSelect: () => generateReport(report.date),
+      onSelect: () => {
+        setRegenDate(report.date);
+        void generateReport(report.date).finally(() =>
+          setRegenDate((d) => (d === report.date ? null : d)),
+        );
+      },
     },
     {
       id: "copy-date",
@@ -134,10 +149,14 @@ function DateList() {
   // independent of which day is selected — selection only affects which card
   // gets the active highlight (and, in the edge case below, a pinned copy).
   useEffect(() => {
-    if (heatmapData.length === 0) return;
+    if (heatmapData.length === 0) {
+      // Nothing to page through once the heatmap has answered empty.
+      if (heatmapLoaded) setFirstPagePending(false);
+      return;
+    }
     resetTimeline();
-    loadTimelinePage();
-  }, [heatmapData.length, resetTimeline, loadTimelinePage]);
+    void loadTimelinePage().finally(() => setFirstPagePending(false));
+  }, [heatmapData.length, heatmapLoaded, resetTimeline, loadTimelinePage]);
 
   // Infinite scroll
   const handleIntersect = useCallback(
@@ -170,8 +189,8 @@ function DateList() {
     return out;
   }, [currentReport, timelineReports]);
 
-  if (displayed.length === 0 && timelineLoading) {
-    return <p className={styles.empty}>{t("report.loading")}</p>;
+  if (displayed.length === 0 && (!heatmapLoaded || firstPagePending || timelineLoading)) {
+    return <SkeletonList rows={8} rowHeight={64} />;
   }
 
   return (
@@ -181,6 +200,7 @@ function DateList() {
           key={report.date}
           report={report}
           active={report.date === selectedDate}
+          busy={report.date === regenDate}
           locale={i18n.language}
           onClick={() => loadReport(report.date)}
           onContextMenu={(e) => {
@@ -198,7 +218,7 @@ function DateList() {
         />
       )}</Presence>
       <div ref={sentinelRef} className={styles.list_sentinel}>
-        {timelineLoading && <span className={styles.empty_inline}>{t("report.loading")}</span>}
+        {footerBusy && displayed.length > 0 && <Spinner size={12} label={t("loading")} />}
         {!timelineHasMore && displayed.length > 1 && (
           <span className={styles.empty_inline}>·</span>
         )}
@@ -210,12 +230,15 @@ function DateList() {
 function DateCard({
   report,
   active,
+  busy,
   locale,
   onClick,
   onContextMenu,
 }: {
   report: DailyReport;
   active: boolean;
+  /** A regenerate for this row is in flight. */
+  busy: boolean;
   locale: string;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -237,6 +260,7 @@ function DateCard({
           {formatDateLong(report.date, locale)}
         </span>
         <span className={styles.date_card_iso}>{report.date}</span>
+        {busy && <Spinner size={12} className={styles.date_card_spinner} />}
       </div>
       <div className={styles.date_card_chips}>
         <span className={styles.meta_chip}>
@@ -267,11 +291,21 @@ function DateCard({
  *  the exact same thing the page does instead of a second, drifting layout. */
 export function ReportDetail() {
   const { t, i18n } = useTranslation();
-  const { currentReport, selectedDate, loading, generateReport } = useReportStore();
+  const { currentReport, selectedDate, loading, reportSettledDate, generateReport } =
+    useReportStore();
+  // Only a report for the selected day may stay on screen during a load: a
+  // regenerate keeps it (dimmed, under a progress bar), but a date switch must
+  // not show the previous day's numbers under the new day's header.
+  const shown = currentReport && currentReport.date === selectedDate ? currentReport : null;
+  const refreshing = useDelayedFlag(loading && shown !== null);
+  // "No report" is only true once a load for this date has finished; before
+  // that (including the first render, before `loading` flips on) it is a wait.
+  const settled = !loading && reportSettledDate === selectedDate;
 
   return (
     <>
       <div className={styles.detail_header}>
+        <TopProgress active={refreshing} />
         <div className={styles.detail_title}>
           <span className={styles.detail_workspace}>{t("report.panel_title")}</span>
           <span className={styles.detail_sep}>/</span>
@@ -283,8 +317,17 @@ export function ReportDetail() {
       </div>
 
       <div className={styles.detail_body}>
-        {loading && <div className={styles.empty}>{t("report.loading")}</div>}
-        {!loading && !currentReport && (
+        {!shown && !settled && (
+          <div className={styles.detail_content}>
+            <SkeletonCard height={72} />
+            <div className={styles.charts_row}>
+              <SkeletonCard height={180} />
+              <SkeletonCard height={180} />
+            </div>
+            <SkeletonCard height={160} />
+          </div>
+        )}
+        {!shown && settled && (
           <EmptyState
             icon={<BarChart3 size={28} strokeWidth={1.5} />}
             title={t("empty_state.report_title")}
@@ -295,24 +338,24 @@ export function ReportDetail() {
             }}
           />
         )}
-        {!loading && currentReport && (
-          <div className={styles.detail_content}>
-            <MetricsCards metrics={currentReport.metrics} />
+        {shown && (
+          <div className={`${styles.detail_content} ${loading ? loadingStyles.stale : ""}`}>
+            <MetricsCards metrics={shown.metrics} />
             <div className={styles.charts_row}>
-              <ToolCallChart breakdown={currentReport.metrics.toolCallBreakdown} />
-              <HourlyActivityChart hourly={currentReport.metrics.hourlyActivity} />
+              <ToolCallChart breakdown={shown.metrics.toolCallBreakdown} />
+              <HourlyActivityChart hourly={shown.metrics.hourlyActivity} />
             </div>
-            <DecisionCardsPanel stats={currentReport.metrics.decisionCards} />
+            <DecisionCardsPanel stats={shown.metrics.decisionCards} />
             <AISummaryCard
-              date={currentReport.date}
-              summary={currentReport.aiSummary}
-              metrics={currentReport.metrics}
+              date={shown.date}
+              summary={shown.aiSummary}
+              metrics={shown.metrics}
             />
             {/* Between the card stats and the day's lessons on purpose: the
                 stats say how many tasks ended, this says which ones and why,
                 and the lessons are what was drawn from them. */}
-            <TaskReviewsCard date={currentReport.date} />
-            <LessonsCard date={currentReport.date} lessons={currentReport.lessons} />
+            <TaskReviewsCard date={shown.date} />
+            <LessonsCard date={shown.date} lessons={shown.lessons} />
           </div>
         )}
       </div>

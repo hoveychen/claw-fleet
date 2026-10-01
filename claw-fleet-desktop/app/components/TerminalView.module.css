@@ -99,3 +99,10 @@
   background: #16161e;
   overflow: hidden;
 }
+
+/* Stand-in for the screen while a shell is reconnected or spawned. */
+.screen_skeleton {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 8px;
+}

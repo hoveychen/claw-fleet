@@ -16,6 +16,8 @@ import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
 import { RailStatTile } from "./RailStatTile";
 import { Presence } from "./Presence";
+import { SkeletonCard, Spinner } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 function formatResetIn(resets_at: string, t: TFunc): string {
   const diff = new Date(resets_at).getTime() - Date.now();
@@ -215,6 +217,16 @@ function UsageSourceMark({ source }: { source: string | null | undefined }) {
   );
 }
 
+// ── Section skeleton (shared) ────────────────────────────────────────────────
+
+/** Placeholder for a section's bars before its first response. The store
+ *  bootstraps every source on import, so "no data and no error" is exactly
+ *  the window before the first answer — never "no usage". Sized like two
+ *  usage bars so the card does not jump when they land. */
+function UsageSectionSkeleton() {
+  return <SkeletonCard height={64} />;
+}
+
 // ── Section footer (shared) ──────────────────────────────────────────────────
 
 function SectionFooter({
@@ -236,6 +248,8 @@ function SectionFooter({
   hideAutoToggle?: boolean;
 }) {
   const { t } = useTranslation();
+  // Gated so a sub-200ms refresh never flashes the spinner.
+  const showSpinner = useDelayedFlag(loading);
   return (
     <div className={styles.tool_footer}>
       {lastUpdated && !loading && (
@@ -253,7 +267,7 @@ function SectionFooter({
           </label>
         )}
         <button className={styles.refresh} onClick={onRefresh} disabled={loading} title={t("account.refresh_now")}>
-          {"\u21BB"}
+          {showSpinner ? <Spinner size={10} /> : "\u21BB"}
         </button>
       </div>
     </div>
@@ -294,7 +308,7 @@ function ClaudeUsageSection() {
           {info.email}
         </div>
       )}
-      {loading && !info && <p className={styles.dim}>{t("account.loading")}</p>}
+      {!info && !error && <UsageSectionSkeleton />}
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
@@ -374,7 +388,7 @@ function CodexUsageSection() {
           {data.email}
         </div>
       )}
-      {loading && !data && <p className={styles.dim}>{t("account.loading")}</p>}
+      {!data && !error && <UsageSectionSkeleton />}
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
@@ -443,7 +457,7 @@ function DshUsageSection() {
         <DshIcon />
         <span className={styles.tool_name}>dsh</span>
       </div>
-      {loading && !data && <p className={styles.dim}>{t("account.loading")}</p>}
+      {!data && !error && <UsageSectionSkeleton />}
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
@@ -497,6 +511,11 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   // `enabled` on the settings toggle — so the section follows the same rule
   // the launcher uses rather than growing a second detection path.
   const [hasDsh, setHasDsh] = useState(false);
+  // Which sections exist is only known once both probes below answer; until
+  // then the expanded panel shows a placeholder instead of the default set
+  // (Claude only), which used to grow Codex / dsh sections in late.
+  const [setupResolved, setSetupResolved] = useState(false);
+  const [sourcesResolved, setSourcesResolved] = useState(false);
   const ring = useUsageRing();
   // Auto-load Claude usage when collapsed (so tile has data without expanding panel)
   const loadUsage = useUsageStore((s) => s.load);
@@ -514,12 +533,14 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
         setHasClaude(tools.cli || tools.vscode || tools.jetbrains || tools.desktop);
         setHasCodex(tools.codex);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSetupResolved(true));
     invoke<SourceInfo[]>("get_sources_config")
       .then((sources) => {
         setHasDsh(sources.some((s) => s.name === "dsh" && s.enabled && s.available));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSourcesResolved(true));
   }, []);
 
   if (!hasClaude && !hasCodex && !hasDsh) return null;
@@ -552,9 +573,15 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
       </button>
       {expanded && (
         <div className={styles.content}>
-          {hasClaude && <ClaudeUsageSection />}
-          {hasCodex && <CodexUsageSection />}
-          {hasDsh && <DshUsageSection />}
+          {!setupResolved || !sourcesResolved ? (
+            <SkeletonCard height={110} />
+          ) : (
+            <>
+              {hasClaude && <ClaudeUsageSection />}
+              {hasCodex && <CodexUsageSection />}
+              {hasDsh && <DshUsageSection />}
+            </>
+          )}
         </div>
       )}
     </div>
