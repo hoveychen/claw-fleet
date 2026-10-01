@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal, Ellipsis, ChevronLeft, ChevronRight } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
@@ -28,6 +28,7 @@ import { LiveStats } from "./LiveStats";
 import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
 import { useResizableWidth } from "../hooks/useResizableWidth";
+import { useHeightTransition } from "../hooks/useHeightTransition";
 import { ResizeHandle } from "./ResizeHandle";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 import { isInNavMore } from "./navGroups";
@@ -84,6 +85,20 @@ export function SessionList() {
   useEffect(() => {
     setInMore(moreActive);
   }, [moreActive]);
+  // The swap slides in from the side it came from: More drills in from the
+  // right, Back returns from the left. Null until the first swap, so the list
+  // the app opens on doesn't animate in. Derived during render, not in an
+  // effect: an effect would paint the new list in place for one frame first.
+  const navSlide = useRef<"forward" | "back" | null>(null);
+  const prevInMore = useRef(inMore);
+  if (prevInMore.current !== inMore) {
+    prevInMore.current = inMore;
+    navSlide.current = inMore ? "forward" : "back";
+  }
+  // The two lists differ in length; without this, everything under the nav
+  // jumps the moment the list swaps.
+  const navRef = useRef<HTMLElement>(null);
+  useHeightTransition(navRef, inMore, 200);
   // On the top level the More items' badges are out of sight, which is how an
   // unread critical audit event goes unnoticed for an hour. Roll them up onto
   // the More entry as one quiet dot — a red count there reads as an error, not
@@ -296,7 +311,13 @@ export function SessionList() {
             skills, so they live under the Skills entry as a segmented tab
             (SkillsSourceTabs), not a separate nav item. The 64px rail uses the
             same two levels, its labels hidden. */}
-        <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
+        <nav ref={navRef} className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
+          <div
+            key={inMore ? "more" : "top"}
+            className={`${styles.nav_pane}${
+              navSlide.current === "forward" ? ` ${styles.nav_pane_forward}` : navSlide.current === "back" ? ` ${styles.nav_pane_back}` : ""
+            }`}
+          >
           {inMore ? (
             <>
               <button
@@ -331,6 +352,7 @@ export function SessionList() {
               </button>
             </>
           )}
+          </div>
         </nav>
 
         <div className={styles.separator} />

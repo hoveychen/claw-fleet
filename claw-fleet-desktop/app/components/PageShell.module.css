@@ -13,6 +13,21 @@
   overflow: hidden;
   background: var(--color-bg);
   min-width: 0;
+  /* Every nav destination mounts its own PageShell, so this runs once per
+     page switch. Opacity only: a transform here would make .page the
+     containing block for the position:fixed dialogs some pages render. */
+  animation: page_enter var(--motion-base) var(--ease-out);
+}
+
+@keyframes page_enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page {
+    animation: none;
+  }
 }
 
 /* ── Banner ───────────────────────────────────────────────────────────────── */

@@ -50,6 +50,16 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
+  /* Motion. Short and decelerating: things arrive and settle, nothing bounces.
+     `--motion-fast` is for hover/press feedback, `--motion-base` for content
+     that appears or swaps (nav sub-page, page switch). Each consumer drops its
+     own entrance animation under `prefers-reduced-motion` — not a global kill,
+     which would also freeze the loading spinners that signal progress. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-shift: 10px;
+
   /* Deliberately fixed light canvas — does NOT follow the theme. Hosts foreign
      content that assumes a light background: the pairing QR code (unscannable
      on a dark ground) and agent-authored HTML. Named outside the --color-bg-*

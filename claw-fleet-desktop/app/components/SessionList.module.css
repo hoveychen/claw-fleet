@@ -261,6 +261,42 @@
   flex-shrink: 1;
   min-height: 0;
   overflow-y: auto;
+  /* The sub-page slide starts a few px off to the side; don't let that flash a
+     horizontal scrollbar. */
+  overflow-x: hidden;
+}
+
+/* One level of the nav (top level or "More"). Keyed in SessionList.tsx, so a
+   swap mounts a fresh pane and the entrance animation runs once. */
+.nav_pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav_pane_forward {
+  animation: nav_pane_in_forward var(--motion-base) var(--ease-out);
+}
+
+.nav_pane_back {
+  animation: nav_pane_in_back var(--motion-base) var(--ease-out);
+}
+
+@keyframes nav_pane_in_forward {
+  from { opacity: 0; transform: translateX(var(--motion-shift)); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes nav_pane_in_back {
+  from { opacity: 0; transform: translateX(calc(-1 * var(--motion-shift))); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav_pane_forward,
+  .nav_pane_back {
+    animation: none;
+  }
 }
 
 .nav_item {
@@ -357,6 +393,21 @@
   align-items: center;
   flex-shrink: 0;
   opacity: 0.7;
+  transition: transform var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
+}
+
+/* A small lean toward where the click goes. */
+.nav_item:hover .nav_more_chevron {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+.nav_back .nav_icon {
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.nav_back:hover .nav_icon {
+  transform: translateX(-2px);
 }
 
 .nav_back {
