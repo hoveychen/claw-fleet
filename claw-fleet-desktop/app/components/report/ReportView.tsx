@@ -18,6 +18,7 @@ import { EmptyState } from "../EmptyState";
 import { PageShell } from "../PageShell";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "../ContextMenu";
 import styles from "./ReportView.module.css";
+import { Presence } from "../Presence";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -189,13 +190,13 @@ function DateList() {
           }}
         />
       ))}
-      {ctxMenu && (
+      <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
         <ContextMenu
           anchor={ctxMenu.anchor}
           items={menuItems(ctxMenu.report)}
           onClose={() => setCtxMenu(null)}
         />
-      )}
+      )}</Presence>
       <div ref={sentinelRef} className={styles.list_sentinel}>
         {timelineLoading && <span className={styles.empty_inline}>{t("report.loading")}</span>}
         {!timelineHasMore && displayed.length > 1 && (

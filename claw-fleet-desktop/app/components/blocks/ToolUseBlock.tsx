@@ -24,6 +24,7 @@ import { formatBytes } from "../../formatBytes";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import { useInFlightTools } from "./inFlightTools";
 import styles from "./ToolUseBlock.module.css";
+import { Presence } from "../Presence";
 
 // Read-only tools that get grouped into a single summary row
 const READ_ONLY_TOOLS = new Set([
@@ -1298,7 +1299,7 @@ function GeneratedImagePreview({
           ))}
         </div>
       )}
-      {zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}
+      <Presence when={Boolean(zoomed)}>{zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}</Presence>
     </div>
   );
 }

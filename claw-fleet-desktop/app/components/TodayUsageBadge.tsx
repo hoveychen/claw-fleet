@@ -9,6 +9,7 @@ import { singleFlight } from "../singleFlight";
 import { RailStatTile } from "./RailStatTile";
 import { TokenReceiptModal } from "./TokenReceiptModal";
 import styles from "./TodayUsageBadge.module.css";
+import { Presence } from "./Presence";
 
 /** Compact token count: 1.2M / 34.5K / 780. */
 function fmtTokens(n: number): string {
@@ -83,9 +84,11 @@ export function TodayUsageBadge({
   // Portalled to <body>: this badge lives in the sidebar scroller, whose
   // mask-image makes it the containing block for position:fixed and would
   // clip the receipt's overlay to the sidebar.
-  const receipt = showReceipt
-    ? createPortal(<TokenReceiptModal onClose={() => setShowReceipt(false)} />, document.body)
-    : null;
+  const receipt = (
+    <Presence when={showReceipt}>
+      {createPortal(<TokenReceiptModal onClose={() => setShowReceipt(false)} />, document.body)}
+    </Presence>
+  );
   const openHint = t("today_usage.open_receipt", "查看用量分析");
 
   if (collapsed) {

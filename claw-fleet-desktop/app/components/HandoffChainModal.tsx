@@ -17,6 +17,7 @@ import { useSessionsStore } from "../store";
 import type { HandoffChain } from "../types";
 import { AgentSourceIcon, formatModel } from "./SessionCard";
 import styles from "./HandoffChainModal.module.css";
+import { useExiting } from "./Presence";
 
 interface Props {
   chain: HandoffChain | null;
@@ -51,6 +52,7 @@ export function HandoffChainModal({
   onClose,
   onOpenSession,
 }: Props) {
+  const exiting = useExiting();
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
 
@@ -91,7 +93,7 @@ export function HandoffChainModal({
   };
 
   return createPortal(
-    <div className={styles.overlay} onClick={close}>
+    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={close}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <span className={styles.title}>

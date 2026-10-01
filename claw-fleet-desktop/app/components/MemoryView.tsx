@@ -13,6 +13,7 @@ import { useReportStore, useUIStore } from "../store";
 import { canRevealPath } from "../canReveal";
 import type { ManagedLesson } from "../types";
 import styles from "./MemoryView.module.css";
+import { Presence } from "./Presence";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -563,13 +564,13 @@ export function MemoryView() {
               </div>
             );
           })}
-          {ctxMenu && (
+          <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
             <ContextMenu
               anchor={ctxMenu.anchor}
               items={cardMenuItems(ctxMenu.ws, ctxMenu.file)}
               onClose={() => setCtxMenu(null)}
             />
-          )}
+          )}</Presence>
         </div>
       }
     >
@@ -690,7 +691,7 @@ function FileDetail({
               >
                 {promoting ? t("memory.promoting") : t("memory.promote")}
               </button>
-              {showPromoteMenu && (
+              <Presence when={Boolean(showPromoteMenu)}>{showPromoteMenu && (
                 <div
                   className={`${styles.promote_menu} ${
                     promoteSide === "above" ? styles.promote_menu_above : styles.promote_menu_below
@@ -710,7 +711,7 @@ function FileDetail({
                     {t("memory.promote_global")}
                   </button>
                 </div>
-              )}
+              )}</Presence>
             </div>
           )}
         </div>

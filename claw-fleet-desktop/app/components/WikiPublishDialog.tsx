@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { WikiDoc } from "./WikiView";
 import { normalizeSlug } from "../wikiSlug";
 import styles from "./WikiPublishDialog.module.css";
+import { useExiting } from "./Presence";
 
 interface Props {
   /** Markdown to publish — the reader's message body. */
@@ -34,6 +35,7 @@ export function WikiPublishDialog({
   onClose,
   onPublished,
 }: Props) {
+  const exiting = useExiting();
   const { t } = useTranslation();
   const [slug, setSlug] = useState(defaultSlug);
   const [title, setTitle] = useState("");
@@ -103,7 +105,7 @@ export function WikiPublishDialog({
   const suggestions = (docs ?? []).filter((d) => d.kind === "markdown").slice(0, 30);
 
   return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
+    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose}>
       <div
         className={styles.dialog}
         onClick={(e) => e.stopPropagation()}

@@ -26,6 +26,7 @@ import { canRevealPath } from "../canReveal";
 import { exportChainBundle } from "../chainBundle";
 import { isWebBuild } from "../hostEnv";
 import type { AuxFacet, AuxFacetItem } from "../detailAux";
+import { Presence } from "./Presence";
 
 /** One icon per facet, so the menu reads as a list of destinations rather than
  *  a wall of text. Keyed by facet id — adding a facet without an icon still
@@ -213,9 +214,9 @@ export function SessionHeaderMenu({
       >
         <MoreHorizontal size={15} />
       </button>
-      {anchor && (
+      <Presence when={Boolean(anchor)}>{anchor && (
         <ContextMenu anchor={anchor} items={items} onClose={() => setAnchor(null)} />
-      )}
+      )}</Presence>
     </>
   );
 }

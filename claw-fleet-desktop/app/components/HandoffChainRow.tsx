@@ -5,6 +5,7 @@ import type { HandoffChain, SessionInfo } from "../types";
 import styles from "./HandoffChainRow.module.css";
 import { isKeyboardActivationKey } from "../keyboard";
 import { HandoffChainModal } from "./HandoffChainModal";
+import { Presence } from "./Presence";
 
 /**
  * Chip showing the relay chain position (n of N hops) that opens a scrollable modal listing the full relay
@@ -62,7 +63,7 @@ export function HandoffChainRow({
       >
         🔗 {t("card.handoff_chip", { hop: info.hop, len: info.chainLen })}
       </span>
-      {open && (
+      <Presence when={Boolean(open)}>{open && (
         <HandoffChainModal
           chain={chain}
           loading={loading}
@@ -71,7 +72,7 @@ export function HandoffChainRow({
           len={info.chainLen}
           onClose={() => setOpen(false)}
         />
-      )}
+      )}</Presence>
     </>
   );
 

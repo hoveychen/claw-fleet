@@ -8,6 +8,7 @@ import type {
   UsageRangeBreakdown,
 } from "../types";
 import styles from "./TokenReceiptModal.module.css";
+import { useExiting } from "./Presence";
 
 interface Props {
   onClose: () => void;
@@ -167,6 +168,7 @@ const KIND_FILL: Record<TokenKind, string> = {
  * from the range breakdown and additionally carry the daily series.
  */
 export function TokenReceiptModal({ onClose }: Props) {
+  const exiting = useExiting();
   const { t } = useTranslation();
   const [range, setRange] = useState<RangeKey>("today");
   const [data, setData] = useState<UsageView | null>(null);
@@ -214,7 +216,7 @@ export function TokenReceiptModal({ onClose }: Props) {
   ];
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
+    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <div className={styles.title_block}>

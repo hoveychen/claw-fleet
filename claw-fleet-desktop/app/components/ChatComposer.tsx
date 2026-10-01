@@ -17,6 +17,7 @@ import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions } from "./useWikiMentions";
 import styles from "./ChatComposer.module.css";
+import { Presence } from "./Presence";
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
@@ -685,7 +686,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
       </button>
-      {addMenuItems && addMenuItems.length > 0 && menuOpen && (
+      <Presence when={Boolean(addMenuItems && addMenuItems.length > 0 && menuOpen)}>{addMenuItems && addMenuItems.length > 0 && menuOpen && (
         <div
           className={`${styles.menu} ${menuSide === "above" ? styles.menu_above : styles.menu_below}`}
           ref={menuRef}
@@ -708,7 +709,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             </button>
           ))}
         </div>
-      )}
+      )}</Presence>
     </div>
   );
 
@@ -820,13 +821,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           {trailingControl}
         </div>
       )}
-      {previewing && (
+      <Presence when={Boolean(previewing)}>{previewing && (
         <ImageLightbox
           src={previewing.src}
           alt={previewing.alt}
           onClose={() => setPreviewing(null)}
         />
-      )}
+      )}</Presence>
     </div>
   );
 });

@@ -5,6 +5,7 @@ import type { ImageBlock } from "../../types";
 import { imageDataUrl, isTrimmedImageData } from "../../imageData";
 import { ImageLightbox } from "../ImageLightbox";
 import styles from "./ImageThumb.module.css";
+import { Presence } from "../Presence";
 
 /** A capped thumbnail that opens the full image in a lightbox. */
 export function ImageThumb({ block, alt }: { block: ImageBlock; alt: string }) {
@@ -67,7 +68,7 @@ export function ImageThumbSrc({ src, alt }: { src: string; alt: string }) {
           onError={() => setBroken(true)}
         />
       </button>
-      {zoomed && <ImageLightbox src={src} alt={alt} onClose={() => setZoomed(false)} />}
+      <Presence when={Boolean(zoomed)}>{zoomed && <ImageLightbox src={src} alt={alt} onClose={() => setZoomed(false)} />}</Presence>
     </>
   );
 }

@@ -45,6 +45,7 @@ import { AutoHeightFrame } from "./AutoHeightFrame";
 import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
+import { Presence } from "./Presence";
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
@@ -285,7 +286,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
             >
               {t("guard.always_allow_menu", "Always allow")} <span aria-hidden>▾</span>
             </button>
-            {menuOpen && (
+            <Presence when={Boolean(menuOpen)}>{menuOpen && (
               <div
                 className={`${styles.always_allow_menu_panel} ${
                   menuSide === "above" ? styles.menu_above : styles.menu_below
@@ -308,7 +309,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
                   </button>
                 ))}
               </div>
-            )}
+            )}</Presence>
           </div>
         )}
         <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleBlock}>

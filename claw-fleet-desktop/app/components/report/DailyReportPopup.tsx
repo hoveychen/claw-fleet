@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useReportStore, useUIStore } from "../../store";
 import { ReportDetail } from "./ReportView";
 import styles from "./DailyReportPopup.module.css";
+import { Presence } from "../Presence";
 
 /**
  * The daily report, pushed at the user instead of waiting to be found.
@@ -29,9 +30,9 @@ export function DailyReportPopup() {
     return () => window.removeEventListener("keydown", onKey);
   }, [date, closeReportPopup]);
 
-  if (!date) return null;
-
   return (
+    <Presence when={!!date}>
+    {date && (
     <div className={styles.overlay} onClick={closeReportPopup}>
       <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
@@ -60,5 +61,7 @@ export function DailyReportPopup() {
         </div>
       </div>
     </div>
+    )}
+    </Presence>
   );
 }

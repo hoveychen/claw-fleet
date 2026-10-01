@@ -45,6 +45,7 @@ import { groupWorkRuns } from "./workRuns";
 import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
 import { InFlightToolsContext, inFlightToolIds } from "./blocks/inFlightTools";
 import styles from "./MessageList.module.css";
+import { Presence } from "./Presence";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
 
@@ -263,14 +264,14 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
       data-msg-uuid={msg.uuid}
     >
       {isUser && actions}
-      {reading && (
+      <Presence when={Boolean(reading)}>{reading && (
         <ReaderModal
           text={copyText}
           title={time?.full}
           paths={paths}
           onClose={() => setReading(false)}
         />
-      )}
+      )}</Presence>
       <div className={styles.content}>
         {isAssistant && Array.isArray(content) && (
           <ContentBlocks

@@ -11,6 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 import "../../i18n";
 import { DiffView } from "./DiffView";
+import { EXIT_MS } from "../Presence";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -83,7 +84,7 @@ describe("DiffView fold", () => {
     expect(rowCount(el)).toBe(MAX_INLINE_ROWS);
   });
 
-  it("lifts the full diff into a sheet, uncapped, and closes again", () => {
+  it("lifts the full diff into a sheet, uncapped, and closes again", async () => {
     const el = mount(40);
     const maximize = [...el.querySelectorAll("button")].find(
       (b) => b.textContent === "⤢",
@@ -99,6 +100,11 @@ describe("DiffView fold", () => {
 
     const close = sheet!.querySelector("[aria-label]") as HTMLButtonElement;
     act(() => close.click());
+    // Plays its exit first (Presence), then unmounts.
+    expect(document.querySelector("[role=dialog]")?.closest("[data-exiting]")).not.toBeNull();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, EXIT_MS + 20));
+    });
     expect(document.querySelector("[role=dialog]")).toBeNull();
   });
 });

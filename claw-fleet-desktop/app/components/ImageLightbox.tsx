@@ -8,6 +8,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 import { isWebBuild } from "../hostEnv";
 import styles from "./ImageLightbox.module.css";
+import { useExiting } from "./Presence";
 
 interface Props {
   src: string;
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function ImageLightbox({ src, alt, onClose }: Props) {
+  const exiting = useExiting();
   const { t } = useTranslation();
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -113,7 +115,7 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
   // the DecisionPanel card (`.panel` has `transform: translateX(-50%)`), which
   // confined the overlay to the ~460px card box instead of the full window.
   return createPortal(
-    <div className={styles.overlay} onClick={onClose} role="dialog" aria-modal="true" aria-label={t("composer.lightbox_preview", "图片预览")}>
+    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose} role="dialog" aria-modal="true" aria-label={t("composer.lightbox_preview", "图片预览")}>
       <div className={styles.toolbar} onClick={(e) => e.stopPropagation()}>
         <button type="button" onClick={() => setScale(zoom - 0.5)} disabled={zoom === 1} title={t("composer.lightbox_zoom_out", "缩小")} aria-label={t("composer.lightbox_zoom_out", "缩小")}><Minus size={17} /></button>
         <span className={styles.zoom}>{Math.round(zoom * 100)}%</span>

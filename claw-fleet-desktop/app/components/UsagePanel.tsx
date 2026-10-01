@@ -15,6 +15,7 @@ import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
 import { RailStatTile } from "./RailStatTile";
+import { Presence } from "./Presence";
 
 function formatResetIn(resets_at: string, t: TFunc): string {
   const diff = new Date(resets_at).getTime() - Date.now();
@@ -325,7 +326,7 @@ function ClaudeUsageSection() {
           {t("account.occupancy_history")}
         </button>
       )}
-      {historyOpen && <UsageHistoryModal onClose={() => setHistoryOpen(false)} />}
+      <Presence when={Boolean(historyOpen)}>{historyOpen && <UsageHistoryModal onClose={() => setHistoryOpen(false)} />}</Presence>
       <SectionFooter
         lastUpdated={lastUpdated}
         loading={loading}
@@ -399,7 +400,7 @@ function CodexUsageSection() {
           {t("account.occupancy_history")}
         </button>
       )}
-      {historyOpen && <CodexUsageHistoryModal onClose={() => setHistoryOpen(false)} />}
+      <Presence when={Boolean(historyOpen)}>{historyOpen && <CodexUsageHistoryModal onClose={() => setHistoryOpen(false)} />}</Presence>
       <SectionFooter
         lastUpdated={lastUpdated}
         loading={loading}

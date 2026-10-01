@@ -5,6 +5,7 @@ import { ContextMenu, type ContextMenuAnchor } from "../components/ContextMenu";
 import { canRevealPath } from "../canReveal";
 import { resolvePathRef, type PathRef } from "./pathRef";
 import styles from "./markdown.module.css";
+import { Presence } from "../components/Presence";
 
 /**
  * Clickable file paths inside agent prose.
@@ -144,7 +145,7 @@ export function PathChip({
       >
         {children}
       </code>
-      {menu && (
+      <Presence when={Boolean(menu)}>{menu && (
         <ContextMenu
           anchor={menu}
           onClose={() => setMenu(null)}
@@ -162,7 +163,7 @@ export function PathChip({
               : []),
           ]}
         />
-      )}
+      )}</Presence>
     </>
   );
 }

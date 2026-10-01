@@ -14,6 +14,7 @@ import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import { canRevealPath } from "../canReveal";
+import { Presence } from "./Presence";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -379,13 +380,13 @@ export function SkillsView() {
               />
             ))}
           </div>
-          {ctxMenu && (
+          <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
             <ContextMenu
               anchor={ctxMenu.anchor}
               items={skillMenuItems(ctxMenu.skill)}
               onClose={() => setCtxMenu(null)}
             />
-          )}
+          )}</Presence>
         </div>
       }
     >

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useAutoFlip } from "./useAutoFlip";
 import styles from "./UsageBar.module.css";
+import { Presence } from "./Presence";
 
 export interface UsageBarSubBar {
   label: string;
@@ -72,7 +73,7 @@ export function UsageBar({ data }: { data: UsageBarData }) {
         </span>
         <span className={styles.pct} style={{ color }}>{Math.round(pct)}%</span>
       </div>
-      {showBreakdown && (
+      <Presence when={Boolean(showBreakdown)}>{showBreakdown && (
         <div
           className={`${styles.popover} ${side === "above" ? styles.popover_above : styles.popover_below}`}
           ref={popoverRef}
@@ -92,7 +93,7 @@ export function UsageBar({ data }: { data: UsageBarData }) {
             return <MiniBar key={s.name} label={s.name} percent={s.percent} />;
           })}
         </div>
-      )}
+      )}</Presence>
     </div>
   );
 }

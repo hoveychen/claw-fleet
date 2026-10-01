@@ -25,6 +25,7 @@ import { SessionAuxDoc } from "./SessionAuxDoc";
 import { SessionAuxExplain } from "./SessionAuxExplain";
 import { SubagentLiveCards } from "./SubagentLiveCards";
 import styles from "./SessionDetail.module.css";
+import { Presence } from "./Presence";
 
 const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
@@ -403,9 +404,9 @@ export function SessionAuxRail({
           </div>
         );
       })}
-      {menu && (
+      <Presence when={Boolean(menu)}>{menu && (
         <ContextMenu anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />
-      )}
+      )}</Presence>
     </aside>
   );
 }
