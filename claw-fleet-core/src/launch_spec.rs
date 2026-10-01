@@ -293,13 +293,9 @@ pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
 
     type Cached = HashMap<String, (SystemTime, u64, LaunchSpec)>;
     static CACHE: Mutex<Option<(PathBuf, Cached)>> = Mutex::new(None);
-
-    // Whichever process lists sessions first on a host fills in the notes
-    // written before `note_spawn` existed — the CLI may run before any desktop.
-    static BACKFILL: std::sync::Once = std::sync::Once::new();
-    BACKFILL.call_once(|| {
-        backfill_once();
-    });
+    // Notes a fill pass could not place, at the (mtime, len) it saw them, so
+    // one is looked up once per change rather than on every poll.
+    static UNPLACED: Mutex<Option<HashMap<String, (SystemTime, u64)>>> = Mutex::new(None);
 
     let Some(dir) = spec_dir() else {
         return HashMap::new();
@@ -340,6 +336,41 @@ pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
         };
         fresh.insert(id.to_string(), (mtime, len, spec));
     }
+
+    // A note with no source is invisible to every source's scan. Fill it in
+    // from the agent stores — on every change, not once per host: a Fleet
+    // build older than `note_spawn` keeps writing such notes for as long as
+    // one of its processes runs (a desktop not yet restarted, the Stop hook's
+    // `fleet`), and a one-shot pass that ran first lost every one of them.
+    let settled = SystemTime::now()
+        .checked_sub(FILL_SETTLE)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let mut unplaced = UNPLACED.lock().unwrap_or_else(|e| e.into_inner());
+    let unplaced = unplaced.get_or_insert_with(HashMap::new);
+    let pending: Vec<(String, SystemTime)> = fresh
+        .iter()
+        .filter(|(_, (m, _, s))| s.source.is_none() && s.kind.as_deref() != Some("fork") && *m <= settled)
+        .filter(|(id, (m, l, _))| unplaced.get(*id) != Some(&(*m, *l)))
+        .map(|(id, (m, _, _))| (id.clone(), *m))
+        .collect();
+    if !pending.is_empty() {
+        let filled = fill_sources(&pending);
+        for (id, _) in &pending {
+            let path = dir.join(format!("{id}.json"));
+            let Some(spec) = get(id) else {
+                continue;
+            };
+            let Ok(meta) = fs::metadata(&path) else {
+                continue;
+            };
+            let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            if !filled.contains(id) {
+                unplaced.insert(id.clone(), (mtime, meta.len()));
+            }
+            fresh.insert(id.clone(), (mtime, meta.len(), spec));
+        }
+    }
+
     let out = fresh
         .iter()
         .filter(|(_, (_, _, s))| s.kind.as_deref() != Some("fork"))
@@ -426,67 +457,86 @@ pub fn retain_registered(
     sessions.retain(|s| kept.contains(&s.id));
 }
 
-const BACKFILL_MARKER: &str = "launch-spec-backfill-v1.done";
+/// How old a source-less note must be before [`registry`] fills it in: a
+/// spawn writes [`record`] and then [`note_spawn`] a moment later, and a fill
+/// landing between the two would race the spawn's write.
+const FILL_SETTLE: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Fill in `source`, `transcript` and `workspace` on notes written before
-/// [`note_spawn`] existed, once per host. Returns how many notes it filled.
-///
-/// A note is matched to the agent whose store knows its id: a Claude
-/// transcript `~/.claude/projects/*/<id>.jsonl`, a thread in Codex's SQLite
-/// index, and otherwise dsh when the note carries an `entrypoint` — only dsh
-/// spawns record one. A note none of them know (a fork that outlived its
-/// process, a session whose transcript was deleted) is left as it is.
-pub fn backfill_once() -> usize {
-    let Some(marker) = crate::session::get_fleet_dir()
-        .map(|d| d.join("migrations").join(BACKFILL_MARKER))
-    else {
-        return 0;
-    };
-    if marker.exists() {
-        return 0;
-    }
-    let filled = backfill(&claude_transcripts(), &crate::codex_source::all_thread_rollout_cwds());
-    backfill_pids(&running_session_pids());
-    if let Some(parent) = marker.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Err(e) = fs::write(&marker, now_ms().to_string()) {
-        crate::log_debug(&format!("launch_spec: write backfill marker: {e}"));
-    }
+/// How long a note no agent store knows stays a candidate. Past that, its
+/// transcript is never coming (a fork that outlived its process, a deleted
+/// session) and it is stamped [`UNKNOWN_SOURCE`], so a fresh process does not
+/// walk every project dir for it again.
+const UNPLACED_GIVE_UP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// The source of a note no agent store could place. No scan lists it.
+const UNKNOWN_SOURCE: &str = "unknown";
+
+/// Fill in `source`, `transcript`, `workspace` and a running pid on the notes
+/// `pending` names (id + the mtime it was read at), from one walk of the agent
+/// stores. Returns the ids it placed.
+fn fill_sources(pending: &[(String, std::time::SystemTime)]) -> std::collections::HashSet<String> {
+    let filled = backfill(
+        pending,
+        &claude_transcripts(),
+        &crate::codex_source::all_thread_rollout_cwds(),
+        std::time::SystemTime::now(),
+    );
+    let pids = running_session_pids();
+    backfill_pids(
+        &pids
+            .into_iter()
+            .filter(|(id, _)| filled.contains(id))
+            .collect(),
+    );
     filled
 }
 
+/// A note is matched to the agent whose store knows its id: a Claude
+/// transcript `~/.claude/projects/*/<id>.jsonl`, a thread in Codex's SQLite
+/// index, and otherwise dsh when the note carries an `entrypoint` — only dsh
+/// spawns record one. A note none of them know is left as it is, until it is
+/// [`UNPLACED_GIVE_UP`] old.
 fn backfill(
+    pending: &[(String, std::time::SystemTime)],
     claude: &std::collections::HashMap<String, PathBuf>,
     codex: &std::collections::HashMap<String, (String, String)>,
-) -> usize {
-    let mut filled = 0;
-    for (id, mut spec) in all() {
+    now: std::time::SystemTime,
+) -> std::collections::HashSet<String> {
+    let mut filled = std::collections::HashSet::new();
+    for (id, mtime) in pending {
+        // Re-read: a spawn may have written the note since the caller saw it.
+        let Some(mut spec) = get(id) else {
+            continue;
+        };
         if spec.source.is_some() {
             continue;
         }
-        if let Some(path) = claude.get(&id) {
+        if let Some(path) = claude.get(id.as_str()) {
             spec.source = Some("claude".into());
             spec.transcript = Some(path.to_string_lossy().into_owned());
             spec.workspace = spec.workspace.or_else(|| transcript_cwd(path));
-        } else if let Some((rollout, cwd)) = codex.get(&id) {
+        } else if let Some((rollout, cwd)) = codex.get(id.as_str()) {
             spec.source = Some("codex".into());
             spec.transcript = Some(rollout.clone());
             spec.workspace = spec.workspace.or_else(|| Some(cwd.clone()));
         } else if spec.entrypoint.is_some() {
             spec.source = Some("dsh".into());
         } else {
+            if now.duration_since(*mtime).is_ok_and(|age| age >= UNPLACED_GIVE_UP) {
+                spec.source = Some(UNKNOWN_SOURCE.into());
+                write(id, &spec);
+            }
             continue;
         }
-        write(&id, &spec);
-        filled += 1;
+        write(id, &spec);
+        filled.insert(id.clone());
     }
     filled
 }
 
 /// Sessions running right now whose argv names them, keyed by id — one
-/// process-table scan, once per host, so the sessions an older build spawned
-/// (and recorded no pid for) keep reading as alive after the upgrade.
+/// process-table scan per fill, so the sessions an older build spawned (and
+/// recorded no pid for) keep reading as alive.
 fn running_session_pids() -> std::collections::HashMap<String, u32> {
     let mut out: std::collections::HashMap<String, u32> = crate::session::scan_cli_processes()
         .into_iter()
@@ -872,7 +922,10 @@ mod tests {
         let codex = [("x".to_string(), ("/r/x.jsonl".to_string(), "/ws/codex".to_string()))]
             .into_iter()
             .collect();
-        assert_eq!(backfill(&claude, &codex), 3);
+        let now = std::time::SystemTime::now();
+        let ids: Vec<_> = ["c", "x", "d", "k", "n"].iter().map(|i| (i.to_string(), now)).collect();
+        let filled = backfill(&ids, &claude, &codex, now);
+        assert_eq!(filled.len(), 3);
 
         let c = get("c").unwrap();
         assert_eq!(c.source.as_deref(), Some("claude"));
@@ -886,6 +939,54 @@ mod tests {
         assert_eq!(get("d").unwrap().source.as_deref(), Some("dsh"));
         assert_eq!(get("k").unwrap().source, None);
         assert_eq!(get("n").unwrap().workspace.as_deref(), Some("/ws/new"));
+    }
+
+    /// A note nobody places is retried until it is a day old, then stamped so
+    /// a fresh process does not walk every project dir for it again.
+    #[test]
+    fn backfill_gives_up_on_a_day_old_unplaced_note() {
+        let _home = TmpHome::new("giveup");
+        record("young", None, None);
+        record("old", None, None);
+        let now = std::time::SystemTime::now();
+        let day_ago = now - UNPLACED_GIVE_UP;
+        let ids = vec![("young".to_string(), now), ("old".to_string(), day_ago)];
+        let (claude, codex) = Default::default();
+        assert!(backfill(&ids, &claude, &codex, now).is_empty());
+        assert_eq!(get("young").unwrap().source, None);
+        assert_eq!(get("old").unwrap().source.as_deref(), Some(UNKNOWN_SOURCE));
+    }
+
+    /// The registry fills a source-less note on sight, however many fill
+    /// passes ran before it — an older build's process writing notes after
+    /// the upgrade must not leave them unlisted. Freshly written notes wait
+    /// out [`FILL_SETTLE`], so a spawn's own write is never raced.
+    #[test]
+    fn registry_fills_a_sourceless_note_written_after_an_earlier_pass() {
+        let home = TmpHome::new("refill");
+        let id = "77777777-2222-3333-4444-555555555555";
+        let project = home.dir.join(".claude").join("projects").join("-ws-late");
+        fs::create_dir_all(&project).unwrap();
+        let jsonl = project.join(format!("{id}.jsonl"));
+        fs::write(&jsonl, "{\"type\":\"user\",\"cwd\":\"/ws/late\"}\n").unwrap();
+        // An earlier pass ran with nothing to do.
+        let _ = registry();
+        // An older build writes the note: flags only, no source.
+        fs::create_dir_all(spec_dir().unwrap()).unwrap();
+        fs::write(spec_path(id).unwrap(), "{\"model\":\"opus\"}").unwrap();
+        assert_eq!(registry()[id].source, None, "a fresh note waits out the settle delay");
+        let backdate = std::time::SystemTime::now() - FILL_SETTLE * 2;
+        fs::File::options()
+            .write(true)
+            .open(spec_path(id).unwrap())
+            .unwrap()
+            .set_modified(backdate)
+            .unwrap();
+        let spec = registry()[id].clone();
+        assert_eq!(spec.source.as_deref(), Some("claude"));
+        assert_eq!(spec.transcript.as_deref(), jsonl.to_str());
+        assert_eq!(spec.workspace.as_deref(), Some("/ws/late"));
+        assert_eq!(spec.model.as_deref(), Some("opus"));
     }
 
     /// Forks are side questions, not sessions: the registry leaves them out.
