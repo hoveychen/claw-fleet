@@ -31,6 +31,7 @@ import type {
 } from "../types";
 import { TaskLine, taskTip } from "./TaskLine";
 import styles from "./PlansView.module.css";
+import { Presence as ExitPresence } from "./Presence";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -469,7 +470,7 @@ export function PlansView() {
         )}
       </div>
 
-      {openChain && (
+      <ExitPresence when={Boolean(openChain)}>{openChain && (
         <HandoffChainModal
           chain={openChain}
           loading={false}
@@ -479,7 +480,7 @@ export function PlansView() {
           onClose={() => setOpenChain(null)}
           onOpenSession={openSession}
         />
-      )}
+      )}</ExitPresence>
     </PageShell>
   );
 }

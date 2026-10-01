@@ -25,6 +25,7 @@ import { sshTargetOf, type SshHost } from "../sshHosts";
 import styles from "./NewSessionForm.module.css";
 import { rcaErrorMessage } from "../rcaErrors";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { Presence } from "./Presence";
 
 export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
@@ -780,7 +781,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
           );
         })()}
 
-      {pickingDir && (
+      <Presence when={Boolean(pickingDir)}>{pickingDir && (
         <DirPickerDialog
           initialPath={browsingHost ? "" : workspace}
           sshTarget={browsingHost ? sshTargetOf(browsingHost) : undefined}
@@ -810,7 +811,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
             setBrowsingHost(null);
           }}
         />
-      )}
+      )}</Presence>
       {registerError && <div className={styles.error}>{registerError}</div>}
     </div>
   );

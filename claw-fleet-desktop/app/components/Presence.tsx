@@ -32,9 +32,15 @@ export function useExiting(): boolean {
  *
  * Reopening mid-exit shows the new children at once. Reduced-motion users get
  * the old instant unmount.
+ *
+ * `children` may also be a function of `exiting`, for a component that portals
+ * from inside its own Presence — useExiting() there would read the Presence
+ * above the component, not this one.
  */
-export function Presence({ when, children }: { when: boolean; children: ReactNode }) {
-  const last = useRef<ReactNode>(null);
+type PresenceChildren = ReactNode | ((exiting: boolean) => ReactNode);
+
+export function Presence({ when, children }: { when: boolean; children: PresenceChildren }) {
+  const last = useRef<PresenceChildren>(null);
   if (when) last.current = children;
 
   // Derived state, set during render, so the exit starts in the same commit
@@ -61,10 +67,11 @@ export function Presence({ when, children }: { when: boolean; children: ReactNod
 
   if (!when && !exiting && !startExit) return null;
   const closing = !when;
+  const shown = closing ? last.current : children;
   return (
     <ExitingContext.Provider value={closing}>
       <div style={{ display: "contents" }} data-exiting={closing || undefined}>
-        {closing ? last.current : children}
+        {typeof shown === "function" ? shown(closing) : shown}
       </div>
     </ExitingContext.Provider>
   );

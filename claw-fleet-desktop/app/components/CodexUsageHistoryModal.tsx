@@ -3,12 +3,14 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { CodexUsageHistoryChart } from "./CodexUsageHistoryChart";
 import styles from "./UsageHistoryModal.module.css";
+import { useExiting } from "./Presence";
 
 interface Props {
   onClose: () => void;
 }
 
 export function CodexUsageHistoryModal({ onClose }: Props) {
+  const exiting = useExiting();
   const { t } = useTranslation();
 
   // Close on Escape
@@ -24,7 +26,7 @@ export function CodexUsageHistoryModal({ onClose }: Props) {
   // mask-image, which makes it the containing block for position:fixed and
   // would clip the overlay to the sidebar.
   return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
+    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <span className={styles.title}>{t("account.occupancy_title")}</span>

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { PatchHunk } from "../../toolResults";
 import { rowsFromHunks, type DiffLine, type Row } from "../../diffRows";
 import styles from "./DiffView.module.css";
+import { Presence } from "../Presence";
 
 /** Rows shown before the diff folds itself.
  *
@@ -234,11 +235,11 @@ export function DiffView({ filePath, before, after, hunks, tag, context = 3, ful
           {t("diff.unfold", { count: rows.length - MAX_INLINE_ROWS })}
         </button>
       )}
-      {maximized &&
+      <Presence when={maximized}>{(exiting) =>
         createPortal(
           // Portalled to body for ImageLightbox's reason: a fixed overlay nested
           // under a transformed ancestor is clipped to that ancestor's box.
-          <div className={styles.overlay} onClick={() => setMaximized(false)}>
+          <div className={styles.overlay} data-exiting={exiting || undefined} onClick={() => setMaximized(false)}>
             <div
               className={styles.sheet}
               onClick={(e) => e.stopPropagation()}
@@ -272,7 +273,7 @@ export function DiffView({ filePath, before, after, hunks, tag, context = 3, ful
             </div>
           </div>,
           document.body,
-        )}
+        )}</Presence>
     </div>
   );
 }

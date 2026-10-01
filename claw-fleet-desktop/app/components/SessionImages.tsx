@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { imageFileName, sessionImageUrl } from "../sessionImages";
 import { ImageLightbox } from "./ImageLightbox";
 import styles from "./SessionImages.module.css";
+import { Presence } from "./Presence";
 
 interface GeneratedImage {
   path: string;
@@ -69,7 +70,7 @@ export function SessionImages({ sessionId }: Props) {
           );
         })}
       </div>
-      {zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}
+      <Presence when={Boolean(zoomed)}>{zoomed && <ImageLightbox src={zoomed.src} alt={zoomed.name} onClose={() => setZoomed(null)} />}</Presence>
     </div>
   );
 }

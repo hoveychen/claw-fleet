@@ -10,6 +10,8 @@ import type { WikiDoc } from "./WikiView";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import { normalizeSlug } from "../wikiSlug";
 import styles from "./ReaderModal.module.css";
+import { Presence } from "./Presence";
+import { useExiting } from "./Presence";
 
 interface Props {
   /** Markdown source of the message — `messageToText`'s output, the same
@@ -44,6 +46,7 @@ function defaultSlug(workspaceRoot: string | undefined): string {
  * clipped to that ancestor's box instead of covering the window.
  */
 export function ReaderModal({ text, title, paths, onClose }: Props) {
+  const exiting = useExiting();
   const { t } = useTranslation();
   const [publishing, setPublishing] = useState(false);
   /** Transient confirmation shown in the header after a successful publish. */
@@ -93,7 +96,7 @@ export function ReaderModal({ text, title, paths, onClose }: Props) {
   };
 
   return createPortal(
-    <div className={styles.overlay} onClick={onClose} data-reader-overlay>
+    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose} data-reader-overlay>
       <div
         className={styles.paper}
         onClick={(e) => e.stopPropagation()}
@@ -139,7 +142,7 @@ export function ReaderModal({ text, title, paths, onClose }: Props) {
           <TextBlock text={text} paths={paths} />
         </div>
       </div>
-      {publishing && (
+      <Presence when={Boolean(publishing)}>{publishing && (
         <WikiPublishDialog
           text={text}
           workspacePath={paths?.workspaceRoot ?? ""}
@@ -147,7 +150,7 @@ export function ReaderModal({ text, title, paths, onClose }: Props) {
           onClose={() => setPublishing(false)}
           onPublished={onPublished}
         />
-      )}
+      )}</Presence>
     </div>,
     document.body,
   );

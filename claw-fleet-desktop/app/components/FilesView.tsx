@@ -46,6 +46,7 @@ import { PageShell } from "./PageShell";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
+import { Presence } from "./Presence";
 
 // ── Types (mirror claw-fleet-core/src/file_explorer.rs) ─────────────────────
 
@@ -379,7 +380,7 @@ export function FilesView() {
       ) : (
         <div className={styles.placeholder}>{t("files.select_workspace")}</div>
       )}
-      {cloning && (
+      <Presence when={Boolean(cloning)}>{cloning && (
         <CloneRepoDialog
           // Beside the repo in hand by default; the picker starts at the
           // backend host's home when nothing is selected.
@@ -394,8 +395,8 @@ export function FilesView() {
           }}
           onCancel={() => setCloning(false)}
         />
-      )}
-      {pickingDir && (
+      )}</Presence>
+      <Presence when={Boolean(pickingDir)}>{pickingDir && (
         <DirPickerDialog
           initialPath={selected ?? ""}
           onPick={(path) => {
@@ -404,7 +405,7 @@ export function FilesView() {
           }}
           onCancel={() => setPickingDir(false)}
         />
-      )}
+      )}</Presence>
     </PageShell>
   );
 }
@@ -1155,13 +1156,13 @@ function GitStatusBar({
         </div>
       )}
 
-      {confirm && (
+      <Presence when={Boolean(confirm)}>{confirm && (
         <ConfirmDialog
           message={confirmMsg}
           onConfirm={() => void runOp(confirm)}
           onCancel={() => setConfirm(null)}
         />
-      )}
+      )}</Presence>
     </div>
   );
 }

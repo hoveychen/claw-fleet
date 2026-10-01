@@ -18,6 +18,7 @@ import { isWebBuild } from "../hostEnv";
 import { DirPickerDialog } from "./DirPickerDialog";
 import type { Delivery, SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
+import { Presence } from "./Presence";
 
 function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/");
@@ -309,7 +310,7 @@ export function ResumeComposer({
         ]}
       />
       {error && <div className={styles.error}>{error}</div>}
-      {pickingDir && (
+      <Presence when={Boolean(pickingDir)}>{pickingDir && (
         <DirPickerDialog
           initialPath=""
           onPick={(path) => {
@@ -318,7 +319,7 @@ export function ResumeComposer({
           }}
           onCancel={() => setPickingDir(false)}
         />
-      )}
+      )}</Presence>
     </div>
   );
 }

@@ -46,6 +46,7 @@ import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { useUIStore } from "../store";
 import { printWikiDoc } from "./wikiPrint";
 import styles from "./WikiView.module.css";
+import { Presence } from "./Presence";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
 
@@ -874,7 +875,7 @@ export function WikiView() {
         />
       )}
 
-      {renameFolder !== null && (
+      <Presence when={Boolean(renameFolder !== null)}>{renameFolder !== null && (
         <PromptDialog
           title={t("wiki.folder_rename_title", "重命名目录 “{{path}}”", { path: renameFolder })}
           hint={t(
@@ -888,9 +889,9 @@ export function WikiView() {
           onConfirm={handleRenameFolderSubmit}
           onCancel={() => setRenameFolder(null)}
         />
-      )}
+      )}</Presence>
 
-      {moveTarget && (
+      <Presence when={Boolean(moveTarget)}>{moveTarget && (
         <PromptDialog
           title={t("wiki.move_title", "移动 / 重命名 “{{title}}”", { title: moveTarget.title })}
           hint={t(
@@ -903,9 +904,9 @@ export function WikiView() {
           onConfirm={handleMoveSubmit}
           onCancel={() => setMoveTarget(null)}
         />
-      )}
+      )}</Presence>
 
-      {confirmDelete && (
+      <Presence when={Boolean(confirmDelete)}>{confirmDelete && (
         <ConfirmDialog
           message={
             confirmDelete.kind === "doc"
@@ -926,7 +927,7 @@ export function WikiView() {
           onConfirm={handleDelete}
           onCancel={() => setConfirmDelete(null)}
         />
-      )}
+      )}</Presence>
       </>}
     >
       <div className={styles.layout}>
