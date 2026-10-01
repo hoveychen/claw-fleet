@@ -75,6 +75,12 @@ const SVG_ATTRS = [
 const schema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), ...SVG_TAGS],
+  // `<style>` is not admitted (its CSS would restyle the whole app), but by
+  // default sanitize keeps a dropped element's children — so an SVG's
+  // `<style>.t{font:12px …}</style>` leaked its rules as visible text. Strip
+  // the content along with the tag, as the default schema already does for
+  // `<script>`.
+  strip: [...(defaultSchema.strip ?? []), "style"],
   attributes: {
     ...defaultSchema.attributes,
     span: [
@@ -153,6 +159,38 @@ export const rehypeFileUrlImages: Plugin<[], Root> = () => (tree) => {
 };
 
 /**
+ * `marker-end="url(#arrow)"` → `marker-end="url(#user-content-arrow)"`.
+ *
+ * `rehype-sanitize` prefixes every `id` with `user-content-` (GitHub's
+ * clobber guard, so a model's `id="body"` can't shadow app globals), but the
+ * `url(#…)` references that point at those ids are plain attribute text and
+ * keep the bare name. Every arrowhead (`marker-*`), gradient/pattern
+ * (`fill`/`stroke`) and `clip-path` in an inline SVG then resolves to nothing:
+ * arrows render as bare lines and gradient fills vanish. Rewrite the
+ * references to the prefixed id so they resolve again.
+ *
+ * Must run after `rehype-sanitize`: that is the pass that adds the prefix.
+ */
+const CLOBBER_PREFIX = "user-content-";
+
+export const rehypeSvgUrlRefs: Plugin<[], Root> = () => (tree) => {
+  visit(tree, "element", (node: Element) => {
+    const props = node.properties;
+    if (!props) return;
+    for (const [key, value] of Object.entries(props)) {
+      if (typeof value !== "string" || !value.includes("url(")) continue;
+      props[key] = value.replace(
+        /url\(\s*(['"]?)#(?!user-content-)/g,
+        (_m, q: string) => `url(${q}#${CLOBBER_PREFIX}`,
+      );
+    }
+  });
+};
+
+/** A block-level `<svg …>` open tag, quoted attribute values allowed to hold `>`. */
+const SVG_OPEN_TAG = /^(\s*<svg\b(?:[^>"']|"[^"]*"|'[^']*')*>)(.*)$/;
+
+/**
  * A bare `<svg>` opens a CommonMark *type-7* HTML block, and — unlike a
  * `<script>`/`<pre>`/`<style>` block — a type-7 block ends at the first blank
  * line. Models routinely separate an inline SVG's logical groups with blank
@@ -162,6 +200,13 @@ export const rehypeFileUrlImages: Plugin<[], Root> = () => (tree) => {
  * blank lines that sit *inside* a top-level svg span so the whole drawing stays
  * one HTML block. Fenced code is left untouched, so an SVG shown as a code
  * sample keeps its original formatting.
+ *
+ * The type-7 start condition also requires the open tag to be *alone* on its
+ * line. `<svg viewBox="…"><defs>` fails it, so the svg starts a paragraph of
+ * inline HTML instead — and the first `<style>`/`<pre>` line, which may
+ * interrupt a paragraph, ends it there: the drawing is cut off after `<defs>`
+ * and the rest spills into the prose. So anything after a block-level `<svg …>`
+ * open tag is moved to its own line.
  */
 export function normalizeSvgBlankLines(text: string): string {
   if (!text.includes("<svg")) return text;
@@ -208,7 +253,9 @@ export function normalizeSvgBlankLines(text: string): string {
       out.push(line);
       continue;
     }
-    buf.push(line);
+    const open = depth === 0 ? SVG_OPEN_TAG.exec(line) : null;
+    if (open && open[2].trim() !== "") buf.push(open[1], open[2]);
+    else buf.push(line);
     depth += (line.match(/<svg\b/g) ?? []).length;
     depth -= (line.match(/<\/svg\s*>/g) ?? []).length;
     if (depth <= 0) flush(true); // balanced close → safe to drop inner blanks
@@ -259,6 +306,8 @@ export const safeRehypePlugins: PluggableList = [
   // After sanitize, so the rewritten bare path isn't re-checked against the
   // protocol list (see rehypeFileUrlImages).
   rehypeFileUrlImages,
+  // After sanitize, which is what adds the id prefix it points refs at.
+  rehypeSvgUrlRefs,
   // Runs last so the `cjk-indent` class it adds to CJK-leading <p> survives the
   // sanitize pass above (className is globally allow-listed by `schema`).
   rehypeCjkIndent,
