@@ -8,7 +8,9 @@
 // and both gaps were user-visible on the phone for as long as they lasted —
 // because the desktop had tests for them and this side had none. plugins.test.ts
 // next to this file now pins both. Add a case there for anything you mirror.
-import type { PluggableList } from "unified";
+import type { Plugin, PluggableList } from "unified";
+import type { Root, Element } from "hast";
+import { visit } from "unist-util-visit";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -68,6 +70,11 @@ const SVG_ATTRS = [
 const schema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), ...SVG_TAGS],
+  // `<style>` is not admitted, but sanitize keeps a dropped element's children by
+  // default, so an SVG's `<style>.t{font:12px …}</style>` leaked its rules as
+  // visible text. Strip the content too, as the default schema does for `<script>`.
+  // Mirrored from the desktop chain; pinned in plugins.test.ts.
+  strip: [...(defaultSchema.strip ?? []), "style"],
   attributes: {
     ...defaultSchema.attributes,
     span: [
@@ -81,6 +88,30 @@ const schema = {
     ],
     "*": [...(defaultSchema.attributes?.["*"] ?? []), ...SVG_ATTRS],
   },
+};
+
+/**
+ * `marker-end="url(#arrow)"` → `marker-end="url(#user-content-arrow)"`.
+ *
+ * `rehype-sanitize` prefixes every `id` with `user-content-` (GitHub's clobber
+ * guard), but the `url(#…)` references pointing at those ids keep the bare name,
+ * so every arrowhead, gradient fill and clip-path in an inline SVG resolved to
+ * nothing. Rewrite the references to the prefixed id. Must run after sanitize,
+ * which is what adds the prefix. Mirrored from the desktop chain
+ * (claw-fleet-desktop/app/markdown/plugins.ts); pinned in plugins.test.ts.
+ */
+export const rehypeSvgUrlRefs: Plugin<[], Root> = () => (tree) => {
+  visit(tree, "element", (node: Element) => {
+    const props = node.properties;
+    if (!props) return;
+    for (const [key, value] of Object.entries(props)) {
+      if (typeof value !== "string" || !value.includes("url(")) continue;
+      props[key] = value.replace(
+        /url\(\s*(['"]?)#(?!user-content-)/g,
+        (_m, q: string) => `url(${q}#user-content-`,
+      );
+    }
+  });
 };
 
 /**
@@ -116,6 +147,8 @@ export const mdRehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, schema],
   rehypeKatex,
+  // After sanitize, which is what adds the id prefix it points refs at.
+  rehypeSvgUrlRefs,
   // Runs last so the `cjk-indent` class it adds to CJK-leading <p> survives the
   // sanitize pass above (className is globally allow-listed by `schema`).
   rehypeCjkIndent,

@@ -76,3 +76,41 @@ describe("other paths unchanged", () => {
     expect(html).toContain("<rect");
   });
 });
+
+// Mirrors the desktop's "inline SVG url(#id) references" cases: sanitize prefixes
+// `id="arr"` to `user-content-arr` but left `marker-end="url(#arr)"` alone, so
+// every arrowhead and gradient resolved to nothing.
+describe("inline SVG url(#id) references follow the id prefix", () => {
+  const svg = [
+    '<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">',
+    '<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z"/></marker>',
+    '<linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs>',
+    '<rect width="10" height="10" fill="url(#g)"/>',
+    '<line x1="0" y1="0" x2="50" y2="0" stroke="#000" marker-end="url(#arr)"/>',
+    "</svg>",
+  ].join("\n");
+
+  it("points marker and paint references at the prefixed ids", () => {
+    const html = render(svg);
+    expect(html).toContain('id="user-content-arr"');
+    expect(html).toContain('marker-end="url(#user-content-arr)"');
+    expect(html).toContain('fill="url(#user-content-g)"');
+    expect(html).not.toMatch(/url\(\s*['"]?#(?!user-content-)/);
+  });
+
+  it("does not double-prefix, and leaves non-fragment urls alone", () => {
+    const html = render(svg.replace('url(#g)"', 'url(#user-content-g)"'));
+    expect(html).not.toContain("user-content-user-content-");
+    expect(render('<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="url(https://x.test/a)"/></svg>'))
+      .not.toContain("user-content-https");
+  });
+});
+
+describe("<style> content is dropped, not leaked as text", () => {
+  it("strips the CSS along with the tag", () => {
+    const html = render("段落\n\n<style>.t{font:12px sans-serif;fill:#333}</style>\n\n结束");
+    expect(html).not.toContain("<style");
+    expect(html).not.toContain("font:12px");
+    expect(html).toContain("结束");
+  });
+});
