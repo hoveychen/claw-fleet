@@ -23,6 +23,7 @@ import i18n from "./i18n";
 import { localDateKeyDaysAgo } from "./localDate";
 import { useRemoteWorkspacesSync } from "./hooks/useRemoteWorkspaces";
 import { useWaitingAlertSound } from "./hooks/useWaitingAlertSound";
+import { Presence } from "./components/Presence";
 
 const ONBOARDING_DISMISSED_KEY = "onboarding-dismissed";
 const WIZARD_COMPLETED_KEY = "wizard-completed";
@@ -262,7 +263,7 @@ function App() {
         <SessionList />
       </div>
       {!simplifiedMode && <DecisionPanel />}
-      {settingsOpen && <SettingsPanel onClose={closeSettings} />}
+      <Presence when={settingsOpen}>{settingsOpen && <SettingsPanel onClose={closeSettings} />}</Presence>
       {!simplifiedMode && <DailyReportPopup />}
       <UpdateNotice />
       <FindBar controller={find} />

@@ -3,6 +3,7 @@
    overlays and they should not drift apart visually. */
 
 .overlay {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
@@ -10,15 +11,11 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  animation: fadeIn 0.15s ease-out;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 
 .panel {
+  composes: modal_enter from "../motion.module.css";
   width: 880px;
   max-width: 92vw;
   max-height: calc(100vh - 72px);
@@ -29,13 +26,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: slideDown 0.15s ease-out;
 }
 
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 
