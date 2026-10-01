@@ -79,6 +79,10 @@ const MOCK_EXPLAIN_QUESTION: Record<string, string> = {
 const MOCK_EXPLAIN_ANSWER =
   "这句话说的是 fork 出的子会话复用了原会话的全部前缀，所以请求命中提示词缓存，只为新增的问题付费。换句话说，追问的成本取决于原会话有多「热」：刚跑完的会话几乎全部命中，放了一天的会话则要重新写入缓存。";
 
+// `?mock&slow=<ms>` delays the first frame and every request by that much, so
+// skeletons and pending states can be screenshotted (fixtures answer instantly).
+const MOCK_SLOW_MS = Number(new URLSearchParams(window.location.search).get("slow") ?? 0);
+
 export class MockRelayClient extends RelayClient {
   // The base class keeps `handlers` private, so hold our own reference.
   private mockHandlers: RelayHandlers;
@@ -107,6 +111,7 @@ export class MockRelayClient extends RelayClient {
   /** Come up connected on the next tick rather than synchronously — App wires
    *  `clientRef` right after `connect()`, and `onAgentOnline` reads it. */
   override connect(): void {
+    // The session list arrives with the first frame, so `?slow` holds it back too.
     setTimeout(() => {
       this.mockHandlers.onStatus?.(true);
       this.mockHandlers.onSessions?.(MOCK_SESSIONS);
@@ -116,7 +121,7 @@ export class MockRelayClient extends RelayClient {
       this.mockHandlers.onRttSample?.({ totalMs: 80, phoneRelayMs: 34, desktopHandleMs: 21 });
       // Last: its handler fetches `pending_snapshot`, which needs the ref set.
       this.mockHandlers.onAgentOnline?.(true);
-    }, 0);
+    }, MOCK_SLOW_MS);
     // A later incremental push, so the More page demonstrates the delta path
     // engaged (incremental ✓) in mock/screenshot mode.
     setTimeout(() => {
@@ -142,6 +147,11 @@ export class MockRelayClient extends RelayClient {
   }
 
   override request<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    if (MOCK_SLOW_MS > 0) {
+      return new Promise((resolve) =>
+        setTimeout(() => resolve(this.serve(method, params) as T), MOCK_SLOW_MS),
+      );
+    }
     return Promise.resolve(this.serve(method, params) as T);
   }
 

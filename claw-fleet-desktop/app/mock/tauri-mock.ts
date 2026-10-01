@@ -111,7 +111,8 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // `?mock&slow=<ms>` delays every command by that much. The fixtures answer
 // instantly, which skips past every skeleton and pending state — this makes
-// them visible for screenshots.
+// them visible for screenshots. Plugin commands (the settings store, read one
+// key at a time at boot) stay instant, as they are on a real machine.
 const SLOW_MS = Number(new URLSearchParams(window.location.search).get("slow") ?? 0);
 
 /** Command-aware canned LLM risk analysis for the guard card (markdown). */
@@ -1627,7 +1628,7 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
     if (qaMode && shouldDelayMockQaCommand(cmd)) {
       await delay(MOCK_QA_DELAY_MS);
     }
-    if (SLOW_MS > 0) await delay(SLOW_MS);
+    if (SLOW_MS > 0 && !cmd.startsWith("plugin:")) await delay(SLOW_MS);
     const a =(args ?? {}) as Record<string, unknown>;
     if (LIVE_MODE) {
       const live = await liveInvoke(cmd, a);
