@@ -3,6 +3,7 @@
    lockZoom 全局屏蔽（鸿蒙 ArkWeb 不守 touch-action），这里的 touch 处理器用
    非 passive 原生监听 + preventDefault 自行接管手势。 */
 .overlay {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -15,16 +16,6 @@
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  animation: lightbox-fade 0.15s ease;
-}
-
-@keyframes lightbox-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 .image {

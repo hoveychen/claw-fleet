@@ -93,6 +93,16 @@
   --r-lg: 20px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Motion — same values as the desktop (claw-fleet-desktop/app/App.css):
+     decelerate only, no overshoot. `--motion-fast` is press/active feedback,
+     `--motion-base` an entrance; exits run at EXIT_MS (140ms). Each surface
+     turns its own animation off under `prefers-reduced-motion` rather than a
+     global kill, which would also freeze the progress spinners. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-shift: 10px;
   color-scheme: dark;
 }
 

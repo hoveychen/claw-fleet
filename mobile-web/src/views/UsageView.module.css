@@ -1,6 +1,7 @@
 /* 页面外壳沿用 RepoView 的全屏子页；卡片/行沿用 MoreView 的设置卡观感。 */
 
 .page {
+  composes: page_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 30;

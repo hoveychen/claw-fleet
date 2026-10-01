@@ -102,6 +102,7 @@
 /* ── Detail sheet ────────────────────────────────────────────────────────── */
 
 .detail {
+  composes: page_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 35;
