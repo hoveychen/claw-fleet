@@ -3,9 +3,9 @@ import { NAV_HOME, NAV_MORE_VIEWS, isInNavMore } from "./navGroups";
 import { ALL_VIEW_MODES } from "../viewModes";
 
 /**
- * The sidebar lists the work pages at the top level and folds the monitoring /
- * management pages under "More". The disclosure opens itself while one of its
- * pages is on screen, which only works if the "More" table names real pages.
+ * The sidebar lists the work pages at the top level and puts the rest on a
+ * "More" sub-page. The nav enters that sub-page while one of its pages is on
+ * screen, which only works if the "More" table names real pages.
  */
 describe("nav More split", () => {
   it("lists only real view modes, each once", () => {
@@ -15,14 +15,14 @@ describe("nav More split", () => {
     }
   });
 
-  it("folds the monitoring / management pages under More", () => {
-    for (const view of ["audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
+  it("puts schedules, plan trees and the monitoring / management pages under More", () => {
+    for (const view of ["schedule", "plans", "audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
       expect(isInNavMore(view)).toBe(true);
     }
   });
 
   it("keeps the agent-work pages at the top level", () => {
-    for (const view of ["history", "files", "terminal", "wiki", "artifacts", "schedule", "plans"] as const) {
+    for (const view of ["history", "files", "terminal", "wiki", "artifacts"] as const) {
       expect(isInNavMore(view)).toBe(false);
     }
   });
