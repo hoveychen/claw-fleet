@@ -296,6 +296,23 @@ export class MockRelayClient extends RelayClient {
         return MOCK_MESSAGES[String(params?.path ?? "")] ?? [];
       case "tail_delta":
         return { lines: [], newOffset: 0 };
+      case "transcript_image": {
+        // A visibly sharper stand-in for the low-res mock thumbnail, so the
+        // lightbox's preview → full-resolution swap can be seen in mock mode.
+        const canvas = document.createElement("canvas");
+        canvas.width = 960;
+        canvas.height = 600;
+        const ctx = canvas.getContext("2d")!;
+        const grad = ctx.createLinearGradient(0, 0, 960, 600);
+        grad.addColorStop(0, "#3b5bdb");
+        grad.addColorStop(1, "#30a46c");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 960, 600);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 72px sans-serif";
+        ctx.fillText("HD 960×600", 260, 320);
+        return { mime: "image/png", base64: canvas.toDataURL("image/png").split(",")[1] };
+      }
       case "tool_detail": {
         const detail = MOCK_TOOL_DETAILS[String(params?.tool_use_id ?? "")];
         if (!detail) throw new Error("tool_use_id not found");

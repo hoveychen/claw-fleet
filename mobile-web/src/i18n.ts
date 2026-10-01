@@ -765,6 +765,8 @@ const DICT: Record<string, string> = {
   "加载预览…": "Loading preview…",
   图片查看: "Image viewer",
   "双击放大 · 捏合缩放 · 单击关闭": "Double-tap to zoom · pinch to scale · tap to close",
+  "正在加载高清图…": "Loading full resolution…",
+  "高清图加载失败，显示的是缩略图": "Couldn't load full resolution — showing the thumbnail",
   保存图片: "Save image",
   分享图片: "Share image",
   图片已保存: "Image saved",

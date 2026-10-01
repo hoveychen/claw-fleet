@@ -2511,6 +2511,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "decision_asset" => serve_decision_asset(params),
         "session_images" => serve_session_images(params),
         "session_image" => serve_session_image(params),
+        "transcript_image" => serve_transcript_image(params),
         "tail" => serve_tail(params),
         "tail_delta" => serve_tail_delta(params),
         "tool_detail" => serve_tool_detail(params),
@@ -2901,6 +2902,113 @@ fn serve_session_image(params: &Value) -> Result<Value, String> {
     let image = crate::codex_image::read_thread_image(session, name)?;
     let (bytes, mime) = downscale_decision_asset(image.bytes, &image.mime);
     if bytes.len() > DECISION_ASSET_HARD_CAP_BYTES {
+        return Err(format!("image too large: {} bytes", bytes.len()));
+    }
+    Ok(json!({
+        "mime": mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
+/// Budget for the lightbox's on-demand full view of a transcript image. Far
+/// above the decision-asset budget (50 KB reads soft once pinch-zoomed on a
+/// phone screen) but still a single relay frame; only fetched on tap.
+const LIGHTBOX_IMAGE_TARGET_BYTES: usize = 400 * 1024;
+const LIGHTBOX_IMAGE_HARD_CAP_BYTES: usize = 800 * 1024;
+const LIGHTBOX_IMAGE_MIN_DIM: u32 = 1024;
+
+/// Raw bytes of one image block, whichever way it carries them: inline base64
+/// or a user-attachment store path (same store guard as the thumbnail path).
+fn image_block_bytes(block: &Value) -> Option<(String, Vec<u8>)> {
+    use base64::Engine as _;
+    if let Some((media_type, data)) = base64_image_source(block) {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+        return Some((media_type.to_string(), bytes));
+    }
+    let source = block.get("source")?;
+    if source.get("type").and_then(Value::as_str) != Some("path") {
+        return None;
+    }
+    let file = std::path::Path::new(source.get("path")?.as_str()?);
+    if !crate::user_attachments::exists_in_store(file) {
+        return None;
+    }
+    let media_type = source
+        .get("media_type")
+        .and_then(Value::as_str)
+        .unwrap_or("image/png");
+    Some((media_type.to_string(), std::fs::read(file).ok()?))
+}
+
+/// Locate the image block behind one tail thumbnail. Two addressing modes,
+/// mirroring the two places the tail ships thumbs:
+/// - `tool_use_id` + `index`: the `index`-th entry of that tool_result's
+///   `_thumbs` — counted over the same thumbnail-able images `slim_tail_block`
+///   kept, so a skipped undecodable image cannot shift the index.
+/// - `uuid` + `block`: a top-level `image` block (`_thumb`) at that content
+///   index of the record with that uuid.
+fn find_transcript_image_block(messages: &[Value], params: &Value) -> Option<Value> {
+    let blocks_of = |msg: &Value| -> Option<Vec<Value>> {
+        msg.get("message")?.get("content")?.as_array().cloned()
+    };
+    if let Some(tool_use_id) = params.get("tool_use_id").and_then(Value::as_str) {
+        let index = params.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        for msg in messages {
+            for block in blocks_of(msg).unwrap_or_default() {
+                if block.get("type").and_then(Value::as_str) != Some("tool_result")
+                    || block.get("tool_use_id").and_then(Value::as_str) != Some(tool_use_id)
+                {
+                    continue;
+                }
+                return block
+                    .get("content")
+                    .and_then(Value::as_array)?
+                    .iter()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("image"))
+                    .filter(|b| tail_thumb_of_image_block(b).is_some())
+                    .nth(index)
+                    .cloned();
+            }
+        }
+        return None;
+    }
+    let uuid = params.get("uuid").and_then(Value::as_str)?;
+    let index = params.get("block").and_then(Value::as_u64)? as usize;
+    let msg = messages
+        .iter()
+        .find(|m| m.get("uuid").and_then(Value::as_str) == Some(uuid))?;
+    let block = blocks_of(msg)?.into_iter().nth(index)?;
+    (block.get("type").and_then(Value::as_str) == Some("image")).then_some(block)
+}
+
+/// Full-resolution bytes for a transcript thumbnail the phone tapped open. The
+/// tail only ships ~256 px thumbs; this re-reads the transcript and returns the
+/// original, re-encoded only when it exceeds the lightbox budget (an original
+/// already under it goes back untouched, keeping PNG transparency).
+fn serve_transcript_image(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
+    let sources = crate::agent_source::build_sources();
+    let source = crate::agent_source::find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source for path: {path}"))?;
+    let messages = source.get_messages(path)?;
+    let block = find_transcript_image_block(&messages, params).ok_or("image not found")?;
+    let (media_type, bytes) = image_block_bytes(&block).ok_or("image bytes unavailable")?;
+    let (bytes, mime) = if bytes.len() <= LIGHTBOX_IMAGE_TARGET_BYTES {
+        (bytes, media_type)
+    } else {
+        downscale_image(
+            bytes,
+            &media_type,
+            LIGHTBOX_IMAGE_TARGET_BYTES,
+            LIGHTBOX_IMAGE_HARD_CAP_BYTES,
+            LIGHTBOX_IMAGE_MIN_DIM,
+        )
+    };
+    if bytes.len() > LIGHTBOX_IMAGE_HARD_CAP_BYTES {
         return Err(format!("image too large: {} bytes", bytes.len()));
     }
     Ok(json!({
@@ -6840,6 +6948,48 @@ mod tests {
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .unwrap();
         png
+    }
+
+    #[test]
+    fn transcript_image_lookup_matches_tail_thumb_indexing() {
+        use base64::Engine as _;
+        let b64 = |w: u32| {
+            base64::engine::general_purpose::STANDARD
+                .encode(png_of(image::RgbImage::from_pixel(w, 8, image::Rgb([9, 9, 9]))))
+        };
+        let img = |data: &str| {
+            json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}})
+        };
+        let messages = vec![
+            json!({"uuid": "u1", "message": {"content": [
+                {"type": "text", "text": "look"},
+                img(&b64(40)),
+            ]}}),
+            json!({"uuid": "u2", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": [
+                    img("not-an-image"),
+                    img(&b64(50)),
+                    img(&b64(60)),
+                ]},
+            ]}}),
+        ];
+        let width_of = |block: Value| {
+            let (_, bytes) = image_block_bytes(&block).unwrap();
+            image::load_from_memory(&bytes).unwrap().width()
+        };
+
+        // The undecodable first image is absent from `_thumbs`, so thumb #0 is
+        // the 50px one, not the broken one.
+        let p = json!({"tool_use_id": "t1", "index": 0});
+        assert_eq!(width_of(find_transcript_image_block(&messages, &p).unwrap()), 50);
+        let p = json!({"tool_use_id": "t1", "index": 1});
+        assert_eq!(width_of(find_transcript_image_block(&messages, &p).unwrap()), 60);
+        assert!(find_transcript_image_block(&messages, &json!({"tool_use_id": "t1", "index": 2})).is_none());
+
+        let p = json!({"uuid": "u1", "block": 1});
+        assert_eq!(width_of(find_transcript_image_block(&messages, &p).unwrap()), 40);
+        // A non-image block at that index is not an image.
+        assert!(find_transcript_image_block(&messages, &json!({"uuid": "u1", "block": 0})).is_none());
     }
 
     #[test]
