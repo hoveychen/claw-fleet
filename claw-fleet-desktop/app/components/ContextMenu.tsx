@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import styles from "./ContextMenu.module.css";
+import { useExiting } from "./Presence";
 
 export interface ContextMenuItem {
   id: string;
@@ -44,6 +45,8 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Portalled out of the caller's <Presence>, so it marks its own root.
+  const exiting = useExiting();
   const [pos, setPos] = useState(anchor);
 
   // Measure before paint so the menu never flashes off-screen.
@@ -127,7 +130,7 @@ export function ContextMenu({
   };
 
   return createPortal(
-    <div ref={ref} className={styles.menu} style={{ left: pos.x, top: pos.y }}>
+    <div ref={ref} className={styles.menu} data-exiting={exiting || undefined} style={{ left: pos.x, top: pos.y }}>
       {normal.map(renderItem)}
       {danger.length > 0 && normal.length > 0 && <div className={styles.separator} />}
       {danger.map(renderItem)}

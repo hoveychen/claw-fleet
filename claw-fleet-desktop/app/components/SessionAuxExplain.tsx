@@ -18,6 +18,7 @@ import { cacheHitRatio, costLabel, quoteSnippet } from "../selectionExplain";
 import { TextBlock } from "./blocks/TextBlock";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionDetail.module.css";
+import { Presence } from "./Presence";
 
 const PRESET_ICON: Record<ExplainPreset, typeof MessageCircleQuestion> = {
   explain: MessageCircleQuestion,
@@ -189,7 +190,7 @@ export function SessionAuxExplain({
         >
           ✕
         </button>
-        {menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}
+        <Presence when={Boolean(menu)}>{menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}</Presence>
       </div>
     );
   }
@@ -280,7 +281,7 @@ export function SessionAuxExplain({
           </form>
         )}
       </div>
-      {menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}
+      <Presence when={Boolean(menu)}>{menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}</Presence>
     </div>
   );
 }

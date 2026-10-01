@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { memberDisplayStatus, type SessionInfo } from "../types";
 import styles from "./SessionDetail.module.css";
+import { Presence } from "./Presence";
 
 /** The header identity label for one session in the family: ◈ main, or ⎇ its
  *  agent type (falling back to the generic "subagent" word when untyped).
@@ -101,7 +102,7 @@ export function AgentScopeSwitcher({
         {agentLabel(current, t)}
         <ChevronDown size={11} className={styles.agent_scope_chevron} />
       </button>
-      {anchor && <ContextMenu anchor={anchor} items={items} onClose={() => setAnchor(null)} />}
+      <Presence when={Boolean(anchor)}>{anchor && <ContextMenu anchor={anchor} items={items} onClose={() => setAnchor(null)} />}</Presence>
     </>
   );
 }

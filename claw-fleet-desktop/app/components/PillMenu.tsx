@@ -7,6 +7,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { useAutoFlip } from "./useAutoFlip";
 import styles from "./PillMenu.module.css";
+import { Presence } from "./Presence";
 
 export interface PillMenuItem {
   id: string;
@@ -138,7 +139,7 @@ export function PillMenu({
         <span className={styles.pill_label}>{label}</span>
         <ChevronDown size={13} strokeWidth={1.8} className={styles.pill_chevron} />
       </button>
-      {open && (
+      <Presence when={Boolean(open)}>{open && (
         <div
           ref={menuRef}
           className={`${styles.menu} ${side === "above" ? styles.menu_above : styles.menu_below}`}
@@ -153,7 +154,7 @@ export function PillMenu({
             </>
           )}
         </div>
-      )}
+      )}</Presence>
     </div>
   );
 }

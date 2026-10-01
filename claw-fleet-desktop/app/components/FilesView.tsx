@@ -360,13 +360,13 @@ export function FilesView() {
               </button>
             ))}
           </div>
-          {ctxMenu && (
+          <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
             <ContextMenu
               anchor={ctxMenu.anchor}
               items={wsMenuItems(ctxMenu.ws)}
               onClose={() => setCtxMenu(null)}
             />
-          )}
+          )}</Presence>
         </div>
       }
     >

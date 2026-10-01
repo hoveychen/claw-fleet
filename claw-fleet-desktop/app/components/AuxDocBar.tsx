@@ -5,6 +5,7 @@ import { MoreHorizontal, X } from "lucide-react";
 import type { AuxDocKind } from "../detailAux";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./AuxDocBar.module.css";
+import { Presence } from "./Presence";
 
 /**
  * The header every auxiliary-rail reader wears.
@@ -67,9 +68,9 @@ export function AuxPane({
       }}
     >
       {children}
-      {anchor && (
+      <Presence when={Boolean(anchor)}>{anchor && (
         <ContextMenu anchor={anchor} items={menuItems} onClose={() => setAnchor(null)} />
-      )}
+      )}</Presence>
     </div>
   );
 }
@@ -216,9 +217,9 @@ export function AuxDocBar({
           </button>
         )}
       </div>
-      {menuAnchor && (
+      <Presence when={Boolean(menuAnchor)}>{menuAnchor && (
         <ContextMenu anchor={menuAnchor} items={menuItems} onClose={() => setMenuAnchor(null)} />
-      )}
+      )}</Presence>
     </div>
   );
 }

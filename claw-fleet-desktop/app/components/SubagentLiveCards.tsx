@@ -20,6 +20,7 @@ import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./Con
 import { formatModel, StatusBadge } from "./SessionCard";
 import { timeAgo } from "./SessionRow";
 import styles from "./SessionDetail.module.css";
+import { Presence } from "./Presence";
 
 /** How many cards render before the rest collapse into a "+N" line. A workflow
  *  fan-out can put a hundred agents in flight at once; the panel is meant to be
@@ -335,7 +336,7 @@ export function SubagentLiveCards({
           {t("detail.live_agents_more", { count: hidden })}
         </div>
       )}
-      {menu && (
+      <Presence when={Boolean(menu)}>{menu && (
         <ContextMenu
           anchor={menu.anchor}
           items={agentMenuItems(
@@ -348,7 +349,7 @@ export function SubagentLiveCards({
           )}
           onClose={() => setMenu(null)}
         />
-      )}
+      )}</Presence>
     </>
   );
 }

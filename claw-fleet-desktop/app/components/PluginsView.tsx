@@ -11,6 +11,7 @@ import { PageShell } from "./PageShell";
 import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
+import { Presence } from "./Presence";
 
 const MARKETPLACE_DOCS_URL =
   "https://code.claude.com/docs/en/plugin-marketplaces";
@@ -415,13 +416,13 @@ export function PluginsView() {
               )}
             </>
           )}
-          {ctxMenu && (
+          <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
             <ContextMenu
               anchor={ctxMenu.anchor}
               items={pluginMenuItems(ctxMenu.plugin)}
               onClose={() => setCtxMenu(null)}
             />
-          )}
+          )}</Presence>
         </div>
       }
     >

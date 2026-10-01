@@ -73,9 +73,11 @@ async function clickRow(text: string) {
 }
 
 function rows(): string[] {
-  return [...container!.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')].map(
-    (b) => b.textContent ?? "",
-  );
+  // A menu that was just closed lingers under [data-exiting] while it fades
+  // (Presence); only the open one counts.
+  return [...container!.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')]
+    .filter((b) => !b.closest("[data-exiting]"))
+    .map((b) => b.textContent ?? "");
 }
 
 describe("SessionOptionPills — dsh", () => {

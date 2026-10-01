@@ -859,21 +859,21 @@ export function WikiView() {
         </div>
       }
       afterBody={<>
-      {ctxMenu && (
+      <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
         <ContextMenu
           anchor={ctxMenu.anchor}
           items={menuItems(ctxMenu.doc)}
           onClose={() => setCtxMenu(null)}
         />
-      )}
+      )}</Presence>
 
-      {folderCtx && (
+      <Presence when={Boolean(folderCtx)}>{folderCtx && (
         <ContextMenu
           anchor={folderCtx.anchor}
           items={folderMenuItems(folderCtx.path)}
           onClose={() => setFolderCtx(null)}
         />
-      )}
+      )}</Presence>
 
       <Presence when={Boolean(renameFolder !== null)}>{renameFolder !== null && (
         <PromptDialog
