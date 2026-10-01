@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { FindController } from "../find/useFindController";
 import styles from "./FindBar.module.css";
+import { Presence } from "./Presence";
 
 /**
  * The floating Cmd/Ctrl+F find bar. Purely presentational — all search state and
@@ -20,11 +21,10 @@ export function FindBar({ controller }: { controller: FindController }) {
     }
   }, [open]);
 
-  if (!open) return null;
-
   const noMatches = query.length > 0 && total === 0;
 
   return (
+    <Presence when={open}>{open && (
     <div className={styles.bar} data-find-bar role="search">
       <input
         ref={inputRef}
@@ -78,5 +78,6 @@ export function FindBar({ controller }: { controller: FindController }) {
         ✕
       </button>
     </div>
+    )}</Presence>
   );
 }

@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getItem } from "../storage";
 import { versionCheckArgs } from "../versionCheck";
 import styles from "./UpdateNotice.module.css";
+import { Presence } from "./Presence";
 
 interface VersionCheckResult {
   current_version: string;
@@ -26,9 +27,10 @@ export function UpdateNotice() {
     ).then(setResult).catch(() => {});
   }, [i18n.language, i18n.resolvedLanguage]);
 
-  if (!result?.has_update || dismissed) return null;
+  const shown = !!result?.has_update && !dismissed;
 
   return (
+    <Presence when={shown}>{shown && result && (
     <div className={styles.banner}>
       <span className={styles.text}>
         {t("update.available", { version: result.latest_version })}
@@ -45,5 +47,6 @@ export function UpdateNotice() {
         </button>
       </div>
     </div>
+    )}</Presence>
   );
 }

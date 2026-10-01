@@ -1,4 +1,7 @@
 .banner {
+  composes: pop_enter from "./motion.module.css";
+  /* Pinned to the bottom edge, so it grows up from there. */
+  transform-origin: bottom center;
   position: fixed;
   bottom: 16px;
   left: 50%;
