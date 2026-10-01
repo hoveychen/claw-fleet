@@ -99,6 +99,7 @@
 
 /* Direction is chosen at runtime by useAutoFlip. */
 .popover {
+  composes: pop_enter from "./motion.module.css";
   position: absolute;
   left: 6px;
   right: 6px;
@@ -111,10 +112,12 @@
 }
 
 .popover_above {
+  transform-origin: bottom center;
   bottom: calc(100% + 4px);
 }
 
 .popover_below {
+  transform-origin: top center;
   top: calc(100% + 4px);
 }
 

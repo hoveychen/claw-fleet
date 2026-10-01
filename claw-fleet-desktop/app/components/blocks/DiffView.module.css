@@ -182,6 +182,7 @@
 }
 
 .overlay {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -193,6 +194,7 @@
 }
 
 .sheet {
+  composes: modal_enter from "../motion.module.css";
   display: flex;
   flex-direction: column;
   width: 100%;

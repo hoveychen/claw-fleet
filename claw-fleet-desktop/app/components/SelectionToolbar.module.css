@@ -4,6 +4,9 @@
    on a decision card's first line — it sits below the box instead
    (`data-place="below"`), so it is never over the selected text. */
 .toolbar {
+  composes: pop_enter from "./motion.module.css";
+  /* Sits above the selection (translate -100%), so grow from its bottom edge. */
+  transform-origin: bottom center;
   position: absolute;
   z-index: 6;
   transform: translate(-50%, -100%);

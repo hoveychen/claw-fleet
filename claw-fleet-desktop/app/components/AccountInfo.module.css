@@ -331,6 +331,7 @@
 /* ── AI Setup Modal ─────────────────────────────────────────────────────────── */
 
 .modal_overlay {
+  composes: overlay_enter from "./motion.module.css";
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
@@ -342,6 +343,7 @@
 }
 
 .modal {
+  composes: modal_enter from "./motion.module.css";
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

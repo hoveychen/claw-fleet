@@ -10,6 +10,7 @@
 }
 
 .container {
+  composes: modal_enter from "./motion.module.css";
   max-width: 680px;
   width: 100%;
   padding: 40px 32px;

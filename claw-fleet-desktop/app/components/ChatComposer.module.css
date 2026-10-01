@@ -255,6 +255,7 @@
 
 /* Direction is chosen at runtime by useAutoFlip. */
 .menu {
+  composes: pop_enter from "./motion.module.css";
   position: absolute;
   left: 0;
   z-index: 10;
@@ -270,10 +271,12 @@
 }
 
 .menu_above {
+  transform-origin: bottom center;
   bottom: calc(100% + 6px);
 }
 
 .menu_below {
+  transform-origin: top center;
   top: calc(100% + 6px);
 }
 
