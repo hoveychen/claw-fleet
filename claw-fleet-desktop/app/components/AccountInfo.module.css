@@ -466,6 +466,9 @@
 }
 
 .step_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   padding: 4px 12px;
   border-radius: var(--radius-xs);
@@ -486,6 +489,9 @@
 }
 
 .step_btn_secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   padding: 4px 12px;
   border-radius: var(--radius-xs);
@@ -494,6 +500,10 @@
   color: var(--color-text-dim);
   cursor: pointer;
   white-space: nowrap;
+}
+
+.step_btn_secondary:disabled {
+  cursor: default;
 }
 
 .step_btn_secondary:hover {

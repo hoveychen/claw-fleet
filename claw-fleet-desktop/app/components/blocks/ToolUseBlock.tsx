@@ -25,6 +25,7 @@ import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import { useInFlightTools } from "./inFlightTools";
 import styles from "./ToolUseBlock.module.css";
 import { Presence } from "../Presence";
+import { Skeleton, SkeletonText, TopProgress } from "../loading";
 
 // Read-only tools that get grouped into a single summary row
 const READ_ONLY_TOOLS = new Set([
@@ -1238,6 +1239,28 @@ function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown 
 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
+/** One thumb in the generated-image strip: a thumb-sized skeleton holds the
+ *  slot until the image decodes, so the strip doesn't open as empty boxes. */
+function GeneratedImageThumb({ src, name, onZoom }: { src: string; name: string; onZoom: () => void }) {
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = loadedSrc === src;
+  return (
+    <button className={styles.genimage_thumb} title={name} onClick={onZoom} aria-busy={!loaded || undefined}>
+      {!loaded && <Skeleton width={180} height={180} radius={0} />}
+      <img
+        src={src}
+        alt={name}
+        loading="lazy"
+        className={loaded ? undefined : styles.genimage_img_pending}
+        // A failed load still ends the wait: the browser's broken-image box
+        // is what this strip showed before, and it is at least visible.
+        onLoad={() => setLoadedSrc(src)}
+        onError={() => setLoadedSrc(src)}
+      />
+    </button>
+  );
+}
+
 /**
  * Always-visible preview of what `fleet__image` / `fleet__image_edit` made.
  *
@@ -1266,14 +1289,7 @@ function GeneratedImagePreview({
         {images.names.map((name) => {
           const src = sessionImageUrl(images.handle, name);
           return (
-            <button
-              key={name}
-              className={styles.genimage_thumb}
-              title={name}
-              onClick={() => setZoomed({ src, name })}
-            >
-              <img src={src} alt={name} loading="lazy" />
-            </button>
+            <GeneratedImageThumb key={name} src={src} name={name} onZoom={() => setZoomed({ src, name })} />
           );
         })}
       </div>
@@ -1479,8 +1495,14 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
 
       {open && (
         <div className={styles.body}>
-          {loadingFull && !full && (
-            <div className={styles.pending}>{t("detail.loading_full_output", "正在加载完整输出…")}</div>
+          {/* The truncated preview stays readable while the full body loads;
+              with no result at all there is nothing to keep, so hold its
+              place instead. */}
+          <TopProgress active={loadingFull && !full && Boolean(resultProp)} />
+          {loadingFull && !full && !resultProp && (
+            <div className={styles.input_section}>
+              <SkeletonText lines={4} />
+            </div>
           )}
           {refetchError && (
             <div className={styles.pending}>Could not load full output: {refetchError}</div>

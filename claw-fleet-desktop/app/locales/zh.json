@@ -842,7 +842,9 @@
     "folder_dissolve": "解散目录（文档移到上级）",
     "folder_delete": "删除目录及其 {{count}} 篇文档",
     "delete_folder_confirm": "删除目录 “{{path}}” 下的全部 {{count}} 篇文档（含所有历史版本）？此操作不可撤销。",
-    "version": "版本"
+    "version": "版本",
+    "mention_loading": "正在加载知识库…",
+    "searching": "搜索中…"
   },
   "live": {
     "section_title": "实时"
@@ -1010,7 +1012,8 @@
     "cost_calls": "已向 provider 取到 {{count}} 次调用的实价",
     "cost_calls_rates": "{{count}} 次调用按公开价目算出",
     "cost_calls_mixed": "{{receipt}} 次取自 provider 实价 / {{rates}} 次按公开价目",
-    "caveat": "Token 计数来自 DeepSeek Harness 自己的会话投影。计费桶是整个会话的累计值，上下文构成是此刻窗口的快照，两者不会相加对齐。花费有两种来路，上方数字会标明是哪一种：对每次生成都开发票的 provider（OpenRouter），显示的是它实际收取的金额，绝不由 token 数推导 —— 因为同一模型经不同 provider 价钱不同；对只有一个卖方且价目公开的路线（DeepSeek 官方，它不开发票），显示的是把公开价目套在已计数的 token 上的结果，并逐次调用区分峰时/闲时。既无价目又无发票的调用只计数，绝不估价。"
+    "caveat": "Token 计数来自 DeepSeek Harness 自己的会话投影。计费桶是整个会话的累计值，上下文构成是此刻窗口的快照，两者不会相加对齐。花费有两种来路，上方数字会标明是哪一种：对每次生成都开发票的 provider（OpenRouter），显示的是它实际收取的金额，绝不由 token 数推导 —— 因为同一模型经不同 provider 价钱不同；对只有一个卖方且价目公开的路线（DeepSeek 官方，它不开发票），显示的是把公开价目套在已计数的 token 上的结果，并逐次调用区分峰时/闲时。既无价目又无发票的调用只计数，绝不估价。",
+    "cost_failed": "获取失败"
   },
   "inspect": {
     "close": "关闭",
@@ -1052,7 +1055,10 @@
   "update": {
     "available": "新版本 {{version}} 已发布！",
     "update_now": "立即更新",
-    "later": "稍后"
+    "later": "稍后",
+    "checking": "正在检查更新…",
+    "up_to_date": "已是最新版本",
+    "check_failed": "检查更新失败，请检查网络"
   },
   "stop_confirm": "停止 {{name}} 中的会话？",
   "card": {
@@ -1106,7 +1112,8 @@
     "handoff_goal_reason_missing": "（未说明）",
     "handoff_note_more": "展开",
     "handoff_note_less": "收起",
-    "tip_compact": "Context Compact：共 {{count}} 次 · 输入累计 {{pre}} tokens · 摘要累计 {{post}} tokens · 估算成本 ~${{cost}}（compact LLM 调用未单独入库，按 cache_read 和 output 单价估算）"
+    "tip_compact": "Context Compact：共 {{count}} 次 · 输入累计 {{pre}} tokens · 摘要累计 {{post}} tokens · 估算成本 ~${{cost}}（compact LLM 调用未单独入库，按 cache_read 和 output 单价估算）",
+    "handoff_load_failed": "接力链加载失败"
   },
   "onboarding": {
     "welcome": "欢迎使用 Claw Fleet",
@@ -2018,6 +2025,7 @@
     "pending_unread_stale": "会话在读到这条之前就结束了",
     "pending_unread_hint": "Claude Code 只在两次工具调用之间读新消息；正在跑的工具返回后它才会看到这条",
     "working_delegating": "子代理执行中…",
+    "tasks_empty": "这个会话没有关联的任务计划。",
     "tasks_anonymous": "(匿名计划)",
     "tasks_status_active": "进行中",
     "tasks_status_done": "已完成",
@@ -2096,7 +2104,8 @@
       "no_models": "模型列表加载中…",
       "failed": "没能执行：{{err}}",
       "resumed": "已重新拉起，等会话接上…",
-      "retry_blocked": "配额恢复后再重试"
+      "retry_blocked": "配额恢复后再重试",
+      "models_unavailable": "读不到模型列表"
     }
   },
   "settings": {
@@ -2331,7 +2340,8 @@
     "remote_host_remove_blocked": "这台主机上还有 {{count}} 个 workspace（{{paths}}）——先移除它们，否则它们会指向一个已不存在的主机。",
     "remote_ws_unattached_title": "未归属主机的 workspace（旧条目）",
     "simplified_mode": "精简模式",
-    "simplified_mode_desc": "仅显示任务与产出，决策直接在任务内操作。"
+    "simplified_mode_desc": "仅显示任务与产出，决策直接在任务内操作。",
+    "interaction_diagnostics_load_failed": "诊断检查失败"
   },
   "usage": {
     "total_tokens": "Token 总数",
@@ -2508,7 +2518,8 @@
     "submit_no_action": "提交（尚未触发动作）",
     "submit_with_action": "提交（{{action}}）",
     "submitting": "提交中…",
-    "cancel": "取消"
+    "cancel": "取消",
+    "failed": "无法渲染这个界面"
   },
   "view_report": "日报",
   "report": {
@@ -2571,7 +2582,9 @@
     "task_review_underclaimed_hint": "Agent 当时并未判定完成，老板直接按了「结束任务」——可能是它低报了进度。",
     "task_review_hops": "接力 {{count}} 段",
     "popup_title": "日报已生成",
-    "popup_open_full": "查看完整日报"
+    "popup_open_full": "查看完整日报",
+    "lessons_failed": "经验教训生成失败",
+    "summary_failed": "AI 摘要生成失败"
   },
   "command": {
     "nested": {
@@ -2742,7 +2755,8 @@
       "op_failed": "操作失败。"
     },
     "proc_open_terminal": "在终端打开",
-    "proc_shell": "shell"
+    "proc_shell": "shell",
+    "reveal_searching": "正在仓库里查找 {{path}}…"
   },
   "paths": {
     "open_in_files": "在仓库页中打开",
@@ -2884,7 +2898,8 @@
       "err_read": "读取压缩包失败。",
       "search": "在包里搜索…",
       "no_hits": "包里没有匹配的文件。"
-    }
+    },
+    "preview_load_failed": "预览没能加载出来。"
   },
   "markdown": {
     "render_rest": "展开剩余 {{n}} 段",

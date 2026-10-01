@@ -32,6 +32,7 @@ import type { Artifact } from "../ArtifactsView";
 import type { ArtifactAdded, WikiPublished } from "./fleetTools";
 import { loadArtifact, loadWikiDoc, type IngestedWikiDoc } from "./ingestLookup";
 import { useIngestOpen } from "./ingestOpenContext";
+import { Skeleton } from "../loading";
 import styles from "./IngestPreview.module.css";
 
 /**
@@ -61,14 +62,49 @@ function useTwoStageOpen(kind: "artifact" | "wiki", ref: string, label: string, 
  *  and a transcript that contains no ingest must not pay for them. */
 const ArtifactThumb = lazy(() => import("../ArtifactThumb"));
 
+/** The well while its content is still on the way. Absolutely placed so it can
+ *  sit over an `<img>` that has to stay mounted to load. */
+function WellSkeleton() {
+  return (
+    <div className={styles.well_skeleton} role="status" aria-busy="true">
+      <Skeleton width="100%" height="100%" radius={0} />
+    </div>
+  );
+}
+
+/** An image in the well: a skeleton until it decodes, the fallback icon if it
+ *  cannot. */
+function WellImage({ src, alt }: { src: string; alt: string }) {
+  // Keyed by src, so a new image starts over as loading.
+  const [settled, setSettled] = useState<{ src: string; ok: boolean } | null>(null);
+  const state = settled?.src !== src ? "loading" : settled.ok ? "ok" : "failed";
+  if (state === "failed") {
+    return <FileText size={26} strokeWidth={1.2} className={styles.fallback_icon} />;
+  }
+  return (
+    <>
+      <img
+        className={styles.image}
+        src={src}
+        alt={alt}
+        onLoad={() => setSettled({ src, ok: true })}
+        onError={() => setSettled({ src, ok: false })}
+      />
+      {state === "loading" && <WellSkeleton />}
+    </>
+  );
+}
+
 export function ArtifactIngestPreview({ artifact }: { artifact: ArtifactAdded }) {
   const { t } = useTranslation();
   const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
-  const [meta, setMeta] = useState<Artifact | null>(null);
+  // `undefined` while the lookup is in flight; `null` once it found nothing.
+  const [meta, setMeta] = useState<Artifact | null | undefined>(undefined);
   const [thumbFailed, setThumbFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    setMeta(undefined);
     void loadArtifact(artifact.id).then((a) => {
       if (alive) setMeta(a);
     });
@@ -97,10 +133,13 @@ export function ArtifactIngestPreview({ artifact }: { artifact: ArtifactAdded })
       }
       onOpen={onClick}
     >
-      {meta && url && meta.kind === "image" ? (
-        <img className={styles.image} src={url} alt={meta.title} />
+      {meta === undefined ? (
+        // Still looking it up: the fallback icon here would read as "failed".
+        <WellSkeleton />
+      ) : meta && url && meta.kind === "image" ? (
+        <WellImage src={url} alt={meta.title} />
       ) : meta && url && mode ? (
-        <Suspense fallback={null}>
+        <Suspense fallback={<WellSkeleton />}>
           <ArtifactThumb
             id={meta.id}
             url={url}
@@ -127,11 +166,13 @@ const WIKI_KIND_LABEL: Record<IngestedWikiDoc["kind"], string> = {
 
 export function WikiIngestPreview({ doc }: { doc: WikiPublished }) {
   const { t } = useTranslation();
-  const [meta, setMeta] = useState<IngestedWikiDoc | null>(null);
+  // `undefined` while the lookup is in flight; `null` once it found nothing.
+  const [meta, setMeta] = useState<IngestedWikiDoc | null | undefined>(undefined);
   const [thumbFailed, setThumbFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    setMeta(undefined);
     void loadWikiDoc(doc.slug).then((d) => {
       if (alive) setMeta(d);
     });
@@ -155,7 +196,8 @@ export function WikiIngestPreview({ doc }: { doc: WikiPublished }) {
     <Shell
       title={title}
       note={doc.slug}
-      badge={WIKI_KIND_LABEL[meta?.kind ?? "markdown"]}
+      // No kind until the lookup answers — a "Markdown" default would be a guess.
+      badge={meta === undefined ? null : WIKI_KIND_LABEL[meta?.kind ?? "markdown"]}
       size={doc.version}
       openLabel={
         opensInRail
@@ -164,8 +206,10 @@ export function WikiIngestPreview({ doc }: { doc: WikiPublished }) {
       }
       onOpen={onClick}
     >
-      {meta && url && !thumbFailed ? (
-        <Suspense fallback={null}>
+      {meta === undefined ? (
+        <WellSkeleton />
+      ) : meta && url && !thumbFailed ? (
+        <Suspense fallback={<WellSkeleton />}>
           <ArtifactThumb
             // Version-keyed: republishing the same slug must not show the
             // previous version out of ArtifactThumb's render cache.
@@ -196,7 +240,8 @@ function Shell({
 }: {
   title: string;
   note: string;
-  badge: string;
+  /** `null` while the kind is not known yet. */
+  badge: string | null;
   size: string;
   openLabel: string;
   onOpen: () => void;
@@ -209,7 +254,11 @@ function Shell({
         <div className={styles.title}>{title}</div>
         {note && <div className={styles.note}>{note}</div>}
         <div className={styles.meta}>
-          <span className={styles.badge}>{badge}</span>
+          {badge === null ? (
+            <Skeleton inline width={52} height={12} />
+          ) : (
+            <span className={styles.badge}>{badge}</span>
+          )}
           <span>{size}</span>
         </div>
       </div>

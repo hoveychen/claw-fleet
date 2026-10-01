@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import { useSessionsStore } from "../store";
 import { useCollapsed } from "./useCollapsed";
+import { SkeletonNumber, SkeletonCard } from "./loading";
 import styles from "./TokenSpeedChart.module.css";
 
 function formatTime(ms: number): string {
@@ -31,11 +32,19 @@ export function TokenSpeedChart({ compact = false, collapsed: tile = false }: { 
       : Date.now();
   const domainStart = domainEnd - WINDOW_MS;
 
+  // Every scan tick appends a sample, so an empty history means no scan has
+  // landed yet — show a placeholder rather than a fake "0".
+  const ready = speedHistory.length > 0;
+
   if (tile) {
-    const tooltip = `${t("chart.title")}: ${currentSpeed.toFixed(1)} tok/s`;
+    const tooltip = ready
+      ? `${t("chart.title")}: ${currentSpeed.toFixed(1)} tok/s`
+      : `${t("chart.title")}: ${t("loading")}`;
     return (
       <div className={styles.tile} title={tooltip}>
-        <span className={styles.tile_value}>{Math.round(currentSpeed)}</span>
+        <span className={styles.tile_value}>
+          {ready ? Math.round(currentSpeed) : <SkeletonNumber width={20} />}
+        </span>
         <span className={styles.tile_label}>{t("chart.unit")}</span>
       </div>
     );
@@ -54,14 +63,14 @@ export function TokenSpeedChart({ compact = false, collapsed: tile = false }: { 
           <span className={styles.title}>{t("chart.title")}</span>
         </span>
         <span className={styles.current}>
-          {currentSpeed.toFixed(1)}{" "}
+          {ready ? currentSpeed.toFixed(1) : <SkeletonNumber width={32} />}{" "}
           <span className={styles.unit}>{t("chart.unit")}</span>
         </span>
       </button>
 
       {!collapsed && (
         speedHistory.length < 2 ? (
-          <div className={styles.no_data}>{t("chart.no_data")}</div>
+          <SkeletonCard height={compact ? 56 : 80} />
         ) : (
           <ResponsiveContainer width="100%" height={compact ? 56 : 80}>
             <AreaChart

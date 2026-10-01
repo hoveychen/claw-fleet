@@ -32,21 +32,37 @@
   color: var(--color-text-dim);
 }
 
-.spinning {
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Holds the export spinner at the Share2 icon's footprint so the header does not shift. */
+.iconBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
 }
 
 .body {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.skeletonPad {
+  padding: 16px;
+}
+
+/* Fills the iframe's slot while the html bundle is assembled. */
+.frameSkeleton {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.frameSkeleton > * {
+  flex: 1;
 }
 
 .hint {

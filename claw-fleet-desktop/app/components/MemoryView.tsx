@@ -14,6 +14,15 @@ import { canRevealPath } from "../canReveal";
 import type { ManagedLesson } from "../types";
 import styles from "./MemoryView.module.css";
 import { Presence } from "./Presence";
+import {
+  SkeletonCard,
+  SkeletonList,
+  SkeletonNumber,
+  SkeletonText,
+  Spinner,
+  TopProgress,
+} from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,9 +174,25 @@ export function MemoryView() {
   // Lessons the user added to global guidance from the daily-report card
   // (~/.claude/fleet-lessons.md), shown as a pinned entry with per-row removal.
   const { managedLessons, loadManagedLessons, removeManagedLesson } = useReportStore();
+  // The report store has no loaded flag for lessons (and swallows errors), so
+  // track the first fetch here: until it settles the pinned group is a skeleton.
+  const [lessonsLoaded, setLessonsLoaded] = useState(false);
   useEffect(() => {
-    loadManagedLessons();
+    void loadManagedLessons().finally(() => setLessonsLoaded(true));
   }, [loadManagedLessons]);
+
+  // Refetches while the list is already on screen (memories-updated, a
+  // promotion): the old list stays and a top progress bar runs instead.
+  const [refreshing, setRefreshing] = useState(0);
+  const showRefreshing = useDelayedFlag(refreshing > 0);
+  const trackRefresh = useCallback(async (work: () => Promise<void>) => {
+    setRefreshing((n) => n + 1);
+    try {
+      await work();
+    } finally {
+      setRefreshing((n) => n - 1);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -178,6 +203,7 @@ export function MemoryView() {
       setLoaded(true);
     }
   }, []);
+  const reload = useCallback(() => trackRefresh(load), [trackRefresh, load]);
 
   // Row context menu — anchor + subject held together, mirroring WikiView.
   const [ctxMenu, setCtxMenu] = useState<{
@@ -193,17 +219,19 @@ export function MemoryView() {
     file: MemoryFile,
     target: "project" | "global",
   ) => {
-    try {
-      await invoke("promote_memory", {
-        memoryPath: file.path,
-        target,
-        workspacePath: ws.workspacePath,
-      });
-      setSelection(null);
-      load();
-    } catch (e) {
-      console.error("promote_memory failed:", e);
-    }
+    await trackRefresh(async () => {
+      try {
+        await invoke("promote_memory", {
+          memoryPath: file.path,
+          target,
+          workspacePath: ws.workspacePath,
+        });
+        setSelection(null);
+        await load();
+      } catch (e) {
+        console.error("promote_memory failed:", e);
+      }
+    });
   };
 
   const cardMenuItems = (ws: WorkspaceMemory, file: MemoryFile): ContextMenuItem[] => {
@@ -263,11 +291,11 @@ export function MemoryView() {
   }, [loaded, load]);
 
   useEffect(() => {
-    const unlisten = listen("memories-updated", () => load());
+    const unlisten = listen("memories-updated", () => void reload());
     return () => {
       unlisten.then((f) => f());
     };
-  }, [load]);
+  }, [reload]);
 
   // Type counts across all workspaces (excludes MEMORY.md itself).
   const typeCounts = useMemo(() => {
@@ -397,19 +425,19 @@ export function MemoryView() {
         <>
           <FilterChip
             label={t("memory.source_claude")}
-            count={sourceCounts["claude-code"]}
+            count={loaded ? sourceCounts["claude-code"] : null}
             active={sourceFilter === "claude-code"}
             onClick={() => setSourceFilter(sourceFilter === "claude-code" ? "all" : "claude-code")}
           />
           <FilterChip
             label={t("memory.source_codex")}
-            count={sourceCounts.codex}
+            count={loaded ? sourceCounts.codex : null}
             active={sourceFilter === "codex"}
             onClick={() => setSourceFilter(sourceFilter === "codex" ? "all" : "codex")}
           />
           <FilterChip
             label={t("memory.filter_all")}
-            count={typeCounts.all}
+            count={loaded ? typeCounts.all : null}
             active={filterType === "all"}
             onClick={() => setFilterType("all")}
           />
@@ -417,7 +445,7 @@ export function MemoryView() {
             <FilterChip
               key={type}
               label={t(`memory.filter_${type}`)}
-              count={typeCounts[type]}
+              count={loaded ? typeCounts[type] : null}
               active={filterType === type}
               typeClass={TYPE_CONFIG[type].cssClass}
               onClick={() => setFilterType(type)}
@@ -426,9 +454,11 @@ export function MemoryView() {
         </>
       }
       secondary={
-        <div className={styles.list_pane}>
-          {!loaded && <p className={styles.empty}>{t("memory.loading")}</p>}
-          {loaded && filtered.length === 0 && managedLessons.length === 0 && (
+        <div className={`${styles.list_pane} ${styles.list_pane_positioned}`}>
+          <TopProgress active={showRefreshing} />
+          {!loaded && <SkeletonList rows={10} avatar />}
+          {loaded && !lessonsLoaded && <SkeletonList rows={1} avatar />}
+          {loaded && lessonsLoaded && filtered.length === 0 && managedLessons.length === 0 && (
             <EmptyState
               icon={<Brain size={28} strokeWidth={1.5} />}
               title={t("empty_state.memory_title")}
@@ -574,9 +604,13 @@ export function MemoryView() {
         </div>
       }
     >
-      {selection === null ? (
+      {selection === null && !loaded ? (
+        <div className={styles.detail_body}>
+          <SkeletonCard height={160} />
+        </div>
+      ) : selection === null ? (
         <div className={styles.placeholder}>
-          {loaded && totalFiles > 0
+          {totalFiles > 0
             ? t("memory.panel_title")
             : t("memory.no_memories")}
         </div>
@@ -594,9 +628,9 @@ export function MemoryView() {
         <FileDetail
           workspace={selection.workspace}
           file={selection.file}
-          onPromoted={() => {
+          onPromoted={async () => {
             setSelection(null);
-            load();
+            await reload();
           }}
         />
       )}
@@ -613,7 +647,7 @@ function FileDetail({
 }: {
   workspace: WorkspaceMemory;
   file: MemoryFile;
-  onPromoted: () => void;
+  onPromoted: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const tab = useUIStore((s) => s.mainViewState.memory.detailTab);
@@ -622,7 +656,7 @@ function FileDetail({
     updateMainViewState("memory", { detailTab });
   const [content, setContent] = useState<string | null>(null);
   const [history, setHistory] = useState<MemoryHistoryEntry[] | null>(null);
-  const [loadingContent, setLoadingContent] = useState(false);
+  const [loadingContent, setLoadingContent] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [showPromoteMenu, setShowPromoteMenu] = useState(false);
@@ -654,6 +688,7 @@ function FileDetail({
   }, [tab, file.path, history]);
 
   const handlePromote = async (target: "project" | "global") => {
+    if (promoting) return;
     setPromoting(true);
     setShowPromoteMenu(false);
     try {
@@ -662,7 +697,7 @@ function FileDetail({
         target,
         workspacePath: workspace.workspacePath,
       });
-      onPromoted();
+      await onPromoted();
     } catch (e) {
       console.error("promote_memory failed:", e);
       setPromoting(false);
@@ -689,6 +724,7 @@ function FileDetail({
                 disabled={promoting}
                 onClick={() => setShowPromoteMenu((v) => !v)}
               >
+                {promoting && <Spinner size={12} className={styles.btn_spinner} />}
                 {promoting ? t("memory.promoting") : t("memory.promote")}
               </button>
               <Presence when={Boolean(showPromoteMenu)}>{showPromoteMenu && (
@@ -738,7 +774,7 @@ function FileDetail({
       <div className={styles.detail_body}>
         {tab === "content" && (
           <>
-            {loadingContent && <p className={styles.loading}>{t("memory.loading")}</p>}
+            {loadingContent && content === null && <SkeletonText lines={10} />}
             {content !== null && (
               <div className={styles.content_markdown}>
                 <TextBlock text={content} />
@@ -749,7 +785,7 @@ function FileDetail({
 
         {tab === "history" && (
           <>
-            {loadingHistory && <p className={styles.loading}>{t("memory.loading")}</p>}
+            {loadingHistory && history === null && <SkeletonList rows={4} meta />}
             {history !== null && history.length === 0 && (
               <p className={styles.no_history}>{t("memory.no_history")}</p>
             )}
@@ -807,7 +843,6 @@ function ClaudeMdDetail({
   workspaceName: string;
   workspacePath: string;
 }) {
-  const { t } = useTranslation();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -830,7 +865,7 @@ function ClaudeMdDetail({
         </div>
       </div>
       <div className={styles.detail_body}>
-        {loading && <p className={styles.loading}>{t("memory.loading")}</p>}
+        {loading && <SkeletonText lines={10} />}
         {content !== null && (
           <div className={styles.content_markdown}>
             <TextBlock text={content} />
@@ -854,6 +889,7 @@ function ManagedLessonsDetail({
   const [removing, setRemoving] = useState<Set<string>>(new Set());
 
   const handleRemove = async (id: string) => {
+    if (removing.has(id)) return;
     setRemoving((prev) => new Set(prev).add(id));
     try {
       await onRemove(id);
@@ -902,7 +938,7 @@ function ManagedLessonsDetail({
                     disabled={removing.has(l.id)}
                     onClick={() => handleRemove(l.id)}
                   >
-                    <Trash2 size={12} strokeWidth={2} />
+                    {removing.has(l.id) ? <Spinner size={12} /> : <Trash2 size={12} strokeWidth={2} />}
                     {removing.has(l.id) ? t("memory.lessons_removing") : t("memory.lessons_remove")}
                   </button>
                 </div>
@@ -925,7 +961,8 @@ function FilterChip({
   onClick,
 }: {
   label: string;
-  count: number;
+  /** null while the list has not loaded yet: render a skeleton, not a fake 0. */
+  count: number | null;
   active: boolean;
   typeClass?: string;
   onClick: () => void;
@@ -938,7 +975,9 @@ function FilterChip({
       onClick={onClick}
     >
       <span className={styles.chip_label}>{label}</span>
-      <span className={styles.chip_count}>{count}</span>
+      <span className={styles.chip_count}>
+        {count === null ? <SkeletonNumber width={10} /> : count}
+      </span>
     </button>
   );
 }

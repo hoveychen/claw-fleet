@@ -20,6 +20,8 @@ import { ProcTerminal } from "./ProcTerminal";
 import { distinctWorkspaces } from "./NewSessionForm";
 import { procLabel } from "./procCommandLabel";
 import { isMissingProcError, terminalProcsForWorkspace } from "./terminalProcs";
+import { SkeletonCard, SkeletonList, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import type { ProcRecord } from "../types";
 import styles from "./MemoryView.module.css";
@@ -29,6 +31,7 @@ import termStyles from "./TerminalView.module.css";
 export function TerminalView() {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
+  const scanReady = useSessionsStore((s) => s.scanReady);
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const forgetProc = useProcStore((s) => s.forgetProc);
@@ -40,6 +43,9 @@ export function TerminalView() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Workspace switch → the proc list is being re-read to find a live shell to
+  // reconnect. Until it settles there is nothing to say about "no terminal".
+  const [reconnecting, setReconnecting] = useState(false);
   // Spawn only once per repo automatically: reconnecting the list is async, without this gate,
   // "list empty → spawn one" would spawn again on the next render.
   const autoSpawned = useRef<string | null>(null);
@@ -101,9 +107,11 @@ export function TerminalView() {
     if (!selected) return;
     let stale = false;
     setError(null);
+    setReconnecting(true);
     void (async () => {
       await fetchProcs();
       if (stale) return;
+      setReconnecting(false);
       const list = terminalProcsForWorkspace(useProcStore.getState().procs, selected);
       const live = list[0];
       setActiveId(live?.id ?? null);
@@ -130,7 +138,7 @@ export function TerminalView() {
     setActiveId(wsProcs[0]?.id ?? null);
   }, [activeId, wsProcs]);
 
-  const kill = async () => {
+  const [killing, kill] = usePending(async () => {
     if (!active) return;
     try {
       await invoke("kill_workspace_proc", { id: active.id, force: false });
@@ -143,8 +151,9 @@ export function TerminalView() {
       }
       setError(String(e));
     }
-    void fetchProcs();
-  };
+    // Awaited so the button's spinner lasts until the tab is gone.
+    await fetchProcs();
+  });
 
   return (
     <PageShell
@@ -154,7 +163,8 @@ export function TerminalView() {
       count={workspaces.length > 0 ? workspaces.length : null}
       secondary={
         <div className={styles.list_pane}>
-          {workspaces.length === 0 && (
+          {workspaces.length === 0 && !scanReady && <SkeletonList rows={8} />}
+          {workspaces.length === 0 && scanReady && (
             <EmptyState
               icon={<FolderOpen size={28} strokeWidth={1.5} />}
               title={t("terminal.no_workspaces")}
@@ -200,9 +210,10 @@ export function TerminalView() {
                 <button
                   className={termStyles.icon_btn}
                   onClick={() => void kill()}
+                  disabled={killing}
                   title={t("terminal.kill")}
                 >
-                  <Square size={12} strokeWidth={1.8} />
+                  {killing ? <Spinner size={12} /> : <Square size={12} strokeWidth={1.8} />}
                 </button>
               )}
               <button
@@ -211,7 +222,7 @@ export function TerminalView() {
                 disabled={busy}
                 title={t("terminal.new")}
               >
-                <Plus size={14} strokeWidth={1.8} />
+                {busy ? <Spinner size={12} /> : <Plus size={14} strokeWidth={1.8} />}
               </button>
             </div>
           </div>
@@ -233,10 +244,12 @@ export function TerminalView() {
                 }}
               />
             </div>
+          ) : reconnecting || busy ? (
+            // Reconnecting to a live shell or starting a new one: hold the
+            // screen's place. A failed spawn clears `busy` and shows `error`.
+            <SkeletonCard height="100%" className={termStyles.screen_skeleton} />
           ) : (
-            <div className={styles.placeholder}>
-              {busy ? t("terminal.starting") : t("terminal.none")}
-            </div>
+            <div className={styles.placeholder}>{t("terminal.none")}</div>
           )}
         </div>
       )}

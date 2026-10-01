@@ -72,6 +72,7 @@ export function DecisionAssetFrame({
       // Empty until the fetch lands: rendering the direct `src` first would
       // flash the broken-image glyph this component exists to remove.
       srcDoc={useSrc ? undefined : (doc ?? "")}
+      pending={!useSrc && doc === null}
     />
   );
 }

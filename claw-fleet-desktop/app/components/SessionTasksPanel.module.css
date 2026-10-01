@@ -9,6 +9,12 @@
   padding: var(--space-3) var(--space-5) var(--space-7);
 }
 
+.empty {
+  margin: 0;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-sm);
+}
+
 .plan + .plan {
   margin-top: var(--space-7);
   padding-top: var(--space-6);

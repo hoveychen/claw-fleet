@@ -6,6 +6,7 @@ import type { AuxDocKind } from "../detailAux";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./AuxDocBar.module.css";
 import { Presence } from "./Presence";
+import { SkeletonNumber, Spinner } from "./loading";
 
 /**
  * The header every auxiliary-rail reader wears.
@@ -80,6 +81,8 @@ export function AuxPane({
 export interface AuxFact {
   text: string;
   strong?: boolean;
+  /** Not known yet: renders a placeholder this many px wide instead of `text`. */
+  pending?: number;
 }
 
 /** A toolbar button. Icon-only — the label is its tooltip and its aria-label,
@@ -89,7 +92,7 @@ export interface AuxAction {
   id: string;
   label: string;
   icon: ReactNode;
-  /** Dims and blocks the button while the action is outstanding. A native save
+  /** Swaps the icon for a spinner and blocks the button while the action is outstanding. A native save
    *  panel plus a large copy is a real wait; without this a click that has not
    *  opened its panel yet is indistinguishable from a dead button. */
   busy?: boolean;
@@ -143,7 +146,7 @@ export function AuxDocBar({
   };
 
   const shown = actions.slice(0, MAX_BAR_ACTIONS);
-  const shownFacts = facts.filter((f) => f.text.length > 0);
+  const shownFacts = facts.filter((f) => f.text.length > 0 || f.pending);
 
   return (
     <div className={styles.bar}>
@@ -171,7 +174,11 @@ export function AuxDocBar({
               {shownFacts.map((f, i) => (
                 <span key={i}>
                   {i > 0 && <span className={styles.dense_sep}> · </span>}
-                  <span className={f.strong ? styles.dense_strong : undefined}>{f.text}</span>
+                  {f.pending ? (
+                    <SkeletonNumber width={f.pending} height="0.8em" />
+                  ) : (
+                    <span className={f.strong ? styles.dense_strong : undefined}>{f.text}</span>
+                  )}
                 </span>
               ))}
             </span>
@@ -186,10 +193,12 @@ export function AuxDocBar({
             className={styles.act}
             onClick={a.onSelect}
             disabled={a.busy}
+            aria-busy={a.busy || undefined}
             title={a.label}
             aria-label={a.label}
           >
-            {a.icon}
+            {/* The spinner takes the icon's place so the button keeps its size. */}
+            {a.busy ? <Spinner size={12} /> : a.icon}
           </button>
         ))}
         {menuItems.length > 0 && (

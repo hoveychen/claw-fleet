@@ -14,6 +14,17 @@
   overflow: hidden;
 }
 
+/* The host renderers' wrap anchors the skeleton laid over them. */
+.wrap_host {
+  position: relative;
+}
+
+.loading_overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
 .status {
   padding: var(--space-3) var(--space-4);
   color: var(--color-text-dim);

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -14,6 +14,8 @@ import {
   X,
 } from "lucide-react";
 import { procCommandText } from "./procCommandLabel";
+import { SkeletonList, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 import { useProcStore, useUIStore } from "../store";
 import { getItem, setItem } from "../storage";
 import type { ProcRecord } from "../types";
@@ -107,6 +109,34 @@ export function ProcPanel({
     parseProcShortcuts(getItem(SHORTCUTS_KEY)),
   );
   const shortcuts = shortcutsFor(shortcutMap, workspace);
+  // The proc store has no "loaded" flag, so an empty list before the first
+  // fetch would read as "no commands yet". Track the first settle locally;
+  // fetchProcs never rejects, so this always ends.
+  const [procsLoaded, setProcsLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void fetchProcs().finally(() => {
+      if (alive) setProcsLoaded(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [fetchProcs]);
+  // Row actions in flight, keyed `run:<cmd>` / `kill:<id>` / `clear:<id|*>`.
+  // The ref drops re-clicks synchronously; the state drives the spinners.
+  const [pendingOps, setPendingOps] = useState<ReadonlySet<string>>(() => new Set());
+  const pendingRef = useRef(new Set<string>());
+  const withPending = async (key: string, fn: () => Promise<unknown>) => {
+    if (pendingRef.current.has(key)) return;
+    pendingRef.current.add(key);
+    setPendingOps(new Set(pendingRef.current));
+    try {
+      await fn();
+    } finally {
+      pendingRef.current.delete(key);
+      setPendingOps(new Set(pendingRef.current));
+    }
+  };
 
   const wsProcs = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace),
@@ -145,7 +175,8 @@ export function ProcPanel({
         rows: 24,
       });
       setOpenTermId(rec.id);
-      void fetchProcs();
+      // Awaited so the button's spinner lasts until the new row is listed.
+      await fetchProcs();
       return true;
     } catch (e) {
       setRunError(String(e));
@@ -153,31 +184,35 @@ export function ProcPanel({
     }
   };
 
-  const run = async () => {
+  const [runPending, run] = usePending(async () => {
     if (await launch(command.trim())) setCommand("");
-  };
+  });
 
-  const kill = async (id: string) => {
-    try {
-      await invoke("kill_workspace_proc", { id, force: false });
-    } catch {
-      // Row keeps showing running state; the next poll reconciles.
-    }
-    void fetchProcs();
-  };
+  const launchRow = (cmd: string) => withPending(`run:${cmd}`, () => launch(cmd));
 
-  const clear = async (id: string | null) => {
-    try {
-      await invoke("clear_workspace_procs", {
-        id,
-        workspacePath: id ? null : workspace,
-      });
-    } catch {
-      // Clearing a proc that just restarted fails server-side; poll reconciles.
-    }
-    if (openTermId && (id === openTermId || id === null)) setOpenTermId(null);
-    void fetchProcs();
-  };
+  const kill = (id: string) =>
+    withPending(`kill:${id}`, async () => {
+      try {
+        await invoke("kill_workspace_proc", { id, force: false });
+      } catch {
+        // Row keeps showing running state; the next poll reconciles.
+      }
+      await fetchProcs();
+    });
+
+  const clear = (id: string | null) =>
+    withPending(`clear:${id ?? "*"}`, async () => {
+      try {
+        await invoke("clear_workspace_procs", {
+          id,
+          workspacePath: id ? null : workspace,
+        });
+      } catch {
+        // Clearing a proc that just restarted fails server-side; poll reconciles.
+      }
+      if (openTermId && (id === openTermId || id === null)) setOpenTermId(null);
+      await fetchProcs();
+    });
 
   return (
     <section className={styles.proc_panel}>
@@ -189,10 +224,15 @@ export function ProcPanel({
               <div className={styles.proc_shortcut} key={shortcut}>
                 <button
                   className={styles.proc_shortcut_run}
-                  onClick={() => void launch(shortcut)}
+                  onClick={() => void launchRow(shortcut)}
+                  disabled={pendingOps.has(`run:${shortcut}`)}
                   title={shortcut}
                 >
-                  <Play size={10} fill="currentColor" />
+                  {pendingOps.has(`run:${shortcut}`) ? (
+                    <Spinner size={10} />
+                  ) : (
+                    <Play size={10} fill="currentColor" />
+                  )}
                   <code>{procCommandText(shortcut, t("files.proc_shell"))}</code>
                 </button>
                 <button
@@ -212,8 +252,16 @@ export function ProcPanel({
       {hasFinished && (
         <div className={styles.proc_header}>
           <span className={styles.proc_spacer} />
-          <button className={styles.proc_action} onClick={() => void clear(null)}>
-            <Trash2 size={12} strokeWidth={1.5} />
+          <button
+            className={styles.proc_action}
+            onClick={() => void clear(null)}
+            disabled={pendingOps.has("clear:*")}
+          >
+            {pendingOps.has("clear:*") ? (
+              <Spinner size={12} />
+            ) : (
+              <Trash2 size={12} strokeWidth={1.5} />
+            )}
             {t("files.proc_clear_finished")}
           </button>
         </div>
@@ -233,8 +281,12 @@ export function ProcPanel({
           placeholder={t("files.proc_input_placeholder", { name })}
           spellCheck={false}
         />
-        <button className={styles.proc_run_btn} type="submit" disabled={!command.trim()}>
-          <Play size={12} strokeWidth={2} />
+        <button
+          className={styles.proc_run_btn}
+          type="submit"
+          disabled={!command.trim() || runPending}
+        >
+          {runPending ? <Spinner size={12} /> : <Play size={12} strokeWidth={2} />}
           {t("files.proc_run")}
         </button>
         {/* Don't spawn shell here, just jump to terminal page with this repo — terminal page
@@ -258,7 +310,12 @@ export function ProcPanel({
         <div className={styles.proc_error}>{t("files.proc_run_error", { error: runError })}</div>
       )}
 
-      {wsProcs.length === 0 && <p className={styles.proc_empty}>{t("files.proc_empty")}</p>}
+      {wsProcs.length === 0 &&
+        (procsLoaded ? (
+          <p className={styles.proc_empty}>{t("files.proc_empty")}</p>
+        ) : (
+          <SkeletonList rows={3} meta={false} />
+        ))}
 
       <div className={styles.proc_list}>
         {procGroups.map((group) => {
@@ -312,8 +369,16 @@ export function ProcPanel({
                   )}
                   {t("files.proc_shortcut")}
                 </button>
-                <button className={styles.proc_action} onClick={() => void launch(group.command)}>
-                  <RotateCw size={11} strokeWidth={1.5} />
+                <button
+                  className={styles.proc_action}
+                  onClick={() => void launchRow(group.command)}
+                  disabled={pendingOps.has(`run:${group.command}`)}
+                >
+                  {pendingOps.has(`run:${group.command}`) ? (
+                    <Spinner size={11} />
+                  ) : (
+                    <RotateCw size={11} strokeWidth={1.5} />
+                  )}
                   {t("files.proc_rerun")}
                 </button>
               </div>
@@ -349,13 +414,26 @@ export function ProcPanel({
                             <button
                               className={`${styles.proc_action} ${styles.proc_action_danger}`}
                               onClick={() => void kill(p.id)}
+                              disabled={pendingOps.has(`kill:${p.id}`)}
                             >
-                              <Square size={11} strokeWidth={2} />
+                              {pendingOps.has(`kill:${p.id}`) ? (
+                                <Spinner size={11} />
+                              ) : (
+                                <Square size={11} strokeWidth={2} />
+                              )}
                               {t("files.proc_kill")}
                             </button>
                           ) : (
-                            <button className={styles.proc_action} onClick={() => void clear(p.id)}>
-                              <Trash2 size={11} strokeWidth={1.5} />
+                            <button
+                              className={styles.proc_action}
+                              onClick={() => void clear(p.id)}
+                              disabled={pendingOps.has(`clear:${p.id}`)}
+                            >
+                              {pendingOps.has(`clear:${p.id}`) ? (
+                                <Spinner size={11} />
+                              ) : (
+                                <Trash2 size={11} strokeWidth={1.5} />
+                              )}
                               {t("files.proc_clear")}
                             </button>
                           )}

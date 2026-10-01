@@ -33,11 +33,15 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 // The catalogue arrives over IPC; the picker only needs it to be non-empty.
-vi.mock("../../useModelCatalog", () => ({
-  useModelCatalog: () => [
+vi.mock("../../useModelCatalog", () => {
+  const catalog = [
     { name: "claude", models: [{ id: "claude-sonnet-5", label: "Sonnet 5", efforts: [] }] },
-  ],
-}));
+  ];
+  return {
+    useModelCatalog: () => catalog,
+    useModelCatalogState: () => ({ catalog, loaded: true }),
+  };
+});
 // A real terminal wants a pty, a ResizeObserver and xterm; the card only needs
 // to know it mounted one.
 vi.mock("../ProcTerminal", () => ({

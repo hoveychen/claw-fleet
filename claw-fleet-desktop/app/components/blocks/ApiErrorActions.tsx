@@ -5,10 +5,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ErrorAction, SyntheticErrorInfo } from "../../../../shared-ts/syntheticError";
 import type { ProcRecord } from "../../types";
 import { cliUpgradeFor, modelChoicesFor } from "../../modelChoices";
-import { useModelCatalog } from "../../useModelCatalog";
+import { useModelCatalogState } from "../../useModelCatalog";
 import { canResumeSession, resumeErrorText, resumeSession } from "../sessionResume";
 import { ProcTerminal } from "../ProcTerminal";
 import { ApiErrorBlock } from "./ApiErrorBlock";
+import { Skeleton } from "../loading";
 import styles from "./ApiErrorBlock.module.css";
 
 /** What a failed-turn card needs to know about the session it sits in. Passed
@@ -47,7 +48,7 @@ export function ApiErrorActions({
   const [done, setDone] = useState<ErrorAction | null>(null);
   const [picking, setPicking] = useState(false);
   const [loginProc, setLoginProc] = useState<ProcRecord | null>(null);
-  const catalog = useModelCatalog();
+  const { catalog, loaded: catalogLoaded } = useModelCatalogState();
 
   const resumable = ctx
     ? canResumeSession({
@@ -148,7 +149,19 @@ export function ApiErrorActions({
         <div className={styles.picker} data-testid="api-error-model-picker">
           <span className={styles.pickerLabel}>{t("detail.api_error.pick_model", "换成")}</span>
           {models.length === 0 ? (
-            <span className={styles.note}>{t("detail.api_error.no_models", "模型列表加载中…")}</span>
+            // Once the catalog fetch has settled (success or failure), an empty
+            // model list is final: the placeholder gives way to a note.
+            catalogLoaded ? (
+              <span className={styles.note}>
+                {t("detail.api_error.models_unavailable", "读不到模型列表")}
+              </span>
+            ) : (
+              <span role="status" aria-busy="true" className={styles.pickerSkeleton}>
+                {[64, 84, 72].map((w) => (
+                  <Skeleton key={w} inline width={w} height={22} radius="var(--radius-pill)" />
+                ))}
+              </span>
+            )
           ) : (
             models.map((m) => (
               <button

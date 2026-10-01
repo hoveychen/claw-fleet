@@ -52,6 +52,11 @@
   object-fit: contain;
 }
 
+.well_skeleton {
+  position: absolute;
+  inset: 0;
+}
+
 .fallback_icon {
   color: var(--color-text-dim);
 }

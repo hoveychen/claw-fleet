@@ -12,6 +12,8 @@ import {
   YAxis,
 } from "recharts";
 import styles from "./UsageTrendPanel.module.css";
+import { SkeletonCard, SkeletonNumber, TopProgress, loadingStyles } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 interface FleetLlmUsageDailyBucket {
   date: string;
@@ -100,11 +102,17 @@ export function UsageTrendPanel() {
   const { t } = useTranslation();
   const [range, setRange] = useState<RangeKey>("7d");
   const [metric, setMetric] = useState<Metric>("tokens");
-  const [buckets, setBuckets] = useState<FleetLlmUsageDailyBucket[]>([]);
-  const [loading, setLoading] = useState(false);
+  // `null` until the first response: the totals row must not read "0 tokens"
+  // before anything has been counted.
+  const [buckets, setBuckets] = useState<FleetLlmUsageDailyBucket[] | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loaded = buckets !== null;
+  // A range switch keeps the previous chart on screen under a progress bar.
+  const refreshing = useDelayedFlag(loading && loaded);
 
   useEffect(() => {
+    let cancelled = false;
     const { fromMs, toMs } = rangeToMsWindow(range);
     setLoading(true);
     setError(null);
@@ -112,9 +120,18 @@ export function UsageTrendPanel() {
       fromMs,
       toMs,
     })
-      .then((rows) => setBuckets(rows))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then((rows) => {
+        if (!cancelled) setBuckets(rows ?? []);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [range]);
 
   // Fill in missing (date, scenario) slots with zeros so the stacked chart
@@ -134,7 +151,7 @@ export function UsageTrendPanel() {
       const dateSet = new Set<string>();
       let hasEstimated = false;
       let hasUnpriced = false;
-      for (const b of buckets) {
+      for (const b of buckets ?? []) {
         dateSet.add(b.date);
         if (b.hasEstimatedTokens) hasEstimated = true;
         if (b.hasUnpricedCalls) hasUnpriced = true;
@@ -153,7 +170,7 @@ export function UsageTrendPanel() {
         return row;
       });
       const dateIdx = new Map(dates.map((d, i) => [d, i]));
-      for (const b of buckets) {
+      for (const b of buckets ?? []) {
         const i = dateIdx.get(b.date);
         if (i === undefined) continue;
         const row = chartData[i];
@@ -177,13 +194,16 @@ export function UsageTrendPanel() {
   const yAxisFormatter = (v: number) =>
     metric === "cost" ? formatCost(v) : formatNumber(v);
 
+  const stale = loading && loaded ? loadingStyles.stale : "";
+
   return (
     <div className={styles.root}>
+      <TopProgress active={refreshing} />
       <div className={styles.header_row}>
-        <div className={styles.totals}>
+        <div className={`${styles.totals} ${stale}`}>
           <div className={styles.total_block}>
             <div className={styles.total_value}>
-              {formatNumber(totals.tokens)}
+              {loaded ? formatNumber(totals.tokens) : <SkeletonNumber width={56} />}
             </div>
             <div className={styles.total_label}>
               {t("usage.total_tokens")}
@@ -191,7 +211,7 @@ export function UsageTrendPanel() {
           </div>
           <div className={styles.total_block}>
             <div className={styles.total_value}>
-              {formatCost(totals.cost)}
+              {loaded ? formatCost(totals.cost) : <SkeletonNumber width={56} />}
             </div>
             <div className={styles.total_label}>
               {t("usage.total_cost")}
@@ -199,7 +219,7 @@ export function UsageTrendPanel() {
           </div>
           <div className={styles.total_block}>
             <div className={styles.total_value}>
-              {formatNumber(totals.calls)}
+              {loaded ? formatNumber(totals.calls) : <SkeletonNumber width={36} />}
             </div>
             <div className={styles.total_label}>
               {t("usage.total_calls")}
@@ -243,17 +263,17 @@ export function UsageTrendPanel() {
         </div>
       )}
 
-      {loading ? (
-        <div className={styles.empty}>{t("usage.loading")}</div>
-      ) : error ? (
+      {error ? (
         <div className={styles.empty}>
           {t("usage.error", { error })}
         </div>
+      ) : !loaded ? (
+        <SkeletonCard height={258} />
       ) : chartData.length === 0 ? (
-        <div className={styles.empty}>{t("usage.no_data")}</div>
+        <div className={`${styles.empty} ${stale}`}>{t("usage.no_data")}</div>
       ) : (
         <>
-          <div className={styles.chart_box}>
+          <div className={`${styles.chart_box} ${stale}`}>
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart
                 data={chartData}
@@ -344,7 +364,7 @@ export function UsageTrendPanel() {
             </ResponsiveContainer>
           </div>
 
-          <table className={styles.table}>
+          <table className={`${styles.table} ${stale}`}>
             <thead>
               <tr>
                 <th>{t("usage.col_scenario")}</th>

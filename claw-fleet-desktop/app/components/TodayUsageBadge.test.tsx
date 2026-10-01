@@ -45,10 +45,23 @@ describe("TodayUsageBadge", () => {
   /// it is pending the badge knows nothing, and "nothing" must not be drawn as
   /// the perfectly valid figure `$0.00` — that is what made the counter look
   /// broken next to a live spend rate.
-  it("shows a pending marker, not $0.00, before the first answer lands", () => {
+  it("shows a loading placeholder, not $0.00, before the first answer lands", () => {
     invoke.mockReturnValue(new Promise(() => {})); // never resolves
     const el = render();
+    expect(el.querySelector('[role="status"]')).not.toBeNull();
+    expect(el.textContent).not.toContain("$0.00");
+  });
+
+  /// A backend that never answers must not leave the skeleton shimmering:
+  /// a failed first fetch settles into a plain dash.
+  it("falls back to a dash when the first fetch fails", async () => {
+    invoke.mockRejectedValue(new Error("offline"));
+    const el = render();
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(el.textContent).toContain("—");
+    expect(el.querySelector('[role="status"]')).toBeNull();
     expect(el.textContent).not.toContain("$0.00");
   });
 

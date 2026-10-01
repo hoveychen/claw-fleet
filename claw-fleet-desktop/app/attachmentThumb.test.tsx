@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { storeThumbUrl, useAttachmentThumb } from "./attachmentThumb";
+import { storeThumbUrl, useAttachmentThumb, useAttachmentThumbState } from "./attachmentThumb";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -96,5 +96,41 @@ describe("useAttachmentThumb", () => {
     await mount({ path: "/Users/me/pics/gone.png", name: "gone.png" });
     expect(invoke).toHaveBeenCalled();
     expect(src()).toBe("none");
+  });
+});
+
+describe("useAttachmentThumbState", () => {
+  let state: ReturnType<typeof useAttachmentThumbState> | null = null;
+  function StateProbe(props: { path: string; name: string }) {
+    state = useAttachmentThumbState(props);
+    return null;
+  }
+
+  it("is pending while the host read is in flight, then settles", async () => {
+    let resolve!: (v: unknown) => void;
+    invoke.mockReturnValue(new Promise((r) => (resolve = r)));
+    await act(async () => {
+      root.render(<StateProbe path="/Users/me/pics/a.png" name="a.png" />);
+    });
+    expect(state).toEqual({ src: null, pending: true, failed: false });
+    await act(async () => {
+      resolve({ kind: "image", base64: "QUJD", mime: "image/png", sizeBytes: 3 });
+    });
+    expect(state).toEqual({ src: "data:image/png;base64,QUJD", pending: false, failed: false });
+  });
+
+  it("ends pending as failed when the read rejects", async () => {
+    invoke.mockRejectedValue(new Error("gone"));
+    await act(async () => {
+      root.render(<StateProbe path="/Users/me/pics/gone.png" name="gone.png" />);
+    });
+    expect(state).toEqual({ src: null, pending: false, failed: true });
+  });
+
+  it("is neither pending nor failed for a non-image", async () => {
+    await act(async () => {
+      root.render(<StateProbe path="/Users/me/docs/spec.pdf" name="spec.pdf" />);
+    });
+    expect(state).toEqual({ src: null, pending: false, failed: false });
   });
 });

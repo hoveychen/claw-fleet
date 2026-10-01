@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive } from "lucide-react";
 import styles from "./DirPickerDialog.module.css";
+import { Skeleton, SkeletonList, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 /** Mirrors `claw_fleet_core::workspace_browse::BrowseDirResponse`. */
 interface BrowseEntry {
@@ -28,7 +31,11 @@ interface Props {
    *  disk — the rca executor a workspace will run on. Everything else about the
    *  dialog is identical because both sides answer the same shape. */
   sshTarget?: string;
-  onPick: (path: string) => void;
+  /** May return a promise (e.g. registering the path somewhere). While it is
+   *  pending the dialog shows a spinner and refuses confirm / cancel; if it
+   *  rejects, the dialog stays open and shows the rejection so the user can
+   *  pick again. Closing on success stays the caller's job. */
+  onPick: (path: string) => void | Promise<unknown>;
   onCancel: () => void;
 }
 
@@ -118,6 +125,21 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
     }
   };
 
+  // usePending drops a second confirm while the first pick is still out.
+  const [picking, pick] = usePending(async (path: string) => {
+    setError(null);
+    try {
+      await onPick(path);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  });
+  // A synchronous onPick settles within the same tick; only a real wait shows.
+  const showPickSpinner = useDelayedFlag(picking);
+  const cancel = () => {
+    if (!picking) onCancel();
+  };
+
   // Long paths matter at their tail (which directory am I in), not their head.
   const crumbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -127,23 +149,37 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape" && !picking) onCancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  }, [onCancel, picking]);
 
   return (
-    <div className={styles.overlay} onClick={onCancel}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.overlay} onClick={cancel}>
+      <div
+        className={styles.dialog}
+        onClick={(e) => e.stopPropagation()}
+        aria-busy={picking || undefined}
+      >
         <div className={styles.title}>{t("dir_picker.title")}</div>
         <div className={styles.crumb} ref={crumbRef}>
-          {data?.path ?? initialPath ?? "…"}
+          {data ? (
+            data.path
+          ) : loading ? (
+            <Skeleton inline width="60%" height={11} />
+          ) : (
+            initialPath || "…"
+          )}
         </div>
 
         {error && <div className={styles.error}>{error}</div>}
 
         <div className={styles.list}>
+          {/* A folder change replaces the listing outright: the old rows belong
+              to another directory, so they must not stay clickable under it. */}
+          {loading && <SkeletonList rows={9} meta={false} avatar rowHeight={31} />}
+          {!loading && <>
           {/* Standing in a root there is no "up" — a root does not expose its
               parent. On a cloud host the listing *starts* in such a root (the
               persistent volume) with home on another one, so the other roots are
@@ -177,11 +213,11 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
               <span className={styles.name}>{e.name}</span>
             </button>
           ))}
-          {data && !loading && data.entries.length === 0 && (
+          {data && data.entries.length === 0 && (
             <div className={styles.empty}>{t("dir_picker.empty")}</div>
           )}
           {data?.truncated && <div className={styles.empty}>{t("dir_picker.truncated")}</div>}
-          {loading && <div className={styles.empty}>{t("dir_picker.loading")}</div>}
+          </>}
         </div>
 
         {creating ? (
@@ -208,6 +244,7 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
               disabled={!newName.trim() || saving}
               onClick={() => void submitNew()}
             >
+              {saving && <Spinner size={12} className={styles.btn_spinner} />}
               {saving ? t("dir_picker.creating") : t("dir_picker.create")}
             </button>
             <button
@@ -226,27 +263,36 @@ export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Pr
         ) : (
           <button
             className={styles.newBtn}
-            disabled={!data}
+            disabled={!data || loading}
             onClick={() => {
               setNewName("");
               setError(null);
               setCreating(true);
             }}
           >
-            <FolderPlus size={13} strokeWidth={1.7} className={styles.icon} />
+            {loading && !data ? (
+              <Spinner size={12} />
+            ) : (
+              <FolderPlus size={13} strokeWidth={1.7} className={styles.icon} />
+            )}
             <span>{t("dir_picker.new")}</span>
           </button>
         )}
 
         <div className={styles.actions}>
-          <button className={styles.cancel} onClick={onCancel}>
+          <button className={styles.cancel} onClick={cancel} disabled={picking}>
             {t("cancel")}
           </button>
           <button
             className={styles.confirm}
-            disabled={!data}
-            onClick={() => data && onPick(data.path)}
+            // Locked while a folder loads: `data.path` is still the previous
+            // directory then, not the one the user just stepped into.
+            disabled={!data || loading || picking}
+            onClick={() => data && !loading && void pick(data.path)}
           >
+            {((loading && !data) || showPickSpinner) && (
+              <Spinner size={12} className={styles.btn_spinner} />
+            )}
             {t("dir_picker.confirm")}
           </button>
         </div>

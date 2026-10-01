@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { ResumeTriggersConfig } from "../generated/types";
+import { SkeletonCard } from "./loading";
 import styles from "./MoreView.module.css";
 
 /** Mirrors `auto_resume::AutoResumeConfig`; whole object round-trips on save. */
@@ -30,10 +31,14 @@ export function ResumeSettingsSection({ client }: { client: FleetTransport | nul
   // null = not fetched: offline, in flight, or a host too old to know the method.
   // The section stays hidden rather than showing switches that save nowhere.
   const [settings, setSettings] = useState<ResumeSettings | null>(null);
+  // The first read is in flight: hold the section's place with a skeleton so it
+  // does not pop in and shift the page. A failed read still hides it.
+  const [loading, setLoading] = useState(client !== null);
 
   useEffect(() => {
     if (!client) return;
     let alive = true;
+    setLoading(true);
     client
       .request<ResumeSettings>("resume_settings")
       .then((r) => {
@@ -41,12 +46,24 @@ export function ResumeSettingsSection({ client }: { client: FleetTransport | nul
       })
       .catch(() => {
         if (alive) setSettings(null);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
       });
     return () => {
       alive = false;
     };
   }, [client]);
 
+  if (client && !settings && loading) {
+    return (
+      <div className={styles.section}>
+        <div className={styles.sectionLabel}>{t("自动续跑")}</div>
+        {/* Seven switch rows plus the note. */}
+        <SkeletonCard height={7 * 52 + 36} />
+      </div>
+    );
+  }
   if (!client || !settings) return null;
 
   function flip<P extends Part>(part: P, patch: Partial<ResumeSettings[P]>) {

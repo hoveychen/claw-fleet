@@ -6,6 +6,8 @@ import { useDecisionStore } from "../store";
 import type { A2uiRenderDecision } from "../types";
 import styles from "./DecisionPanel.module.css";
 import { ParkedBanner } from "./DecisionPanel";
+import { SkeletonCard, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 
 // Flatten the agent's `userAction.context` (arbitrary JSON values) into the
 // `Record<String, String>` shape the Rust backend expects. Non-string values
@@ -39,8 +41,14 @@ export function A2uiRenderCard({ decision }: { decision: A2uiRenderDecision }) {
     [decision.id, setA2uiActionPayload],
   );
   const [surface, setSurface] = useState<SurfaceModel | null>(null);
+  // Processing is synchronous, so "no surface after processing" is final: a
+  // tree that threw or never created one. Name it rather than leaving the
+  // placeholder up forever.
+  const [failed, setFailed] = useState(false);
+  const [cancelling, cancel] = usePending(() => cancelA2uiRender(decision.id));
 
   useEffect(() => {
+    let threw = false;
     try {
       const msg = decision.request.messageTree;
       // Accept both shapes A2UI v0.9 allows: bare array of messages or a
@@ -53,12 +61,14 @@ export function A2uiRenderCard({ decision }: { decision: A2uiRenderDecision }) {
       processor.processMessages(messages as never);
     } catch (e) {
       console.error("A2UI processMessages failed:", e);
+      threw = true;
     }
     const sync = () => {
       const first = Array.from(processor.model.surfacesMap.values())[0] ?? null;
       setSurface(first);
+      return first;
     };
-    sync();
+    setFailed(threw || sync() === null);
     const created = processor.onSurfaceCreated(sync);
     const deleted = processor.onSurfaceDeleted(sync);
     return () => {
@@ -104,10 +114,12 @@ export function A2uiRenderCard({ decision }: { decision: A2uiRenderDecision }) {
           // hits the README quickstart. Cast through `never` until upstream
           // aligns the generics — see memory:project_a2ui_evaluation.md.
           <A2uiSurface surface={surface as never} />
-        ) : (
+        ) : failed ? (
           <div style={{ opacity: 0.6, padding: "0.6rem 0" }}>
-            {t("a2ui_render.waiting", "Rendering A2UI surface…")}
+            {t("a2ui_render.failed", "无法渲染这个界面")}
           </div>
+        ) : (
+          <SkeletonCard height={120} />
         )}
       </div>
 
@@ -115,17 +127,21 @@ export function A2uiRenderCard({ decision }: { decision: A2uiRenderDecision }) {
       <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
-          onClick={() => cancelA2uiRender(decision.id)}
-          disabled={decision.submitting}
+          onClick={() => void cancel()}
+          disabled={decision.submitting || cancelling}
+          aria-busy={cancelling || undefined}
         >
+          {cancelling && <Spinner size={12} className={styles.btn_spinner} />}
           {t("a2ui_render.cancel", "Cancel")}
         </button>
         <div className={styles.actions_spacer} />
         <button
           className={`${styles.btn} ${styles.btn_allow}`}
           onClick={() => submitA2uiRender(decision.id)}
-          disabled={decision.submitting}
+          disabled={decision.submitting || cancelling}
+          aria-busy={decision.submitting || undefined}
         >
+          {decision.submitting && <Spinner size={12} className={styles.btn_spinner} />}
           {decision.submitting
             ? t("a2ui_render.submitting", "Submitting…")
             : decision.actionPayload

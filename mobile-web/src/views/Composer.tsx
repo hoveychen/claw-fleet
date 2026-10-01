@@ -14,7 +14,6 @@ import {
 import {
   Check,
   FolderSearch,
-  LoaderCircle,
   MapPin,
   Plus,
   Send,
@@ -30,16 +29,16 @@ import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
 import { waitForSessionId } from "../spawnConfirm";
 import { isSessionLive, type SessionInfo } from "../types";
-import { useChatWorkspace } from "../useChatWorkspace";
+import { useChatWorkspaceState } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
 import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
-import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModels } from "../dshModels";
+import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModelsState } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import {
   effortChoicesFor,
   cliFloorFor,
   modelChoicesFor,
-  useModelCatalog,
+  useModelCatalogState,
 } from "../useModelCatalog";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
@@ -49,6 +48,7 @@ import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
+import { Skeleton, SkeletonList, Spinner } from "./loading";
 import { Presence } from "../Presence";
 
 // Model and effort choices were once hardcoded here and manually sync'd with the
@@ -431,7 +431,7 @@ function OptionSelects({
   const codexProfiles = useCodexProfiles(isCodex ? client : null);
   // dsh's model catalog is determined by the host's provider config; Fleet
   // hard-codes no entries.
-  const dshCatalog = useDshModels(isDsh ? client : null);
+  const { catalog: dshCatalog, loaded: dshLoaded } = useDshModelsState(isDsh ? client : null);
   const dshGroups = useMemo(
     () => (isDsh ? dshModelGroups(dshCatalog) : []),
     [isDsh, dshCatalog],
@@ -446,7 +446,11 @@ function OptionSelects({
         : { efforts: [], defaultEffort: "" },
     [isDsh, dshCatalog, model],
   );
-  const catalog = useModelCatalog(client);
+  const { catalog, loaded: catalogLoaded } = useModelCatalogState(client);
+  // Until the list lands the select holds only "默认模型", which reads as "no
+  // other models exist": mark the field as loading instead. `loaded` turns true
+  // on failure too, so the spinner always ends.
+  const modelsLoading = !!client && !(isDsh ? dshLoaded : catalogLoaded);
   const modelChoices = isCodex
     ? [
         ...modelChoicesFor(catalog, "codex", t("默认模型")),
@@ -479,7 +483,9 @@ function OptionSelects({
     <>
     <div className={styles.optionRow}>
       <label className={styles.optionField}>
-        <span>{t("模型")}</span>
+        <span>
+          {t("模型")} {modelsLoading && <Spinner size={10} label={t("加载中…")} />}
+        </span>
         <select
           className={styles.optionSelect}
           value={model}
@@ -524,7 +530,9 @@ function OptionSelects({
         </select>
       </label>
       <label className={styles.optionField}>
-        <span>{t("思考强度")}</span>
+        <span>
+          {t("思考强度")} {modelsLoading && <Spinner size={10} label={t("加载中…")} />}
+        </span>
         <select
           className={styles.optionSelect}
           value={effort}
@@ -611,6 +619,12 @@ interface NewSessionProps {
    * when upload would immediately hit "relay not connected yet".
    */
   relayReady?: boolean;
+  /**
+   * The target device's first sessions frame is still on its way (link up,
+   * agent online or not yet reported). The "最近" list holds skeleton rows
+   * meanwhile instead of looking empty.
+   */
+  recentsPending?: boolean;
   onClose: () => void;
 }
 
@@ -801,11 +815,15 @@ export function NewSessionSheet({
   onTargetDevice,
   initialFiles,
   relayReady,
+  recentsPending,
   onClose,
 }: NewSessionProps) {
   // Chat-only workspace: not project-bound, no "recent sessions" to discover; must
   // be explicitly nailed as the first option.
-  const chatPath = useChatWorkspace(client);
+  const { path: chatPath, loaded: chatPathLoaded } = useChatWorkspaceState(client);
+  // Hold the 纯聊天 row's place while its path is fetched, so it does not pop in
+  // and push the rows below it down.
+  const chatPathLoading = !!client && !chatPathLoaded;
 
   const recentRows = recentWorkspaceRows(sessions, chatPath);
   const recents = recentRows.map((r): [string, string] => [r.path, r.name]);
@@ -936,7 +954,11 @@ export function NewSessionSheet({
     },
   });
   const toolLabel = t(toolChoices.find(([value]) => value === tool)?.[1] ?? tool);
-  const sheetCatalog = useModelCatalog(client);
+  const { catalog: sheetCatalog, loaded: sheetCatalogLoaded } = useModelCatalogState(client);
+  // A picked model shows its raw id until the catalog maps it to a label; hold
+  // the chip text instead of flashing the id.
+  const sheetCatalogLoading = !!client && !sheetCatalogLoaded;
+  const chipLabelLoading = !!model && tool !== "dsh" && sheetCatalogLoading;
   const modelLabel = model
     ? (modelChoicesFor(sheetCatalog, tool === "codex" ? "codex" : "claude", "").find(
         ([value]) => value === model,
@@ -1079,6 +1101,10 @@ export function NewSessionSheet({
                 {workspace === row.path && <Check size={17} className={styles.recentCheck} />}
               </button>
             ))}
+            {recentsPending && recentRows.length === 0 && (
+              <SkeletonList rows={3} meta={false} rowHeight={46} />
+            )}
+            {!chatPath && chatPathLoading && <SkeletonList rows={1} meta rowHeight={46} />}
             {chatPath && (
               <button
                 className={styles.recentRow}
@@ -1116,7 +1142,11 @@ export function NewSessionSheet({
             </button>
             <button className={styles.resumeChip} onClick={() => setPicker("config")}>
               <SlidersHorizontal size={13} />
-              {configSummary.title}
+              {chipLabelLoading ? (
+                <Skeleton inline width={120} height={10} />
+              ) : (
+                configSummary.title
+              )}
             </button>
           </div>
           {(attachments.length > 0 || pending.length > 0) && !voice.active && (
@@ -1142,7 +1172,7 @@ export function NewSessionSheet({
                 aria-label={uploading ? t("上传中…") : t("附件")}
               >
                 {uploading ? (
-                  <LoaderCircle size={19} className={styles.spin} />
+                  <Spinner size={17} />
                 ) : (
                   <Plus size={20} />
                 )}
@@ -1172,7 +1202,7 @@ export function NewSessionSheet({
                 {created ? (
                   <Check size={17} />
                 ) : busy ? (
-                  <LoaderCircle size={17} className={styles.spin} />
+                  <Spinner size={16} className={styles.sendSpinner} />
                 ) : (
                   <Send size={16} />
                 )}
@@ -1430,7 +1460,10 @@ export function ResumeComposer({
   const fileRef = useRef<HTMLInputElement>(null);
   // Current config shown in the pill. dsh's model catalog comes from the host at runtime; if we
   // don't recognize an id, display it as-is — a real but unfamiliar id beats a wrong friendly name.
-  const resumeCatalog = useModelCatalog(client);
+  const { catalog: resumeCatalog, loaded: resumeCatalogLoaded } = useModelCatalogState(client);
+  // The model chip would show the raw id, then swap to the friendly label.
+  const resumeCatalogLoading = !!client && !resumeCatalogLoaded;
+  const modelChipLoading = !!model && tool !== "dsh" && resumeCatalogLoading;
   const modelLabel = useMemo(() => {
     if (tool === "dsh") return model;
     const table = modelChoicesFor(resumeCatalog, tool === "codex" ? "codex" : "claude", "");
@@ -1664,14 +1697,15 @@ export function ResumeComposer({
           settings, so showing unchangeable pills would only mislead. */}
       {!enqueueing && !voice.active && (
         <div className={styles.resumeChips}>
-          {configChips.map((label) => (
+          {configChips.map((label, i) => (
             <button
               key={label}
               type="button"
               className={styles.resumeChip}
               onClick={() => setPickerOpen(true)}
             >
-              {label}
+              {/* The first chip carries the model label. */}
+              {i === 0 && modelChipLoading ? <Skeleton inline width={84} height={10} /> : label}
             </button>
           ))}
         </div>
@@ -1687,7 +1721,7 @@ export function ResumeComposer({
             aria-label={uploading ? t("上传中…") : t("附件")}
           >
             {uploading ? (
-              <LoaderCircle size={19} className={styles.spin} />
+              <Spinner size={17} />
             ) : (
               <Plus size={20} />
             )}
@@ -1728,7 +1762,7 @@ export function ResumeComposer({
             }
           >
             {busy ? (
-              <LoaderCircle size={17} className={styles.spin} />
+              <Spinner size={16} className={styles.sendSpinner} />
             ) : sent ? (
               <Check size={17} />
             ) : (

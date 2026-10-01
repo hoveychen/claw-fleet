@@ -11,7 +11,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
+import { CalendarClock, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
@@ -87,6 +87,8 @@ import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
 import styles from "./SessionDetail.module.css";
+import { DecisionRecordsLoadedContext } from "./DecisionHistory";
+import { SkeletonCard, SkeletonNumber, Spinner } from "./loading";
 import { showLatestSync } from "../conversationPlaceholder";
 import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
 import { singleFlight } from "../singleFlight";
@@ -151,17 +153,25 @@ function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const setViewMode = useUIStore((s) => s.setViewMode);
   const [scheduleId, setScheduleId] = useState<string | null>(null);
+  // Until the lookup answers, the generic "scheduled" label would be a guess
+  // that then swaps to the id; hold the id's place instead.
+  const [resolved, setResolved] = useState(false);
   const isScheduled = session.entrypoint === SCHEDULE_ENTRYPOINT;
   useEffect(() => {
     if (!isScheduled) return;
     let alive = true;
+    setScheduleId(null);
+    setResolved(false);
     invoke<{ id: string; firedSessionId?: string }[]>("list_schedules")
       .then((list) => {
         if (!alive) return;
         const hit = list.find((s) => s.firedSessionId === session.id);
         if (hit) setScheduleId(hit.id);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setResolved(true);
+      });
     return () => {
       alive = false;
     };
@@ -174,9 +184,13 @@ function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
       onClick={() => setViewMode("schedule")}
     >
       <CalendarClock size={11} strokeWidth={2.2} />
-      {scheduleId
-        ? t("detail.triggered_by_schedule", { id: scheduleId })
-        : t("detail.triggered_by_schedule_generic")}
+      {!resolved ? (
+        <SkeletonNumber width={88} height="0.8em" />
+      ) : scheduleId ? (
+        t("detail.triggered_by_schedule", { id: scheduleId })
+      ) : (
+        t("detail.triggered_by_schedule_generic")
+      )}
     </button>
   );
 }
@@ -476,6 +490,9 @@ export function SessionDetail({
   const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
+  // Which session `decisionRecords` was last read for. Until it matches the one
+  // on screen, an empty list means "not read yet", not "no decisions".
+  const [decisionsReadFor, setDecisionsReadFor] = useState<string | null>(null);
   const timelineMessages = useMemo(
     () => settlePending(
       withCodexDecisionHistory(liveSession, messages, decisionRecords),
@@ -564,6 +581,7 @@ export function SessionDetail({
     explains,
     all: allExplains,
     hidden: hiddenExplains,
+    loaded: explainsLoaded,
     ask: askExplainRecord,
     dismiss: dismissExplain,
     restore: restoreExplain,
@@ -579,6 +597,10 @@ export function SessionDetail({
      is the exception: see the render for why the warn state stays out. */
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
+  // Which `workspace\0session` key `taskPlans` was last read (or failed to
+  // read) for. Until it matches the one on screen, an empty list means "not
+  // read yet", not "no plans".
+  const [taskPlansReadFor, setTaskPlansReadFor] = useState<string | null>(null);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
 
   // Claude Code Workflow runs for this session → reconstructed DAG, surfaced as
@@ -802,10 +824,12 @@ export function SessionDetail({
         .then((r) => {
           if (cancelled) return;
           setDecisionRecords(r ?? []);
+          setDecisionsReadFor(sid);
         })
         .catch(() => {
           if (cancelled) return;
           setDecisionRecords([]);
+          setDecisionsReadFor(sid);
         });
 
     void refresh();
@@ -892,12 +916,15 @@ export function SessionDetail({
   // didn't. But the list is fetched once per app run, so a doc the session
   // published a minute ago is missing from it and its ref would gray out too —
   // a miss buys one re-read (once per slug) before we believe it.
-  const { docs: wikiDocs } = useWikiDocs();
+  const { docs: wikiDocs, loaded: wikiLoaded, inFlight: wikiInFlight } = useWikiDocs();
   const wikiLinks = useMemo<WikiLinkContext>(() => {
     const slugs = new Set(wikiDocs.map((d) => d.slug));
     return {
       hasSlug: (slug) => {
         if (slugs.has(slug)) return true;
+        // Not known yet (first read, or the re-read a miss asked for): `null`
+        // keeps the ref live instead of graying it out ahead of the answer.
+        if (!wikiLoaded || wikiInFlight) return null;
         // Off the render path: the re-read flips `inFlight` synchronously, and
         // hasSlug runs while the markdown renderer is rendering.
         queueMicrotask(() => refetchWikiDocsForMissingSlug(slug));
@@ -906,26 +933,34 @@ export function SessionDetail({
       // Beside the prose, same as a clicked path.
       openSlug: (slug) => openAuxDoc("wiki", slug),
     };
-  }, [wikiDocs, openAuxDoc]);
+  }, [wikiDocs, wikiLoaded, wikiInFlight, openAuxDoc]);
 
+  const taskPlansKey = workspacePath && sessionId ? `${workspacePath}\0${sessionId}` : null;
   useEffect(() => {
     if (!workspacePath || !sessionId) {
       setTaskPlans([]);
       return;
     }
     let cancelled = false;
+    const key = `${workspacePath}\0${sessionId}`;
     invoke<TaskPlanDetail[]>("get_task_plans", { workspacePath, sessionId })
       .then((r) => {
-        if (!cancelled) setTaskPlans(r ?? []);
+        if (cancelled) return;
+        setTaskPlans(r ?? []);
+        setTaskPlansReadFor(key);
       })
       .catch(() => {
-        if (!cancelled) setTaskPlans([]);
+        if (cancelled) return;
+        setTaskPlans([]);
+        setTaskPlansReadFor(key);
       });
     return () => {
       cancelled = true;
     };
   }, [workspacePath, sessionId]);
   const hasTaskPlans = taskPlans.length > 0;
+  // No session/workspace means nothing to read, which counts as settled.
+  const taskPlansLoaded = taskPlansKey === null || taskPlansReadFor === taskPlansKey;
 
   // Claude Code gives every session a private scratch dir and tells it to keep
   // temp files there rather than in /tmp. Probe the top level once per session:
@@ -1834,7 +1869,7 @@ export function SessionDetail({
                 />
                 {syncingLatest && (
                   <div className={styles.syncing_latest} role="status" aria-live="polite">
-                    <LoaderCircle size={14} aria-hidden="true" />
+                    <Spinner size={12} />
                     {t("detail.syncing_latest", "正在同步最新消息…")}
                   </div>
                 )}
@@ -1856,6 +1891,7 @@ export function SessionDetail({
                       status={liveSession?.status ?? null}
                       liveThinking={shownLiveThinking}
                       decisionRecords={decisionRecords}
+                      decisionRecordsLoading={decisionsReadFor !== liveSession?.id}
                       onLoadEarlier={loadEarlier}
                       fullyLoaded={fullyLoaded}
                       isLoadingEarlier={isLoadingEarlier}
@@ -1871,14 +1907,14 @@ export function SessionDetail({
                     />
                     {simplifiedMode && pendingDecisions.filter((d) => d.request.sessionId === liveSession?.id).map((decision) => (
                       <div key={decision.id} className={styles.inline_fleet_ask} data-testid="inline-task-decision">
-                        <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
+                        <Suspense fallback={<SkeletonCard height={140} />}>
                           <InlineDecisionCard decision={decision} compact />
                         </Suspense>
                       </div>
                     ))}
                     {!simplifiedMode && inlineFleetAsk && (
                       <div className={styles.inline_fleet_ask} data-testid="inline-pending-fleet-ask">
-                        <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
+                        <Suspense fallback={<SkeletonCard height={140} />}>
                           <InlineFleetAskCard decision={inlineFleetAsk} compact />
                         </Suspense>
                       </div>
@@ -1953,28 +1989,36 @@ export function SessionDetail({
 
             {auxOpen && (
               <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>
+                {/* The facet panel forwards only the records; whether they have
+                    been read yet rides this context to DecisionHistory. */}
                 {activeFacet && (
-                  <SessionFacetPanel
-                    facet={activeFacet}
-                    session={liveSession}
-                    decisionRecords={decisionRecords}
-                    taskPlans={taskPlans}
-                    bgTasks={bgTasks}
-                    workflowTrees={workflowTrees}
-                    sessions={sessions}
-                    onOpenAgent={openAgentSession}
-                    library={{
-                      explains: allExplains,
-                      hiddenExplains,
-                      docs: docHistory,
-                      subagents: allSubagents,
-                      onOpenExplain: reopenExplain,
-                      onOpenDoc: reopenDoc,
-                      onForgetDoc: forgetDoc,
-                      onForgetAllDocs: forgetAllDocs,
-                      onOpenAgentSession: reopenAgent,
-                    }}
-                  />
+                  <DecisionRecordsLoadedContext.Provider
+                    value={decisionsReadFor === liveSession.id}
+                  >
+                    <SessionFacetPanel
+                      facet={activeFacet}
+                      session={liveSession}
+                      decisionRecords={decisionRecords}
+                      taskPlans={taskPlans}
+                      taskPlansLoaded={taskPlansLoaded}
+                      bgTasks={bgTasks}
+                      workflowTrees={workflowTrees}
+                      sessions={sessions}
+                      onOpenAgent={openAgentSession}
+                      library={{
+                        explains: allExplains,
+                        explainsLoaded,
+                        hiddenExplains,
+                        docs: docHistory,
+                        subagents: allSubagents,
+                        onOpenExplain: reopenExplain,
+                        onOpenDoc: reopenDoc,
+                        onForgetDoc: forgetDoc,
+                        onForgetAllDocs: forgetAllDocs,
+                        onOpenAgentSession: reopenAgent,
+                      }}
+                    />
+                  </DecisionRecordsLoadedContext.Provider>
                 )}
               </SessionAuxPanel>
             )}

@@ -9,6 +9,7 @@ import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 import { isWebBuild } from "../hostEnv";
 import styles from "./ImageLightbox.module.css";
 import { useExiting } from "./Presence";
+import { SkeletonCard, Spinner } from "./loading";
 
 interface Props {
   src: string;
@@ -22,7 +23,12 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
+  // Which toolbar action is running; the others stay disabled until it ends.
+  const [busy, setBusy] = useState<"copy" | "save" | "share" | null>(null);
+  // The src that finished loading (or failed): until then the stage holds a
+  // skeleton instead of a blank box.
+  const [settledSrc, setSettledSrc] = useState<string | null>(null);
+  const imageReady = settledSrc === src;
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const nativeMacShare = !isWebBuild() && navigator.platform.toLowerCase().includes("mac");
   const canShare = nativeMacShare || typeof navigator.share === "function";
@@ -34,7 +40,7 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
   };
 
   const action = async (kind: "copy" | "save" | "share") => {
-    setBusy(true);
+    setBusy(kind);
     setStatus("");
     try {
       const response = await fetch(src);
@@ -95,7 +101,7 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError"))
         setStatus(t("composer.lightbox_action_failed", "操作失败：{{error}}", { error: String(error) }));
-    } finally { setBusy(false); }
+    } finally { setBusy(null); }
   };
 
   useEffect(() => {
@@ -122,9 +128,9 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
         <button type="button" onClick={() => setScale(zoom + 0.5)} disabled={zoom === 5} title={t("composer.lightbox_zoom_in", "放大")} aria-label={t("composer.lightbox_zoom_in", "放大")}><Plus size={17} /></button>
         <button type="button" onClick={() => setScale(1)} disabled={zoom === 1} title={t("composer.lightbox_reset", "适合窗口")} aria-label={t("composer.lightbox_reset", "适合窗口")}><RotateCcw size={16} /></button>
         <span className={styles.divider} />
-        <button type="button" onClick={() => void action("copy")} disabled={busy} title={t("composer.lightbox_copy", "复制图片")} aria-label={t("composer.lightbox_copy", "复制图片")}><Copy size={17} /></button>
-        <button type="button" onClick={() => void action("save")} disabled={busy} title={t("composer.lightbox_save", "保存图片")} aria-label={t("composer.lightbox_save", "保存图片")}><Download size={17} /></button>
-        {canShare && <button type="button" onClick={() => void action("share")} disabled={busy} title={t("composer.lightbox_share", "分享图片")} aria-label={t("composer.lightbox_share", "分享图片")}><Share2 size={17} /></button>}
+        <button type="button" onClick={() => void action("copy")} disabled={busy !== null} aria-busy={busy === "copy" || undefined} title={t("composer.lightbox_copy", "复制图片")} aria-label={t("composer.lightbox_copy", "复制图片")}>{busy === "copy" ? <Spinner size={16} /> : <Copy size={17} />}</button>
+        <button type="button" onClick={() => void action("save")} disabled={busy !== null} aria-busy={busy === "save" || undefined} title={t("composer.lightbox_save", "保存图片")} aria-label={t("composer.lightbox_save", "保存图片")}>{busy === "save" ? <Spinner size={16} /> : <Download size={17} />}</button>
+        {canShare && <button type="button" onClick={() => void action("share")} disabled={busy !== null} aria-busy={busy === "share" || undefined} title={t("composer.lightbox_share", "分享图片")} aria-label={t("composer.lightbox_share", "分享图片")}>{busy === "share" ? <Spinner size={16} /> : <Share2 size={17} />}</button>}
       </div>
       <button
         type="button"
@@ -136,11 +142,16 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
         <X size={19} />
       </button>
       <div className={styles.stage} onClick={(e) => e.stopPropagation()} onWheel={(e) => { e.preventDefault(); setScale(zoom + (e.deltaY < 0 ? 0.5 : -0.5)); }}>
+      {!imageReady && <SkeletonCard className={styles.placeholder} width="min(640px, 100%)" height="min(420px, 60vh)" />}
       <img
         src={src}
         alt={alt ?? ""}
         className={styles.image}
-        style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, cursor: zoom > 1 ? "grab" : "default" }}
+        // Kept in the tree (so it loads) but out of the layout until it has a
+        // size; an error also ends the skeleton and shows the broken image.
+        style={{ display: imageReady ? undefined : "none", transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, cursor: zoom > 1 ? "grab" : "default" }}
+        onLoad={() => setSettledSrc(src)}
+        onError={() => setSettledSrc(src)}
         onPointerDown={(e) => { if (zoom === 1) return; drag.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }; e.currentTarget.setPointerCapture(e.pointerId); }}
         onPointerMove={(e) => {
           if (!drag.current) return;

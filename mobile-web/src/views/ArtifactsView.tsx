@@ -29,6 +29,7 @@ import {
   Package,
   Presentation,
   TriangleAlert,
+  WifiOff,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
@@ -48,6 +49,7 @@ import styles from "./ArtifactsView.module.css";
 import { AppHeader } from "./AppHeader";
 import { PreviewBody, type PreviewSource } from "./ArtifactPreviewBody";
 import { ZipBrowser } from "./ZipBrowser";
+import { SkeletonCard, SkeletonList, SkeletonNumber, SkeletonText } from "./loading";
 import { Presence } from "../Presence";
 
 interface Props {
@@ -82,10 +84,9 @@ export function ArtifactsView({ client }: Props) {
         }
       })
       .catch((e) => {
-        if (alive) {
-          setItems([]);
-          setError(e instanceof Error ? e.message : String(e));
-        }
+        // Leave `items` alone: an empty list here would add "nothing yet"
+        // under the error, as if the library were genuinely empty.
+        if (alive) setError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       alive = false;
@@ -101,14 +102,22 @@ export function ArtifactsView({ client }: Props) {
     <div className={styles.page}>
       <div className={styles.listHead}>
         <span className={styles.listTitle}>{t("产出")}</span>
-        {items && <span className={styles.listCount}>{items.length}</span>}
+        {items ? (
+          <span className={styles.listCount}>{items.length}</span>
+        ) : (
+          client && !error && <SkeletonNumber className={styles.listCount} width={14} />
+        )}
       </div>
 
       {error && <div className={styles.error}>{error}</div>}
 
       <div className={styles.body}>
         {items === null ? (
-          <EmptyState icon={Package} title={t("加载中…")} spin />
+          !client ? (
+            <EmptyState icon={WifiOff} title={t("桌面端离线")} />
+          ) : error ? null : (
+            <SkeletonList rows={6} avatar />
+          )
         ) : items.length === 0 ? (
           <EmptyState
             icon={Package}
@@ -379,10 +388,10 @@ export function ArtifactDetail({
             fallback={
               kind === "media" ? (
                 mediaPrompt
+              ) : isTextPreview(kind) ? (
+                <SkeletonText className={styles.stageSkeletonText} lines={8} />
               ) : (
-                <div className={styles.noPreview}>
-                  <div className={styles.noPreviewHint}>{t("加载中…")}</div>
-                </div>
+                <SkeletonCard className={styles.stageSkeleton} height="100%" />
               )
             }
           />

@@ -845,7 +845,9 @@
     "folder_dissolve": "Dissolve folder (move docs up)",
     "folder_delete": "Delete folder and its {{count}} docs",
     "delete_folder_confirm": "Delete all {{count}} docs under “{{path}}” (including every version)? This cannot be undone.",
-    "version": "Version"
+    "version": "Version",
+    "mention_loading": "Loading wiki…",
+    "searching": "Searching…"
   },
   "live": {
     "section_title": "Live"
@@ -1013,7 +1015,8 @@
     "cost_calls": "{{count}} call(s) priced by the provider",
     "cost_calls_rates": "{{count}} call(s) priced from published rates",
     "cost_calls_mixed": "{{receipt}} by the provider / {{rates}} from published rates",
-    "caveat": "Token counts come from DeepSeek Harness's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. Spend is obtained one of two ways, and the figure above says which: for providers that issue a receipt per generation (OpenRouter) it is what they actually charged, never derived from the token counts, because the same model costs different amounts through different providers; for a route with one seller and a published price list (DeepSeek official, which issues no receipt) it is those rates applied to the counted tokens, peak or off-peak per call. Calls on a model with no rate and no receipt are counted, never guessed at."
+    "caveat": "Token counts come from DeepSeek Harness's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. Spend is obtained one of two ways, and the figure above says which: for providers that issue a receipt per generation (OpenRouter) it is what they actually charged, never derived from the token counts, because the same model costs different amounts through different providers; for a route with one seller and a published price list (DeepSeek official, which issues no receipt) it is those rates applied to the counted tokens, peak or off-peak per call. Calls on a model with no rate and no receipt are counted, never guessed at.",
+    "cost_failed": "Unavailable"
   },
   "inspect": {
     "close": "Close",
@@ -1055,7 +1058,10 @@
   "update": {
     "available": "New version {{version}} is available!",
     "update_now": "Update Now",
-    "later": "Later"
+    "later": "Later",
+    "checking": "Checking for updates…",
+    "up_to_date": "You're on the latest version",
+    "check_failed": "Update check failed — check your network"
   },
   "stop_confirm": "Stop session in {{name}}?",
   "card": {
@@ -1109,7 +1115,8 @@
     "handoff_goal_reason_missing": "(not stated)",
     "handoff_note_more": "Expand",
     "handoff_note_less": "Collapse",
-    "tip_compact": "Context compactions: {{count}} · {{pre}} input tokens summarised · {{post}} summary tokens produced · estimated cost ~${{cost}} (compact LLM calls aren't logged separately, priced from cache_read + output rates)"
+    "tip_compact": "Context compactions: {{count}} · {{pre}} input tokens summarised · {{post}} summary tokens produced · estimated cost ~${{cost}} (compact LLM calls aren't logged separately, priced from cache_read + output rates)",
+    "handoff_load_failed": "Failed to load relay chain"
   },
   "onboarding": {
     "welcome": "Welcome to Claw Fleet",
@@ -2021,6 +2028,7 @@
     "pending_unread_stale": "The session ended before reading this",
     "pending_unread_hint": "Claude Code only picks up new messages between tool calls; it will see this one when the running tool returns",
     "working_delegating": "Delegating to subagents…",
+    "tasks_empty": "This session has no linked task plans.",
     "tasks_anonymous": "(anonymous plan)",
     "tasks_status_active": "In progress",
     "tasks_status_done": "Done",
@@ -2099,7 +2107,8 @@
       "no_models": "Loading models…",
       "failed": "Couldn't run it: {{err}}",
       "resumed": "Resumed — waiting for the session to pick up…",
-      "retry_blocked": "Retry once the quota resets"
+      "retry_blocked": "Retry once the quota resets",
+      "models_unavailable": "Couldn't load the model list."
     }
   },
   "settings": {
@@ -2334,7 +2343,8 @@
     "remote_host_remove_blocked": "This host still has {{count}} workspace(s) ({{paths}}) — remove them first, or they would point at a host that no longer exists.",
     "remote_ws_unattached_title": "Workspaces not attached to a host (legacy entries)",
     "simplified_mode": "Simplified mode",
-    "simplified_mode_desc": "Show only Tasks and Artifacts. Answer decisions inside each task."
+    "simplified_mode_desc": "Show only Tasks and Artifacts. Answer decisions inside each task.",
+    "interaction_diagnostics_load_failed": "Diagnostics check failed"
   },
   "usage": {
     "total_tokens": "Tokens",
@@ -2511,7 +2521,8 @@
     "submit_no_action": "Submit (no action yet)",
     "submit_with_action": "Submit ({{action}})",
     "submitting": "Submitting…",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "failed": "This UI couldn't be rendered."
   },
   "view_report": "Report",
   "report": {
@@ -2574,7 +2585,9 @@
     "task_review_underclaimed_hint": "The agent did not judge the task complete, yet you finished it — it may have under-reported its progress.",
     "task_review_hops": "{{count}} hops",
     "popup_title": "Your daily report is ready",
-    "popup_open_full": "Open full report"
+    "popup_open_full": "Open full report",
+    "lessons_failed": "Failed to generate lessons",
+    "summary_failed": "AI summary failed to generate"
   },
   "command": {
     "nested": {
@@ -2745,7 +2758,8 @@
       "op_failed": "Operation failed."
     },
     "proc_open_terminal": "Open in terminal",
-    "proc_shell": "shell"
+    "proc_shell": "shell",
+    "reveal_searching": "Searching the repo for {{path}}…"
   },
   "paths": {
     "open_in_files": "Open in Repos",
@@ -2888,7 +2902,8 @@
       "count_one": "1 item",
       "search": "Search in archive…",
       "no_hits": "No file in this archive matches."
-    }
+    },
+    "preview_load_failed": "The preview couldn't be loaded."
   },
   "markdown": {
     "render_rest": "Render the remaining {{n}} sections",

@@ -8,6 +8,7 @@ import { WatchStatusRow } from "./WatchStatusRow";
 import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 import { isKeyboardActivationKey } from "../keyboard";
+import { Spinner } from "./loading";
 import { PlanProgressRow } from "./PlanProgressRow";
 import { canResumeSession, resumeErrorText, resumeSession } from "./sessionResume";
 import { findRemoteWorkspace, useRemoteWorkspacesStore } from "../hooks/useRemoteWorkspaces";
@@ -91,9 +92,10 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
           className={styles.resume_btn}
           onClick={handleResume}
           disabled={resuming}
+          aria-busy={resuming || undefined}
           title={t("rateLimit.resumeNow")}
         >
-          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+          {resuming ? <Spinner size={12} /> : <Play size={12} strokeWidth={1.75} />}
         </button>
       )}
     </>
@@ -141,9 +143,10 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
           className={styles.resume_btn}
           onClick={handleResume}
           disabled={resuming}
+          aria-busy={resuming || undefined}
           title={t("serverError.resumeNow")}
         >
-          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+          {resuming ? <Spinner size={12} /> : <Play size={12} strokeWidth={1.75} />}
         </button>
       )}
     </>
@@ -247,9 +250,10 @@ export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
           className={styles.resume_btn}
           onClick={handleReopen}
           disabled={resuming}
+          aria-busy={resuming || undefined}
           title={t("remoteDisconnect.reopen_tip", { host })}
         >
-          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+          {resuming ? <Spinner size={12} /> : <Play size={12} strokeWidth={1.75} />}
         </button>
       )}
     </>
@@ -354,9 +358,10 @@ export function OutOfCreditsNotice({
           className={`${styles.resume_btn} ${inline ? styles.resume_btn_inline : ""}`}
           onClick={handleResume}
           disabled={resuming}
+          aria-busy={resuming || undefined}
           title={t("outOfCredits.resumeNow")}
         >
-          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+          {resuming ? <Spinner size={12} /> : <Play size={12} strokeWidth={1.75} />}
         </button>
       )}
     </>

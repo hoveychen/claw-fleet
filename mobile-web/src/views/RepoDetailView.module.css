@@ -200,6 +200,16 @@
   color: var(--color-text);
 }
 
+.opSpinner {
+  margin-right: 6px;
+}
+
+/* The shared ring's accent arc vanishes on the accent-filled button; go white. */
+.opButton[data-primary="true"] .opSpinner {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
 .opButton[data-primary="true"] {
   background: var(--color-accent);
   border-color: var(--color-accent);

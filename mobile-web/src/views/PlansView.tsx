@@ -5,7 +5,7 @@
 // "task plans" tab in session details uses `task_plans` instead, which is flat per-session
 // list with no parent relationships, done/total, or handoff chains.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, GitBranch, ListTree, Moon, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
@@ -34,6 +34,7 @@ import { TaskItemLine } from "./TaskItemLine";
 import styles from "./PlansView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
+import { SkeletonList, TopProgress } from "./loading";
 import { Presence as MotionPresence } from "../Presence";
 
 interface Props {
@@ -133,6 +134,15 @@ export function PlansView({ sessions, client, onBack }: Props) {
     if (!repo && repos.length > 0) setRepo(repos[0].path);
   }, [repo, repos]);
 
+  // The repo a response belongs to. A different repo's tree is wrong, not just
+  // stale, so a switch clears it (skeleton) and late replies for the old repo are dropped.
+  const repoRef = useRef(repo);
+  useEffect(() => {
+    repoRef.current = repo;
+    setForest(null);
+    setError(null);
+  }, [repo]);
+
   const load = useCallback(
     async (silent = false) => {
       if (!client || !repo) return;
@@ -141,9 +151,10 @@ export function PlansView({ sessions, client, onBack }: Props) {
         setError(null);
       }
       try {
-        setForest(await client.request<PlanForest>("plan_forest", { workspacePath: repo }));
+        const next = await client.request<PlanForest>("plan_forest", { workspacePath: repo });
+        if (repoRef.current === repo) setForest(next);
       } catch (e) {
-        if (!silent) {
+        if (!silent && repoRef.current === repo) {
           setForest(null);
           setError(e instanceof Error ? e.message : String(e));
         }
@@ -266,8 +277,14 @@ export function PlansView({ sessions, client, onBack }: Props) {
       )}
 
       <div className={styles.body}>
+        <TopProgress active={loading && forest !== null} />
         {error && <div className={styles.hint}>{t("计划加载失败：{0}", error)}</div>}
-        {!error && loading && forest === null && <div className={styles.hint}>{t("加载中…")}</div>}
+        {!error && forest === null && !client && (
+          <div className={styles.hint}>{t("桌面端离线")}</div>
+        )}
+        {!error && forest === null && client && repo && (
+          <SkeletonList rows={8} meta={false} rowHeight={40} />
+        )}
         {!error && forest !== null && liveRoots.length === 0 && doneRoots.length === 0 && (
           <EmptyState icon={ListTree} title={t("这个仓库还没有计划")} />
         )}

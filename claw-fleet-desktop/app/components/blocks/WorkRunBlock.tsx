@@ -22,6 +22,8 @@ interface Props {
   resultMap: Map<string, ToolResultBlock>;
   metaMap: Map<string, unknown>;
   decisionRecords: DecisionHistoryRecord[];
+  /** See ContentBlocks' prop of the same name. */
+  decisionRecordsLoading?: boolean;
   searchTerms?: string[] | null;
   paths?: PathLinkContext;
   /** True when this run is the transcript's trailing unit. The tail is where
@@ -68,6 +70,7 @@ export function WorkRunBlock({
   resultMap,
   metaMap,
   decisionRecords,
+  decisionRecordsLoading,
   searchTerms,
   paths,
   defaultOpen,
@@ -149,6 +152,7 @@ export function WorkRunBlock({
                 resultMap={resultMap}
                 metaMap={metaMap}
                 decisionRecords={decisionRecords}
+                decisionRecordsLoading={decisionRecordsLoading}
                 isPartial={msg.message?.stop_reason === null && i === msgs.length - 1}
                 searchTerms={searchTerms}
                 paths={paths}

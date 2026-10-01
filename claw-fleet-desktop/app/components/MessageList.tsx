@@ -44,8 +44,65 @@ import { groupMetaRuns } from "./metaGrouping";
 import { groupWorkRuns } from "./workRuns";
 import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
 import { InFlightToolsContext, inFlightToolIds } from "./blocks/inFlightTools";
+import { Skeleton, Spinner } from "./loading";
 import styles from "./MessageList.module.css";
 import { Presence } from "./Presence";
+
+// ── First-load placeholder ───────────────────────────────────────────────────
+
+// Deterministic so the placeholder does not reshuffle on re-render.
+const SKELETON_TURNS: { user: string; lines: string[] }[] = [
+  { user: "42%", lines: ["94%", "88%", "91%", "62%"] },
+  { user: "30%", lines: ["90%", "84%", "48%"] },
+];
+
+/**
+ * Message-shaped placeholder for a conversation whose transcript has not
+ * arrived: right-aligned user bubbles over full-width assistant prose, in the
+ * transcript's own column, so nothing jumps when the real rows land.
+ *
+ * `userPrompt` puts a real first bubble in place of the first skeleton one —
+ * the new-session "starting" pane knows what was just sent, and showing it is
+ * the strongest sign the send went through.
+ */
+export function ConversationSkeleton({ userPrompt }: { userPrompt?: string }) {
+  const { t } = useTranslation();
+  const turns = userPrompt ? SKELETON_TURNS.slice(0, 1) : SKELETON_TURNS;
+  return (
+    <div
+      className={`${styles.list} ${styles.skeleton_list}`}
+      role="status"
+      aria-busy="true"
+      aria-label={t("loading", "Loading…")}
+      data-testid="conversation-skeleton"
+    >
+      {turns.map((turn, i) => (
+        <Fragment key={i}>
+          <div className={`${styles.message} ${styles.user}`}>
+            {i === 0 && userPrompt ? (
+              <div className={styles.content}>
+                <div className={`${styles.user_text} ${styles.skeleton_prompt}`}>
+                  {userPrompt}
+                </div>
+              </div>
+            ) : (
+              <div className={styles.content} style={{ width: turn.user }}>
+                <Skeleton height={40} radius="12px 12px 4px 12px" />
+              </div>
+            )}
+          </div>
+          <div className={`${styles.message} ${styles.assistant}`}>
+            <div className={`${styles.content} ${styles.skeleton_prose}`}>
+              {turn.lines.map((w, j) => (
+                <Skeleton key={j} height={11} width={w} />
+              ))}
+            </div>
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
 
 // ── Search highlight ─────────────────────────────────────────────────────────
 
@@ -97,6 +154,7 @@ interface MsgProps {
   resultMap: Map<string, ToolResultBlock>;
   metaMap: Map<string, unknown>;
   decisionRecords: DecisionHistoryRecord[];
+  decisionRecordsLoading?: boolean;
   searchTerms?: string[] | null;
   msgIdx?: number;
   /** The hit the search navigation is currently parked on. */
@@ -109,7 +167,7 @@ interface MsgProps {
   apiErrorCtx?: ApiErrorContext | null;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths, turnUsage, apiErrorCtx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, decisionRecordsLoading, searchTerms, msgIdx, isActiveMatch, paths, turnUsage, apiErrorCtx }: MsgProps) {
   const { t } = useTranslation();
   // Declared before the early returns below so the hook order stays fixed
   // across the compact-summary / meta-fold branches.
@@ -279,6 +337,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             resultMap={resultMap}
             metaMap={metaMap}
             decisionRecords={decisionRecords}
+            decisionRecordsLoading={decisionRecordsLoading}
             isPartial={isPartial}
             searchTerms={searchTerms}
             paths={paths}
@@ -453,6 +512,10 @@ interface Props {
   /** Decision records for this session. Inline decision cards read them for the
    *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
   decisionRecords?: DecisionHistoryRecord[];
+  /** True until `decisionRecords` has been read for this session (success or
+   *  failure). Decision cards without a matching record wait instead of
+   *  reading as unanswered. */
+  decisionRecordsLoading?: boolean;
   /** Pull older messages from disk. Awaited, so the reveal happens after the
    *  fetch lands. Omit when the caller has no deeper history to offer. */
   onLoadEarlier?: () => Promise<void> | void;
@@ -490,6 +553,7 @@ export function MessageList({
   status,
   liveThinking,
   decisionRecords,
+  decisionRecordsLoading = false,
   onLoadEarlier,
   fullyLoaded = true,
   isLoadingEarlier = false,
@@ -759,7 +823,7 @@ export function MessageList({
     messageCount: displayMsgs.length,
   });
   if (placeholder === "loading") {
-    return <div className={styles.loading}>{t("loading", "Loading…")}</div>;
+    return <ConversationSkeleton />;
   }
   if (placeholder === "failed") {
     return (
@@ -825,10 +889,16 @@ export function MessageList({
           className={styles.load_earlier}
           onClick={loadEarlier}
           disabled={isLoadingEarlier}
+          aria-busy={isLoadingEarlier || undefined}
         >
-          {isLoadingEarlier
-            ? t("detail.loading_earlier")
-            : `↑ ${t("detail.load_earlier")}`}
+          {isLoadingEarlier ? (
+            <span className={styles.load_earlier_busy}>
+              <Spinner size={12} />
+              {t("detail.loading_earlier")}
+            </span>
+          ) : (
+            `↑ ${t("detail.load_earlier")}`
+          )}
         </button>
       )}
       {renderUnits.map((unit, unitIdx) => {
@@ -858,6 +928,7 @@ export function MessageList({
                   resultMap={resultMap}
                   metaMap={metaMap}
                   decisionRecords={records}
+                  decisionRecordsLoading={decisionRecordsLoading}
                   searchTerms={searchTerms}
                   paths={paths}
                   defaultOpen={unitIdx === renderUnits.length - 1}
@@ -895,6 +966,7 @@ export function MessageList({
               resultMap={resultMap}
               metaMap={metaMap}
               decisionRecords={records}
+              decisionRecordsLoading={decisionRecordsLoading}
               searchTerms={searchTerms}
               msgIdx={globalStart}
               isActiveMatch={globalStart === searchMatchIndex}

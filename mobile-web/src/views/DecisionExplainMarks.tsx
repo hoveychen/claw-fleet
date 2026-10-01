@@ -31,6 +31,7 @@ import {
 import type { FleetTransport } from "../transport";
 import type { SessionInfo } from "../types";
 import { Md } from "./DecisionQa";
+import { SkeletonText, Spinner } from "./loading";
 import styles from "./DecisionExplainMarks.module.css";
 
 export function useDecisionExplainMarks(
@@ -165,7 +166,17 @@ export function DecisionExplainAnswers({
   onDismiss: (id: string) => void;
   onFollowUp: (prev: ExplainRecord, question: string) => void;
 }) {
-  if (answers.length === 0) return null;
+  if (answers.length === 0) {
+    // The first ask is in flight: hold the answer card's place under the question.
+    if (!busy) return null;
+    return (
+      <div className={styles.list} data-testid="decision-explain-answers">
+        <div className={styles.card}>
+          <SkeletonText lines={3} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={styles.list} data-testid="decision-explain-answers">
       {groupExplainThreads(answers).map((thread) => {
@@ -220,7 +231,7 @@ function ExplainTurn({ rec }: { rec: ExplainRecord }) {
           <Md text={rec.text} />
         </div>
       ) : running ? (
-        <div className={styles.waiting}>{t("正在 fork 会话作答…")}</div>
+        <SkeletonText lines={3} />
       ) : null}
       {rec.status === "error" && <div className={styles.error}>{rec.error || t("失败")}</div>}
     </div>
@@ -234,6 +245,11 @@ function ExplainTurn({ rec }: { rec: ExplainRecord }) {
  */
 function ExplainFollowUp({ busy, onSubmit }: { busy: boolean; onSubmit: (question: string) => void }) {
   const [draft, setDraft] = useState("");
+  // This box's own follow-up is in flight (`busy` covers every box).
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    if (!busy) setSent(false);
+  }, [busy]);
   return (
     <form
       className={styles.follow}
@@ -241,6 +257,7 @@ function ExplainFollowUp({ busy, onSubmit }: { busy: boolean; onSubmit: (questio
         e.preventDefault();
         const q = draft.trim();
         if (!q || busy) return;
+        setSent(true);
         onSubmit(q);
         setDraft("");
       }}
@@ -253,6 +270,7 @@ function ExplainFollowUp({ busy, onSubmit }: { busy: boolean; onSubmit: (questio
         aria-label={t("继续追问")}
       />
       <button type="submit" className={styles.followSend} disabled={busy || !draft.trim()}>
+        {busy && sent && <Spinner size={12} />}
         {t("发送")}
       </button>
     </form>

@@ -110,7 +110,6 @@
   font-size: 12px;
 }
 
-.detail_loading,
 .detail_error {
   color: var(--color-text-dim);
   font-style: italic;

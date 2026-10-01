@@ -368,6 +368,19 @@
   cursor: not-allowed;
 }
 
+/* In flight: still blocked, but at full strength with a ring — a pending send
+   must not look like a dead one. */
+.send_btn.send_btn_pending:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+/* The shared ring sits on the accent fill here, so it takes the on-accent ink. */
+.send_btn .send_spinner {
+  border-color: color-mix(in srgb, var(--color-on-accent) 35%, transparent);
+  border-top-color: var(--color-on-accent);
+}
+
 /* ── Hero layout (contextSlot / toolbarSlot provided) ─────────────────────── */
 
 .context_row {

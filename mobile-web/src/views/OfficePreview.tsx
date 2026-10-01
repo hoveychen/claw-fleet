@@ -15,7 +15,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import { t } from "../i18n";
+import { SkeletonCard, SkeletonList } from "./loading";
 import styles from "./OfficePreview.module.css";
 
 /** Max rows to render in a sheet; on mobile, anything more won't scroll into view anyway. */
@@ -96,7 +96,9 @@ function HostPreview({ kind, blob }: { kind: "docx" | "pptx"; blob: Blob }) {
 
   return (
     <div className={styles.wrap}>
-      {loading && <div className={styles.status}>{t("加载中…")}</div>}
+      {/* Page-shaped placeholder; the host below stays mounted (empty) because
+          the renderer needs it in the DOM to measure and draw into. */}
+      {loading && <SkeletonCard height={kind === "docx" ? 420 : 220} />}
       {err && <div className={styles.status}>{err}</div>}
       <div ref={hostRef} className={kind === "docx" ? styles.docxHost : styles.pptxHost} />
     </div>
@@ -128,7 +130,7 @@ function SheetPreview({ blob }: { blob: Blob }) {
   }, [blob]);
 
   if (err) return <div className={styles.status}>{err}</div>;
-  if (!sheets) return <div className={styles.status}>{t("加载中…")}</div>;
+  if (!sheets) return <SkeletonList className={styles.wrap} rows={10} meta={false} />;
 
   const current = sheets[Math.min(active, sheets.length - 1)];
   const rows = (current?.data ?? []).slice(0, MAX_SHEET_ROWS);

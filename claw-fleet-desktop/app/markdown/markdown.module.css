@@ -104,9 +104,17 @@
 
 /* ── Local images in agent markdown (markdown/localImages.tsx) ───────────── */
 
-/* Both states stay labeled and occupy space: an image that is loading, or one
-   that could not be read, must never look like an image that was never there. */
-.image_loading,
+/* Both states occupy space: an image that is loading, or one that could not
+   be read, must never look like an image that was never there. */
+.image_loading {
+  display: inline-block;
+  margin: 6px 0 0;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  line-height: 0;
+  max-width: 100%;
+}
+
 .image_failed {
   display: inline-flex;
   align-items: center;

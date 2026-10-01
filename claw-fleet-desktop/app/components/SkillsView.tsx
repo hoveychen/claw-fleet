@@ -15,6 +15,7 @@ import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import { canRevealPath } from "../canReveal";
 import { Presence } from "./Presence";
+import { SkeletonCard, SkeletonList, SkeletonNumber, SkeletonText, Spinner } from "./loading";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -219,7 +220,20 @@ export function SkillsView() {
 
   // These mirror the SkillDetail action buttons so the same operations are one
   // right-click away from the list. Each reloads on success.
-  const adoptSkill = async (skill: SkillItem) => {
+  // Path of the row whose context-menu action is in flight: the menu closes on
+  // select, so the row itself carries the spinner and refuses a second action.
+  const [rowBusyPath, setRowBusyPath] = useState<string | null>(null);
+  const withRowBusy = async (skill: SkillItem, fn: () => Promise<void>) => {
+    if (rowBusyPath) return;
+    setRowBusyPath(skill.path);
+    try {
+      await fn();
+    } finally {
+      setRowBusyPath(null);
+    }
+  };
+
+  const adoptSkill = (skill: SkillItem) => withRowBusy(skill, async () => {
     try {
       const report = await invoke<SkillSyncReport>("skill_sync_adopt", { path: skill.path });
       if (report.conflicts.length > 0) {
@@ -229,8 +243,8 @@ export function SkillsView() {
     } catch (error) {
       window.alert(t("skills.sync_failed", { error: String(error) }));
     }
-  };
-  const unlinkSkill = async (skill: SkillItem) => {
+  });
+  const unlinkSkill = (skill: SkillItem) => withRowBusy(skill, async () => {
     try {
       await invoke("skill_sync_unlink", {
         slug: skill.name,
@@ -240,17 +254,19 @@ export function SkillsView() {
     } catch (error) {
       window.alert(t("skills.sync_failed", { error: String(error) }));
     }
-  };
+  });
   const deleteSkill = async (skill: SkillItem) => {
     if (!window.confirm(t("skills.delete_confirm", { name: skill.name }))) return;
-    try {
-      await invoke("delete_skill", { skillPath: skill.path });
-      setSkills((prev) => prev.filter((s) => s.path !== skill.path));
-      if (selectedPath === skill.path) updateMainViewState("skills", { selectedPath: null });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      window.alert(t("skills.delete_failed", { error: msg }));
-    }
+    await withRowBusy(skill, async () => {
+      try {
+        await invoke("delete_skill", { skillPath: skill.path });
+        setSkills((prev) => prev.filter((s) => s.path !== skill.path));
+        if (selectedPath === skill.path) updateMainViewState("skills", { selectedPath: null });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        window.alert(t("skills.delete_failed", { error: msg }));
+      }
+    });
   };
 
   const skillMenuItems = (skill: SkillItem): ContextMenuItem[] => {
@@ -332,10 +348,11 @@ export function SkillsView() {
             onClick={() => setSourceFilter(sourceFilter === "claude-code" ? "all" : "claude-code")}
           >
             <span>{t("skills.source_claude")}</span>
-            <span className={styles.chip_count}>{sourceCounts["claude-code"]}</span>
+            <span className={styles.chip_count}>{loaded ? sourceCounts["claude-code"] : <SkeletonNumber width={10} />}</span>
           </button>
           <span className={skillStyles.sync_spacer} />
           <button className={styles.chip} onClick={applySync} disabled={syncing}>
+            {syncing && <Spinner size={10} />}
             {syncing ? t("skills.syncing") : t("skills.sync_all")}
           </button>
           <button
@@ -343,20 +360,20 @@ export function SkillsView() {
             onClick={() => setSourceFilter(sourceFilter === "codex" ? "all" : "codex")}
           >
             <span>{t("skills.source_codex")}</span>
-            <span className={styles.chip_count}>{sourceCounts.codex}</span>
+            <span className={styles.chip_count}>{loaded ? sourceCounts.codex : <SkeletonNumber width={10} />}</span>
           </button>
           <button
             className={`${styles.chip} ${sourceFilter === "dsh" ? styles.chip_active : ""}`}
             onClick={() => setSourceFilter(sourceFilter === "dsh" ? "all" : "dsh")}
           >
             <span>{t("skills.source_dsh")}</span>
-            <span className={styles.chip_count}>{sourceCounts.dsh}</span>
+            <span className={styles.chip_count}>{loaded ? sourceCounts.dsh : <SkeletonNumber width={10} />}</span>
           </button>
         </>
       }
       secondary={
         <div className={styles.list_pane}>
-          {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
+          {!loaded && <SkeletonList rows={8} avatar />}
           {loaded && filtered.length === 0 && (
             <EmptyState
               icon={<Sparkles size={28} strokeWidth={1.5} />}
@@ -371,6 +388,7 @@ export function SkillsView() {
                 skill={skill}
                 syncEntry={syncBySlug.get(skill.name)}
                 active={selected?.path === skill.path}
+                busy={rowBusyPath === skill.path}
                 onClick={() => updateMainViewState("skills", { selectedPath: skill.path })}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -403,9 +421,13 @@ export function SkillsView() {
             updateMainViewState("skills", { selectedPath: null });
           }}
         />
+      ) : !loaded ? (
+        <div className={styles.detail_body}>
+          <SkeletonCard height={160} />
+        </div>
       ) : (
         <div className={styles.placeholder}>
-          {loaded && skills.length > 0
+          {skills.length > 0
             ? t("skills.panel_title")
             : t("skills.no_skills")}
         </div>
@@ -420,12 +442,14 @@ function SkillCard({
   skill,
   syncEntry,
   active,
+  busy,
   onClick,
   onContextMenu,
 }: {
   skill: SkillItem;
   syncEntry?: SkillSyncEntry;
   active: boolean;
+  busy: boolean;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
@@ -436,7 +460,7 @@ function SkillCard({
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
-      <span className={skillStyles.skill_badge}>⚡</span>
+      <span className={skillStyles.skill_badge}>{busy ? <Spinner size={12} /> : "⚡"}</span>
       <div className={styles.card_body}>
         <div className={styles.card_title}>{skill.name}</div>
         {skill.description && (
@@ -641,11 +665,13 @@ function SkillDetail({
         <div className={styles.detail_actions}>
           {isSyncable(skill) && skill.scope === "user" && syncEntry?.state === "unmanaged" && (
             <button className={styles.promote_btn} onClick={adopt} disabled={mutatingSync}>
+              {mutatingSync && <Spinner size={12} className={styles.btn_spinner} />}
               {t("skills.share_both")}
             </button>
           )}
           {managedForSource && (
             <button className={styles.promote_btn} onClick={unlink} disabled={mutatingSync}>
+              {mutatingSync && <Spinner size={12} className={styles.btn_spinner} />}
               {t("skills.unlink_target")}
             </button>
           )}
@@ -665,6 +691,7 @@ function SkillDetail({
               disabled={deleting}
               title={t("skills.delete")}
             >
+              {deleting && <Spinner size={12} className={styles.btn_spinner} />}
               {t("skills.delete")}
             </button>
           )}
@@ -739,7 +766,7 @@ function SkillDetail({
 
         <div className={styles.detail_body}>
           {files === null ? (
-            <p className={styles.loading}>{t("skills.loading")}</p>
+            <SkeletonText lines={10} />
           ) : activeFile ? (
             <FilePreview file={activeFile} />
           ) : (
@@ -757,7 +784,9 @@ function FilePreview({ file }: { file: SkillFileEntry }) {
   const { t } = useTranslation();
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Starts true for text files so the first frame is a skeleton, not the
+  // "read_error" branch (content is still null before the effect runs).
+  const [loading, setLoading] = useState(() => isTextFile(file.name));
 
   useEffect(() => {
     setContent(null);
@@ -777,7 +806,7 @@ function FilePreview({ file }: { file: SkillFileEntry }) {
   }, [file.absolutePath, file.name]);
 
   if (loading) {
-    return <p className={styles.loading}>{t("skills.loading")}</p>;
+    return <SkeletonText lines={10} />;
   }
 
   if (!isTextFile(file.name)) {

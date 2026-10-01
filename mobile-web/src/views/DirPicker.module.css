@@ -110,6 +110,11 @@
   border: none;
   font-weight: 600;
 }
+.newOk .btnSpinner {
+  margin-right: 6px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
 .newOk:disabled {
   opacity: 0.5;
 }
@@ -119,6 +124,7 @@
   color: var(--color-text-dim);
 }
 .list {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;

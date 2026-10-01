@@ -23,7 +23,9 @@ import type { FleetTransport } from "../transport";
  * transport injected instead of Tauri `invoke`.
  *
  * `loaded` tells "the list came back empty" from "we have not heard yet", so
- * the sheet's readout can say 无 without lying about a slow link.
+ * the sheet's readout can say 无 without lying about a slow link. It turns true
+ * once the list read settles, on failure too — then `error` is set, so the
+ * pane shows a failure instead of a skeleton that never ends.
  */
 export function useSessionExplains(
   client: FleetTransport | null,
@@ -31,10 +33,12 @@ export function useSessionExplains(
 ): {
   explains: ExplainRecord[];
   loaded: boolean;
+  error: boolean;
   ask: (req: ExplainRequest) => Promise<ExplainRecord>;
 } {
   const [records, setRecords] = useState<ExplainRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
   const pollers = useRef(new Map<string, AbortController>());
   // The session the state belongs to, readable from async callbacks so a
   // reply that lands after a switch cannot seed the next session's list.
@@ -77,6 +81,7 @@ export function useSessionExplains(
     stopAll();
     setRecords([]);
     setLoaded(false);
+    setError(false);
     if (!client || !sessionId) return;
     let alive = true;
     listExplanations(client, sessionId)
@@ -86,7 +91,12 @@ export function useSessionExplains(
         setLoaded(true);
         for (const r of list) if (r.status === "running") track(sessionId, r.id);
       })
-      .catch((e) => console.error("session_explain_list failed:", e));
+      .catch((e) => {
+        console.error("session_explain_list failed:", e);
+        if (!alive || current.current !== sessionId) return;
+        setError(true);
+        setLoaded(true);
+      });
     return () => {
       alive = false;
       stopAll();
@@ -112,5 +122,5 @@ export function useSessionExplains(
     [client, upsert, track],
   );
 
-  return { explains: records, loaded, ask };
+  return { explains: records, loaded, error, ask };
 }

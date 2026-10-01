@@ -135,6 +135,9 @@
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 16px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -164,4 +167,11 @@
 .btn_primary:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* The shared spinner's accent arc vanishes on the accent fill; draw it in the
+   button's own text colour instead. */
+.btn_primary .spinner_on_accent {
+  border-color: currentColor;
+  border-top-color: transparent;
 }

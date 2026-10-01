@@ -251,3 +251,15 @@ audio.mediaPlayer {
   /* tab 正文左右缩进由 main 给，这里只留纵向间距。 */
   padding: 2px 0;
 }
+
+/* First-load placeholders inside the centred stage: stretch to fill it so the
+   real preview lands in the same box. */
+.stageSkeleton {
+  align-self: stretch;
+  width: 100%;
+}
+
+.stageSkeletonText {
+  align-self: flex-start;
+  width: 100%;
+}

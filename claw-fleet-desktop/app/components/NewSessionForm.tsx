@@ -16,7 +16,7 @@ import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { agentToolsForSources, type SourceInfo } from "../modelChoices";
-import { useChatWorkspace } from "../hooks/useChatWorkspace";
+import { useChatWorkspaceState } from "../hooks/useChatWorkspace";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
@@ -26,6 +26,7 @@ import styles from "./NewSessionForm.module.css";
 import { rcaErrorMessage } from "../rcaErrors";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { Presence } from "./Presence";
+import { Skeleton, Spinner } from "./loading";
 
 export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
@@ -40,9 +41,24 @@ export interface NewSessionCreated {
   workspacePath: string;
 }
 
+/** What the host needs to draw the "starting" pane the moment send is
+ *  pressed, before the spawn has answered. */
+export interface NewSessionLaunch {
+  /** The prompt as typed (trimmed, without the appended context-file list). */
+  prompt: string;
+}
+
 export interface NewSessionFormProps {
   /** Fired once the backend has spawned the detached `claude -p` process. */
   onCreated: (info: NewSessionCreated) => void;
+  /** Fired the moment a valid submit starts, before the spawn is invoked. A
+   *  host that handles it switches its pane to the "starting" view right away
+   *  and keeps this form mounted (hidden) until `onCreated` or
+   *  `onLaunchFailed` — the draft, pills and error all live here. */
+  onLaunching?: (launch: NewSessionLaunch) => void;
+  /** The spawn invoke failed. The draft is untouched and the error is already
+   *  set on the form, so the host only has to show the form again. */
+  onLaunchFailed?: () => void;
   /** Fired when the user backs out of the form without creating a session.
    *  Omitted where the form is the pane's *resting* state rather than something
    *  the user opened — an empty editor group — since there is nothing to back
@@ -214,9 +230,15 @@ export function defaultWorkspace(
  *  pills and custom popovers instead of labeled form rows and native
  *  <select>s. */
 
-export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
+export function NewSessionForm({
+  onCreated,
+  onCancel,
+  onLaunching,
+  onLaunchFailed,
+}: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
+  const scanReady = useSessionsStore((s) => s.scanReady);
   // Tauri's native directory dialog browses the machine the *desktop* runs on.
   // In the browser build there is no such dialog at all — a tab can only hand
   // back bytes, never a host path — so that case goes through
@@ -295,7 +317,10 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
 
   // The pure-chat workspace. Unlike a project it has no prior sessions to be
   // discovered from, so it must be pinned explicitly.
-  const chatPath = useChatWorkspace();
+  // `loaded` settles on failure too, so a host that cannot hand a chat
+  // directory back stops the pill spinning instead of leaving it up for good.
+  const { path: chatPath, loaded: chatPathLoaded } = useChatWorkspaceState();
+  const chatPathLoading = !chatPath && !chatPathLoaded;
 
   // Distinct workspaces from known sessions, most recently active first.
   // Worktree checkouts collapse onto their repo root — see distinctWorkspaces.
@@ -305,6 +330,13 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   );
 
   const isChat = !!chatPath && workspace === chatPath;
+  // The seed below waits on the first scan (for recents) and on `chatPath`.
+  // Until the scan lands, an empty workspace — or the provisional chat seed
+  // the seeding effect will swap for a real recent — is "not known yet", not
+  // "nothing picked": show a placeholder instead of the bare "workspace" label
+  // and the "pick a workspace" hint, which both read as a choice to make.
+  const seedPending =
+    !scanReady && !chosenByUser.current && (!workspace || isChat);
 
   // Chat mode is a mode, not a workspace, but the backend still spawns into a
   // directory — so the toggle below writes `chatPath` into the same `workspace`
@@ -369,6 +401,8 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   // Picking a directory on a host IS the registration. The user never types the
   // path, so it cannot disagree between the two machines — which was the whole
   // failure mode of the settings-page form this replaces.
+  // Rejects with the user-facing message so DirPickerDialog can show it in
+  // place and stay open.
   const registerRemoteWorkspace = async (host: SshHost, path: string) => {
     setRegisterError(null);
     try {
@@ -377,16 +411,17 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       });
       setRemoteWorkspaces(cfg.workspaces ?? []);
       setWorkspace(path);
-      return true;
     } catch (e) {
       // The identity-path constraint bites here: the same absolute path must be
       // creatable on THIS machine too, and macOS cannot make `/home/...`. Say
       // which path and why, right where the choice was made — the alternative
       // is a spawn that fails much later with no way back to this dialog.
-      setRegisterError(
-        t("new_session.remote_register_failed", { path, error: rcaErrorMessage(e, t) }),
-      );
-      return false;
+      const message = t("new_session.remote_register_failed", {
+        path,
+        error: rcaErrorMessage(e, t),
+      });
+      setRegisterError(message);
+      throw new Error(message);
     }
   };
   const remotePaths = useMemo(
@@ -528,6 +563,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     }
     setSubmitting(true);
     setError(null);
+    onLaunching?.({ prompt: prompt.trim() });
     try {
       const resp = await invoke<{ pid: number; sessionId?: string | null }>(
         "spawn_new_claude_session",
@@ -544,6 +580,10 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       // (survives the draft clear() below, which resets the in-memory workspace).
       saveLastWorkspace(ws);
       clear();
+      // Normally the host unmounts this form now; if it chose to keep it (the
+      // user backed out of the starting pane mid-spawn), it must not stay
+      // locked in "submitting" with nothing in flight.
+      setSubmitting(false);
       onCreated({ pid: resp.pid, sessionId: resp.sessionId, workspacePath: ws });
     } catch (e) {
       // A spawn into a remote workspace fails through `wrap_launch`, whose
@@ -551,6 +591,10 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       // and not a Rust string. Anything else passes through unchanged.
       setError(rcaErrorMessage(e, t));
       setSubmitting(false);
+      // The host brings the form back with the draft intact; put the caret in
+      // it so fixing and resending is one keystroke away.
+      onLaunchFailed?.();
+      setTimeout(() => composerRef.current?.focus(), 0);
     }
   };
 
@@ -564,19 +608,24 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const chatModePill = (
     <button
       type="button"
-      className={`${pillStyles.ghost_pill} ${isChat ? styles.chat_pill_on : ""}`}
-      aria-pressed={isChat}
+      className={`${pillStyles.ghost_pill} ${isChat && !seedPending ? styles.chat_pill_on : ""}`}
+      aria-pressed={isChat && !seedPending}
       disabled={submitting || !chatPath}
-      onClick={() => setChatMode(!isChat)}
+      // Judged on what the pill *shows*: a provisional chat seed reads as off.
+      onClick={() => setChatMode(!(isChat && !seedPending))}
       title={
         chatPath
           ? t("new_session.chat_sub")
           : t("new_session.chat_loading", "正在准备纯聊天…")
       }
-      aria-busy={!chatPath}
+      aria-busy={chatPathLoading || undefined}
       data-testid="chat-mode-pill"
     >
-      <MessageCircle size={13} strokeWidth={1.7} />
+      {chatPathLoading ? (
+        <Spinner size={12} />
+      ) : (
+        <MessageCircle size={13} strokeWidth={1.7} />
+      )}
       <span className={pillStyles.pill_label}>{t("new_session.chat")}</span>
     </button>
   );
@@ -585,7 +634,10 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     <PillMenu
       placement="below"
       icon={<FolderOpen size={13} strokeWidth={1.7} />}
-      label={workspace ? basename(workspace) : t("new_session.workspace")}
+      label={
+        seedPending ? "" : workspace ? basename(workspace) : t("new_session.workspace")
+      }
+      labelSlot={seedPending ? <Skeleton inline width={72} height={10} /> : undefined}
       title={workspace || t("new_session.workspace_placeholder")}
       disabled={submitting}
       testId="workspace-pill"
@@ -725,7 +777,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
         contextSlot={
           <>
             {chatModePill}
-            {!isChat && workspacePill}
+            {(!isChat || seedPending) && workspacePill}
           </>
         }
         toolbarSlot={optionPills}
@@ -749,11 +801,15 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
           with no recents at all leaves nothing selected — say so, instead of
           leaving a disabled submit button to be puzzled over. */}
       <p className={styles.hint}>
-        {isChat
-          ? t("new_session.hint_chat")
-          : workspace
-            ? t("new_session.hint")
-            : t("new_session.hint_pick_workspace")}
+        {seedPending ? (
+          <Skeleton inline width={180} height={9} />
+        ) : isChat ? (
+          t("new_session.hint_chat")
+        ) : workspace ? (
+          t("new_session.hint")
+        ) : (
+          t("new_session.hint_pick_workspace")
+        )}
       </p>
 
       {error &&
@@ -792,16 +848,15 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
               return;
             }
             if (browsingHost) {
-              // Keep the dialog open if registration fails — the error names a
-              // path the user can navigate away from, and closing would strand
-              // them with no way back.
-              void registerRemoteWorkspace(browsingHost, path).then((ok) => {
-                if (ok) {
-                  setPickingDir(null);
-                  setBrowsingHost(null);
-                }
+              // Returning the promise lets the picker show a spinner and drop a
+              // second click while registration is in flight (which would
+              // register the same path twice). A rejection keeps the dialog
+              // open with the error shown — it names a path the user can
+              // navigate away from, and closing would strand them.
+              return registerRemoteWorkspace(browsingHost, path).then(() => {
+                setPickingDir(null);
+                setBrowsingHost(null);
               });
-              return;
             }
             setWorkspace(path);
             setPickingDir(null);

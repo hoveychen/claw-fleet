@@ -170,3 +170,10 @@
   opacity: 0.45;
   cursor: default;
 }
+
+/* The shared spinner's accent arc vanishes on an accent-filled button; flip
+   it to the on-accent colour there. */
+.confirm > [aria-hidden="true"] {
+  border-color: color-mix(in srgb, var(--color-on-accent) 35%, transparent);
+  border-top-color: var(--color-on-accent);
+}

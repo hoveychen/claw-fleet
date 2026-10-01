@@ -30,6 +30,16 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
+import {
+  Skeleton,
+  SkeletonCard,
+  SkeletonList,
+  SkeletonNumber,
+  Spinner,
+  TopProgress,
+} from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
+import { usePending } from "../hooks/usePending";
 import styles from "./AuditView.module.css";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
@@ -321,6 +331,10 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   }
 
   const hasEvents = (summary?.events.length ?? 0) > 0;
+  // First load has nothing to show yet → skeleton. A refresh keeps the old list
+  // on screen and only shows the (delayed) progress bar + spinning refresh icon.
+  const firstLoad = loading && summary === null;
+  const refreshing = useDelayedFlag(loading && summary !== null);
 
   const navigateToSession = (jsonlPath: string) => {
     const session = sessions.find((s) => s.jsonlPath === jsonlPath);
@@ -396,7 +410,7 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
         />
         <FilterChip
           label={t("audit.all")}
-          count={summary?.events.length ?? 0}
+          count={summary ? summary.events.length : null}
           active={!unreadOnly && filter === "all"}
           onClick={() => { setUnreadOnly(false); setFilter("all"); setAutoRevealed(false); }}
         />
@@ -404,7 +418,7 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
           <FilterChip
             key={level}
             label={RISK_LABELS[level]}
-            count={counts[level]}
+            count={summary ? counts[level] : null}
             active={!unreadOnly && filter === level}
             tone={RISK_CLASS[level]}
             onClick={() => { setUnreadOnly(false); setFilter(level); setAutoRevealed(false); }}
@@ -434,13 +448,20 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
             ✓ {t("audit.mark_all_read")}
           </button>
         )}
-        <button className={styles.icon_btn} onClick={load} title={t("audit.refresh")}>
-          ↻
+        <button
+          className={styles.icon_btn}
+          onClick={load}
+          disabled={loading}
+          title={t("audit.refresh")}
+        >
+          {refreshing ? <Spinner size={12} /> : "↻"}
         </button>
-        {summary && (
+        {summary ? (
           <span className={styles.scan_info}>
             {t("audit.scanned", { count: summary.totalSessionsScanned })}
           </span>
+        ) : (
+          loading && <Skeleton inline width={72} height={8} />
         )}
         </>
       }
@@ -449,15 +470,16 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
       secondary={eventsDetail}
     >
         <div className={styles.list_pane}>
-          {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
-          {!loading && !hasEvents && (
+          <TopProgress active={refreshing} />
+          {firstLoad && <SkeletonList rows={8} rowHeight={52} />}
+          {!firstLoad && !hasEvents && (
             <EmptyState
               icon={<ShieldCheck size={28} strokeWidth={1.5} />}
               title={t("empty_state.audit_title")}
               subtitle={t("empty_state.audit_subtitle")}
             />
           )}
-          {!loading && hasEvents && (
+          {!firstLoad && hasEvents && (
             <div className={styles.overview}>
               <div className={styles.overview_title}>{t("audit.overview_title")}</div>
               <div className={styles.overview_chips}>
@@ -480,13 +502,13 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
               </div>
             </div>
           )}
-          {!loading && autoRevealed && (
+          {!firstLoad && autoRevealed && (
             <p className={styles.unread_hint}>{t("audit.unread_auto_revealed")}</p>
           )}
-          {!loading && hasEvents && filtered.length === 0 && (
+          {!firstLoad && hasEvents && filtered.length === 0 && (
             <p className={styles.empty}>{t("audit.no_matching_events")}</p>
           )}
-          {!loading && Array.from(grouped.entries()).map(([sessionId, events]) => (
+          {!firstLoad && Array.from(grouped.entries()).map(([sessionId, events]) => (
             <div key={sessionId} className={styles.workspace_group}>
               <button
                 className={styles.workspace_header}
@@ -562,6 +584,11 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
   const { t } = useTranslation();
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  // False until the first `get_audit_rules` settles (success or failure), so the
+  // counter and list show skeletons instead of a fake "0 rules".
+  const [loaded, setLoaded] = useState(false);
+  // Rule ids whose enable toggle is waiting on `set_audit_rule_enabled`.
+  const [togglingIds, setTogglingIds] = useState<ReadonlySet<string>>(new Set());
   const { selectedRuleId, rulesQuery: query } = useUIStore(
     (s) => s.mainViewState.audit,
   );
@@ -585,10 +612,12 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
       setRules([]);
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   }, []);
 
   useEffect(() => { loadRules(); }, [loadRules]);
+  const refreshing = useDelayedFlag(loading && loaded);
 
   const filteredRules = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -620,15 +649,23 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
   }, [filteredRules]);
 
   const handleToggle = async (rule: AuditRuleInfo) => {
+    if (togglingIds.has(rule.id)) return;
+    setTogglingIds((prev) => new Set(prev).add(rule.id));
     try {
       await invoke("set_audit_rule_enabled", { id: rule.id, enabled: !rule.enabled });
       setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r));
     } catch (e) {
       console.error("Failed to toggle rule:", e);
+    } finally {
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(rule.id);
+        return next;
+      });
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const [deleting, handleDelete] = usePending(async (id: string) => {
     if (!confirm(t("audit.rule_delete_confirm"))) return;
     try {
       await invoke("delete_custom_audit_rule", { id });
@@ -637,6 +674,27 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
     } catch (e) {
       console.error("Failed to delete rule:", e);
     }
+  });
+
+  // The enable switch: while its write is in flight it is disabled and a small
+  // spinner sits just left of it (absolutely positioned, so the row never shifts).
+  const ruleToggle = (rule: AuditRuleInfo) => {
+    const pending = togglingIds.has(rule.id);
+    return (
+      <label
+        className={`${styles.toggle} ${pending ? styles.toggle_pending : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={rule.enabled}
+          disabled={pending}
+          onChange={() => handleToggle(rule)}
+        />
+        <span className={styles.toggle_slider} />
+        {pending && <Spinner size={12} className={styles.toggle_spinner} />}
+      </label>
+    );
   };
 
   const catLabel = (cat: string) => {
@@ -675,15 +733,17 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
             {selectedRule.patterns.join("\n")}
           </pre>
           <div className={styles.detail_actions}>
-            <label className={styles.toggle}>
-              <input type="checkbox" checked={selectedRule.enabled} onChange={() => handleToggle(selectedRule)} />
-              <span className={styles.toggle_slider} />
-            </label>
+            {ruleToggle(selectedRule)}
             <span className={styles.toggle_label}>
               {selectedRule.enabled ? t("audit.rule_builtin") : t("audit.rule_custom")}
             </span>
             {!selectedRule.builtin && (
-              <button className={styles.delete_btn} onClick={() => handleDelete(selectedRule.id)}>
+              <button
+                className={`${styles.delete_btn} ${styles.busy_btn}`}
+                onClick={() => handleDelete(selectedRule.id)}
+                disabled={deleting}
+              >
+                {deleting && <Spinner size={12} />}
                 {t("audit.rule_delete")}
               </button>
             )}
@@ -722,7 +782,14 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
         />
         <div className={styles.filter_spacer} />
         <span className={styles.scan_info}>
-          {query.trim() ? `${filteredRules.length} / ${rules.length}` : rules.length} {t("audit.tab_rules").toLowerCase()}
+          {!loaded ? (
+            <SkeletonNumber width={20} />
+          ) : query.trim() ? (
+            `${filteredRules.length} / ${rules.length}`
+          ) : (
+            rules.length
+          )}{" "}
+          {t("audit.tab_rules").toLowerCase()}
         </span>
         </>
       }
@@ -732,12 +799,13 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
       afterBody={<GuardAllowRulesSection />}
     >
         <div className={styles.list_pane}>
-          {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
-          {!loading && rules.length === 0 && <p className={styles.empty}>{t("audit.no_rules")}</p>}
-          {!loading && rules.length > 0 && filteredRules.length === 0 && (
+          <TopProgress active={refreshing} />
+          {!loaded && <SkeletonList rows={8} rowHeight={60} />}
+          {loaded && rules.length === 0 && <p className={styles.empty}>{t("audit.no_rules")}</p>}
+          {loaded && rules.length > 0 && filteredRules.length === 0 && (
             <p className={styles.empty}>{t("audit.no_matching_rules")}</p>
           )}
-          {!loading && Array.from(grouped.entries()).map(([cat, catRules]) => (
+          {loaded && Array.from(grouped.entries()).map(([cat, catRules]) => (
             <div key={cat} className={styles.workspace_group}>
               <div className={styles.workspace_header_static}>
                 <span className={styles.workspace_name}>{catLabel(cat)}</span>
@@ -768,10 +836,7 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
                           </code>
                         )}
                       </div>
-                      <label className={styles.toggle} onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={rule.enabled} onChange={() => handleToggle(rule)} />
-                        <span className={styles.toggle_slider} />
-                      </label>
+                      {ruleToggle(rule)}
                     </button>
                   );
                 })}
@@ -789,6 +854,8 @@ function GuardAllowRulesSection() {
   const { t, i18n } = useTranslation();
   const [rules, setRules] = useState<GuardAllowRule[]>([]);
   const [loading, setLoading] = useState(true);
+  // Allow-rule ids whose `remove_guard_allow_rule` call is in flight.
+  const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
   const expanded = useUIStore((s) => s.mainViewState.audit.allowRulesExpanded);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setExpanded = (value: boolean) =>
@@ -812,12 +879,20 @@ function GuardAllowRulesSection() {
   }, [load]);
 
   const handleRemove = async (id: string) => {
+    if (removingIds.has(id)) return;
     if (!confirm(t("guard.allow_rules_remove_confirm"))) return;
+    setRemovingIds((prev) => new Set(prev).add(id));
     try {
       await invoke("remove_guard_allow_rule", { id });
       setRules((prev) => prev.filter((r) => r.id !== id));
     } catch (e) {
       console.error("remove_guard_allow_rule failed:", e);
+    } finally {
+      setRemovingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -840,13 +915,15 @@ function GuardAllowRulesSection() {
       >
         <span className={styles.allow_rules_chevron}>{expanded ? "▾" : "▸"}</span>
         <span className={styles.allow_rules_title}>{t("guard.allow_rules_title")}</span>
-        <span className={styles.workspace_count}>{rules.length}</span>
+        <span className={styles.workspace_count}>
+          {loading ? <SkeletonNumber width={12} /> : rules.length}
+        </span>
       </button>
 
       {expanded && (
         <div className={styles.allow_rules_body}>
           {loading ? (
-            <p className={styles.empty}>{t("audit.scanning")}</p>
+            <SkeletonList rows={3} meta={false} rowHeight={32} />
           ) : rules.length === 0 ? (
             <p className={styles.empty}>{t("guard.allow_rules_empty")}</p>
           ) : (
@@ -875,9 +952,11 @@ function GuardAllowRulesSection() {
                     <td className={styles.allow_rules_created}>{formatCreated(r.createdAt)}</td>
                     <td>
                       <button
-                        className={styles.delete_btn}
+                        className={`${styles.delete_btn} ${styles.busy_btn}`}
                         onClick={() => handleRemove(r.id)}
+                        disabled={removingIds.has(r.id)}
                       >
+                        {removingIds.has(r.id) && <Spinner size={12} />}
                         {t("guard.allow_rules_remove")}
                       </button>
                     </td>
@@ -930,7 +1009,7 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
     });
   };
 
-  const handleAddSelected = async () => {
+  const [adding, handleAddSelected] = usePending(async () => {
     for (const s of suggestions.filter((s) => selected.has(s.id))) {
       try {
         await invoke("save_custom_audit_rule", {
@@ -953,7 +1032,7 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
     }
     setAdded(true);
     setTimeout(onClose, 500);
-  };
+  });
 
   const desc = (s: SuggestedRule) =>
     lang.startsWith("zh") ? s.descriptionZh : s.descriptionEn;
@@ -974,10 +1053,11 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
           rows={3}
         />
         <button
-          className={styles.primary_btn}
+          className={`${styles.primary_btn} ${styles.busy_btn}`}
           onClick={handleGenerate}
           disabled={loading || !concern.trim()}
         >
+          {loading && <Spinner size={12} />}
           {loading ? t("audit.suggest_loading") : t("audit.suggest_btn")}
         </button>
       </div>
@@ -986,6 +1066,12 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
 
       {!loading && suggestions.length === 0 && concern.trim() && !error && (
         <p className={styles.empty}>{t("audit.suggest_empty")}</p>
+      )}
+
+      {loading && (
+        <div className={styles.suggest_results}>
+          {[0, 1, 2].map((i) => <SkeletonCard key={i} height={130} />)}
+        </div>
       )}
 
       {suggestions.length > 0 && (
@@ -1011,10 +1097,11 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
           ))}
 
           <button
-            className={styles.primary_btn}
-            disabled={selected.size === 0 || added}
-            onClick={handleAddSelected}
+            className={`${styles.primary_btn} ${styles.busy_btn}`}
+            disabled={selected.size === 0 || added || adding}
+            onClick={() => handleAddSelected()}
           >
+            {(adding || added) && <Spinner size={12} />}
             {t("audit.suggest_add_selected")} ({selected.size})
           </button>
         </div>
@@ -1033,7 +1120,8 @@ function FilterChip({
   onClick,
 }: {
   label: string;
-  count: number;
+  /** `null` while the first fetch is in flight → skeleton, never a fake 0. */
+  count: number | null;
   active: boolean;
   tone?: string;
   onClick: () => void;
@@ -1044,7 +1132,9 @@ function FilterChip({
       onClick={onClick}
     >
       <span className={styles.chip_label}>{label}</span>
-      <span className={styles.chip_count}>{count}</span>
+      <span className={styles.chip_count}>
+        {count === null ? <SkeletonNumber width={12} /> : count}
+      </span>
     </button>
   );
 }

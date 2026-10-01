@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Search,
   SearchX,
+  WifiOff,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { dateLocale, t } from "../i18n";
@@ -23,6 +24,8 @@ import { listWikiDocs } from "../wiki";
 import styles from "./WikiView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
+import { SkeletonList, Spinner } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 
 const KIND_BADGE: Record<WikiDoc["kind"], string> = {
   markdown: "MD",
@@ -60,18 +63,23 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [workspace, setWorkspace] = useState(""); // "" = all
+  const [refreshing, setRefreshing] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!client) return;
     setError(null);
+    setRefreshing(true);
     try {
       const list = await listWikiDocs(client);
       list.sort((a, b) => b.updatedMs - a.updatedMs);
       setDocs(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
     }
   }, [client]);
+  const showRefreshing = useDelayedFlag(refreshing);
 
   useEffect(() => {
     void refresh();
@@ -79,6 +87,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
 
   const { searching, matchSlugs, snippetBySlug } = useWikiSearch(client, query);
   const searchActive = query.trim().length >= 2;
+  const showSearching = useDelayedFlag(searchActive && searching);
 
   const docBySlug = useMemo(() => new Map((docs ?? []).map((d) => [d.slug, d])), [docs]);
 
@@ -144,6 +153,8 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
             icon={<RefreshCw size={17} />}
             label={t("刷新")}
             onClick={() => void refresh()}
+            busy={showRefreshing}
+            disabled={refreshing}
           />
         }
       />
@@ -152,7 +163,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
         <div className={styles.filters}>
           <div className={styles.searchWrap}>
             <span className={styles.searchIcon}>
-              <Search size={14} />
+              {showSearching ? <Spinner size={12} label={t("搜索中…")} /> : <Search size={14} />}
             </span>
             <input
               className={styles.search}
@@ -179,7 +190,12 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
         </div>
 
         {error && <div className={styles.hint}>{t("知识库加载失败：{0}", error)}</div>}
-        {!error && docs === null && <div className={styles.hint}>{t("加载中…")}</div>}
+        {!error && docs === null &&
+          (client ? (
+            <SkeletonList rows={8} avatar />
+          ) : (
+            <EmptyState icon={WifiOff} title={t("桌面端离线")} />
+          ))}
         {!error && docs !== null && total === 0 && (
           <EmptyState
             icon={BookOpen}
@@ -191,7 +207,6 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
         {/* Search mode */}
         {!error && searchActive && (
           <>
-            {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
             {!searching && results.length === 0 && (
               <EmptyState compact icon={SearchX} title={t("没有匹配「{0}」的文档。", query)} />
             )}

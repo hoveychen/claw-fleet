@@ -3,6 +3,8 @@ import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive, X } from "lucide-
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { BrowseDirResponse } from "../types";
+import { Skeleton, SkeletonList, Spinner, TopProgress } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 import styles from "./DirPicker.module.css";
 
 interface DirPickerProps {
@@ -22,16 +24,23 @@ interface DirPickerProps {
 export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerProps) {
   const [data, setData] = useState<BrowseDirResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // No client means the fetch never starts: do not open in a loading state.
+  const [loading, setLoading] = useState(!!client);
+  // Latest navigation wins: tapping another row mid-load must not let the
+  // slower, older reply overwrite the newer listing.
+  const seqRef = useRef(0);
 
   const load = useCallback(
     async (path?: string, fallbackToHome = false) => {
       if (!client) return;
+      const seq = ++seqRef.current;
       setLoading(true);
       setError(null);
       try {
-        setData(await client.request<BrowseDirResponse>("browse_dir", path ? { path } : {}));
+        const next = await client.request<BrowseDirResponse>("browse_dir", path ? { path } : {});
+        if (seq === seqRef.current) setData(next);
       } catch (e) {
+        if (seq !== seqRef.current) return;
         // Keep the previous screen on failure so user can go back; avoid blank page.
         setError(e instanceof Error ? e.message : t("读取目录失败"));
         // But when the initial path fails, there is no previous screen—the user may have typed
@@ -46,11 +55,13 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
           }
         }
       } finally {
-        setLoading(false);
+        if (seq === seqRef.current) setLoading(false);
       }
     },
     [client],
   );
+  // Navigation with a listing already on screen: keep it, show a bar on top.
+  const showNavProgress = useDelayedFlag(loading && !!data);
 
   useEffect(() => {
     void load(initialPath || undefined, true);
@@ -101,7 +112,8 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
         </div>
 
         <div className={styles.crumb} ref={crumbRef}>
-          {data?.path ?? initialPath ?? "…"}
+          {data?.path ??
+            (loading ? <Skeleton inline width="60%" height={10} /> : initialPath || "…")}
         </div>
 
         {error && <div className={styles.error}>{error}</div>}
@@ -127,6 +139,7 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
               disabled={!newName.trim() || saving}
               onClick={() => void submitNew()}
             >
+              {saving && <Spinner size={12} className={styles.btnSpinner} />}
               {saving ? t("创建中…") : t("创建")}
             </button>
             <button
@@ -158,6 +171,9 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
         )}
 
         <div className={styles.list}>
+          <TopProgress active={showNavProgress} />
+          {!data && loading && <SkeletonList rows={6} avatar meta={false} />}
+          {!data && !loading && !client && <div className={styles.empty}>{t("桌面端离线")}</div>}
           {/* When standing in a root, there is no "parent" to click—roots don't expose their parent.
               Cloud container's starting point is such a root (persistent volume), home is on another,
               so we list other roots as clickable rows; otherwise users can only switch roots by typing. */}
@@ -196,7 +212,6 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
           {data?.truncated && (
             <div className={styles.empty}>{t("子目录过多，仅显示前 500 个")}</div>
           )}
-          {loading && <div className={styles.empty}>{t("读取中…")}</div>}
         </div>
 
         <button

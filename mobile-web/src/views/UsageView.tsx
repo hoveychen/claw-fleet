@@ -16,6 +16,7 @@ import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
+import { SkeletonCard, SkeletonNumber } from "./loading";
 
 /** How much one device spent in "Today's Cumulative". `usage` is `null` = this device
  *  hasn't reported yet. */
@@ -30,6 +31,10 @@ interface Props {
   /** Today's cumulative from App header, reused directly — avoid re-scanning sessions
    *  for the same number. */
   todayUsage: TodayUsage | null;
+  /** `todayUsage` is still on its way from some device (App's
+   *  todayUsagePending). False means a null `todayUsage` is final: the desktop
+   *  is offline or could not answer. */
+  todayPending?: boolean;
   /** Per-device breakdown totals. Empty array when only one device is configured —
    *  the breakdown is the total itself, and extra lines are just noise. */
   perDevice?: DeviceUsageRow[];
@@ -172,6 +177,7 @@ function UsageSourceValue({
 export function UsageView({
   client,
   todayUsage,
+  todayPending: todayPendingProp = false,
   perDevice = [],
   activeDeviceLabel = null,
   onBack,
@@ -200,6 +206,11 @@ export function UsageView({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // `todayUsage === null` means either "still on its way" or "unavailable";
+  // App tells them apart (deviceRuntime's todayUsagePending), which ends once
+  // every device is known offline or its first poll settled.
+  const todayPending = !todayUsage && todayPendingProp;
 
   const claude = data?.claude ?? null;
 
@@ -263,6 +274,11 @@ export function UsageView({
                   </>
                 )}
               </>
+            ) : todayPending ? (
+              <div className={styles.today}>
+                <SkeletonNumber className={styles.todayCost} width={72} />
+                <SkeletonNumber className={styles.todayTokens} width={56} />
+              </div>
             ) : (
               <div className={styles.hint}>{t("桌面端离线，拿不到今日用量。")}</div>
             )}
@@ -270,7 +286,13 @@ export function UsageView({
         </div>
 
         {error && <div className={styles.hint}>{t("用量加载失败：{0}", error)}</div>}
-        {!error && !data && loading && <div className={styles.hint}>{t("加载中…")}</div>}
+        {/* First load: hold the Claude account card's place (rows + two bars). */}
+        {!error && !data && client && (
+          <div className={styles.section}>
+            <SectionHead label="Claude Code" device={activeDeviceLabel} />
+            <SkeletonCard height={190} />
+          </div>
+        )}
 
         {/* ── Claude Account ── */}
         {data && (

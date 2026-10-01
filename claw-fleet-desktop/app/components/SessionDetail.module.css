@@ -979,18 +979,6 @@
   pointer-events: none;
 }
 
-.syncing_latest svg {
-  color: var(--color-accent);
-  animation: syncingLatestSpin 800ms linear infinite;
-}
-
-@keyframes syncingLatestSpin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .syncing_latest svg { animation: none; }
-}
 
 /* Scroll area. `padding-bottom` is set inline from the dock's measured height
    (SessionDetail), so the last message can always scroll clear of the composer
@@ -1034,13 +1022,6 @@
   padding: 0 24px;
 }
 
-.inline_fleet_ask_loading {
-  padding: 12px 16px;
-  color: var(--color-text-dim);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-card);
-}
 
 /* The "load earlier" button moved into MessageList, which owns the render
    window it used to duplicate. Its styles live in MessageList.module.css. */
@@ -1411,6 +1392,9 @@
 }
 .explain_follow_send {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: none;
   background: var(--color-accent);
   color: var(--color-on-accent);

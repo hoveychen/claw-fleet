@@ -740,6 +740,7 @@ const DICT: Record<string, string> = {
   "加载图片…": "Loading image…",
   "图片加载失败，点按重试": "Image failed to load — tap to retry",
   "{0} 张图片加载失败，点按重试": "{0} image(s) failed to load — tap to retry",
+  "桌面端未连接，预览里的图片暂时无法加载": "Desktop not connected — images in this preview can't load yet",
 
   // ── English coverage: entries below previously had only Chinese; English view would show Chinese ──
   "今日 Fleet 花费": "Fleet spend today",
@@ -1070,6 +1071,7 @@ const DICT: Record<string, string> = {
   "打开页面": "Open page",
   "配额已恢复": "Quota reset",
   "模型列表加载中…": "Loading models…",
+  "没有可切换的模型": "No other models to switch to",
   "处理中…": "Working…",
   "已重新拉起，等会话接上…": "Resumed — waiting for the session to pick up…",
   "没能执行：": "Couldn't run it: ",

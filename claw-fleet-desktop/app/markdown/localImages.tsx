@@ -26,6 +26,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ImageOff } from "lucide-react";
 import { ImageThumbSrc } from "../components/blocks/ImageThumb";
+import { Skeleton } from "../components/loading";
 import type { ExplorerFileContent } from "../components/ExplorerPane";
 import { resolvePathRef } from "./pathRef";
 import type { PathLinkContext } from "./pathLinks";
@@ -121,11 +122,19 @@ function LocalImage({ path, alt }: { path: string; alt: string }) {
     return <ImageFailed label={alt || path} title={path} onRetry={() => setAttempt((n) => n + 1)} />;
   }
   if (!src) {
-    // Named, not blank: an image being read must not look like an image that
-    // was never there (the failure mode this whole module exists to undo).
+    // A thumb-sized placeholder, not blank: an image being read must not look
+    // like an image that was never there (the failure mode this whole module
+    // exists to undo). A span, because markdown images sit inside a <p>.
     return (
-      <span className={styles.image_loading} data-testid="markdown-image-loading" title={path}>
-        {alt || path}
+      <span
+        className={styles.image_loading}
+        data-testid="markdown-image-loading"
+        title={path}
+        role="status"
+        aria-busy="true"
+        aria-label={alt || path}
+      >
+        <Skeleton inline width={160} height={110} radius={0} />
       </span>
     );
   }

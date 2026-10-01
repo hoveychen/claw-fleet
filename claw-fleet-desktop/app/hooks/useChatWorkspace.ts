@@ -10,11 +10,31 @@ import { invoke } from "@tauri-apps/api/core";
  * this machine — see `Backend::chat_workspace`.
  */
 export function useChatWorkspace(): string | null {
-  const [path, setPath] = useState<string | null>(null);
+  return useChatWorkspaceState().path;
+}
+
+/**
+ * The chat workspace plus whether the backend has answered. `loaded` turns
+ * true on success and on failure, so `path === null && loaded` means "this host
+ * has no chat workspace" rather than "still asking".
+ */
+export function useChatWorkspaceState(): { path: string | null; loaded: boolean } {
+  const [state, setState] = useState<{ path: string | null; loaded: boolean }>({
+    path: null,
+    loaded: false,
+  });
   useEffect(() => {
+    let live = true;
     invoke<string>("chat_workspace")
-      .then(setPath)
-      .catch(() => setPath(null));
+      .then((p) => {
+        if (live) setState({ path: p ?? null, loaded: true });
+      })
+      .catch(() => {
+        if (live) setState({ path: null, loaded: true });
+      });
+    return () => {
+      live = false;
+    };
   }, []);
-  return path;
+  return state;
 }

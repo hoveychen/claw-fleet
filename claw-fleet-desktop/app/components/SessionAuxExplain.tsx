@@ -19,6 +19,8 @@ import { TextBlock } from "./blocks/TextBlock";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionDetail.module.css";
 import { Presence } from "./Presence";
+import { Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 
 const PRESET_ICON: Record<ExplainPreset, typeof MessageCircleQuestion> = {
   explain: MessageCircleQuestion,
@@ -80,14 +82,21 @@ export function SessionAuxExplain({
   onClose: () => void;
   /** Scroll the transcript back to the quoted passage and re-select it. */
   onLocate: () => void;
-  /** Ask a follow-up about the same passage, continuing this chain. */
-  onFollowUp: (question: string) => void;
+  /** Ask a follow-up about the same passage, continuing this chain. May return
+   *  the fork request's promise; the send button spins until it settles. */
+  onFollowUp: (question: string) => void | Promise<unknown>;
   onGripDown: (e: ReactPointerEvent<HTMLElement>) => void;
   onHideRail: () => void;
 }) {
   const { t } = useTranslation();
   const [menu, setMenu] = useState<ContextMenuAnchor | null>(null);
   const [followUp, setFollowUp] = useState("");
+  // Starting the fork takes a moment before the new running turn lands and
+  // replaces this form; until then the button spins and refuses a second send.
+  const [sending, sendFollowUp] = usePending(async (q: string) => {
+    await onFollowUp(q);
+    setFollowUp("");
+  });
   // The chip and the head summarise the chain: its opening question and quote,
   // but the latest turn's state — a chain whose follow-up is still forking
   // reads as running, not as the first answer's cost.
@@ -263,9 +272,9 @@ export function SessionAuxExplain({
             onSubmit={(e) => {
               e.preventDefault();
               const q = followUp.trim();
-              if (!q) return;
-              onFollowUp(q);
-              setFollowUp("");
+              if (!q || sending) return;
+              // A failed send keeps the question in the box to retry.
+              sendFollowUp(q).catch(() => {});
             }}
           >
             <input
@@ -274,8 +283,15 @@ export function SessionAuxExplain({
               onChange={(e) => setFollowUp(e.target.value)}
               placeholder={t("detail.explain_follow_up_placeholder", "继续追问这段话…")}
               aria-label={t("detail.explain_follow_up", "继续追问")}
+              readOnly={sending}
             />
-            <button type="submit" className={styles.explain_follow_send} disabled={!followUp.trim()}>
+            <button
+              type="submit"
+              className={styles.explain_follow_send}
+              disabled={!followUp.trim() || sending}
+              aria-busy={sending || undefined}
+            >
+              {sending && <Spinner size={12} />}
               {t("detail.explain_send", "发送")}
             </button>
           </form>

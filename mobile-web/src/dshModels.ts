@@ -119,9 +119,21 @@ export function dshEffortsFor(
 
 /** Host's dsh model catalog. Returns null if unreachable (relay disconnected,
  *  request in flight, host has no dsh installed, or desktop version too old to
- *  recognize this method) — callers treat null as "only the default item". */
+ *  recognize this method) — callers treat null as "only the default item".
+ *  Use `useDshModelsState` to tell "in flight" from "settled without a catalog". */
 export function useDshModels(client: FleetTransport | null): DshModelCatalog | null {
+  return useDshModelsState(client).catalog;
+}
+
+/** The catalog plus `loaded`: true once the request for the current `client`
+ *  has settled, on success **and** on failure, so a loader keyed on
+ *  `!!client && !loaded` always ends. Stays false while `client` is null. */
+export function useDshModelsState(client: FleetTransport | null): {
+  catalog: DshModelCatalog | null;
+  loaded: boolean;
+} {
   const [catalog, setCatalog] = useState<DshModelCatalog | null>(null);
+  const [settledFor, setSettledFor] = useState<FleetTransport | null>(null);
   useEffect(() => {
     if (!client) return;
     let alive = true;
@@ -132,10 +144,13 @@ export function useDshModels(client: FleetTransport | null): DshModelCatalog | n
       })
       .catch(() => {
         if (alive) setCatalog(null);
+      })
+      .finally(() => {
+        if (alive) setSettledFor(client);
       });
     return () => {
       alive = false;
     };
   }, [client]);
-  return catalog;
+  return { catalog, loaded: !!client && settledFor === client };
 }

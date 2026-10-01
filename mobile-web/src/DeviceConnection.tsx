@@ -16,7 +16,7 @@ import { useEffect, useRef } from "react";
 import type { TransportFactory } from "./App";
 import type { PairedDevice } from "./devices";
 import type { HostIdentity } from "./generated/types";
-import type { DeviceAction } from "./deviceRuntime";
+import { AGENT_REPORT_TIMEOUT_MS, type DeviceAction } from "./deviceRuntime";
 import {
   connectDelayMs,
   shouldConnect,
@@ -61,6 +61,9 @@ interface Props {
   hasPendingDecisions: boolean;
   /** Whether the desktop agent is online — gates both polling loops. */
   agentOnline: boolean;
+  /** Whether the current connection has heard the agent's status yet
+   *  (deviceRuntime's `agentReported`). Drives the report timeout. */
+  agentReported: boolean;
   /** Whether this device is the current-scope device. Affects polling frequency
    *  only (see connectionPolicy.ts). */
   isActive: boolean;
@@ -111,6 +114,7 @@ export function DeviceConnection({
   registerHandle,
   hasPendingDecisions,
   agentOnline,
+  agentReported,
   isActive,
   index,
   visibility,
@@ -221,6 +225,18 @@ export function DeviceConnection({
     index,
   ]);
 
+  // Offline path for the agent report: the status normally arrives with the
+  // handshake, but if a connection stays silent past the grace window, read it
+  // as "desktop offline" instead of "connecting" forever.
+  useEffect(() => {
+    if (!connected || agentReported) return;
+    const timer = window.setTimeout(
+      () => dispatchRef.current({ deviceId, type: "agentReportTimeout" }),
+      AGENT_REPORT_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [connected, agentReported, deviceId]);
+
   // Cold start renders cached task list first to avoid blank page while socket
   // is still handshaking.
   useEffect(() => {
@@ -280,7 +296,9 @@ export function DeviceConnection({
           const usage = await client.request<TodayUsage>("today_usage");
           if (!cancelled) dispatchRef.current({ deviceId, type: "usage", usage });
         } catch {
-          /* Transient failure — keep previous value */
+          // Transient failure — keep the previous value, but mark the first
+          // round settled so the usage placeholder does not wait forever.
+          if (!cancelled) dispatchRef.current({ deviceId, type: "usageFailed" });
         }
       }
       if (!cancelled) timer = window.setTimeout(poll, intervalMs);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -8,6 +8,8 @@ import type { AuxDoc } from "../detailAux";
 import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildWebMenu, type AuxCardTail } from "./auxDocMenu";
 import styles from "./TabPanes.module.css";
+import { SkeletonCard, TopProgress } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 /** What the host learned about framing this URL — see `gui/url_embed.rs`. */
 interface UrlEmbedProbe {
@@ -40,24 +42,38 @@ export function WebTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail }) {
   // Bumped by "Reload": re-probes and, because it keys the iframe, forces a fresh
   // load even when the src string is unchanged.
   const [nonce, setNonce] = useState(0);
+  // A re-probe on Reload keeps the current frame on screen under the progress
+  // bar; only a different url clears to the skeleton.
+  const [probing, setProbing] = useState(true);
+  // The frame paints nothing until its page loads; the bar covers that gap.
+  const [frameLoading, setFrameLoading] = useState(true);
+  const probedUrl = useRef<string | null>(null);
   const url = doc.ref;
 
   useEffect(() => {
     let stale = false;
-    setProbe(null);
+    if (probedUrl.current !== url) setProbe(null);
+    probedUrl.current = url;
+    setProbing(true);
+    setFrameLoading(true);
+    const settle = (p: UrlEmbedProbe) => {
+      if (stale) return;
+      setProbe(p);
+      setProbing(false);
+    };
     invoke<UrlEmbedProbe>("probe_url_embeddable", { url })
-      .then((r) => {
-        // A null (a host that doesn't know this command) is not a refusal.
-        if (!stale) setProbe(r ?? { embeddable: true, reason: null, status: null });
-      })
-      .catch(() => {
-        // The command itself failed (never mind the site) — same fail-open rule.
-        if (!stale) setProbe({ embeddable: true, reason: null, status: null });
-      });
+      // A null (a host that doesn't know this command) is not a refusal.
+      .then((r) => settle(r ?? { embeddable: true, reason: null, status: null }))
+      // The command itself failed (never mind the site) — same fail-open rule.
+      .catch(() => settle({ embeddable: true, reason: null, status: null }));
     return () => {
       stale = true;
     };
   }, [url, nonce]);
+
+  const busy = useDelayedFlag(
+    probe !== null && (probing || (probe.embeddable && frameLoading)),
+  );
 
   const open = () => {
     openUrl(url).catch((e) => console.error("openUrl failed:", url, e));
@@ -93,14 +109,13 @@ export function WebTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail }) {
         facts={[
           { text: path, strong: true },
           { text: probe?.status != null ? `HTTP ${probe.status}` : "" },
-          {
-            text:
-              probe == null
-                ? t("tabs.web_probing_short", "检查中…")
-                : probe.embeddable
+          probe == null
+            ? { text: "", pending: 40 }
+            : {
+                text: probe.embeddable
                   ? t("tabs.web_embeddable", "可嵌入")
                   : t("tabs.web_not_embeddable", "禁止嵌入"),
-          },
+              },
         ]}
         actions={build.actions}
         menuItems={build.menu}
@@ -109,8 +124,9 @@ export function WebTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail }) {
       />
       {error && <p className={styles.error_line}>{error}</p>}
       <div className={styles.body}>
+        <TopProgress active={busy} />
         {probe === null ? (
-          <p className={styles.status}>{t("tabs.web_probing", "正在检查该站是否允许嵌入…")}</p>
+          <SkeletonCard height="100%" className={styles.body_skeleton} />
         ) : probe.embeddable ? (
           // allow-same-origin is safe here in a way it would not be for local
           // HTML: the frame's document IS the remote site, a different origin
@@ -123,6 +139,7 @@ export function WebTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail }) {
             sandbox="allow-scripts allow-same-origin allow-forms"
             src={url}
             title={url}
+            onLoad={() => setFrameLoading(false)}
           />
         ) : (
           <div className={styles.blocked}>

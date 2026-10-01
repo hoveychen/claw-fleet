@@ -4,6 +4,7 @@ import { useReportStore } from "../../store";
 import { localDateKey } from "../../localDate";
 import type { DailyReportStats } from "../../types";
 import styles from "./ContributionsHeatmap.module.css";
+import { SkeletonCard } from "../loading";
 
 // Color levels for the heatmap
 function getLevel(value: number, max: number): number {
@@ -68,7 +69,7 @@ function formatTokens(n: number): string {
 
 export function ContributionsHeatmap({ compact = false }: { compact?: boolean } = {}) {
   const { t } = useTranslation();
-  const { heatmapData, loadReport, selectedDate } = useReportStore();
+  const { heatmapData, heatmapLoaded, loadReport, selectedDate } = useReportStore();
   const [tooltip, setTooltip] = useState<{ date: string; stats: DailyReportStats | null; x: number; y: number } | null>(null);
   const [metric, setMetric] = useState<"tokens" | "sessions" | "toolCalls">("tokens");
 
@@ -129,6 +130,11 @@ export function ContributionsHeatmap({ compact = false }: { compact?: boolean } 
             ))}
           </div>
         )}
+        {/* Before the first stats response an all-level-0 grid would read as
+            "no activity for a year", so hold its footprint with a placeholder. */}
+        {!heatmapLoaded ? (
+          <SkeletonCard className={styles.grid_skeleton} height={compact ? 48 : 102} />
+        ) : (
         <div className={styles.grid}>
           {weeks.map((week, wi) =>
             week.map((date, di) => {
@@ -152,6 +158,7 @@ export function ContributionsHeatmap({ compact = false }: { compact?: boolean } 
             })
           )}
         </div>
+        )}
       </div>
 
       {/* Legend */}

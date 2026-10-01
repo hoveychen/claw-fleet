@@ -1,7 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { Paperclip } from "lucide-react";
+import { ImageOff, Paperclip } from "lucide-react";
 import { attachmentName } from "../../userAttachments";
-import { useAttachmentThumb } from "../../attachmentThumb";
+import { useAttachmentThumbState } from "../../attachmentThumb";
+import { useDelayedFlag } from "../../hooks/useDelayedFlag";
+import { Skeleton } from "../loading";
 import { ImageThumbSrc } from "./ImageThumb";
 import styles from "./AttachmentRow.module.css";
 
@@ -34,14 +36,38 @@ export function AttachmentRow({ paths }: { paths: string[] }) {
 }
 
 function AttachmentItem({ path }: { path: string }) {
+  const { t } = useTranslation();
   const name = attachmentName(path);
-  const src = useAttachmentThumb({ path, name });
+  const { src, pending, failed } = useAttachmentThumbState({ path, name });
+  // A host read can take a beat; past the show-delay a thumb-sized skeleton
+  // holds the slot so the row does not jump from chip to picture.
+  const showSkeleton = useDelayedFlag(pending);
   if (src) {
     return <ImageThumbSrc src={src} alt={name} />;
   }
+  if (pending) {
+    return (
+      <span
+        className={styles.thumb_pending}
+        role="status"
+        aria-busy="true"
+        aria-label={t("loading")}
+        data-testid="attachment-thumb-pending"
+      >
+        {showSkeleton && <Skeleton inline width={160} height={110} radius={5} />}
+      </span>
+    );
+  }
+  // An image whose file could not be read gets a broken-image glyph, so it does
+  // not pass for an ordinary non-image attachment.
+  const Icon = failed ? ImageOff : Paperclip;
   return (
-    <span className={styles.chip} title={path}>
-      <Paperclip size={12} className={styles.chip_icon} />
+    <span
+      className={styles.chip}
+      title={path}
+      data-failed={failed || undefined}
+    >
+      <Icon size={12} className={styles.chip_icon} />
       <span className={styles.chip_name}>{name}</span>
     </span>
   );

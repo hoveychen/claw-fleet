@@ -6,8 +6,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import type { WikiDoc } from "./WikiView";
 import { useAutoFlip } from "./useAutoFlip";
+import { Spinner } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./useWikiMentions.module.css";
 
 /** Longest `@…` run still treated as a mention query rather than prose. */
@@ -76,6 +79,7 @@ export function useWikiMentions(
   onChange: (next: string) => void,
   textareaRef: RefObject<HTMLTextAreaElement | null>,
 ): WikiMentions {
+  const { t } = useTranslation();
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [docs, setDocs] = useState<WikiDoc[] | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -99,12 +103,16 @@ export function useWikiMentions(
 
   const matches = mention && docs ? filterWikiDocs(docs, mention.query) : [];
   const open = Boolean(mention) && matches.length > 0;
+  // The first `@` waits on the list: show a one-row spinner instead of nothing.
+  // It does not claim the keyboard (`open` stays false), so Enter still sends.
+  const showLoading = useDelayedFlag(enabled && Boolean(mention) && docs === null);
+  const visible = open || showLoading;
 
   // Prefer opening upward (the composer usually sits low), but fall back to
   // below when the composer is near the top of the window. The anchor defaults
   // to the menu's offsetParent — the composer it spans.
   // `matches.length` re-measures as the result list grows or shrinks.
-  const side = useAutoFlip(open, "above", wrapRef, undefined, matches.length);
+  const side = useAutoFlip(visible, "above", wrapRef, undefined, matches.length);
 
   useEffect(() => {
     setActiveIdx(0);
@@ -139,7 +147,7 @@ export function useWikiMentions(
 
   // Close on outside click, leaving clicks on the textarea itself alone.
   useEffect(() => {
-    if (!open) return;
+    if (!visible) return;
     const onDown = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node) && e.target !== textareaRef.current) {
         setMention(null);
@@ -147,7 +155,7 @@ export function useWikiMentions(
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
-  }, [open, textareaRef]);
+  }, [visible, textareaRef]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent): boolean => {
@@ -177,7 +185,17 @@ export function useWikiMentions(
     [accept, activeIdx, matches, open],
   );
 
-  const menu = open ? (
+  const menu = showLoading && !open ? (
+    <div
+      className={`${styles.menu} ${side === "above" ? styles.above : styles.below}`}
+      ref={wrapRef}
+    >
+      <div className={styles.loading}>
+        <Spinner size={12} />
+        {t("wiki.mention_loading", "正在加载知识库…")}
+      </div>
+    </div>
+  ) : open ? (
     <div
       className={`${styles.menu} ${side === "above" ? styles.above : styles.below}`}
       ref={wrapRef}

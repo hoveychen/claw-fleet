@@ -24,7 +24,6 @@ import {
   FileText,
   Globe,
   ListTodo,
-  LoaderCircle,
   MessageSquareDashed,
   MoreHorizontal,
   Pencil,
@@ -103,6 +102,8 @@ import {
   selectQuoteIn,
   type AssistantSelection,
 } from "../../../shared-ts/sessionExplain";
+import { Skeleton, SkeletonList, Spinner, TopProgress } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
@@ -671,16 +672,30 @@ function ThumbRow({ srcs }: { srcs: string[] }) {
   return (
     <div className={styles.thumbRow}>
       {srcs.map((src, i) => (
-        <img
-          key={i}
-          src={src}
-          className={styles.thumbImg}
-          alt=""
-          loading="lazy"
-          onClick={() => open(src)}
-        />
+        <Thumb key={i} src={src} onOpen={() => open(src)} />
       ))}
     </div>
+  );
+}
+
+/** One thumbnail: a fixed placeholder box holds its place until the image has
+ *  decoded, so the row does not jump as lazy images arrive. A failed load
+ *  ends the placeholder too (the browser's broken-image box takes over). */
+function Thumb({ src, onOpen }: { src: string; onOpen: () => void }) {
+  const [settled, setSettled] = useState(false);
+  return (
+    <span className={styles.thumbBox} data-pending={!settled || undefined}>
+      {!settled && <Skeleton className={styles.thumbSkeleton} height="100%" radius={6} />}
+      <img
+        src={src}
+        className={styles.thumbImg}
+        alt=""
+        loading="lazy"
+        onLoad={() => setSettled(true)}
+        onError={() => setSettled(true)}
+        onClick={onOpen}
+      />
+    </span>
   );
 }
 
@@ -1251,7 +1266,12 @@ export function SessionDetailView({
   const [sheetOpen, setSheetOpen] = useState(false);
   // Side questions about passages of the transcript. The list is read over
   // the relay per session; the one just asked opens in the 追问 pane.
-  const { explains, loaded: explainsLoaded, ask: askExplainRecord } = useSessionExplains(client, session.id);
+  const {
+    explains,
+    loaded: explainsLoaded,
+    error: explainsError,
+    ask: askExplainRecord,
+  } = useSessionExplains(client, session.id);
   const [openExplain, setOpenExplain] = useState<string | null>(null);
   const [explainBusy, setExplainBusy] = useState(false);
   const openTarget = useCallback((target: PillTarget) => {
@@ -1345,6 +1365,13 @@ export function SessionDetailView({
   }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);
+  /** "加载更早的消息" was tapped and the wider tail is on its way. The refetch
+   *  runs as a resync (`syncingLatest`), so it ends when that does. */
+  const [loadingMore, setLoadingMore] = useState(false);
+  useEffect(() => {
+    if (!syncingLatest) setLoadingMore(false);
+  }, [syncingLatest]);
+  const showSyncBar = useDelayedFlag(syncingLatest);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1782,7 +1809,8 @@ export function SessionDetailView({
           family={family}
           pendingDecisions={pendingDecisions}
           client={client}
-          explainCount={explainsLoaded ? explains.length : undefined}
+          explainCount={explainsLoaded && !explainsError ? explains.length : undefined}
+          explainLoading={!!client && !explainsLoaded}
           onClose={() => setSheetOpen(false)}
           onOpenPane={setPane}
           onOpenSession={(s) => onOpenSessionId(s.id)}
@@ -1824,7 +1852,10 @@ export function SessionDetailView({
             {pane === "explains" && (
               <SessionExplainsTab
                 explains={explains}
-                loaded={explainsLoaded}
+                // No client means nothing is in flight: show the offline
+                // failure rather than a skeleton that would never end.
+                loaded={explainsLoaded || !client}
+                error={explainsError || !client}
                 openId={openExplain}
                 busy={explainBusy}
                 onToggle={setOpenExplain}
@@ -1851,27 +1882,32 @@ export function SessionDetailView({
         onScroll={onScroll}
         style={composerHeight ? { paddingBottom: composerHeight + 14 } : undefined}
       >
-        {syncingLatest && messages !== null && (
-          <div className={styles.syncingLatest} role="status" aria-live="polite">
-            <LoaderCircle size={14} aria-hidden="true" />
-            <span>{t("正在同步最新消息…")}</span>
+        {/* Resync over messages already on screen: a thin bar pinned to the
+            top of the list, never a banner over the content. */}
+        {showSyncBar && messages !== null && (
+          <div className={styles.syncBar}>
+            <TopProgress active />
           </div>
         )}
-        {messages === null && !loadError && (
-          <div className={styles.messageLoading} role="status" aria-live="polite">
-            <LoaderCircle size={18} aria-hidden="true" />
-            <span>{t("正在同步最新消息…")}</span>
-          </div>
+        {messages === null && !loadError && !client && (
+          <div className={styles.hint}>{t("尚未连接 relay")}</div>
+        )}
+        {messages === null && !loadError && client && (
+          <SkeletonList rows={7} className={styles.messageSkeleton} />
         )}
         {loadError && <div className={styles.hint}>{t("消息加载失败：{0}", loadError)}</div>}
         {messages !== null && (messages.length >= tailN || tailN > TAIL_INITIAL) && (
           <button
             className={styles.loadMore}
+            disabled={loadingMore}
+            aria-busy={loadingMore || undefined}
             onClick={() => {
               stickToBottom.current = false;
+              setLoadingMore(true);
               setTailN((n) => n + TAIL_STEP);
             }}
           >
+            {loadingMore && <Spinner size={12} />}
             {t("加载更早的消息")}
           </button>
         )}

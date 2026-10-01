@@ -8,7 +8,6 @@ import {
   Cloud,
   Inbox,
   ListTodo,
-  Loader2,
   RefreshCw,
 } from "lucide-react";
 import appStyles from "../App.module.css";
@@ -17,6 +16,7 @@ import { ConnIcon, type ConnIconKind } from "../views/ConnIcon";
 import { HttpFleetCloudClient, type FleetCloudClient } from "./client";
 import { applyTaskEvent, initialCloudTaskState, type CloudTaskState } from "./reducer";
 import type { Decision, Task, TaskDetail, TaskStatus } from "./types";
+import { Skeleton, SkeletonCard, SkeletonList, SkeletonNumber, Spinner, TopProgress } from "../views/loading";
 import styles from "./CloudApp.module.css";
 import { t, useI18n } from "../i18n";
 
@@ -89,6 +89,16 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
   const [detailState, setDetailState] = useState<CloudTaskState | null>(null);
   const [detailReload, setDetailReload] = useState(0);
   const [loading, setLoading] = useState(true);
+  // First successful reads: the task list, then every task's detail (which is
+  // where the open decisions come from). Until each lands its counts and list
+  // are unknown, not zero.
+  const [tasksLoaded, setTasksLoaded] = useState(false);
+  const [detailsLoaded, setDetailsLoaded] = useState(false);
+  // The detail is being re-read after an event gap; the old one stays on screen.
+  const [detailRefetching, setDetailRefetching] = useState(false);
+  // Event cursor the task had when its detail was read: the replay from cursor 0
+  // has caught up once the reduced state reaches it.
+  const [replayTarget, setReplayTarget] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"online" | "syncing" | "offline">("syncing");
 
@@ -101,13 +111,17 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
         const detail = await client.getTask(embedTaskId);
         setTasks([detail]);
         setDetails({ [detail.id]: detail });
+        setTasksLoaded(true);
+        setDetailsLoaded(true);
         setSyncState("online");
         return;
       }
       const page = await client.listTasks({ limit: 100 });
       setTasks(page.data);
+      setTasksLoaded(true);
       const loaded = await Promise.all(page.data.map((task) => client.getTask(task.id)));
       setDetails(Object.fromEntries(loaded.map((detail) => [detail.id, detail])));
+      setDetailsLoaded(true);
       setSyncState("online");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -134,7 +148,9 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
       .then(async (detail) => {
         if (!active) return;
         const seed = initialCloudTaskState({ ...detail, event_cursor: 0 });
+        setReplayTarget(detail.event_cursor);
         setDetailState(seed);
+        setDetailRefetching(false);
         setSyncState("online");
         await client.streamTaskEvents(
           selectedId,
@@ -148,6 +164,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
       })
       .catch((caught) => {
         if (!active || controller.signal.aborted) return;
+        setDetailRefetching(false);
         setError(caught instanceof Error ? caught.message : String(caught));
         setSyncState("offline");
       });
@@ -159,9 +176,17 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
 
   useEffect(() => {
     if (!detailState?.refetchAfterGap) return;
-    setDetailState(null);
+    // Keep the stale detail on screen under a progress bar; the re-read replaces it.
+    setDetailRefetching(true);
     setDetailReload((current) => current + 1);
   }, [detailState?.refetchAfterGap]);
+
+  // Leaving a task must not leave the next one showing its detail meanwhile.
+  useEffect(() => {
+    setDetailState(null);
+    setDetailRefetching(false);
+    setReplayTarget(0);
+  }, [selectedId]);
 
   const openDecisions = useMemo(
     () =>
@@ -208,6 +233,8 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
       <CloudDetail
         client={client}
         state={detailState}
+        refetching={detailRefetching}
+        replaying={!!detailState && detailState.task.event_cursor < replayTarget}
         error={error}
         syncState={syncState}
         onBack={() => {
@@ -229,7 +256,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
           <div className={styles.projectLabel}>{t("托管工作区")}</div>
         </div>
         <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")} disabled={loading}>
-          <RefreshCw size={15} className={loading ? styles.spinning : undefined} />
+          {loading ? <Spinner size={15} /> : <RefreshCw size={15} />}
         </button>
         <span className={appStyles.connIcon} data-kind={cloudConnKind(syncState)} role="img" aria-label={cloudConnText(syncState)} title={cloudConnText(syncState)}>
           <ConnIcon kind={cloudConnKind(syncState)} />
@@ -239,10 +266,14 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
       <main className={`${appStyles.main} ${styles.main}`}>
         <div className={styles.rail}>
           <button data-active={tab === "tasks"} onClick={() => setTab("tasks")}>
-            <ListTodo size={16} />{t("任务")} <span>{tasks.length}</span>
+            <ListTodo size={16} />{t("任务")}{" "}
+            <span>{tasksLoaded ? tasks.length : loading ? <SkeletonNumber width={16} /> : "—"}</span>
           </button>
           <button data-active={tab === "decisions"} onClick={() => setTab("decisions")}>
-            <Inbox size={16} />{t("决策")} <span>{openDecisions.length}</span>
+            <Inbox size={16} />{t("决策")}{" "}
+            <span>
+              {detailsLoaded ? openDecisions.length : loading ? <SkeletonNumber width={16} /> : "—"}
+            </span>
           </button>
         </div>
 
@@ -256,10 +287,13 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
           </div>
 
           {error && <ErrorBanner message={error} onRetry={() => void refresh()} />}
-          {loading && tasks.length === 0 ? (
-            <div className={styles.loading}><Loader2 size={18} className={styles.spinning} />{t("正在读取控制面…")}</div>
+          {loading && !tasksLoaded ? (
+            <SkeletonList rows={6} />
           ) : tab === "tasks" ? (
             <TaskList tasks={tasks} onOpen={setSelectedId} />
+          ) : loading && !detailsLoaded ? (
+            // Open decisions come from the per-task details, which are still landing.
+            <SkeletonList rows={3} />
           ) : (
             <DecisionList
               client={client}
@@ -322,21 +356,30 @@ function DecisionList({ client, decisions, details, onOpenTask, onResolved }: { 
   );
 }
 
-function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolved }: { client: FleetCloudClient; state: CloudTaskState | null; error: string | null; syncState: "online" | "syncing" | "offline"; onBack: () => void; onDecisionResolved: (decision: Decision) => void }) {
+function CloudDetail({ client, state, refetching, replaying, error, syncState, onBack, onDecisionResolved }: { client: FleetCloudClient; state: CloudTaskState | null; refetching: boolean; replaying: boolean; error: string | null; syncState: "online" | "syncing" | "offline"; onBack: () => void; onDecisionResolved: (decision: Decision) => void }) {
   const detail = state?.task;
   return (
     <div className={appStyles.app}>
       <header className={`${appStyles.header} ${styles.detailHeader}`}>
         <button className={styles.back} onClick={onBack}><ArrowLeft size={18} />{t("返回")}</button>
-        <div className={styles.detailHeaderTitle}>{detail ? taskTitle(detail) : t("读取任务")}</div>
+        <div className={styles.detailHeaderTitle}>
+          {detail ? taskTitle(detail) : error ? t("读取任务") : <Skeleton width="45%" height={14} />}
+        </div>
         <span className={appStyles.connIcon} data-kind={cloudConnKind(syncState)} role="img" aria-label={cloudConnText(syncState)} title={cloudConnText(syncState)}>
           <ConnIcon kind={cloudConnKind(syncState)} />
         </span>
       </header>
       <main className={`${appStyles.main} ${styles.detailMain}`}>
+        <TopProgress active={refetching} />
         {error && <ErrorBanner message={error} />}
         {!state || !detail ? (
-          <div className={styles.loading}><Loader2 size={18} className={styles.spinning} />{t("正在同步任务事件…")}</div>
+          // A failed read already shows its banner; only a pending one gets a placeholder.
+          !error && (
+            <div className={styles.detailSkeleton}>
+              <SkeletonCard height={150} />
+              <SkeletonList rows={5} />
+            </div>
+          )
         ) : (
           <>
             <section className={styles.detailIntro}>
@@ -345,15 +388,19 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
               <p>{detail.prompt}</p>
               <div className={styles.detailFacts}>
                 <span data-status={detail.status}>{t(STATUS_LABEL[detail.status])}</span>
-                <span>{t("{0} 次尝试", state.attempts.length)}</span>
-                <span>Event #{detail.event_cursor}</span>
+                {/* The event replay from cursor 0 is still catching up: these
+                    count up from 0 until it has. */}
+                <span>{replaying ? <SkeletonNumber width={56} /> : t("{0} 次尝试", state.attempts.length)}</span>
+                <span>{replaying ? <SkeletonNumber width={56} /> : `Event #${detail.event_cursor}`}</span>
               </div>
             </section>
 
             <div className={styles.detailGrid}>
               <section className={styles.transcript}>
                 <h2>{t("会话记录")}</h2>
-                {state.messages.length === 0 ? (
+                {state.messages.length === 0 && replaying ? (
+                  <SkeletonList rows={4} />
+                ) : state.messages.length === 0 ? (
                   <div className={styles.muted}>{t("还没有会话消息。")}</div>
                 ) : state.messages.map((message) => (
                   <article key={message.id} data-role={message.role}>
@@ -365,7 +412,7 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
 
               <aside className={styles.attempts}>
                 <h2>{t("尝试链")}</h2>
-                {state.attempts.length === 0 ? <div className={styles.muted}>{t("等待 Runner 接单")}</div> : state.attempts.map((attempt) => (
+                {state.attempts.length === 0 && replaying ? <SkeletonList rows={2} /> : state.attempts.length === 0 ? <div className={styles.muted}>{t("等待 Runner 接单")}</div> : state.attempts.map((attempt) => (
                   <div key={attempt.id} className={styles.attemptRow}>
                     <span className={styles.attemptOrdinal}>{attempt.ordinal}</span>
                     <span><strong>{attempt.agent_source}</strong><small>{attempt.reason} · {attempt.status}</small></span>
@@ -409,12 +456,14 @@ function DecisionResponder({ client, decision, onResolved, compact = false }: { 
     .filter((option): option is { label: string; value: string } => option !== null);
   const questionId = typeof firstQuestion.id === "string" ? firstQuestion.id : "answer";
   const [answer, setAnswer] = useState(options[0]?.value ?? "");
-  const [submitting, setSubmitting] = useState(false);
+  // Which button is in flight, so only that one spins; both stay blocked.
+  const [submitting, setSubmitting] = useState<"answer" | "decline" | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const submit = async (action: "answer" | "decline") => {
+    if (submitting) return;
     if (action === "answer" && !answer.trim()) return;
-    setSubmitting(true);
+    setSubmitting(action);
     setSubmitError(null);
     try {
       const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `decision-${Date.now()}-${Math.random()}`;
@@ -427,7 +476,7 @@ function DecisionResponder({ client, decision, onResolved, compact = false }: { 
     } catch (caught) {
       setSubmitError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
     }
   };
 
@@ -443,8 +492,14 @@ function DecisionResponder({ client, decision, onResolved, compact = false }: { 
         <input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={t("输入答复")} aria-label={t("决策答复")} />
       )}
       <div className={styles.responseActions}>
-        <button onClick={() => void submit("decline")} disabled={submitting}>{t("拒绝")}</button>
-        <button data-primary onClick={() => void submit("answer")} disabled={submitting || !answer.trim()}>{submitting ? t("提交中…") : t("提交答复")}</button>
+        <button onClick={() => void submit("decline")} disabled={submitting !== null}>
+          {submitting === "decline" && <Spinner size={12} />}
+          {t("拒绝")}
+        </button>
+        <button data-primary onClick={() => void submit("answer")} disabled={submitting !== null || !answer.trim()}>
+          {submitting === "answer" && <Spinner size={12} />}
+          {submitting === "answer" ? t("提交中…") : t("提交答复")}
+        </button>
       </div>
       {submitError && <small className={styles.submitError}>{submitError}</small>}
     </div>

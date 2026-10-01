@@ -30,6 +30,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { formatBytes } from "../formatBytes";
+import { usePending } from "../hooks/usePending";
 import {
   buildZipTree,
   rangeReader,
@@ -44,6 +45,7 @@ import {
   type ZipDir,
   type ZipEntry,
 } from "../../../shared-ts/zipDir";
+import { Skeleton, SkeletonCard, SkeletonList, Spinner } from "./loading";
 import styles from "./ZipBrowser.module.css";
 
 /** What the page needs to render one member with its artifact-level renderer. */
@@ -134,6 +136,10 @@ export function ZipBrowser({
   // Every blob: URL handed out has to be revoked, or the archive stays in
   // memory for the life of the window.
   const objectUrl = useRef<string | null>(null);
+  // Save dialog + IPC copy; the button holds a spinner and refuses re-clicks.
+  const [exporting, exportMember] = usePending(async (name: string, bytes: Uint8Array) => {
+    await onExportMember?.(name, bytes);
+  });
 
   /** Translate at render, not where the failure happened.
    *
@@ -255,7 +261,17 @@ export function ZipBrowser({
     );
   }
   if (!loaded || !dir) {
-    return <div className={styles.centered}>{t("artifacts.loading", "加载中…")}</div>;
+    // Shaped like the listing it becomes: the crumb bar, then file rows.
+    return (
+      <div className={styles.root}>
+        <div className={styles.bar}>
+          <Skeleton width={72} height={10} />
+        </div>
+        <div className={styles.body}>
+          <SkeletonList rows={8} avatar meta={false} rowHeight={32} className={styles.skeleton_fill} />
+        </div>
+      </div>
+    );
   }
 
   const crumbs = cwd ? cwd.split("/") : [];
@@ -273,12 +289,18 @@ export function ZipBrowser({
           <span className={styles.crumb_current}>{open.path}</span>
           <span className={styles.bar_spacer} />
           <span className={styles.bar_size}>{formatBytes(open.size)}</span>
-          {onExportMember && memberBytes && (
+          {/* Present (disabled) while the member is still being read, so
+              the bar does not shift when the bytes land. */}
+          {onExportMember && !tooBig && !memberError && (
             <button
               className={styles.bar_action}
-              onClick={() => void onExportMember(open.name, memberBytes)}
+              disabled={!memberBytes || exporting}
+              aria-busy={exporting}
+              onClick={() => {
+                if (memberBytes) void exportMember(open.name, memberBytes);
+              }}
             >
-              <Download size={13} />
+              {exporting ? <Spinner size={12} /> : <Download size={13} />}
               {t("artifacts.zip.export_member", "导出这一项")}
             </button>
           )}
@@ -302,7 +324,9 @@ export function ZipBrowser({
           ) : member ? (
             renderPreview(member)
           ) : (
-            <div className={styles.centered}>{t("artifacts.loading", "加载中…")}</div>
+            <div className={styles.member_skeleton}>
+              <SkeletonCard height="100%" />
+            </div>
           )}
         </div>
       </div>

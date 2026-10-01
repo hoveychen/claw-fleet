@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { MessagesSquare, Loader2 } from "lucide-react";
+import { MessagesSquare } from "lucide-react";
 import type { ReactNode } from "react";
+import { SkeletonList } from "./loading";
 import styles from "./EmptyState.module.css";
 
 interface EmptyStateAction {
@@ -43,7 +44,7 @@ export function EmptyState({ icon, title, subtitle, action }: EmptyStateProps) {
 interface SessionEmptyStateProps {
   /**
    * Whether the initial background scan has completed. While `false` (and no
-   * sessions exist yet) we show a lightweight "scanning…" state instead of the
+   * sessions exist yet) we show row-shaped skeletons instead of the
    * onboarding hint, so we don't flash "no sessions" before the first scan
    * resolves.
    */
@@ -60,7 +61,7 @@ interface SessionEmptyStateProps {
 /**
  * Session list / gallery empty state. Three cases:
  *  - sessions exist but none match the current filter → neutral "no match";
- *  - scan not done yet AND no sessions at all → subtle scanning spinner;
+ *  - scan not done yet AND no sessions at all → session-row skeletons;
  *  - scan done AND no sessions at all → friendly onboarding hint guiding the
  *    user to start an agent session (Fleet only observes external sessions).
  */
@@ -76,12 +77,7 @@ export function SessionEmptyState({ scanReady, hasSessions }: SessionEmptyStateP
   }
 
   if (!scanReady) {
-    return (
-      <div className={styles.wrap}>
-        <Loader2 className={styles.spinner} size={20} strokeWidth={1.75} />
-        <p className={styles.scanning}>{t("empty_state.scanning")}</p>
-      </div>
-    );
+    return <SkeletonList rows={6} avatar className={styles.skeleton} />;
   }
 
   return (

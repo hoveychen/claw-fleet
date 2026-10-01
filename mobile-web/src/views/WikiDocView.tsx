@@ -7,7 +7,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Share2 } from "lucide-react";
+import { Share2 } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents as sharedMdComponents } from "../markdown/components";
@@ -21,6 +21,8 @@ import { useLightbox } from "./Lightbox";
 import styles from "./WikiDocView.module.css";
 import mdStyles from "./markdownBody.module.css";
 import { AppHeader } from "./AppHeader";
+import { Skeleton, SkeletonCard, SkeletonText, Spinner, TopProgress } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 
 interface Props {
   doc: WikiDoc;
@@ -41,12 +43,46 @@ function expandWikiMentions(md: string): string {
   });
 }
 
+/** Markdown image with a placeholder until it has painted, so the text below
+ *  does not jump down when a large image finally decodes. */
+function WikiImg({
+  src,
+  alt,
+  onZoom,
+  ...rest
+}: ComponentPropsWithoutRef<"img"> & { onZoom: (src: string, alt: string) => void }) {
+  const [settled, setSettled] = useState(false);
+  useEffect(() => setSettled(false), [src]);
+  return (
+    <>
+      {/* A bare span, not SkeletonCard: markdown puts images inside <p>, where a <div> is invalid. */}
+      {!settled && <Skeleton height={160} radius={8} />}
+      <img
+        src={src}
+        alt={alt}
+        style={{ cursor: "zoom-in", maxWidth: "100%", display: settled ? undefined : "none" }}
+        onLoad={() => setSettled(true)}
+        // A broken image still settles: show the browser's broken-image box, not a skeleton forever.
+        onError={() => setSettled(true)}
+        onClick={() => typeof src === "string" && src && onZoom(src, alt ?? "")}
+        {...rest}
+      />
+    </>
+  );
+}
+
 export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
   const [version, setVersion] = useState(doc.currentVersion);
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [srcdoc, setSrcdoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Markdown fetch in flight. A version switch keeps the old text on screen
+  // under a progress bar; a different doc clears it (old text would be wrong).
+  const [mdLoading, setMdLoading] = useState(false);
+  const mdSlugRef = useRef<string | null>(null);
+  // `wiki:` link currently being resolved (list lookup before the jump).
+  const [openingSlug, setOpeningSlug] = useState<string | null>(null);
   const { open: openLightbox } = useLightbox();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -69,11 +105,17 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
   useEffect(() => {
     if (doc.kind !== "markdown" || !client) return;
     let cancelled = false;
-    setMarkdown(null);
+    if (mdSlugRef.current !== doc.slug) setMarkdown(null);
     setError(null);
+    setMdLoading(true);
     fetchWikiText(client, doc.slug, version, doc.entry)
-      .then((text) => !cancelled && setMarkdown(text))
-      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+      .then((text) => {
+        if (cancelled) return;
+        mdSlugRef.current = doc.slug;
+        setMarkdown(text);
+      })
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => !cancelled && setMdLoading(false));
     return () => {
       cancelled = true;
     };
@@ -103,7 +145,8 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
   }, [doc.kind, doc.slug, doc.entry, version, client]);
 
   const openSlug = async (slug: string) => {
-    if (!client) return;
+    if (!client || openingSlug) return;
+    setOpeningSlug(slug);
     try {
       const list = await listWikiDocs(client);
       const target = list.find((d) => d.slug === slug);
@@ -111,6 +154,8 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
       else window.alert(t("知识库里没有找到「{0}」", slug));
     } catch {
       /* offline — ignore */
+    } finally {
+      setOpeningSlug(null);
     }
   };
 
@@ -153,16 +198,24 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
       ...sharedMdComponents,
       a: ({ href = "", children, ...rest }: ComponentPropsWithoutRef<"a">) => {
         if (href.startsWith("wiki:")) {
+          const slug = decodeURIComponent(href.slice(5));
           return (
             <a
               href={href}
               onClick={(e) => {
                 e.preventDefault();
-                void openSlug(decodeURIComponent(href.slice(5)));
+                void openSlug(slug);
               }}
+              aria-busy={openingSlug === slug || undefined}
               {...rest}
             >
               {children}
+              {openingSlug === slug && (
+                <>
+                  {" "}
+                  <Spinner size={11} />
+                </>
+              )}
             </a>
           );
         }
@@ -175,19 +228,14 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
         );
       },
       img: ({ src = "", alt, ...rest }: ComponentPropsWithoutRef<"img">) => (
-        <img
-          src={src}
-          alt={alt}
-          style={{ cursor: "zoom-in", maxWidth: "100%" }}
-          onClick={() => typeof src === "string" && src && openLightbox(src, alt ?? "")}
-          {...rest}
-        />
+        <WikiImg src={src} alt={alt} onZoom={openLightbox} {...rest} />
       ),
     }),
-    [client, openLightbox],
+    [client, openLightbox, openingSlug],
   );
 
   const versions = doc.versions ?? [];
+  const showMdRefetch = useDelayedFlag(mdLoading && markdown !== null);
 
   return (
     <div className={styles.page}>
@@ -217,18 +265,27 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
               aria-label={t("导出 / 分享")}
               title={t("导出 / 分享")}
             >
-              {exporting ? <Loader2 size={18} className={styles.spinning} /> : <Share2 size={18} />}
+              {exporting ? (
+                <span className={styles.iconBox}>
+                  <Spinner size={14} />
+                </span>
+              ) : (
+                <Share2 size={18} />
+              )}
             </button>
           </>
         }
       />
 
       <div className={styles.body}>
+        <TopProgress active={showMdRefetch} />
         {error && <div className={styles.hint}>{t("加载失败：{0}", error)}</div>}
 
-        {doc.kind === "markdown" ? (
+        {!client && !error && markdown === null && srcdoc === null ? (
+          <div className={styles.hint}>{t("桌面端离线")}</div>
+        ) : doc.kind === "markdown" ? (
           !error && markdown === null ? (
-            <div className={styles.hint}>{t("加载中…")}</div>
+            <SkeletonText className={styles.skeletonPad} lines={12} />
           ) : (
             <div className={mdStyles.markdown}>
               <ReactMarkdown
@@ -245,7 +302,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
             </div>
           )
         ) : !error && srcdoc === null ? (
-          <div className={styles.hint}>{t("渲染中…（正在拉取页面资源）")}</div>
+          <SkeletonCard className={styles.frameSkeleton} height="100%" />
         ) : srcdoc !== null ? (
           <iframe
             ref={frameRef}

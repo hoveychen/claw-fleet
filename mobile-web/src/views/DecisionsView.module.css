@@ -492,10 +492,10 @@
 }
 
 /* ── loading skeletons ──────────────────────────────────────────────────────
-   Shimmer placeholders for the two "not yet loaded" moments: decision-card
-   assets (gallery image / html preview) while their bytes stream in, and whole
-   skeleton cards on the decisions tab before the first pending snapshot lands —
-   so nothing flashes a broken <img> or an empty state first.
+   Shimmer placeholders for decision-card assets (gallery image / html preview)
+   while their bytes stream in, so nothing flashes a broken <img> first. (The
+   whole-card placeholders on the decisions tab use the shared loading
+   primitives.)
    `.skeleton` is the shared base: a dim fill with a band sweeping across it. The
    band middle stop is `--color-bg-card`, which sits opposite `--color-bg-secondary`
    in both themes (lighter on light, darker on dark), so the sweep stays visible
@@ -560,65 +560,6 @@
   margin-top: 8px;
 }
 
-/* Whole-card skeleton in the decision-card silhouette. */
-.skelCard {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.skelRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.skelChip {
-  height: 18px;
-  width: 64px;
-  border-radius: 999px;
-}
-
-.skelWs {
-  height: 14px;
-  width: 90px;
-  border-radius: 6px;
-}
-
-.skelTitle {
-  height: 16px;
-  width: 70%;
-  border-radius: 6px;
-}
-
-.skelLine {
-  height: 12px;
-  width: 100%;
-  border-radius: 6px;
-}
-
-.skelLineShort {
-  height: 12px;
-  width: 55%;
-  border-radius: 6px;
-}
-
-.skelActions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.skelBtn {
-  flex: 1;
-  height: 38px;
-  border-radius: 10px;
-}
-
 /* Tap-to-retry surface for a failed asset (timeout on a slow link, or a
    missing asset) — replaces the old silent, forever-spinning placeholder. */
 .assetError {
@@ -634,8 +575,28 @@
   cursor: pointer;
 }
 
+/* Spinner portalled into the tapped answer button while the answer is sent. */
+.tapSpinner {
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .assetError:active {
   opacity: 0.7;
+}
+
+/* Static note under an HTML preview whose images cannot be fetched because no
+   transport exists — not tappable, nothing to retry until the link is back. */
+.assetOffline {
+  padding: 12px;
+  margin-top: 8px;
+  text-align: center;
+  font-size: var(--t-meta, 12px);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
 }
 
 /* ── v2: guard analysis / always-allow / plan editing / question tools ── */
@@ -653,11 +614,6 @@
   font-weight: 600;
   color: var(--color-text-secondary);
   margin-bottom: 4px;
-}
-
-.analysisLoading {
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-dim);
 }
 
 .prefixMenu {

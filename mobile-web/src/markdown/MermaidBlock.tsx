@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SkeletonCard } from "../views/loading";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
 import { applyDiagramWidth } from "./mermaidFit";
@@ -98,12 +99,18 @@ export function MermaidBlock({ code }: { code: string }) {
     );
   }
 
+  // First render: mermaid is still loading / laying out. Hold a diagram-sized
+  // block so the text below does not jump when the SVG pops in.
+  if (svg === null) {
+    return <SkeletonCard className={styles.diagram} height={160} />;
+  }
+
   return (
     <div
       ref={hostRef}
       className={styles.diagram}
       // Trusted: mermaid's own strict-mode renderer sanitized this, not the model.
-      dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
+      dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
 }

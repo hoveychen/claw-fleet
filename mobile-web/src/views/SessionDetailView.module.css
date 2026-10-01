@@ -115,56 +115,26 @@
 /* Initial transcript bootstrap. Keep this in the message rail rather than in
    a floating card: it marks the content below as unavailable, not the whole
    page as blocked. */
-.messageLoading {
-  flex: 1;
-  min-height: 120px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--color-text-dim);
-  font-size: var(--t-ui, 14px);
-}
-
-.messageLoading svg {
-  color: var(--color-accent);
-  animation: messageLoadingSpin 800ms linear infinite;
-}
-
-.syncingLatest {
+/* Zero-height sticky host for the resync TopProgress: pinned to the top edge
+   of the scroller, spanning its padding, taking no room in the flex column
+   (the negative bottom margin cancels the column gap). */
+.syncBar {
   position: sticky;
   z-index: 2;
   top: 0;
-  align-self: flex-end;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-bg);
-  color: var(--color-text-secondary);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
-  font-size: var(--t-aux, 12px);
-  pointer-events: none;
+  height: 0;
+  margin: -12px -12px -10px;
 }
 
-.syncingLatest svg {
-  color: var(--color-accent);
-  animation: messageLoadingSpin 800ms linear infinite;
-}
-
-@keyframes messageLoadingSpin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .messageLoading svg,
-  .syncingLatest svg { animation: none; }
+.messageSkeleton {
+  flex: 1;
 }
 
 .loadMore {
   align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--color-border-strong);
   background: var(--color-bg-card);
   color: var(--color-text-secondary);
@@ -544,6 +514,28 @@
   flex-wrap: wrap;
   gap: 4px;
   padding-bottom: 4px;
+}
+
+/* Holds a lazy thumbnail's place until it decodes. */
+.thumbBox {
+  position: relative;
+  display: inline-flex;
+}
+
+.thumbBox[data-pending] {
+  width: 120px;
+  height: 90px;
+}
+
+.thumbBox[data-pending] .thumbImg {
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.thumbSkeleton {
+  position: absolute;
+  inset: 0;
 }
 
 .thumbImg {
@@ -955,6 +947,10 @@
   padding: 6px 14px;
   border-radius: 8px;
   font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .apiErrorPrimary {

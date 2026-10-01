@@ -80,3 +80,10 @@
   line-height: 1.6;
   padding: 14px;
 }
+
+.error {
+  font-size: var(--t-ui, 14px);
+  color: var(--color-error);
+  line-height: 1.6;
+  padding: 14px;
+}

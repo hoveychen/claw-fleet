@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   CheckCircle2,
@@ -45,6 +46,7 @@ import type {
 import type { Attachment } from "./Composer";
 import { uploadAttachmentFiles } from "./Composer";
 import { AttachmentThumbs } from "./AttachmentThumb";
+import { SkeletonCard, SkeletonText, Spinner } from "./loading";
 import styles from "./DecisionsView.module.css";
 import { StructuredCommand } from "./StructuredCommand";
 import { basename } from "./taskNotification";
@@ -69,6 +71,9 @@ interface Props {
   connected: boolean;
   agentOnline: boolean;
   decisionsLoaded: boolean;
+  /** Link up but no agent status reported yet (App's useSettlingAgents):
+   *  `agentOnline` is still its initial `false` and must not read as offline. */
+  agentPending?: boolean;
   workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
   onAnswered: (deviceId: string, id: string) => void;
   onOpenSession: (deviceId: string, sessionId: string) => void;
@@ -89,6 +94,7 @@ export function DecisionsView({
   connected,
   agentOnline,
   decisionsLoaded,
+  agentPending = false,
   workspaceOf,
   onAnswered,
   onOpenSession,
@@ -149,11 +155,13 @@ export function DecisionsView({
     // snapshot has landed, then a genuine empty. The two transient states show
     // shimmer skeleton cards so a pending card never flashes an empty state
     // first; only "desktop offline" and "nothing pending" are terminal.
-    if (!connected || (agentOnline && !decisionsLoaded)) {
+    if (!connected || ((agentOnline || agentPending) && !decisionsLoaded)) {
+      // Two placeholders at a decision card's height (chip row, title, two
+      // body lines, action row).
       return (
         <div className={styles.list} aria-busy="true" aria-label={t("正在加载决策…")}>
-          <SkeletonCard />
-          <SkeletonCard />
+          <SkeletonCard height={172} />
+          <SkeletonCard height={172} />
         </div>
       );
     }
@@ -234,27 +242,6 @@ export function DecisionsView({
   );
 }
 
-/** Shimmer placeholder in the decision-card silhouette (chip · workspace ·
- *  title · two body lines · action row), shown while the first pending snapshot
- *  is still in flight so the tab doesn't flash an empty state then pop a card. */
-function SkeletonCard() {
-  return (
-    <div className={styles.skelCard} aria-hidden="true">
-      <div className={styles.skelRow}>
-        <span className={`${styles.skeleton} ${styles.skelChip}`} />
-        <span className={`${styles.skeleton} ${styles.skelWs}`} />
-      </div>
-      <span className={`${styles.skeleton} ${styles.skelTitle}`} />
-      <span className={`${styles.skeleton} ${styles.skelLine}`} />
-      <span className={`${styles.skeleton} ${styles.skelLineShort}`} />
-      <div className={styles.skelActions}>
-        <span className={`${styles.skeleton} ${styles.skelBtn}`} />
-        <span className={`${styles.skeleton} ${styles.skelBtn}`} />
-      </div>
-    </div>
-  );
-}
-
 interface CardProps {
   decision: PendingDecision;
   client: FleetTransport | null;
@@ -296,9 +283,15 @@ function DecisionCard({
   // round trip is what made answers unsendable while cards kept arriving.
   const [sending, setSending] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
+  // The answer buttons live in half a dozen per-kind cards that all funnel into
+  // `submit`; the card root records which button was tapped so the spinner can
+  // land on that button without threading a pending flag through every kind.
+  const lastTapped = useRef<HTMLButtonElement | null>(null);
+  const [sendingFrom, setSendingFrom] = useState<HTMLButtonElement | null>(null);
   const submit = useCallback(
     (fields: Record<string, unknown>) => {
       if (!client || sending) return;
+      setSendingFrom(lastTapped.current?.isConnected ? lastTapped.current : null);
       setSending(true);
       setSendFailed(false);
       client
@@ -315,7 +308,21 @@ function DecisionCard({
   );
 
   return (
-    <div className={`${styles.card} ${sending ? styles.cardBusy : ""}`} aria-busy={sending}>
+    <div
+      className={`${styles.card} ${sending ? styles.cardBusy : ""}`}
+      aria-busy={sending}
+      onClickCapture={(e) => {
+        lastTapped.current = (e.target as Element).closest("button");
+      }}
+    >
+      {sending &&
+        sendingFrom &&
+        createPortal(
+          <span className={styles.tapSpinner}>
+            <Spinner size={12} />
+          </span>,
+          sendingFrom,
+        )}
       <div className={styles.cardHead}>
         <span className={styles.kindChip} data-kind={decision.kind}>
           {t(KIND_LABEL[decision.kind] ?? decision.kind)}
@@ -497,12 +504,13 @@ function GuardAnalysis({
     };
   }, [client, request.command, request.id, session?.jsonlPath]);
 
-  if (state === "unavailable") return null;
+  // No client means the request never goes out: nothing to wait for.
+  if (state === "unavailable" || (state === "loading" && !client)) return null;
   return (
     <div className={styles.analysis}>
       <div className={styles.analysisHead}>{t("AI 风险分析")}</div>
       {state === "loading" ? (
-        <div className={styles.analysisLoading}>{t("分析中…")}</div>
+        <SkeletonText lines={3} />
       ) : (
         <div className={styles.markdown}>
           <ReactMarkdown
@@ -1015,20 +1023,35 @@ function LastUserInputBlock({
   client: FleetTransport | null;
 }) {
   const [input, setInput] = useState<LastUserInput | null>(null);
+  const canFetch = !!client && !!session?.jsonlPath;
+  // The tail is in flight: hold the block's place above the question instead of
+  // popping it in later. A failed or empty read ends it (block stays absent).
+  const [loading, setLoading] = useState(canFetch);
   useEffect(() => {
     if (!client || !session?.jsonlPath) return;
     let cancelled = false;
+    setLoading(true);
     client
       .request<RawMessage[]>("tail", { path: session.jsonlPath, n: TRANSCRIPT_TAIL })
       .then((rows) => {
         if (!cancelled) setInput(findLastUserInput(rows));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [client, session?.jsonlPath]);
 
+  if (!input && loading && canFetch) {
+    return (
+      <div className={styles.preceding}>
+        <SkeletonText lines={2} />
+      </div>
+    );
+  }
   if (!input) return null;
   return (
     <div className={styles.preceding}>
@@ -1535,10 +1558,11 @@ function OtherComposer({
             <button
               className={styles.otherAttach}
               disabled={uploading}
+              aria-busy={uploading || undefined}
               onClick={() => inputRef.current?.click()}
               aria-label={t("为「{0}」添加附件", question)}
             >
-              <Plus size={14} />
+              {uploading ? <Spinner size={12} /> : <Plus size={14} />}
             </button>
           )}
           {/* While recording, the input box stays in place showing real-time transcription (read-only); the voice bar starts a new line —
@@ -1795,10 +1819,13 @@ function HtmlPreview({
   // thumbnails in Boss's screenshot). Hold the iframe back behind a shimmer
   // until the assets settle; an errored asset stops being "pending" so the
   // iframe mounts and the tap-to-retry surface below can take over.
+  // Without a client nothing is fetched, so nothing is pending: mount the
+  // iframe as-is and say why the images are missing rather than shimmer forever.
   const assetsPending = useMemo(
-    () => names.some((n) => !states[n] || states[n].status === "loading"),
-    [names, states],
+    () => !!client && names.some((n) => !states[n] || states[n].status === "loading"),
+    [client, names, states],
   );
+  const assetsOffline = !client && names.length > 0;
 
   // `sandbox="allow-scripts"` without `allow-same-origin` (same as the desktop
   // AutoHeightFrame): the document keeps an opaque origin — no DOM/storage
@@ -1852,6 +1879,9 @@ function HtmlPreview({
         >
           {t("{0} 张图片加载失败，点按重试", String(failed.length))}
         </button>
+      )}
+      {assetsOffline && (
+        <div className={styles.assetOffline}>{t("桌面端未连接，预览里的图片暂时无法加载")}</div>
       )}
     </>
   );

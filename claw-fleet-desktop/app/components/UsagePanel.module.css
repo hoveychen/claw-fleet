@@ -260,6 +260,12 @@
   cursor: pointer;
   padding: 0;
   line-height: 1;
+  /* Holds the glyph's footprint while the spinner stands in for it. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12px;
+  min-height: 12px;
 }
 
 .refresh:hover {

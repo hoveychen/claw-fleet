@@ -51,10 +51,6 @@
   flex-shrink: 0;
 }
 
-@keyframes history_spin {
-  to { transform: rotate(360deg); }
-}
-
 /* Non-directory filters (mark segments) sit in their own compact row. */
 .mark_row {
   display: flex;
@@ -163,6 +159,11 @@
   gap: 8px;
 }
 
+/* First-scan placeholder rows in the rail. */
+.rail_skeleton {
+  padding: 4px 0;
+}
+
 .empty {
   padding: 20px 8px;
   font-size: 12px;
@@ -244,13 +245,27 @@
   padding: 0 24px;
 }
 
-.starting_spinner {
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: history_spin 0.7s linear infinite;
+/* Starting pane: the status line on top, the conversation-to-be under it. */
+.starting_pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.starting_pane > .detail_starting {
+  flex: none;
+  flex-direction: row;
+  padding: 18px 24px 4px;
+}
+
+/* Holds a ConversationSkeleton; clipped rather than scrolled. */
+.starting_body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .starting_text {

@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./fonts";
 import "./App.css";
 import { Onboarding } from "./components/Onboarding";
@@ -24,6 +24,8 @@ import { localDateKeyDaysAgo } from "./localDate";
 import { useRemoteWorkspacesSync } from "./hooks/useRemoteWorkspaces";
 import { useWaitingAlertSound } from "./hooks/useWaitingAlertSound";
 import { Presence } from "./components/Presence";
+import { Spinner } from "./components/loading";
+import styles from "./App.module.css";
 
 const ONBOARDING_DISMISSED_KEY = "onboarding-dismissed";
 const WIZARD_COMPLETED_KEY = "wizard-completed";
@@ -74,6 +76,10 @@ function App() {
     return unseen.length > 0 ? "whats_new" : null;
   });
   const [showWizard, setShowWizard] = useState(false);
+  // On-screen feedback for the native menu's "Check for updates": the menu item
+  // itself cannot show progress, so a small pill reports checking / result.
+  const [updateCheck, setUpdateCheck] = useState<"checking" | "latest" | "failed" | null>(null);
+  const updateCheckRef = useRef(false);
 
   // Drag bar / caption buttons now switch off the host classes set in
   // main.tsx (`tauri-host` + `os-windows` / `os-macos`); we still need
@@ -165,6 +171,11 @@ function App() {
       setOnboardingMode("full");
     }));
     ps.push(listen("menu-check-updates", async () => {
+      // A second click while a check is in flight is dropped.
+      if (updateCheckRef.current) return;
+      updateCheckRef.current = true;
+      setUpdateCheck("checking");
+      let outcome: "latest" | "failed" | null = null;
       try {
         const result = await invoke<{ has_update: boolean; latest_version: string; release_url: string }>(
           "check_app_version",
@@ -173,9 +184,19 @@ function App() {
         if (result.has_update && result.release_url) {
           const { openUrl } = await import("@tauri-apps/plugin-opener");
           await openUrl(result.release_url).catch(() => {});
+        } else {
+          outcome = "latest";
         }
       } catch {
-        /* network errors are silent */
+        outcome = "failed";
+      } finally {
+        updateCheckRef.current = false;
+      }
+      setUpdateCheck(outcome);
+      if (outcome) {
+        window.setTimeout(() => {
+          setUpdateCheck((cur) => (cur === outcome ? null : cur));
+        }, 2500);
       }
     }));
 
@@ -266,6 +287,18 @@ function App() {
       <Presence when={settingsOpen}>{settingsOpen && <SettingsPanel onClose={closeSettings} />}</Presence>
       {!simplifiedMode && <DailyReportPopup />}
       <UpdateNotice />
+      <Presence when={!!updateCheck}>
+        {updateCheck && (
+          <div className={styles.menu_status} role="status">
+            {updateCheck === "checking" && <Spinner size={12} />}
+            {updateCheck === "checking"
+              ? i18n.t("update.checking", "正在检查更新…")
+              : updateCheck === "latest"
+                ? i18n.t("update.up_to_date", "已是最新版本")
+                : i18n.t("update.check_failed", "检查更新失败，请检查网络")}
+          </div>
+        )}
+      </Presence>
       <FindBar controller={find} />
     </div>
   );

@@ -20,6 +20,7 @@ import type { Artifact, IngestSummary, WikiDoc } from "../types";
 import { listWikiDocs } from "../wiki";
 import { ArtifactDetail } from "./ArtifactsView";
 import { WikiDocView } from "./WikiDocView";
+import { Skeleton, Spinner } from "./loading";
 import styles from "./IngestCard.module.css";
 
 /** Byte limit for fetching directly on the card. Only applies to images; larger sizes should wait for user to click. */
@@ -56,19 +57,28 @@ function ArtifactIngestCard({
   client: FleetTransport | null;
 }) {
   const [artifact, setArtifact] = useState<Artifact | null>(null);
+  // The record lookup has settled (found, missing or failed).
+  const [resolved, setResolved] = useState(false);
   const [thumb, setThumb] = useState<string | null>(null);
+  const [thumbFailed, setThumbFailed] = useState(false);
   const [open, setOpen] = useState(false);
+  // Tapped before the record arrived: show a spinner and open once it does.
+  const [wantOpen, setWantOpen] = useState(false);
 
   // Fetch the full artifact record (needed for overlay) by id from the list: relay has no single-item fetch,
   // and the list is what the output tab fetches anyway.
   useEffect(() => {
     if (!client) return;
     let alive = true;
+    setResolved(false);
     listArtifacts(client)
       .then((list) => {
         if (alive) setArtifact(list.find((a) => a.id === ingest.id) ?? null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setResolved(true);
+      });
     return () => {
       alive = false;
     };
@@ -84,19 +94,42 @@ function ArtifactIngestCard({
         url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
         setThumb(url);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setThumbFailed(true);
+      });
     return () => {
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
   }, [client, ingest.id, ingest.akind, ingest.bytes]);
 
+  useEffect(() => {
+    if (!wantOpen || !resolved) return;
+    setWantOpen(false);
+    if (artifact) setOpen(true);
+  }, [wantOpen, resolved, artifact]);
+
+  const thumbPending =
+    !!client &&
+    ingest.akind === "image" &&
+    ingest.bytes <= INLINE_IMAGE_MAX_BYTES &&
+    !thumb &&
+    !thumbFailed;
+
   return (
     <>
-      <button className={styles.card} onClick={() => artifact && setOpen(true)}>
+      <button
+        className={styles.card}
+        onClick={() => (artifact ? setOpen(true) : !resolved && client && setWantOpen(true))}
+        aria-busy={wantOpen || undefined}
+      >
         <span className={styles.well}>
-          {thumb ? (
+          {wantOpen ? (
+            <Spinner size={16} />
+          ) : thumb ? (
             <img className={styles.thumb} src={thumb} alt={ingest.title} />
+          ) : thumbPending ? (
+            <Skeleton width="100%" height="100%" radius={8} />
           ) : (
             <Package size={20} strokeWidth={1.4} />
           )}
@@ -125,26 +158,43 @@ function WikiIngestCard({
   client: FleetTransport | null;
 }) {
   const [doc, setDoc] = useState<WikiDoc | null>(null);
+  const [resolved, setResolved] = useState(false);
   const [open, setOpen] = useState(false);
+  // Tapped before the doc list arrived: show a spinner and open once it does.
+  const [wantOpen, setWantOpen] = useState(false);
 
   useEffect(() => {
     if (!client) return;
     let alive = true;
+    setResolved(false);
     listWikiDocs(client)
       .then((docs) => {
         if (alive) setDoc(docs.find((d) => d.slug === ingest.slug) ?? null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setResolved(true);
+      });
     return () => {
       alive = false;
     };
   }, [client, ingest.slug]);
 
+  useEffect(() => {
+    if (!wantOpen || !resolved) return;
+    setWantOpen(false);
+    if (doc) setOpen(true);
+  }, [wantOpen, resolved, doc]);
+
   return (
     <>
-      <button className={styles.card} onClick={() => doc && setOpen(true)}>
+      <button
+        className={styles.card}
+        onClick={() => (doc ? setOpen(true) : !resolved && client && setWantOpen(true))}
+        aria-busy={wantOpen || undefined}
+      >
         <span className={styles.well}>
-          <FileText size={20} strokeWidth={1.4} />
+          {wantOpen ? <Spinner size={16} /> : <FileText size={20} strokeWidth={1.4} />}
         </span>
         <span className={styles.text}>
           <span className={styles.title}>{ingest.title || ingest.slug}</span>

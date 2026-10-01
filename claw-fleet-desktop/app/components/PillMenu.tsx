@@ -4,8 +4,11 @@
 // check-list popover, no native <select> chrome, no form labels.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, ChevronDown } from "lucide-react";
 import { useAutoFlip } from "./useAutoFlip";
+import { Spinner } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./PillMenu.module.css";
 import { Presence } from "./Presence";
 
@@ -28,6 +31,9 @@ export interface PillMenuItem {
 export interface PillMenuProps {
   /** Pill text (ellipsized past max-width). */
   label: string;
+  /** Rendered in place of `label` when set — e.g. a skeleton while the value
+   *  the pill would name is still being worked out. */
+  labelSlot?: ReactNode;
   /** Optional leading icon on the pill (e.g. a folder for the workspace pill). */
   icon?: ReactNode;
   title?: string;
@@ -57,10 +63,17 @@ export interface PillMenuProps {
    *  first load can fail during `dsh web` startup, so reopening must retry or
    *  the menu lies ("no options") until the whole dialog is remounted. */
   onOpen?: () => void;
+  /** The menu's options are still being fetched. The pill's chevron turns into
+   *  a spinner and the open menu ends in a "loading" row, so a half-filled list
+   *  (often just "default") does not read as the complete set. */
+  loading?: boolean;
+  /** Text of that loading row; defaults to the generic "Loading…". */
+  loadingLabel?: string;
 }
 
 export function PillMenu({
   label,
+  labelSlot,
   icon,
   title,
   disabled,
@@ -71,8 +84,16 @@ export function PillMenu({
   className,
   testId,
   onOpen,
+  loading,
+  loadingLabel,
 }: PillMenuProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // An item's async `onSelect` still settling (a native dialog, a backend
+  // write). The menu is already closed by then, so the pill carries the cue —
+  // gated so the common synchronous pick never flashes it.
+  const [busy, setBusy] = useState(false);
+  const showBusy = useDelayedFlag(busy || !!loading);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -96,7 +117,14 @@ export function PillMenu({
       className={styles.menu_item}
       onClick={async () => {
         if (!item.keepOpen) setOpen(false);
-        await item.onSelect();
+        const result = item.onSelect();
+        if (!result || typeof (result as Promise<void>).then !== "function") return;
+        setBusy(true);
+        try {
+          await result;
+        } finally {
+          setBusy(false);
+        }
       }}
     >
       {item.icon ?? (
@@ -125,7 +153,7 @@ export function PillMenu({
         type="button"
         className={styles.ghost_pill}
         onClick={() => {
-          if (disabled) return;
+          if (disabled || busy) return;
           if (!open) onOpen?.();
           setOpen((v) => !v);
         }}
@@ -134,10 +162,15 @@ export function PillMenu({
         data-testid={testId}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-busy={busy || loading || undefined}
       >
         {icon}
-        <span className={styles.pill_label}>{label}</span>
-        <ChevronDown size={13} strokeWidth={1.8} className={styles.pill_chevron} />
+        <span className={styles.pill_label}>{labelSlot ?? label}</span>
+        {showBusy ? (
+          <Spinner size={12} className={styles.pill_chevron} />
+        ) : (
+          <ChevronDown size={13} strokeWidth={1.8} className={styles.pill_chevron} />
+        )}
       </button>
       <Presence when={Boolean(open)}>{open && (
         <div
@@ -147,6 +180,12 @@ export function PillMenu({
         >
           {menuHeader?.(() => setOpen(false))}
           {items.map(renderItem)}
+          {loading && (
+            <div className={styles.menu_loading} role="status">
+              <Spinner size={12} />
+              <span>{loadingLabel ?? t("loading", "Loading…")}</span>
+            </div>
+          )}
           {footerItems && footerItems.length > 0 && (
             <>
               {(items.length > 0 || menuHeader) && <div className={styles.menu_sep} />}

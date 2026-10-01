@@ -27,6 +27,7 @@ import type {
 import { useDocumentTheme } from "../../hooks/useDocumentTheme";
 import { DecisionAssetFrame } from "../DecisionAssetFrame";
 import { AttachmentRow } from "./AttachmentRow";
+import { Skeleton, SkeletonCard } from "../loading";
 import styles from "./DecisionToolCard.module.css";
 
 // Inline markdown: unwrap the <p> so option labels sit inside a <span>.
@@ -155,6 +156,9 @@ interface Props {
   meta?: unknown;
   /** Decision records for the session; supplies asset ids for image cards. */
   records?: DecisionHistoryRecord[];
+  /** `records` has not been fetched yet, so an unmatched card may simply be
+   *  waiting for its record rather than having none. */
+  recordsLoading?: boolean;
   isPartial?: boolean;
 }
 
@@ -171,7 +175,7 @@ interface Props {
  * Collapsed by default with a human-readable header — a long session is mostly
  * tool calls, and an always-open card would dominate it.
  */
-export function DecisionToolCard({ block, result, meta, records, isPartial }: Props) {
+export function DecisionToolCard({ block, result, meta, records, recordsLoading, isPartial }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Cross-origin preview iframe: the theme travels as a value on the URL, not
@@ -207,6 +211,10 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
   // question" — label them identically rather than leaking the raw tool name.
   const kindLabel = t("detail.decision_ask");
 
+  // Only the record can still change the reading of an unmatched card: its
+  // terminal outcome and its asset id both come from there.
+  const awaitingRecord = Boolean(recordsLoading) && !record;
+
   // A card with no parseable questions is not worth a bespoke renderer.
   if (questions.length === 0) return null;
 
@@ -229,7 +237,11 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
           </span>
         )}
         {!open && !firstAnswer && !terminalOutcome && !isPartial && !errorMessage && (
-          <span className={styles.pending_chip}>{t("detail.decision_unanswered")}</span>
+          awaitingRecord ? (
+            <Skeleton inline width={56} height={14} radius="var(--radius-pill)" />
+          ) : (
+            <span className={styles.pending_chip}>{t("detail.decision_unanswered")}</span>
+          )
         )}
         {isPartial && !result && <span className={styles.spinner}>⟳</span>}
         {errorMessage && !terminalOutcome && <span className={styles.error_badge}>error</span>}
@@ -277,6 +289,8 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                     style={{ colorScheme: theme }}
                     minHeight={160}
                   />
+                ) : q.images && q.images.length > 0 && awaitingRecord ? (
+                  <SkeletonCard height={160} />
                 ) : (
                   (q.html || (q.images && q.images.length > 0)) && (
                     <div className={styles.html_marker}>

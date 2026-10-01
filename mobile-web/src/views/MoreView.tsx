@@ -26,6 +26,8 @@ import { scanAvailability } from "../scanAvailability";
 import { PairPasteForm } from "./PairPasteForm";
 import { PairScanner } from "./PairScanner";
 import { ResumeSettingsSection } from "./ResumeSettingsSection";
+import { SkeletonNumber, Spinner } from "./loading";
+import { usePending } from "../usePending";
 import type { FleetTransport } from "../transport";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
@@ -64,8 +66,11 @@ interface Props {
   push: PushState;
   /** True when the user turned notifications off while permission stays granted. */
   pushOptedOut: boolean;
-  onEnablePush: () => void;
-  onDisablePush: () => void;
+  onEnablePush: () => void | Promise<void>;
+  onDisablePush: () => void | Promise<void>;
+  /** Link is up but the agent has not been reported yet (see
+   *  deviceRuntime.awaitingAgentReport): still connecting, not "desktop offline". */
+  agentPending?: boolean;
   onOpenRepo: () => void;
   onOpenPlans: () => void;
   onOpenWiki: () => void;
@@ -115,6 +120,7 @@ export function MoreView({
   pushOptedOut,
   onEnablePush,
   onDisablePush,
+  agentPending = false,
   onOpenRepo,
   onOpenPlans,
   onOpenWiki,
@@ -191,8 +197,18 @@ export function MoreView({
   const hhmm = (ts: number) =>
     new Date(ts).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
+  // Enabling asks for the system permission and subscribes; disabling
+  // unsubscribes every device. Both take a moment: spin the tapped button.
+  const [enablingPush, enablePush] = usePending(async () => {
+    await onEnablePush();
+  });
+  const [disablingPush, disablePush] = usePending(async () => {
+    await onDisablePush();
+  });
+
+  const connecting = !connected || (!agentOnline && agentPending);
   const connState = !connected ? "offline" : agentOnline ? "online" : "agent-offline";
-  const connLabel = !connected
+  const connLabel = connecting
     ? t("连接中…")
     : agentOnline
       ? t("桌面端在线")
@@ -476,7 +492,11 @@ export function MoreView({
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("桌面端")}</span>
             <span className={styles.connWrap}>
-              <span className={styles.connDot} data-state={connState} />
+              {connecting ? (
+                <Spinner size={10} />
+              ) : (
+                <span className={styles.connDot} data-state={connState} />
+              )}
               <span className={styles.connLabel}>{connLabel}</span>
             </span>
           </div>
@@ -488,7 +508,14 @@ export function MoreView({
             <span className={styles.rowLabel}>{t("链路耗时")}</span>
             <span className={styles.connWrap}>
               <span className={styles.connLabel}>
-                {rttSplit ? `${rttSplit.totalMs}ms` : t("等待样本…")}
+                {rttSplit ? (
+                  `${rttSplit.totalMs}ms`
+                ) : connected ? (
+                  // The first round trip is on its way; a sample lands within seconds.
+                  <SkeletonNumber width={44} />
+                ) : (
+                  t("等待样本…")
+                )}
               </span>
               {rttSplit && (
                 <span className={styles.frameCount}>
@@ -582,11 +609,21 @@ export function MoreView({
             <span className={styles.rowLabel}>{t("通知")}</span>
             {push === "granted" ? (
               pushOptedOut ? (
-                <button className={styles.actionButton} onClick={onEnablePush}>
+                <button
+                  className={styles.actionButton}
+                  onClick={() => void enablePush()}
+                  disabled={enablingPush}
+                >
+                  {enablingPush && <Spinner size={12} className={styles.actionSpinner} />}
                   {t("开启")}
                 </button>
               ) : (
-                <button className={styles.actionButton} onClick={onDisablePush}>
+                <button
+                  className={styles.actionButton}
+                  onClick={() => void disablePush()}
+                  disabled={disablingPush}
+                >
+                  {disablingPush && <Spinner size={12} className={styles.actionSpinner} />}
                   {t("停用")}
                 </button>
               )
@@ -597,7 +634,12 @@ export function MoreView({
             ) : push === "ios-needs-a2hs" ? (
               <span className={styles.rowValue}>{t("需添加到主屏幕")}</span>
             ) : (
-              <button className={styles.actionButton} onClick={onEnablePush}>
+              <button
+                className={styles.actionButton}
+                onClick={() => void enablePush()}
+                disabled={enablingPush}
+              >
+                {enablingPush && <Spinner size={12} className={styles.actionSpinner} />}
                 {t("开启")}
               </button>
             )}

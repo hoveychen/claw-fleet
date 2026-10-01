@@ -28,6 +28,8 @@ import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
 import { ThemeToggle } from "./ThemeToggle";
 import { EnvironmentPanel } from "./EnvironmentPanel";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { SkeletonCard, Spinner } from "./loading";
+import { usePending } from "../hooks/usePending";
 import styles from "./Onboarding.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -178,7 +180,13 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   );
 }
 
-function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
+function CelebrationView({
+  onDismiss,
+  dismissing,
+}: {
+  onDismiss: () => void;
+  dismissing: boolean;
+}) {
   const { t } = useTranslation();
   const soundPlayed = useRef(false);
 
@@ -196,7 +204,8 @@ function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
         <div className={styles.celebration_icon}>&#x1F389;</div>
         <h2 className={styles.celebration_title}>{t("onboarding.celebration.title")}</h2>
         <p className={styles.celebration_description}>{t("onboarding.celebration.description")}</p>
-        <button className={styles.btn_primary} onClick={onDismiss}>
+        <button className={styles.btn_primary} onClick={onDismiss} disabled={dismissing}>
+          {dismissing && <><Spinner size={12} />{" "}</>}
           {t("onboarding.dismiss")}
         </button>
       </div>
@@ -915,10 +924,16 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
   // ── Sources config ───────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
+  // Settles (success or failure) once, so the source card shows a skeleton
+  // only while the first fetch is out — never forever.
+  const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const sourcesChanged = useRef(false);
 
   useEffect(() => {
-    invoke<SourceInfo[]>("get_sources_config").then(setSources).catch(() => {});
+    invoke<SourceInfo[]>("get_sources_config")
+      .then(setSources)
+      .catch(() => {})
+      .finally(() => setSourcesLoaded(true));
   }, []);
 
   const handleToggleSource = useCallback(async (name: string, enabled: boolean) => {
@@ -933,6 +948,10 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
   // ── Hooks state ────────────────────────────────────────────────────────
   const [hooksPlan, setHooksPlan] = useState<HookSetupPlan | null>(null);
+  // The first `get_hooks_setup_plan` settled. Until then the feature toggles
+  // below only hold this page's localStorage copy and may flip when the
+  // backend prefs land, so their cards render as skeletons.
+  const [prefsSettled, setPrefsSettled] = useState(false);
 
   // ── Guard state ─────────────────────────────────────────────────────────
   const [guardState, setGuardState] = useState<FeatureState>(
@@ -1127,7 +1146,8 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
         setWikiGuidanceState(states["wiki-guidance-enabled"]);
         setModelGuidanceState(states["model-guidance-enabled"]);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPrefsSettled(true));
   }, []);
 
   // ── Notification state (tristate: concrete mode or "default") ───────────
@@ -1197,7 +1217,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, [sources]);
 
   // Wrap onDismiss: mark all features as seen, apply default-on hooks, + restart if sources changed
-  const handleDismiss = useCallback(async () => {
+  const dismissImpl = useCallback(async () => {
     // Apply hooks/guidance that are checked by default but were never toggled
     // by the user. These are all default-ON, so dismissing onboarding without
     // touching them still writes the corresponding sentinel/hook to ~/.claude.
@@ -1256,6 +1276,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     wikiGuidanceEnabled,
     modelGuidanceEnabled,
   ]);
+  // Up to ~8 sequential invokes: the button spins and drops re-clicks meanwhile.
+  const [dismissing, runDismiss] = usePending(dismissImpl);
+  const handleDismiss = useCallback(() => void runDismiss(), [runDismiss]);
 
   // Environment detection runs in the background and streams into the
   // diagnostics area — it must never block the first paint. Credential
@@ -1293,6 +1316,8 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     return () => clearTimeout(timer);
   }, [status]);
 
+  const [rechecking, runRecheck] = usePending(check);
+
   const retryCheck = useCallback(() => {
     setCheckTimedOut(false);
     check();
@@ -1313,6 +1338,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
     prevSessionCount.current = sessions.length;
   }, [sessions.length, celebrating, status]);
+
+  // Skeleton stand-in for a feature card whose toggle state is not known yet.
+  const featureCardSkeleton = <SkeletonCard height={132} />;
 
   // Determine issues
   const issues: Issue[] = [];
@@ -1376,6 +1404,12 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             </div>
           )}
 
+          {unseenFeatures.has("hooks_guard_elicitation") && !hooksPlan && !prefsSettled && (
+            <div className={styles.cards}>
+              <SkeletonCard height={220} />
+            </div>
+          )}
+
           {unseenFeatures.has("hooks_guard_elicitation") && hooksPlan && (
             <div className={styles.cards}>
               <HooksSetupCard
@@ -1392,42 +1426,58 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
           {unseenFeatures.has("global_ask") && (
             <div className={styles.cards}>
-              <InteractionModeCard
-                value={interactionModeState}
-                defaultOn={featureDefault("interaction-mode-enabled")}
-                onChange={handleToggleInteractionMode}
-                elicitationEnabled={elicitationEnabled}
-              />
+              {prefsSettled ? (
+                <InteractionModeCard
+                  value={interactionModeState}
+                  defaultOn={featureDefault("interaction-mode-enabled")}
+                  onChange={handleToggleInteractionMode}
+                  elicitationEnabled={elicitationEnabled}
+                />
+              ) : (
+                featureCardSkeleton
+              )}
             </div>
           )}
 
           {unseenFeatures.has("prd_discipline") && (
             <div className={styles.cards}>
-              <PrdModeCard
-                value={prdModeState}
-                defaultOn={featureDefault("prd-mode-enabled")}
-                onChange={handleTogglePrdMode}
-              />
+              {prefsSettled ? (
+                <PrdModeCard
+                  value={prdModeState}
+                  defaultOn={featureDefault("prd-mode-enabled")}
+                  onChange={handleTogglePrdMode}
+                />
+              ) : (
+                featureCardSkeleton
+              )}
             </div>
           )}
 
           {unseenFeatures.has("wiki_guidance") && (
             <div className={styles.cards}>
-              <WikiGuidanceCard
-                value={wikiGuidanceState}
-                defaultOn={featureDefault("wiki-guidance-enabled")}
-                onChange={handleToggleWikiGuidance}
-              />
+              {prefsSettled ? (
+                <WikiGuidanceCard
+                  value={wikiGuidanceState}
+                  defaultOn={featureDefault("wiki-guidance-enabled")}
+                  onChange={handleToggleWikiGuidance}
+                />
+              ) : (
+                featureCardSkeleton
+              )}
             </div>
           )}
 
           {unseenFeatures.has("model_guidance") && (
             <div className={styles.cards}>
-              <ModelGuidanceCard
-                value={modelGuidanceState}
-                defaultOn={featureDefault("model-guidance-enabled")}
-                onChange={handleToggleModelGuidance}
-              />
+              {prefsSettled ? (
+                <ModelGuidanceCard
+                  value={modelGuidanceState}
+                  defaultOn={featureDefault("model-guidance-enabled")}
+                  onChange={handleToggleModelGuidance}
+                />
+              ) : (
+                featureCardSkeleton
+              )}
             </div>
           )}
 
@@ -1442,7 +1492,8 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             )}
 
           <div className={styles.footer}>
-            <button className={styles.btn_primary} onClick={handleDismiss}>
+            <button className={styles.btn_primary} onClick={handleDismiss} disabled={dismissing}>
+              {dismissing && <><Spinner size={12} />{" "}</>}
               {t("onboarding.dismiss")}
             </button>
           </div>
@@ -1456,7 +1507,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     <div className={styles.overlay}>
       <div className={styles.container}>
         {celebrating ? (
-          <CelebrationView onDismiss={handleDismiss} />
+          <CelebrationView onDismiss={handleDismiss} dismissing={dismissing} />
         ) : (
           <>
             <div className={styles.header}>
@@ -1491,7 +1542,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 </div>
               ) : (
                 <div className={styles.loading}>
-                  <div className={styles.spinner} />
+                  <Spinner size={20} />
                   <span className={styles.loading_text}>{t("onboarding.checking")}</span>
                 </div>
               )
@@ -1558,6 +1609,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
               </button>
               {advancedOpen && (
                 <div className={styles.cards}>
+                  {!sourcesLoaded && <SkeletonCard height={150} />}
                   {hasMultipleSources && sources.length > 0 && (
                     <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
                   )}
@@ -1573,6 +1625,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                     userTitle={userTitle}
                     onUserTitleChange={handleUserTitleChange}
                   />
+                  {hasClaudeCode && !hooksPlan && !prefsSettled && <SkeletonCard height={220} />}
                   {hasClaudeCode && hooksPlan && (
                     <HooksSetupCard
                       hooksPlan={hooksPlan}
@@ -1585,33 +1638,49 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                     />
                   )}
                   {hasClaudeCode && (
-                    <InteractionModeCard
-                      value={interactionModeState}
-                      defaultOn={featureDefault("interaction-mode-enabled")}
-                      onChange={handleToggleInteractionMode}
-                      elicitationEnabled={elicitationEnabled}
-                    />
+                    prefsSettled ? (
+                      <InteractionModeCard
+                        value={interactionModeState}
+                        defaultOn={featureDefault("interaction-mode-enabled")}
+                        onChange={handleToggleInteractionMode}
+                        elicitationEnabled={elicitationEnabled}
+                      />
+                    ) : (
+                      featureCardSkeleton
+                    )
                   )}
                   {hasClaudeCode && (
-                    <PrdModeCard
-                      value={prdModeState}
-                      defaultOn={featureDefault("prd-mode-enabled")}
-                      onChange={handleTogglePrdMode}
-                    />
+                    prefsSettled ? (
+                      <PrdModeCard
+                        value={prdModeState}
+                        defaultOn={featureDefault("prd-mode-enabled")}
+                        onChange={handleTogglePrdMode}
+                      />
+                    ) : (
+                      featureCardSkeleton
+                    )
                   )}
                   {hasClaudeCode && (
-                    <WikiGuidanceCard
-                      value={wikiGuidanceState}
-                      defaultOn={featureDefault("wiki-guidance-enabled")}
-                      onChange={handleToggleWikiGuidance}
-                    />
+                    prefsSettled ? (
+                      <WikiGuidanceCard
+                        value={wikiGuidanceState}
+                        defaultOn={featureDefault("wiki-guidance-enabled")}
+                        onChange={handleToggleWikiGuidance}
+                      />
+                    ) : (
+                      featureCardSkeleton
+                    )
                   )}
                   {hasClaudeCode && (
-                    <ModelGuidanceCard
-                      value={modelGuidanceState}
-                      defaultOn={featureDefault("model-guidance-enabled")}
-                      onChange={handleToggleModelGuidance}
-                    />
+                    prefsSettled ? (
+                      <ModelGuidanceCard
+                        value={modelGuidanceState}
+                        defaultOn={featureDefault("model-guidance-enabled")}
+                        onChange={handleToggleModelGuidance}
+                      />
+                    ) : (
+                      featureCardSkeleton
+                    )
                   )}
                   {shouldShowSkillInterop(hasClaudeCode, status?.detected_tools) && (
                     <SkillInteropCard
@@ -1625,11 +1694,17 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
             <div className={styles.footer}>
               {status !== null && issues.length > 0 && (
-                <button className={styles.btn_secondary} onClick={check}>
+                <button
+                  className={styles.btn_secondary}
+                  onClick={() => void runRecheck()}
+                  disabled={rechecking}
+                >
+                  {rechecking && <><Spinner size={12} />{" "}</>}
                   {t("onboarding.recheck")}
                 </button>
               )}
-              <button className={styles.btn_primary} onClick={handleDismiss}>
+              <button className={styles.btn_primary} onClick={handleDismiss} disabled={dismissing}>
+                {dismissing && <><Spinner size={12} />{" "}</>}
                 {t("onboarding.dismiss")}
               </button>
             </div>

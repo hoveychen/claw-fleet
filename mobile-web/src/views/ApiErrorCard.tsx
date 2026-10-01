@@ -7,13 +7,14 @@ import {
 } from "../../../shared-ts/syntheticError";
 import { t } from "../i18n";
 import type { FleetTransport } from "../relay";
-import { modelChoicesFor, useModelCatalog } from "../useModelCatalog";
+import { modelChoicesFor, useModelCatalogState } from "../useModelCatalog";
 import {
   resumeOverRelay,
   runApiErrorAction,
   type ActionOutcome,
   type ApiErrorSession,
 } from "./apiErrorActions";
+import { Skeleton, Spinner } from "./loading";
 import styles from "./SessionDetailView.module.css";
 
 /**
@@ -44,7 +45,8 @@ export function ApiErrorCard({
   const [busy, setBusy] = useState<ErrorAction | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
-  const catalog = useModelCatalog(client ?? null);
+  const { catalog, loaded: catalogLoaded } = useModelCatalogState(client ?? null);
+  const catalogLoading = !!client && !catalogLoaded;
   const countdown = useCountdown(info);
 
   const canAct = !!session && !!client;
@@ -126,6 +128,7 @@ export function ApiErrorCard({
               disabled={busy != null}
               onClick={() => void run(a)}
             >
+              {busy === a && <Spinner size={12} />}
               {busy === a ? t("处理中…") : actionLabel(a)}
             </button>
           ))}
@@ -133,8 +136,15 @@ export function ApiErrorCard({
       )}
       {picking && (
         <div className={styles.apiErrorPicker} data-testid="api-error-model-picker">
-          {models.length === 0 ? (
-            <span className={styles.apiErrorNote}>{t("模型列表加载中…")}</span>
+          {models.length === 0 && catalogLoading ? (
+            // Chip-shaped placeholders while the catalog is fetched.
+            <span role="status" aria-label={t("模型列表加载中…")} style={{ display: "contents" }}>
+              {[72, 96, 64].map((w) => (
+                <Skeleton key={w} inline width={w} height={34} radius={8} />
+              ))}
+            </span>
+          ) : models.length === 0 ? (
+            <span className={styles.apiErrorNote}>{t("没有可切换的模型")}</span>
           ) : (
             models.map(([value, label]) => (
               <button

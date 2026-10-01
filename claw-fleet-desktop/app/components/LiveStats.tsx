@@ -6,6 +6,7 @@ import type { CostSample, SpeedSample } from "../store";
 import { useSessionsStore } from "../store";
 import { fmtRailCount, fmtRailMoney } from "../railNumbers";
 import { RailStatTile } from "./RailStatTile";
+import { SkeletonNumber } from "./loading";
 import styles from "./LiveStats.module.css";
 
 function formatClock(ms: number): string {
@@ -61,25 +62,36 @@ export function LiveStats({
   const [hoverSpeed, setHoverSpeed] = useState<SpeedSample | null>(null);
   const [hoverCost, setHoverCost] = useState<CostSample | null>(null);
 
-  const currentSpeed =
-    speedHistory.length > 0 ? speedHistory[speedHistory.length - 1].speed : 0;
-  const currentCost =
-    costHistory.length > 0
-      ? costHistory[costHistory.length - 1].costPerMin
-      : 0;
+  // Both histories gain a sample on every scan tick, so an empty history means
+  // "no scan has landed yet" — not "0 tok/s". Render a placeholder until then.
+  const speedReady = speedHistory.length > 0;
+  const costReady = costHistory.length > 0;
+  const currentSpeed = speedReady ? speedHistory[speedHistory.length - 1].speed : 0;
+  const currentCost = costReady ? costHistory[costHistory.length - 1].costPerMin : 0;
 
   if (collapsed) {
+    // Before the first scan sample there is no value yet: number skeleton, not 0.
     return (
       <div className={styles.tiles} data-wizard="token-speed">
         <RailStatTile
-          value={fmtRailCount(currentSpeed)}
+          value={speedReady ? fmtRailCount(currentSpeed) : ""}
+          loading={!speedReady}
           label={t("chart.unit")}
-          title={`${t("chart.title")}: ${currentSpeed.toFixed(1)} ${t("chart.unit")}`}
+          title={
+            speedReady
+              ? `${t("chart.title")}: ${currentSpeed.toFixed(1)} ${t("chart.unit")}`
+              : `${t("chart.title")}: ${t("loading")}`
+          }
         />
         <RailStatTile
-          value={fmtRailMoney(currentCost)}
+          value={costReady ? fmtRailMoney(currentCost) : ""}
+          loading={!costReady}
           label={t("cost_chart.unit")}
-          title={`${t("cost_chart.title")}: $${currentCost.toFixed(2)} ${t("cost_chart.unit")}`}
+          title={
+            costReady
+              ? `${t("cost_chart.title")}: $${currentCost.toFixed(2)} ${t("cost_chart.unit")}`
+              : `${t("cost_chart.title")}: ${t("loading")}`
+          }
         />
       </div>
     );
@@ -102,7 +114,7 @@ export function LiveStats({
             <span
               className={`${styles.kpi_value} ${hoverSpeed ? styles.kpi_value_past : ""}`}
             >
-              {speedShown.toFixed(1)}
+              {speedReady ? speedShown.toFixed(1) : <SkeletonNumber width={28} />}
             </span>
             <span className={styles.kpi_unit}>{t("chart.unit")}</span>
           </div>
@@ -118,7 +130,7 @@ export function LiveStats({
             <span
               className={`${styles.kpi_value} ${hoverCost ? styles.kpi_value_past : ""}`}
             >
-              ${costShown.toFixed(2)}
+              {costReady ? `$${costShown.toFixed(2)}` : <SkeletonNumber width={36} />}
             </span>
             <span className={styles.kpi_unit}>{t("cost_chart.unit")}</span>
           </div>

@@ -1,5 +1,5 @@
-import { Languages, LoaderCircle, MessageCircleQuestion, PencilLine, Scale, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { Languages, MessageCircleQuestion, PencilLine, Scale, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import {
   EXPLAIN_MARK_SELECT_EVENT,
@@ -8,6 +8,7 @@ import {
 } from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
 import type { ExplainPreset } from "../sessionExplain";
+import { Spinner } from "./loading";
 import styles from "./SelectionAskBar.module.css";
 
 /**
@@ -54,6 +55,9 @@ export function SelectionAskBar({
   const readTimer = useRef<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // The preset just tapped: the bar stays up with a spinner on that button
+  // until the parent's submit settles (`busy` drops), then goes away.
+  const [firing, setFiring] = useState<ExplainPreset | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -142,19 +146,31 @@ export function SelectionAskBar({
     if (custom) inputRef.current?.focus();
   }, [custom]);
 
+  // `onAsk` flips `busy` on synchronously; once it is off again the submit
+  // has settled (or never started) and the bar is done.
+  useEffect(() => {
+    if (firing && !busy) {
+      setFiring(null);
+      setShown(null);
+      setCustom(false);
+      setQuestion("");
+    }
+  }, [firing, busy]);
+
   if (!shown) return null;
   const fire = (preset: ExplainPreset, q?: string) => {
-    if (busy) return;
+    if (busy || firing) return;
     onAsk(shown.sel, preset, q);
-    setShown(null);
-    setCustom(false);
-    setQuestion("");
+    setFiring(preset);
   };
   const dismiss = () => {
+    setFiring(null);
     setShown(null);
     setCustom(false);
     setQuestion("");
   };
+  const presetIcon = (preset: ExplainPreset, icon: ReactNode) =>
+    firing === preset ? <Spinner size={14} /> : icon;
   const hold = () => {
     holding.current = true;
   };
@@ -199,7 +215,7 @@ export function SelectionAskBar({
             enterKeyHint="send"
           />
           <button type="submit" className={styles.send} disabled={busy || !question.trim()}>
-            {busy ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : null}
+            {busy ? <Spinner size={14} /> : null}
             {t("发送")}
           </button>
           <button type="button" className={styles.btn} onClick={dismiss} aria-label={t("取消")}>
@@ -209,15 +225,15 @@ export function SelectionAskBar({
       ) : (
         <>
           <button type="button" className={styles.btn} onClick={() => fire("explain")} disabled={busy}>
-            <MessageCircleQuestion size={14} strokeWidth={1.8} aria-hidden="true" />
+            {presetIcon("explain", <MessageCircleQuestion size={14} strokeWidth={1.8} aria-hidden="true" />)}
             {t("解释")}
           </button>
           <button type="button" className={styles.btn} onClick={() => fire("translate")} disabled={busy}>
-            <Languages size={14} strokeWidth={1.8} aria-hidden="true" />
+            {presetIcon("translate", <Languages size={14} strokeWidth={1.8} aria-hidden="true" />)}
             {t("翻译")}
           </button>
           <button type="button" className={styles.btn} onClick={() => fire("rationale")} disabled={busy}>
-            <Scale size={14} strokeWidth={1.8} aria-hidden="true" />
+            {presetIcon("rationale", <Scale size={14} strokeWidth={1.8} aria-hidden="true" />)}
             {t("为什么")}
           </button>
           <button

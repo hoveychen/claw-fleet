@@ -65,6 +65,8 @@
 
 .toolbar button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
 .toolbar button:disabled { opacity: 0.35; cursor: default; }
+/* The running action keeps full strength so its spinner reads as progress. */
+.toolbar button[aria-busy="true"]:disabled { opacity: 1; }
 .zoom { min-width: 42px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
 .divider { width: 1px; height: 20px; margin: 0 4px; background: rgba(255, 255, 255, 0.22); }
 .status { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 5px; background: rgba(24, 24, 24, 0.92); color: #fff; font-size: 12px; cursor: default; }
@@ -91,3 +93,4 @@
   background: rgba(0, 0, 0, 0.7);
   border-color: rgba(255, 255, 255, 0.5);
 }
+.placeholder { border-radius: var(--radius-sm); overflow: hidden; }

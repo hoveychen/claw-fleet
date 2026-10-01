@@ -134,6 +134,34 @@
   color: var(--color-text-dim);
 }
 
+.load_earlier_busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── First-load skeleton (ConversationSkeleton) ── */
+
+/* The real list scrolls; the placeholder only has to fill the top of it. */
+.skeleton_list {
+  overflow: hidden;
+}
+
+.skeleton_prose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+/* The prompt is plain text here, not UserContent runs, so keep its newlines
+   and cap a long paste instead of letting it push the skeleton off screen. */
+.skeleton_prompt {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: hidden;
+}
+
 /* Message row.
    Roles are told apart by layout, the way claude.ai and ChatGPT do it: the
    assistant runs full width with no bubble, the user gets a narrow bubble

@@ -6,6 +6,7 @@ import "./App.css";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "./markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "./markdown/plugins";
 import { applyWindowTheme, useUIStore } from "./store";
+import { SkeletonText } from "./components/loading";
 import styles from "./PreviewApp.module.css";
 
 type PreviewPayload = {
@@ -19,6 +20,11 @@ function PreviewApp() {
     const params = new URLSearchParams(window.location.search);
     return params.get("markdown") ?? "";
   });
+  // Without `?markdown=` the content arrives on the first `preview://update`
+  // event; until then the body is a skeleton rather than a blank page.
+  const [received, setReceived] = useState<boolean>(() =>
+    new URLSearchParams(window.location.search).has("markdown"),
+  );
   const [title, setTitle] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("title") ?? "Preview";
@@ -44,6 +50,7 @@ function PreviewApp() {
     const off = listen<PreviewPayload>("preview://update", (event) => {
       if (disposed) return;
       setContent(event.payload.markdown ?? "");
+      setReceived(true);
       if (event.payload.title) setTitle(event.payload.title);
     });
     return () => {
@@ -58,7 +65,9 @@ function PreviewApp() {
         <span className={styles.title}>{title}</span>
       </div>
       <div className={styles.body}>
-        {content ? (
+        {!received ? (
+          <SkeletonText lines={8} />
+        ) : content ? (
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>
             {normalizeSvgBlankLines(content)}
           </ReactMarkdown>

@@ -5,6 +5,8 @@ import {
   parseFrameHeight,
   shouldApplyFrameHeight,
 } from "../decisionFrame";
+import { Skeleton } from "./loading";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 /**
  * The iframe every decision card renders its `html` preview in — the one place
@@ -30,6 +32,7 @@ export function AutoHeightFrame({
   className,
   style,
   minHeight = FRAME_MIN_HEIGHT,
+  pending = false,
 }: {
   title: string;
   src?: string;
@@ -37,9 +40,18 @@ export function AutoHeightFrame({
   className?: string;
   style?: CSSProperties;
   minHeight?: number;
+  /** The caller is still producing the document (e.g. fetching `srcDoc`):
+   *  keep the loading box up even though the empty frame has fired `load`. */
+  pending?: boolean;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState<number | null>(null);
+  // Which document the frame last finished loading. Keyed by the inputs so a
+  // card switch puts the loading box back instead of showing a blank frame.
+  const docKey = `${src ?? ""}\u0000${srcDoc ?? ""}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = pending || loadedKey !== docKey;
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     // A different document is about to load: drop the old measurement rather
@@ -56,20 +68,30 @@ export function AutoHeightFrame({
   }, [src, srcDoc]);
 
   return (
-    <iframe
-      ref={ref}
-      title={title}
-      sandbox="allow-scripts"
-      src={src}
-      srcDoc={srcDoc}
-      className={className}
-      style={{
-        ...style,
-        // Until the first message lands (old cards whose stored html predates the
-        // script, or a document that never loads) the min-height still applies.
-        height: height === null ? undefined : `${height}px`,
-        minHeight: `${minHeight}px`,
-      }}
-    />
+    <div style={{ position: "relative" }}>
+      <iframe
+        ref={ref}
+        onLoad={() => setLoadedKey(docKey)}
+        title={title}
+        sandbox="allow-scripts"
+        src={src}
+        srcDoc={srcDoc}
+        className={className}
+        style={{
+          ...style,
+          // Until the first message lands (old cards whose stored html predates the
+          // script, or a document that never loads) the min-height still applies.
+          height: height === null ? undefined : `${height}px`,
+          minHeight: `${minHeight}px`,
+        }}
+      />
+      {loading && showSkeleton && (
+        // Over the frame rather than instead of it: the iframe has to stay
+        // mounted to load at all.
+        <div role="status" aria-busy="true" style={{ position: "absolute", inset: 0 }}>
+          <Skeleton height="100%" radius="0.4rem" />
+        </div>
+      )}
+    </div>
   );
 }

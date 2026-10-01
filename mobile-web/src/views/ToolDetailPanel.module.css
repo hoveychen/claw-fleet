@@ -234,6 +234,10 @@
   cursor: zoom-in;
 }
 
+.loadFullSpinner {
+  margin-right: 5px;
+}
+
 .loadFull {
   align-self: flex-start;
   border: 1px solid var(--color-border-strong);

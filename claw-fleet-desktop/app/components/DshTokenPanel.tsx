@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { DshSessionCost, DshTokenBreakdown } from "../types";
 import styles from "./TokenSpendPanel.module.css";
+import { TokenPanelSkeleton } from "./TokenSpendPanel";
+import { SkeletonNumber } from "./loading";
 
 interface Props {
   /** `dsh://<session-id>` — dsh sessions have no file, so this is a URI. */
@@ -41,6 +43,9 @@ export function DshTokenPanel({ uri }: Props) {
   const { t } = useTranslation();
   const [data, setData] = useState<DshTokenBreakdown | null>(null);
   const [cost, setCost] = useState<DshSessionCost | null>(null);
+  // The cost lookup is slow and may fail on its own; "still asking" and "could
+  // not get a figure" must not both read as "—".
+  const [costState, setCostState] = useState<CostState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -62,25 +67,29 @@ export function DshTokenPanel({ uri }: Props) {
     // Deliberately not awaited alongside the breakdown: a slow or failing cost
     // lookup must never keep the token numbers off the screen.
     setCost(null);
+    setCostState("loading");
     invoke<DshSessionCost>("get_dsh_session_cost", { uri })
       .then((c) => {
-        if (!cancelled) setCost(c);
+        if (cancelled) return;
+        setCost(c);
+        setCostState("done");
       })
       .catch(() => {
-        /* the panel simply shows no cost card */
+        if (!cancelled) setCostState("failed");
       });
     return () => {
       cancelled = true;
     };
   }, [uri]);
 
-  if (loading)
-    return <div className={styles.empty}>{t("dsh_token.loading") || "Loading…"}</div>;
+  if (loading) return <TokenPanelSkeleton />;
   if (error) return <div className={styles.empty}>{error}</div>;
   if (!data) return <div className={styles.empty}>{t("dsh_token.no_data") || "No data"}</div>;
 
-  return <DshTokenView data={data} cost={cost} />;
+  return <DshTokenView data={data} cost={cost} costState={costState} />;
 }
+
+type CostState = "loading" | "done" | "failed";
 
 interface Row {
   key: string;
@@ -141,9 +150,12 @@ function costCallsLabel(
 export function DshTokenView({
   data,
   cost,
+  costState = "done",
 }: {
   data: DshTokenBreakdown;
   cost?: DshSessionCost | null;
+  /** Defaults to "done" so a caller holding a settled cost needs no flag. */
+  costState?: CostState;
 }) {
   const { t } = useTranslation();
 
@@ -205,8 +217,22 @@ export function DshTokenView({
         />
         <KpiCard
           label={t("dsh_token.kpi_cost") || "Real spend"}
-          primary={cost?.totalUsd != null ? fmtUsd(cost.totalUsd) : "—"}
-          secondary={cost ? costCallsLabel(cost, t) : ""}
+          primary={
+            costState === "loading" ? (
+              <SkeletonNumber width={72} height={22} />
+            ) : cost?.totalUsd != null ? (
+              fmtUsd(cost.totalUsd)
+            ) : (
+              "—"
+            )
+          }
+          secondary={
+            costState === "failed"
+              ? t("dsh_token.cost_failed", "获取失败")
+              : cost
+                ? costCallsLabel(cost, t)
+                : ""
+          }
         />
         <KpiCard
           label={t("dsh_token.kpi_context") || "Context used"}
@@ -319,7 +345,7 @@ function KpiCard({
   secondary,
 }: {
   label: string;
-  primary: string;
+  primary: ReactNode;
   secondary?: string;
 }) {
   return (

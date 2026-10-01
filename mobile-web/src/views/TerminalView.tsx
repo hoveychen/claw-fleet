@@ -15,6 +15,8 @@ import { clearProc, killProc, listProcs, runProc, type ProcRecord } from "../ter
 import { isDefaultShellCommand } from "../../../shared-ts/procShell";
 import styles from "./TerminalView.module.css";
 import { AppHeader } from "./AppHeader";
+import { SkeletonCard, Spinner } from "./loading";
+import { usePending } from "../usePending";
 
 // xterm and its CSS only download when a terminal actually opens — see the note at
 // the top of TerminalPane.
@@ -97,6 +99,10 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The current workspace's proc list has come back (or failed). Until then an
+  // empty `procs` means "not known yet", not "no terminals".
+  const [listed, setListed] = useState(false);
+  const listedPath = useRef<string | null>(null);
   // Auto-spawn shell at most once per workspace: fetching the list is async, and without
   // this gate, "list empty → spawn one" would spawn again on second render.
   const autoSpawned = useRef<string | null>(null);
@@ -131,6 +137,14 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     if (!client || !ws) return;
     let stale = false;
     setError(null);
+    setListed(false);
+    // Another workspace's tabs would be wrong here, not just stale: drop them.
+    // A reconnect on the same workspace keeps them so the live pane survives.
+    if (listedPath.current !== ws.path) {
+      setProcs([]);
+      setActiveId(null);
+    }
+    listedPath.current = ws.path;
     void (async () => {
       try {
         const list = await listProcs(client, ws.path);
@@ -144,6 +158,8 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
         }
       } catch (e) {
         if (!stale) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!stale) setListed(true);
       }
     })();
     return () => {
@@ -162,17 +178,17 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     setProcs((prev) => prev.map((p) => (p.id === rec.id ? rec : p)));
   }, []);
 
-  const handleKill = useCallback(async () => {
+  const [killing, handleKill] = usePending(async () => {
     if (!client || !active) return;
     try {
       await killProc(client, active.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [client, active]);
+  });
 
   /** Close an exited terminal: delete record + remove from tabs. */
-  const handleClear = useCallback(async () => {
+  const [clearing, handleClear] = usePending(async () => {
     if (!client || !active) return;
     try {
       await clearProc(client, active.id);
@@ -184,7 +200,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [client, active]);
+  });
 
   // ── No workspace selected yet: choose first ──────────────────────────────
   if (!ws) {
@@ -230,13 +246,23 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
         actions={
           <>
             {exited ? (
-              <button className={styles.iconButton} onClick={() => void handleClear()}>
-                <Trash2 size={16} />
+              <button
+                className={styles.iconButton}
+                onClick={() => void handleClear()}
+                disabled={clearing}
+                aria-busy={clearing || undefined}
+              >
+                {clearing ? <Spinner size={12} /> : <Trash2 size={16} />}
               </button>
             ) : (
               active && (
-                <button className={styles.iconButton} onClick={() => void handleKill()}>
-                  <Square size={14} />
+                <button
+                  className={styles.iconButton}
+                  onClick={() => void handleKill()}
+                  disabled={killing}
+                  aria-busy={killing || undefined}
+                >
+                  {killing ? <Spinner size={12} /> : <Square size={14} />}
                 </button>
               )
             )}
@@ -245,8 +271,9 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
               onClick={() => void spawn()}
               disabled={busy}
               aria-label={t("新终端")}
+              aria-busy={busy || undefined}
             >
-              <Plus size={18} />
+              {busy ? <Spinner size={12} /> : <Plus size={18} />}
             </button>
           </>
         }
@@ -271,7 +298,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
       {error && <div className={styles.error}>{error}</div>}
 
       {client && active ? (
-        <Suspense fallback={<EmptyState compact icon={Folder} title={t("加载中…")} />}>
+        <Suspense fallback={<SkeletonCard className={styles.paneSkeleton} height="100%" />}>
           <TerminalPane
             key={active.id}
             client={client}
@@ -284,8 +311,17 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
             onCtrlConsumed={() => setCtrl(false)}
           />
         </Suspense>
+      ) : busy ? (
+        <div className={styles.paneWait} role="status">
+          <Spinner size={16} />
+          {t("正在开终端…")}
+        </div>
+      ) : !client ? (
+        <EmptyState compact icon={Folder} title={t("桌面端离线")} />
+      ) : !listed && !error ? (
+        <SkeletonCard className={styles.paneSkeleton} height="100%" />
       ) : (
-        <EmptyState compact icon={Folder} title={busy ? t("正在开终端…") : t("没有终端")} />
+        <EmptyState compact icon={Folder} title={t("没有终端")} />
       )}
 
       {!exited && active && (
@@ -323,7 +359,13 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
           {active.exitCode === null || active.exitCode === undefined
             ? t("已退出")
             : t("已退出 · 退出码 {0}", String(active.exitCode))}
-          <button className={styles.exitAction} onClick={() => void spawn()}>
+          <button
+            className={styles.exitAction}
+            onClick={() => void spawn()}
+            disabled={busy}
+            aria-busy={busy || undefined}
+          >
+            {busy && <Spinner size={12} className={styles.exitSpinner} />}
             {t("重开")}
           </button>
         </div>

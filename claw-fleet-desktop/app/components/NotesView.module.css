@@ -1,0 +1,19 @@
+/* The notes tree's filter box, with room for the spinner a running search
+   shows at its right edge. A column flex box so the input keeps stretching to
+   the pane width the way it did as a direct child of the tree pane. */
+.filter_wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Centred on the input, not on the wrapper: the input carries a 6px bottom
+   margin that the wrapper's height includes. */
+.filter_spinner {
+  position: absolute;
+  right: 12px;
+  top: calc(50% - 3px);
+  transform: translateY(-50%);
+  display: inline-flex;
+  pointer-events: none;
+}

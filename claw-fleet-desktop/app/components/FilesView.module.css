@@ -768,3 +768,21 @@
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
 }
+
+/* Suffix search behind a clicked path that the tree could not reveal. */
+.reveal_searching {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 8px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+/* A row action whose request is in flight: the spinner is the cue, so keep
+   the button at full strength and only drop the pointer. */
+.proc_action:disabled,
+.proc_shortcut_run:disabled {
+  cursor: default;
+}

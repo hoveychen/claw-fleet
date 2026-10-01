@@ -7,6 +7,7 @@ import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plu
 import { useReportStore } from "../../store";
 import type { TaskReview } from "../../types";
 import styles from "./ReportView.module.css";
+import { SkeletonList } from "../loading";
 
 /**
  * The day's per-task retrospectives — the visible end of the v3 decision card's
@@ -52,9 +53,7 @@ export function TaskReviewsCard({ date }: { date: string }) {
     <div className={styles.section}>
       <h3 className={styles.section_title}>{t("report.task_reviews")}</h3>
       {!loaded ? (
-        <div className={styles.lessons_empty}>
-          <p>{t("report.loading")}</p>
-        </div>
+        <SkeletonList rows={3} meta={false} rowHeight={34} />
       ) : taskReviews.length === 0 ? (
         <div className={styles.lessons_empty}>
           <p>{t("report.no_task_reviews")}</p>

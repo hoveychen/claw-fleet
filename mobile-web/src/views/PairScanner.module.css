@@ -59,3 +59,10 @@
   color: #fff;
   font-size: var(--t-ui, 14px);
 }
+
+/* Camera warm-up ring, white on the dark viewfinder. */
+.hint .startSpinner {
+  margin-right: 6px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}

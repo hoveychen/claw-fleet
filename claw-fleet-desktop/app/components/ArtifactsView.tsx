@@ -39,6 +39,17 @@ import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
 import { useUIStore } from "../store";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
+import { usePending } from "../hooks/usePending";
+import {
+  Skeleton,
+  SkeletonCard,
+  SkeletonList,
+  SkeletonNumber,
+  SkeletonText,
+  Spinner,
+  TopProgress,
+} from "./loading";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact, downloadFolderZip } from "../mock/liveProxy";
 import { isBrowsableArchive } from "../../../shared-ts/zipDir";
@@ -309,6 +320,13 @@ export function dropKey(workspacePath: string, directory: string): string {
   return `${workspacePath}\u0000${directory}`;
 }
 
+/** A directory-tree row with a verb in flight: `zip` is the pack-and-export
+ *  button, `folder` any create / rename / delete. */
+interface TreeBusy {
+  key: string;
+  op: "zip" | "folder";
+}
+
 /**
  * Where a drop landed, or `null` when it landed nowhere it may go.
  *
@@ -494,8 +512,10 @@ export function buildArtifactDirectoryTree(
 export function ArtifactsView() {
   const { t } = useTranslation();
   const [items, setItems] = useState<Artifact[] | null>(null);
-  const [folders, setFolders] = useState<ArtifactFolder[]>([]);
-  const [usage, setUsage] = useState<StoreUsage | null>(null);
+  // null = not answered yet (skeleton), as distinct from an empty answer.
+  const [folders, setFolders] = useState<ArtifactFolder[] | null>(null);
+  // undefined = not answered yet; null = answered with nothing to show.
+  const [usage, setUsage] = useState<StoreUsage | null | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [directory, setDirectory] = useState("");
@@ -548,14 +568,34 @@ export function ArtifactsView() {
     [sortKey, sortDir],
   );
 
+  // Loads in flight. A counter, not a flag: a drop and a rollback can overlap,
+  // and the first to finish must not clear the progress bar of the other.
+  const inflight = useRef(0);
+  const [reloading, setReloading] = useState(false);
+
   const load = useCallback(async () => {
-    // `?? []` rather than the raw result: the mock's `default:` branch answers
-    // null, and a null here would blank the page on the first filter() — the
-    // exact failure MOCK_WIKI_DOCS exists to prevent for the wiki.
-    const list = (await invoke<Artifact[]>("list_artifacts").catch(() => [])) ?? [];
-    setItems(list);
-    setFolders((await invoke<ArtifactFolder[]>("list_artifact_folders").catch(() => [])) ?? []);
-    setUsage((await invoke<StoreUsage>("artifact_usage").catch(() => null)) ?? null);
+    inflight.current += 1;
+    setReloading(true);
+    try {
+      // `?? []` rather than the raw result: the mock's `default:` branch answers
+      // null, and a null here would blank the page on the first filter() — the
+      // exact failure MOCK_WIKI_DOCS exists to prevent for the wiki. The three
+      // reads are independent, so they go out together and land as they come.
+      await Promise.all([
+        invoke<Artifact[]>("list_artifacts")
+          .catch(() => [])
+          .then((list) => setItems(list ?? [])),
+        invoke<ArtifactFolder[]>("list_artifact_folders")
+          .catch(() => [])
+          .then((list) => setFolders(list ?? [])),
+        invoke<StoreUsage>("artifact_usage")
+          .catch(() => null)
+          .then((u) => setUsage(u ?? null)),
+      ]);
+    } finally {
+      inflight.current -= 1;
+      if (inflight.current === 0) setReloading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -577,7 +617,7 @@ export function ArtifactsView() {
   }, [artifactNav, items, clearArtifactNav]);
 
   const directoryTree = useMemo(
-    () => buildArtifactDirectoryTree(items ?? [], folders),
+    () => buildArtifactDirectoryTree(items ?? [], folders ?? []),
     [items, folders],
   );
 
@@ -657,6 +697,26 @@ export function ArtifactsView() {
     [t],
   );
 
+  // Which selection-bar verb is running, so that button (and only that one)
+  // swaps its icon for a spinner. Set before any dialog the verb opens, so a
+  // second click while the dialog is up is refused rather than queued.
+  const [batchKind, setBatchKind] = useState<"move" | "export" | "delete" | null>(null);
+  const batchGuard = useRef(false);
+  const withBatch = useCallback(
+    async (kind: "move" | "export" | "delete", run: () => Promise<void>) => {
+      if (batchGuard.current) return;
+      batchGuard.current = true;
+      setBatchKind(kind);
+      try {
+        await run();
+      } finally {
+        batchGuard.current = false;
+        setBatchKind(null);
+      }
+    },
+    [],
+  );
+
   const batchDelete = useCallback(async () => {
     const items = checkedItems;
     if (
@@ -668,10 +728,12 @@ export function ArtifactsView() {
     ) {
       return;
     }
-    await runBatch(items, (a) => invoke("delete_artifact", { id: a.id }));
-    clearChecked();
-    await load();
-  }, [checkedItems, runBatch, clearChecked, load, t]);
+    await withBatch("delete", async () => {
+      await runBatch(items, (a) => invoke("delete_artifact", { id: a.id }));
+      clearChecked();
+      await load();
+    });
+  }, [checkedItems, runBatch, clearChecked, load, t, withBatch]);
 
   const batchMove = useCallback(async () => {
     const items = checkedItems;
@@ -685,41 +747,60 @@ export function ArtifactsView() {
       items[0]?.path ?? "",
     );
     if (target === null) return;
-    await runBatch(items, async (a) => {
-      await invoke<Artifact>("update_artifact", { id: a.id, path: target });
+    await withBatch("move", async () => {
+      await runBatch(items, async (a) => {
+        await invoke<Artifact>("update_artifact", { id: a.id, path: target });
+      });
+      clearChecked();
+      await load();
     });
-    clearChecked();
-    await load();
-  }, [checkedItems, runBatch, clearChecked, load, t]);
+  }, [checkedItems, runBatch, clearChecked, load, t, withBatch]);
 
-  const batchExport = useCallback(async () => {
-    const items = checkedItems;
-    const names = uniqueExportNames(items.map((a) => a.name));
-    // A tab cannot be handed a destination directory, so it falls back to the
-    // browser's own download folder, one file at a time — same split the
-    // single-artifact export already makes.
-    if (isWebBuild()) {
-      await runBatch(items, (a, i) => downloadArtifact(a.id, names[i]));
-      return;
-    }
-    const dir = await openDialog({ multiple: false, directory: true });
-    if (typeof dir !== "string") return;
-    await runBatch(items, (a, i) =>
-      invoke("export_artifact", { id: a.id, dest: joinExportPath(dir, names[i]) }),
-    );
-  }, [checkedItems, runBatch]);
+  const batchExport = useCallback(
+    () =>
+      withBatch("export", async () => {
+        const items = checkedItems;
+        const names = uniqueExportNames(items.map((a) => a.name));
+        // A tab cannot be handed a destination directory, so it falls back to the
+        // browser's own download folder, one file at a time — same split the
+        // single-artifact export already makes.
+        if (isWebBuild()) {
+          await runBatch(items, (a, i) => downloadArtifact(a.id, names[i]));
+          return;
+        }
+        const dir = await openDialog({ multiple: false, directory: true });
+        if (typeof dir !== "string") return;
+        await runBatch(items, (a, i) =>
+          invoke("export_artifact", { id: a.id, dest: joinExportPath(dir, names[i]) }),
+        );
+      }),
+    [checkedItems, runBatch, withBatch],
+  );
+
+  // Artifacts with an `update_artifact` outstanding. Their star button shows a
+  // spinner and refuses clicks, and the detail pane marks the save, until the
+  // round trip lands — the star only flips once the store has it.
+  const [patching, setPatching] = useState<ReadonlySet<string>>(() => new Set());
+  const patchingRef = useRef(new Set<string>());
 
   const patch = useCallback(
     async (
       id: string,
       fields: { title?: string; note?: string; starred?: boolean; path?: string },
     ) => {
+      // A second toggle while the first is in flight would race it.
+      if (fields.starred !== undefined && patchingRef.current.has(id)) return;
+      patchingRef.current.add(id);
+      setPatching(new Set(patchingRef.current));
       try {
         const updated = await invoke<Artifact>("update_artifact", { id, ...fields });
         setItems((prev) => (prev ?? []).map((a) => (a.id === id ? updated : a)));
         setError(null);
       } catch (e) {
         setError(String(e));
+      } finally {
+        patchingRef.current.delete(id);
+        setPatching(new Set(patchingRef.current));
       }
     },
     [],
@@ -732,28 +813,42 @@ export function ArtifactsView() {
    * artifact under it server-side, so the artifact list is stale too and
    * patching only the folder array would leave the counts wrong.
    */
+  // The tree row a folder verb is running on (its drop key), and which verb —
+  // the row shows an inline spinner until the op and its reload are done.
+  const [treeBusy, setTreeBusy] = useState<TreeBusy | null>(null);
+
   const folderOp = useCallback(
-    async (op: () => Promise<unknown>) => {
+    async (rowKey: string, op: () => Promise<unknown>) => {
+      setTreeBusy({ key: rowKey, op: "folder" });
       try {
         await op();
         setError(null);
         await load();
       } catch (e) {
         setError(String(e));
+      } finally {
+        setTreeBusy(null);
       }
     },
     [load],
   );
 
   const createFolder = useCallback(
-    (workspacePath: string, path: string) =>
-      folderOp(() => invoke("create_artifact_folder", { workspacePath, path })),
+    (workspacePath: string, path: string) => {
+      // The spinner sits on the parent row — the new one does not exist yet.
+      const parent = path.split("/").slice(0, -1).join("/");
+      return folderOp(dropKey(workspacePath, parent), () =>
+        invoke("create_artifact_folder", { workspacePath, path }),
+      );
+    },
     [folderOp],
   );
 
   const renameFolder = useCallback(
     (workspacePath: string, from: string, to: string) =>
-      folderOp(() => invoke("rename_artifact_folder", { workspacePath, from, to })),
+      folderOp(dropKey(workspacePath, from), () =>
+        invoke("rename_artifact_folder", { workspacePath, from, to }),
+      ),
     [folderOp],
   );
 
@@ -765,8 +860,14 @@ export function ArtifactsView() {
    * browser build there is no dialog to show — the server streams the archive
    * as a download instead, which `downloadFolderZip` handles.
    */
+  const zipGuard = useRef(false);
   const exportFolder = useCallback(
     async (workspacePath: string, directory: string) => {
+      if (zipGuard.current) return;
+      zipGuard.current = true;
+      // From the click, not from the save dialog: the plan fetch before it is
+      // a real round trip and used to pass with nothing on screen.
+      setTreeBusy({ key: dropKey(workspacePath, directory), op: "zip" });
       try {
         const plan = await invoke<FolderZip>("artifact_folder_zip_plan", {
           workspacePath,
@@ -801,6 +902,8 @@ export function ArtifactsView() {
         setError(t("artifacts.zip_failed", "打包失败：{{error}}", { error: String(e) }));
       } finally {
         setBusy(false);
+        setTreeBusy(null);
+        zipGuard.current = false;
       }
     },
     [t],
@@ -808,7 +911,7 @@ export function ArtifactsView() {
 
   const deleteFolder = useCallback(
     (workspacePath: string, path: string) =>
-      folderOp(async () => {
+      folderOp(dropKey(workspacePath, path), async () => {
         await invoke("delete_artifact_folder", { workspacePath, path });
         // The rail's selection may have just been deleted from under it.
         if (workspace === workspacePath && directory.startsWith(path)) {
@@ -899,7 +1002,7 @@ export function ArtifactsView() {
   const folderOptions = useCallback(
     (workspacePath: string): string[] => {
       const out = new Set<string>();
-      for (const f of folders) {
+      for (const f of folders ?? []) {
         if (f.workspacePath === workspacePath && f.path) out.add(f.path);
       }
       // Paths already in use count as folders even without a record — a
@@ -953,30 +1056,33 @@ export function ArtifactsView() {
           className={styles.selection_action}
           title={t("artifacts.batch_move", "移动到…")}
           aria-label={t("artifacts.batch_move", "移动到…")}
-          disabled={busy}
+          disabled={busy || batchKind !== null}
+          aria-busy={batchKind === "move"}
           onClick={batchMove}
         >
-          <FolderInput size={14} strokeWidth={1.5} />
+          {batchKind === "move" ? <Spinner size={12} /> : <FolderInput size={14} strokeWidth={1.5} />}
         </button>
         <button
           type="button"
           className={styles.selection_action}
           title={t("artifacts.batch_export", "导出到…")}
           aria-label={t("artifacts.batch_export", "导出到…")}
-          disabled={busy}
+          disabled={busy || batchKind !== null}
+          aria-busy={batchKind === "export"}
           onClick={batchExport}
         >
-          <Download size={14} strokeWidth={1.5} />
+          {batchKind === "export" ? <Spinner size={12} /> : <Download size={14} strokeWidth={1.5} />}
         </button>
         <button
           type="button"
           className={`${styles.selection_action} ${styles.selection_action_danger}`}
           title={t("artifacts.batch_delete", "删除")}
           aria-label={t("artifacts.batch_delete", "删除")}
-          disabled={busy}
+          disabled={busy || batchKind !== null}
+          aria-busy={batchKind === "delete"}
           onClick={batchDelete}
         >
-          <Trash2 size={14} strokeWidth={1.5} />
+          {batchKind === "delete" ? <Spinner size={12} /> : <Trash2 size={14} strokeWidth={1.5} />}
         </button>
         <button
           type="button"
@@ -1038,6 +1144,11 @@ export function ArtifactsView() {
           <Rows3 size={14} strokeWidth={1.5} />
         </button>
       </span>
+      {usage === undefined && (
+        <span className={styles.usage}>
+          <SkeletonNumber width={88} />
+        </span>
+      )}
       {usage && usage.count > 0 && (
         <span className={styles.usage}>
           {t("artifacts.usage", "{{count}} 份 · 共 {{size}}", {
@@ -1049,11 +1160,17 @@ export function ArtifactsView() {
     </div>
   );
 
+  // A refetch (after a drop, delete, rollback or folder op) or a batch keeps
+  // the current list on screen and runs the bar over it instead. The first
+  // load has its own skeletons, so it is excluded here.
+  const showProgress = useDelayedFlag((reloading && items !== null) || busy);
+
   return (
     <PageShell
       view="artifacts"
       title={t("artifacts.panel_title", "产出")}
       count={items?.length ?? null}
+      countLoading={items === null && !error}
       search={{
         value: query,
         onChange: setQuery,
@@ -1065,7 +1182,9 @@ export function ArtifactsView() {
           nodes={directoryTree}
           dropKeyActive={dropAt}
           selectedKey={workspace ? `${workspace}\u0000${directory}` : ""}
-          totalCount={items?.length ?? 0}
+          totalCount={items?.length ?? null}
+          foldersLoaded={items !== null && folders !== null}
+          busy={treeBusy}
           onSelect={(nextWorkspace, nextDirectory) => {
             setWorkspace(nextWorkspace);
             setDirectory(nextDirectory);
@@ -1078,6 +1197,11 @@ export function ArtifactsView() {
         />
       }
     >
+      {/* Zero-height positioned anchor: PageShell's <main> is not positioned,
+          and the bar has to pin to the top of this column. */}
+      <div className={styles.progress_anchor}>
+        <TopProgress active={showProgress} />
+      </div>
       {error && <div className={styles.error_line}>{error}</div>}
       {/* What the pointer is carrying. `pointer-events: none` in CSS, or it
           would hit-test as the drop target under itself. */}
@@ -1106,9 +1230,10 @@ export function ArtifactsView() {
           // stays open on the same card.
           onReloaded={load}
           onError={setError}
+          patching={patching.has(selected.id)}
         />
       ) : items === null ? (
-        <EmptyState icon={<Package size={30} strokeWidth={1.1} />} title={t("artifacts.loading", "加载中…")} />
+        <ArtifactListSkeleton layout={layout} />
       ) : shown.length === 0 ? (
         <EmptyState
           icon={<Package size={30} strokeWidth={1.1} />}
@@ -1135,6 +1260,7 @@ export function ArtifactsView() {
           }}
           onToggleChecked={toggleChecked}
           onToggleStar={(a) => patch(a.id, { starred: !a.starred })}
+          patching={patching}
         />
       ) : (
         <div className={styles.grid}>
@@ -1153,11 +1279,43 @@ export function ArtifactsView() {
               }}
               onToggleChecked={(shift) => toggleChecked(a.id, shift)}
               onToggleStar={() => patch(a.id, { starred: !a.starred })}
+              patching={patching.has(a.id)}
             />
           ))}
         </div>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * First-load placeholder for the main column, shaped like whichever layout
+ * the page will open in: grid cards reuse the real card's thumb well and body
+ * so the grid does not reflow when the list lands; the table gets row bars.
+ */
+function ArtifactListSkeleton({ layout }: { layout: ArtifactLayout }) {
+  const { t } = useTranslation();
+  if (layout === "list") {
+    return (
+      <div className={styles.table_pane}>
+        <SkeletonList rows={12} meta={false} rowHeight={34} />
+      </div>
+    );
+  }
+  return (
+    <div className={styles.grid} role="status" aria-busy="true" aria-label={t("loading")}>
+      {Array.from({ length: 8 }, (_, i) => (
+        <div key={i} className={`${styles.card} ${styles.card_skeleton}`} aria-hidden>
+          <div className={styles.thumb}>
+            <Skeleton height="100%" radius={0} />
+          </div>
+          <div className={styles.card_body}>
+            <Skeleton height={12} width={i % 2 ? "72%" : "58%"} />
+            <Skeleton height={9} width="40%" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1181,6 +1339,7 @@ function ArtifactTable({
   onOpen,
   onToggleChecked,
   onToggleStar,
+  patching,
 }: {
   items: Artifact[];
   sortKey: SortKey;
@@ -1192,6 +1351,8 @@ function ArtifactTable({
   onOpen: (id: string) => void;
   onToggleChecked: (id: string, shift: boolean) => void;
   onToggleStar: (artifact: Artifact) => void;
+  /** Ids with an update in flight; their star shows a spinner. */
+  patching: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
 
@@ -1259,18 +1420,24 @@ function ArtifactTable({
                       a.starred ? t("artifacts.unstar", "取消收藏") : t("artifacts.star", "收藏")
                     }
                     aria-pressed={a.starred}
+                    aria-busy={patching.has(a.id)}
                     // Or the click also opens the detail pane behind it.
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (patching.has(a.id)) return;
                       onToggleStar(a);
                     }}
                   >
-                    <Star
-                      size={13}
-                      strokeWidth={1.5}
-                      fill={a.starred ? "currentColor" : "none"}
-                      className={a.starred ? styles.row_star_on : ""}
-                    />
+                    {patching.has(a.id) ? (
+                      <Spinner size={12} />
+                    ) : (
+                      <Star
+                        size={13}
+                        strokeWidth={1.5}
+                        fill={a.starred ? "currentColor" : "none"}
+                        className={a.starred ? styles.row_star_on : ""}
+                      />
+                    )}
                   </button>
                 </td>
                 <td>
@@ -1310,6 +1477,8 @@ function ArtifactDirectoryTree({
   selectedKey,
   dropKeyActive,
   totalCount,
+  foldersLoaded,
+  busy,
   onSelect,
   onCreateFolder,
   onRenameFolder,
@@ -1320,7 +1489,13 @@ function ArtifactDirectoryTree({
   selectedKey: string;
   /** Drop zone the pointer is currently over, or null. */
   dropKeyActive: string | null;
-  totalCount: number;
+  /** null until the first list answer — a skeleton, never a fake 0. */
+  totalCount: number | null;
+  /** Both the artifact list and the folder list have answered once. Until
+   *  then the folder rows are placeholders, so they do not pop in one by one. */
+  foldersLoaded: boolean;
+  /** The row a folder verb is running on, if any. */
+  busy: TreeBusy | null;
   onSelect: (workspacePath: string, directory: string) => void;
   onCreateFolder: (workspacePath: string, path: string) => void;
   onRenameFolder: (workspacePath: string, from: string, to: string) => void;
@@ -1338,15 +1513,19 @@ function ArtifactDirectoryTree({
         <span className={styles.tree_spacer} />
         <Package size={15} strokeWidth={1.4} />
         <span className={styles.tree_label}>{t("artifacts.all_artifacts", "全部产出")}</span>
-        <span className={styles.tree_count}>{totalCount}</span>
+        <span className={styles.tree_count}>
+          {totalCount === null ? <SkeletonNumber width={14} /> : totalCount}
+        </span>
       </button>
-      {nodes.map((node) => (
+      {!foldersLoaded && <SkeletonList rows={4} meta={false} rowHeight={30} />}
+      {foldersLoaded && nodes.map((node) => (
         <ArtifactDirectoryBranch
           key={node.key}
           node={node}
           depth={0}
           selectedKey={selectedKey}
           dropKeyActive={dropKeyActive}
+          busy={busy}
           onSelect={onSelect}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
@@ -1363,6 +1542,7 @@ function ArtifactDirectoryBranch({
   depth,
   selectedKey,
   dropKeyActive,
+  busy,
   onSelect,
   onCreateFolder,
   onRenameFolder,
@@ -1373,6 +1553,7 @@ function ArtifactDirectoryBranch({
   depth: number;
   selectedKey: string;
   dropKeyActive: string | null;
+  busy: TreeBusy | null;
   onSelect: (workspacePath: string, directory: string) => void;
   onCreateFolder: (workspacePath: string, path: string) => void;
   onRenameFolder: (workspacePath: string, from: string, to: string) => void;
@@ -1395,6 +1576,7 @@ function ArtifactDirectoryBranch({
   // The workspace row is the drive, not a folder: it can hold new folders but
   // cannot itself be renamed or deleted.
   const isWorkspaceRoot = node.directory === "";
+  const rowBusy = busy?.key === myDropKey ? busy.op : null;
 
   const commit = (value: string) => {
     const name = value.trim();
@@ -1435,9 +1617,17 @@ function ArtifactDirectoryBranch({
         <button type="button" className={styles.tree_target} onClick={() => onSelect(node.workspacePath, node.directory)}>
           {expanded && hasChildren ? <FolderOpen size={15} strokeWidth={1.4} /> : <Folder size={15} strokeWidth={1.4} />}
           <span className={styles.tree_label} title={node.label}>{node.label}</span>
-          <span className={styles.tree_count}>{node.count}</span>
+          {rowBusy === "folder" ? (
+            <Spinner size={12} />
+          ) : (
+            <span className={styles.tree_count}>{node.count}</span>
+          )}
         </button>
-        <span className={styles.tree_actions}>
+        {/* Pinned visible while its zip runs, or the spinner would only show
+            on hover. */}
+        <span
+          className={`${styles.tree_actions} ${rowBusy === "zip" ? styles.tree_actions_busy : ""}`}
+        >
           {/* Available on the workspace row too, where it packs everything in
               that workspace — the tree already treats that row as a folder. */}
           <button
@@ -1445,9 +1635,11 @@ function ArtifactDirectoryBranch({
             className={styles.tree_action}
             title={t("artifacts.folder_zip", "打包导出")}
             aria-label={t("artifacts.folder_zip", "打包导出")}
+            aria-busy={rowBusy === "zip"}
+            disabled={busy?.op === "zip"}
             onClick={() => onExportFolder(node.workspacePath, node.directory)}
           >
-            <FileArchive size={13} strokeWidth={1.5} />
+            {rowBusy === "zip" ? <Spinner size={12} /> : <FileArchive size={13} strokeWidth={1.5} />}
           </button>
           <button
             type="button"
@@ -1512,6 +1704,7 @@ function ArtifactDirectoryBranch({
           depth={depth + 1}
           selectedKey={selectedKey}
           dropKeyActive={dropKeyActive}
+          busy={busy}
           onSelect={onSelect}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
@@ -1531,6 +1724,7 @@ function ArtifactCard({
   onOpen,
   onToggleChecked,
   onToggleStar,
+  patching,
 }: {
   artifact: Artifact;
   checked: boolean;
@@ -1541,6 +1735,8 @@ function ArtifactCard({
   onOpen: () => void;
   onToggleChecked: (shift: boolean) => void;
   onToggleStar: () => void;
+  /** An update is in flight; the star shows a spinner and ignores clicks. */
+  patching: boolean;
 }) {
   const { t } = useTranslation();
   const Icon = KIND_ICON[artifact.kind] ?? FileText;
@@ -1549,6 +1745,10 @@ function ArtifactCard({
   const [thumbFailed, setThumbFailed] = useState(false);
   const thumb = thumbFailed ? null : thumbMode(artifact.mime, artifact.sizeBytes);
   const onThumbFail = useCallback(() => setThumbFailed(true), []);
+  // An image card holds a skeleton in the well until the bytes decode.
+  const imageUrl = artifactBlobUrl(artifact.id, artifact.name);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  useEffect(() => setImageLoaded(false), [imageUrl]);
   return (
     <div
       className={`${styles.card} ${checked ? styles.card_checked : ""} ${dragging ? styles.card_dragging : ""}`}
@@ -1577,8 +1777,20 @@ function ArtifactCard({
         onChange={() => {}}
       />
       <div className={styles.thumb}>
-        {artifact.kind === "image" ? (
-          <img src={artifactBlobUrl(artifact.id, artifact.name)} alt={artifact.title} />
+        {artifact.kind === "image" && !thumbFailed ? (
+          <>
+            {!imageLoaded && (
+              <Skeleton height="100%" radius={0} style={{ position: "absolute", inset: 0 }} />
+            )}
+            <img
+              src={imageUrl}
+              alt={artifact.title}
+              onLoad={() => setImageLoaded(true)}
+              // Same rule as the document thumbs: a broken image falls back to
+              // the kind icon below, never to an empty well.
+              onError={onThumbFail}
+            />
+          </>
         ) : (
           <>
             {/* The icon stays mounted underneath: it is what shows while the
@@ -1604,12 +1816,18 @@ function ArtifactCard({
         <button
           className={`${styles.star_btn} ${artifact.starred ? styles.star_on : ""}`}
           title={t(artifact.starred ? "artifacts.unstar" : "artifacts.star", "收藏")}
+          aria-busy={patching}
           onClick={(e) => {
             e.stopPropagation();
+            if (patching) return;
             onToggleStar();
           }}
         >
-          <Star size={13} strokeWidth={1.6} fill={artifact.starred ? "currentColor" : "none"} />
+          {patching ? (
+            <Spinner size={12} />
+          ) : (
+            <Star size={13} strokeWidth={1.6} fill={artifact.starred ? "currentColor" : "none"} />
+          )}
         </button>
       </div>
       <div className={styles.card_body}>
@@ -1644,6 +1862,7 @@ export function ArtifactDetail({
   onDeleted,
   onReloaded,
   onError,
+  patching = false,
 }: {
   artifact: Artifact;
   folderOptions: string[];
@@ -1655,6 +1874,8 @@ export function ArtifactDetail({
   onDeleted: () => void;
   onReloaded: () => Promise<void> | void;
   onError: (msg: string | null) => void;
+  /** A note / folder save is in flight. */
+  patching?: boolean;
 }) {
   const { t } = useTranslation();
   const [note, setNote] = useState(artifact.note);
@@ -1688,8 +1909,10 @@ export function ArtifactDetail({
   // frontend never needed it; the only real fork is the browser build, which
   // has no file manager to hand anything to, and that is what this answers.
   const osActions = canRevealPath();
+  const showSaving = useDelayedFlag(patching);
 
   const doExport = async () => {
+    if (exporting) return;
     setExporting(true);
     try {
       // A tab cannot be given a destination path — `save()` answers null there
@@ -1711,6 +1934,53 @@ export function ArtifactDetail({
     }
   };
 
+  const [opening, openExternal] = usePending(async () => {
+    // Not the opener plugin's `openPath`: that command is scope-checked and
+    // `opener:default` does not grant `allow-open-path`, so it rejected and —
+    // unawaited — did nothing at all. The backend command resolves the path
+    // host-side and opens it from Rust, which is not scope-checked.
+    try {
+      await invoke("open_artifact_external", { id: artifact.id });
+      onError(null);
+    } catch (e) {
+      onError(t("artifacts.open_failed", "打开失败：{{error}}", { error: String(e) }));
+    }
+  });
+
+  const [revealing, reveal] = usePending(async () => {
+    // The blob can be gone by now — the drift banner below exists precisely
+    // because the source file moves under us. Without this the click is
+    // indistinguishable from a no-op.
+    //
+    // Resolved from the id host-side (like the button above) rather than by
+    // shipping a path to the frontend first: that extra round trip is exactly
+    // what used to decide whether this button existed at all.
+    try {
+      await invoke("reveal_artifact", { id: artifact.id });
+      onError(null);
+    } catch (e) {
+      onError(t("artifacts.reveal_failed", "显示失败：{{error}}", { error: String(e) }));
+    }
+  });
+
+  const [deleting, doDelete] = usePending(async () => {
+    if (
+      !window.confirm(
+        t("artifacts.delete_confirm", "删除「{{title}}」？", {
+          title: artifact.title,
+        }),
+      )
+    ) {
+      return;
+    }
+    try {
+      await invoke("delete_artifact", { id: artifact.id });
+      onDeleted();
+    } catch (e) {
+      onError(String(e));
+    }
+  });
+
   return (
     <div className={styles.detail}>
       <div className={styles.detail_bar}>
@@ -1726,73 +1996,29 @@ export function ArtifactDetail({
               wait), and with no state at all a click that had not opened its
               panel yet was indistinguishable from a dead button. */}
           <button className={styles.action} onClick={doExport} disabled={exporting}>
+            {exporting && <Spinner size={12} />}
             {exporting
               ? t("artifacts.exporting", "导出中…")
               : t("artifacts.export_short", "导出")}
           </button>
           {osActions && (
             <>
-              <button
-                className={styles.action}
-                onClick={async () => {
-                  // Not the opener plugin's `openPath`: that command is
-                  // scope-checked and `opener:default` does not grant
-                  // `allow-open-path`, so it rejected and — unawaited — did
-                  // nothing at all. The backend command resolves the path host-
-                  // side and opens it from Rust, which is not scope-checked.
-                  try {
-                    await invoke("open_artifact_external", { id: artifact.id });
-                    onError(null);
-                  } catch (e) {
-                    onError(t("artifacts.open_failed", "打开失败：{{error}}", { error: String(e) }));
-                  }
-                }}
-              >
+              <button className={styles.action} onClick={() => void openExternal()} disabled={opening}>
+                {opening && <Spinner size={12} />}
                 {t("artifacts.open_with", "用系统应用打开")}
               </button>
-              <button
-                className={styles.action}
-                onClick={async () => {
-                  // The blob can be gone by now — the drift banner below exists
-                  // precisely because the source file moves under us. Without
-                  // this the click is indistinguishable from a no-op.
-                  //
-                  // Resolved from the id host-side (like the button above)
-                  // rather than by shipping a path to the frontend first: that
-                  // extra round trip is exactly what used to decide whether
-                  // this button existed at all.
-                  try {
-                    await invoke("reveal_artifact", { id: artifact.id });
-                    onError(null);
-                  } catch (e) {
-                    onError(t("artifacts.reveal_failed", "显示失败：{{error}}", { error: String(e) }));
-                  }
-                }}
-              >
+              <button className={styles.action} onClick={() => void reveal()} disabled={revealing}>
+                {revealing && <Spinner size={12} />}
                 {t("artifacts.reveal", "在访达中显示")}
               </button>
             </>
           )}
           <button
             className={`${styles.action} ${styles.action_danger}`}
-            onClick={async () => {
-              if (
-                !window.confirm(
-                  t("artifacts.delete_confirm", "删除「{{title}}」？", {
-                    title: artifact.title,
-                  }),
-                )
-              ) {
-                return;
-              }
-              try {
-                await invoke("delete_artifact", { id: artifact.id });
-                onDeleted();
-              } catch (e) {
-                onError(String(e));
-              }
-            }}
+            onClick={() => void doDelete()}
+            disabled={deleting}
           >
+            {deleting && <Spinner size={12} />}
             {t("artifacts.delete", "删除产出")}
           </button>
         </div>
@@ -1840,6 +2066,9 @@ export function ArtifactDetail({
               <option key={option} value={option} />
             ))}
           </datalist>
+          {/* A note or folder save in flight; both commit on blur, so this
+              is the only sign the write has not landed yet. */}
+          {showSaving && <Spinner size={12} label={t("loading")} />}
         </label>
         <textarea
           className={styles.note_input}
@@ -1908,11 +2137,13 @@ function ArtifactVersions({
   onError: (msg: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const [busy, setBusy] = useState(false);
+  // The version being restored, so its button (only) carries the spinner.
+  const [restoring, setRestoring] = useState<string | null>(null);
   const shown = previewVersion ?? artifact.currentVersion;
 
   const rollback = async (version: string) => {
-    setBusy(true);
+    if (restoring) return;
+    setRestoring(version);
     try {
       await invoke("rollback_artifact", { id: artifact.id, version });
       onError(null);
@@ -1920,7 +2151,7 @@ function ArtifactVersions({
     } catch (e) {
       onError(String(e));
     } finally {
-      setBusy(false);
+      setRestoring(null);
     }
   };
 
@@ -1962,9 +2193,11 @@ function ArtifactVersions({
               <button
                 type="button"
                 className={styles.version_restore}
-                disabled={busy}
+                disabled={restoring !== null}
+                aria-busy={restoring === v.id}
                 onClick={() => rollback(v.id)}
               >
+                {restoring === v.id && <Spinner size={12} />}
                 {t("artifacts.version_restore", "恢复")}
               </button>
             )}
@@ -1998,38 +2231,100 @@ function ArtifactVersions({
  * .xls / .ppt, ODF, non-zip archives) still gets the typed placeholder with
  * 导出 / 打开 one click away in the bar above.
  */
+/** A text body's fetch: loading, landed, or failed — three states, so a
+ *  failed fetch shows an error instead of a loader that never ends. */
+type TextBody =
+  | { status: "loading" }
+  | { status: "ready"; text: string }
+  | { status: "error"; error: string };
+
+const BODY_LOADING: TextBody = { status: "loading" };
+
+/**
+ * Whether a frame / image at `url` has finished loading.
+ *
+ * Reset on every url change. The ceiling is the "never spin forever" rule: a
+ * PDF plugin frame is not guaranteed to fire `load` in every webview, and a
+ * skeleton stuck over a document that did render would hide it.
+ */
+function useMediaLoaded(url: string): [boolean, () => void] {
+  // Keyed by url rather than reset in an effect, so the render right after a
+  // switch already reads "not loaded" instead of the previous item's answer.
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const ceiling = setTimeout(() => setLoadedUrl(url), 10_000);
+    return () => clearTimeout(ceiling);
+  }, [url]);
+  const onLoad = useCallback(() => setLoadedUrl(url), [url]);
+  return [loadedUrl === url, onLoad];
+}
+
 function PreviewStage({ item }: { item: StageItem }) {
   const { t } = useTranslation();
-  const [text, setText] = useState<string | null>(null);
   const url = item.url;
+  // Tagged with its url: another artifact's (or version's) text is wrong for
+  // this one, so a switch goes straight back to the skeleton.
+  const [fetched, setFetched] = useState<{ url: string; body: TextBody } | null>(null);
+  const body = fetched?.url === url ? fetched.body : BODY_LOADING;
   // html goes to the frame by URL, so only the two rendered-from-source modes
   // pull the bytes into React.
   const textMode = item.kind === "text" ? textPreviewMode(item.mime) : null;
   const needsBody = textMode === "markdown" || textMode === "plain";
+  const [mediaLoaded, onMediaLoaded] = useMediaLoaded(url);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const imageFailed = failedUrl === url;
 
   useEffect(() => {
-    if (!needsBody) {
-      setText(null);
-      return;
-    }
+    if (!needsBody) return;
     let alive = true;
     fetch(url)
-      .then((r) => r.text())
-      .then((body) => {
-        if (alive) setText(body);
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
       })
-      .catch(() => {
-        if (alive) setText(null);
+      .then((text) => {
+        if (alive) setFetched({ url, body: { status: "ready", text } });
+      })
+      .catch((e) => {
+        if (alive) {
+          const error = e instanceof Error ? e.message : String(e);
+          setFetched({ url, body: { status: "error", error } });
+        }
       });
     return () => {
       alive = false;
     };
   }, [needsBody, url]);
 
+  const Icon = KIND_ICON[item.kind] ?? FileText;
+  /** The stage-sized placeholder over a frame or image still loading. */
+  const mediaSkeleton = !mediaLoaded && (
+    <SkeletonCard height="100%" className={styles.stage_skeleton} />
+  );
+  const failed = (message: string) => (
+    <div className={styles.no_preview}>
+      <Icon size={40} strokeWidth={1.1} />
+      <div className={styles.no_preview_hint}>{message}</div>
+    </div>
+  );
+
   if (item.kind === "image") {
     return (
       <div className={styles.stage}>
-        <img src={url} alt={item.title} />
+        {imageFailed ? (
+          failed(t("artifacts.preview_load_failed", "预览没能加载出来。"))
+        ) : (
+          <>
+            {mediaSkeleton}
+            <img
+              src={url}
+              alt={item.title}
+              className={mediaLoaded ? undefined : styles.stage_media_pending}
+              onLoad={onMediaLoaded}
+              onError={() => setFailedUrl(url)}
+            />
+          </>
+        )}
       </div>
     );
   }
@@ -2050,7 +2345,13 @@ function PreviewStage({ item }: { item: StageItem }) {
   if (item.kind === "pdf") {
     return (
       <div className={styles.stage}>
-        <iframe className={styles.doc_frame} src={url} title={item.title} />
+        {mediaSkeleton}
+        <iframe
+          className={styles.doc_frame}
+          src={url}
+          title={item.title}
+          onLoad={onMediaLoaded}
+        />
       </div>
     );
   }
@@ -2060,12 +2361,21 @@ function PreviewStage({ item }: { item: StageItem }) {
     // Tauri IPC. Same policy as the wiki's html frame.
     return (
       <div className={styles.stage}>
+        {mediaSkeleton}
         <iframe
           className={styles.doc_frame}
           sandbox="allow-scripts"
           src={url}
           title={item.title}
+          onLoad={onMediaLoaded}
         />
+      </div>
+    );
+  }
+  if (needsBody && body.status === "error") {
+    return (
+      <div className={styles.stage}>
+        {failed(t("artifacts.preview_failed", "这份文件没能解析：{{error}}", { error: body.error }))}
       </div>
     );
   }
@@ -2073,7 +2383,7 @@ function PreviewStage({ item }: { item: StageItem }) {
     return (
       <div className={styles.stage}>
         <div className={styles.markdown_body}>
-          {text === null ? t("artifacts.loading", "加载中…") : <TextBlock text={text} />}
+          {body.status === "ready" ? <TextBlock text={body.text} /> : <SkeletonText lines={12} />}
         </div>
       </div>
     );
@@ -2081,7 +2391,14 @@ function PreviewStage({ item }: { item: StageItem }) {
   if (textMode === "plain") {
     return (
       <div className={styles.stage}>
-        <pre className={styles.text_pre}>{text ?? t("artifacts.loading", "加载中…")}</pre>
+        {body.status === "ready" ? (
+          <pre className={styles.text_pre}>{body.text}</pre>
+        ) : (
+          // Not inside the <pre>: block skeleton bars are not phrasing content.
+          <div className={styles.text_pre}>
+            <SkeletonText lines={14} />
+          </div>
+        )}
       </div>
     );
   }
@@ -2089,13 +2406,12 @@ function PreviewStage({ item }: { item: StageItem }) {
   if (office) {
     return (
       <div className={`${styles.stage} ${styles.stage_office}`}>
-        <Suspense fallback={<div className={styles.no_preview_hint}>{t("artifacts.loading", "加载中…")}</div>}>
+        <Suspense fallback={<SkeletonCard height="100%" className={styles.stage_fill} />}>
           <OfficePreview mode={office} url={url} title={item.title} />
         </Suspense>
       </div>
     );
   }
-  const Icon = KIND_ICON[item.kind] ?? FileText;
   return (
     <div className={styles.stage}>
       <div className={styles.no_preview}>

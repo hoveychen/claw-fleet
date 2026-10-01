@@ -14,9 +14,25 @@ import type { PickerHarness } from "./generated/types";
 /** Returns empty array when unavailable (relay not connected, request in flight,
  *  or desktop version too old to recognize this method). Callers treat empty as
  *  "not loaded yet" and show only their "default" entry — same graceful fallback
- *  as useCodexProfiles. */
+ *  as useCodexProfiles. Use `useModelCatalogState` to tell "in flight" from
+ *  "settled empty". */
 export function useModelCatalog(client: FleetTransport | null): PickerHarness[] {
+  return useModelCatalogState(client).catalog;
+}
+
+/** The catalog plus `loaded`: true once the request for the current `client`
+ *  has settled — on success **and** on failure — so a loader keyed on
+ *  `!!client && !loaded` always ends (relay requests answer or time out).
+ *  Stays false while `client` is null: nothing is in flight then, and callers
+ *  gate their loader on `client` too. */
+export function useModelCatalogState(client: FleetTransport | null): {
+  catalog: PickerHarness[];
+  loaded: boolean;
+} {
   const [catalog, setCatalog] = useState<PickerHarness[]>([]);
+  // Which client the last settled request belonged to; keyed so a client
+  // switch reads as "not loaded" on the very first render, before the effect.
+  const [settledFor, setSettledFor] = useState<FleetTransport | null>(null);
   useEffect(() => {
     if (!client) return;
     let alive = true;
@@ -27,12 +43,15 @@ export function useModelCatalog(client: FleetTransport | null): PickerHarness[] 
       })
       .catch(() => {
         if (alive) setCatalog([]);
+      })
+      .finally(() => {
+        if (alive) setSettledFor(client);
       });
     return () => {
       alive = false;
     };
   }, [client]);
-  return catalog;
+  return { catalog, loaded: !!client && settledFor === client };
 }
 
 /** Available models for a harness → dropdown entries `[value, label]`, prefixed

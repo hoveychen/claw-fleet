@@ -7,6 +7,7 @@ import {
   type SyntheticErrorInfo,
 } from "../../../../shared-ts/syntheticError";
 import { useBandOpen } from "./useBandOpen";
+import { Spinner } from "../loading";
 import styles from "./ApiErrorBlock.module.css";
 
 /**
@@ -82,10 +83,10 @@ export function ApiErrorBlock({
               title={waiting && a === "retry" ? t("detail.api_error.retry_blocked", { defaultValue: "配额恢复后再重试" }) : undefined}
               onClick={() => onAction?.(a, info)}
               data-action={a}
+              aria-busy={busy === a || undefined}
             >
-              {busy === a
-                ? t("detail.api_error.working", "处理中…")
-                : t(`detail.api_error.action.${a}`, { defaultValue: ACTION_FALLBACK[a] })}
+              {busy === a && <Spinner size={12} />}
+              {t(`detail.api_error.action.${a}`, { defaultValue: ACTION_FALLBACK[a] })}
             </button>
           ))}
         </div>

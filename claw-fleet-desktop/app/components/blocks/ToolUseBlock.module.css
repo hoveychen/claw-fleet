@@ -117,6 +117,7 @@
 
 /* Body */
 .body {
+  position: relative;
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border);
 }
@@ -522,6 +523,16 @@
   cursor: zoom-in;
   line-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+/* Still decoding: kept in the DOM (and in the strip's scroll range, so
+   `loading="lazy"` still fires) but without a box of its own. */
+.genimage_thumb img.genimage_img_pending {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
 }
 
 .genimage_thumb:hover {

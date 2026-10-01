@@ -5,6 +5,9 @@ import { useTranslation } from "react-i18next";
 import { isWebBuild } from "../hostEnv";
 import type { RemoteWorkspacesConfig } from "../types";
 import { AgentSourceIcon } from "./SessionCard";
+import { SkeletonCard, SkeletonList, SkeletonText, Spinner, TopProgress } from "./loading";
+import { usePending } from "../hooks/usePending";
+import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./EnvironmentPanel.module.css";
 
 // ── Wire types (serde camelCase from claw-fleet-core) ─────────────────────────
@@ -132,6 +135,9 @@ export function EnvironmentPanel() {
   const [statuses, setStatuses] = useState<HarnessStatus[] | null>(null);
   const [custody, setCustody] = useState<FoxyCustody | null>(null);
   const [probing, setProbing] = useState(false);
+  // A re-probe with cards already on screen keeps them and shows a top bar;
+  // gated so a fast probe never flashes it.
+  const showRefreshing = useDelayedFlag(probing && statuses !== null);
 
   // Which source has an install/update running, and its streamed log tail.
   const [busy, setBusy] = useState<Record<string, "install" | "update" | "node" | null>>({});
@@ -168,6 +174,8 @@ export function EnvironmentPanel() {
     done: boolean;
     error: string | null;
   } | null>(null);
+  /** Host path whose remote codex login is being started (pre-flow wait). */
+  const [remoteCodexStarting, setRemoteCodexStarting] = useState<string | null>(null);
 
   const probe = useCallback(async () => {
     setProbing(true);
@@ -321,6 +329,7 @@ export function EnvironmentPanel() {
       setClaudeFlow({ procId: "", url: null, awaitingCode: false, done: false, error: String(e) });
     }
   }, [probe, stopClaudePoll, t]);
+  const [claudeStarting, runStartClaudeLogin] = usePending(startClaudeLogin);
 
   const cancelClaudeLogin = useCallback(async () => {
     stopClaudePoll();
@@ -337,6 +346,7 @@ export function EnvironmentPanel() {
     );
     setClaudeCode("");
   }, [claudeFlow, claudeCode]);
+  const [submittingCode, runSubmitClaudeCode] = usePending(submitClaudeCode);
 
   // ── codex login flow ────────────────────────────────────────────────────────
 
@@ -384,6 +394,7 @@ export function EnvironmentPanel() {
       setCodexFlow({ procId: "", url: null, done: false, portBusy: false, error: String(e) });
     }
   }, [probe, stopCodexPoll, t]);
+  const [codexStarting, runStartCodexLogin] = usePending(startCodexLogin);
 
   const cancelCodexLogin = useCallback(async () => {
     stopCodexPoll();
@@ -432,6 +443,7 @@ export function EnvironmentPanel() {
       setDshMsg(String(e));
     }
   }, [dshRef, dshKey, loadDshCreds, t]);
+  const [savingDshKey, runSaveDshKey] = usePending(saveDshKey);
 
   // ── rca remote-workspace hosts (phase 2) ────────────────────────────────────
 
@@ -490,6 +502,8 @@ export function EnvironmentPanel() {
 
   const startRemoteCodexLogin = useCallback(
     async (path: string) => {
+      if (remoteCodexStarting) return;
+      setRemoteCodexStarting(path);
       try {
         const procId = await invoke<string>("remote_codex_login_start", { path });
         setRemoteCodexFlow({ path, procId, url: null, code: null, done: false, error: null });
@@ -521,9 +535,11 @@ export function EnvironmentPanel() {
         }, 1500);
       } catch (e) {
         setRemoteCodexFlow({ path, procId: "", url: null, code: null, done: false, error: String(e) });
+      } finally {
+        setRemoteCodexStarting(null);
       }
     },
-    [probeHost, stopRemoteCodexPoll, t],
+    [probeHost, remoteCodexStarting, stopRemoteCodexPoll, t],
   );
 
   const cancelRemoteCodexLogin = useCallback(async () => {
@@ -571,10 +587,11 @@ export function EnvironmentPanel() {
       return (
         <button
           className={styles.action_btn}
-          onClick={() => void startClaudeLogin()}
-          disabled={localOnlyDisabled}
+          onClick={() => void runStartClaudeLogin()}
+          disabled={localOnlyDisabled || claudeStarting}
           title={webOnlyHint}
         >
+          {claudeStarting && <Spinner size={12} />}
           {t("env.login_btn")}
         </button>
       );
@@ -585,7 +602,13 @@ export function EnvironmentPanel() {
           <div className={styles.flow_done}>{t("env.claude_login_done")}</div>
         ) : (
           <>
-            <div className={styles.flow_hint}>{t("env.claude_login_hint")}</div>
+            <div className={styles.flow_hint}>
+              {/* The auth url arrives on a later poll tick; spin until it does. */}
+              {!claudeFlow.url && !claudeFlow.awaitingCode && !claudeFlow.error && (
+                <><Spinner size={12} />{" "}</>
+              )}
+              {t("env.claude_login_hint")}
+            </div>
             {claudeFlow.url && (
               <button className={styles.link_btn} onClick={() => void openExternal(claudeFlow.url!)}>
                 {t("env.open_browser")}
@@ -598,9 +621,14 @@ export function EnvironmentPanel() {
                   value={claudeCode}
                   placeholder={t("env.paste_code")}
                   onChange={(e) => setClaudeCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && void submitClaudeCode()}
+                  onKeyDown={(e) => e.key === "Enter" && void runSubmitClaudeCode()}
                 />
-                <button className={styles.action_btn} onClick={() => void submitClaudeCode()}>
+                <button
+                  className={styles.action_btn}
+                  onClick={() => void runSubmitClaudeCode()}
+                  disabled={submittingCode}
+                >
+                  {submittingCode && <Spinner size={12} />}
                   {t("env.submit_code")}
                 </button>
               </div>
@@ -622,10 +650,11 @@ export function EnvironmentPanel() {
       return (
         <button
           className={styles.action_btn}
-          onClick={() => void startCodexLogin()}
-          disabled={localOnlyDisabled}
+          onClick={() => void runStartCodexLogin()}
+          disabled={localOnlyDisabled || codexStarting}
           title={webOnlyHint}
         >
+          {codexStarting && <Spinner size={12} />}
           {t("env.login_btn")}
         </button>
       );
@@ -636,7 +665,10 @@ export function EnvironmentPanel() {
           <div className={styles.flow_done}>{t("env.codex_login_done")}</div>
         ) : (
           <>
-            <div className={styles.flow_hint}>{t("env.codex_login_hint")}</div>
+            <div className={styles.flow_hint}>
+              {!codexFlow.url && !codexFlow.error && <><Spinner size={12} />{" "}</>}
+              {t("env.codex_login_hint")}
+            </div>
             {codexFlow.url && (
               <button className={styles.link_btn} onClick={() => void openExternal(codexFlow.url!)}>
                 {t("env.open_browser")}
@@ -672,7 +704,7 @@ export function EnvironmentPanel() {
     return (
       <div className={styles.flow}>
         {dshRefs === null ? (
-          <div className={styles.muted}>{t("env.loading")}</div>
+          <SkeletonText lines={2} />
         ) : dshRefs.length === 0 ? (
           <div className={styles.muted}>{t("env.dsh_no_refs")}</div>
         ) : (
@@ -699,9 +731,14 @@ export function EnvironmentPanel() {
                 value={dshKey}
                 placeholder={t("env.dsh_key_placeholder")}
                 onChange={(e) => setDshKey(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void saveDshKey()}
+                onKeyDown={(e) => e.key === "Enter" && void runSaveDshKey()}
               />
-              <button className={styles.action_btn} onClick={() => void saveDshKey()}>
+              <button
+                className={styles.action_btn}
+                onClick={() => void runSaveDshKey()}
+                disabled={savingDshKey}
+              >
+                {savingDshKey && <Spinner size={12} />}
                 {t("env.save")}
               </button>
             </div>
@@ -765,6 +802,7 @@ export function EnvironmentPanel() {
               disabled={!!b}
               onClick={() => void runInstall(s.source)}
             >
+              {b === "install" && <Spinner size={12} />}
               {b === "install" ? t("env.installing") : t("env.install_btn")}
             </button>
           )}
@@ -778,6 +816,7 @@ export function EnvironmentPanel() {
               disabled={!!b}
               onClick={() => void runUpdate(s.source)}
             >
+              {b === "update" && <Spinner size={12} />}
               {b === "update"
                 ? t("env.updating")
                 : s.outdated
@@ -791,6 +830,7 @@ export function EnvironmentPanel() {
               disabled={!!b}
               onClick={() => void runNodeInstall()}
             >
+              {b === "node" && <Spinner size={12} />}
               {b === "node" ? t("env.installing") : t("env.install_node_btn")}
             </button>
           )}
@@ -831,6 +871,7 @@ export function EnvironmentPanel() {
               title={webOnlyHint}
               onClick={() => void probeHost(host.path)}
             >
+              {st?.probing && <Spinner size={12} />}
               {st?.probing ? t("env.probing") : t("env.probe_host")}
             </button>
           ) : (
@@ -838,6 +879,7 @@ export function EnvironmentPanel() {
           )}
         </div>
         {st?.error && <div className={styles.error}>{st.error}</div>}
+        {st?.probing && !st.statuses && <SkeletonList rows={3} avatar meta={false} />}
         {st?.statuses?.map((s) => {
           const logKey = `remote:${host.path}:${s.source}`;
           const log = logs[logKey] ?? [];
@@ -876,16 +918,18 @@ export function EnvironmentPanel() {
                   title={webOnlyHint}
                   onClick={() => void installRemote(host.path, s.source)}
                 >
+                  {busySource === s.source && <Spinner size={12} />}
                   {busySource === s.source ? t("env.installing") : t("env.install_btn")}
                 </button>
               )}
               {s.source === "codex" && s.installed && s.loggedIn === false && !flow && (
                 <button
                   className={styles.action_btn}
-                  disabled={localOnlyDisabled}
-          title={webOnlyHint}
+                  disabled={localOnlyDisabled || !!remoteCodexStarting}
+                  title={webOnlyHint}
                   onClick={() => void startRemoteCodexLogin(host.path)}
                 >
+                  {remoteCodexStarting === host.path && <Spinner size={12} />}
                   {t("env.login_btn")}
                 </button>
               )}
@@ -901,7 +945,10 @@ export function EnvironmentPanel() {
               <div className={styles.flow_done}>{t("env.codex_login_done")}</div>
             ) : (
               <>
-                <div className={styles.flow_hint}>{t("env.remote_codex_device_hint")}</div>
+                <div className={styles.flow_hint}>
+                  {!flow.url && !flow.code && !flow.error && <><Spinner size={12} />{" "}</>}
+                  {t("env.remote_codex_device_hint")}
+                </div>
                 {flow.code && <div className={styles.card_name}>{flow.code}</div>}
                 {flow.url && (
                   <button className={styles.link_btn} onClick={() => void openExternal(flow.url!)}>
@@ -922,14 +969,17 @@ export function EnvironmentPanel() {
 
   return (
     <div className={styles.root}>
+      <TopProgress active={showRefreshing} />
       <div className={styles.head_row}>
         <p className={styles.subtitle}>{t("env.subtitle")}</p>
         <button className={styles.action_btn} onClick={() => void probe()} disabled={probing}>
+          {probing && <Spinner size={12} />}
           {probing ? t("env.probing") : t("env.refresh")}
         </button>
       </div>
       {statuses === null ? (
-        <div className={styles.muted}>{t("env.loading")}</div>
+        // One placeholder per harness card, sized like a populated card.
+        SOURCES.map((src) => <SkeletonCard key={src} height={96} />)
       ) : (
         SOURCES.map((src) => {
           const s = statuses.find((x) => x.source === src);

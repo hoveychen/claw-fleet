@@ -78,12 +78,14 @@ afterEach(() => {
 function mount(sessionId: string) {
   const seen = {
     explains: [] as ExplainRecord[],
+    loaded: false,
     dismiss: (_id: string) => {},
     restore: (_id: string) => {},
   };
   function Probe({ id }: { id: string }) {
     const h = useSessionExplains(id);
     seen.explains = h.explains;
+    seen.loaded = h.loaded;
     seen.dismiss = h.dismiss;
     seen.restore = h.restore;
     return null;
@@ -150,5 +152,28 @@ describe("useSessionExplains dismissal", () => {
 
     expect(probe.explains).toEqual([]);
     expect(dismissExplanation).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSessionExplains loaded flag", () => {
+  it("is false until the list is read, and resets on a session switch", async () => {
+    const { probe, switchTo, settle } = mount("s1");
+    expect(probe.loaded).toBe(false);
+    await settle();
+    expect(probe.loaded).toBe(true);
+    await switchTo("s2");
+    expect(probe.loaded).toBe(true);
+  });
+
+  // A skeleton keyed on `loaded` must end even when the read fails.
+  it("settles on a failed read", async () => {
+    const api = await import("../explainApi");
+    vi.mocked(api.listExplanations).mockRejectedValueOnce(new Error("io"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { probe, settle } = mount("s1");
+    await settle();
+    expect(probe.loaded).toBe(true);
+    expect(probe.explains).toEqual([]);
+    spy.mockRestore();
   });
 });

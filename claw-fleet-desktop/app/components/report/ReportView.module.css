@@ -81,6 +81,12 @@
   min-width: 0;
 }
 
+/* Regenerate-in-flight cue on the clicked row. */
+.date_card_spinner {
+  margin-left: auto;
+  align-self: center;
+}
+
 .date_card_label {
   font-size: 13px;
   font-weight: 600;
@@ -139,6 +145,7 @@
 /* ── Detail pane ──────────────────────────────────────────────────────────── */
 
 .detail_header {
+  position: relative; /* anchors the reload TopProgress */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -471,6 +478,29 @@
   overflow: hidden;
 }
 
+/* Placeholder while the AI summary is being generated; same box as the card. */
+.summary_skeleton {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+/* Retry under a failed-generation message in the summary / lessons boxes. */
+.empty_retry_btn {
+  margin-top: 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.empty_retry_btn:hover {
+  border-color: var(--color-accent);
+}
+
 .summary_hero {
   padding: 16px;
   border-bottom: 1px solid var(--color-border);
@@ -682,6 +712,9 @@
 }
 
 .lesson_add_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);

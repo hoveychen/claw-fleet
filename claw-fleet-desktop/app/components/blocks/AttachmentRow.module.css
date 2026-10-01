@@ -21,6 +21,14 @@
   color: var(--color-text-muted, #888);
 }
 
+/* Holds the thumb slot while a picked image is read; the skeleton inside only
+   appears past the show-delay. */
+.thumb_pending {
+  display: inline-flex;
+  min-width: 160px;
+  min-height: 110px;
+}
+
 .chip_icon {
   flex-shrink: 0;
   opacity: 0.7;

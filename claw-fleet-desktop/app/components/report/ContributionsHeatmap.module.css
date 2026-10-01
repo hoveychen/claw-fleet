@@ -223,3 +223,9 @@
   box-shadow: var(--shadow-float);
   color: var(--color-text);
 }
+
+/* Stands in for .grid until the first stats response lands. */
+.grid_skeleton {
+  flex: 1;
+  min-width: 0;
+}

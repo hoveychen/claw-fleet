@@ -4,7 +4,7 @@
 // to RepoDetailView for per-worktree details and push/pull.
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, FolderGit2, RefreshCw } from "lucide-react";
+import { ChevronRight, FolderGit2, RefreshCw, WifiOff } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -13,6 +13,8 @@ import { listRepos } from "../repo";
 import styles from "./RepoView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
+import { SkeletonList } from "./loading";
+import { useDelayedFlag } from "../useDelayedFlag";
 
 interface Props {
   client: FleetTransport | null;
@@ -23,16 +25,21 @@ interface Props {
 export function RepoView({ client, onBack, onOpenRepo }: Props) {
   const [repos, setRepos] = useState<RepoSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!client) return;
     setError(null);
+    setRefreshing(true);
     try {
       setRepos(await listRepos(client));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
     }
   }, [client]);
+  const showRefreshing = useDelayedFlag(refreshing);
 
   useEffect(() => {
     void refresh();
@@ -50,13 +57,20 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
             icon={<RefreshCw size={17} />}
             label={t("刷新")}
             onClick={() => void refresh()}
+            busy={showRefreshing}
+            disabled={refreshing}
           />
         }
       />
 
       <div className={styles.body}>
         {error && <div className={styles.hint}>{t("仓库加载失败：{0}", error)}</div>}
-        {!error && repos === null && <div className={styles.hint}>{t("加载中…")}</div>}
+        {!error && repos === null &&
+          (client ? (
+            <SkeletonList rows={6} avatar />
+          ) : (
+            <EmptyState icon={WifiOff} title={t("桌面端离线")} />
+          ))}
         {!error && repos !== null && total === 0 && (
           <EmptyState
             icon={FolderGit2}

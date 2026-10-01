@@ -9,6 +9,7 @@ import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { UsageHistoryPoint } from "../types";
 import { linePath, timeTicks, type ChartBox } from "../usageChart";
+import { SkeletonCard } from "./loading";
 import styles from "./UsageChart.module.css";
 
 const WINDOW_MS = 24 * 3_600_000;
@@ -34,6 +35,8 @@ export function UsageChart({ client }: { client: FleetTransport | null }) {
   // Timestamp at the moment of fetch: lock the window's right edge to prevent the
   // window from drifting on each re-render.
   const [now, setNow] = useState(() => Date.now());
+  // A failed fetch is its own state: rendering it as `[]` would read as "no samples yet".
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -43,10 +46,11 @@ export function UsageChart({ client }: { client: FleetTransport | null }) {
       .then((rows) => {
         if (cancelled) return;
         setPoints(rows);
+        setError(null);
         setNow(to);
       })
-      .catch(() => {
-        if (!cancelled) setPoints([]);
+      .catch((e) => {
+        if (!cancelled) setError(String(e?.message ?? e));
       });
     return () => {
       cancelled = true;
@@ -68,8 +72,16 @@ export function UsageChart({ client }: { client: FleetTransport | null }) {
   );
   const ticks = useMemo(() => timeTicks(box, TICK_STEP_MS), [box]);
 
+  // No client means the relay is not connected: say so instead of loading forever.
+  if (!client) {
+    return <div className={styles.hint}>{t("桌面端离线")}</div>;
+  }
+  if (error !== null) {
+    return <div className={styles.error}>{t("加载失败：{0}", error)}</div>;
+  }
   if (points === null) {
-    return <div className={styles.hint}>{t("加载中…")}</div>;
+    // Roughly the chart's rendered height (svg + axis + legend) so nothing jumps.
+    return <SkeletonCard className={styles.wrap} height={150} />;
   }
   if (!fiveHour && !sevenDay) {
     return <div className={styles.hint}>{t("还没有攒够采样点，桌面端跑一阵子再看。")}</div>;

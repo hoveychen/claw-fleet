@@ -43,6 +43,11 @@
   gap: 14px;
 }
 
+/* Opt-in anchor for a <TopProgress> bar pinned to the top of the rail. */
+.list_pane_positioned {
+  position: relative;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -465,6 +470,11 @@
 .promote_btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Spinner sitting before a text button's label while its action runs. */
+.btn_spinner {
+  margin-right: 6px;
 }
 
 /* Direction is chosen at runtime by useAutoFlip. */

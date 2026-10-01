@@ -35,6 +35,7 @@ import {
   renderPptxInto,
   type ParsedSheet,
 } from "../officeRender";
+import { SkeletonCard, SkeletonList } from "./loading";
 import styles from "./OfficePreview.module.css";
 
 /**
@@ -104,8 +105,10 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
   }, [mode, url]);
 
   return (
-    <div className={styles.wrap}>
-      {loading && <div className={styles.status}>{t("artifacts.loading", "加载中…")}</div>}
+    <div className={`${styles.wrap} ${styles.wrap_host}`}>
+      {/* Laid over the host rather than replacing it: the host must stay
+          mounted and laid out, since pptx sizes the deck off its width. */}
+      {loading && <SkeletonCard height="100%" className={styles.loading_overlay} />}
       {error && (
         <div className={styles.status}>
           {t("artifacts.preview_failed", "这份文件没能解析：{{error}}", { error })}
@@ -154,7 +157,7 @@ function SheetPreview({ url }: { url: string }) {
   if (!sheets) {
     return (
       <div className={styles.wrap}>
-        <div className={styles.status}>{t("artifacts.loading", "加载中…")}</div>
+        <SkeletonList rows={12} meta={false} rowHeight={28} />
       </div>
     );
   }

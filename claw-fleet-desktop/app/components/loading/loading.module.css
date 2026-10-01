@@ -1,0 +1,150 @@
+/* Shared loading primitives. Every async wait in the app renders through these
+   so a cold list, a pending button and a refetch all speak the same language:
+   - skeleton: first load where the final layout is known (shimmer sweep);
+   - spinner: the one rotating ring (buttons, inline refresh, small waits);
+   - top_progress: 2px indeterminate bar while old content stays on screen.
+   Under prefers-reduced-motion the skeleton freezes into a static block but the
+   spinner and progress bar keep moving — they are the progress signal itself
+   (see the motion note in App.css). */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  display: block;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-xs);
+  animation: skeleton_pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-bg-card-hover) 50%,
+    transparent 100%
+  );
+  animation: skeleton_sweep 1.4s linear infinite;
+}
+
+.circle {
+  border-radius: var(--radius-pill);
+  flex: none;
+}
+
+.inline {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+@keyframes skeleton_pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes skeleton_sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.list_row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+
+.list_row_body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.card {
+  border-radius: var(--radius-lg);
+  width: 100%;
+}
+
+/* ── spinner ───────────────────────────────────────────────────────────── */
+
+.spinner {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-accent);
+  animation: spinner_rotate 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spinner_rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── top progress ──────────────────────────────────────────────────────── */
+
+.top_progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.top_progress::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 35%;
+  background: var(--color-accent);
+  border-radius: var(--radius-hair);
+  animation: top_progress_slide 1.1s var(--ease-out) infinite;
+}
+
+@keyframes top_progress_slide {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+/* Region that holds stale content while a refetch is in flight. */
+.stale {
+  opacity: 0.6;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .skeleton::after {
+    animation: none;
+  }
+}
