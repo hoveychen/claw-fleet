@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchDecisionAsset } from "./decisionAsset";
+import { fetchDecisionAsset, inlineImgSrcs } from "./decisionAsset";
 import type { RelayClient } from "./relay";
 import { fetchWikiFile } from "./wiki";
 
@@ -37,5 +37,26 @@ describe("Asset/upload requests use extended timeout (prevent silent 15s timeout
     await fetchWikiFile(client, "slug", "20260101-000000", "index.html");
     expect(calls[0].method).toBe("wiki_file");
     expect(calls[0].timeoutMs ?? 0).toBeGreaterThan(DEFAULT_CONTROL_TIMEOUT_MS);
+  });
+});
+
+describe("inlineImgSrcs", () => {
+  const uris = new Map([
+    ["a.png", "data:image/png;base64,A"],
+    ["d-cold.png", "data:image/png;base64,D"],
+  ]);
+
+  it("rewrites double-quoted, single-quoted and unquoted refs", () => {
+    const html = `<img src="a.png" alt="x"><img src='a.png'><img src=d-cold.png><img alt=y src=d-cold.png />`;
+    const out = inlineImgSrcs(html, uris);
+    expect(out).toContain('<img src="data:image/png;base64,A" alt="x">');
+    expect(out).toContain("<img src='data:image/png;base64,A'>");
+    expect(out).toContain('<img src="data:image/png;base64,D">');
+    expect(out).toContain('alt=y src="data:image/png;base64,D" />');
+  });
+
+  it("leaves refs it has no URI for untouched", () => {
+    const html = `<img src=missing.png><img src="https://cdn/c.png">`;
+    expect(inlineImgSrcs(html, uris)).toBe(html);
   });
 });

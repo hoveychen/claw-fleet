@@ -44,6 +44,14 @@ describe("inlineRelativeImages", () => {
     expect(out).toContain('alt="x"');
   });
 
+  it("inlines unquoted img src values too", async () => {
+    const { inlineRelativeImages } = await loadWeb();
+    const html = "<figure><img src=d-cold.png><figcaption>x</figcaption></figure><img alt=y src=m.png />";
+    const out = await inlineRelativeImages(html, async (rel) => `data:image/png;base64,${rel}`);
+    expect(out).toContain('<img src="data:image/png;base64,d-cold.png">');
+    expect(out).toContain('alt=y src="data:image/png;base64,m.png" />');
+  });
+
   it("leaves a ref whose fetch failed alone rather than blanking the preview", async () => {
     const { inlineRelativeImages } = await loadWeb();
     vi.spyOn(console, "warn").mockImplementation(() => {});
