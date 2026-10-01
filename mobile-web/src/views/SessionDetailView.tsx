@@ -130,6 +130,19 @@ export function shouldShowTailError(hasMessages: boolean, consecutiveFailures: n
 }
 const TAIL_INITIAL = 120;
 const TAIL_STEP = 200;
+
+/** Whether a full `tail` reply may have stopped short of the transcript's
+ *  first line. `tail` returns the last `requested` raw lines, so a short reply
+ *  means it hit the start of the file.
+ *
+ *  Only the full-tail reply can answer this. The rendered list's length can't:
+ *  `tail_delta` appends live lines to it, so a session that is still running
+ *  pushes it past the window even when the first line is already on screen.
+ *  And having widened the window once says nothing either — that rule kept the
+ *  button up forever after a single tap. */
+export function tailMayHaveEarlier(returned: number, requested: number): boolean {
+  return returned >= requested;
+}
 const LIVE_THINKING_POLL_MS = 1200;
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
 
@@ -1365,6 +1378,8 @@ export function SessionDetailView({
   }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);
+  /** The last full `tail` came back full, so lines before it may exist. */
+  const [hasEarlier, setHasEarlier] = useState(false);
   /** "加载更早的消息" was tapped and the wider tail is on its way. The refetch
    *  runs as a resync (`syncingLatest`), so it ends when that does. */
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1479,6 +1494,7 @@ export function SessionDetailView({
       });
       if (!cancelled) {
         setMessages(rows);
+        setHasEarlier(tailMayHaveEarlier(rows.length, tailN));
         setLoadError(null);
       }
     };
@@ -1896,7 +1912,7 @@ export function SessionDetailView({
           <SkeletonList rows={7} className={styles.messageSkeleton} />
         )}
         {loadError && <div className={styles.hint}>{t("消息加载失败：{0}", loadError)}</div>}
-        {messages !== null && (messages.length >= tailN || tailN > TAIL_INITIAL) && (
+        {messages !== null && hasEarlier && (
           <button
             className={styles.loadMore}
             disabled={loadingMore}
