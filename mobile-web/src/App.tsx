@@ -1264,6 +1264,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
       <main className={styles.main}>
         <ErrorBoundary label={t("{0} 页", t(TAB_LABEL[tab]))} resetKey={tab}>
+        <div key={tab} className={styles.tabPage}>
         {tab === "decisions" ? (
           <DecisionsView
             decisions={decisions}
@@ -1326,6 +1327,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
+        </div>
         </ErrorBoundary>
       </main>
 
