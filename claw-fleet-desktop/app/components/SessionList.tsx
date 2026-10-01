@@ -155,6 +155,17 @@ export function SessionList() {
 
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
+  // Collapsing re-lays the whole sidebar out in one frame (labels drop, icons
+  // re-centre, the panels switch to rail tiles) while the width is still
+  // easing. Fading the new layout in hides that jump. The class name differs
+  // per direction so each toggle restarts the animation; null until the first
+  // toggle, so the app doesn't fade its sidebar in on launch.
+  const sidebarSettle = useRef<"collapsed" | "expanded" | null>(null);
+  const prevCollapsed = useRef(sidebarCollapsed);
+  if (prevCollapsed.current !== sidebarCollapsed) {
+    prevCollapsed.current = sidebarCollapsed;
+    sidebarSettle.current = sidebarCollapsed ? "collapsed" : "expanded";
+  }
 
   // The items on the "More" sub-page.
   const moreItems = (
@@ -283,7 +294,9 @@ export function SessionList() {
   return (
     <>
       {!simplifiedMode && <aside
-        className={`${styles.sidebar}${sidebarCollapsed ? ` ${styles.sidebar_collapsed}` : ""}`}
+        className={`${styles.sidebar}${sidebarCollapsed ? ` ${styles.sidebar_collapsed}` : ""}${
+          sidebarSettle.current === "collapsed" ? ` ${styles.sidebar_settle_collapsed}` : sidebarSettle.current === "expanded" ? ` ${styles.sidebar_settle_expanded}` : ""
+        }`}
         style={{ width: effectiveWidth }}
       >
         {/* Empty header strip — reserves the top-right space for the collapse
