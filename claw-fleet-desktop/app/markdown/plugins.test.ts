@@ -255,6 +255,93 @@ describe("inline SVG survives the sanitize pass", () => {
   });
 });
 
+// A model that draws arrows uses `<marker id="arr">` + `marker-end="url(#arr)"`.
+// Sanitize prefixes the id to `user-content-arr` but leaves the reference
+// alone, so every arrowhead and gradient silently resolved to nothing.
+describe("inline SVG url(#id) references", () => {
+  const svg = [
+    '<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">',
+    '<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z"/></marker>',
+    '<linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs>',
+    '<rect width="10" height="10" fill="url(#g)" stroke="url( \'#g\' )"/>',
+    '<line x1="0" y1="0" x2="50" y2="0" stroke="#000" marker-end="url(#arr)"/>',
+    "</svg>",
+  ].join("\n");
+
+  it("points marker and paint references at the prefixed ids", () => {
+    const html = render(svg);
+    expect(html).toContain('id="user-content-arr"');
+    expect(html).toContain('marker-end="url(#user-content-arr)"');
+    expect(html).toContain('fill="url(#user-content-g)"');
+    // Quoted form: the serializer escapes the quote, so match on the id.
+    expect(html).toContain('stroke="url(&#x27;#user-content-g&#x27; )"');
+    expect(html).not.toMatch(/url\(\s*['"]?#(?!user-content-)/);
+  });
+
+  it("does not double-prefix a reference that already carries the prefix", () => {
+    const html = render(svg.replace('url(#g)"', 'url(#user-content-g)"'));
+    expect(html).toContain('fill="url(#user-content-g)"');
+    expect(html).not.toContain("user-content-user-content-");
+  });
+
+  it("leaves non-fragment urls alone", () => {
+    const html = render('<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="url(https://x.test/a)"/></svg>');
+    expect(html).not.toContain("user-content-https");
+  });
+});
+
+// `<svg …><defs>` on one line fails CommonMark's type-7 start condition (the open
+// tag must be alone on its line), so the svg became inline HTML in a paragraph
+// and the next `<style>` line — which may interrupt a paragraph — cut it off,
+// spilling the CSS and the rest of the drawing into the prose.
+describe("inline SVG with content after the open tag", () => {
+  const md = [
+    "前文",
+    "",
+    '<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg"><defs>',
+    "<style>.t{font:12px sans-serif;fill:#333}</style>",
+    "</defs>",
+    '<text class="t" x="5" y="20">hello</text>',
+    "</svg>",
+    "",
+    "后文",
+  ].join("\n");
+
+  it("truncates the drawing without the fix (documents the bug)", () => {
+    const html = render(md);
+    expect(html).toContain("<p><svg");
+    expect(html.indexOf("hello")).toBeGreaterThan(html.indexOf("</svg>"));
+  });
+
+  it("moves the trailing content to its own line so the svg stays one block", () => {
+    const out = normalizeSvgBlankLines(md);
+    expect(out).toContain('xmlns="http://www.w3.org/2000/svg">\n<defs>');
+    const html = render(out);
+    expect(html).not.toContain("<p><svg");
+    expect(html.indexOf("hello")).toBeLessThan(html.indexOf("</svg>"));
+    expect(html).toContain("<p class=\"cjk-indent\">后文</p>");
+  });
+
+  it("keeps a quoted '>' inside the open tag intact", () => {
+    const line = '<svg viewBox="0 0 10 10" aria-label="a > b"><rect width="1" height="1"/></svg>';
+    expect(normalizeSvgBlankLines(line)).toBe(
+      '<svg viewBox="0 0 10 10" aria-label="a > b">\n<rect width="1" height="1"/></svg>',
+    );
+  });
+
+  it("does not touch an open tag that is already alone on its line", () => {
+    const ok = '<svg viewBox="0 0 10 10">\n<rect width="1" height="1"/>\n</svg>';
+    expect(normalizeSvgBlankLines(ok)).toBe(ok);
+  });
+
+  it("drops <style> content instead of leaking the CSS as text", () => {
+    const html = render(normalizeSvgBlankLines(md));
+    expect(html).not.toContain("<style");
+    expect(html).not.toContain("font:12px");
+    expect(render("段落 <style>p{color:red}</style> 结束")).not.toContain("color:red");
+  });
+});
+
 describe("CJK first-line indent", () => {
   it("marks a Chinese paragraph with cjk-indent", () => {
     const html = render("这是一段中文正文，应该首行缩进两个字。");
