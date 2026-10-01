@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -137,7 +137,7 @@ function AgentBody({ result, fallback }: { result: Record<string, unknown> | nul
             rehypePlugins={mdRehypePlugins}
             components={mdComponents}
           >
-            {text}
+            {normalizeSvgBlankLines(text)}
           </ReactMarkdown>
         </div>
       )}
@@ -296,7 +296,7 @@ function WebFetchBody({
             rehypePlugins={mdRehypePlugins}
             components={mdComponents}
           >
-            {summary}
+            {normalizeSvgBlankLines(summary)}
           </ReactMarkdown>
         </div>
       ) : (

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, ChevronRight, ListTodo, NotebookPen, Search, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { TaskItemLine } from "./TaskItemLine";
 import { dateLocale, t } from "../i18n";
@@ -798,7 +798,7 @@ function NoteBody({
         remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
         components={mdComponents}
       >
-        {text}
+        {normalizeSvgBlankLines(text)}
       </ReactMarkdown>
     </div>
   );
@@ -937,7 +937,7 @@ function HandoffLinkCard({
             remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
             components={mdComponents}
           >
-            {link.note}
+            {normalizeSvgBlankLines(link.note)}
           </ReactMarkdown>
         </div>
       ) : (

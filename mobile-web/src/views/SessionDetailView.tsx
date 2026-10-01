@@ -39,7 +39,7 @@ import { isFleetTool, isImageCall, parseImageProvenance } from "./fleetTools";
 import { IngestCard, ingestStepLabel } from "./IngestCard";
 import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { dateLocale, t } from "../i18n";
 import { formatBytes } from "../artifacts";
@@ -515,7 +515,7 @@ function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
           rehypePlugins={mdRehypePlugins}
           components={mdComponents}
         >
-          {text}
+          {normalizeSvgBlankLines(text)}
         </ReactMarkdown>
       ) : (
         <div className={styles.mdPlaceholder}>{text}</div>
@@ -1022,7 +1022,7 @@ function WorkRunBand({
             rehypePlugins={mdRehypePlugins}
             components={bandTitleMdComponents}
           >
-            {title}
+            {normalizeSvgBlankLines(title)}
           </ReactMarkdown>
         </span>
         <span className={styles.bandSteps}>

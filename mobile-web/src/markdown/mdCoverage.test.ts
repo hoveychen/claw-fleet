@@ -36,6 +36,23 @@ describe("markdown rendering surface coverage", () => {
     expect(offenders).toEqual([]);
   });
 
+  // A blank line inside an inline <svg> ends CommonMark's HTML block and the rest of
+  // the drawing escapes into a paragraph — fixed on desktop long ago, while every
+  // surface here kept truncating. The fix is a text pass before parsing, so each
+  // render site has to apply it; forgetting is silent, hence this check.
+  it("Every <ReactMarkdown> runs its text through normalizeSvgBlankLines", () => {
+    const offenders: string[] = [];
+    for (const [path, src] of Object.entries(FILES)) {
+      if (path.endsWith(".test.tsx")) continue;
+      for (const m of src.matchAll(/<ReactMarkdown\b[\s\S]*?>([\s\S]*?)<\/ReactMarkdown>/g)) {
+        if (!m[1].includes("normalizeSvgBlankLines(")) {
+          offenders.push(`${path}:${src.slice(0, m.index).split("\n").length}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   // Decision cards used to attach only remarkGfm, so the same text rendered correctly
   // in sessions (CJK bold, formulas, soft line breaks all work) but broke entirely in
   // decision cards. Differences between rendering surfaces should only appear in the

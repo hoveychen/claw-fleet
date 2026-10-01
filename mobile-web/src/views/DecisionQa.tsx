@@ -11,7 +11,7 @@
 
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -34,7 +34,7 @@ export function Md({ text, inline }: { text: string; inline?: boolean }) {
       rehypePlugins={mdRehypePlugins}
       components={inline ? MD_INLINE : MD_BLOCK}
     >
-      {text}
+      {normalizeSvgBlankLines(text)}
     </ReactMarkdown>
   );
 }

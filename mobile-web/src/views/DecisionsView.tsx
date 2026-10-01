@@ -15,7 +15,7 @@ import { useFollowTail, useVoiceRecorder } from "../useVoiceRecorder";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { VoiceTextarea } from "./VoiceTextarea";
 import ReactMarkdown from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
 import { SelectionAskBar } from "./SelectionAskBar";
@@ -518,7 +518,7 @@ function GuardAnalysis({
             rehypePlugins={mdRehypePlugins}
             components={mdComponents}
           >
-            {state}
+            {normalizeSvgBlankLines(state)}
           </ReactMarkdown>
         </div>
       )}
@@ -732,7 +732,7 @@ function PlanCard({
             rehypePlugins={mdRehypePlugins}
             components={mdComponents}
           >
-            {content}
+            {normalizeSvgBlankLines(content)}
           </ReactMarkdown>
           {long && (
             <button className={styles.expandButton} onClick={() => setExpanded((v) => !v)}>
@@ -1068,7 +1068,7 @@ function LastUserInputBlock({
                 rehypePlugins={mdRehypePlugins}
                 components={mdComponents}
               >
-                {a.value}
+                {normalizeSvgBlankLines(a.value)}
               </ReactMarkdown>
             </div>
           </div>
@@ -1313,7 +1313,7 @@ function QuestionsCard({
               rehypePlugins={mdRehypePlugins}
               components={mdComponents}
             >
-              {stripTtsDivider(q.question)}
+              {normalizeSvgBlankLines(stripTtsDivider(q.question))}
             </ReactMarkdown>
           </div>
           <SelectionAskBar
@@ -1397,7 +1397,7 @@ function QuestionsCard({
             rehypePlugins={mdRehypePlugins}
                       components={mdComponents}
                     >
-                      {o.preview}
+                      {normalizeSvgBlankLines(o.preview)}
                     </ReactMarkdown>
                   </div>
                 )}
