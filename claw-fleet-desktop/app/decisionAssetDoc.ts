@@ -45,8 +45,11 @@ import { decisionAssetUrl } from "./decisionAssets";
  * stylesheet or script the agent referenced relatively would still break, but
  * nothing generates those today and inlining arbitrary subresources would mean
  * parsing the document rather than one attribute.
+ *
+ * Unquoted values (`<img src=chart.png>`) count too: agents write them as often
+ * as the quoted form, and missing them leaves a broken-image glyph.
  */
-const IMG_SRC_RE = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"']*)\2/gi;
+const IMG_SRC_RE = /(<img\b[^>]*?\bsrc\s*=\s*)(?:(["'])([^"']*)\2|([^\s"'=<>`]+))/gi;
 
 /**
  * A ref that resolves against the asset directory, i.e. one we have to fetch
@@ -71,7 +74,8 @@ export async function inlineRelativeImages(
 ): Promise<string> {
   const refs = new Set<string>();
   for (const m of html.matchAll(IMG_SRC_RE)) {
-    if (isRelativeAssetRef(m[3])) refs.add(m[3]);
+    const ref = m[3] ?? m[4];
+    if (isRelativeAssetRef(ref)) refs.add(ref);
   }
   if (refs.size === 0) return html;
 
@@ -86,10 +90,16 @@ export async function inlineRelativeImages(
     }),
   );
 
-  return html.replace(IMG_SRC_RE, (whole, pre: string, quote: string, ref: string) => {
-    const url = resolved.get(ref);
-    return url ? `${pre}${quote}${url}${quote}` : whole;
-  });
+  return html.replace(
+    IMG_SRC_RE,
+    (whole, pre: string, quote: string | undefined, quoted: string | undefined, bare: string | undefined) => {
+      const url = resolved.get(quoted ?? bare ?? "");
+      // An unquoted ref comes back double-quoted: a data: URL may hold
+      // characters an unquoted attribute value cannot.
+      const q = quote ?? '"';
+      return url ? `${pre}${q}${url}${q}` : whole;
+    },
+  );
 }
 
 /** Read a fetched image into the `data:` URL the sandboxed frame can load. */

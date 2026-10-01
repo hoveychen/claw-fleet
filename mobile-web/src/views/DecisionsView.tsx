@@ -19,7 +19,7 @@ import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
 import { SelectionAskBar } from "./SelectionAskBar";
-import { fetchDecisionAsset } from "../decisionAsset";
+import { fetchDecisionAsset, inlineImgSrcs } from "../decisionAsset";
 import { splitContextFiles } from "../userAttachments";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
@@ -1799,13 +1799,12 @@ function HtmlPreview({
   const { states, retry } = useAssets(names, requestId, qidx, client);
   const { open: openLightbox } = useLightbox();
   const resolved = useMemo(() => {
-    let out = html;
+    const uris = new Map<string, string>();
     for (const name of names) {
       const st = states[name];
-      if (st?.status !== "ok") continue;
-      out = out.split(`src="${name}"`).join(`src="${st.uri}"`);
-      out = out.split(`src='${name}'`).join(`src='${st.uri}'`);
+      if (st?.status === "ok") uris.set(name, st.uri);
     }
+    const out = inlineImgSrcs(html, uris);
     // Append the tap-to-zoom bridge so images inside the sandbox open the
     // app-level lightbox (the sandbox is opaque-origin, so it must postMessage).
     return out + IMG_ZOOM_INJECT;
