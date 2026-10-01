@@ -1,5 +1,6 @@
 /* 知识库页：从「更多」进来的全屏浮层，层级沿用 RepoView/PlansView 的 30。 */
 .page {
+  composes: page_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 30;

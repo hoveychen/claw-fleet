@@ -7,6 +7,7 @@
    so tap-to-zoom inside a card still opens above the sheet. */
 
 .peek {
+  composes: sheet_enter from "../motion.module.css";
   position: fixed;
   left: 8px;
   right: 8px;
@@ -24,7 +25,6 @@
   backdrop-filter: blur(12px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
   text-align: left;
-  animation: peekIn 200ms ease-out;
 }
 
 /* Over the tab bar the centre FAB rises 18px above it; clear it with a gap. */
@@ -84,11 +84,11 @@
 }
 
 .scrim {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 44;
   background: rgba(0, 0, 0, 0.4);
-  animation: scrimIn 200ms ease-out;
 }
 
 .sheet {
@@ -104,7 +104,7 @@
   border-top: 1px solid var(--color-border);
   border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.28);
-  animation: sheetIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: sheetIn 240ms var(--ease-out);
 }
 
 .grabberRow {
@@ -162,32 +162,12 @@
   padding: 12px 12px calc(16px + var(--safe-bottom));
 }
 
-@keyframes peekIn {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @keyframes sheetIn {
   from {
     transform: translateY(100%);
   }
   to {
     transform: translateY(0);
-  }
-}
-
-@keyframes scrimIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 

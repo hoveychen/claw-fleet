@@ -5,7 +5,7 @@
   text-align: center;
   gap: 12px;
   padding: 56px 24px;
-  animation: emptyFadeIn 0.28s ease both;
+  animation: emptyFadeIn var(--motion-base) var(--ease-out) both;
 }
 
 .root[data-compact] {

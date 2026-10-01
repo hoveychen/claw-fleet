@@ -328,7 +328,7 @@
   font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
-  animation: exitToastIn 140ms ease-out;
+  animation: exitToastIn 140ms var(--ease-out);
 }
 
 @keyframes exitToastIn {
