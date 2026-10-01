@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
-import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
+import { NAV_HOME } from "./components/navGroups";
 import { isViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
@@ -28,7 +28,7 @@ export function openSettings(): void {
 
 export type Theme = "dark" | "light" | "system";
 // The page enum lives in ./viewModes so components/navGroups.ts can build its
-// tab table from it without importing this module (which imports navGroups).
+// nav table from it without importing this module (which imports navGroups).
 // Re-exported here because most call sites import ViewMode from the store.
 export { ALL_VIEW_MODES } from "./viewModes";
 export type { ViewMode } from "./viewModes";
@@ -219,12 +219,6 @@ interface UIState {
   viewMode: ViewMode;
   simplifiedMode: boolean;
   setSimplifiedMode: (enabled: boolean) => void;
-  /** Last page visited inside each sidebar tab (Fleet / Work), so switching tabs
-   *  returns you where you left off instead of always landing on the tab's home
-   *  page. Persisted as a JSON blob under "nav-group-last-view". There is
-   *  deliberately no `navGroup` field: the active tab is derived from `viewMode`
-   *  via navGroupOf, so a cross-page hop can't desync the two. */
-  lastViewByNavGroup: Record<NavGroup, ViewMode>;
   sidebarCollapsed: boolean;
   /** Per-view collapse state for each view's secondary sidebar (second-level sidebar),
    *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
@@ -289,9 +283,6 @@ interface UIState {
    *  ProjectFormDialog in create mode. */
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
-  /** Switch sidebar tabs: hops to that tab's remembered page (or its home page
-   *  on the first visit). A no-op when the current page already belongs to it. */
-  setNavGroup: (g: NavGroup) => void;
   setSidebarCollapsed: (on: boolean) => void;
   /** Toggle the collapsed state of `view`'s secondary sidebar. */
   toggleSecondarySidebar: (view: ViewMode) => void;
@@ -515,18 +506,6 @@ function readHistoryWorkspaceFilter(): string {
   return raw;
 }
 
-/** Keys this blob used to be written under, for tabs that have been renamed.
- *  Read-only fallbacks: the first write after a restart re-keys the blob, so an
- *  entry here only has to survive one boot on an already-installed machine. */
-const LEGACY_NAV_GROUP_KEYS: Partial<Record<NavGroup, string>> = {
-  // The Fleet tab was `steward` until 2026-08.
-  fleet: "steward",
-};
-
-/** Per-tab "last page I was on", tolerating an absent / corrupt blob. A stored
- *  page that no longer belongs to its tab is dropped rather than restored —
- *  otherwise moving a page between tabs would strand the old tab on a page it
- *  no longer lists. */
 /** The stored page, or the Tasks page when it names one that no longer exists —
  *  the retired Sessions page ("list" / "gallery") above all. */
 function readViewMode(): ViewMode {
@@ -534,30 +513,13 @@ function readViewMode(): ViewMode {
   return isViewMode(stored) ? stored : "history";
 }
 
-function readLastViewByNavGroup(): Record<NavGroup, ViewMode> {
-  const result = { ...NAV_GROUP_HOME };
-  const stored = readJson<Record<string, unknown>>("nav-group-last-view", {});
-  for (const group of NAV_GROUPS) {
-    const legacy = LEGACY_NAV_GROUP_KEYS[group];
-    // Current key wins; the legacy one only fills in for a blob written before
-    // the tab was renamed.
-    const view = stored[group] ?? (legacy ? stored[legacy] : undefined);
-    if (isViewMode(view) && navGroupOf(view) === group) result[group] = view;
-  }
-  return result;
-}
-
-/** The shared body of every page change. Beyond writing `viewMode`, it records
- *  the page as its tab's last visited one — which is what makes the tab strip
- *  restore you where you left off. Every path that moves the main area goes
- *  through this (setViewMode and the three nav requests below); a path that set
- *  `viewMode` directly would leave its tab's memory pointing at a stale page. */
+/** The shared body of every page change: persists `viewMode` and applies the
+ *  simplified-mode page clamp. Every path that moves the main area goes through
+ *  this (setViewMode and the nav requests below). */
 function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
   if (s.simplifiedMode && m !== "history" && m !== "artifacts") m = "history";
   setItem("viewMode", m);
-  const lastViewByNavGroup = { ...s.lastViewByNavGroup, [navGroupOf(m)]: m };
-  setItem("nav-group-last-view", JSON.stringify(lastViewByNavGroup));
-  return { viewMode: m, lastViewByNavGroup };
+  return { viewMode: m };
 }
 
 /** Read once: the call rewrites the retired pseudo-values on disk, so the two
@@ -620,7 +582,6 @@ export const useUIStore = create<UIState>((set) => ({
   viewMode: initialSimplifiedMode
     ? (getItem("viewMode") === "artifacts" ? "artifacts" : "history")
     : readViewMode(),
-  lastViewByNavGroup: readLastViewByNavGroup(),
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   autoCollapsed: { sidebar: false, secondary: null },
@@ -679,12 +640,6 @@ export const useUIStore = create<UIState>((set) => ({
     set({ theme: t });
   },
   setViewMode: (m) => set((s) => viewModePatch(s, m)),
-  setNavGroup: (g) =>
-    set((s) =>
-      navGroupOf(s.viewMode) === g
-        ? {}
-        : viewModePatch(s, s.lastViewByNavGroup[g] ?? NAV_GROUP_HOME[g]),
-    ),
   fileNav: null,
   requestFileNav: (req) =>
     set((s) => ({
@@ -742,7 +697,7 @@ export const useUIStore = create<UIState>((set) => ({
       // can boot straight onto a page that no longer exists. Send it home
       // instead of rendering an empty main area with no nav item to leave by.
       ...(!features.terminal && s.viewMode === "terminal"
-        ? viewModePatch(s, NAV_GROUP_HOME.work)
+        ? viewModePatch(s, NAV_HOME)
         : {}),
       // On first browser open the cache is empty, so the host's opinion takes
       // effect immediately rather than on reload. Only when this client has no

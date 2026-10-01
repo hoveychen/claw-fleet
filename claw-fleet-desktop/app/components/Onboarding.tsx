@@ -621,28 +621,22 @@ function PrdModeCard({
   );
 }
 
-/** Purely informational—the sidebar's two modes and what each one holds.
- *  Unlike every other card here it has no toggle: the split isn't optional, and
- *  an upgrading user who knew where Tasks or Wiki used to sit needs to be told
- *  they are now behind the Work tab rather than discovering it by clicking
- *  around. That's also why "nav_modes" is in ONBOARDING_FEATURES—it makes
- *  this card surface once in What's New for existing installs. */
-function NavModesCard() {
+/** Purely informational—where the sidebar's pages are. Unlike every other card
+ *  here it has no toggle: the layout isn't optional, and an upgrading user who
+ *  knew the Fleet / Work tabs needs to be told those pages now sit under More
+ *  rather than discovering it by clicking around. That's also why "nav_more" is
+ *  in ONBOARDING_FEATURES—it makes this card surface once in What's New for
+ *  existing installs. */
+function NavMoreCard() {
   const { t } = useTranslation();
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
       <div className={styles.card_header}>
         <span className={styles.card_icon}>&#x1F9ED;</span>
-        <span className={styles.card_title}>{t("onboarding.nav_modes.title")}</span>
+        <span className={styles.card_title}>{t("onboarding.nav_more.title")}</span>
       </div>
-      <p className={styles.card_description}>{t("onboarding.nav_modes.description")}</p>
-      <p className={styles.card_description}>
-        <strong>{t("nav_group.fleet")}</strong> — {t("onboarding.nav_modes.fleet")}
-      </p>
-      <p className={styles.card_description}>
-        <strong>{t("nav_group.work")}</strong> — {t("onboarding.nav_modes.work")}
-      </p>
-      <p className={styles.card_description}>{t("onboarding.nav_modes.hint")}</p>
+      <p className={styles.card_description}>{t("onboarding.nav_more.description")}</p>
+      <p className={styles.card_description}>{t("onboarding.nav_more.hint")}</p>
     </div>
   );
 }
@@ -1353,9 +1347,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
           {/* First card in What's New: it explains where the pages moved, so it
               has to come before any of the toggles. */}
-          {unseenFeatures.has("nav_modes") && (
+          {unseenFeatures.has("nav_more") && (
             <div className={styles.cards}>
-              <NavModesCard />
+              <NavMoreCard />
             </div>
           )}
 
@@ -1536,7 +1530,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             )}
 
             <div className={styles.cards}>
-              <NavModesCard />
+              <NavMoreCard />
             </div>
 
             <div className={styles.cards}>

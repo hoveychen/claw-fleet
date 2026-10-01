@@ -1,8 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
+import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal, Ellipsis, ChevronRight } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettings, runningProcTotal, useAuditStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -30,7 +30,7 @@ import { UsagePanel } from "./UsagePanel";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
-import { NAV_GROUPS, navGroupOf, type NavGroup } from "./navGroups";
+import { isInNavMore } from "./navGroups";
 import { fmtBadgeCount } from "../railNumbers";
 
 const MIN_WIDTH = 200;
@@ -45,7 +45,6 @@ export function SessionList() {
     simplifiedMode,
     viewMode,
     setViewMode,
-    setNavGroup,
     theme,
     setTheme,
     sidebarCollapsed,
@@ -75,24 +74,20 @@ export function SessionList() {
   // Total running workspace commands across all repos — surfaced as a badge on
   // the Files nav item, mirroring the green per-repo badge in FilesView.
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
-  // Which tab (Fleet / Work) the sidebar is showing. Derived from the page rather
-  // than stored beside it (see navGroups.ts), so the cross-page hops that bypass
-  // the nav — audit → sessions, a wiki [[slug]] mention, a tray click into the
-  // Tasks page — carry the tab along instead of leaving it on a group that isn't
-  // on screen.
-  const navGroup = navGroupOf(viewMode);
-  // The hidden tab's nav items take their badges with them, which is how an
-  // unread critical audit event or a waiting task goes unnoticed for an hour.
-  // Roll each group's counts up onto its tab and show them there while its nav
-  // is collapsed away, using the same red/green vocabulary as the items.
-  const groupBadges: Record<NavGroup, { alert: number; running: number; dot: boolean }> = {
-    // Fleet carries no count pill — a red digit on a tab you are not looking at
-    // reads as an error rather than a nudge. Its unread-critical-audit signal
-    // folds into the same quiet dot the new daily report already uses; the exact
-    // count still sits on the Audit nav item inside the tab.
-    fleet: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
-    work: { alert: 0, running: runningProcCount, dot: false },
-  };
+  // The monitoring / management pages fold under a "More" disclosure at the
+  // bottom of the nav. It opens itself whenever one of its pages comes on screen
+  // (including hops that bypass the nav — an audit link, a tray click), so the
+  // active page is never hidden inside a closed menu.
+  const moreActive = isInNavMore(viewMode);
+  const [moreOpen, setMoreOpen] = useState(moreActive);
+  useEffect(() => {
+    if (moreActive) setMoreOpen(true);
+  }, [moreActive]);
+  // Closed, the folded items take their badges with them, which is how an unread
+  // critical audit event goes unnoticed for an hour. Roll them up onto "More" as
+  // one quiet dot — a red count on a closed menu reads as an error, not a nudge;
+  // the exact count still sits on the Audit item once it is open.
+  const moreDot = !moreOpen && (hasNewReport || unreadCriticalCount > 0);
   const {
     width: sidebarWidth,
     isDragging,
@@ -145,10 +140,8 @@ export function SessionList() {
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
 
-  // The two modes' nav items. Held as values rather than inlined twice so
-  // the expanded view (one group at a time) and the collapsed icon rail
-  // (both groups flattened) render the exact same buttons.
-  const fleetItems = (
+  // The items folded under "More".
+  const moreItems = (
     <>
       <button
         className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
@@ -170,8 +163,6 @@ export function SessionList() {
         <span className={styles.nav_label}>{t("view_report")}</span>
         {hasNewReport && <span className={styles.nav_dot} />}
       </button>
-
-      <div className={styles.nav_divider} />
 
       <button
         className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
@@ -297,66 +288,30 @@ export function SessionList() {
           </svg>
         </button>
 
-        {/* Sidebar nav, split into two top-level modes by the tab strip below:
-            Fleet (watching / administering — sessions, audit, report, memory,
-            skills, phone) and Work (what you reach for while an agent works —
-            tasks, repos, wiki, schedules, plan trees). Plugins are a source of
-            skills, so they live under the Skills entry as a segmented tab
-            (SkillsSourceTabs), not a separate nav item. */}
+        {/* Sidebar nav: the work pages at the top level, the monitoring /
+            administration pages (audit, report, memory, skills, phone) folded
+            under "More" at the bottom. Plugins are a source of skills, so they
+            live under the Skills entry as a segmented tab (SkillsSourceTabs),
+            not a separate nav item. The 64px rail uses the same structure, its
+            labels hidden. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          <div className={styles.nav_tabs} role="tablist" aria-label={t("nav_group.aria", "模式")}>
-            {NAV_GROUPS.map((group) => {
-              const badge = groupBadges[group];
-              const label = t(`nav_group.${group}`, group === "fleet" ? "舰队" : "工作");
-              const selected = navGroup === group;
-              return (
-                <button
-                  key={group}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  className={`${styles.nav_tab} ${selected ? styles.nav_tab_active : ""}`}
-                  onClick={() => setNavGroup(group)}
-                  title={label}
-                >
-                  <span className={styles.nav_tab_label}>{label}</span>
-                  {/* Only while this tab's own nav is hidden — an active tab's
-                      items carry their own badges. */}
-                  {!selected && badge.alert > 0 && (
-                    <span className={styles.nav_tab_badge} title={`${badge.alert}`}>
-                      {fmtBadgeCount(badge.alert)}
-                    </span>
-                  )}
-                  {!selected && badge.running > 0 && (
-                    <span className={styles.nav_tab_badge_running} title={`${badge.running}`}>
-                      {fmtBadgeCount(badge.running)}
-                    </span>
-                  )}
-                  {!selected && badge.alert === 0 && badge.dot && (
-                    <span className={styles.nav_tab_dot} />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Collapsed to the 64px rail, the mode strip is hidden and both
-              groups are flattened into one icon column: a rail exists to reach
-              every page in the least space, and a mode layer on top of it would
-              only add a click. Two labelled segments don't fit there anyway —
-              every narrow rail in this class of app (VS Code's activity bar,
-              JetBrains' tool-window strip) stacks icons vertically instead. */}
-          {sidebarCollapsed ? (
-            <>
-              {fleetItems}
-              <div className={styles.nav_divider} />
-              {workItems}
-            </>
-          ) : navGroup === "fleet" ? (
-            fleetItems
-          ) : (
-            workItems
-          )}
+          {workItems}
+          <div className={styles.nav_divider} />
+          <button
+            type="button"
+            className={`${styles.nav_item} ${moreActive && !moreOpen ? styles.nav_active : ""}`}
+            onClick={() => setMoreOpen(!moreOpen)}
+            aria-expanded={moreOpen}
+            title={t("nav_more", "更多")}
+          >
+            <span className={styles.nav_icon}><Ellipsis size={14} strokeWidth={1.5} /></span>
+            <span className={styles.nav_label}>{t("nav_more", "更多")}</span>
+            {moreDot && <span className={styles.nav_dot} />}
+            <span className={`${styles.nav_more_chevron}${moreOpen ? ` ${styles.nav_more_chevron_open}` : ""}`}>
+              <ChevronRight size={12} strokeWidth={1.75} />
+            </span>
+          </button>
+          {moreOpen && <div className={styles.nav_more_children}>{moreItems}</div>}
         </nav>
 
         <div className={styles.separator} />
