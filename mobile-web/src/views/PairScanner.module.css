@@ -2,6 +2,7 @@
    屏幕，取景框越大越好对。 */
 
 .overlay {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 100;

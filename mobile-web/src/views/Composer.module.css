@@ -1,4 +1,5 @@
 .sheetBackdrop {
+  composes: sheet_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -302,6 +303,7 @@
 }
 
 .pickerBackdrop {
+  composes: overlay_enter from "../motion.module.css";
   position: absolute;
   inset: 0;
   z-index: 5;
@@ -309,6 +311,7 @@
 }
 
 .pickerSheet {
+  composes: sheet_enter from "../motion.module.css";
   position: absolute;
   left: 0;
   right: 0;
