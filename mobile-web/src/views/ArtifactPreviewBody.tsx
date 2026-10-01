@@ -13,7 +13,7 @@
 import { Suspense, lazy } from "react";
 import ReactMarkdown from "react-markdown";
 
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { isOfficePreview, type PreviewKind } from "../artifacts";
 import { SkeletonCard } from "./loading";
@@ -70,7 +70,7 @@ export function PreviewBody({
           // see mermaidComponents for why every surface spreads this one.
           components={mermaidMarkdownComponents}
         >
-          {text}
+          {normalizeSvgBlankLines(text)}
         </ReactMarkdown>
       </div>
     );

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Check } from "lucide-react";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents, mdInlineComponents } from "../markdown/components";
 import { splitMarker, taskTip } from "../../../shared-ts/taskItem";
 import styles from "./TaskItemLine.module.css";
@@ -56,7 +56,7 @@ export function TaskItemLine({
           rehypePlugins={mdRehypePlugins}
           components={open ? mdComponents : mdInlineComponents}
         >
-          {rest}
+          {normalizeSvgBlankLines(rest)}
         </ReactMarkdown>
       </span>
     </div>

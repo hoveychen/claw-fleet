@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import ReactMarkdown from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "./plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "./plugins";
 
 /**
  * This chain previously had tests only on desktop, so it drifted silently on two counts —
@@ -112,5 +112,44 @@ describe("<style> content is dropped, not leaked as text", () => {
     expect(html).not.toContain("<style");
     expect(html).not.toContain("font:12px");
     expect(html).toContain("结束");
+  });
+});
+
+// Mirrors the desktop's "inline SVG blank lines" / "content after the open tag"
+// cases. This chain had no normalization at all, so a blank line inside an <svg>
+// truncated the drawing on every mobile surface.
+describe("inline SVG blank lines and same-line open tags", () => {
+  const svg = [
+    '<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">',
+    '  <rect width="200" height="100" fill="#fafafa"/>',
+    "",
+    '  <text x="10" y="20">label</text>',
+    '  <circle cx="50" cy="50" r="20" fill="#f59e0b"/>',
+    "</svg>",
+  ].join("\n");
+  const inner = (html: string) => html.slice(html.indexOf("<svg"), html.indexOf("</svg>"));
+
+  it("truncates at the blank line without normalization (documents the bug)", () => {
+    expect(inner(render(svg))).not.toContain("#f59e0b");
+  });
+
+  it("keeps the whole drawing once normalized", () => {
+    const html = render(normalizeSvgBlankLines(svg));
+    expect(inner(html)).toContain("#f59e0b");
+    expect(html).not.toContain("<p>");
+  });
+
+  it("moves content after a same-line open tag to its own line", () => {
+    const md = '<svg viewBox="0 0 10 10" aria-label="a > b"><rect width="1" height="1"/></svg>';
+    expect(normalizeSvgBlankLines(md)).toBe(
+      '<svg viewBox="0 0 10 10" aria-label="a > b">\n<rect width="1" height="1"/></svg>',
+    );
+  });
+
+  it("leaves fenced code and prose-only mentions untouched", () => {
+    const fenced = "```html\n" + svg + "\n```";
+    expect(normalizeSvgBlankLines(fenced)).toBe(fenced);
+    const prose = "先说 `<svg>` 标签。\n\n第一段。\n\n第二段。";
+    expect(normalizeSvgBlankLines(prose)).toBe(prose);
   });
 });

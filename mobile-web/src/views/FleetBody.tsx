@@ -5,7 +5,7 @@
 
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { t } from "../i18n";
 import { classifyResult, type FleetResult, type FleetTool } from "./fleetTools";
@@ -369,7 +369,7 @@ function ResultView({ result, tool }: { result: FleetResult; tool: FleetTool }) 
             rehypePlugins={mdRehypePlugins}
             components={mdComponents}
           >
-            {result.body}
+            {normalizeSvgBlankLines(result.body)}
           </ReactMarkdown>
         </div>
       );

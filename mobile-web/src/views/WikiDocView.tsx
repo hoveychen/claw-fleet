@@ -9,7 +9,7 @@ import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents as sharedMdComponents } from "../markdown/components";
 import { MdLink } from "../markdown/linkComponents";
 import { dateLocale, t } from "../i18n";
@@ -297,7 +297,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
                   url.startsWith("wiki:") ? url : defaultUrlTransform(url)
                 }
               >
-                {expandWikiMentions(markdown ?? "")}
+                {normalizeSvgBlankLines(expandWikiMentions(markdown ?? ""))}
               </ReactMarkdown>
             </div>
           )
