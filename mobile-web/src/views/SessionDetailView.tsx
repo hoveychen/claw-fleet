@@ -4,8 +4,10 @@
 // sidecar method while the session is working.
 
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -45,6 +47,7 @@ import { dateLocale, t } from "../i18n";
 import { formatBytes } from "../artifacts";
 import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
+import { fetchTranscriptImage, type TranscriptImageAddr } from "../sessionImages";
 import { AttachmentThumbs } from "./AttachmentThumb";
 import { splitContextFiles } from "../userAttachments";
 import { isDesktopRejection, type FleetTransport } from "../transport";
@@ -265,11 +268,23 @@ function thumbSrc(b: ContentBlock): string | null {
   return `data:${b.source.media_type ?? "image/jpeg"};base64,${b.source.data}`;
 }
 
-function imageThumbs(msg: RawMessage): string[] {
-  return blocksOf(msg)
-    .map(thumbSrc)
-    .filter((s): s is string => !!s);
+/** A user record's top-level image thumbnails, each with the address the
+ *  lightbox fetches its full-resolution version by. */
+function imageThumbs(msg: RawMessage): Array<{ src: string; addr?: TranscriptImageAddr }> {
+  const out: Array<{ src: string; addr?: TranscriptImageAddr }> = [];
+  blocksOf(msg).forEach((b, block) => {
+    const src = thumbSrc(b);
+    if (src) out.push({ src, addr: msg.uuid ? { uuid: msg.uuid, block } : undefined });
+  });
+  return out;
 }
+
+/** Fetches the full-resolution version of a tail thumbnail. Provided once per
+ *  transcript (bound to its client + path) so thumbnail sites deep in the row
+ *  tree need no extra props; `null` means previews stay previews. */
+const TranscriptImageContext = createContext<
+  ((addr: TranscriptImageAddr) => Promise<string>) | null
+>(null);
 
 /** Per-tool metadata harvested from the (non-renderable) tool_result rows:
  *  the relay's `_digest` stats, the error bit and result-screenshot thumbs,
@@ -677,16 +692,29 @@ function DigestChips({ meta }: { meta: ToolMeta }) {
 }
 
 /** A row of tappable thumbnails (result screenshots / pasted images). Tapping
- *  opens the full-screen lightbox — note these are the low-res `_thumbs`, so
- *  the enlarged view is the preview scaled up; the tool chip's detail panel
- *  carries the full-resolution bytes. */
-function ThumbRow({ srcs }: { srcs: string[] }) {
+ *  opens the full-screen lightbox on the low-res thumb at once, then swaps in
+ *  the full-resolution original fetched by the thumb's `addrs` entry. */
+function ThumbRow({
+  srcs,
+  addrs,
+}: {
+  srcs: string[];
+  addrs?: Array<TranscriptImageAddr | undefined>;
+}) {
   const { open } = useLightbox();
+  const loadFull = useContext(TranscriptImageContext);
   return (
     <div className={styles.thumbRow}>
-      {srcs.map((src, i) => (
-        <Thumb key={i} src={src} onOpen={() => open(src)} />
-      ))}
+      {srcs.map((src, i) => {
+        const addr = addrs?.[i];
+        return (
+          <Thumb
+            key={i}
+            src={src}
+            onOpen={() => open(src, "", loadFull && addr ? () => loadFull(addr) : undefined)}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -852,7 +880,12 @@ function ToolStep({
           **result** of this call, not scaffold records, so they are always visible
           without expanding. */}
       {meta?.ingest && <IngestCard ingest={meta.ingest} client={client} />}
-      {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
+      {meta?.thumbs && (
+        <ThumbRow
+          srcs={meta.thumbs}
+          addrs={meta.thumbs.map((_, index) => (b.id ? { tool_use_id: b.id, index } : undefined))}
+        />
+      )}
       {isImageCall(name) && <ImagePrompt text={imagePrompt(b.input)} />}
       {isImageCall(name) && meta?.image && <ImageMetaChips image={meta.image} />}
       {open && expandable && (
@@ -887,6 +920,7 @@ export function rowKeyOf(msg: RawMessage | undefined, index: number): string {
  *  desktop transcript. */
 function AssistantBlocks({
   blocks,
+  uuid,
   rowKey,
   expandedThinking,
   onToggleThinking,
@@ -895,6 +929,8 @@ function AssistantBlocks({
   jsonlPath,
 }: {
   blocks: ContentBlock[];
+  /** The record's transcript uuid, addressing its image blocks' originals. */
+  uuid?: string;
   /** Identity of the record these blocks came from — see `rowKeyOf`. */
   rowKey: string;
   expandedThinking: Set<string>;
@@ -923,7 +959,9 @@ function AssistantBlocks({
         }
         if (b.type === "image") {
           const src = thumbSrc(b);
-          return src ? <ThumbRow key={j} srcs={[src]} /> : null;
+          return src ? (
+            <ThumbRow key={j} srcs={[src]} addrs={[uuid ? { uuid, block: j } : undefined]} />
+          ) : null;
         }
         if (b.type === "tool_use") {
           return (
@@ -1036,6 +1074,7 @@ function WorkRunBand({
             <AssistantBlocks
               key={rowKeyOf(m, baseIndex + i)}
               blocks={blocksOf(m)}
+              uuid={m.uuid}
               rowKey={rowKeyOf(m, baseIndex + i)}
               expandedThinking={expandedThinking}
               onToggleThinking={onToggleThinking}
@@ -1188,7 +1227,9 @@ const MessageRow = memo(function MessageRow({
     return (
       <div className={styles.userRow}>
         <div className={styles.userBubble}>
-          {thumbs.length > 0 && <ThumbRow srcs={thumbs} />}
+          {thumbs.length > 0 && (
+            <ThumbRow srcs={thumbs.map((x) => x.src)} addrs={thumbs.map((x) => x.addr)} />
+          )}
           {display && <div className={styles.userText}>{display}</div>}
           <AttachmentThumbs paths={attachments} client={client ?? null} />
         </div>
@@ -1225,6 +1266,7 @@ const MessageRow = memo(function MessageRow({
     >
       <AssistantBlocks
         blocks={blocks}
+        uuid={msg.uuid}
         rowKey={rowKey}
         expandedThinking={expandedThinking}
         onToggleThinking={onToggleThinking}
@@ -1679,6 +1721,16 @@ export function SessionDetailView({
   // no transcript file at all — its `jsonlPath` is a `dsh://` uri. Both leave
   // tool lines non-expandable (digest chips never arrive for either).
   const detailPath = detailPathForSession(session.agentSource, session.jsonlPath);
+  // Unlike tool_detail this goes through the host's agent source, so it serves
+  // every source's transcript path (dsh `dsh://` uris included).
+  const transcriptPath = session.jsonlPath;
+  const loadTranscriptImage = useMemo(
+    () =>
+      client && transcriptPath
+        ? (addr: TranscriptImageAddr) => fetchTranscriptImage(client, transcriptPath, addr)
+        : null,
+    [client, transcriptPath],
+  );
 
   // Text of every real user row, to tell which optimistic echoes have landed.
   const realUserTexts = useMemo(() => {
@@ -1927,6 +1979,7 @@ export function SessionDetailView({
             {t("加载更早的消息")}
           </button>
         )}
+        <TranscriptImageContext.Provider value={loadTranscriptImage}>
         {(() => {
           const units = groupWorkRuns(groupMetaRuns(mainRows));
           return units.map((unit, unitIdx) => {
@@ -1981,6 +2034,7 @@ export function SessionDetailView({
             );
           });
         })()}
+        </TranscriptImageContext.Provider>
         {shownLiveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>

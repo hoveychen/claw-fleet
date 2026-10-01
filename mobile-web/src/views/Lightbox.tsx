@@ -20,8 +20,10 @@ import { Presence } from "../Presence";
 // ── public API ────────────────────────────────────────────────────────────────
 
 interface LightboxApi {
-  /** Open the full-screen viewer for one image (data URI or URL). */
-  open: (src: string, alt?: string) => void;
+  /** Open the full-screen viewer for one image (data URI or URL). When `src`
+   *  is only a preview, `loadFull` fetches the full-resolution version: the
+   *  preview shows at once and is swapped out once the full one decodes. */
+  open: (src: string, alt?: string, loadFull?: () => Promise<string>) => void;
 }
 
 const NOOP: LightboxApi = { open: () => {} };
@@ -35,15 +37,24 @@ export function useLightbox(): LightboxApi {
 }
 
 export function LightboxProvider({ children }: { children: ReactNode }) {
-  const [img, setImg] = useState<{ src: string; alt: string } | null>(null);
-  const open = useCallback((src: string, alt = "") => setImg({ src, alt }), []);
+  const [img, setImg] = useState<{
+    src: string;
+    alt: string;
+    loadFull?: () => Promise<string>;
+  } | null>(null);
+  const open = useCallback(
+    (src: string, alt = "", loadFull?: () => Promise<string>) => setImg({ src, alt, loadFull }),
+    [],
+  );
   const close = useCallback(() => setImg(null), []);
   const api = useMemo(() => ({ open }), [open]);
   return (
     <LightboxContext.Provider value={api}>
       {children}
       <Presence when={!!img}>
-        {img && <LightboxOverlay src={img.src} alt={img.alt} onClose={close} />}
+        {img && (
+          <LightboxOverlay src={img.src} alt={img.alt} loadFull={img.loadFull} onClose={close} />
+        )}
       </Presence>
     </LightboxContext.Provider>
   );
@@ -88,14 +99,47 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 function LightboxOverlay({
-  src,
+  src: previewSrc,
   alt,
+  loadFull,
   onClose,
 }: {
   src: string;
   alt: string;
+  loadFull?: () => Promise<string>;
   onClose: () => void;
 }) {
+  // The preview is shown immediately; the full-resolution version replaces it
+  // only after it has decoded, so the swap never flashes black or resets the
+  // zoom (same aspect ratio, same element, same transform).
+  const [src, setSrc] = useState(previewSrc);
+  const [hdState, setHdState] = useState<"idle" | "loading" | "failed">(
+    loadFull ? "loading" : "idle",
+  );
+  useEffect(() => {
+    setSrc(previewSrc);
+    if (!loadFull) {
+      setHdState("idle");
+      return;
+    }
+    let cancelled = false;
+    setHdState("loading");
+    loadFull()
+      .then(async (full) => {
+        const probe = new Image();
+        probe.src = full;
+        await probe.decode();
+        if (cancelled) return;
+        setSrc(full);
+        setHdState("idle");
+      })
+      .catch(() => {
+        if (!cancelled) setHdState("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewSrc, loadFull]);
   const rootRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   // Committed transform (between gestures). Live gesture values are written
@@ -276,7 +320,10 @@ function LightboxOverlay({
   useEffect(() => {
     const el = imgRef.current;
     setPainted(!!el && el.complete && el.naturalWidth > 0);
-  }, [src]);
+    // Keyed on the preview, not the shown src: the full-resolution swap lands
+    // pre-decoded over an already painted preview and must not bring the
+    // spinner back.
+  }, [previewSrc]);
   const showImgWait = useDelayedFlag(!painted);
 
   const [saving, setSaving] = useState(false);
@@ -355,7 +402,12 @@ function LightboxOverlay({
         )}
       </button>
       <div className={status ? styles.status : styles.hint} role={status ? "status" : undefined}>
-        {status ?? t("双击放大 · 捏合缩放 · 单击关闭")}
+        {status ??
+          (hdState === "loading"
+            ? t("正在加载高清图…")
+            : hdState === "failed"
+              ? t("高清图加载失败，显示的是缩略图")
+              : t("双击放大 · 捏合缩放 · 单击关闭"))}
       </div>
     </div>
   );

@@ -50,3 +50,26 @@ export function fetchSessionImage(
     ASSET_REQUEST_TIMEOUT_MS,
   );
 }
+
+/** Where one tail thumbnail came from, so the host can find its original:
+ *  the `index`-th `_thumbs` entry of a tool_result, or the top-level `image`
+ *  block at content index `block` of the record with that `uuid`. */
+export type TranscriptImageAddr =
+  | { tool_use_id: string; index: number }
+  | { uuid: string; block: number };
+
+/** Full-resolution version of a transcript thumbnail (the tail ships ~256px
+ *  JPEGs only), as a data URI for the lightbox. Asset timeout for the same
+ *  reason as `fetchSessionImage`. */
+export async function fetchTranscriptImage(
+  client: FleetTransport,
+  path: string,
+  addr: TranscriptImageAddr,
+): Promise<string> {
+  const res = await client.request<SessionImageBytes>(
+    "transcript_image",
+    { path, ...addr },
+    ASSET_REQUEST_TIMEOUT_MS,
+  );
+  return `data:${res.mime};base64,${res.base64}`;
+}
