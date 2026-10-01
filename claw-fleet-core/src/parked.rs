@@ -460,9 +460,10 @@ pub fn park_and_stop(
 
 /// The pid of the process Fleet spawned for `session_id` (Claude or Codex),
 /// if it is still up — the launch note's pid, checked against its recorded
-/// start time so a reused pid is never SIGINTed.
+/// start time so a reused pid is never SIGINTed. A note with no pid (an older
+/// build spawned the process) falls back to the process table.
 pub fn session_pid(session_id: &str) -> Option<u32> {
-    crate::launch_spec::live_pid(session_id)
+    crate::launch_spec::live_pid_or_scan(session_id)
 }
 
 /// Whether the Fleet-owned process for this session is still live, across
@@ -1473,6 +1474,20 @@ mod tests {
         // A session id no real session would carry, so the scan can only match
         // the process we spawn here.
         let sid = format!("live-gate-{}-{}", std::process::id(), 42);
+        // A pidless note, the shape a pre-pid build's spawn leaves behind:
+        // only the process-table fallback can find this session's process.
+        let _home = TmpHome::new("live-gate");
+        crate::launch_spec::note_spawn(
+            &sid,
+            crate::launch_spec::Spawn {
+                source: "claude",
+                kind: crate::launch_spec::SpawnKind::New,
+                workspace: &dir.to_string_lossy(),
+                pid: None,
+                parent: None,
+                transcript: None,
+            },
+        );
         let child = std::process::Command::new(&bin)
             .arg("--resume")
             .arg(&sid)
