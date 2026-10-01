@@ -398,6 +398,39 @@ pub fn live_pid(session_id: &str) -> Option<u32> {
     get(session_id)?.live_pid()
 }
 
+/// [`live_pid`], plus a process-table lookup for a note that records no pid
+/// at all — and the pid found is stamped back, so the scan runs once.
+///
+/// The fill pass only stamps pids on notes that also lack a `source`. A note
+/// whose source was filled while the session was idle, and which a pre-pid
+/// build then resumed, ends up with a source and no pid for good: [`live_pid`]
+/// reads that running process as dead. On 2026-10-01 that made orphan recovery
+/// resume a session (yellow `704c0f82`) whose original process was still
+/// blocked on the very card being answered — two `claude` processes on one
+/// transcript, and the card raised a second time when the first one timed out.
+///
+/// A note with a pid keeps the cheap check: a stale pid means a dead process,
+/// because every build that records pids records the newest one.
+pub fn live_pid_or_scan(session_id: &str) -> Option<u32> {
+    live_pid_or_scan_with(session_id, crate::session::scan_cli_processes)
+}
+
+fn live_pid_or_scan_with(
+    session_id: &str,
+    scan: impl FnOnce() -> Vec<crate::session::CliProcess>,
+) -> Option<u32> {
+    let spec = get(session_id)?;
+    if spec.pid.is_some() {
+        return spec.live_pid();
+    }
+    let pid = scan()
+        .into_iter()
+        .find(|p| p.resume_session_id.as_deref() == Some(session_id))?
+        .pid;
+    backfill_pids(&std::collections::HashMap::from([(session_id.to_string(), pid)]));
+    Some(pid)
+}
+
 /// Could the transcript at `path` belong to a session Fleet started? For the
 /// file watcher, so a `claude`/`codex` the user runs by hand does not trigger
 /// rescans. Cheap — one `stat` per candidate id, no registry read.
@@ -852,6 +885,59 @@ mod tests {
             parent: None,
             transcript: None,
         }
+    }
+
+    fn cli_process(pid: u32, session_id: &str) -> crate::session::CliProcess {
+        crate::session::CliProcess {
+            pid,
+            ppid: None,
+            cwd: "/w".into(),
+            resume_session_id: Some(session_id.into()),
+            headless: true,
+        }
+    }
+
+    /// The yellow `704c0f82` shape: a source filled while the session was
+    /// idle, then a resume by a build that records no pid. The running process
+    /// must read as alive, and its pid lands in the note.
+    #[test]
+    fn pidless_note_with_a_source_finds_its_running_process() {
+        let _home = TmpHome::new("pidless");
+        let me = std::process::id();
+        note_spawn("s", spawn("claude", SpawnKind::New, "/w", None));
+        assert!(get("s").unwrap().source.is_some());
+        assert_eq!(live_pid("s"), None, "the bare note check misses it");
+
+        let found = live_pid_or_scan_with("s", || {
+            vec![cli_process(me + 1, "other"), cli_process(me, "s")]
+        });
+        assert_eq!(found, Some(me));
+        let after = get("s").unwrap();
+        assert_eq!(after.pid, Some(me), "the found pid is stamped back");
+        assert!(after.pid_start_time.is_some());
+        assert_eq!(live_pid("s"), Some(me), "later checks need no scan");
+
+        // No process carries the id: still dead, and the note is untouched.
+        note_spawn("t", spawn("claude", SpawnKind::New, "/w", None));
+        assert_eq!(live_pid_or_scan_with("t", || vec![cli_process(me, "s")]), None);
+        assert_eq!(get("t").unwrap().pid, None);
+    }
+
+    /// A note that records a pid keeps the cheap check — no process scan —
+    /// and a session with no note at all is not Fleet's.
+    #[test]
+    fn noted_pid_or_no_note_never_scans() {
+        let _home = TmpHome::new("noted");
+        let me = std::process::id();
+        note_spawn("s", spawn("claude", SpawnKind::New, "/w", Some(me)));
+        let scan = || -> Vec<crate::session::CliProcess> { panic!("must not scan") };
+        assert_eq!(live_pid_or_scan_with("s", scan), Some(me));
+
+        let mut stale = get("s").unwrap();
+        stale.pid_start_time = stale.pid_start_time.map(|t| t - 1);
+        write("s", &stale);
+        assert_eq!(live_pid_or_scan_with("s", scan), None, "a stale pid is dead");
+        assert_eq!(live_pid_or_scan_with("ghost", scan), None);
     }
 
     /// The first spawn fixes how the session came to be; a resume moves the
