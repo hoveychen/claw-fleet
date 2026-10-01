@@ -381,6 +381,7 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   return (
     <PageShell
       view="audit"
+      detailKey={selectedEventKey}
       className={styles.risk_scope}
       title={t("audit.panel_title")}
       bannerCenter={tabBar}
@@ -703,6 +704,7 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
   return (
     <PageShell
       view="audit"
+      detailKey={selectedRuleId}
       className={styles.risk_scope}
       title={t("audit.panel_title")}
       bannerCenter={tabBar}

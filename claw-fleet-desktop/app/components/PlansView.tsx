@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFadeOnChange } from "../hooks/useFadeOnChange";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, GitBranch, Link2, ListTree, Moon, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
@@ -672,6 +673,10 @@ function PlanDrawer({
   onClose,
 }: DrawerProps) {
   const { t } = useTranslation();
+  // Reused across selections, so picking another plan node fades the drawer
+  // instead of swapping its contents in one frame.
+  const drawerRef = useRef<HTMLElement>(null);
+  useFadeOnChange(drawerRef, nodeKey(node));
   // Plan titles are supposed to be one line, but plenty in the wild are a whole
   // paragraph — clamp like the items do rather than let one push the tasks off.
   const [titleOpen, setTitleOpen] = useState(false);
@@ -681,7 +686,7 @@ function PlanDrawer({
   const focusIsDone = focusItem != null && node.items[focusItem]?.done === true;
 
   return (
-    <aside className={styles.drawer}>
+    <aside ref={drawerRef} className={styles.drawer}>
       <div className={styles.drawer_head}>
         <div
           className={titleOpen ? styles.drawer_title_open : styles.drawer_title}

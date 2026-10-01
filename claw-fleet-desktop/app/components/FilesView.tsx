@@ -299,6 +299,7 @@ export function FilesView() {
   return (
     <PageShell
       view="files"
+      detailKey={selected}
       className={styles.mem_scope}
       title={t("files.panel_title")}
       count={workspaces.length > 0 ? workspaces.length : null}

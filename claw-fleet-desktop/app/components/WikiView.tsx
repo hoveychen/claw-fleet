@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { useFadeOnChange } from "../hooks/useFadeOnChange";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { isWebBuild } from "../hostEnv";
@@ -387,6 +388,10 @@ export function WikiView() {
     () => docs.find((d) => d.slug === selectedSlug) ?? null,
     [docs, selectedSlug],
   );
+  // The preview pane sits beside the grid, so it fades on its own when another
+  // doc is picked — fading all of <main> would flash the grid too.
+  const previewRef = useRef<HTMLDivElement>(null);
+  useFadeOnChange(previewRef, selected?.slug ?? null);
 
   const wikiLinks = useMemo(() => {
     const slugs = new Set(docs.map((d) => d.slug));
@@ -995,7 +1000,7 @@ export function WikiView() {
         </div>
 
         {selected && (
-          <div className={styles.preview_pane}>
+          <div ref={previewRef} className={styles.preview_pane}>
             <WikiDetail
               doc={selected}
               wikiLinks={wikiLinks}

@@ -314,6 +314,7 @@ export function SkillsView() {
   return (
     <PageShell
       view="skills"
+      detailKey={selectedPath}
       className={styles.mem_scope}
       title={t("skills.panel_title")}
       count={loaded && skills.length > 0 ? skills.length : null}
