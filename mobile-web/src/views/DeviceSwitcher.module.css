@@ -57,6 +57,7 @@
 /* 下拉而不是底部抽屉:这个开关挂在头部左上角,面板从它底下落下来才对得上因果。
    背板铺满全屏是为了「点哪儿都能关掉」,不是为了压暗内容。 */
 .backdrop {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -64,6 +65,8 @@
 }
 
 .sheet {
+  composes: pop_enter from "../motion.module.css";
+  transform-origin: top left;
   position: absolute;
   top: calc(var(--safe-top) + 46px);
   left: 12px;

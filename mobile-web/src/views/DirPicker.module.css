@@ -1,5 +1,6 @@
 /* 叠在新会话 sheet 之上（后者 z-index 40），所以这里必须更高。 */
 .backdrop {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 50;
@@ -8,6 +9,7 @@
   align-items: flex-end;
 }
 .sheet {
+  composes: sheet_enter from "../motion.module.css";
   width: 100%;
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border-strong);

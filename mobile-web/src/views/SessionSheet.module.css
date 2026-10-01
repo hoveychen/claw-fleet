@@ -2,6 +2,7 @@
    展开的位置上，40 那档会让最后两行被「待决策 N 张」盖掉（旧 SessionHeaderMenu
    的实测截图确认过）。仍低于灯箱（100）与 App 的 60 档。 */
 .backdrop {
+  composes: overlay_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 55;
@@ -13,6 +14,7 @@
 /* 85vh 而不是旧菜单的 80vh：这张面要装下 chip 行 + 三节内容，而旧菜单只有一列
    复制条目。上限仍留着——占满整屏就该是一整页而不是半屏，抓手也就失去意义。 */
 .sheet {
+  composes: sheet_enter from "../motion.module.css";
   position: relative;
   width: 100%;
   background: var(--color-bg-secondary);

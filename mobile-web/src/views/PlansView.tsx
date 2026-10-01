@@ -35,6 +35,7 @@ import styles from "./PlansView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
 import { SkeletonList, TopProgress } from "./loading";
+import { Presence as MotionPresence } from "../Presence";
 
 interface Props {
   sessions: SessionInfo[];
@@ -391,6 +392,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
         )}
       </div>
 
+      <MotionPresence when={!!selected}>
       {selected && (
         <>
           <div className={styles.scrim} onClick={() => setSelectedKey(null)} />
@@ -402,6 +404,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
           />
         </>
       )}
+      </MotionPresence>
     </div>
   );
 }

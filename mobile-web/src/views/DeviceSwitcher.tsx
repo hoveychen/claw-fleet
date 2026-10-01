@@ -16,6 +16,7 @@ import type { PairedDevice } from "../devices";
 import { t } from "../i18n";
 import { Spinner } from "./loading";
 import styles from "./DeviceSwitcher.module.css";
+import { Presence } from "../Presence";
 
 /** A device's connectivity status now; only the two bits the switcher displays. */
 export interface DeviceStatus {
@@ -112,7 +113,7 @@ export function DeviceSwitcher({
         <ChevronDown size={15} className={styles.chevron} data-open={open ? "true" : undefined} />
       </button>
 
-      {open && (
+      <Presence when={open}>
         <div className={styles.backdrop} onClick={() => onOpenChange(false)}>
           {/* Drawer swallows clicks, or selecting a device would bubble to the
               backdrop and close it first. */}
@@ -157,7 +158,7 @@ export function DeviceSwitcher({
             </button>
           </div>
         </div>
-      )}
+      </Presence>
     </>
   );
 }

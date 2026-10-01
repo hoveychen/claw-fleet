@@ -49,6 +49,7 @@ import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { Skeleton, SkeletonList, Spinner } from "./loading";
+import { Presence } from "../Presence";
 
 // Model and effort choices were once hardcoded here and manually sync'd with the
 // desktop's modelChoices.ts. Both drifted: each claimed Codex efforts were
@@ -738,7 +739,9 @@ export function recentWorkspaceRows(
     if (isTempWorkspacePath(path)) continue;
     if (path === chatPath) continue;
     const prev = byPath.get(path);
-    const running = (prev?.running ?? 0) + (isSessionLive(s) ? 1 : 0);
+    // Subagents are not tasks: counting them made one session with 11 parallel
+    // subagents read as "15 running" while the task list showed 4.
+    const running = (prev?.running ?? 0) + (!s.isSubagent && isSessionLive(s) ? 1 : 0);
     // For the same path, keep the name and timestamp from the most recently active session.
     if (!prev || s.lastActivityMs > prev.lastMs) {
       byPath.set(path, {
@@ -1382,9 +1385,8 @@ export function NewSessionSheet({
           </>
         )}
 
-        {picking && (
-          <>
-            <HistoryLayer onBack={() => setPicking(false)} />
+        {picking && <HistoryLayer onBack={() => setPicking(false)} />}
+        <Presence when={picking}>
             <DirPicker
               client={client}
               initialPath={customWorkspace.trim()}
@@ -1394,8 +1396,7 @@ export function NewSessionSheet({
               }}
               onClose={() => setPicking(false)}
             />
-          </>
-        )}
+        </Presence>
       </div>
     </div>
   );
@@ -1805,7 +1806,7 @@ export function ResumeComposer({
           />
         </div>
       )}
-      {pickerOpen && (
+      <Presence when={pickerOpen}>
         <div className={styles.resumePicker}>
           <div className={styles.pickerBackdrop} onClick={() => setPickerOpen(false)} />
           <div className={styles.pickerSheet} role="dialog" aria-label={t("运行配置")}>
@@ -1838,7 +1839,7 @@ export function ResumeComposer({
             </div>
           </div>
         </div>
-      )}
+      </Presence>
     </div>
   );
 }

@@ -106,6 +106,7 @@ import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
 import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
+import { Presence } from "./Presence";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
 /** The PushState when the notification banner was last dismissed, not a boolean.
@@ -1356,6 +1357,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
       <main className={styles.main}>
         <ErrorBoundary label={t("{0} 页", t(TAB_LABEL[tab]))} resetKey={tab}>
+        <div key={tab} className={styles.tabPage}>
         {tab === "decisions" ? (
           <DecisionsView
             decisions={decisions}
@@ -1421,6 +1423,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
+        </div>
         </ErrorBoundary>
       </main>
 
@@ -1448,6 +1451,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
       ))}
+      <Presence when={!!detailSession}>
       {detailSession && (
         <SessionDetailView
           key={sessionDetailKey(detailSession.deviceId, detailSession.id)}
@@ -1474,20 +1478,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           }
         />
       )}
+      </Presence>
 
       {/* The wiki list itself is an overlay (entering from "More"), with document details
           stacked on top — so render it before wikiStack. */}
 
-      {showWiki && (
-        <>
-          <HistoryLayer onBack={() => setShowWiki(false)} />
-          <WikiView
-            client={client}
-            onBack={() => setShowWiki(false)}
-            onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
-          />
-        </>
-      )}
+      {showWiki && <HistoryLayer onBack={() => setShowWiki(false)} />}
+      <Presence when={showWiki}>
+        <WikiView
+          client={client}
+          onBack={() => setShowWiki(false)}
+          onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
+        />
+      </Presence>
 
       {/* Each document gets a layer, but only render the top one — lower docs don't need
           to stay around refetching content/rendering diagrams. */}
@@ -1495,6 +1498,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {wikiStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setWikiStack((s) => s.slice(0, i))} />
       ))}
+      <Presence when={wikiStack.length > 0}>
       {wikiStack.length > 0 && (
         <WikiDocView
           doc={wikiStack[wikiStack.length - 1].doc}
@@ -1505,71 +1509,65 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           }
         />
       )}
+      </Presence>
 
-      {showRepo && (
-        <>
-          <HistoryLayer onBack={() => setShowRepo(false)} />
-          <RepoView
-            client={client}
-            onBack={() => setShowRepo(false)}
-            onOpenRepo={(repo) => setRepoDetail({ deviceId: activeDeviceId, repo })}
-          />
-        </>
-      )}
+      {showRepo && <HistoryLayer onBack={() => setShowRepo(false)} />}
+      <Presence when={showRepo}>
+        <RepoView
+          client={client}
+          onBack={() => setShowRepo(false)}
+          onOpenRepo={(repo) => setRepoDetail({ deviceId: activeDeviceId, repo })}
+        />
+      </Presence>
 
-      {repoDetail && (
-        <>
-          <HistoryLayer onBack={() => setRepoDetail(null)} />
+      {repoDetail && <HistoryLayer onBack={() => setRepoDetail(null)} />}
+      <Presence when={!!repoDetail}>
+        {repoDetail && (
           <RepoDetailView
             repo={repoDetail.repo}
             client={transportFor(repoDetail.deviceId)}
             onBack={() => setRepoDetail(null)}
           />
-        </>
-      )}
+        )}
+      </Presence>
 
       {/* hostFeatures defaults to all-off, so this layer won't flicker before the
           response arrives. */}
 
-      {terminal && hostFeatures.terminal && (
-        <>
-          <HistoryLayer onBack={() => setTerminal(null)} />
+      {terminal && hostFeatures.terminal && <HistoryLayer onBack={() => setTerminal(null)} />}
+      <Presence when={!!terminal && hostFeatures.terminal}>
+        {terminal && (
           <TerminalView
             workspaces={terminalWorkspaces}
             initial={terminal.workspace}
             clientFor={transportFor}
             onBack={() => setTerminal(null)}
           />
-        </>
-      )}
+        )}
+      </Presence>
 
-      {showPlans && (
-        <>
-          <HistoryLayer onBack={() => setShowPlans(false)} />
-          <PlansView
-            sessions={scopedSessions}
-            client={client}
-            onBack={() => setShowPlans(false)}
-          />
-        </>
-      )}
+      {showPlans && <HistoryLayer onBack={() => setShowPlans(false)} />}
+      <Presence when={showPlans}>
+        <PlansView
+          sessions={scopedSessions}
+          client={client}
+          onBack={() => setShowPlans(false)}
+        />
+      </Presence>
 
-      {showUsage && (
-        <>
-          <HistoryLayer onBack={() => setShowUsage(false)} />
-          <UsageView
-            client={client}
-            todayUsage={todayUsage}
-            perDevice={usageRows}
-            activeDeviceLabel={deviceLabelOf(activeDeviceId)}
-            onBack={() => setShowUsage(false)}
-          />
-        </>
-      )}
+      {showUsage && <HistoryLayer onBack={() => setShowUsage(false)} />}
+      <Presence when={showUsage}>
+        <UsageView
+          client={client}
+          todayUsage={todayUsage}
+          perDevice={usageRows}
+          activeDeviceLabel={deviceLabelOf(activeDeviceId)}
+          onBack={() => setShowUsage(false)}
+        />
+      </Presence>
 
-      {showNewSession && (
-        <>
-          <HistoryLayer onBack={() => setShowNewSession(false)} />
+      {showNewSession && <HistoryLayer onBack={() => setShowNewSession(false)} />}
+      <Presence when={showNewSession}>
           {/* The form runs entirely in the **target device** scope, not the current one:
               drafts, attachments, last-used repo inside are all "per-machine things".
               The `key` is required, not optional — useDraft only reads disk on mount
@@ -1608,8 +1606,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               }}
             />
           </DeviceScopeProvider>
-        </>
-      )}
+      </Presence>
 
       {showDecisionDrawer && (
         <DecisionDrawer

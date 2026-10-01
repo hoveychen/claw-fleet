@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useI18n } from "./i18n";
 import styles from "./ConfirmDialog.module.css";
+import { Presence } from "./Presence";
 
 export interface ConfirmPrompt {
   message: string;
@@ -91,6 +92,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   return (
     <ConfirmContext.Provider value={controller.request}>
       {children}
+      <Presence when={!!prompt}>
       {prompt && (
         <div className={styles.overlay} onClick={() => settle(false)}>
           <div
@@ -114,6 +116,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
+      </Presence>
     </ConfirmContext.Provider>
   );
 }

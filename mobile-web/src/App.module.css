@@ -86,6 +86,11 @@
   .connIcon[data-kind="connecting"] {
     animation: none;
   }
+  .tabButton,
+  .tabIcon,
+  .centerFab {
+    transition: none;
+  }
 }
 
 .usage {
@@ -165,6 +170,13 @@
   border-top-color: #fff;
 }
 
+/* Each tab's body fades in when the tab changes (keyed on the tab in App.tsx).
+   Opacity only: a transform here would make this the containing block of the
+   position:fixed layers some tabs open (the artifact detail), clipping them. */
+.tabPage {
+  composes: overlay_enter from "./motion.module.css";
+}
+
 .main {
   flex: 1;
   padding: 12px 12px calc(70px + var(--safe-bottom));
@@ -198,6 +210,7 @@
   font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   font-weight: 500;
+  transition: color var(--motion-fast) var(--ease-out);
 }
 
 .tabButton[data-active="true"] {
@@ -208,6 +221,12 @@
   display: inline-flex;
   align-items: center;
   line-height: 1;
+  transition: scale var(--motion-fast) var(--ease-out);
+}
+
+/* Press feedback: the icon gives a little under the finger. */
+.tabButton:active .tabIcon {
+  scale: 0.92;
 }
 
 /* 中间「新会话」：iPhone 风格凸起圆形动作按钮，浮在导航栏之上。 */
@@ -241,10 +260,14 @@
   align-items: center;
   justify-content: center;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    scale var(--motion-fast) var(--ease-out);
 }
 
 .centerTab:active .centerFab {
   background: var(--color-accent-hover);
+  scale: 0.94;
 }
 
 .centerLabel {
@@ -337,7 +360,7 @@
   font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
-  animation: exitToastIn 140ms ease-out;
+  animation: exitToastIn 140ms var(--ease-out);
 }
 
 @keyframes exitToastIn {
