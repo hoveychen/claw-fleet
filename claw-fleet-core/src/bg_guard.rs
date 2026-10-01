@@ -185,10 +185,24 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
     // Only the doomed types block: a running subagent/workflow is waited on by
     // the `-p` exit path and will re-invoke the model when it completes, so the
     // promised "I'll report later" actually happens — interrupting there is a false alarm.
-    let running: Vec<&BackgroundTask> = running_tasks(payload)
-        .into_iter()
-        .filter(|t| t.doomed_on_headless_exit())
-        .collect();
+    //
+    // A running subagent/workflow also keeps every shell alive: `-p` cannot exit
+    // while it waits, and the completion re-invokes the model, whose next Stop is
+    // judged afresh. That matters because shells a *subagent* starts appear in
+    // the parent's `background_tasks` with no owner field — on 2026-10-01 session
+    // 704c0f82 was blocked over two shells its PARITY subagent had started, and
+    // the "wait in the foreground" advice sent it into a `sleep 10` polling loop.
+    let any_waited = running_tasks(payload)
+        .iter()
+        .any(|t| !t.doomed_on_headless_exit());
+    let running: Vec<&BackgroundTask> = if any_waited {
+        Vec::new()
+    } else {
+        running_tasks(payload)
+            .into_iter()
+            .filter(|t| t.doomed_on_headless_exit())
+            .collect()
+    };
     let crons = &payload.session_crons;
     if running.is_empty() && crons.is_empty() {
         return None;
@@ -413,15 +427,40 @@ mod tests {
         assert_eq!(block_reason(&p, true), None);
     }
 
-    /// Mixed doomed + waited work: the guard must still block for the shell, but
-    /// the reason must not smear the "killed in ~5s" claim onto the subagent.
+    /// Real payload (session 704c0f82, 2026-10-01, trimmed): both shells were
+    /// started by the running PARITY subagent, yet they are listed flat in the
+    /// parent's `background_tasks`. `-p` stays alive waiting on the subagent, so
+    /// the shells are not doomed — blocking here pushed the parent into a
+    /// foreground polling loop.
     #[test]
-    fn mixed_shell_and_subagent_blocks_and_lists_only_the_shell() {
+    fn running_subagent_keeps_shells_alive_so_no_block() {
+        let json = r#"{
+            "session_id": "704c0f82-2181-4c87-8444-652e7231901a",
+            "stop_hook_active": false,
+            "background_tasks": [
+                {"id":"abfe39259398ebd97","type":"subagent","status":"running",
+                 "description":"PARITY 三种出身平衡","agent_type":"general-purpose"},
+                {"id":"bemih62fi","type":"shell","status":"running",
+                 "description":"Run original-code baseline at scale",
+                 "command":"./multi_orig.sh spec_orig.txt > orig_out.txt 2>&1; echo done"},
+                {"id":"by10shx6e","type":"shell","status":"running",
+                 "description":"Wait for original baseline and summarize",
+                 "command":"until grep -q done bemih62fi.output; do sleep 10; done"}
+            ],
+            "session_crons": []
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        assert_eq!(block_reason(&p, true), None);
+    }
+
+    /// Once the subagent has finished, a still-running shell is doomed again.
+    #[test]
+    fn finished_subagent_does_not_shield_a_running_shell() {
         let json = r#"{
             "session_id": "s1",
             "background_tasks": [
                 {"id":"sh1","type":"shell","status":"running","description":"tail deploy log"},
-                {"id":"a1","type":"subagent","status":"running","description":"audit desktop counters"}
+                {"id":"a1","type":"subagent","status":"completed","description":"audit desktop counters"}
             ]
         }"#;
         let p = parse_stop_payload(json).unwrap();
@@ -429,6 +468,24 @@ mod tests {
         assert!(reason.contains("tail deploy log"), "{reason}");
         assert!(reason.contains("1 个后台任务"), "{reason}");
         assert!(!reason.contains("audit desktop counters"), "{reason}");
+    }
+
+    /// A running subagent does not rescue a session cron: crons only fire in an
+    /// idle REPL, which headless never has.
+    #[test]
+    fn running_subagent_does_not_shield_a_cron() {
+        let json = r#"{
+            "session_id": "s1",
+            "background_tasks": [
+                {"id":"a1","type":"subagent","status":"running","description":"x"}
+            ],
+            "session_crons": [
+                {"id":"c1","schedule":"*/5 * * * *","recurring":true,"prompt":"re-check"}
+            ]
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        let reason = block_reason(&p, true).expect("cron must still block");
+        assert!(reason.contains("re-check"), "{reason}");
     }
 
     #[test]
