@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
+import { useFadeOnChange } from "../hooks/useFadeOnChange";
 import { ResizeHandle } from "./ResizeHandle";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { RAILS } from "./pageShellConfig";
@@ -46,6 +47,12 @@ interface Props {
    *  invalid value — silently, with no gate to catch it — if the element
    *  carrying the declaration is not an ancestor. */
   className?: string;
+  /** Identity of what the detail column shows (a session id, a skill path).
+   *  When it changes the detail column fades in, so picking another item reads
+   *  as a swap rather than a flash. Pass it only where the detail column holds
+   *  the selection alone — a page whose main container also holds the list
+   *  (Wiki's grid) fades its own inner pane with useFadeOnChange instead. */
+  detailKey?: string | number | null;
 }
 
 /** The page's scrollable body: rail + main. Exported so a page that renders its
@@ -88,6 +95,7 @@ export function PageShell({
   children,
   afterBody,
   className,
+  detailKey,
 }: Props) {
   const rail = RAILS[view];
   const simplifiedMode = useUIStore((s) => s.simplifiedMode);
@@ -154,6 +162,12 @@ export function PageShell({
 
   const railIsList = rail?.side !== "right";
 
+  // The detail column is <main> beside a left rail (or alone), and the rail
+  // itself when it sits on the right (Audit).
+  const mainRef = useRef<HTMLElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  useFadeOnChange(railIsList ? mainRef : railRef, detailKey);
+
   const railEl = !hasRail ? null : effectiveCollapsed ? (
     <CollapsedSidebarRail
       side={rail?.side}
@@ -161,6 +175,7 @@ export function PageShell({
     />
   ) : (
     <aside
+      ref={railRef}
       className={`${styles.rail}${railIsList ? "" : ` ${styles.col_last}`}`}
       style={{ width }}
     >
@@ -172,7 +187,7 @@ export function PageShell({
   );
 
   const main = (
-    <main className={`${styles.main}${hasRail && railIsList ? ` ${styles.col_last}` : ""}`}>
+    <main ref={mainRef} className={`${styles.main}${hasRail && railIsList ? ` ${styles.col_last}` : ""}`}>
       {inColumn && !railIsList && header}
       {children}
     </main>

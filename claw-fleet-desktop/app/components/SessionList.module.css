@@ -9,7 +9,36 @@
   height: 100vh;
   overflow: hidden;
   position: relative;
-  transition: width 0.18s ease;
+  transition: width var(--motion-base) var(--ease-out);
+}
+
+/* Set for one collapse / expand (see SessionList.tsx). Two identical keyframes
+   under different names, so flipping direction restarts the animation. The
+   toggle button is left out: it is what was just clicked. */
+.sidebar_settle_collapsed > :is(.nav, .sidebar_content) {
+  animation: sidebar_settle_a var(--motion-base) var(--ease-out);
+}
+.sidebar_settle_expanded > :is(.nav, .sidebar_content, .footer) {
+  animation: sidebar_settle_b var(--motion-base) var(--ease-out);
+}
+
+@keyframes sidebar_settle_a {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes sidebar_settle_b {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+  .sidebar_settle_collapsed > *,
+  .sidebar_settle_expanded > * {
+    animation: none;
+  }
 }
 
 /* ── Collapsed (icon-rail) variant ───────────────────────────────────────── */
@@ -347,6 +376,11 @@
 
 .nav_label {
   flex: 1;
+  /* While the expand transition is still widening the sidebar, a label must
+     not wrap onto a second line and push the rows below it down. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav_badge {

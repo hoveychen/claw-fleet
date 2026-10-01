@@ -149,6 +149,7 @@ export function TerminalView() {
   return (
     <PageShell
       view="terminal"
+      detailKey={selected}
       title={t("terminal.title")}
       count={workspaces.length > 0 ? workspaces.length : null}
       secondary={

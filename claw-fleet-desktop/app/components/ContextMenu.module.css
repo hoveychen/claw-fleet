@@ -1,4 +1,5 @@
 .menu {
+  composes: pop_enter from "./motion.module.css";
   position: fixed;
   z-index: 2100;
   min-width: 168px;

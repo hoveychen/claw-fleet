@@ -1,4 +1,5 @@
 .overlay {
+  composes: overlay_enter from "./motion.module.css";
   position: fixed;
   inset: 0;
   z-index: 2100;
@@ -13,6 +14,7 @@
 /* A page, not a dialog: fixed reading measure, centred, the rest of the app
    dimmed behind it. */
 .paper {
+  composes: modal_enter from "./motion.module.css";
   display: flex;
   flex-direction: column;
   width: min(860px, 100%);

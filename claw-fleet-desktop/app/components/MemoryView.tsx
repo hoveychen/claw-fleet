@@ -369,6 +369,7 @@ export function MemoryView() {
   return (
     <PageShell
       view="memory"
+      detailKey={selectedKey}
       className={styles.mem_scope}
       title={t("memory.panel_title")}
       count={loaded && totalFiles > 0 ? totalFiles : null}

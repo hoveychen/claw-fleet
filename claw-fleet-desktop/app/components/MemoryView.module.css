@@ -469,6 +469,7 @@
 
 /* Direction is chosen at runtime by useAutoFlip. */
 .promote_menu {
+  composes: pop_enter from "./motion.module.css";
   position: absolute;
   right: 0;
   background: var(--color-bg);
@@ -481,10 +482,12 @@
 }
 
 .promote_menu_below {
+  transform-origin: top center;
   top: calc(100% + 4px);
 }
 
 .promote_menu_above {
+  transform-origin: bottom center;
   bottom: calc(100% + 4px);
 }
 

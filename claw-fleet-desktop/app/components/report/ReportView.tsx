@@ -71,6 +71,7 @@ export function ReportView() {
   return (
     <PageShell
       view="report"
+      detailKey={selectedDate}
       title={t("report.panel_title")}
       actions={<ReportShareMenu />}
       secondary={

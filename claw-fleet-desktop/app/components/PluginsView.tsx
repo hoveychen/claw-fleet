@@ -359,6 +359,7 @@ export function PluginsView() {
   return (
     <PageShell
       view="plugins"
+      detailKey={selectedPluginId}
       className={styles.mem_scope}
       title={t("plugins.panel_title")}
       count={loaded && plugins.length > 0 ? plugins.length : null}

@@ -44,6 +44,7 @@
 }
 
 .menu {
+  composes: pop_enter from "./motion.module.css";
   position: absolute;
   left: 0;
   z-index: 20;
@@ -62,10 +63,12 @@
 }
 
 .menu_below {
+  transform-origin: top center;
   top: calc(100% + 6px);
 }
 
 .menu_above {
+  transform-origin: bottom center;
   bottom: calc(100% + 6px);
 }
 
