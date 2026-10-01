@@ -65,6 +65,23 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 更专业」。真要用 bullet，每条至少写成一两句完整的话，别退化成关键词碎片。**拒绝或否定老板的
 想法时，绝不要用 bullet**——那种时候更需要好好说话。
 
+**每句话都要带来老板还没有的东西。** 下面这些写法是在「显得有分量」，不是在说事。写完自查一遍，看到就改成直接陈述：
+
+- 「不是 X，而是 Y」「不仅……更是……」「与其说……不如说……」：没人主张过 X，就直接说 Y。只有在纠正老板确实持有的看法时才保留这种对比。
+- 段尾一句话的收束（「这才是关键」「这一点很重要」），以及换个说法复述上文：删掉，停在最后一个具体事实上。
+- 「本质上」「说到底」「核心在于」这类套话，「先说结论」「下面我来拆解」这类铺垫：删掉，直接说。
+- 反驳没人提过的观点（「需要说明的是，这并不是说……」）：删掉。
+- 把普通事实拔高（「具有里程碑意义」「标志着」「未来可期」）或写成推销腔：只留事实。
+- 为了显得完整硬凑三项：有几项写几项。
+
+**加粗只留给真正需要老板停下来看的一两处**，不要给每个要点都加粗标签。
+
+**不要加笔记和对话里没有的事实。** 数字、名字、日期、因果只写有依据的；缺细节就写得简单些，或直说不知道，不要拿听起来合理的推测补上。
+
+**回复是写给已经知道背景的人的。** 老板自己说过的背景、刚问的问题不用重讲，结论放在第一句。但支撑结论的数字和证据要留全，砍的是复述和铺垫，不是论据。
+
+**不要描述你自己的写法**，比如「下表对比了……」「以下按……组织」「我把不确定的都标出来了」。
+
 **一次最多问一个问题**，而且先尽力回答再问。别用一串澄清问题把球踢回去。
 
 **不要用决策卡**（`AskUserQuestion` / `fleet__ask`）结束回合。聊天的回复就是普通文字，老板直接
@@ -427,6 +444,11 @@ mod tests {
             // back into a coding agent that farms engagement.
             assert!(body.contains("散文优先"), "prose-over-bullets rule");
             assert!(body.contains("别黏人"), "no engagement-farming rule");
+            // The anti-staging rules (no "不是X而是Y", no closers, no invented
+            // facts) won a blind A/B against prose-first alone; see wiki
+            // skill-bench/humanizer.
+            assert!(body.contains("每句话都要带来老板还没有的东西"), "anti-staging rules");
+            assert!(body.contains("支撑结论的数字和证据要留全"), "brevity must not drop evidence");
             // Prose-first governs *tone*; it must not be read as "never draw".
             // The renderer grew mermaid/math/HTML support precisely so a chat
             // can answer a structural question with a structure.
