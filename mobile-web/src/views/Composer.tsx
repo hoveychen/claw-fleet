@@ -699,7 +699,9 @@ export function recentWorkspaceRows(
     if (isTempWorkspacePath(path)) continue;
     if (path === chatPath) continue;
     const prev = byPath.get(path);
-    const running = (prev?.running ?? 0) + (isSessionLive(s) ? 1 : 0);
+    // Subagents are not tasks: counting them made one session with 11 parallel
+    // subagents read as "15 running" while the task list showed 4.
+    const running = (prev?.running ?? 0) + (!s.isSubagent && isSessionLive(s) ? 1 : 0);
     // For the same path, keep the name and timestamp from the most recently active session.
     if (!prev || s.lastActivityMs > prev.lastMs) {
       byPath.set(path, {

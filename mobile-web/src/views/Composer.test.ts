@@ -413,6 +413,18 @@ describe("recentWorkspaceRows", () => {
     expect(rows).toEqual([{ path: "/home/repo", name: "Repo", lastMs: 900, running: 2 }]);
   });
 
+  it("running subagents are not counted as running tasks", () => {
+    const rows = recentWorkspaceRows(
+      [
+        live("/home/repo", "Repo", 100, "executing"),
+        { ...live("/home/repo", "Repo", 200, "thinking"), isSubagent: true } as SessionInfo,
+        { ...live("/home/repo", "Repo", 300, "streaming"), isSubagent: true } as SessionInfo,
+      ],
+      null,
+    );
+    expect(rows[0].running).toBe(1);
+  });
+
   it("when all idle, running is 0", () => {
     const rows = recentWorkspaceRows([live("/home/repo", "Repo", 100, "idle")], null);
     expect(rows[0].running).toBe(0);
