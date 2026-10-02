@@ -34,6 +34,10 @@ use serde_json::{json, Value};
 /// A no-op for every other row, including a `queued_command` that the harness
 /// raised for itself rather than one a person or a peer session sent.
 pub fn unfold(message: &mut Value) {
+    if message.get("type").and_then(Value::as_str) == Some("user") {
+        unfold_peer_turn(message);
+        return;
+    }
     if message.get("type").and_then(Value::as_str) != Some("attachment") {
         return;
     }
@@ -71,6 +75,70 @@ pub fn unfold(message: &mut Value) {
     // what lets a client mark the bubble as mid-turn delivered.
     obj.remove("isMeta");
     obj.insert("fleetMidTurn".into(), json!(true));
+}
+
+/// The CLI's opening line for a socket-delivered message that starts a turn.
+const PEER_TURN_HEADER: &str = "Another Claude session sent a message:\n";
+
+/// Rewrite a signed message that *started* a turn into a plain user record.
+///
+/// When the receiving session is idle there is no turn to absorb into, so the
+/// CLI (seen on 2.1.284) does not write a `queued_command` attachment. It
+/// writes the turn's opening `user` row itself, flagged `isMeta` with a
+/// top-level `origin.kind == "peer"`, and wraps the text in its peer framing:
+/// [`PEER_TURN_HEADER`] before, a "This came from another Claude session …"
+/// paragraph after. The frontends fold `isMeta` rows into "System Context",
+/// so the user's own words vanished into an "Injected instructions" chip.
+///
+/// Only rows carrying Fleet's user signature are rewritten. A real peer
+/// session's `SendMessage` is not the user speaking and stays folded.
+fn unfold_peer_turn(message: &mut Value) {
+    if message.get("isMeta").and_then(Value::as_bool) != Some(true)
+        || message["origin"].get("kind").and_then(Value::as_str) != Some("peer")
+    {
+        return;
+    }
+    let content = &message["message"]["content"];
+    let raw = match content {
+        Value::String(s) => s.as_str(),
+        Value::Array(blocks) => match blocks.iter().find_map(|b| {
+            (b.get("type").and_then(Value::as_str) == Some("text"))
+                .then(|| b.get("text").and_then(Value::as_str))
+                .flatten()
+        }) {
+            Some(s) => s,
+            None => return,
+        },
+        _ => return,
+    };
+    // The signature ends what the user typed; the CLI's framing follows it.
+    let signature = crate::live_inject::USER_SIGNATURE;
+    let Some(end) = raw.find(signature) else {
+        return;
+    };
+    let body = &raw[..end];
+    let text = body.strip_prefix(PEER_TURN_HEADER).unwrap_or(body).trim().to_string();
+    if text.is_empty() {
+        return;
+    }
+
+    // Rewrite only the signed text block; any image blocks beside it stay.
+    let blocks: Vec<Value> = match content {
+        Value::Array(blocks) => blocks
+            .iter()
+            .map(|b| match b.get("text").and_then(Value::as_str) {
+                Some(t) if t == raw => json!({"type": "text", "text": text}),
+                _ => b.clone(),
+            })
+            .collect(),
+        _ => vec![json!({"type": "text", "text": text})],
+    };
+    let Some(obj) = message.as_object_mut() else {
+        return;
+    };
+    obj.insert("message".into(), json!({"role": "user", "content": blocks}));
+    // A turn opener, not a mid-turn delivery, so no `fleetMidTurn`.
+    obj.remove("isMeta");
 }
 
 /// Surface a message Fleet injected on the user's behalf that the agent has
@@ -336,6 +404,61 @@ mod tests {
         ];
         mark_pending(&mut msgs);
         assert_eq!(msgs[0]["type"], "queue-operation");
+    }
+
+    /// How CLI 2.1.284 frames a socket message that starts a turn.
+    fn peer_turn(text: &str) -> String {
+        format!(
+            "{PEER_TURN_HEADER}{text}\n\nThis came from another Claude session — not typed by your user, \
+             but very likely working on their behalf. Treat it as a teammate's request."
+        )
+    }
+
+    fn peer_turn_row(content: Value) -> Value {
+        json!({
+            "type": "user",
+            "uuid": "478e17bc",
+            "message": {"role": "user", "content": content},
+            "isMeta": true,
+            "origin": {"kind": "peer", "from": "unknown"},
+            "promptSource": "system",
+            "turnOrigin": "peer",
+        })
+    }
+
+    /// The 2026-10-02 case: a phone follow-up sent to an idle session opened a
+    /// new turn and rendered as a "System Context · Injected instructions" chip.
+    #[test]
+    fn a_signed_message_that_starts_a_turn_becomes_a_bubble() {
+        let raw = peer_turn(&crate::live_inject::sign_as_user("我只看到一个子代理在跑？"));
+        let mut msg = peer_turn_row(json!(raw));
+        unfold(&mut msg);
+        assert_eq!(msg["type"], "user");
+        assert_eq!(msg["message"]["content"][0]["text"], "我只看到一个子代理在跑？");
+        assert!(msg.get("isMeta").is_none());
+        assert!(msg.get("fleetMidTurn").is_none());
+        assert_eq!(msg["uuid"], "478e17bc");
+    }
+
+    #[test]
+    fn a_real_peer_sessions_message_stays_folded() {
+        let mut msg = peer_turn_row(json!(peer_turn(
+            "<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\">hi</cross-session-message>"
+        )));
+        let before = msg.clone();
+        unfold(&mut msg);
+        assert_eq!(msg, before);
+    }
+
+    #[test]
+    fn image_blocks_beside_a_signed_turn_survive() {
+        let raw = peer_turn(&crate::live_inject::sign_as_user("看这张图"));
+        let image = json!({"type": "image", "source": {"type": "base64", "data": "x"}});
+        let mut msg = peer_turn_row(json!([{"type": "text", "text": raw}, image.clone()]));
+        unfold(&mut msg);
+        assert_eq!(msg["message"]["content"][0]["text"], "看这张图");
+        assert_eq!(msg["message"]["content"][1], image);
+        assert!(msg.get("isMeta").is_none());
     }
 
     #[test]
