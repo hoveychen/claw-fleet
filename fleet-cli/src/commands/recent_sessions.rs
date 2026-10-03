@@ -2,9 +2,10 @@
 //! opened context window what this repository has been worked on lately.
 //!
 //! Fleet's analogue of ChatGPT's *Recent Conversation Context* layer. The text
-//! is rendered by [`claw_fleet_core::recent_sessions::render_for_workspace`],
-//! which the codex and dsh arms call too, so the three harnesses inject the
-//! same block.
+//! is rendered by [`claw_fleet_core::recent_sessions::render_for_workspace`]
+//! (here under [`claw_fleet_core::recent_sessions::render_bounded_with_fallback`]'s
+//! ceiling), which the codex and dsh arms call too, so the three harnesses
+//! inject the same block.
 //!
 //! It is a separate `SessionStart` entry rather than an extension of
 //! `notes-hint` because Claude Code keeps the `additionalContext` of every
@@ -38,9 +39,12 @@ pub(crate) fn cmd_recent_sessions() {
         .map(str::to_string)
         .or_else(crate::commands::session::read_fleet_session_id);
 
-    let Some(block) = claw_fleet_core::recent_sessions::render_for_workspace(
+    // The session waits on this hook before its first turn, so a stalled
+    // source (a wedged dsh server) must not hold it for the dsh client's 30s.
+    let Some(block) = claw_fleet_core::recent_sessions::render_bounded_with_fallback(
         &cwd.to_string_lossy(),
         session_id.as_deref(),
+        std::time::Duration::from_secs(5),
     ) else {
         return;
     };

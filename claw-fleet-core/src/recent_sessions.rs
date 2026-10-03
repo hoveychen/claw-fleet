@@ -379,7 +379,50 @@ pub fn render_within(
 ) -> Option<String> {
     let workspace = workspace_path.to_string();
     let exclude = exclude_session_id.map(str::to_string);
-    run_within(budget, move || render_for_workspace(&workspace, exclude.as_deref())).flatten()
+    run_within(budget, move || {
+        render_for_workspace(&workspace, exclude.as_deref())
+    })
+    .flatten()
+}
+
+/// [`render_for_workspace`] with a ceiling, falling back to the file-backed
+/// sources when the full scan overruns `budget`.
+///
+/// For Claude's `SessionStart` hook, which the session waits on before its
+/// first turn. The full scan asks the dsh server for its roster, and a wedged
+/// `dsh web` answers nothing until the client's 30s timeout — on 2026-10-04
+/// every new Claude session sat 31s in this hook for exactly that reason. The
+/// fallback keeps the block (minus dsh rows) instead of dropping it, and only
+/// runs on a real overrun: an empty block from a finished scan is final.
+pub fn render_bounded_with_fallback(
+    workspace_path: &str,
+    exclude_session_id: Option<&str>,
+    budget: std::time::Duration,
+) -> Option<String> {
+    let workspace = workspace_path.to_string();
+    let exclude = exclude_session_id.map(str::to_string);
+    let (ws, ex) = (workspace.clone(), exclude.clone());
+    within_or_fallback(
+        budget,
+        move || render_for_workspace(&ws, ex.as_deref()),
+        move || {
+            let sources = crate::agent_source::build_file_backed_sources();
+            render_from_sources(&sources, &workspace, exclude.as_deref())
+        },
+    )
+}
+
+/// `primary` if it finishes within `budget`, else `fallback` under the same
+/// budget. A `None` from a finished `primary` is its answer, not an overrun.
+fn within_or_fallback<T: Send + 'static>(
+    budget: std::time::Duration,
+    primary: impl FnOnce() -> Option<T> + Send + 'static,
+    fallback: impl FnOnce() -> Option<T> + Send + 'static,
+) -> Option<T> {
+    match run_within(budget, primary) {
+        Some(answer) => answer,
+        None => run_within(budget, fallback).flatten(),
+    }
 }
 
 fn run_within<T: Send + 'static>(
@@ -494,6 +537,42 @@ mod tests {
         });
         assert_eq!(result, None);
         release.send(()).unwrap();
+    }
+
+    #[test]
+    fn stalled_primary_falls_back_to_file_backed_render() {
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let result = within_or_fallback(
+            std::time::Duration::from_millis(20),
+            move || {
+                let _ = blocked.recv();
+                Some("full")
+            },
+            || Some("file-backed"),
+        );
+        assert_eq!(result, Some("file-backed"));
+        let _ = release.send(());
+    }
+
+    #[test]
+    fn finished_empty_primary_does_not_run_the_fallback() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = ran.clone();
+        let result = within_or_fallback(
+            std::time::Duration::from_secs(5),
+            || None::<&str>,
+            move || {
+                flag.store(true, Ordering::SeqCst);
+                Some("file-backed")
+            },
+        );
+        assert_eq!(result, None);
+        assert!(
+            !ran.load(Ordering::SeqCst),
+            "fallback ran after the primary finished"
+        );
     }
 
     fn session(id: &str, workspace: &str, activity: u64) -> SessionInfo {
