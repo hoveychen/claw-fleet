@@ -202,6 +202,13 @@ enum Commands {
         /// Generate lessons from sessions (requires claude CLI)
         #[arg(long)]
         lessons: bool,
+        /// Run the outsider drift check on every relay chain that is due
+        #[arg(long)]
+        drift: bool,
+        /// Run the drift check on one relay chain now (id or unique prefix),
+        /// ignoring the per-chain throttle
+        #[arg(long, value_name = "CHAIN_ID")]
+        drift_chain: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -1371,7 +1378,9 @@ fn main() {
         Commands::History { action } => commands::notes::cmd_history(action),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),
-        Commands::Report { date, backfill, regenerate, lessons, json, lang } => commands::report::cmd_report(date, backfill, regenerate, lessons, json, &lang),
+        Commands::Report { date, backfill, regenerate, lessons, drift, drift_chain, json, lang } => {
+            commands::report::cmd_report(date, backfill, regenerate, lessons, drift, drift_chain, json, &lang)
+        }
         Commands::Serve { port, token, port_file } => {
             commands::serve::cmd_serve(port, token, port_file)
         }

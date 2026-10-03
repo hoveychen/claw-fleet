@@ -453,6 +453,38 @@ pub fn run_due_checks(config: &crate::llm_provider::LlmConfig, locale: &str) -> 
     flagged
 }
 
+/// Check one chain right now, skipping the `chains_due` throttle, and store
+/// the verdict. `chain_id` may be a unique prefix. For manual runs (CLI).
+pub fn check_chain_now(
+    config: &crate::llm_provider::LlmConfig,
+    chain_id: &str,
+    locale: &str,
+) -> Result<DriftCheck, String> {
+    let chains = crate::handoff::list_chains();
+    let matches: Vec<&HandoffChain> = chains
+        .iter()
+        .filter(|c| c.chain_id.starts_with(chain_id))
+        .collect();
+    let chain = match matches.as_slice() {
+        [one] => *one,
+        [] => return Err(format!("no relay chain matches {chain_id}")),
+        _ => return Err(format!("{} relay chains match {chain_id}", matches.len())),
+    };
+    if chain.goal.as_deref().map_or(true, |g| g.trim().is_empty()) {
+        return Err(format!("chain {} has no goal to check against", chain.chain_id));
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let check = check_chain_routed(config, chain, locale, now_ms)
+        .ok_or_else(|| "drift check failed (no LLM route answered)".to_string())?;
+    DriftStore::open()
+        .and_then(|s| s.save(&check))
+        .map_err(|e| format!("save drift check: {e}"))?;
+    Ok(check)
+}
+
 /// Checks made on local calendar day `date` (`YYYY-MM-DD`). Soft: an
 /// unreadable store yields none.
 pub fn checks_for_date(date: &str) -> Vec<DriftCheck> {
