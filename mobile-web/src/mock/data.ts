@@ -9,6 +9,7 @@
 import type {
   Artifact,
   BrowseDirResponse,
+  DailyAttention,
   DecisionHistoryRecord,
   ElicitationRequest,
   FleetAskRequest,
@@ -1643,4 +1644,43 @@ export const MOCK_PLAN_FOREST: PlanForest = {
   ],
   unattachedChains: [],
   anonymous: 0,
+};
+
+/** `daily_attention` — one drifting chain, one recurring lesson, one adopted
+ *  lesson broken again. The mock answers every date with this same object, so
+ *  the view's today+yesterday merge also gets exercised (duplicates must fold). */
+export const MOCK_DAILY_ATTENTION: DailyAttention = {
+  date: "2026-10-03",
+  drift: [
+    {
+      chainId: "chain-billing-v2",
+      workspacePath: "/Users/demo/projects/billing",
+      workspaceName: "billing",
+      planId: "billing-v2",
+      goal: "Ship the v2 invoice pipeline behind a flag and cut the nightly batch over to it.",
+      sessionCount: 6,
+      latestSessionId: "sess-billing-3",
+      verdict: "polishing",
+      evidence: "The last three hand-off notes all describe retry-backoff tweaks; no plan task has been ticked since hop 3.",
+      question: "Is the backoff good enough to ship, or is it actually blocking the cut-over?",
+      checkedAt: NOW - 2 * 3600_000,
+    },
+  ],
+  lessons: [
+    {
+      content: "Run the migration against a copy of production data before declaring it reversible.",
+      reason: "Two sessions shipped down-migrations that only worked on an empty schema.",
+      workspaceName: "api-server",
+      sessionId: "sess-api-main",
+      evidenceSessionIds: ["sess-api-main", "sess-e2e-main", "sess-codex-refactor"],
+    },
+  ],
+  violations: [
+    {
+      lessonId: "lesson-verify-before-claim",
+      lessonContent: "Re-run the verification command yourself before relaying a predecessor's \"tests pass\" claim.",
+      sessionIds: ["sess-e2e-main", "sess-billing-3"],
+      note: "Two sessions reported green builds that were never re-run after the hand-off.",
+    },
+  ],
 };
