@@ -67,6 +67,19 @@ pub(crate) fn route_task_reviews(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
+/// `GET /daily_report/attention?date=YYYY-MM-DD` — the day's items that need
+/// the user's judgment, from the same `attention_for_date` the desktop reads.
+pub(crate) fn route_daily_attention(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let date = query.get("date").cloned().unwrap_or_default();
+    let attention = crate::daily_report::attention_for_date(&date);
+    let body = serde_json::to_string(&attention).unwrap_or_else(|_| "{}".into());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_daily_report_generate(
     ctx: &ServeCtx,
     request: tiny_http::Request,

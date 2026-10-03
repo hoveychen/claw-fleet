@@ -119,6 +119,19 @@ pub(crate) async fn list_task_reviews(
         .map_err(|e| format!("join: {e}"))
 }
 
+/// The day's items that need the user's judgment (drift alerts, recurring
+/// lessons, adopted-lesson violations). SQLite reads only, so off the runtime.
+#[tauri::command]
+pub(crate) async fn get_daily_attention(
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::daily_report::DailyAttention, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.get_daily_attention(&date))
+        .await
+        .map_err(|e| format!("join: {e}"))
+}
+
 #[tauri::command]
 pub(crate) async fn list_managed_lessons(
     state: tauri::State<'_, AppState>,

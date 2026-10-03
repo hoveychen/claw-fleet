@@ -1889,6 +1889,7 @@ pub fn run() {
             append_lesson_to_claude_md,
             list_managed_lessons,
             list_task_reviews,
+            get_daily_attention,
             remove_managed_lesson,
         ])
         .build(tauri::generate_context!())

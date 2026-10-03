@@ -3993,6 +3993,10 @@ impl LocalBackend {
         crate::daily_report::append_lesson_to_claude_md(lesson)
     }
 
+    pub fn get_daily_attention(&self, date: &str) -> claw_fleet_core::daily_report::DailyAttention {
+        claw_fleet_core::daily_report::attention_for_date(date)
+    }
+
     pub fn list_task_reviews(&self, date: &str) -> Vec<claw_fleet_core::task_review::TaskReview> {
         claw_fleet_core::daily_report::task_reviews_for_date(date)
     }

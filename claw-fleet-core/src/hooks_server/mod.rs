@@ -1988,6 +1988,9 @@ fn handle_request(
                 route_daily_report_stats(ctx, request, &query, json_header, path)
             }
             crate::routes::TASK_REVIEWS => route_task_reviews(request, &query, json_header),
+            crate::routes::DAILY_REPORT_ATTENTION => {
+                route_daily_attention(request, &query, json_header)
+            }
 
             crate::routes::DAILY_REPORT_GENERATE => {
                 route_daily_report_generate(ctx, request, &query, json_header, path)

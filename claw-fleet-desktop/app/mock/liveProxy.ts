@@ -741,6 +741,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { date: q(a.date) },
   }),
 
+  get_daily_attention: (a) => ({
+    method: "GET",
+    path: "/daily_report/attention",
+    query: { date: q(a.date) },
+  }),
+
   find_explorer_path: (a) => ({
     method: "GET",
     path: "/explorer_find",
