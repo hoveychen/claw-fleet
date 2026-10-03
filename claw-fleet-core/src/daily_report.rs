@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -159,6 +159,38 @@ pub struct Lesson {
     pub workspace_name: String,
     /// Session ID where the mistake occurred.
     pub session_id: String,
+    /// Every session the pattern was seen in. A lesson shown to the user cites
+    /// at least two (see [`gate_lessons`]); empty on lessons stored before the
+    /// recurrence gate existed and on per-task review lessons.
+    #[serde(default)]
+    pub evidence_session_ids: Vec<String>,
+}
+
+/// An adopted lesson (in `~/.claude/fleet-lessons.md`) that an agent still
+/// acted against: evidence the rule is not doing its job.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct LessonViolation {
+    /// Id of the adopted lesson (`ManagedLesson::id`).
+    pub lesson_id: String,
+    pub lesson_content: String,
+    /// Sessions on that day that violated it.
+    pub session_ids: Vec<String>,
+    /// What the agent did, in one sentence.
+    pub note: String,
+}
+
+/// What one day's lessons pass produced, split by how much evidence backs it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LessonsOutcome {
+    /// Patterns seen in two or more sessions, at least one of them that day.
+    /// The only lessons shown to the user.
+    pub lessons: Vec<Lesson>,
+    /// Single-session candidates. Not shown; kept so later days can match
+    /// against them and promote a pattern once it recurs.
+    pub candidates: Vec<Lesson>,
+    pub violations: Vec<LessonViolation>,
 }
 
 /// A user text turn paired with the immediately preceding assistant turn.
@@ -273,6 +305,18 @@ impl ReportStore {
             "ALTER TABLE daily_reports ADD COLUMN lessons_generated_at INTEGER;",
             [],
         );
+
+        // Lesson evidence that is not shown on the report itself: single-session
+        // candidates (the recurrence pool) and adopted-lesson violations.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS lesson_pool (
+                 date         TEXT PRIMARY KEY,
+                 candidates   TEXT NOT NULL,
+                 violations   TEXT NOT NULL,
+                 generated_at INTEGER NOT NULL
+             );",
+        )
+        .map_err(|e| format!("sqlite schema: {e}"))?;
 
         Ok(Self { conn })
     }
@@ -449,6 +493,51 @@ impl ReportStore {
             )
             .map_err(|e| format!("update lessons: {e}"))?;
         Ok(())
+    }
+
+    /// Persist a lessons pass: the gated lessons onto the report, the rest into
+    /// `lesson_pool`.
+    pub fn save_lessons_outcome(&self, date: &str, outcome: &LessonsOutcome) -> Result<(), String> {
+        self.update_lessons(date, &outcome.lessons)?;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let candidates = serde_json::to_string(&outcome.candidates)
+            .map_err(|e| format!("json encode candidates: {e}"))?;
+        let violations = serde_json::to_string(&outcome.violations)
+            .map_err(|e| format!("json encode violations: {e}"))?;
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO lesson_pool (date, candidates, violations, generated_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![date, candidates, violations, now_ms],
+            )
+            .map_err(|e| format!("save lesson pool: {e}"))?;
+        Ok(())
+    }
+
+    /// A day's single-session candidates and adopted-lesson violations, or
+    /// `None` when that day's pass has not run under the recurrence gate.
+    pub fn get_lesson_pool(
+        &self,
+        date: &str,
+    ) -> Result<Option<(Vec<Lesson>, Vec<LessonViolation>)>, String> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT candidates, violations FROM lesson_pool WHERE date = ?1",
+                params![date],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|e| format!("query lesson pool: {e}"))?;
+        Ok(row.map(|(c, v)| {
+            (
+                serde_json::from_str(&c).unwrap_or_default(),
+                serde_json::from_str(&v).unwrap_or_default(),
+            )
+        }))
     }
 
     /// List all dates that have reports, ordered ascending.
@@ -1097,31 +1186,91 @@ fn build_decision_signals_section(
     )
 }
 
+/// How far back the recurrence pool reaches, and how many past candidates it
+/// shows the model. A failure pattern that recurs less than once a fortnight
+/// is not worth a standing rule in every session's system prompt.
+const POOL_DAYS: i64 = 14;
+const POOL_MAX: usize = 80;
+
+/// A single-session candidate from an earlier day, offered to the model so a
+/// pattern seen once on Monday and once on Thursday is recognised as recurring.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PoolEntry {
+    pub content: String,
+    pub session_id: String,
+    pub workspace_name: String,
+}
+
+/// One block the model emitted, before evidence validation.
+#[derive(Default, Debug)]
+struct RawBlock {
+    lesson: Option<String>,
+    violated: Option<String>,
+    reason: Option<String>,
+    workspace: Option<String>,
+    sessions: Vec<String>,
+    note: Option<String>,
+}
+
 fn build_lessons_prompt(
     pairs: &[ConversationPair],
     locale: &str,
     existing_rules: &str,
+    adopted: &[crate::lessons_store::ManagedLesson],
+    pool: &[PoolEntry],
     other_picks: &[crate::decision_history::OtherPickContext],
     task_reviews: &[crate::task_review::TaskReview],
 ) -> String {
     let lang_instruction = match locale {
-        "zh" => "请用中文撰写输出。",
-        _ => "Write the output in English.",
+        "zh" => "LESSON / REASON / NOTE 的内容请用中文撰写（字段名保持英文）。",
+        _ => "Write the field contents in English.",
     };
     let decision_signals = build_decision_signals_section(other_picks);
     let finished_tasks = build_task_review_section(task_reviews);
 
-    let dedup_section = if existing_rules.is_empty() {
+    let rules_section = if existing_rules.is_empty() {
         String::new()
     } else {
         format!(
-            "DEDUPLICATION — The following rules/lessons are ALREADY recorded in the user's \
-             CLAUDE.md files. Do NOT output any lesson that overlaps with or restates these \
-             existing rules, even if phrased differently. Only output genuinely NEW insights.\n\
-             \n\
-             <existing_rules>\n\
-             {existing_rules}\n\
-             </existing_rules>\n\n"
+            "EXISTING RULES — already in the user's CLAUDE.md files. Do NOT output a \
+             LESSON that overlaps with or restates these, even if phrased differently.\n\
+             <existing_rules>\n{existing_rules}\n</existing_rules>\n\n"
+        )
+    };
+
+    let adopted_section = if adopted.is_empty() {
+        String::new()
+    } else {
+        let mut body = String::new();
+        for l in adopted {
+            let content: String = l.content.chars().take(300).collect();
+            body.push_str(&format!("[{}] {}\n", l.id, content));
+        }
+        format!(
+            "ADOPTED LESSONS — the user already adopted these; they are injected into \
+             every session. Never output a LESSON that restates one. Instead, when \
+             today's evidence shows an agent acting against one, output a VIOLATED \
+             block for it (format below).\n\
+             <adopted_lessons>\n{body}</adopted_lessons>\n\n"
+        )
+    };
+
+    let pool_section = if pool.is_empty() {
+        String::new()
+    } else {
+        let mut body = String::new();
+        for p in pool {
+            let content: String = p.content.chars().take(240).collect();
+            body.push_str(&format!(
+                "- {content} (workspace: {}, session: {})\n",
+                p.workspace_name, p.session_id
+            ));
+        }
+        format!(
+            "RECENT CANDIDATES — single-session candidates from the previous {POOL_DAYS} \
+             days. When today's evidence shows the SAME failure pattern as one of these, \
+             cite that candidate's session id alongside today's.\n\
+             <recent_candidates>\n{body}</recent_candidates>\n\n"
         )
     };
 
@@ -1142,38 +1291,40 @@ fn build_lessons_prompt(
     }
 
     format!(
-        "Below are two kinds of evidence from a day of AI-coding sessions. \
-         First, conversation turns: what the AI said, followed by the user's reply. \
-         Second (when present), DECISION-CARD SIGNALS: decision cards where the user \
-         declined the AI's offered options and answered via \"Other\", or rejected a \
-         proposed plan.\n\n\
-         Your task: across BOTH kinds of evidence, identify cases where the user \
-         corrected the AI, rejected an approach, pointed out a mistake, repeated a \
-         requirement the AI ignored, or — in the decision cards — was offered the \
-         wrong choices / a wrong recommendation / a decision that should not have \
-         been asked at all.\n\n\
-         CRITICAL FILTER — only include a lesson if ALL of these are true:\n\
-         1. It is a GENERAL principle applicable to any project, not a fix specific to this codebase \
-            (e.g. \"wrong config value for Tauri\" or \"wrong CSS class name\" are project-specific — skip them).\n\
-         2. The lesson explains WHY the rule matters (what went wrong, what the consequence was), \
-            not just WHAT to do.\n\
-         3. The mistake represents a pattern an AI would plausibly repeat in future projects.\n\n\
-         Good lesson examples:\n\
-         - \"Never run `git stash drop` after a failed stash pop\" — WHY: it permanently destroys \
-           uncommitted work; recovery requires `git fsck` before GC runs.\n\
-         - \"Answer the specific question asked; do not substitute a related but different question\" \
-           — WHY: the user loses trust and wastes time correcting scope before getting the real answer.\n\n\
-         Bad lesson examples (skip these):\n\
-         - \"Use `Overlay` not `hidden` for Tauri titleBarStyle\" — project/framework-specific config detail.\n\
-         - \"Add i18n keys for all labels\" — obvious coding standard, not an insightful transferable lesson.\n\
-         - \"Apply the effect only to the mascot component\" — one-off UI correction, not a general principle.\n\n\
-         {dedup_section}\
-         For each qualifying lesson, output exactly:\n\
+        "Below is evidence from one day of AI-coding sessions: conversation turns (what \
+         the AI said, then the user's reply) and, when present, decision cards where the \
+         user declined the AI's offered options, and the day's finished-task reviews.\n\n\
+         Your job is NOT to list every correction. A one-off mistake is noise; only a \
+         failure pattern that RECURS across sessions earns a standing rule. Work in three \
+         steps:\n\
+         1. Find each case where the user corrected the AI, rejected an approach, pointed \
+            out a mistake, repeated a requirement the AI ignored, or — in a decision card — \
+            was offered the wrong choices or asked something that should not have been asked.\n\
+         2. Group cases that share the SAME underlying failure (same root cause in the AI's \
+            behaviour, not merely the same topic or project), across today's sessions AND \
+            the RECENT CANDIDATES.\n\
+         3. Output one block per pattern, listing EVERY session it was seen in.\n\n\
+         CRITICAL FILTER — only output a pattern if ALL of these hold:\n\
+         1. It is a GENERAL principle applicable to any project, not a fix specific to one \
+            codebase (a wrong config value or class name is project-specific — skip it).\n\
+         2. It explains WHY it matters (what went wrong, what it cost).\n\
+         3. An AI would plausibly repeat it in future work.\n\n\
+         {rules_section}\
+         {adopted_section}\
+         {pool_section}\
+         Output format, one block per pattern:\n\
          LESSON: <one-sentence actionable rule>\n\
-         REASON: <one-to-two sentences explaining WHY — what went wrong and what the consequence was>\n\
-         WORKSPACE: <workspace name>\n\
-         SESSION: <session id>\n\n\
-         If no qualifying lessons exist, output NONE.\n\n\
+         REASON: <one or two sentences on WHY — what happened and what it cost>\n\
+         WORKSPACE: <workspace of the most recent occurrence>\n\
+         SESSIONS: <comma-separated session ids where this pattern occurred>\n\n\
+         Output a pattern seen in only one session too (it becomes a candidate later days \
+         can match), but NEVER invent a session id: list only ids that appear verbatim in \
+         the evidence or the RECENT CANDIDATES.\n\n\
+         For an adopted lesson the agent acted against today:\n\
+         VIOLATED: <adopted lesson id, the bracketed value>\n\
+         SESSIONS: <comma-separated session ids from today's evidence>\n\
+         NOTE: <one sentence: what the agent did>\n\n\
+         If nothing qualifies, output NONE.\n\n\
          {lang_instruction}\n\n\
          {finished_tasks}\
          {decision_signals}\
@@ -1182,70 +1333,187 @@ fn build_lessons_prompt(
     )
 }
 
-fn parse_lessons(output: &str, pairs: &[ConversationPair]) -> Vec<Lesson> {
-    let mut lessons = Vec::new();
-    let mut current_content: Option<String> = None;
-    let mut current_reason: Option<String> = None;
-    let mut current_workspace: Option<String> = None;
-    let mut current_session: Option<String> = None;
-
+fn parse_blocks(output: &str) -> Vec<RawBlock> {
+    let mut blocks: Vec<RawBlock> = Vec::new();
     for line in output.lines() {
-        let line = line.trim();
+        let line = line.trim().trim_start_matches(['-', '*']).trim();
         if let Some(rest) = line.strip_prefix("LESSON:") {
-            // Flush previous
-            if let (Some(content), Some(reason)) = (current_content.take(), current_reason.take()) {
-                let workspace = current_workspace.take().unwrap_or_else(|| {
-                    pairs
-                        .first()
-                        .map(|p| p.workspace_name.clone())
-                        .unwrap_or_default()
-                });
-                let session = current_session.take().unwrap_or_default();
-                lessons.push(Lesson {
-                    content,
-                    reason,
-                    workspace_name: workspace,
-                    session_id: session,
-                });
-            }
-            current_content = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("REASON:") {
-            current_reason = Some(rest.trim().to_string());
+            blocks.push(RawBlock {
+                lesson: Some(rest.trim().to_string()),
+                ..Default::default()
+            });
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("VIOLATED:") {
+            blocks.push(RawBlock {
+                violated: Some(rest.trim().trim_matches(['[', ']']).to_string()),
+                ..Default::default()
+            });
+            continue;
+        }
+        let Some(cur) = blocks.last_mut() else { continue };
+        if let Some(rest) = line.strip_prefix("REASON:") {
+            cur.reason = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("WORKSPACE:") {
-            current_workspace = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("SESSION:") {
-            current_session = Some(rest.trim().to_string());
+            cur.workspace = Some(rest.trim().to_string());
+        } else if let Some(rest) = line
+            .strip_prefix("SESSIONS:")
+            .or_else(|| line.strip_prefix("SESSION:"))
+        {
+            cur.sessions.extend(
+                rest.split([',', ' ', ';'])
+                    .map(|s| s.trim().trim_matches(['`', '[', ']']))
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            );
+        } else if let Some(rest) = line.strip_prefix("NOTE:") {
+            cur.note = Some(rest.trim().to_string());
         }
     }
+    blocks
+}
 
-    // Flush final
-    if let (Some(content), Some(reason)) = (current_content, current_reason) {
-        let workspace = current_workspace.unwrap_or_else(|| {
-            pairs
-                .first()
-                .map(|p| p.workspace_name.clone())
-                .unwrap_or_default()
-        });
-        let session = current_session.unwrap_or_default();
-        lessons.push(Lesson {
-            content,
-            reason,
-            workspace_name: workspace,
-            session_id: session,
-        });
+/// Validate the model's blocks against the evidence it was actually shown and
+/// split them by how much evidence backs them.
+///
+/// The recurrence gate is enforced here, not trusted to the prompt: a lesson
+/// reaches the user only when it cites at least two distinct sessions the model
+/// really saw, at least one of them from `today_sessions` (otherwise an old
+/// pattern would be re-announced every day from the pool alone). Session ids the
+/// model invented are dropped before counting.
+pub(crate) fn gate_lessons(
+    output: &str,
+    today_sessions: &HashMap<String, String>,
+    pool: &[PoolEntry],
+    adopted: &[crate::lessons_store::ManagedLesson],
+) -> LessonsOutcome {
+    let mut known: HashMap<&str, &str> = today_sessions
+        .iter()
+        .map(|(id, ws)| (id.as_str(), ws.as_str()))
+        .collect();
+    for p in pool {
+        known
+            .entry(p.session_id.as_str())
+            .or_insert(p.workspace_name.as_str());
     }
 
-    lessons
+    let mut out = LessonsOutcome::default();
+    for b in parse_blocks(output) {
+        let mut seen = HashSet::new();
+        let evidence: Vec<String> = b
+            .sessions
+            .iter()
+            .filter(|s| known.contains_key(s.as_str()))
+            .filter(|s| seen.insert(s.as_str()))
+            .cloned()
+            .collect();
+        let has_today = evidence.iter().any(|s| today_sessions.contains_key(s));
+
+        if let Some(id) = b.violated {
+            let Some(adopted_lesson) = adopted.iter().find(|l| l.id == id) else {
+                continue;
+            };
+            let today_ids: Vec<String> = evidence
+                .into_iter()
+                .filter(|s| today_sessions.contains_key(s))
+                .collect();
+            if today_ids.is_empty() {
+                continue;
+            }
+            out.violations.push(LessonViolation {
+                lesson_id: id,
+                lesson_content: adopted_lesson.content.clone(),
+                session_ids: today_ids,
+                note: b.note.unwrap_or_default(),
+            });
+            continue;
+        }
+
+        let (Some(content), Some(reason)) = (b.lesson, b.reason) else {
+            continue;
+        };
+        if content.is_empty() || !has_today {
+            continue;
+        }
+        let latest_today = evidence
+            .iter()
+            .find(|s| today_sessions.contains_key(*s))
+            .cloned()
+            .unwrap_or_default();
+        let workspace_name = b
+            .workspace
+            .filter(|w| !w.is_empty())
+            .or_else(|| known.get(latest_today.as_str()).map(|w| w.to_string()))
+            .unwrap_or_default();
+        let lesson = Lesson {
+            content,
+            reason,
+            workspace_name,
+            session_id: latest_today,
+            evidence_session_ids: evidence.clone(),
+        };
+        if evidence.len() >= 2 {
+            out.lessons.push(lesson);
+        } else {
+            out.candidates.push(lesson);
+        }
+    }
+    out
+}
+
+/// Earlier days' lessons and candidates, newest first, deduplicated by content:
+/// the pool a new day's evidence is matched against for recurrence.
+pub fn recent_lesson_pool(date: &str) -> Vec<PoolEntry> {
+    let Some(day) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok() else {
+        return Vec::new();
+    };
+    let store = ReportStore::open().ok();
+    let mut seen = HashSet::new();
+    let mut pool = Vec::new();
+    let mut push = |l: &Lesson, pool: &mut Vec<PoolEntry>| {
+        if l.session_id.is_empty() || !seen.insert(l.content.clone()) {
+            return;
+        }
+        pool.push(PoolEntry {
+            content: l.content.clone(),
+            session_id: l.session_id.clone(),
+            workspace_name: l.workspace_name.clone(),
+        });
+    };
+    for back in 1..=POOL_DAYS {
+        let d = (day - chrono::Duration::days(back))
+            .format("%Y-%m-%d")
+            .to_string();
+        if let Some(store) = &store {
+            if let Ok(Some(r)) = store.get_report(&d) {
+                for l in r.lessons.iter().flatten() {
+                    push(l, &mut pool);
+                }
+            }
+            if let Ok(Some((candidates, _))) = store.get_lesson_pool(&d) {
+                for l in &candidates {
+                    push(l, &mut pool);
+                }
+            }
+        }
+        for r in task_reviews_for_date(&d) {
+            for l in &r.lessons {
+                push(l, &mut pool);
+            }
+        }
+    }
+    pool.truncate(POOL_MAX);
+    pool
 }
 
 /// Generate lessons for a daily report from its session JSONL files.
-/// Returns None if claude CLI is unavailable or no conversation pairs found.
+/// Returns None if the provider is unavailable or the call failed.
 pub fn generate_lessons(
     provider: &dyn LlmProvider,
     model: &str,
     report: &DailyReport,
     locale: &str,
-) -> Option<Vec<Lesson>> {
+) -> Option<LessonsOutcome> {
     if !provider.is_available() {
         log_debug(&format!(
             "[daily_report] provider '{}' not available for lessons",
@@ -1256,6 +1524,9 @@ pub fn generate_lessons(
 
     // Collect conversation pairs from all non-subagent sessions
     let mut all_pairs: Vec<ConversationPair> = Vec::new();
+    // Every session id the model may legitimately cite as today's evidence,
+    // mapped to its workspace.
+    let mut today_sessions: HashMap<String, String> = HashMap::new();
 
     // We only have session_ids in the report; re-scan to find paths
     let sessions = scan_sessions_for_date(&report.date);
@@ -1270,6 +1541,7 @@ pub fn generate_lessons(
         let pairs = extract_conversation_pairs(&content, &si.id, &si.workspace_name);
         // Only include sessions with >= 2 user text turns (pairs)
         if pairs.len() >= 2 {
+            today_sessions.insert(si.id.clone(), si.workspace_name.clone());
             all_pairs.extend(pairs);
         }
     }
@@ -1280,58 +1552,60 @@ pub fn generate_lessons(
     const MAX_DECISION_SIGNALS: usize = 40;
     let other_picks =
         crate::decision_history::collect_other_picks_for_date(&report.date, MAX_DECISION_SIGNALS);
+    for p in &other_picks {
+        today_sessions
+            .entry(p.session_id.clone())
+            .or_insert_with(|| p.workspace_name.clone());
+    }
 
-    // Tasks that reached a terminal state on this day were already reviewed
-    // individually, at the moment they ended, knowing whether they succeeded —
-    // context this day-level pass does not have. Their lessons are adopted
-    // as-is rather than re-derived, and they are listed in the prompt so the
-    // day-level pass does not restate them.
+    // Tasks that ended today were reviewed on their own, knowing the outcome.
+    // Their lessons are single-session evidence like any other: they reach the
+    // user only if the same pattern shows up in a second session.
     let task_reviews = task_reviews_for_date(&report.date);
-    let mut lessons_from_tasks: Vec<Lesson> = Vec::new();
     for r in &task_reviews {
-        lessons_from_tasks.extend(r.lessons.iter().cloned());
+        for sid in &r.session_ids {
+            today_sessions
+                .entry(sid.clone())
+                .or_insert_with(|| r.workspace_name.clone());
+        }
     }
 
-    if all_pairs.is_empty() && other_picks.is_empty() {
-        log_debug("[daily_report] no conversation pairs or decision signals found for lessons");
-        return Some(lessons_from_tasks);
+    if all_pairs.is_empty() && other_picks.is_empty() && task_reviews.is_empty() {
+        log_debug("[daily_report] no evidence found for lessons");
+        return Some(LessonsOutcome::default());
     }
 
-    // Collect workspace paths for deduplication against existing CLAUDE.md rules
     let workspace_paths: Vec<String> = sessions
         .iter()
         .filter(|si| !si.is_subagent)
         .map(|si| si.workspace_path.clone())
         .collect();
     let existing_rules = collect_existing_rules(&workspace_paths);
+    let adopted = crate::lessons_store::list_lessons();
+    let pool = recent_lesson_pool(&report.date);
 
     let prompt = build_lessons_prompt(
         &all_pairs,
         locale,
         &existing_rules,
+        &adopted,
+        &pool,
         &other_picks,
         &task_reviews,
     );
 
-    let raw = match crate::llm_usage::complete_accounted(
+    let raw = crate::llm_usage::complete_accounted(
         provider,
         &prompt,
         model,
         LESSONS_TIMEOUT,
         crate::llm_usage::SCENARIO_DAILY_REPORT_LESSONS,
-    ) {
-        Some(r) => r,
-        None => return None,
-    };
+    )?;
 
-    if raw.is_empty() || raw.eq_ignore_ascii_case("NONE") {
-        return Some(lessons_from_tasks);
+    if raw.is_empty() || raw.trim().eq_ignore_ascii_case("NONE") {
+        return Some(LessonsOutcome::default());
     }
-
-    // Per-task lessons first: they carry the outcome the day-level pass cannot see.
-    let mut lessons = lessons_from_tasks;
-    lessons.extend(parse_lessons(&raw, &all_pairs));
-    Some(lessons)
+    Some(gate_lessons(&raw, &today_sessions, &pool, &adopted))
 }
 
 /// The task retrospectives whose task ended on `date` (local time). Soft: an
@@ -1359,8 +1633,8 @@ pub fn task_reviews_for_date(date: &str) -> Vec<crate::task_review::TaskReview> 
 }
 
 /// Render the day's finished task retrospectives for the lessons prompt: how
-/// many tasks ended, how they ended, and which lessons were already drawn from
-/// them so the day-level pass does not repeat them.
+/// many tasks ended, how they ended, and the single-task lessons each review
+/// drew — evidence the day-level pass groups with everything else.
 fn build_task_review_section(reviews: &[crate::task_review::TaskReview]) -> String {
     if reviews.is_empty() {
         return String::new();
@@ -1375,8 +1649,11 @@ fn build_task_review_section(reviews: &[crate::task_review::TaskReview]) -> Stri
             "ABANDONED"
         };
         body.push_str(&format!(
-            "--- [{verdict}] {} (workspace: {}) ---\n  {}\n",
-            r.title, r.workspace_name, r.summary
+            "--- [{verdict}] {} (workspace: {}, sessions: {}) ---\n  {}\n",
+            r.title,
+            r.workspace_name,
+            r.session_ids.join(", "),
+            r.summary
         ));
         if r.outcome.is_success() != r.agent_claimed_complete {
             body.push_str(
@@ -1384,18 +1661,18 @@ fn build_task_review_section(reviews: &[crate::task_review::TaskReview]) -> Stri
             );
         }
         for l in &r.lessons {
-            body.push_str(&format!("  ALREADY-DRAWN LESSON: {}\n", l.content));
+            body.push_str(&format!(
+                "  TASK LESSON (session {}): {}\n",
+                l.session_id, l.content
+            ));
         }
         body.push('\n');
     }
     format!(
         "FINISHED TASKS — {n} task(s) reached a terminal state today ({done} completed, \
-         {abandoned} abandoned). Each was already reviewed on its own, at the moment it \
-         ended, with its outcome known. Their conclusions are below. Do NOT restate any \
-         lesson marked ALREADY-DRAWN — those are adopted verbatim and adding them again \
-         would duplicate them. Use this section instead as context for what the day was \
-         actually about, and only emit a lesson that spans tasks or that none of these \
-         reviews caught.\n\
+         {abandoned} abandoned), each reviewed on its own with its outcome known. A TASK \
+         LESSON is single-session evidence like any other: group it with matching cases \
+         from other sessions, and cite its session id when you do.\n\
          \n\
          <finished_tasks>\n{body}</finished_tasks>\n\n",
         n = reviews.len(),
@@ -1406,7 +1683,7 @@ pub fn generate_lessons_routed(
     config: &crate::llm_provider::LlmConfig,
     report: &DailyReport,
     locale: &str,
-) -> Option<Vec<Lesson>> {
+) -> Option<LessonsOutcome> {
     for route in crate::llm_provider::daily_report_routes(config) {
         log_debug(&format!(
             "[daily_report] trying lessons provider '{}' model '{}'",
@@ -1971,13 +2248,15 @@ fn run_backfill_check(
             log_debug(&format!(
                 "[report-scheduler] generating lessons for {date}..."
             ));
-            if let Some(lessons) = generate_lessons_routed(llm_config, &report, locale) {
+            if let Some(outcome) = generate_lessons_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
-                store.update_lessons(&date, &lessons).ok();
-                became_readable = !lessons.is_empty();
+                store.save_lessons_outcome(&date, &outcome).ok();
+                became_readable = !outcome.lessons.is_empty() || !outcome.violations.is_empty();
                 log_debug(&format!(
-                    "[report-scheduler] lessons for {date} done ({} found)",
-                    lessons.len()
+                    "[report-scheduler] lessons for {date} done ({} recurring, {} candidates, {} violations)",
+                    outcome.lessons.len(),
+                    outcome.candidates.len(),
+                    outcome.violations.len()
                 ));
             } else {
                 log_debug(&format!("[report-scheduler] lessons for {date} failed"));
@@ -2635,24 +2914,114 @@ mod tests {
         assert_eq!(pairs[0].user_text, "Thanks");
     }
 
-    #[test]
-    fn test_parse_lessons_output() {
-        let output = "LESSON: Never use git stash\nREASON: It can lose data\nWORKSPACE: my-proj\nSESSION: sess-42\n\nLESSON: Always write tests first\nREASON: User corrected TDD order\nWORKSPACE: my-proj\nSESSION: sess-42";
-        let pairs: Vec<ConversationPair> = vec![];
-        let lessons = parse_lessons(output, &pairs);
-        assert_eq!(lessons.len(), 2);
-        assert_eq!(lessons[0].content, "Never use git stash");
-        assert_eq!(lessons[0].reason, "It can lose data");
-        assert_eq!(lessons[0].workspace_name, "my-proj");
-        assert_eq!(lessons[0].session_id, "sess-42");
-        assert_eq!(lessons[1].content, "Always write tests first");
+    fn today(ids: &[(&str, &str)]) -> HashMap<String, String> {
+        ids.iter()
+            .map(|(id, ws)| (id.to_string(), ws.to_string()))
+            .collect()
+    }
+
+    fn adopted(id: &str, content: &str) -> crate::lessons_store::ManagedLesson {
+        crate::lessons_store::ManagedLesson {
+            id: id.into(),
+            content: content.into(),
+            reason: String::new(),
+            workspace_name: String::new(),
+            session_id: String::new(),
+        }
     }
 
     #[test]
-    fn test_parse_lessons_none_output() {
-        let pairs: Vec<ConversationPair> = vec![];
-        let lessons = parse_lessons("NONE", &pairs);
-        assert!(lessons.is_empty());
+    fn gate_promotes_only_patterns_seen_in_two_sessions() {
+        let output = "LESSON: Verify before claiming done\nREASON: Twice the user found it broken\nWORKSPACE: a\nSESSIONS: s1, s2\n\nLESSON: Ask fewer questions\nREASON: Once\nWORKSPACE: a\nSESSIONS: s1";
+        let out = gate_lessons(output, &today(&[("s1", "a"), ("s2", "b")]), &[], &[]);
+        assert_eq!(out.lessons.len(), 1, "two-session pattern must be shown");
+        assert_eq!(out.lessons[0].evidence_session_ids, vec!["s1", "s2"]);
+        assert_eq!(out.candidates.len(), 1, "one-session pattern is kept as a candidate only");
+        assert_eq!(out.candidates[0].content, "Ask fewer questions");
+    }
+
+    #[test]
+    fn gate_drops_invented_session_ids_before_counting() {
+        // The model claims two sessions but one was never shown to it.
+        let output = "LESSON: X\nREASON: Y\nSESSIONS: s1, made-up";
+        let out = gate_lessons(output, &today(&[("s1", "a")]), &[], &[]);
+        assert!(out.lessons.is_empty(), "an invented id must not satisfy the gate");
+        assert_eq!(out.candidates.len(), 1);
+        assert_eq!(out.candidates[0].evidence_session_ids, vec!["s1"]);
+    }
+
+    #[test]
+    fn gate_counts_a_pool_match_but_needs_one_session_from_today() {
+        let pool = vec![PoolEntry {
+            content: "earlier".into(),
+            session_id: "old".into(),
+            workspace_name: "w".into(),
+        }];
+        let recur = "LESSON: X\nREASON: Y\nSESSIONS: s1, old";
+        let out = gate_lessons(recur, &today(&[("s1", "a")]), &pool, &[]);
+        assert_eq!(out.lessons.len(), 1, "today + an earlier candidate is a recurrence");
+        assert_eq!(out.lessons[0].session_id, "s1");
+
+        // Only pool sessions: an old pattern must not be re-announced.
+        let stale = "LESSON: X\nREASON: Y\nSESSIONS: old";
+        let out = gate_lessons(stale, &today(&[("s1", "a")]), &pool, &[]);
+        assert!(out.lessons.is_empty() && out.candidates.is_empty());
+    }
+
+    #[test]
+    fn gate_keeps_violations_of_known_adopted_lessons_only() {
+        let output = "VIOLATED: [abc]\nSESSIONS: s1\nNOTE: claimed done without testing\n\nVIOLATED: nope\nSESSIONS: s1\nNOTE: z";
+        let out = gate_lessons(
+            output,
+            &today(&[("s1", "a")]),
+            &[],
+            &[adopted("abc", "Test before done")],
+        );
+        assert_eq!(out.violations.len(), 1);
+        assert_eq!(out.violations[0].lesson_id, "abc");
+        assert_eq!(out.violations[0].lesson_content, "Test before done");
+        assert_eq!(out.violations[0].session_ids, vec!["s1"]);
+        assert!(out.lessons.is_empty());
+    }
+
+    #[test]
+    fn gate_on_none_output_is_empty() {
+        let out = gate_lessons("NONE", &today(&[("s1", "a")]), &[], &[]);
+        assert_eq!(out, LessonsOutcome::default());
+    }
+
+    #[test]
+    fn lesson_pool_round_trips() {
+        let db_path = temp_db_path();
+        let store = ReportStore::open_at(&db_path).unwrap();
+        store.save_report(&make_test_report("2026-03-31")).unwrap();
+        assert!(store.get_lesson_pool("2026-03-31").unwrap().is_none());
+
+        let cand = Lesson {
+            content: "c".into(),
+            reason: "r".into(),
+            workspace_name: "w".into(),
+            session_id: "s1".into(),
+            evidence_session_ids: vec!["s1".into()],
+        };
+        let outcome = LessonsOutcome {
+            lessons: vec![],
+            candidates: vec![cand.clone()],
+            violations: vec![LessonViolation {
+                lesson_id: "abc".into(),
+                lesson_content: "t".into(),
+                session_ids: vec!["s1".into()],
+                note: "n".into(),
+            }],
+        };
+        store.save_lessons_outcome("2026-03-31", &outcome).unwrap();
+        let (c, v) = store.get_lesson_pool("2026-03-31").unwrap().unwrap();
+        assert_eq!(c, vec![cand]);
+        assert_eq!(v.len(), 1);
+        let report = store.get_report("2026-03-31").unwrap().unwrap();
+        assert_eq!(report.lessons, Some(vec![]), "gated lessons land on the report");
+
+        let _ = std::fs::remove_file(&db_path);
     }
 
     #[test]
@@ -2666,6 +3035,7 @@ mod tests {
             reason: "User asked for TDD".to_string(),
             workspace_name: "project".to_string(),
             session_id: "sess-1".to_string(),
+            evidence_session_ids: vec!["sess-1".to_string(), "sess-0".to_string()],
         }]);
         report.lessons_generated_at = Some(9999);
         store.save_report(&report).unwrap();
@@ -2740,6 +3110,7 @@ mod tests {
             reason: "Bugs found in prod".to_string(),
             workspace_name: "proj".to_string(),
             session_id: "s1".to_string(),
+            evidence_session_ids: Vec::new(),
         }];
         store.update_lessons("2026-03-31", &lessons).unwrap();
 

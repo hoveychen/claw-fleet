@@ -370,6 +370,7 @@ fn parse_raw_body(ws: String, sid: String, body: &[&str]) -> Option<Lesson> {
         reason,
         workspace_name: ws,
         session_id: sid,
+        evidence_session_ids: Vec::new(),
     })
 }
 
@@ -514,6 +515,7 @@ mod tests {
             reason: reason.to_string(),
             workspace_name: ws.to_string(),
             session_id: sid.to_string(),
+            evidence_session_ids: Vec::new(),
         }
     }
 

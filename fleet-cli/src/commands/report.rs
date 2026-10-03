@@ -71,9 +71,15 @@ pub(crate) fn cmd_report(
             Ok(Some(report)) => {
                 eprint!("Generating lessons (may take up to 3 minutes)...");
                 match generate_lessons_routed(&llm_cfg, &report, lang) {
-                    Some(lessons) => {
-                        eprintln!(" done ({} lessons found)", lessons.len());
-                        store.update_lessons(&target_date, &lessons).ok();
+                    Some(outcome) => {
+                        eprintln!(
+                            " done ({} recurring, {} single-session candidates, {} adopted-lesson violations)",
+                            outcome.lessons.len(),
+                            outcome.candidates.len(),
+                            outcome.violations.len()
+                        );
+                        store.save_lessons_outcome(&target_date, &outcome).ok();
+                        let lessons = outcome.lessons;
                         if as_json {
                             println!("{}", serde_json::to_string_pretty(&lessons).unwrap());
                             return;

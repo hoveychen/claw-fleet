@@ -114,13 +114,13 @@ pub(crate) fn route_daily_report_lessons(
             let cfg = llm_config.lock().unwrap().clone();
             let result = generate_lessons_routed(&cfg, &report, lang);
             match result {
-                Some(lessons) => {
+                Some(outcome) => {
                     report_store
                         .lock()
                         .unwrap()
-                        .update_lessons(&date, &lessons)
+                        .save_lessons_outcome(&date, &outcome)
                         .ok();
-                    let body = serde_json::to_string(&lessons).unwrap_or_default();
+                    let body = serde_json::to_string(&outcome.lessons).unwrap_or_default();
                     let _ = request
                         .respond(tiny_http::Response::from_string(body).with_header(json_header));
                 }

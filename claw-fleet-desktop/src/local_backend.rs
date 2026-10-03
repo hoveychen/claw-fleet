@@ -3974,16 +3974,16 @@ impl LocalBackend {
 
         let lang = self.locale.lock().unwrap().clone();
         let cfg = self.llm_config.lock().unwrap().clone();
-        let lessons = crate::daily_report::generate_lessons_routed(&cfg, &report, &lang)
+        let outcome = crate::daily_report::generate_lessons_routed(&cfg, &report, &lang)
             .ok_or_else(|| "Lessons generation failed".to_string())?;
 
         self.report_store
             .lock()
             .unwrap()
-            .update_lessons(date, &lessons)
+            .save_lessons_outcome(date, &outcome)
             .map_err(|e| format!("save lessons: {e}"))?;
 
-        Ok(lessons)
+        Ok(outcome.lessons)
     }
 
     pub fn append_lesson_to_claude_md(
