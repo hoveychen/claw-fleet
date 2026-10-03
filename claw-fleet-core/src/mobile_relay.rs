@@ -1056,6 +1056,24 @@ pub fn publish_decision_created(kind: &str, request: Value, notify_title: &str, 
     ));
 }
 
+/// Fan out a Web Push notification that is not tied to a decision card. The
+/// tap opens `notify_url(tag)`, so `tag` doubles as the phone's deep link.
+///
+/// Returns false when there is no relay socket to hand the frame to — the
+/// caller can then keep its "already notified" marker unset and retry later.
+pub fn publish_notification(title: &str, body: &str, tag: &str) -> bool {
+    let Some(tx) = OUT_TX.lock().unwrap().clone() else {
+        return false;
+    };
+    tx.send(Outbound::Text(build_notify_frame(
+        title,
+        body,
+        tag,
+        pending_decision_count(),
+    )))
+    .is_ok()
+}
+
 /// Tell mobile clients a decision disappeared (answered elsewhere / timed out).
 pub fn publish_decision_resolved(kind: &str, id: &str) {
     send_out(encode_payload(&build_decision_resolved_payload(kind, id)));
@@ -9232,6 +9250,82 @@ mod tests {
             match prev_cfg {
                 Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
                 None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+            }
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    /// The judgment push: nothing on a quiet day, nothing (and no marker)
+    /// without a relay socket, one notification once there is drift, and no
+    /// second one the same day.
+    #[test]
+    fn judgment_push_fires_once_per_day_and_only_with_items() {
+        let _guard = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-attention-push-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let prev_home = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let marker = crate::session::get_fleet_dir().unwrap().join("attention-pushed");
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+        crate::daily_report::push_attention_to_phone(&today, "zh");
+        assert!(rx.try_recv().is_err(), "a quiet day pushes nothing");
+        assert!(!marker.exists(), "a quiet day does not burn the date");
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        crate::drift_check::DriftStore::open()
+            .unwrap()
+            .save(&crate::drift_check::DriftCheck {
+                chain_id: "chain-a".into(),
+                workspace_path: "/w".into(),
+                workspace_name: "w".into(),
+                plan_id: None,
+                goal: "ship it".into(),
+                session_count: 5,
+                latest_session_id: "s5".into(),
+                verdict: crate::drift_check::DriftVerdict::Polishing,
+                evidence: "same tweak three hops in a row".into(),
+                question: "ship as is?".into(),
+                checked_at: now_ms,
+            })
+            .unwrap();
+
+        *OUT_TX.lock().unwrap() = None;
+        crate::daily_report::push_attention_to_phone(&today, "zh");
+        assert!(!marker.exists(), "no relay socket: retry on a later tick");
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+        crate::daily_report::push_attention_to_phone(&today, "zh");
+        let Outbound::Text(frame) = rx.try_recv().expect("drift pushes a notification");
+        let frame: Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(frame["type"], "notify");
+        assert_eq!(frame["title"], "需要你判断的事");
+        assert_eq!(frame["body"], "1 条接力链可能跑偏");
+        assert_eq!(frame["url"], format!("/#d=attention:{today}"));
+        assert_eq!(fs::read_to_string(&marker).unwrap(), today);
+
+        crate::daily_report::push_attention_to_phone(&today, "zh");
+        assert!(rx.try_recv().is_err(), "at most one push per day");
+
+        *OUT_TX.lock().unwrap() = None;
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
             }
         }
         let _ = fs::remove_dir_all(&home);
