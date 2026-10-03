@@ -19,6 +19,16 @@ describe("parseDecisionDeepLink", () => {
     });
   });
 
+  // The daily judgment push reuses the same link with a date as the id; App
+  // routes kind "attention" to the judgment page instead of a decision card.
+  it("judgment push link carries the date and source mark", () => {
+    expect(parseDecisionDeepLink("/#d=attention:2026-10-03&ch=105e300f")).toEqual({
+      kind: "attention",
+      id: "2026-10-03",
+      channelMark: "105e300f",
+    });
+  });
+
   // ID is externally provided, may contain colons; kind never does. So split by
   // the first colon only; everything after goes to id.
   it("split by first colon only when id contains colons", () => {

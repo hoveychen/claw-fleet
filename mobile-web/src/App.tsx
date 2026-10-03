@@ -860,20 +860,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // second click.
 
   useEffect(() => {
-    return onDecisionDeepLink((target) => {
-      setTab("decisions");
-      setFocusDecision({ id: target.id, nonce: Date.now() });
-      // The relay's source mark is a prefix of the channel id; we only have the pairing
-      // secret, so we recalculate each device's channel id to compare. This is async
-      // (SubtleCrypto), so we focus by id first, then refine to the specific device after
-      // getting it — clicking doesn't wait for hashing.
-      //
-      // Dynamic import + direct define wrapping: relayCrypto lives in relay-land, and
-      // same-origin (webui) builds aren't allowed to have it. Going through a const
-      // stops Rollup from inlining (see main.tsx and hostMode.test.ts for two empirical
-      // tests).
-
-      const mark = target.channelMark;
+    // The relay's source mark is a prefix of the channel id; we only have the pairing
+    // secret, so we recalculate each device's channel id to compare. This is async
+    // (SubtleCrypto), so callers act on the id first, then refine to the specific device
+    // after getting it — clicking doesn't wait for hashing.
+    //
+    // Dynamic import + direct define wrapping: relayCrypto lives in relay-land, and
+    // same-origin (webui) builds aren't allowed to have it. Going through a const
+    // stops Rollup from inlining (see main.tsx and hostMode.test.ts for two empirical
+    // tests).
+    const resolveDevice = (mark: string | undefined, then: (deviceId: string) => void) => {
       if (!mark || import.meta.env.VITE_FLEET_HOST === "webui") return;
       void (async () => {
         const { channelIdOf } = await import("./relayCrypto");
@@ -883,12 +879,27 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           if (d.kind !== "relay") continue;
           const id = await channelIdOf(d.secret);
           if (!id.startsWith(mark)) continue;
-          setFocusDecision({ id: target.id, deviceId: d.id, nonce: Date.now() });
+          then(d.id);
           return;
         }
       })();
+    };
+
+    return onDecisionDeepLink((target) => {
+      // The daily judgment push (`attention:<date>`, daily_report::push_attention_to_phone)
+      // is not a decision card: open the judgment page, on the desktop that sent it.
+      if (target.kind === "attention") {
+        setShowAttention(true);
+        resolveDevice(target.channelMark, switchDevice);
+        return;
+      }
+      setTab("decisions");
+      setFocusDecision({ id: target.id, nonce: Date.now() });
+      resolveDevice(target.channelMark, (deviceId) =>
+        setFocusDecision({ id: target.id, deviceId, nonce: Date.now() }),
+      );
     });
-  }, []);
+  }, [switchDevice]);
 
   /** Master toggle ON: ask for system permission using the current device's connection
    *  and register it, then clear mute flags for all other devices — their effects will
