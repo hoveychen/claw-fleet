@@ -1779,6 +1779,65 @@ fn flagged_drift(checks: Vec<crate::drift_check::DriftCheck>) -> Vec<crate::drif
     out
 }
 
+/// Marker under `~/.fleet` holding the local date of the last judgment push.
+const ATTENTION_PUSH_MARKER: &str = "attention-pushed";
+
+/// One-line notification body counting a day's judgment items, or `None`
+/// when there is nothing to judge (a quiet day pushes nothing).
+fn attention_push_body(a: &DailyAttention, locale: &str) -> Option<String> {
+    let zh = locale == "zh";
+    let mut parts = Vec::new();
+    if !a.drift.is_empty() {
+        parts.push(if zh {
+            format!("{} 条接力链可能跑偏", a.drift.len())
+        } else {
+            format!("{} relay chain(s) may be drifting", a.drift.len())
+        });
+    }
+    if !a.lessons.is_empty() {
+        parts.push(if zh {
+            format!("{} 条教训反复出现", a.lessons.len())
+        } else {
+            format!("{} lesson(s) keep recurring", a.lessons.len())
+        });
+    }
+    if !a.violations.is_empty() {
+        parts.push(if zh {
+            format!("{} 条已采纳的教训又被违反", a.violations.len())
+        } else {
+            format!("{} adopted lesson(s) broken again", a.violations.len())
+        });
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// Push the phone a notification for `date`'s judgment items, at most once
+/// per local calendar day. Drift is judged against today and lessons against
+/// yesterday, so both scheduler passes can fire on the same day; keying the
+/// marker on the day of the push (not on `date`) keeps that to one buzz.
+///
+/// The marker is written only after the frame reached the relay socket, so a
+/// pass that runs while the relay is down retries on the next tick.
+pub fn push_attention_to_phone(date: &str, locale: &str) {
+    let Some(dir) = crate::session::get_fleet_dir() else {
+        return;
+    };
+    let marker = dir.join(ATTENTION_PUSH_MARKER);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let last = std::fs::read_to_string(&marker).unwrap_or_default();
+    if last.trim() >= today.as_str() {
+        return;
+    }
+    let Some(body) = attention_push_body(&attention_for_date(date), locale) else {
+        return;
+    };
+    let title = if locale == "zh" { "需要你判断的事" } else { "Needs your judgment" };
+    if crate::mobile_relay::publish_notification(title, &body, &format!("attention:{date}")) {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(&marker, &today);
+    }
+}
+
 /// Add a single lesson to the user's global Claude guidance.
 ///
 /// Delegates to [`crate::lessons_store`], which records the lesson as a
@@ -2354,6 +2413,7 @@ fn run_backfill_check(
         // Announce only when there is something to act on: a quiet day pushes
         // nothing.
         if became_readable {
+            push_attention_to_phone(&date, locale);
             if let Some(hook) = on_report_ready {
                 hook(&date);
             }
@@ -2364,8 +2424,10 @@ fn run_backfill_check(
     // Throttled per chain inside `chains_due`, so most ticks make no LLM call.
     let flagged = crate::drift_check::run_due_checks(llm_config, locale);
     if !flagged.is_empty() {
+        let date = today.format("%Y-%m-%d").to_string();
+        push_attention_to_phone(&date, locale);
         if let Some(hook) = on_report_ready {
-            hook(&today.format("%Y-%m-%d").to_string());
+            hook(&date);
         }
     }
 
