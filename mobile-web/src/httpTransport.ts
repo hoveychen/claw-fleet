@@ -30,6 +30,11 @@
 
 import type { DecisionKind, SessionInfo } from "./types";
 import { TransportError, type FleetTransport, type TransportHandlers } from "./transport";
+import {
+  applySessionsFrame,
+  type SessionsFrame,
+  type SessionsState,
+} from "../../shared-ts/sessionsFrame";
 
 /** SSE event name prefix → decision card kind.
  *
@@ -95,6 +100,17 @@ export class HttpTransport implements FleetTransport {
   private closed = false;
   private reconnectDelay = RECONNECT_BASE_MS;
   private reconnectTimer: number | undefined;
+  /** The session list as the server's numbered frames built it. Deltas only
+   *  apply on top of the seq they name; anything else triggers a resync. */
+  private sessions: SessionsState<SessionInfo> = { seq: null, sessions: [] };
+  /** Set while a snapshot fetch is in flight. Frames that arrive meanwhile are
+   *  queued and replayed on top of the snapshot instead of each starting a
+   *  resync of their own. */
+  private resyncQueue: SessionsFrame<SessionInfo>[] | null = null;
+  /** The stream dropped after having been open. Frames sent while it was down
+   *  are gone, and the host may have restarted with its seq back at 1, so the
+   *  next open refetches the full list. */
+  private resyncOnOpen = false;
 
   constructor(
     private readonly handlers: TransportHandlers,
@@ -139,6 +155,10 @@ export class HttpTransport implements FleetTransport {
       // /mobile_rpc. There is no third-party relay to go down, so once this signal is
       // true it will not independently become false — it follows the connection itself.
       this.handlers.onAgentOnline?.(true);
+      if (this.resyncOnOpen) {
+        this.resyncOnOpen = false;
+        void this.catchUpSessions();
+      }
     };
 
     // First-screen catch-up. **Can't rely on SSE alone**: the server's `sessions-updated`
@@ -158,6 +178,7 @@ export class HttpTransport implements FleetTransport {
       if (this.closed) return;
       if (this.connected) {
         this.connected = false;
+        this.resyncOnOpen = true;
         this.handlers.onStatus?.(false);
         this.handlers.onAgentOnline?.(false);
         this.handlers.onReconnect?.();
@@ -193,15 +214,39 @@ export class HttpTransport implements FleetTransport {
       });
     }
 
+    // The server pushes the rows that changed since the previous frame.
+    stream.addEventListener("sessions-frame", (e) => {
+      const frame = parseJson((e as MessageEvent).data);
+      if (isSessionsFrame(frame)) this.applyFrame(frame);
+    });
+    // Hosts built before `sessions-frame` push the whole list here. Kept so a
+    // direct-to-host entry pointing at an older host still updates.
     stream.addEventListener("sessions-updated", (e) => {
       const sessions = parseJson((e as MessageEvent).data);
       if (!Array.isArray(sessions)) return;
-      this.handlers.onSessions?.(sessions as SessionInfo[]);
-      // The server only sends full snapshots on this SSE stream. The relay path has
-      // `sessions_delta`, but this one doesn't — reporting "delta" would make the UI
-      // display a non-existent incremental link.
+      this.sessions = { seq: null, sessions: sessions as SessionInfo[] };
+      this.handlers.onSessions?.(this.sessions.sessions);
       this.handlers.onSessionsKind?.("full");
     });
+  }
+
+  /** Merge one frame into the held list and report the result. A delta that
+   *  does not follow the held seq (a frame was missed, or the list came from
+   *  an unnumbered source) starts a resync instead. */
+  private applyFrame(frame: SessionsFrame<SessionInfo>): void {
+    if (this.resyncQueue) {
+      this.resyncQueue.push(frame);
+      return;
+    }
+    const next = applySessionsFrame(this.sessions, frame);
+    if (next === null) {
+      void this.catchUpSessions();
+      return;
+    }
+    if (next === this.sessions) return;
+    this.sessions = next;
+    this.handlers.onSessions?.(next.sessions);
+    this.handlers.onSessionsKind?.(frame.kind);
   }
 
   /** Drop this dead stream and reopen one after backing off.
@@ -223,26 +268,44 @@ export class HttpTransport implements FleetTransport {
     }, delay) as unknown as number;
   }
 
-  /** Fetch a full sessions snapshot, compensating for the frame SSE won't replay for
-   *  new clients.
+  /** Fetch a full sessions frame: on connect, because SSE does not replay the
+   *  current list to a new client, and whenever a delta did not line up.
    *
    *  Silently ignore failures: the SSE path may still deliver the data, and throwing
    *  here would turn a recoverable first-screen gap into a complete connection failure. */
   private async catchUpSessions(): Promise<void> {
+    if (this.resyncQueue) return;
+    this.resyncQueue = [];
     const fetchImpl = this.opts.fetchImpl ?? globalThis.fetch;
+    let full: SessionsFrame<SessionInfo> | null = null;
     try {
-      const res = await fetchImpl(`${this.base}/sessions`);
-      if (!res.ok) return;
-      const sessions = await res.json();
-      // It doesn't matter if we were close()'d or beaten by a real SSE frame — both
-      // deliver full snapshots, the later one overwrites the earlier, and the result
-      // is consistent.
-      if (this.closed || !Array.isArray(sessions)) return;
-      this.handlers.onSessions?.(sessions as SessionInfo[]);
-      this.handlers.onSessionsKind?.("full");
+      const res = await fetchImpl(`${this.base}/sessions_snapshot`);
+      if (res.ok) {
+        const body = await res.json();
+        if (isSessionsFrame(body)) full = body;
+      } else if (res.status === 404) {
+        // A host built before `/sessions_snapshot`: the plain list, unnumbered.
+        const legacy = await fetchImpl(`${this.base}/sessions`);
+        const sessions = legacy.ok ? await legacy.json() : null;
+        if (Array.isArray(sessions)) {
+          this.sessions = { seq: null, sessions: sessions as SessionInfo[] };
+          if (!this.closed) {
+            this.handlers.onSessions?.(this.sessions.sessions);
+            this.handlers.onSessionsKind?.("full");
+          }
+        }
+      }
     } catch {
       // See above: silent degradation.
     }
+    const queued = this.resyncQueue ?? [];
+    this.resyncQueue = null;
+    if (this.closed) return;
+    // A full frame always applies; the deltas that arrived meanwhile then apply
+    // on top of it or, being older than it, are ignored. One that still does
+    // not line up starts the next resync.
+    if (full) this.sessions = { seq: null, sessions: this.sessions.sessions };
+    for (const frame of full ? [full, ...queued] : queued) this.applyFrame(frame);
   }
 
   close(): void {
@@ -390,4 +453,17 @@ function parseJson(raw: string): unknown {
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function isSessionsFrame(v: unknown): v is SessionsFrame<SessionInfo> {
+  if (typeof v !== "object" || v === null) return false;
+  const f = v as Record<string, unknown>;
+  if (typeof f.seq !== "number") return false;
+  if (f.kind === "full") return Array.isArray(f.sessions);
+  return (
+    f.kind === "delta" &&
+    typeof f.baseSeq === "number" &&
+    Array.isArray(f.upsert) &&
+    Array.isArray(f.remove)
+  );
 }

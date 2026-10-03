@@ -686,34 +686,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         }
     }
 
-    // Sort: active first, then by created_at_ms asc (oldest first = stable order)
-    sessions.sort_by(|a, b| {
-        let a_active = matches!(
-            a.status,
-            SessionStatus::Thinking
-                | SessionStatus::Executing
-                | SessionStatus::Streaming
-                | SessionStatus::Delegating
-                | SessionStatus::Processing
-                | SessionStatus::WaitingInput
-                | SessionStatus::RateLimited
-                | SessionStatus::ServerErrored
-        );
-        let b_active = matches!(
-            b.status,
-            SessionStatus::Thinking
-                | SessionStatus::Executing
-                | SessionStatus::Streaming
-                | SessionStatus::Delegating
-                | SessionStatus::Processing
-                | SessionStatus::WaitingInput
-                | SessionStatus::RateLimited
-                | SessionStatus::ServerErrored
-        );
-        b_active
-            .cmp(&a_active)
-            .then(a.created_at_ms.cmp(&b.created_at_ms))
-    });
+    sort_sessions(&mut sessions);
 
     // Persist the cleaned cache to disk, throttled. Subsequent process starts
     // can then seed `session_cache` and bypass the per-file re-parse on the
@@ -761,9 +734,14 @@ pub fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
                 | SessionStatus::RateLimited
                 | SessionStatus::ServerErrored
         );
+        // The id breaks creation-time ties (a fork and its parent can share
+        // the millisecond). Without it the order of tied rows follows source
+        // scan order, which varies between scans, so an unchanged list read as
+        // reordered and every push frame carried the full id order.
         b_active
             .cmp(&a_active)
             .then(a.created_at_ms.cmp(&b.created_at_ms))
+            .then_with(|| a.id.cmp(&b.id))
     });
 }
 

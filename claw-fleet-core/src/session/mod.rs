@@ -821,6 +821,26 @@ mod tests {
         assert_eq!(sessions[2].status, SessionStatus::Idle);
     }
 
+    #[test]
+    fn sort_breaks_created_at_ties_by_id() {
+        // Tied rows must come out in the same order whatever order the scan
+        // produced them in, or the push frames see a reorder on every tick.
+        let mut a = make_session(SessionStatus::Idle);
+        a.id = "a".into();
+        a.created_at_ms = 100;
+        let mut b = a.clone();
+        b.id = "b".into();
+
+        let mut forward = vec![a.clone(), b.clone()];
+        let mut backward = vec![b, a];
+        sort_sessions(&mut forward);
+        sort_sessions(&mut backward);
+
+        let ids = |v: &[SessionInfo]| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&forward), vec!["a", "b"]);
+        assert_eq!(ids(&backward), vec!["a", "b"]);
+    }
+
     // ── determine_status tests ──────────────────────────────────────────────
 
     /// Test wrapper that preserves pre-content-age semantics by passing the

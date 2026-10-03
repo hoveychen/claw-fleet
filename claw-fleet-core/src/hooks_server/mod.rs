@@ -269,6 +269,7 @@ pub fn serve(opts: ServeOptions) {
     });
 
     let sse = SseBroadcaster::new();
+    let _ = SESSIONS_SSE.set(sse.clone());
 
     // Bind host defaults to loopback so a local `fleet serve` is never exposed
     // by accident. The Fleet Cloud lean container overrides it to `0.0.0.0`
@@ -372,8 +373,8 @@ pub fn serve(opts: ServeOptions) {
         let sse_bg = sse.clone();
         let snapshot_bg = snapshot.clone();
         std::thread::spawn(move || {
-            let mut prev_sessions_json = String::new();
             let mut prev_mobile_clients: usize = 0;
+            let mut prev_sessions_seq: u64 = 0;
             // Last keepalive comment written to the SSE clients. See
             // `SseBroadcaster::ping` for why an idle stream still needs bytes:
             // nginx's default `proxy_read_timeout` is 60s, and this loop only
@@ -466,24 +467,27 @@ pub fn serve(opts: ServeOptions) {
                 // beats a card that arrives seven seconds late.
                 let scanned = snapshot_bg.sessions_if_scanned();
                 if let Some(sessions) = scanned.as_ref() {
-                    let json = serde_json::to_string(sessions).unwrap_or_default();
-                    let sessions_changed = json != prev_sessions_json;
-                    if sessions_changed {
-                        sse_bg.broadcast("sessions-updated", &json);
-                    }
+                    // Pushed as a `sessions-frame`: the rows that changed since
+                    // the last frame rather than the whole list (~1.7MB on a
+                    // busy box). The frame is broadcast while the tracker lock
+                    // is held so frames leave in seq order relative to the
+                    // snapshot route.
+                    let rows = sessions_as_rows(sessions);
+                    // Compared by seq rather than by whether this tick framed:
+                    // the snapshot route frames too, and a change it caught
+                    // first must still reach the phone.
+                    let seq = frame_sessions(&rows);
+                    let sessions_changed = seq != prev_sessions_seq;
+                    prev_sessions_seq = seq;
                     // Publish to mobile on change, and also when a new mobile
                     // client just came online (it needs an initial snapshot even
-                    // if nothing changed since the last one).
+                    // if nothing changed since the last one). The relay diffs
+                    // its own slimmed snapshot.
                     let mobile_clients = crate::mobile_relay::client_count();
                     if sessions_changed || mobile_clients > prev_mobile_clients {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
-                            crate::mobile_relay::publish_sessions(&v);
-                        }
+                        crate::mobile_relay::publish_sessions(&serde_json::Value::Array(rows));
                     }
                     prev_mobile_clients = mobile_clients;
-                    if sessions_changed {
-                        prev_sessions_json = json;
-                    }
 
                     // Broadcast waiting alerts (simple detection from session status)
                     let waiting_ids: std::collections::HashSet<String> = sessions
@@ -1022,6 +1026,38 @@ pub fn serve(opts: ServeOptions) {
 /// One event name for all four channels (the payload is the request id, which
 /// is unique across them) — same shape the desktop emits as a Tauri event, so
 /// the frontend's `useDecisionEvents` handles both without a branch.
+/// Frames the session list for the SSE `sessions-frame` event. Shared by the
+/// broadcaster loop and [`routes_core::route_sessions_snapshot`]; both frame
+/// through [`frame_sessions`] so every seq they consume is broadcast and the
+/// delta chain a client follows has no holes. One per process: a process runs
+/// one `serve`.
+pub(crate) static SESSIONS_TRACKER: std::sync::Mutex<crate::session_delta::DeltaTracker> =
+    std::sync::Mutex::new(crate::session_delta::DeltaTracker::new());
+
+/// The broadcaster [`frame_sessions`] pushes through, set once by `serve`.
+static SESSIONS_SSE: std::sync::OnceLock<SseBroadcaster> = std::sync::OnceLock::new();
+
+/// Frame `rows` and, if they changed, broadcast the frame as
+/// `sessions-frame`. Returns the tracker's seq afterwards. Broadcasts while
+/// holding the tracker lock, so frames leave in seq order.
+pub(crate) fn frame_sessions(rows: &[serde_json::Value]) -> u64 {
+    let mut tracker = SESSIONS_TRACKER.lock().unwrap();
+    if let Some(frame) = tracker.frame(rows) {
+        if let (Some(sse), Ok(json)) = (SESSIONS_SSE.get(), serde_json::to_string(&frame)) {
+            sse.broadcast("sessions-frame", &json);
+        }
+    }
+    tracker.snapshot().seq()
+}
+
+/// The session list as JSON rows, the shape [`SESSIONS_TRACKER`] diffs.
+pub(crate) fn sessions_as_rows(sessions: &[crate::session::SessionInfo]) -> Vec<serde_json::Value> {
+    sessions
+        .iter()
+        .filter_map(|s| serde_json::to_value(s).ok())
+        .collect()
+}
+
 fn broadcast_parked(sse: &sse::SseBroadcaster, ids: Vec<String>) {
     for id in ids {
         if let Ok(json) = serde_json::to_string(&id) {
@@ -1195,6 +1231,9 @@ fn handle_request(
             crate::routes::FLEET_SKILL => route_fleet_skill(request),
 
             crate::routes::SESSIONS => route_sessions(ctx, request, &query, json_header, path),
+            crate::routes::SESSIONS_SNAPSHOT => {
+                routes_core::route_sessions_snapshot(ctx, request, &query, json_header)
+            }
 
             crate::routes::INTERRUPT => route_interrupt(ctx, request, &query, json_header, path),
 

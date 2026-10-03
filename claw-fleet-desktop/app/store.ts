@@ -12,6 +12,7 @@ import i18n, { isSupportedLanguage } from "./i18n";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
+import { applySessionsFrame, type SessionsFrame } from "../../shared-ts/sessionsFrame";
 
 /** Open the in-app Settings overlay.
  *
@@ -828,7 +829,13 @@ interface SessionsState {
   scanReady: boolean;
   /** sessionId → workflow run rollup (see WorkflowRunCount) */
   workflowRunCounts: Record<string, WorkflowRunCount>;
+  /** Seq of the `sessions-frame` that produced `sessions`; null when the list
+   *  came from an unnumbered source (the browser build's poller, the mock). */
+  sessionsSeq: number | null;
+  /** Replace the list wholesale, unnumbered. */
   setSessions: (sessions: SessionInfo[]) => void;
+  /** Apply one `sessions-frame` push; resyncs when it doesn't follow on. */
+  applyFrame: (frame: SessionsFrame<SessionInfo>) => void;
   setScanReady: (ready: boolean) => void;
   setWorkflowRunCount: (sessionId: string, count: WorkflowRunCount) => void;
   refresh: () => Promise<void>;
@@ -836,36 +843,64 @@ interface SessionsState {
 
 const SPEED_WINDOW_MS = 5 * 60 * 1000;
 
-export const useSessionsStore = create<SessionsState>((set) => ({
+/** The rest of the store's state after the list became `sessions`. */
+function withSessions(
+  state: SessionsState,
+  sessions: SessionInfo[],
+  sessionsSeq: number | null,
+): Partial<SessionsState> {
+  const totalSpeed = sessions.reduce((sum, s) => sum + s.tokenSpeed, 0);
+  const totalCostPerMin = sessions.reduce(
+    (sum, s) => sum + (s.costSpeedUsdPerMin ?? 0),
+    0,
+  );
+  const now = Date.now();
+  const windowStart = now - SPEED_WINDOW_MS;
+  const speedHistory = [...state.speedHistory, { time: now, speed: totalSpeed }].filter(
+    (s) => s.time >= windowStart,
+  );
+  const costHistory = [
+    ...state.costHistory,
+    { time: now, costPerMin: totalCostPerMin },
+  ].filter((s) => s.time >= windowStart);
+  // If we received any sessions, the scan has demonstrably completed — mark
+  // the scan ready even if the one-shot `scan-ready` push event was emitted
+  // before this window's listener was registered (a real race that left the
+  // list stuck on "scanning…" forever). Never flip it back to false here:
+  // an empty payload doesn't prove the scan finished.
+  const scanReady = sessions.length > 0 ? true : state.scanReady;
+  return { sessions, sessionsSeq, speedHistory, costHistory, scanReady };
+}
+
+/** Spelled as one name so `invoke<…>("sessions_snapshot")` stays a flat
+ *  generic, which is what the live-proxy route coverage test can read. */
+type SessionInfoFrame = SessionsFrame<SessionInfo>;
+
+/** One resync at a time: a burst of unappliable deltas needs one snapshot. */
+const resyncSessions = () =>
+  singleFlight("sessions_snapshot", async () => {
+    const frame = await invoke<SessionInfoFrame | null>("sessions_snapshot");
+    if (frame?.kind === "full") useSessionsStore.getState().applyFrame(frame);
+  });
+
+export const useSessionsStore = create<SessionsState>((set, get) => ({
   sessions: [],
+  sessionsSeq: null,
   speedHistory: [],
   costHistory: [],
   scanReady: false,
   workflowRunCounts: {},
-  setSessions: (sessions) =>
-    set((state) => {
-      const totalSpeed = sessions.reduce((sum, s) => sum + s.tokenSpeed, 0);
-      const totalCostPerMin = sessions.reduce(
-        (sum, s) => sum + (s.costSpeedUsdPerMin ?? 0),
-        0,
-      );
-      const now = Date.now();
-      const windowStart = now - SPEED_WINDOW_MS;
-      const speedHistory = [...state.speedHistory, { time: now, speed: totalSpeed }].filter(
-        (s) => s.time >= windowStart,
-      );
-      const costHistory = [
-        ...state.costHistory,
-        { time: now, costPerMin: totalCostPerMin },
-      ].filter((s) => s.time >= windowStart);
-      // If we received any sessions, the scan has demonstrably completed — mark
-      // the scan ready even if the one-shot `scan-ready` push event was emitted
-      // before this window's listener was registered (a real race that left the
-      // list stuck on "scanning…" forever). Never flip it back to false here:
-      // an empty payload doesn't prove the scan finished.
-      const scanReady = sessions.length > 0 ? true : state.scanReady;
-      return { sessions, speedHistory, costHistory, scanReady };
-    }),
+  setSessions: (sessions) => set((state) => withSessions(state, sessions, null)),
+  applyFrame: (frame) => {
+    const { sessions, sessionsSeq } = get();
+    const next = applySessionsFrame({ seq: sessionsSeq, sessions }, frame);
+    if (next === null) {
+      void resyncSessions().catch(() => {});
+      return;
+    }
+    if (next.seq === sessionsSeq && next.sessions === sessions) return;
+    set((state) => withSessions(state, next.sessions, next.seq));
+  },
   setScanReady: (ready) => set({ scanReady: ready }),
   setWorkflowRunCount: (sessionId, count) =>
     set((state) => {
@@ -878,8 +913,16 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       };
     }),
   refresh: async () => {
-    const sessions = await invoke<SessionInfo[]>("list_sessions");
-    useSessionsStore.getState().setSessions(sessions);
+    // Falls back to the plain list where `sessions_snapshot` is missing (a
+    // `fleet serve` built before it, or the mock).
+    try {
+      const frame = await invoke<SessionInfoFrame | null>("sessions_snapshot");
+      if (frame?.kind !== "full") throw new Error("no sessions snapshot");
+      useSessionsStore.getState().applyFrame(frame);
+    } catch {
+      const sessions = await invoke<SessionInfo[]>("list_sessions");
+      useSessionsStore.getState().setSessions(sessions);
+    }
   },
 }));
 

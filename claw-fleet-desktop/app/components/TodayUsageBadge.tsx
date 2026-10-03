@@ -54,13 +54,17 @@ export function TodayUsageBadge({
     };
     void fetchUsage();
     const timer = setInterval(fetchUsage, 15_000);
-    const unlisten = listen("sessions-updated", () => {
-      void fetchUsage();
-    });
+    // `sessions-frame` is the real push (desktop IPC, or SSE in the browser
+    // build); `sessions-updated` the mock's.
+    const unlisten = ["sessions-frame", "sessions-updated"].map((event) =>
+      listen(event, () => {
+        void fetchUsage();
+      }),
+    );
     return () => {
       cancelled = true;
       clearInterval(timer);
-      void unlisten.then((f) => f());
+      for (const u of unlisten) void u.then((f) => f());
     };
   }, []);
 

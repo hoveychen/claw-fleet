@@ -172,7 +172,7 @@ impl LocalBackend {
             claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
         };
-        let _ = self.app.emit("sessions-updated", &snapshot);
+        emit_sessions(&self.app, &snapshot);
         crate::update_tray(&self.app, &snapshot);
         publish_mobile_sessions(&snapshot);
     }
@@ -330,7 +330,7 @@ impl LocalBackend {
                     ));
                 }
                 *sess_bg.lock().unwrap() = initial.clone();
-                let _ = app_bg.emit("sessions-updated", &initial);
+                emit_sessions(&app_bg, &initial);
                 let _ = app_bg.emit("scan-ready", true);
                 crate::update_tray(&app_bg, &initial);
                 publish_mobile_sessions(&initial);
@@ -1564,6 +1564,35 @@ fn sessions_to_index_request(sessions: &[SessionInfo]) -> IndexRequest {
         .collect()
 }
 
+/// The Tauri event the session list is pushed on, as
+/// [`claw_fleet_core::session_delta::SessionsFrame`]s: a full list the first
+/// time, then only the rows that changed. Replaced `sessions-updated`, which
+/// re-sent all ~1,150 rows (~1.7MB) on every rescan.
+const SESSIONS_FRAME_EVENT: &str = "sessions-frame";
+
+/// One tracker for the whole process, so every emit site — the rescan threads,
+/// the liveness ticker, mark re-stamps — numbers its frames in one sequence.
+/// Held across the emit so frames leave in seq order.
+static SESSIONS_TRACKER: Mutex<claw_fleet_core::session_delta::DeltaTracker> =
+    Mutex::new(claw_fleet_core::session_delta::DeltaTracker::new());
+
+fn session_rows(sessions: &[SessionInfo]) -> Vec<Value> {
+    sessions
+        .iter()
+        .filter_map(|s| serde_json::to_value(s).ok())
+        .collect()
+}
+
+/// Push `sessions` to the frontend as the next frame. Emits nothing when the
+/// list is unchanged since the last frame.
+fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) {
+    let rows = session_rows(sessions);
+    let mut tracker = SESSIONS_TRACKER.lock().unwrap();
+    if let Some(frame) = tracker.frame(&rows) {
+        let _ = app.emit(SESSIONS_FRAME_EVENT, &frame);
+    }
+}
+
 /// Mirror a sessions snapshot onto the mobile relay channel. The relay side
 /// additionally throttles (≥2s between pushes) and skips when no mobile
 /// client is online; the `is_connected` gate here just avoids serializing
@@ -1666,7 +1695,7 @@ fn rescan_and_emit(
     }
 
     *sessions.lock().unwrap() = s.clone();
-    let _ = app.emit("sessions-updated", &s);
+    emit_sessions(app, &s);
     crate::update_tray(app, &s);
     publish_mobile_sessions(&s);
     // Pre-fold changed sessions so the cost-breakdown modal opens warm.
@@ -1851,7 +1880,7 @@ fn incremental_rescan_and_emit(
     let s = commit_rescan(sources, sessions, scanned, dirty, &outcome_tags);
     let lock_took = lock_started.elapsed();
 
-    let _ = app.emit("sessions-updated", &s);
+    emit_sessions(app, &s);
     crate::update_tray(app, &s);
     publish_mobile_sessions(&s);
     // Pre-fold changed sessions so the cost-breakdown modal opens warm.
@@ -2056,7 +2085,7 @@ fn refresh_dead_codex_liveness_and_emit(sessions: &Arc<Mutex<Vec<SessionInfo>>>,
         }
     };
     if let Some(s) = updated {
-        let _ = app.emit("sessions-updated", &s);
+        emit_sessions(app, &s);
         crate::update_tray(app, &s);
         publish_mobile_sessions(&s);
     }
@@ -2067,6 +2096,19 @@ fn refresh_dead_codex_liveness_and_emit(sessions: &Arc<Mutex<Vec<SessionInfo>>>,
 impl LocalBackend {
     pub fn list_sessions(&self) -> Vec<SessionInfo> {
         self.sessions.lock().unwrap().clone()
+    }
+
+    /// The current list as a full frame, for a frontend that is out of step
+    /// with `sessions-frame` (just mounted, or saw a delta it can't apply).
+    /// A list that changed since the last emit is emitted first, so every
+    /// other listener's next delta still follows on.
+    pub fn sessions_snapshot(&self) -> claw_fleet_core::session_delta::SessionsFrame {
+        let rows = session_rows(&self.sessions.lock().unwrap());
+        let mut tracker = SESSIONS_TRACKER.lock().unwrap();
+        if let Some(frame) = tracker.frame(&rows) {
+            let _ = self.app.emit(SESSIONS_FRAME_EVENT, &frame);
+        }
+        tracker.snapshot()
     }
 
     pub fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {

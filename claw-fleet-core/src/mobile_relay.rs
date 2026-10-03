@@ -1962,56 +1962,8 @@ fn reset_sessions_dedup() {
     *SESSIONS_BASELINE.lock().unwrap() = None;
 }
 
-/// Per-`id` hash of each slim session object — the baseline a later delta diffs
-/// against. Sessions without a string `id` are skipped (they can't be keyed).
-fn per_id_hashes(slim: &Value) -> HashMap<String, u64> {
-    let mut m = HashMap::new();
-    if let Some(arr) = slim.as_array() {
-        for s in arr {
-            if let Some(id) = s.get("id").and_then(Value::as_str) {
-                m.insert(id.to_string(), snapshot_hash(s));
-            }
-        }
-    }
-    m
-}
-
-/// Diff the current slim snapshot against the baseline, keyed by session `id`.
-/// Returns `(upsert, remove)`: `upsert` holds the full slim object for every
-/// session that is new or whose content hash changed; `remove` holds the ids
-/// present in the baseline but absent from the current snapshot (dropped, or
-/// fell out of the top-[`SNAPSHOT_MAX_SESSIONS`] cap — both render as a removal
-/// on the phone). Order within `upsert` follows the snapshot (already sorted by
-/// `lastActivityMs` desc); the client re-sorts its merged map regardless.
-fn diff_snapshot(prev: &HashMap<String, u64>, slim: &Value) -> (Vec<Value>, Vec<String>) {
-    let mut upsert = Vec::new();
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    if let Some(arr) = slim.as_array() {
-        for s in arr {
-            let Some(id) = s.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            seen.insert(id);
-            if prev.get(id) != Some(&snapshot_hash(s)) {
-                upsert.push(s.clone());
-            }
-        }
-    }
-    let remove: Vec<String> = prev
-        .keys()
-        .filter(|id| !seen.contains(id.as_str()))
-        .cloned()
-        .collect();
-    (upsert, remove)
-}
-
-fn snapshot_hash(v: &Value) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    v.to_string().hash(&mut h);
-    // Never collide with the "nothing sent yet" sentinel 0.
-    h.finish() | 1
-}
+// The per-id diff helpers are shared with the desktop and `fleet serve` pushes.
+use crate::session_delta::{diff_snapshot, per_id_hashes, snapshot_hash};
 
 /// Below this serialized size, gzip costs more (per-frame gzip header) than it
 /// saves, so small payloads are sealed uncompressed.

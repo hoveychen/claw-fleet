@@ -884,6 +884,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   }),
 
   list_sessions: () => ({ method: "GET", path: "/sessions" }),
+  sessions_snapshot: () => ({ method: "GET", path: "/sessions_snapshot" }),
 
   list_skill_files: (a) => ({
     method: "GET",
@@ -1977,12 +1978,41 @@ function stopTailPoll() {
   tailSeen = 0;
 }
 
-/** Real `fleet serve` has no push channel to this page, so poll the board. */
+/** Seq of the newest `sessions-frame` this page has seen, from SSE or the
+ *  poll below, and when the last one arrived. */
+let lastFrameSeq: number | null = null;
+let lastFrameAt = 0;
+
+function noteFrame(frame: unknown) {
+  const seq = (frame as { seq?: unknown } | null)?.seq;
+  if (typeof seq !== "number") return;
+  lastFrameSeq = seq;
+  lastFrameAt = Date.now();
+}
+
+/** How long SSE may stay silent before the poll below steps in. */
+const SESSIONS_POLL_QUIET_MS = 10_000;
+
+/**
+ * The board normally rides SSE `sessions-frame` deltas. This poll is the
+ * fallback for a stream that is down or held back by a buffering proxy: once
+ * no frame has arrived for a while it asks for the list with `since`, which
+ * answers 204 while nothing changed — so a quiet board costs a status line
+ * every 3s, not the whole list.
+ */
 function startSessionsPoll() {
   window.setInterval(async () => {
+    if (Date.now() - lastFrameAt < SESSIONS_POLL_QUIET_MS) return;
     try {
-      const sessions = await callProbe({ method: "GET", path: "/sessions" });
-      if (Array.isArray(sessions)) emit("sessions-updated", sessions);
+      const frame = await callProbe({
+        method: "GET",
+        path: "/sessions_snapshot",
+        query: lastFrameSeq == null ? undefined : { since: String(lastFrameSeq) },
+      });
+      if (frame && typeof frame === "object") {
+        noteFrame(frame);
+        emit("sessions-frame", frame);
+      }
     } catch {
       /* transient */
     }
@@ -2002,9 +2032,8 @@ function startSessionsPoll() {
  *     `waiting-alerts-updated` carries the whole list, and there is no removal
  *     event to keep an accumulated list honest. `get_waiting_alerts` answers
  *     `[]` in this build for the same reason.
- *   - `sessions-updated` — the 3s poll above already delivers it, and having
- *     two sources write the board would make a stale one silently win. Left to
- *     the poller so a proxy that buffers SSE can't freeze the board.
+ *   - `sessions-updated` — no longer sent; the board rides `sessions-frame`,
+ *     with the poll above as its fallback.
  */
 export const FORWARDED_SSE_EVENTS = [
   "guard-request",
@@ -2023,6 +2052,8 @@ export const FORWARDED_SSE_EVENTS = [
   // question and interrupted the turn, and the card stays until answered. Miss
   // this and the card keeps counting down forever with no "Timed Out" badge.
   "decision-parked",
+  // The session list, as numbered deltas the store merges.
+  "sessions-frame",
 ];
 
 let eventStream: EventSource | null = null;
@@ -2171,6 +2202,7 @@ function startEventStream() {
         /* a non-JSON body is forwarded as the string it is */
       }
       logLine(`SSE ${name}`);
+      if (name === "sessions-frame") noteFrame(payload);
       emit(name, payload);
     });
   }

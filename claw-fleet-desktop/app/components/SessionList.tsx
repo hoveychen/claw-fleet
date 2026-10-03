@@ -8,6 +8,7 @@ import { openSettings, runningProcTotal, useAuditStore, useProcStore, useReportS
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import type { SessionInfo } from "../types";
+import type { SessionsFrame } from "../../../shared-ts/sessionsFrame";
 import { MascotEyes } from "./MascotEyes";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
@@ -42,7 +43,7 @@ const DEFAULT_WIDTH = 280;
 
 export function SessionList() {
   const { t } = useTranslation();
-  const { refresh, setSessions, setScanReady } = useSessionsStore();
+  const { refresh, setSessions, applyFrame, setScanReady } = useSessionsStore();
   const {
     simplifiedMode,
     viewMode,
@@ -131,6 +132,10 @@ export function SessionList() {
     // condition: on Linux the initial background scan can complete so fast
     // that the "sessions-updated" event fires before the listener is set up,
     // causing existing sessions to be invisible until a new one is created.
+    const unlistenFrames = listen<SessionsFrame<SessionInfo>>("sessions-frame", (e) => {
+      applyFrame(e.payload);
+    });
+    // The browser build's poller and the mock still push whole, unnumbered lists.
     const unlistenPromise = listen<SessionInfo[]>("sessions-updated", (e) => {
       setSessions(e.payload);
     });
@@ -140,7 +145,7 @@ export function SessionList() {
     // Refresh after listeners are registered. Even if the initial scan event
     // was already emitted, this fetch will pick up whatever has been scanned
     // so far; and any future events will be caught by the listeners above.
-    unlistenPromise.then(() => refresh());
+    Promise.all([unlistenFrames, unlistenPromise]).then(() => refresh());
     unlistenScanReady.then(() => refresh());
     // Keep the running-command total fresh for the repos nav badge even when the
     // files view isn't open (FilesView also polls, but only while mounted).
@@ -148,6 +153,7 @@ export function SessionList() {
     fetchProcs();
     const procTimer = setInterval(fetchProcs, 2000);
     return () => {
+      unlistenFrames.then((u) => u());
       unlistenPromise.then((u) => u());
       unlistenScanReady.then((u) => u());
       clearInterval(procTimer);
