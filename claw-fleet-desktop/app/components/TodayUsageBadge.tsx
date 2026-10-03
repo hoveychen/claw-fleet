@@ -54,8 +54,8 @@ export function TodayUsageBadge({
     };
     void fetchUsage();
     const timer = setInterval(fetchUsage, 15_000);
-    // `sessions-frame` is the desktop's push; `sessions-updated` the browser
-    // build's poller.
+    // `sessions-frame` is the real push (desktop IPC, or SSE in the browser
+    // build); `sessions-updated` the mock's.
     const unlisten = ["sessions-frame", "sessions-updated"].map((event) =>
       listen(event, () => {
         void fetchUsage();

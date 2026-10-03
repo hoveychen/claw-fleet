@@ -872,10 +872,14 @@ function withSessions(
   return { sessions, sessionsSeq, speedHistory, costHistory, scanReady };
 }
 
+/** Spelled as one name so `invoke<…>("sessions_snapshot")` stays a flat
+ *  generic, which is what the live-proxy route coverage test can read. */
+type SessionInfoFrame = SessionsFrame<SessionInfo>;
+
 /** One resync at a time: a burst of unappliable deltas needs one snapshot. */
 const resyncSessions = () =>
   singleFlight("sessions_snapshot", async () => {
-    const frame = await invoke<SessionsFrame<SessionInfo> | null>("sessions_snapshot");
+    const frame = await invoke<SessionInfoFrame | null>("sessions_snapshot");
     if (frame?.kind === "full") useSessionsStore.getState().applyFrame(frame);
   });
 
@@ -909,9 +913,10 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       };
     }),
   refresh: async () => {
-    // The browser build has no `sessions_snapshot`; it reads the plain list.
+    // Falls back to the plain list where `sessions_snapshot` is missing (a
+    // `fleet serve` built before it, or the mock).
     try {
-      const frame = await invoke<SessionsFrame<SessionInfo> | null>("sessions_snapshot");
+      const frame = await invoke<SessionInfoFrame | null>("sessions_snapshot");
       if (frame?.kind !== "full") throw new Error("no sessions snapshot");
       useSessionsStore.getState().applyFrame(frame);
     } catch {

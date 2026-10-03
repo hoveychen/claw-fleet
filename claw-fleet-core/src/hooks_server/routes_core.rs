@@ -126,6 +126,31 @@ pub(crate) fn route_sessions(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
+/// `/sessions_snapshot[?since=<seq>]` — the full `SessionsFrame` the SSE
+/// `sessions-frame` deltas build on.
+///
+/// Frames the current list first (broadcasting the delta if it changed), so
+/// the answer is fresh even while the broadcaster loop is idle for want of a
+/// consumer. With `since` equal to the resulting seq the client already holds
+/// this list and gets `204` instead of the whole list again — what lets a
+/// fallback poller run every few seconds for the cost of a status line.
+pub(crate) fn route_sessions_snapshot(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let rows = super::sessions_as_rows(&ctx.snapshot.sessions());
+    let seq = super::frame_sessions(&rows);
+    if query.get("since").and_then(|s| s.parse::<u64>().ok()) == Some(seq) {
+        let _ = request.respond(tiny_http::Response::empty(204));
+        return;
+    }
+    let frame = super::SESSIONS_TRACKER.lock().unwrap().snapshot();
+    let body = serde_json::to_string(&frame).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 /// `/interrupt_agent_session?path=<uri>` — stop one session through its own
 /// source, for the sources with no per-session process to signal (dsh).
 pub(crate) fn route_interrupt_agent_session(

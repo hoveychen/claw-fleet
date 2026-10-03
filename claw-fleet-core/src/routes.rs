@@ -266,6 +266,10 @@ pub const SESSION_NOTES: &str = "/session_notes";
 pub const SESSION_NOTES_SEARCH: &str = "/session_notes_search";
 pub const SESSION_TITLE: &str = "/session_title";
 pub const SESSIONS: &str = "/sessions";
+/// The session list as a full `SessionsFrame` under the seq the SSE
+/// `sessions-frame` deltas build on. What a client fetches on connect and
+/// whenever a delta does not line up with the seq it holds.
+pub const SESSIONS_SNAPSHOT: &str = "/sessions_snapshot";
 pub const SET_SOURCE_ENABLED: &str = "/set_source_enabled";
 pub const SETUP_STATUS: &str = "/setup-status";
 pub const SKILL_CONTENT: &str = "/skill_content";

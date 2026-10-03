@@ -111,14 +111,14 @@ describe("HttpTransport 的首屏 catch-up", () => {
   // for one new client disturbs everyone; but pulling catch-up on mount is what HTTP
   // clients should do anyway — desktop webui's liveProxy does this (calls list_sessions
   // on mount).
-  it("connect() 之后主动拉一次 /sessions,不能只等 SSE 推", async () => {
+  it("connect() 之后主动拉一次 /sessions_snapshot,不能只等 SSE 推", async () => {
     const seen: unknown[][] = [];
     const kinds: string[] = [];
     const calls: string[] = [];
     const fetchImpl = vi.fn(async (url: string) => {
       calls.push(url);
-      if (String(url).endsWith("/sessions")) {
-        return jsonResponse([{ id: "s1" }, { id: "s2" }]);
+      if (String(url).endsWith("/sessions_snapshot")) {
+        return jsonResponse({ kind: "full", seq: 1, sessions: [{ id: "s1" }, { id: "s2" }] });
       }
       return jsonResponse({ ok: true, data: null });
     });
@@ -131,7 +131,7 @@ describe("HttpTransport 的首屏 catch-up", () => {
     // catch-up is async; let the microtask queue finish.
     await vi.waitFor(() => expect(seen.length).toBe(1));
 
-    expect(calls).toContain("/sessions");
+    expect(calls).toContain("/sessions_snapshot");
     expect(seen[0]).toEqual([{ id: "s1" }, { id: "s2" }]);
     expect(kinds).toEqual(["full"]);
   });
@@ -162,10 +162,12 @@ describe("connect 时的首屏补拉", () => {
   //
   // So first screen can't wait for push — desktop webui also pulls catch-up on mount,
   // do the same here. Push only handles "changes after".
-  it("connect 后主动拉一次 /sessions，不等 SSE", async () => {
+  it("connect 后主动拉一次 /sessions_snapshot，不等 SSE", async () => {
     const seen: unknown[][] = [];
     const kinds: string[] = [];
-    const fetchImpl = vi.fn(async () => jsonResponse([{ id: "s1" }, { id: "s2" }]));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ kind: "full", seq: 3, sessions: [{ id: "s1" }, { id: "s2" }] }),
+    );
     const t = new HttpTransport(
       { onSessions: (s) => seen.push(s), onSessionsKind: (k) => kinds.push(k) },
       {
@@ -180,7 +182,7 @@ describe("connect 时的首屏补拉", () => {
     // `vi.fn(async () => …)` parameter type inferred as empty tuple, direct subscript [0][0]
     // is out of bounds (TS2493). Cast to actual call shape first.
     const calls = fetchImpl.mock.calls as unknown as [string][];
-    expect(calls[0][0]).toBe("/sessions");
+    expect(calls[0][0]).toBe("/sessions_snapshot");
     expect(seen[0]).toEqual([{ id: "s1" }, { id: "s2" }]);
     expect(kinds).toEqual(["full"]);
   });
@@ -255,8 +257,7 @@ describe("HttpTransport 的 SSE 映射", () => {
     FakeEventSource.last!.emit("sessions-updated", JSON.stringify([{ id: "s1" }, { id: "s2" }]));
 
     expect(seen).toEqual([[{ id: "s1" }, { id: "s2" }]]);
-    // Same-origin: server only pushes full, no delta channel — reporting delta would show
-    // a non-existent incremental path in UI.
+    // Hosts built before `sessions-frame` push whole lists here.
     expect(kinds).toEqual(["full"]);
   });
 
@@ -475,5 +476,119 @@ describe("cross-origin host with a token", () => {
     await t.request("pending_snapshot");
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+});
+
+describe("HttpTransport 的 sessions-frame 合并", () => {
+  type Row = { id: string; v?: number };
+  const full = (seq: number, sessions: Row[]) => ({ kind: "full", seq, sessions });
+  const delta = (seq: number, baseSeq: number, upsert: Row[], remove: string[] = []) => ({
+    kind: "delta",
+    seq,
+    baseSeq,
+    upsert,
+    remove,
+  });
+
+  function setup(responses: unknown[]) {
+    const seen: Row[][] = [];
+    const kinds: string[] = [];
+    const queue = [...responses];
+    const fetchImpl = vi.fn(async (url: string) => {
+      const next = queue.shift();
+      if (next instanceof Response || (next && typeof next === "object" && "ok" in next && "status" in next))
+        return next as Response;
+      void url;
+      return jsonResponse(next);
+    });
+    const t = new HttpTransport(
+      { onSessions: (s) => seen.push(s as unknown as Row[]), onSessionsKind: (k) => kinds.push(k) },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      },
+    );
+    return { t, seen, kinds, fetchImpl, urls: () => (fetchImpl.mock.calls as unknown as [string][]).map((c) => c[0]) };
+  }
+
+  it("快照之后的 delta 只改变化的行，报 delta", async () => {
+    const { t, seen, kinds } = setup([full(5, [{ id: "a", v: 1 }, { id: "b", v: 1 }])]);
+    t.connect();
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+
+    FakeEventSource.last!.emit("sessions-frame", JSON.stringify(delta(6, 5, [{ id: "b", v: 2 }])));
+
+    expect(seen[1]).toEqual([{ id: "a", v: 1 }, { id: "b", v: 2 }]);
+    // Unchanged rows keep identity, so memoised rows do not re-render.
+    expect(seen[1][0]).toBe(seen[0][0]);
+    expect(kinds).toEqual(["full", "delta"]);
+  });
+
+  it("delta 衔接不上序号时补拉快照，而不是硬套", async () => {
+    const { t, seen, urls } = setup([
+      full(5, [{ id: "a" }]),
+      full(9, [{ id: "a" }, { id: "c" }]),
+    ]);
+    t.connect();
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+
+    FakeEventSource.last!.emit("sessions-frame", JSON.stringify(delta(8, 7, [{ id: "x" }])));
+
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]).toEqual([{ id: "a" }, { id: "c" }]);
+    expect(urls()).toEqual(["/sessions_snapshot", "/sessions_snapshot"]);
+  });
+
+  it("补拉期间到的帧排队，快照落地后接着套上", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const seen: Row[][] = [];
+    const fetchImpl = vi.fn(async () => {
+      await gate;
+      return jsonResponse(full(5, [{ id: "a" }]));
+    });
+    const t = new HttpTransport(
+      { onSessions: (s) => seen.push(s as unknown as Row[]) },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      },
+    );
+    t.connect();
+    FakeEventSource.last!.emit("sessions-frame", JSON.stringify(delta(6, 5, [{ id: "b" }])));
+    release();
+
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]).toEqual([{ id: "a" }, { id: "b" }]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("旧主机没有 /sessions_snapshot（404）时退回 /sessions 整表", async () => {
+    const { t, seen, urls } = setup([jsonResponse("not found", 404), [{ id: "a" }]]);
+    t.connect();
+
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+    expect(seen[0]).toEqual([{ id: "a" }]);
+    expect(urls()).toEqual(["/sessions_snapshot", "/sessions"]);
+  });
+
+  // The host may have restarted while the stream was down, its seq back at 1;
+  // without a refetch every later delta would read as already-seen.
+  it("断线重连后重新拉快照", async () => {
+    const { t, seen, urls } = setup([full(40, [{ id: "a" }]), full(1, [{ id: "z" }])]);
+    t.connect();
+    const es = FakeEventSource.last!;
+    es.onopen?.();
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+
+    es.onerror?.();
+    es.onopen?.();
+
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]).toEqual([{ id: "z" }]);
+    expect(urls()).toEqual(["/sessions_snapshot", "/sessions_snapshot"]);
+
+    FakeEventSource.last!.emit("sessions-frame", JSON.stringify(delta(2, 1, [{ id: "y" }])));
+    expect(seen[2]).toEqual([{ id: "z" }, { id: "y" }]);
   });
 });
