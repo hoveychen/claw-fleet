@@ -506,7 +506,8 @@ latencyCount: number, };
 
 export type DecisionCardStats = { byType: { [key in string]: DecisionTypeStats }, };
 
-export type DailyReport = { date: string, timezone: string, generatedAt: number, metrics: DailyMetrics, aiSummary: string | null, aiSummaryGeneratedAt: number | null, sessionIds: Array<string>, lessons: Array<Lesson> | null, lessonsGeneratedAt: number | null, };
+export type DailyReport = { date: string, timezone: string, generatedAt: number, metrics: DailyMetrics, 
+aiSummary: string | null, aiSummaryGeneratedAt: number | null, sessionIds: Array<string>, lessons: Array<Lesson> | null, lessonsGeneratedAt: number | null, };
 
 export type DailyMetrics = { 
 metricsVersion: number, totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, totalSessions: number, totalSubagents: number, totalToolCalls: number, toolCallBreakdown: { [key in string]: number }, modelBreakdown: { [key in string]: ModelTokens }, projects: Array<ProjectMetrics>, sourceBreakdown: { [key in string]: number }, hourlyActivity: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], 
@@ -526,7 +527,27 @@ export type Lesson = {
 content: string, 
 reason: string, 
 workspaceName: string, 
-sessionId: string, };
+sessionId: string, 
+evidenceSessionIds: Array<string>, };
+
+export type LessonViolation = { 
+lessonId: string, lessonContent: string, 
+sessionIds: Array<string>, 
+note: string, };
+
+export type DailyAttention = { date: string, 
+drift: Array<DriftCheck>, 
+lessons: Array<Lesson>, 
+violations: Array<LessonViolation>, };
+
+export type DriftVerdict = "on_track" | "polishing" | "goal_shifted" | "unclear";
+
+export type DriftCheck = { chainId: string, workspacePath: string, workspaceName: string, planId: string | null, goal: string, 
+sessionCount: number, 
+latestSessionId: string, verdict: DriftVerdict, 
+evidence: string, 
+question: string, 
+checkedAt: number, };
 
 export type ManagedLesson = { 
 id: string, content: string, reason: string, workspaceName: string, sessionId: string, };

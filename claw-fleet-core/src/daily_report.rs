@@ -1705,6 +1705,80 @@ pub fn generate_lessons_routed(
     None
 }
 
+// ── Attention ────────────────────────────────────────────────────────────────
+
+/// Everything from one day that needs the user's judgment. The report leads
+/// with this; a day where it is empty pushes nothing.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DailyAttention {
+    pub date: String,
+    /// Relay chains an outsider judged to be polishing or off-goal that day,
+    /// one (the latest) per chain.
+    pub drift: Vec<crate::drift_check::DriftCheck>,
+    /// Lessons seen in two or more sessions, not yet adopted.
+    pub lessons: Vec<Lesson>,
+    /// Adopted lessons an agent still acted against.
+    pub violations: Vec<LessonViolation>,
+}
+
+impl DailyAttention {
+    pub fn is_empty(&self) -> bool {
+        self.drift.is_empty() && self.lessons.is_empty() && self.violations.is_empty()
+    }
+}
+
+/// Assemble a day's [`DailyAttention`] from the stored drift checks, lessons
+/// and lesson pool. Pure reads, no LLM.
+pub fn attention_for_date(date: &str) -> DailyAttention {
+    let adopted: HashSet<String> = crate::lessons_store::list_lessons()
+        .into_iter()
+        .map(|l| l.content)
+        .collect();
+    let store = ReportStore::open().ok();
+    let lessons = store
+        .as_ref()
+        .and_then(|s| s.get_report(date).ok().flatten())
+        .and_then(|r| r.lessons)
+        .unwrap_or_default()
+        .into_iter()
+        // Pre-gate lessons cite no evidence; they are history, not a finding.
+        .filter(|l| l.evidence_session_ids.len() >= 2)
+        .filter(|l| !adopted.contains(&l.content))
+        .collect();
+    let violations = store
+        .as_ref()
+        .and_then(|s| s.get_lesson_pool(date).ok().flatten())
+        .map(|(_, v)| v)
+        .unwrap_or_default();
+    DailyAttention {
+        date: date.to_string(),
+        drift: flagged_drift(crate::drift_check::checks_for_date(date)),
+        lessons,
+        violations,
+    }
+}
+
+/// The latest check per chain, kept only when it needs attention.
+fn flagged_drift(checks: Vec<crate::drift_check::DriftCheck>) -> Vec<crate::drift_check::DriftCheck> {
+    let mut latest: HashMap<String, crate::drift_check::DriftCheck> = HashMap::new();
+    for c in checks {
+        match latest.get(&c.chain_id) {
+            Some(prev) if prev.checked_at >= c.checked_at => {}
+            _ => {
+                latest.insert(c.chain_id.clone(), c);
+            }
+        }
+    }
+    let mut out: Vec<_> = latest
+        .into_values()
+        .filter(|c| c.verdict.needs_attention())
+        .collect();
+    out.sort_by_key(|c| std::cmp::Reverse(c.checked_at));
+    out
+}
+
 /// Add a single lesson to the user's global Claude guidance.
 ///
 /// Delegates to [`crate::lessons_store`], which records the lesson as a
@@ -3003,6 +3077,32 @@ mod tests {
     fn gate_on_none_output_is_empty() {
         let out = gate_lessons("NONE", &today(&[("s1", "a")]), &[], &[]);
         assert_eq!(out, LessonsOutcome::default());
+    }
+
+    #[test]
+    fn flagged_drift_keeps_only_a_chains_latest_verdict() {
+        use crate::drift_check::{DriftCheck, DriftVerdict};
+        let mk = |id: &str, at: u64, v: DriftVerdict| DriftCheck {
+            chain_id: id.into(),
+            workspace_path: String::new(),
+            workspace_name: String::new(),
+            plan_id: None,
+            goal: String::new(),
+            session_count: 3,
+            latest_session_id: String::new(),
+            verdict: v,
+            evidence: String::new(),
+            question: String::new(),
+            checked_at: at,
+        };
+        let out = flagged_drift(vec![
+            mk("a", 1, DriftVerdict::Polishing),
+            mk("a", 2, DriftVerdict::OnTrack), // later recovery wins
+            mk("b", 1, DriftVerdict::GoalShifted),
+            mk("c", 1, DriftVerdict::Unclear),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].chain_id, "b");
     }
 
     #[test]
