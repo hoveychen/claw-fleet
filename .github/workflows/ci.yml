@@ -106,6 +106,46 @@ jobs:
         run: pnpm exec vitest run
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # Desktop front end: typecheck, CSS token lint and unit tests.
+  #
+  # Agents verify locally with scripts/test-affected.sh (only the tests a diff
+  # can reach) and leave the full regression to CI. Before this job the desktop
+  # front end had no CI coverage at all, so "CI runs the full suite" would have
+  # meant nobody ever ran its full vitest suite.
+  # ═══════════════════════════════════════════════════════════════════════════
+  desktop-web:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    name: desktop front end (tsc + vitest)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: corepack enable
+
+      - name: Install
+        working-directory: claw-fleet-desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: claw-fleet-desktop
+        run: pnpm exec tsc --noEmit
+
+      - name: CSS token lint
+        working-directory: claw-fleet-desktop
+        run: node scripts/check-css-tokens.mjs
+
+      - name: Unit tests
+        working-directory: claw-fleet-desktop
+        run: pnpm exec vitest run
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Tag push (or manual dispatch) only — the distributable Android APK.
   #
   # Deliberately NOT run on every branch push: a Gradle release build is minutes
