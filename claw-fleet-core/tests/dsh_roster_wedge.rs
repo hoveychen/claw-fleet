@@ -45,6 +45,7 @@ fn a_stalled_session_list_restarts_the_server() {
     let wedged_token = source
         .server_launch_token()
         .expect("the fixture server is up");
+    let wedged_port = source.server_port().expect("the fixture server is up");
 
     // Whatever the restart spawns must answer promptly.
     std::env::set_var("FAKE_DSH_LIST_DELAY_MS", "50");
@@ -66,10 +67,27 @@ fn a_stalled_session_list_restarts_the_server() {
         "the wedged server must have been replaced"
     );
 
+    // The restart asks for the remembered port again, so only the token tells
+    // the two servers apart — and the event follower must notice, or it keeps
+    // the dead cookie and never publishes the cursor a history read needs.
+    let same_port = source.server_port() == Some(wedged_port);
+    let history = source.get_messages_tail("dsh://session-fake-slow", 5);
+
     let started = Instant::now();
     let rows = source.scan_sessions();
     let fresh_took = started.elapsed();
     claw_fleet_core::dsh_source::shutdown();
+
+    assert!(
+        same_port,
+        "the restart was expected to reuse the port; this test only covers the \
+         follower's token check when it does"
+    );
+    let history = history.expect("history reads work against the replacement server");
+    assert!(
+        !history.is_empty(),
+        "the follower must track the replacement's token"
+    );
 
     assert!(
         fresh_took < Duration::from_secs(5),

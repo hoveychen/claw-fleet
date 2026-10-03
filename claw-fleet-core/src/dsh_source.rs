@@ -502,10 +502,6 @@ impl DshSource {
                 *lock(roster_stall_slot()) = None;
                 // The old server's roster described a process that is gone.
                 *lock(roster_slot()) = None;
-                // `restart` usually keeps the port but never the token, and
-                // `ensure_watcher` only compares ports — drop the follower so
-                // the next call rebuilds it with the new token.
-                *lock(watcher_slot()) = None;
             }
             Err(e) => {
                 crate::log_debug(&format!("dsh source: wedge restart failed: {e}"));
@@ -522,8 +518,12 @@ impl DshSource {
             .map(|(_, value)| value.clone())
     }
 
-    /// Point the downlink follower at `port`, replacing one that is following a
-    /// stale port.
+    /// Point the downlink follower at the server on `port` with `launch_token`,
+    /// replacing one that follows a previous server.
+    ///
+    /// Both have to match: `DshServer::restart` usually lands on the remembered
+    /// port again, so a port-only check kept a crash-restarted server's
+    /// follower on the old token, whose cookie the new process rejects.
     ///
     /// Called from inside [`with_client`], so the lock order is always
     /// server-then-watcher; nothing takes them the other way round.
@@ -531,7 +531,10 @@ impl DshSource {
     /// [`with_client`]: Self::with_client
     fn ensure_watcher(port: u16, launch_token: &str) {
         let mut guard = lock(watcher_slot());
-        if guard.as_ref().is_some_and(|w| w.port() == port) {
+        if guard
+            .as_ref()
+            .is_some_and(|w| w.follows(port, launch_token))
+        {
             return;
         }
         // Assigning drops the old watcher, which stops its follower thread. Its
