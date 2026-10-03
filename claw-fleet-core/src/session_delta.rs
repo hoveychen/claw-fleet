@@ -68,8 +68,14 @@ pub struct DeltaTracker {
 }
 
 impl DeltaTracker {
-    pub fn new() -> Self {
-        Self::default()
+    /// `const` so a process-wide tracker can live in a `static Mutex`.
+    pub const fn new() -> Self {
+        Self {
+            seq: 0,
+            baseline: None,
+            order: Vec::new(),
+            last: Vec::new(),
+        }
     }
 
     /// Frame `sessions` (a JSON array of session objects, in display order).

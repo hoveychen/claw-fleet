@@ -254,6 +254,10 @@ async function handleIPC(
   qaMode = false,
 ): Promise<unknown> {
   switch (cmd) {
+    // The desktop's resync for its `sessions-frame` push. Mock pushes plain
+    // `sessions-updated` lists, so any seq will do.
+    case "sessions_snapshot":
+      return { kind: "full", seq: 1, sessions: currentSessions };
     case "list_sessions":
       return currentSessions;
     case "get_messages": {

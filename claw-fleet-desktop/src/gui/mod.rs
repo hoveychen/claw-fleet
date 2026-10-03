@@ -1611,6 +1611,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_sessions,
+            sessions_snapshot,
             today_usage,
             today_usage_breakdown,
             usage_range_breakdown,

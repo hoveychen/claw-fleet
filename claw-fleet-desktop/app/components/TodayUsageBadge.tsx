@@ -54,13 +54,17 @@ export function TodayUsageBadge({
     };
     void fetchUsage();
     const timer = setInterval(fetchUsage, 15_000);
-    const unlisten = listen("sessions-updated", () => {
-      void fetchUsage();
-    });
+    // `sessions-frame` is the desktop's push; `sessions-updated` the browser
+    // build's poller.
+    const unlisten = ["sessions-frame", "sessions-updated"].map((event) =>
+      listen(event, () => {
+        void fetchUsage();
+      }),
+    );
     return () => {
       cancelled = true;
       clearInterval(timer);
-      void unlisten.then((f) => f());
+      for (const u of unlisten) void u.then((f) => f());
     };
   }, []);
 

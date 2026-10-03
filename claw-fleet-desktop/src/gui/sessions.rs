@@ -16,6 +16,15 @@ pub(crate) async fn list_sessions(
     run_blocking(move || backend.list_sessions()).await
 }
 
+/// Resync for a frontend out of step with the `sessions-frame` push.
+#[tauri::command]
+pub(crate) async fn sessions_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::session_delta::SessionsFrame, String> {
+    let backend = state.backend.clone();
+    run_blocking(move || backend.sessions_snapshot()).await
+}
+
 #[tauri::command]
 pub(crate) async fn today_usage(
     state: tauri::State<'_, AppState>,
