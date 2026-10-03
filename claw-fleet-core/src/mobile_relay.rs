@@ -2488,6 +2488,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "wiki_list" => serve_wiki_list(params),
         "wiki_file" => serve_wiki_file(params),
         "wiki_search" => serve_wiki_search(params),
+        "daily_attention" => serve_daily_attention(params),
         "wiki_export" => serve_wiki_export(params),
         "artifact_list" => serve_artifact_list(params),
         "artifact_folders" => serve_artifact_folders(params),
@@ -2503,6 +2504,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
         "create_dir" => serve_create_dir(params),
+        // Idempotent by itself: the managed file is keyed by lesson content.
+        "adopt_lesson" => serve_adopt_lesson(params),
         "spawn_session" => serve_spawn_session(params),
         // Both carry the user's typed text and both have a process-spawning
         // side effect, so a lost reply must not turn into a second turn.
@@ -3492,6 +3495,28 @@ fn serve_wiki_search(params: &Value) -> Result<Value, String> {
         return Ok(Value::Array(Vec::new()));
     }
     serde_json::to_value(crate::wiki::search_docs(query)).map_err(|e| e.to_string())
+}
+
+// The day's "needs your judgment" items (mirrors the desktop's
+// `get_daily_attention`). `date` is `YYYY-MM-DD`; defaults to today.
+fn serve_daily_attention(params: &Value) -> Result<Value, String> {
+    let date = params
+        .get("date")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    serde_json::to_value(crate::daily_report::attention_for_date(&date)).map_err(|e| e.to_string())
+}
+
+// Adopt a recurring lesson into the managed ~/.claude/fleet-lessons.md
+// (mirrors the desktop's `append_lesson_to_claude_md`).
+fn serve_adopt_lesson(params: &Value) -> Result<Value, String> {
+    let lesson: crate::daily_report::Lesson = serde_json::from_value(
+        params.get("lesson").cloned().ok_or("missing lesson")?,
+    )
+    .map_err(|e| format!("bad lesson: {e}"))?;
+    crate::daily_report::append_lesson_to_claude_md(&lesson)?;
+    Ok(Value::Null)
 }
 
 // Export one doc as a downloadable artifact (single file for
@@ -9153,5 +9178,62 @@ mod tests {
                 .collect();
             assert_eq!(ids, vec!["newer", "older"], "other workspace filtered out");
         });
+    }
+
+    /// The phone reads the day's judgment items and adopts a lesson through
+    /// the same core calls the desktop uses.
+    #[test]
+    fn phone_reads_attention_and_adopts_a_lesson() {
+        let _guard = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-mobile-attention-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let prev_home = std::env::var_os("FLEET_HOME");
+        let prev_cfg = std::env::var_os("CLAUDE_CONFIG_DIR");
+        // SAFETY: serialised by fleet_home_lock.
+        unsafe {
+            std::env::set_var("FLEET_HOME", &home);
+            std::env::set_var("CLAUDE_CONFIG_DIR", home.join(".claude"));
+        }
+
+        let got = serve_request("daily_attention", &serde_json::json!({ "date": "2026-10-02" }))
+            .unwrap();
+        assert_eq!(got["date"], "2026-10-02");
+        for k in ["drift", "lessons", "violations"] {
+            assert_eq!(got[k], serde_json::json!([]), "{k} on an empty home");
+        }
+
+        assert!(serve_request("adopt_lesson", &serde_json::json!({})).is_err());
+        let lesson = serde_json::json!({
+            "content": "Re-run the check before relaying a claim.",
+            "reason": "Seen twice.",
+            "workspaceName": "fleet",
+            "sessionId": "s1",
+            "evidenceSessionIds": ["s1", "s2"],
+        });
+        serve_request("adopt_lesson", &serde_json::json!({ "lesson": lesson })).unwrap();
+        let adopted = crate::lessons_store::list_lessons();
+        assert!(
+            adopted.iter().any(|l| l.content == "Re-run the check before relaying a claim."),
+            "lesson written to the managed file"
+        );
+
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+            match prev_cfg {
+                Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+                None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+            }
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 }
