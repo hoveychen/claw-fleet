@@ -23,6 +23,14 @@ Why it exists: several agent sessions each run their own cargo, cargo defaults e
 - `FLEET_CARGO_GUARD=0` bypasses it for one command; `FLEET_CARGO_SLOTS` / `FLEET_CARGO_MAX_WAIT` tune it.
 - The slot store and `build-local.sh`'s build lock both live under `/tmp`, deliberately **not** `$TMPDIR`: Fleet spawns sessions detached, and one that does not inherit the per-user launchd TMPDIR would queue against a private store — two stores means no gate at all, silently.
 
+## Verifying a change: affected tests only
+
+Verify with `scripts/test-affected.sh` (`--dry-run` shows what it would run). It diffs against `main`, runs the unit tests of the Rust modules you touched (libtest filters, `--lib`/`--bins` only), the integration tests you touched, `vitest related` over the TS files you touched, and a fixed list of guard tests — the registry/drift checks that go red in module B when module A changes. When you write a new test of that shape, add it to the lists at the top of the script.
+
+**Do not run the full suite locally** — no bare `cargo test -p claw-fleet-core`, no `cargo test --workspace`, no bare `vitest run`. CI (`.github/workflows/ci.yml`) runs the full Rust, mobile-web and desktop front-end suites on every branch push; it is the regression backstop. A red that only CI caught gets fixed then.
+
+Why: the core crate alone has ~3,300 unit tests plus ~30 integration-test binaries, and every agent re-running all of it after every small edit made iteration slower the larger the repo got. Measured 2026-10-03: a one-module core change selects ~90 tests and runs in about a minute warm. Most of what is left is compiling, and on a busy machine, waiting for a cargo slot (see the section above).
+
 ## Relay agent role
 
 Only **one** process per machine may join the mobile-relay channel as an agent. The relay hands every client frame to *all* agents in the channel (`fleet-relay/src/registry.rs::deliver_or_queue`) and each agent runs the handler for real, so a second local agent executes every phone-side write twice — on 2026-08-27 the desktop app plus a hand-started `fleet webui` turned one phone submit into two `claude --resume` processes on the same transcript.
