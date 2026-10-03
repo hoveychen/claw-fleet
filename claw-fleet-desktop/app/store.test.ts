@@ -486,13 +486,14 @@ describe("applyWindowTheme", () => {
 });
 
 /**
- * Deduplication contract for auto-popup daily reports.
+ * Deduplication contract for the auto-popup.
  *
  * Two signals trigger maybePopupReport: a 1.5s make-up check after startup, and the
- * daily-report-ready event sent when the scheduler finishes writing the AI summary.
- * The startup check often arrives before the summary is written (scheduler's first cycle
- * waits 10s), so the "already popped" persistence flag must only be written after we
- * actually pop — write it early and the real event's outcome gets blocked, main path fails.
+ * daily-report-ready event the scheduler sends once a day has something that needs
+ * the user's judgment. The startup check often arrives before the scheduler has
+ * judged the day, so the "already popped" flag must only be written after we
+ * actually pop — write it early and the real event gets blocked. A day with
+ * nothing to judge never pops.
  */
 describe("auto-popup daily report", () => {
   beforeEach(() => {
@@ -508,11 +509,8 @@ describe("auto-popup daily report", () => {
     return await import("./store");
   }
 
-  it("does not pop when summary not ready, does not write popped flag", async () => {
-    const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
-      date: "2026-09-05",
-      aiSummary: null,
-    });
+  it("does not pop when nothing needs judgment, does not write popped flag", async () => {
+    const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({ date: "2026-09-05", drift: [], lessons: [], violations: [] });
     const { getItem } = await import("./storage");
 
     await useReportStore.getState().maybePopupReport("2026-09-05");
@@ -521,10 +519,12 @@ describe("auto-popup daily report", () => {
     expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
   });
 
-  it("pops when summary ready, records the date", async () => {
+  it("pops when something needs judgment, records the date", async () => {
     const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
       date: "2026-09-05",
-      aiSummary: "今天干了很多活",
+      drift: [],
+      lessons: [{ content: "c", reason: "r", workspaceName: "w", sessionId: "s1", evidenceSessionIds: ["s1", "s2"] }],
+      violations: [],
     });
     const { getItem } = await import("./storage");
 
@@ -537,7 +537,9 @@ describe("auto-popup daily report", () => {
   it("does not pop twice on the same day", async () => {
     const { useReportStore } = await setup({
       date: "2026-09-05",
-      aiSummary: "今天干了很多活",
+      drift: [],
+      lessons: [{ content: "c", reason: "r", workspaceName: "w", sessionId: "s1", evidenceSessionIds: ["s1", "s2"] }],
+      violations: [],
     });
 
     await useReportStore.getState().maybePopupReport("2026-09-05");
@@ -550,7 +552,9 @@ describe("auto-popup daily report", () => {
   it("does not pop when toggle is off", async () => {
     const { useReportStore, REPORT_AUTO_POPUP_KEY } = await setup({
       date: "2026-09-05",
-      aiSummary: "今天干了很多活",
+      drift: [],
+      lessons: [{ content: "c", reason: "r", workspaceName: "w", sessionId: "s1", evidenceSessionIds: ["s1", "s2"] }],
+      violations: [],
     });
     const { setFeatureState } = await import("./storage");
     setFeatureState(REPORT_AUTO_POPUP_KEY, "off");

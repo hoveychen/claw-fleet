@@ -28,7 +28,8 @@ interface FleetLlmUsageDailyBucket {
   hasUnpricedCalls: boolean;
 }
 
-// Keep in sync with the SCENARIO_* constants in claw-fleet-core/src/llm_usage.rs.
+// Keep in sync with the SCENARIO_* constants in claw-fleet-core/src/llm_usage.rs
+// (plus drift_check::SCENARIO_DRIFT_CHECK).
 // Order determines stacking order (bottom-up) and legend order.
 const SCENARIOS = [
   "guard_command",
@@ -38,6 +39,7 @@ const SCENARIOS = [
   "session_analyze",
   "mascot_quips",
   "session_explain",
+  "drift_check",
 ] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
@@ -50,6 +52,7 @@ const SCENARIO_COLORS: Record<Scenario, string> = {
   session_analyze: "#10b981",      // emerald — frequent ambient
   mascot_quips: "#a855f7",         // violet — cosmetic
   session_explain: "#0ea5e9",      // sky — user-initiated side questions
+  drift_check: "#ec4899",          // pink — outsider read of relay chains
 };
 
 type RangeKey = "7d" | "30d" | "all";

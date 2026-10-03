@@ -59,7 +59,7 @@ import {
   MOCK_DAILY_REPORT,
   MOCK_HANDOFF_CHAINS,
   MOCK_HEATMAP_STATS,
-  MOCK_LESSONS,
+  MOCK_DAILY_ATTENTION,
   MOCK_MANAGED_LESSONS,
   MOCK_TIMELINE_REPORTS,
   getMessagesForSession,
@@ -1080,8 +1080,8 @@ async function handleIPC(
       return MOCK_HEATMAP_STATS;
     case "generate_daily_report":
       return MOCK_DAILY_REPORT;
-    case "generate_daily_report_lessons":
-      return MOCK_LESSONS;
+    case "get_daily_attention":
+      return MOCK_DAILY_ATTENTION;
     case "append_lesson_to_claude_md":
       return null;
     case "list_managed_lessons":

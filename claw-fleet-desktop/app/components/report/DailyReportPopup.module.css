@@ -89,12 +89,12 @@
 
 /* ── Body ────────────────────────────────────────────────────────────────── */
 
-/* ReportDetail brings its own header/body blocks sized for the report page's
-   PageShell; here they just need to scroll inside the panel. */
+/* Holds the attention card alone; scrolls inside the panel. */
 .body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  padding: 16px 20px 20px;
 }

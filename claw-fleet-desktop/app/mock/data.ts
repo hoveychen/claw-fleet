@@ -5,7 +5,7 @@
  */
 
 import { localDateKey } from "../localDate";
-import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, PlanForest, PlanNode, RawMessage, SessionInfo, SkillInvocation, TaskPlanDetail, WaitingAlert } from "../types";
+import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyAttention, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, PlanForest, PlanNode, RawMessage, SessionInfo, SkillInvocation, TaskPlanDetail, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -3493,18 +3493,21 @@ export const MOCK_DAILY_REPORT: DailyReport = {
       reason: "JWT issuer was changed from 'api-server' to 'api-server-v2' without a transition period, causing all existing tokens to be rejected.",
       workspaceName: "api-server",
       sessionId: "sess-api-main",
+      evidenceSessionIds: ["sess-api-main", "sess-api-main-b"],
     },
     {
       content: "Parallel subagent delegation works well for independent tasks (explore, test, review) but requires the main agent to synthesize results — don't delegate tasks with interdependencies.",
       reason: "The claw-fleet session successfully ran 5 subagents in parallel, but earlier attempts at dependent subtasks caused conflicts.",
       workspaceName: "claw-fleet",
       sessionId: "sess-fleet-main",
+      evidenceSessionIds: ["sess-fleet-main", "sess-fleet-main-b"],
     },
     {
       content: "Mock data should cover edge cases (empty states, error states) not just happy paths. The initial mock only showed active sessions.",
       reason: "Screenshots missed the 'no sessions' and 'connection error' states which are important for documentation.",
       workspaceName: "claw-fleet",
       sessionId: "sess-fleet-gp",
+      evidenceSessionIds: ["sess-fleet-gp", "sess-fleet-gp-b"],
     },
   ],
   lessonsGeneratedAt: NOW - HOUR,
@@ -3683,7 +3686,36 @@ function generateHeatmapStats(): DailyReportStats[] {
 
 export const MOCK_HEATMAP_STATS: DailyReportStats[] = generateHeatmapStats();
 
-export const MOCK_LESSONS: Lesson[] = MOCK_DAILY_REPORT.lessons!;
+
+/** One item of each kind, so the "needs your judgment" card and popup can be
+ *  eyeballed without a real scheduler run. */
+export const MOCK_DAILY_ATTENTION: DailyAttention = {
+  date: MOCK_DAILY_REPORT.date,
+  drift: [
+    {
+      chainId: "chain-fleet-report",
+      workspacePath: "/Users/demo/projects/claw-fleet",
+      workspaceName: "claw-fleet",
+      planId: "report-judgment",
+      goal: "Turn the daily report into a short list of things that need the user's judgment, and push it only on days that have any.",
+      sessionCount: 6,
+      latestSessionId: "sess-fleet-main",
+      verdict: "polishing",
+      evidence: "The last three hand-off notes all describe CSS spacing tweaks on the same card; no plan task has been ticked since hop 3.",
+      question: "Is the card good enough to ship, or is spacing actually blocking the goal?",
+      checkedAt: Date.now() - 2 * 3600_000,
+    },
+  ],
+  lessons: [MOCK_DAILY_REPORT.lessons![0]],
+  violations: [
+    {
+      lessonId: "lesson-verify-before-claim",
+      lessonContent: "Re-run the verification command yourself before relaying a predecessor's \"tests pass\" claim.",
+      sessionIds: ["sess-api-main", "sess-fleet-gp"],
+      note: "Two sessions reported green builds that were never re-run after the hand-off.",
+    },
+  ],
+};
 
 // ── Additional mock reports for timeline demo ──────────────────────────────
 
@@ -3702,7 +3734,7 @@ const TIMELINE_SUMMARIES: { daysAgo: number; summary: string; sessions: number; 
 - Database query logging should be enabled by default in dev to catch N+1 issues earlier.`,
     sessions: 5, input: 420_000, output: 180_000, tools: 134, projects: 2, subagents: 2,
     lessons: [
-      { content: "Always enable SQL query logging in development. N+1 queries are invisible without it.", reason: "The user list endpoint was making 200+ queries per request. This was only noticed after a user reported slowness.", workspaceName: "api-server", sessionId: "sess-api-perf" },
+      { content: "Always enable SQL query logging in development. N+1 queries are invisible without it.", reason: "The user list endpoint was making 200+ queries per request. This was only noticed after a user reported slowness.", workspaceName: "api-server", sessionId: "sess-api-perf", evidenceSessionIds: ["sess-api-perf", "sess-api-perf-b"] },
     ],
   },
   {
@@ -3719,7 +3751,7 @@ const TIMELINE_SUMMARIES: { daysAgo: number; summary: string; sessions: number; 
 - Mermaid diagrams render well in GitHub but need manual testing for dark mode contrast.`,
     sessions: 4, input: 310_000, output: 95_000, tools: 78, projects: 2, subagents: 1,
     lessons: [
-      { content: "Test Mermaid diagrams in both light and dark mode before committing. GitHub's dark mode can make certain colors invisible.", reason: "A flowchart node with green text was unreadable on GitHub dark mode.", workspaceName: "docs", sessionId: "sess-docs-mermaid" },
+      { content: "Test Mermaid diagrams in both light and dark mode before committing. GitHub's dark mode can make certain colors invisible.", reason: "A flowchart node with green text was unreadable on GitHub dark mode.", workspaceName: "docs", sessionId: "sess-docs-mermaid", evidenceSessionIds: ["sess-docs-mermaid", "sess-docs-mermaid-b"] },
     ],
   },
   {
@@ -3736,8 +3768,8 @@ const TIMELINE_SUMMARIES: { daysAgo: number; summary: string; sessions: number; 
 - The shared auth library's error messages are much better than our custom ones — users now see actionable error descriptions.`,
     sessions: 8, input: 650_000, output: 290_000, tools: 215, projects: 3, subagents: 4,
     lessons: [
-      { content: "When replacing auth infrastructure, keep the old code path available behind a feature flag for at least one release cycle.", reason: "We had to emergency rollback once because a third-party integration was still using the old token format.", workspaceName: "api-server", sessionId: "sess-api-auth" },
-      { content: "Deep link handlers must check authentication state before navigating. Unauthenticated deep links should be queued and replayed after login.", reason: "The app crashed when a push notification deep link arrived while the user was logged out.", workspaceName: "mobile-app", sessionId: "sess-mobile-deeplink" },
+      { content: "When replacing auth infrastructure, keep the old code path available behind a feature flag for at least one release cycle.", reason: "We had to emergency rollback once because a third-party integration was still using the old token format.", workspaceName: "api-server", sessionId: "sess-api-auth", evidenceSessionIds: ["sess-api-auth", "sess-api-auth-b"] },
+      { content: "Deep link handlers must check authentication state before navigating. Unauthenticated deep links should be queued and replayed after login.", reason: "The app crashed when a push notification deep link arrived while the user was logged out.", workspaceName: "mobile-app", sessionId: "sess-mobile-deeplink", evidenceSessionIds: ["sess-mobile-deeplink", "sess-mobile-deeplink-b"] },
     ],
   },
   {

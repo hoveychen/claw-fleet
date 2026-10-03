@@ -429,12 +429,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { date: q(a.date) },
   }),
 
-  generate_daily_report_lessons: (a) => ({
-    method: "GET",
-    path: "/daily_report/lessons",
-    query: { date: q(a.date) },
-  }),
-
   get_account_info: () => ({
     method: "GET",
     path: "/sources/claude/account",

@@ -1199,7 +1199,7 @@
       "description": "Environment checks passed. Start a Claude Code session in any project directory and Fleet will pick it up automatically."
     },
     "features": {
-      "ai_summary_title": "AI Daily Summaries",
+      "attention_title": "Daily “needs your judgment” digest",
       "live_status_title": "Live Status Dashboard",
       "audit_title": "Security Audit"
     },
@@ -2283,8 +2283,8 @@
     "app_version": "Version",
     "auto_update_check": "Automatic update check",
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
-    "report_auto_popup": "Pop up the daily report",
-    "report_auto_popup_desc": "Show the report in the main window once its AI summary is written — once per day, never twice.",
+    "report_auto_popup": "Pop up what needs your judgment",
+    "report_auto_popup_desc": "On days with something to decide (a drifting relay chain, a recurring lesson), raise it in the main window once. Quiet days push nothing.",
     "group_handoff": "Group handoff sessions",
     "group_handoff_desc": "Collapse sessions from the same handoff relay chain into one group in the task list; click to expand, and mark the whole chain done at once",
     "auto_resume": "Auto-resume after rate limit",
@@ -2371,7 +2371,8 @@
     "scenario_daily_report_lessons": "Daily report lessons",
     "scenario_session_analyze": "Session outcome analysis",
     "scenario_mascot_quips": "Mascot quips",
-    "scenario_session_explain": "Selection explain"
+    "scenario_session_explain": "Selection explain",
+    "scenario_drift_check": "Drift check"
   },
   "hooks": {
     "installed": "Sessions Fleet starts carry Fleet's hooks"
@@ -2548,16 +2549,10 @@
     "tool_breakdown": "Tool Call Distribution",
     "hourly_activity": "Hourly Activity",
     "project_breakdown": "Projects",
-    "ai_summary": "AI Summary",
-    "no_summary": "AI summary not yet generated.",
-    "generate_summary": "Generate AI Summary",
     "generating": "Generating...",
     "copy_markdown": "Copy as Markdown",
     "share": "Copy Markdown",
     "lessons": "Lessons Learned",
-    "no_lessons": "Lessons not yet generated.",
-    "no_lessons_found": "No AI mistakes found in this day's sessions.",
-    "generate_lessons": "Generate Lessons",
     "add_to_claude_md": "Add to CLAUDE.md",
     "lesson_added": "Added",
     "no_insights": "No insights yet. Reports will appear here as data is collected.",
@@ -2584,10 +2579,21 @@
     "task_review_underclaimed": "claimed unfinished",
     "task_review_underclaimed_hint": "The agent did not judge the task complete, yet you finished it — it may have under-reported its progress.",
     "task_review_hops": "{{count}} hops",
-    "popup_title": "Your daily report is ready",
+    "popup_title": "{{count}} things need your judgment",
     "popup_open_full": "Open full report",
-    "lessons_failed": "Failed to generate lessons",
-    "summary_failed": "AI summary failed to generate"
+    "attention_title": "Needs your judgment",
+    "attention_empty": "Nothing needs your judgment today.",
+    "attention_drift": "Relay chains that may have drifted",
+    "attention_lessons": "Lessons that keep recurring",
+    "attention_violations": "Adopted lessons broken again",
+    "attention_open_session": "Open session",
+    "drift_on_track": "On track",
+    "drift_polishing": "Polishing in place",
+    "drift_goal_shifted": "Goal shifted",
+    "drift_unclear": "Unclear",
+    "drift_goal": "Goal",
+    "drift_sessions": "{{count}} hops",
+    "lesson_evidence": "seen in {{count}} sessions"
   },
   "command": {
     "nested": {
