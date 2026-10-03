@@ -861,11 +861,13 @@ impl LiveView {
 
 /// A background follower of one `dsh web` instance's mux socket.
 ///
-/// Bound to a single port: a restarted server lands on a fresh OS-assigned port
-/// (and mints a fresh launch token), so the owner drops this watcher and starts
-/// another rather than reusing it.
+/// Bound to a single server instance — a port *and* its launch token. A
+/// restarted server usually asks for its remembered port again but always mints
+/// a fresh token, so the owner compares both ([`Self::follows`]) and drops this
+/// watcher for a new one rather than reusing it with a dead cookie.
 pub struct DshEventWatcher {
     port: u16,
+    launch_token: String,
     live: SharedLive,
     stop: Arc<AtomicBool>,
     /// Asks the socket thread to open a `session/follow` for one session.
@@ -942,6 +944,7 @@ impl DshEventWatcher {
 
         Self {
             port,
+            launch_token: launch_token.to_string(),
             live,
             stop,
             follow_tx,
@@ -952,6 +955,11 @@ impl DshEventWatcher {
     /// The port this watcher follows.
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Is this the watcher for the server at `port` with `launch_token`?
+    pub fn follows(&self, port: u16, launch_token: &str) -> bool {
+        self.port == port && self.launch_token == launch_token
     }
 
     /// Start following one session's log, if it is not already followed.
