@@ -121,10 +121,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # Not 22: under Node 22 jsdom's FileReader rejects Node's own Blob
+      # ("parameter 1 is not of type 'Blob'") and Response.blob() objects lack
+      # .stream(), which fails decisionAssetDoc.test.ts and
+      # mock/liveProxy.test.ts. Verified 2026-10-03: red on 22.23, green on 24
+      # and on the 26 the dev machine runs.
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Setup pnpm
         run: corepack enable
