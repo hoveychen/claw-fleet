@@ -18,6 +18,7 @@ import {
   MOCK_ATTACHMENT_BYTES,
   MOCK_ATTACHMENT_STORE_DIR,
   MOCK_CHAT_WORKSPACE,
+  MOCK_DAILY_ATTENTION,
   mockBrowseDir,
   mockCreateDir,
   MOCK_DECISION_HISTORY,
@@ -213,6 +214,10 @@ export class MockRelayClient extends RelayClient {
         return MOCK_DECISION_HISTORY;
       case "today_usage":
         return MOCK_TODAY_USAGE;
+      case "daily_attention":
+        return MOCK_DAILY_ATTENTION;
+      case "adopt_lesson":
+        return null;
       // dsh has no transcript file, so both of these are RPC-only — which is
       // exactly why they needed mocking: without them the dsh Token tab was
       // blank everywhere except against a live relay.

@@ -59,7 +59,7 @@ export function mergeAttention(days: DailyAttention[]): {
   };
 }
 
-// Thunks so each label stays a literal `t("…")` call the i18n key test can see.
+// Thunks so each label stays a literal t() call the i18n key test can see.
 const VERDICT_LABEL: Record<DriftVerdict, () => string> = {
   on_track: () => t("方向正常"),
   polishing: () => t("原地打磨"),
