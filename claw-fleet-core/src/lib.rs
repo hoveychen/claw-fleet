@@ -236,6 +236,7 @@ pub mod scope_migration;
 pub mod schedule;
 pub mod search_index;
 pub mod session;
+pub mod session_delta;
 pub mod session_explain;
 pub mod session_history;
 pub mod session_driver;
