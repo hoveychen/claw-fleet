@@ -148,6 +148,12 @@ git worktree add -b prd/<task-id> .worktrees/<task-id> main
 
 每个非最后的 P-task：**开发 → 测试/验证 → 在 worktree 内提交 → `fleet plan check <id> <P>` → 同一回合里立即做下一个**，不为确认停顿。
 
+**「验证」指改动能触及的范围，不是全量回归。**本规则里的「测试/验证」「验证全绿」都按这个读：
+
+- 跑你改到的模块/文件的测试，加上项目里那些「改 A 却在 B 里红」的守门测试（登记表、drift guard、i18n key 对齐这类）。项目提供了按 diff 选测试的脚本（如 `scripts/test-affected.sh`）就用它，CLAUDE.md 里写了验证命令就照它来。
+- **项目有 CI 跑全量的，本地不跑全量**——每次小改都整套重跑，随项目长大就是迭代速度的指数级下降。全量回归是 CI 的活，push 后由它兜底。没有 CI 的项目，合并前跑一次全量即可，不要每个 P-task 都跑。
+- 选择性跑法漏掉的红，在 CI 里看到时再修。别为了「万一」把全量搬回本地。
+
 不要停下来做摘要，不要问「要我继续 P2 吗」「P4 前要不要审一下进度」。进度的单位是计划，不是 P-task；TASKS.md 和 worktree 提交已让进度一目了然。
 
 接起一个你没创建、也没被交接的计划时，第一个 P-task 之前先 `fleet plan resume <plan-id> [P]`。`create` 与 Fleet 交接会自动归属你，`check` 随你推进而刷新。
@@ -368,6 +374,12 @@ Rule 3 covers any change touching production code, **whether multi-step or singl
 ## Rule 4 — Plan execution rhythm
 
 Every non-final P-task: **Dev** → **Test / verify** → **Commit inside the worktree** → `fleet plan check <id> <P>` → move straight to the next P-task **in the same turn**, without pausing for confirmation.
+
+**"Verification" means what your change can reach, not the full regression.** Read "test / verify" and "verification is green" throughout these rules that way:
+
+- Run the tests of the modules/files you touched, plus the project's guard tests that go red in B when A changes (registries, drift guards, i18n key parity and the like). If the project ships a diff-driven selector (e.g. `scripts/test-affected.sh`) use it; if its CLAUDE.md names a verification command, follow that.
+- **When the project has CI running the full suite, do not run the full suite locally** — re-running everything on every small change is how iteration speed decays exponentially as a project grows. The full regression is CI's job, as the backstop after a push. A project without CI gets one full run before the merge, not one per P-task.
+- A red that the selective run missed gets fixed when CI shows it. Do not move the full suite back onto your machine "just in case".
 
 Do not stop to summarize. Do not ask "shall I continue with P2?" or "should I review progress before P4?". Do not offer "I've written quite a few P-tasks, want a summary?". Progress is measured in plans, not P-tasks, and TASKS.md plus the worktree commits already make it legible.
 
