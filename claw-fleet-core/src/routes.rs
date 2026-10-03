@@ -95,7 +95,6 @@ pub const CHAT_WORKSPACE: &str = "/chat_workspace";
 pub const CLOUD_USAGE: &str = "/cloud_usage";
 pub const CLAUDE_BINARY_OVERRIDE: &str = "/claude_binary_override";
 pub const DAILY_REPORT: &str = "/daily_report";
-pub const DAILY_REPORT_AI_SUMMARY: &str = "/daily_report/ai_summary";
 pub const DAILY_REPORT_APPEND_LESSON: &str = "/daily_report/append_lesson";
 pub const DAILY_REPORT_GENERATE: &str = "/daily_report/generate";
 pub const DAILY_REPORT_LESSONS: &str = "/daily_report/lessons";

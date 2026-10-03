@@ -1080,8 +1080,6 @@ async function handleIPC(
       return MOCK_HEATMAP_STATS;
     case "generate_daily_report":
       return MOCK_DAILY_REPORT;
-    case "generate_daily_report_ai_summary":
-      return MOCK_DAILY_REPORT.aiSummary;
     case "generate_daily_report_lessons":
       return MOCK_LESSONS;
     case "append_lesson_to_claude_md":

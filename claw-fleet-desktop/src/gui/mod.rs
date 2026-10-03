@@ -1885,7 +1885,6 @@ pub fn run() {
             get_daily_report,
             list_daily_report_stats,
             generate_daily_report,
-            generate_daily_report_ai_summary,
             generate_daily_report_lessons,
             append_lesson_to_claude_md,
             list_managed_lessons,

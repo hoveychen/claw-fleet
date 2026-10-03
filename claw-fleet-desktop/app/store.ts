@@ -1217,11 +1217,9 @@ interface ReportState {
    *  `currentReport === null` only means "no report" once this matches the
    *  selected date — before that it is the window before the first fetch. */
   reportSettledDate: string | null;
-  generatingSummary: boolean;
   generatingLessons: boolean;
-  /** Date whose AI summary / lessons generation last failed, or null. Lets the
-   *  cards leave their loading state and offer a retry instead of spinning on. */
-  summaryFailedDate: string | null;
+  /** Date whose lessons generation last failed, or null. Lets the card leave
+   *  its loading state and offer a retry instead of spinning on. */
   lessonsFailedDate: string | null;
 
   // Lessons already recorded in the managed ~/.claude/fleet-lessons.md. Used to
@@ -1273,7 +1271,6 @@ interface ReportState {
   /** Close the auto-popup overlay. */
   closeReportPopup: () => void;
   generateReport: (date: string) => Promise<void>;
-  generateSummary: (date: string) => Promise<void>;
   generateLessons: (date: string) => Promise<void>;
   appendLessonToClaudeMd: (lesson: Lesson) => Promise<void>;
   /** Refresh the managed-lessons list from ~/.claude/fleet-lessons.md. */
@@ -1316,9 +1313,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
   selectedDate: yesterday(),
   loading: false,
   reportSettledDate: null,
-  generatingSummary: false,
   generatingLessons: false,
-  summaryFailedDate: null,
   lessonsFailedDate: null,
 
   managedLessons: [],
@@ -1440,19 +1435,6 @@ export const useReportStore = create<ReportState>((set, get) => ({
       set({ currentReport: report, loading: false, selectedDate: date, reportSettledDate: date });
     } catch {
       set({ loading: false, reportSettledDate: date });
-    }
-  },
-
-  generateSummary: async (date: string) => {
-    set({ generatingSummary: true, summaryFailedDate: null });
-    try {
-      const summary = await invoke<string>("generate_daily_report_ai_summary", { date });
-      set((s) => ({
-        generatingSummary: false,
-        currentReport: s.currentReport ? { ...s.currentReport, aiSummary: summary } : null,
-      }));
-    } catch {
-      set({ generatingSummary: false, summaryFailedDate: date });
     }
   },
 

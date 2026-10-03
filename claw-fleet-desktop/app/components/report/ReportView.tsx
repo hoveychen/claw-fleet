@@ -9,7 +9,6 @@ import { HourlyActivityChart } from "./HourlyActivityChart";
 import { MetricsCards } from "./MetricsCards";
 import { DecisionCardsPanel } from "./DecisionCardsPanel";
 import { TaskReviewsCard } from "./TaskReviewsCard";
-import { AISummaryCard } from "./AISummaryCard";
 import { LessonsCard } from "./LessonsCard";
 import { ToolCallChart } from "./ToolCallChart";
 import { ReportShareMenu } from "./ReportShareMenu";
@@ -346,11 +345,6 @@ export function ReportDetail() {
               <HourlyActivityChart hourly={shown.metrics.hourlyActivity} />
             </div>
             <DecisionCardsPanel stats={shown.metrics.decisionCards} />
-            <AISummaryCard
-              date={shown.date}
-              summary={shown.aiSummary}
-              metrics={shown.metrics}
-            />
             {/* Between the card stats and the day's lessons on purpose: the
                 stats say how many tasks ended, this says which ones and why,
                 and the lessons are what was drawn from them. */}

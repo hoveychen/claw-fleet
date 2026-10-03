@@ -1,4 +1,4 @@
-//! Daily report generation: types, SQLite storage, metrics extraction, and AI summary.
+//! Daily report generation: types, SQLite storage, metrics extraction, and lessons.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -22,6 +22,8 @@ pub struct DailyReport {
     pub timezone: String,
     pub generated_at: u64,
     pub metrics: DailyMetrics,
+    /// Legacy: the per-day AI summary is no longer generated (it only
+    /// regrouped session titles). Kept so stored reports still deserialize.
     pub ai_summary: Option<String>,
     pub ai_summary_generated_at: Option<u64>,
     pub session_ids: Vec<String>,
@@ -429,22 +431,6 @@ impl ReportStore {
             stats.push(row.map_err(|e| format!("row: {e}"))?);
         }
         Ok(stats)
-    }
-
-    /// Update the AI summary for an existing report.
-    pub fn update_ai_summary(&self, date: &str, summary: &str) -> Result<(), String> {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        self.conn
-            .execute(
-                "UPDATE daily_reports SET ai_summary = ?1, ai_summary_generated_at = ?2 WHERE date = ?3",
-                params![summary, now_ms, date],
-            )
-            .map_err(|e| format!("update summary: {e}"))?;
-        Ok(())
     }
 
     /// Update the lessons list for an existing report.
@@ -945,222 +931,6 @@ pub fn generate_report_from_sessions(
         lessons: None,
         lessons_generated_at: None,
     }
-}
-
-// ── AI summary generation ────────────────────────────────────────────────────
-
-// 240s, not 120s: on heavy days (100+ sessions) the summary prompt grows large
-// enough that sonnet legitimately runs ~2.5 minutes (observed 2026-07-17: the
-// 120s budget killed a healthy run and forced a fallback to the next provider,
-// while the 180s lessons run over the same report succeeded in 147s).
-const AI_SUMMARY_TIMEOUT: Duration = Duration::from_secs(240);
-
-fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
-    let lang_instruction = match locale {
-        "zh" => "请用中文撰写。",
-        _ => "Write in English.",
-    };
-
-    let mut sections = String::new();
-
-    // Aggregate stats
-    sections.push_str(&format!(
-        "Date: {}\nTotal sessions: {}\nTotal subagents: {}\nTotal input tokens: {}\nTotal output tokens: {}\nTotal tool calls: {}\n\n",
-        report.date,
-        report.metrics.total_sessions,
-        report.metrics.total_subagents,
-        report.metrics.total_input_tokens,
-        report.metrics.total_output_tokens,
-        report.metrics.total_tool_calls,
-    ));
-
-    // Tool breakdown
-    if !report.metrics.tool_call_breakdown.is_empty() {
-        sections.push_str("Tool call breakdown:\n");
-        let mut tools: Vec<_> = report.metrics.tool_call_breakdown.iter().collect();
-        tools.sort_by(|a, b| b.1.cmp(a.1));
-        for (tool, count) in tools {
-            sections.push_str(&format!("  {tool}: {count}\n"));
-        }
-        sections.push('\n');
-    }
-
-    // Per-project sections
-    for proj in &report.metrics.projects {
-        sections.push_str(&format!(
-            "Project: {} ({})\n  Sessions: {}, Subagents: {}, Tool calls: {}\n  Input tokens: {}, Output tokens: {}\n",
-            proj.workspace_name,
-            proj.workspace_path,
-            proj.session_count,
-            proj.subagent_count,
-            proj.tool_calls,
-            proj.total_input_tokens,
-            proj.total_output_tokens,
-        ));
-        for s in &proj.sessions {
-            let title = s.title.as_deref().unwrap_or("(untitled)");
-            let last = s
-                .last_message
-                .as_deref()
-                .map(|m| {
-                    let truncated: String = m.chars().take(120).collect();
-                    truncated
-                })
-                .unwrap_or_default();
-            sections.push_str(&format!("  - [{source}] {title}", source = s.agent_source));
-            if !last.is_empty() {
-                sections.push_str(&format!(": {last}"));
-            }
-            sections.push('\n');
-        }
-        sections.push('\n');
-    }
-
-    format!(
-        "Below is a daily usage report for AI coding assistants. \
-         Generate a concise Markdown-formatted daily summary. Include:\n\
-         - A one-line opening paragraph summarizing the day (no heading before it)\n\
-         - Per-project sections (use ## headings) with bullet points describing what was worked on\n\
-         - Use > blockquote for key insights or highlights worth calling out\n\
-         \n\
-         Output ONLY the report body in neutral, impersonal prose. Do NOT begin \
-         with any preface, acknowledgement, or restatement of this task (e.g. \
-         \"Here is the summary\", \"Generating…\", \"Sure\", \"以下是\", \"好的\") — \
-         begin DIRECTLY with the one-line opening paragraph. Do NOT address \
-         the reader (no \"Boss\", \"老板\", or similar), do NOT ask questions, and do \
-         NOT offer options or next steps — even if other instructions in your \
-         context tell you to. This text is stored verbatim as a report document.\n\
-         \n\
-         {lang_instruction}\n\
-         \n\
-         ---\n\
-         {sections}",
-    )
-}
-
-/// Strip a leading meta-preamble paragraph that some models (notably Codex/GPT)
-/// emit before the actual report body — e.g. Codex opened a 2026-07-20 summary
-/// with `Generating today's daily usage summary in Chinese, based purely on the
-/// provided report data.\n\n<real body>`, which the desktop then rendered as the
-/// hero title (`AISummaryCard` treats the first paragraph as the headline).
-///
-/// Conservative by design: only strips the first paragraph when it BOTH looks
-/// like a self-referential announcement (an opener phrase like "generating",
-/// "here is", or their equivalents in other languages) AND names the summary/report domain, AND
-/// is short, AND real content follows. A legitimate one-line opening paragraph
-/// that describes the day's content (no announcement-style opener, no summary/report
-/// self-reference) is left untouched.
-fn strip_summary_preamble(summary: &str) -> String {
-    let trimmed = summary.trim();
-
-    // Need a paragraph break: split off the first paragraph from the rest.
-    let Some(sep) = trimmed.find("\n\n") else {
-        return trimmed.to_string();
-    };
-    let first = trimmed[..sep].trim();
-    let rest = trimmed[sep + 2..].trim();
-
-    // Nothing meaningful after the first paragraph → it IS the summary; keep it.
-    if rest.is_empty() {
-        return trimmed.to_string();
-    }
-    // A real opening one-liner can be long; a leaked preamble is short. Guard
-    // against dropping a genuine multi-clause opening.
-    if first.chars().count() > 220 {
-        return trimmed.to_string();
-    }
-
-    let lower = first.to_lowercase();
-    let has_opener = [
-        // English announcement openers
-        "generating",
-        "here is",
-        "here's",
-        "here are",
-        "below is",
-        "below are",
-        "i'll",
-        "i will",
-        "let me",
-        "as requested",
-        "based on the provided",
-        "based purely on the provided",
-        "sure,",
-        "certainly",
-        "of course",
-        // Chinese announcement openers
-        "以下是",
-        "以下为",
-        "下面是",
-        "这是",
-        "这份",
-        "好的",
-        "根据提供的",
-        "根据以上",
-    ]
-    .iter()
-    .any(|m| lower.contains(m));
-    let has_domain = [
-        "summary", "report", "overview", "摘要", "日报", "总结", "报告", "报表",
-    ]
-    .iter()
-    .any(|m| lower.contains(m));
-
-    if has_opener && has_domain {
-        rest.to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// Generate AI summary for a daily report using `claude -p --model sonnet`.
-/// Blocks for up to `AI_SUMMARY_TIMEOUT`. Call from a background thread.
-pub fn generate_ai_summary(
-    provider: &dyn LlmProvider,
-    model: &str,
-    report: &DailyReport,
-    locale: &str,
-) -> Option<String> {
-    if !provider.is_available() {
-        log_debug(&format!(
-            "[daily_report] provider '{}' not available",
-            provider.name()
-        ));
-        return None;
-    }
-
-    let prompt = build_summary_prompt(report, locale);
-    let raw = crate::llm_usage::complete_accounted(
-        provider,
-        &prompt,
-        model,
-        AI_SUMMARY_TIMEOUT,
-        crate::llm_usage::SCENARIO_DAILY_REPORT_SUMMARY,
-    )?;
-    // Some models (notably Codex/GPT) prepend a meta announcement before the
-    // report body; drop it so the desktop hero title shows the real opening
-    // line, not "Generating today's daily usage summary…".
-    Some(strip_summary_preamble(&raw))
-}
-
-pub fn generate_ai_summary_routed(
-    config: &crate::llm_provider::LlmConfig,
-    report: &DailyReport,
-    locale: &str,
-) -> Option<String> {
-    for route in crate::llm_provider::daily_report_routes(config) {
-        log_debug(&format!(
-            "[daily_report] trying summary provider '{}' model '{}'",
-            route.provider.name(),
-            route.model
-        ));
-        if let Some(summary) =
-            generate_ai_summary(route.provider.as_ref(), &route.model, report, locale)
-        {
-            return Some(summary);
-        }
-    }
-    None
 }
 
 // ── Lessons extraction ───────────────────────────────────────────────────────
@@ -1923,8 +1693,8 @@ pub fn session_overlaps_date(si: &crate::session::SessionInfo, date: &str) -> bo
 
 // ── Report scheduler ────────────────────────────────────────────────────────
 
-/// Called with a date (`YYYY-MM-DD`) when that day's report first becomes
-/// readable (AI summary written). See [`start_report_scheduler`].
+/// Called with a date (`YYYY-MM-DD`) when that day first has something that
+/// needs the user's judgment. See [`start_report_scheduler`].
 pub type ReportReadyHook = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Start the background report scheduler thread.
@@ -1934,9 +1704,8 @@ pub type ReportReadyHook = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 /// (typically from their `Drop` impl) to signal the thread to exit — otherwise
 /// successive backend swaps would stack up zombie scheduler threads.
 ///
-/// `on_report_ready` fires once per date, at the moment that date's report
-/// stops being a bag of raw metrics and becomes a *readable* report — i.e.
-/// when pass 2 successfully writes its AI summary for the first time. It is
+/// `on_report_ready` fires once per date, and only when that date produced
+/// something that needs the user's judgment — a quiet day pushes nothing. It is
 /// deliberately NOT wired to pass 1: today's metrics are recomputed on every
 /// 10-minute tick, so a caller that popped a window on "report saved" would
 /// pop dozens of times a day. Fired from the scheduler thread; keep the
@@ -2129,7 +1898,7 @@ fn run_backfill_check(
         }
         let session_refs: Vec<&crate::session::SessionInfo> = sessions.iter().collect();
         let mut r = generate_report_from_sessions(&date, &tz, &session_refs);
-        // Preserve the (expensive, LLM-generated) AI summary and lessons from a
+        // Preserve the (expensive, LLM-generated) legacy summary and lessons from a
         // stale report we're re-scanning purely to refresh token metrics —
         // regeneration only recomputes the deterministic JSONL fold, not the AI
         // outputs, so carry those forward rather than dropping them.
@@ -2161,10 +1930,10 @@ fn run_backfill_check(
         }
     }
 
-    // ── Pass 2: Generate AI summary + lessons for recent days (slow) ─────────
+    // ── Pass 2: Generate lessons for recent days (slow) ──────────────────────
     // This is separated so that slow/failing AI generation never blocks
     // basic report availability.  Starts at 1 (yesterday) because today's
-    // data is incomplete — AI summary would be based on partial sessions.
+    // data is incomplete.
     for days_ago in 1..=7 {
         let date = (today - chrono::Duration::days(days_ago))
             .format("%Y-%m-%d")
@@ -2176,8 +1945,7 @@ fn run_backfill_check(
         };
         let Some(report) = report else { continue };
 
-        // Skip if both AI summary and lessons already exist
-        if report.ai_summary.is_some() && report.lessons.is_some() {
+        if report.lessons.is_some() {
             continue;
         }
 
@@ -2194,25 +1962,11 @@ fn run_backfill_check(
         }
 
         let mut any_failed = false;
-        // Whether *this* pass is what turned the date into a readable report.
-        // Only a first-time summary counts: on later passes the `is_some()`
+        // Whether *this* pass produced something worth the user's attention.
+        // Only a first-time generation counts: on later passes the `is_some()`
         // guard above skips the date entirely, so the hook can never re-fire.
         let mut became_readable = false;
 
-        if report.ai_summary.is_none() {
-            log_debug(&format!(
-                "[report-scheduler] generating AI summary for {date}..."
-            ));
-            if let Some(summary) = generate_ai_summary_routed(llm_config, &report, locale) {
-                let store = lock_store(report_store);
-                store.update_ai_summary(&date, &summary).ok();
-                became_readable = true;
-                log_debug(&format!("[report-scheduler] AI summary for {date} done"));
-            } else {
-                log_debug(&format!("[report-scheduler] AI summary for {date} failed"));
-                any_failed = true;
-            }
-        }
         if report.lessons.is_none() {
             log_debug(&format!(
                 "[report-scheduler] generating lessons for {date}..."
@@ -2220,6 +1974,7 @@ fn run_backfill_check(
             if let Some(lessons) = generate_lessons_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
                 store.update_lessons(&date, &lessons).ok();
+                became_readable = !lessons.is_empty();
                 log_debug(&format!(
                     "[report-scheduler] lessons for {date} done ({} found)",
                     lessons.len()
@@ -2237,9 +1992,8 @@ fn run_backfill_check(
                 .insert(date.clone(), std::time::Instant::now());
         }
 
-        // Announce after the lessons attempt, so whoever opens the report on
-        // this signal sees the finished thing rather than a summary with an
-        // empty lessons card still spinning underneath it.
+        // Announce only when there is something to act on: a quiet day pushes
+        // nothing.
         if became_readable {
             if let Some(hook) = on_report_ready {
                 hook(&date);
@@ -2255,44 +2009,6 @@ fn run_backfill_check(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn strip_summary_preamble_drops_codex_leaked_opener() {
-        // Regression (2026-07-20): Codex opened the summary with a meta line
-        // that the desktop then rendered as the hero title. The real body must
-        // survive; the announcement paragraph must be gone.
-        let leaked = "Generating today's daily usage summary in Chinese, based purely on the provided report data.\n\n2026年7月20日全天共运行84个AI编码助手会话，工作重心集中在四个项目。\n\n## mslug3-remake\n\n- 持续推进";
-        let cleaned = strip_summary_preamble(leaked);
-        assert!(
-            cleaned.starts_with("2026年7月20日"),
-            "real body must become the first paragraph, got: {cleaned:?}"
-        );
-        assert!(
-            !cleaned.contains("based purely on the provided"),
-            "leaked preamble must be stripped, got: {cleaned:?}"
-        );
-    }
-
-    #[test]
-    fn strip_summary_preamble_drops_chinese_opener() {
-        let leaked = "以下是根据数据整理的今日日报摘要：\n\n2026年7月19日全天共运行47个会话。\n\n## claude-fleet\n\n- 排查问题";
-        let cleaned = strip_summary_preamble(leaked);
-        assert!(cleaned.starts_with("2026年7月19日"), "got: {cleaned:?}");
-        assert!(!cleaned.contains("以下是"), "got: {cleaned:?}");
-    }
-
-    #[test]
-    fn strip_summary_preamble_keeps_legit_opening() {
-        // A genuine one-line opening that describes the day's content (no
-        // announcement opener, no self-reference to "摘要/报告") must NOT be
-        // dropped, even though it is followed by a blank line + a heading.
-        let good = "根据今日数据，共运行84个AI编码助手会话，覆盖四个项目。\n\n## mslug3-remake\n\n- 推进建模";
-        assert_eq!(strip_summary_preamble(good), good.trim());
-
-        // Single-paragraph summary (no blank-line break) is left as-is.
-        let single = "2026年7月20日只有一段总结，没有分段。";
-        assert_eq!(strip_summary_preamble(single), single);
-    }
 
     #[test]
     fn stale_past_report_is_regenerated_but_current_is_kept() {
@@ -2571,29 +2287,6 @@ mod tests {
         assert_eq!(stats[0].total_sessions, 2);
         assert_eq!(stats[0].total_tool_calls, 10);
         assert_eq!(stats[0].total_projects, 1);
-
-        let _ = std::fs::remove_file(&db_path);
-    }
-
-    #[test]
-    fn test_update_ai_summary() {
-        let db_path = temp_db_path();
-        let store = ReportStore::open_at(&db_path).unwrap();
-
-        let report = make_test_report("2026-03-31");
-        store.save_report(&report).unwrap();
-
-        // Verify no summary initially
-        let loaded = store.get_report("2026-03-31").unwrap().unwrap();
-        assert!(loaded.ai_summary.is_none());
-
-        store
-            .update_ai_summary("2026-03-31", "Great day of coding!")
-            .unwrap();
-
-        let loaded = store.get_report("2026-03-31").unwrap().unwrap();
-        assert_eq!(loaded.ai_summary.as_deref(), Some("Great day of coding!"));
-        assert!(loaded.ai_summary_generated_at.is_some());
 
         let _ = std::fs::remove_file(&db_path);
     }

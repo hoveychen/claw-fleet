@@ -77,17 +77,6 @@ pub(crate) async fn generate_daily_report(
 }
 
 #[tauri::command]
-pub(crate) async fn generate_daily_report_ai_summary(
-    date: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
-    let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.generate_daily_report_ai_summary(&date))
-        .await
-        .map_err(|e| format!("join: {e}"))?
-}
-
-#[tauri::command]
 pub(crate) async fn generate_daily_report_lessons(
     date: String,
     state: tauri::State<'_, AppState>,

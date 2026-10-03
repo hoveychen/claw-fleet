@@ -3960,29 +3960,6 @@ impl LocalBackend {
         Ok(report)
     }
 
-    pub fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
-        let report = self
-            .report_store
-            .lock()
-            .unwrap()
-            .get_report(date)
-            .map_err(|e| format!("load report: {e}"))?
-            .ok_or_else(|| format!("No report found for {date}"))?;
-
-        let lang = self.locale.lock().unwrap().clone();
-        let cfg = self.llm_config.lock().unwrap().clone();
-        let summary = crate::daily_report::generate_ai_summary_routed(&cfg, &report, &lang)
-            .ok_or_else(|| "AI summary generation failed".to_string())?;
-
-        self.report_store
-            .lock()
-            .unwrap()
-            .update_ai_summary(date, &summary)
-            .map_err(|e| format!("save summary: {e}"))?;
-
-        Ok(summary)
-    }
-
     pub fn generate_daily_report_lessons(
         &self,
         date: &str,

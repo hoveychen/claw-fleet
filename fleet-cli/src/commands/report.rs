@@ -1,4 +1,4 @@
-//! `fleet report` — view or generate daily reports (metrics, AI summary, lessons).
+//! `fleet report` — view or generate daily reports (metrics, lessons).
 
 use crate::fmt::*;
 
@@ -7,12 +7,11 @@ pub(crate) fn cmd_report(
     backfill: bool,
     regenerate: bool,
     gen_lessons: bool,
-    gen_summary: bool,
     as_json: bool,
     lang: &str,
 ) {
     use claw_fleet_core::daily_report::{
-        generate_ai_summary_routed, generate_lessons_routed, generate_report_from_sessions,
+        generate_lessons_routed, generate_report_from_sessions,
         local_tz_tag, scan_sessions_for_date, ReportStore,
     };
     use claw_fleet_core::llm_provider::LlmConfig;
@@ -65,40 +64,6 @@ pub(crate) fn cmd_report(
         let report = generate_report_from_sessions(&target_date, &tz, &session_refs);
         store.save_report(&report).ok();
         println!("Regenerated report for {}", target_date);
-    }
-
-    if gen_summary {
-        match store.get_report(&target_date) {
-            Ok(Some(report)) => {
-                eprint!("Generating AI summary (may take up to 2 minutes)...");
-                match generate_ai_summary_routed(&llm_cfg, &report, lang) {
-                    Some(summary) => {
-                        eprintln!(" done");
-                        store.update_ai_summary(&target_date, &summary).ok();
-                        if as_json {
-                            println!("{}", serde_json::to_string_pretty(&summary).unwrap());
-                        } else {
-                            println!("{summary}");
-                        }
-                    }
-                    None => {
-                        eprintln!(" failed (claude CLI unavailable or timed out)");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            Ok(None) => {
-                eprintln!("No report for {}. Use --regenerate first.", target_date);
-                std::process::exit(1);
-            }
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        if !gen_lessons {
-            return;
-        }
     }
 
     if gen_lessons {
@@ -223,10 +188,5 @@ fn print_report(report: &claw_fleet_core::daily_report::DailyReport) {
             );
         }
         println!();
-    }
-
-    if let Some(ref summary) = report.ai_summary {
-        println!("{b}AI Summary{r}");
-        println!("{}", summary);
     }
 }

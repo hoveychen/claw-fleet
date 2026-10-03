@@ -202,9 +202,6 @@ enum Commands {
         /// Generate lessons from sessions (requires claude CLI)
         #[arg(long)]
         lessons: bool,
-        /// Force regenerate AI summary (requires claude CLI)
-        #[arg(long)]
-        summary: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -1374,7 +1371,7 @@ fn main() {
         Commands::History { action } => commands::notes::cmd_history(action),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),
-        Commands::Report { date, backfill, regenerate, lessons, summary, json, lang } => commands::report::cmd_report(date, backfill, regenerate, lessons, summary, json, &lang),
+        Commands::Report { date, backfill, regenerate, lessons, json, lang } => commands::report::cmd_report(date, backfill, regenerate, lessons, json, &lang),
         Commands::Serve { port, token, port_file } => {
             commands::serve::cmd_serve(port, token, port_file)
         }
