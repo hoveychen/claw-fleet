@@ -37,6 +37,7 @@ pub mod control_plane;
 pub mod control_plane_prefs;
 pub mod daily_report;
 pub mod decision_history;
+pub mod drift_check;
 pub mod decision_panel_config;
 #[cfg(windows)]
 pub mod dpapi;

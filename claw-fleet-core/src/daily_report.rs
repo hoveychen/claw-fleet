@@ -1617,19 +1617,25 @@ pub fn generate_lessons(
 /// panel and the lessons pass would disagree about a task that ended near
 /// midnight.
 pub fn task_reviews_for_date(date: &str) -> Vec<crate::task_review::TaskReview> {
-    use chrono::TimeZone;
-    let Some(start) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .ok()
-        .and_then(|d| d.and_hms_opt(0, 0, 0))
-        .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
-    else {
+    let Some((from_ms, to_ms)) = local_day_bounds_ms(date) else {
         return Vec::new();
     };
-    let from_ms = start.timestamp_millis().max(0) as u64;
-    let to_ms = from_ms + 24 * 60 * 60 * 1000;
     crate::task_review::TaskReviewStore::open()
         .and_then(|s| s.list_in_range(from_ms, to_ms))
         .unwrap_or_default()
+}
+
+/// `[start, start + 24h)` in epoch ms for local calendar day `date`
+/// (`YYYY-MM-DD`): the one definition of "which instants belong to this day"
+/// for everything the report attributes by timestamp.
+pub fn local_day_bounds_ms(date: &str) -> Option<(u64, u64)> {
+    use chrono::TimeZone;
+    let start = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())?;
+    let from_ms = start.timestamp_millis().max(0) as u64;
+    Some((from_ms, from_ms + 24 * 60 * 60 * 1000))
 }
 
 /// Render the day's finished task retrospectives for the lessons prompt: how
@@ -2277,6 +2283,15 @@ fn run_backfill_check(
             if let Some(hook) = on_report_ready {
                 hook(&date);
             }
+        }
+    }
+
+    // ── Pass 3: Drift checks on active relay chains ──────────────────────────
+    // Throttled per chain inside `chains_due`, so most ticks make no LLM call.
+    let flagged = crate::drift_check::run_due_checks(llm_config, locale);
+    if !flagged.is_empty() {
+        if let Some(hook) = on_report_ready {
+            hook(&today.format("%Y-%m-%d").to_string());
         }
     }
 
