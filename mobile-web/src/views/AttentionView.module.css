@@ -1,0 +1,145 @@
+/* "Needs your judgment" page: fullscreen overlay from More, same z-level 30
+   as WikiView/PlansView. Cards reuse WikiView's border + radius. */
+.page {
+  composes: page_enter from "../motion.module.css";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.count {
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.hint {
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 14px);
+  padding: 20px 4px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.groupLabel {
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: 0 2px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+}
+
+/* Outlined badge; only the colour carries the verdict. */
+.verdict {
+  flex-shrink: 0;
+  font-size: var(--t-meta, 11px);
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+}
+
+.verdict[data-verdict="polishing"] {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.verdict[data-verdict="goal_shifted"] {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.goal {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.text {
+  font-size: var(--t-ui, 14px);
+  line-height: 1.5;
+}
+
+.reason {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.meta {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: var(--t-aux, 12px);
+}
+
+.btn:active {
+  background: var(--color-bg-card-hover);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}

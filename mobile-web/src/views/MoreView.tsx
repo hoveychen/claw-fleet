@@ -9,6 +9,7 @@ import {
   ChevronRight,
   FolderGit2,
   BookOpen,
+  Scale,
   Gauge,
   ListTree,
   QrCode,
@@ -75,6 +76,7 @@ interface Props {
   onOpenRepo: () => void;
   onOpenPlans: () => void;
   onOpenWiki: () => void;
+  onOpenAttention: () => void;
   onOpenUsage: () => void;
   onOpenTerminal: () => void;
   /** Whether this desktop machine has terminal UI (backend FLEET_TERMINAL, see
@@ -125,6 +127,7 @@ export function MoreView({
   onOpenRepo,
   onOpenPlans,
   onOpenWiki,
+  onOpenAttention,
   onOpenUsage,
   onOpenTerminal,
   terminalEnabled,
@@ -262,6 +265,17 @@ export function MoreView({
             <span className={styles.navText}>
               <span className={styles.navLabel}>{t("知识库")}</span>
               <span className={styles.navSub}>{t("agent 沉淀下来的调研与文档")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+          <div className={styles.divider} />
+          <button className={styles.navRow} onClick={onOpenAttention}>
+            <span className={styles.navIcon}>
+              <Scale size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("需要你判断的事")}</span>
+              <span className={styles.navSub}>{t("跑偏的接力链、反复出现的教训")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>
