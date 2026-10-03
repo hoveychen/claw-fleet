@@ -156,6 +156,56 @@ fn start_backoff_message(failure: Option<&(std::time::Instant, String)>) -> Opti
         })
 }
 
+/// A `session/list` that fails after at least this long stalled rather than
+/// failed: the server took the request and never answered.
+///
+/// On 2026-10-03 and again 2026-10-04 a long-lived `dsh web` kept answering
+/// every other RPC in milliseconds but never answered `session/list`, so each
+/// roster scan ran into the client's 30s timeout (`dsh_client::DEFAULT_TIMEOUT`)
+/// — for hours, because the process was alive and `ensure_alive` saw nothing
+/// wrong. A fresh `dsh web` answered the same call in 0.3s.
+const ROSTER_STALL_THRESHOLD: Duration = Duration::from_secs(20);
+
+/// How long roster scans stay off a server whose `session/list` stalled and
+/// that was not restarted for it (see [`WEDGE_RESTART_INTERVAL`]).
+const ROSTER_STALL_BACKOFF: Duration = Duration::from_secs(120);
+
+/// At most one wedge restart per this interval. A restart interrupts any dsh
+/// turn the server is running, so a dsh that is merely slow at listing must
+/// not be killed on every scan; past the first restart it is backed off.
+const WEDGE_RESTART_INTERVAL: Duration = Duration::from_secs(600);
+
+/// The last stalled `session/list` that put scans into backoff, and why.
+static ROSTER_STALL: OnceLock<Mutex<Option<(std::time::Instant, String)>>> = OnceLock::new();
+
+/// When a stalled `session/list` last made Fleet restart `dsh web`.
+static WEDGE_RESTART: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
+
+fn roster_stall_slot() -> &'static Mutex<Option<(std::time::Instant, String)>> {
+    ROSTER_STALL.get_or_init(|| Mutex::new(None))
+}
+
+fn wedge_restart_slot() -> &'static Mutex<Option<std::time::Instant>> {
+    WEDGE_RESTART.get_or_init(|| Mutex::new(None))
+}
+
+/// The error a roster scan reports while `stall` is inside the backoff window.
+fn stall_backoff_message(stall: Option<&(std::time::Instant, String)>) -> Option<String> {
+    stall
+        .filter(|(at, _)| at.elapsed() < ROSTER_STALL_BACKOFF)
+        .map(|(at, e)| {
+            format!(
+                "dsh session/list stalled {}s ago, not retrying yet: {e}",
+                at.elapsed().as_secs()
+            )
+        })
+}
+
+/// Should a stall restart the server, given when the last wedge restart was?
+fn wedge_restart_due(last_restart: Option<std::time::Instant>) -> bool {
+    last_restart.is_none_or(|at| at.elapsed() >= WEDGE_RESTART_INTERVAL)
+}
+
 fn server_slot() -> &'static Mutex<Option<DshServer>> {
     SERVER.get_or_init(|| Mutex::new(None))
 }
@@ -399,14 +449,69 @@ impl DshSource {
         if let Some(e) = Self::backed_off_start_failure() {
             return Err(e);
         }
+        if let Some(e) = stall_backoff_message(lock(roster_stall_slot()).as_ref()) {
+            return Err(e);
+        }
 
-        let value = self.with_client(|client| {
-            client
-                .call("session/list", json!({ "_request": {} }))
-                .map_err(Into::into)
-        })?;
+        let started = std::time::Instant::now();
+        let value = self
+            .with_client(|client| {
+                client
+                    .call("session/list", json!({ "_request": {} }))
+                    .map_err(Into::into)
+            })
+            .inspect_err(|e| {
+                if started.elapsed() >= ROSTER_STALL_THRESHOLD {
+                    Self::handle_roster_stall(e);
+                }
+            })?;
+        *lock(roster_stall_slot()) = None;
         *lock(roster_slot()) = Some((std::time::Instant::now(), value.clone()));
         Ok(value)
+    }
+
+    /// A `session/list` stalled on a live server: restart it once per
+    /// [`WEDGE_RESTART_INTERVAL`], otherwise back roster scans off.
+    fn handle_roster_stall(error: &str) {
+        let mut last_restart = lock(wedge_restart_slot());
+        if !wedge_restart_due(*last_restart) {
+            crate::log_debug(&format!(
+                "dsh source: session/list stalled again, backing roster scans off: {error}"
+            ));
+            *lock(roster_stall_slot()) = Some((std::time::Instant::now(), error.to_string()));
+            return;
+        }
+        *last_restart = Some(std::time::Instant::now());
+        drop(last_restart);
+
+        let mut guard = lock(server_slot());
+        let Some(server) = guard.as_mut() else {
+            return;
+        };
+        crate::log_debug(&format!(
+            "dsh source: session/list stalled on live dsh web pid={}, restarting it: {error}",
+            server.pid()
+        ));
+        match server.restart() {
+            Ok(()) => {
+                crate::log_debug(&format!(
+                    "dsh source: restarted wedged dsh web, now pid={} port={}",
+                    server.pid(),
+                    server.port()
+                ));
+                *lock(roster_stall_slot()) = None;
+                // The old server's roster described a process that is gone.
+                *lock(roster_slot()) = None;
+                // `restart` usually keeps the port but never the token, and
+                // `ensure_watcher` only compares ports — drop the follower so
+                // the next call rebuilds it with the new token.
+                *lock(watcher_slot()) = None;
+            }
+            Err(e) => {
+                crate::log_debug(&format!("dsh source: wedge restart failed: {e}"));
+                *lock(start_failure_slot()) = Some((std::time::Instant::now(), e));
+            }
+        }
     }
 
     /// The cached roster, if it is younger than [`ROSTER_TTL`].
@@ -1290,7 +1395,10 @@ impl AgentSource for DshSource {
                         .filter(|(info, _)| kept.contains(&info.id))
                         .unzip();
                     for info in &infos {
-                        if registry.get(&info.id).is_some_and(|s| s.workspace.is_none()) {
+                        if registry
+                            .get(&info.id)
+                            .is_some_and(|s| s.workspace.is_none())
+                        {
                             crate::launch_spec::note_workspace(&info.id, &info.workspace_path);
                         }
                     }
@@ -2733,6 +2841,46 @@ mod tests {
         };
         let old = (old_at, "lock timed out".to_string());
         assert_eq!(start_backoff_message(Some(&old)), None);
+    }
+
+    #[test]
+    fn stall_backoff_holds_off_only_inside_the_window() {
+        assert_eq!(stall_backoff_message(None), None);
+
+        let recent = (
+            std::time::Instant::now(),
+            "session/list timed out".to_string(),
+        );
+        let msg = stall_backoff_message(Some(&recent)).expect("recent stall backs off");
+        assert!(msg.contains("session/list timed out"), "{msg}");
+
+        let Some(old_at) =
+            std::time::Instant::now().checked_sub(ROSTER_STALL_BACKOFF + Duration::from_secs(1))
+        else {
+            return; // monotonic clock too young to rewind that far
+        };
+        assert_eq!(
+            stall_backoff_message(Some(&(old_at, "x".to_string()))),
+            None
+        );
+    }
+
+    #[test]
+    fn wedge_restart_happens_at_most_once_per_interval() {
+        assert!(wedge_restart_due(None), "first stall restarts");
+        assert!(
+            !wedge_restart_due(Some(std::time::Instant::now())),
+            "repeat stall backs off"
+        );
+        let Some(old) =
+            std::time::Instant::now().checked_sub(WEDGE_RESTART_INTERVAL + Duration::from_secs(1))
+        else {
+            return;
+        };
+        assert!(
+            wedge_restart_due(Some(old)),
+            "a stall after the interval restarts again"
+        );
     }
 
     #[test]
