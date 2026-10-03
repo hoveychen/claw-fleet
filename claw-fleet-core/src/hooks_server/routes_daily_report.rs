@@ -67,6 +67,19 @@ pub(crate) fn route_task_reviews(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
+/// `GET /daily_report/attention?date=YYYY-MM-DD` — the day's items that need
+/// the user's judgment, from the same `attention_for_date` the desktop reads.
+pub(crate) fn route_daily_attention(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let date = query.get("date").cloned().unwrap_or_default();
+    let attention = crate::daily_report::attention_for_date(&date);
+    let body = serde_json::to_string(&attention).unwrap_or_else(|_| "{}".into());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_daily_report_generate(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -95,56 +108,6 @@ pub(crate) fn route_daily_report_generate(
     }
 }
 
-pub(crate) fn route_daily_report_ai_summary(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    let report_store = ctx.report_store.clone();
-    let llm_config = ctx.llm_config.clone();
-
-    let date = query.get("date").cloned().unwrap_or_default();
-    let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
-    let store = report_store.lock().unwrap();
-    match store.get_report(&date) {
-        Ok(Some(report)) => {
-            drop(store);
-            let cfg = llm_config.lock().unwrap().clone();
-            let result = generate_ai_summary_routed(&cfg, &report, lang);
-            match result {
-                Some(summary) => {
-                    report_store
-                        .lock()
-                        .unwrap()
-                        .update_ai_summary(&date, &summary)
-                        .ok();
-                    let body = serde_json::to_string(&summary).unwrap_or_default();
-                    let _ = request
-                        .respond(tiny_http::Response::from_string(body).with_header(json_header));
-                }
-                None => {
-                    let body = r#"{"error":"AI summary generation failed"}"#;
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body)
-                            .with_status_code(500)
-                            .with_header(json_header),
-                    );
-                }
-            }
-        }
-        _ => {
-            let body = r#"{"error":"report not found"}"#;
-            let _ = request.respond(
-                tiny_http::Response::from_string(body)
-                    .with_status_code(404)
-                    .with_header(json_header),
-            );
-        }
-    }
-}
-
 pub(crate) fn route_daily_report_lessons(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -164,13 +127,13 @@ pub(crate) fn route_daily_report_lessons(
             let cfg = llm_config.lock().unwrap().clone();
             let result = generate_lessons_routed(&cfg, &report, lang);
             match result {
-                Some(lessons) => {
+                Some(outcome) => {
                     report_store
                         .lock()
                         .unwrap()
-                        .update_lessons(&date, &lessons)
+                        .save_lessons_outcome(&date, &outcome)
                         .ok();
-                    let body = serde_json::to_string(&lessons).unwrap_or_default();
+                    let body = serde_json::to_string(&outcome.lessons).unwrap_or_default();
                     let _ = request
                         .respond(tiny_http::Response::from_string(body).with_header(json_header));
                 }

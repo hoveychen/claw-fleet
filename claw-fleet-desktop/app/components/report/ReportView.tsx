@@ -9,8 +9,7 @@ import { HourlyActivityChart } from "./HourlyActivityChart";
 import { MetricsCards } from "./MetricsCards";
 import { DecisionCardsPanel } from "./DecisionCardsPanel";
 import { TaskReviewsCard } from "./TaskReviewsCard";
-import { AISummaryCard } from "./AISummaryCard";
-import { LessonsCard } from "./LessonsCard";
+import { AttentionCard } from "./AttentionCard";
 import { ToolCallChart } from "./ToolCallChart";
 import { ReportShareMenu } from "./ReportShareMenu";
 import { BarChart3, RefreshCw, Copy } from "lucide-react";
@@ -37,18 +36,6 @@ function formatDateLong(dateStr: string, locale?: string): string {
     month: "short",
     day: "numeric",
   });
-}
-
-// Strip the leading title/hero from aiSummary for a one-line preview.
-function summaryPreview(aiSummary: string | null): string | null {
-  if (!aiSummary) return null;
-  let text = aiSummary.trim();
-  if (/^#{1,3}\s/.test(text)) {
-    const nlIdx = text.indexOf("\n");
-    if (nlIdx !== -1) text = text.slice(nlIdx + 1).trimStart();
-  }
-  const firstChunk = text.split(/\n\n|\n(?=#{1,3}\s)/)[0] ?? "";
-  return firstChunk.replace(/[#*`>_]/g, "").trim() || null;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -125,7 +112,7 @@ function DateList() {
     {
       id: "regen",
       label:
-        (report.metrics.totalSessions ?? 0) > 0 || report.aiSummary
+        (report.metrics.totalSessions ?? 0) > 0
           ? t("report.regenerate", "重新生成报告")
           : t("report.generate", "生成报告"),
       icon: <RefreshCw size={13} strokeWidth={1.7} />,
@@ -247,7 +234,6 @@ function DateCard({
   const totalTokens =
     report.metrics.totalInputTokens + report.metrics.totalOutputTokens;
   const lessonCount = report.lessons?.length ?? 0;
-  const preview = summaryPreview(report.aiSummary);
 
   return (
     <button
@@ -280,7 +266,6 @@ function DateCard({
           </span>
         )}
       </div>
-      {preview && <div className={styles.date_card_preview}>{preview}</div>}
     </button>
   );
 }
@@ -340,22 +325,18 @@ export function ReportDetail() {
         )}
         {shown && (
           <div className={`${styles.detail_content} ${loading ? loadingStyles.stale : ""}`}>
+            {/* First on purpose: the only part of the day that asks the
+                user for a decision. Everything below is reference numbers. */}
+            <AttentionCard date={shown.date} />
             <MetricsCards metrics={shown.metrics} />
             <div className={styles.charts_row}>
               <ToolCallChart breakdown={shown.metrics.toolCallBreakdown} />
               <HourlyActivityChart hourly={shown.metrics.hourlyActivity} />
             </div>
             <DecisionCardsPanel stats={shown.metrics.decisionCards} />
-            <AISummaryCard
-              date={shown.date}
-              summary={shown.aiSummary}
-              metrics={shown.metrics}
-            />
-            {/* Between the card stats and the day's lessons on purpose: the
-                stats say how many tasks ended, this says which ones and why,
-                and the lessons are what was drawn from them. */}
+            {/* After the card stats: they say how many tasks ended, this
+                says which ones and why. */}
             <TaskReviewsCard date={shown.date} />
-            <LessonsCard date={shown.date} lessons={shown.lessons} />
           </div>
         )}
       </div>

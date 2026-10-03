@@ -603,6 +603,7 @@ fn parse_review(raw: &str, session_ids: &[String], workspace_name: &str) -> Pars
                         reason: rest.trim().to_string(),
                         workspace_name: workspace_name.to_string(),
                         session_id: session_id.clone(),
+                        evidence_session_ids: Vec::new(),
                     });
                 }
             }
@@ -645,6 +646,7 @@ mod tests {
                 reason: "The agent said done and the user abandoned it".into(),
                 workspace_name: "repo".into(),
                 session_id: root.into(),
+                evidence_session_ids: Vec::new(),
             }],
             terminated_at,
             generated_at: terminated_at + 5,

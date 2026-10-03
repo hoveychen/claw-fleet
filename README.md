@@ -84,7 +84,7 @@ When a task outgrows one context window, the agent registers a handoff and **Fle
 
 ### The rest
 
-- **Reports** — AI-written daily summaries of what got built, plus "lessons learned" you can add to your `CLAUDE.md` in one click.
+- **Reports** — a short list of what needs your judgment, pushed only on days that have any: relay chains an outsider read flags as drifting from their goal, lessons that recur across sessions (one click adds them to your `CLAUDE.md`), and adopted lessons that got broken again. Day metrics sit below.
 - **Wiki** — versioned, full-text-searchable archive of everything your agents publish (HTML reports, demos, docs), cross-linked with `[[slug]]`.
 - **Repos** — file trees, git status with push/pull, and run a command in a workspace.
 - **Audit** — every Bash command your agents ran, classified by risk.
@@ -124,7 +124,7 @@ fleet account                 # rate-limit windows and usage
 fleet stop <session>          # stop a runaway agent
 fleet search "some phrase"    # full-text search across all sessions
 fleet audit                   # risky commands, classified
-fleet report                  # the daily summary
+fleet report                  # what needs your judgment, plus day metrics
 fleet plan / handoff / loop   # multi-step plans, relays, recurring runs
 fleet wiki publish <path>     # archive a report or demo
 fleet skill install           # teach your agents the Fleet CLI

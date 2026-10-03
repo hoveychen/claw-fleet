@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
+import type { A2uiRenderRequest, DailyAttention, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
 import { NAV_HOME } from "./components/navGroups";
 import { isViewMode, type ViewMode } from "./viewModes";
@@ -1217,12 +1217,6 @@ interface ReportState {
    *  `currentReport === null` only means "no report" once this matches the
    *  selected date — before that it is the window before the first fetch. */
   reportSettledDate: string | null;
-  generatingSummary: boolean;
-  generatingLessons: boolean;
-  /** Date whose AI summary / lessons generation last failed, or null. Lets the
-   *  cards leave their loading state and offer a retry instead of spinning on. */
-  summaryFailedDate: string | null;
-  lessonsFailedDate: string | null;
 
   // Lessons already recorded in the managed ~/.claude/fleet-lessons.md. Used to
   // show "added" state in the report card and to drive the Memory-panel list.
@@ -1235,6 +1229,12 @@ interface ReportState {
   // changes, so a stale day's reviews can never render under a new date.
   taskReviews: TaskReview[];
   taskReviewsDate: string;
+
+  // The selected day's "needs your judgment" items (drifting relay chains,
+  // recurring lessons, violated adopted lessons). Same date-stamp pattern as
+  // `taskReviews`: `attentionDate` tells "nothing to judge" from "not loaded".
+  attention: DailyAttention | null;
+  attentionDate: string;
 
   // "New report" red dot on the Daily Report nav item. `latestReportDate` is the most
   // recent date that has report data; `lastSeenReportDate` is the newest date the
@@ -1265,21 +1265,20 @@ interface ReportState {
   markReportSeen: () => void;
   /**
    * Raise the auto-popup for `date`, unless the toggle is off or that date has
-   * already been popped once. Loads the report into `currentReport` so the
-   * overlay reuses the normal report body. No-op when the report has no AI
-   * summary yet — the popup exists to show a finished report, not a spinner.
+   * already been popped once. No-op when the day has nothing that needs the
+   * user's judgment — a quiet day pushes nothing.
    */
   maybePopupReport: (date: string) => Promise<void>;
   /** Close the auto-popup overlay. */
   closeReportPopup: () => void;
   generateReport: (date: string) => Promise<void>;
-  generateSummary: (date: string) => Promise<void>;
-  generateLessons: (date: string) => Promise<void>;
   appendLessonToClaudeMd: (lesson: Lesson) => Promise<void>;
   /** Refresh the managed-lessons list from ~/.claude/fleet-lessons.md. */
   loadManagedLessons: () => Promise<void>;
   /** Load the day's per-task retrospectives for the report's task-review card. */
   loadTaskReviews: (date: string) => Promise<void>;
+  /** Load the day's "needs your judgment" items. */
+  loadAttention: (date: string) => Promise<void>;
   /** Remove a managed lesson by id and refresh the list. */
   removeManagedLesson: (id: string) => Promise<void>;
   loadTimelinePage: () => Promise<void>;
@@ -1306,6 +1305,11 @@ export const REPORT_LAST_POPPED_KEY = "daily-report-last-popped";
 /** Auto-popup toggle. A tristate feature key — default ON via FEATURE_DEFAULTS. */
 export const REPORT_AUTO_POPUP_KEY = "daily-report-auto-popup";
 
+/** How many items in `a` ask for the user's judgment. */
+export function attentionCount(a: DailyAttention): number {
+  return (a.drift?.length ?? 0) + (a.lessons?.length ?? 0) + (a.violations?.length ?? 0);
+}
+
 /** Dates whose popup check is mid-flight. See `maybePopupReport`. */
 const popupInFlight = new Set<string>();
 
@@ -1316,16 +1320,15 @@ export const useReportStore = create<ReportState>((set, get) => ({
   selectedDate: yesterday(),
   loading: false,
   reportSettledDate: null,
-  generatingSummary: false,
-  generatingLessons: false,
-  summaryFailedDate: null,
-  lessonsFailedDate: null,
 
   managedLessons: [],
   managedLessonsLoaded: false,
 
   taskReviews: [],
   taskReviewsDate: "",
+
+  attention: null,
+  attentionDate: "",
 
   latestReportDate: "",
   lastSeenReportDate: getItem("daily-report-last-seen") ?? "",
@@ -1397,23 +1400,17 @@ export const useReportStore = create<ReportState>((set, get) => ({
     // The in-flight set — not the persisted key — is what keeps two racing
     // signals (boot check + scheduler event) from both opening. The key is
     // written only once we've actually shown something: the boot check runs
-    // seconds after launch and routinely finds a report whose summary the
-    // scheduler hasn't written yet, and burning the date on that read would
-    // suppress the very event we're waiting for.
+    // seconds after launch, often before the scheduler has judged the day,
+    // and burning the date on that read would suppress the very event we're
+    // waiting for.
     if (popupInFlight.has(date)) return;
     popupInFlight.add(date);
     try {
-      const report = await invoke<DailyReport | null>("get_daily_report", { date });
-      if (!report?.aiSummary) return;
+      const attention = await invoke<DailyAttention | null>("get_daily_attention", { date });
+      if (!attention || attentionCount(attention) === 0) return;
       if (get().reportPopupDate) return;
       setItem(REPORT_LAST_POPPED_KEY, date);
-      set({
-        currentReport: report,
-        selectedDate: date,
-        reportPopupDate: date,
-        loading: false,
-        reportSettledDate: date,
-      });
+      set({ attention, attentionDate: date, reportPopupDate: date });
     } catch {
       // Best-effort: a failed read just means no popup this time.
     } finally {
@@ -1440,34 +1437,6 @@ export const useReportStore = create<ReportState>((set, get) => ({
       set({ currentReport: report, loading: false, selectedDate: date, reportSettledDate: date });
     } catch {
       set({ loading: false, reportSettledDate: date });
-    }
-  },
-
-  generateSummary: async (date: string) => {
-    set({ generatingSummary: true, summaryFailedDate: null });
-    try {
-      const summary = await invoke<string>("generate_daily_report_ai_summary", { date });
-      set((s) => ({
-        generatingSummary: false,
-        currentReport: s.currentReport ? { ...s.currentReport, aiSummary: summary } : null,
-      }));
-    } catch {
-      set({ generatingSummary: false, summaryFailedDate: date });
-    }
-  },
-
-  generateLessons: async (date: string) => {
-    set({ generatingLessons: true, lessonsFailedDate: null });
-    try {
-      const lessons = await invoke<Lesson[]>("generate_daily_report_lessons", { date });
-      set((s) => ({
-        generatingLessons: false,
-        currentReport: s.currentReport
-          ? { ...s.currentReport, lessons, lessonsGeneratedAt: Date.now() }
-          : null,
-      }));
-    } catch {
-      set({ generatingLessons: false, lessonsFailedDate: date });
     }
   },
 
@@ -1498,6 +1467,15 @@ export const useReportStore = create<ReportState>((set, get) => ({
       set({ taskReviews: reviews ?? [], taskReviewsDate: date });
     } catch {
       set({ taskReviews: [], taskReviewsDate: date });
+    }
+  },
+
+  loadAttention: async (date: string) => {
+    try {
+      const attention = await invoke<DailyAttention | null>("get_daily_attention", { date });
+      set({ attention: attention ?? null, attentionDate: date });
+    } catch {
+      set({ attention: null, attentionDate: date });
     }
   },
 

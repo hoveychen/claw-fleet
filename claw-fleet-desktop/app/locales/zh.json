@@ -1196,7 +1196,7 @@
       "description": "环境检查通过。在任意项目目录里启动一次 Claude Code 会话，Fleet 就会自动发现并展示它。"
     },
     "features": {
-      "ai_summary_title": "AI 每日摘要",
+      "attention_title": "每日「需要你判断的事」",
       "live_status_title": "实时状态仪表盘",
       "audit_title": "安全审计"
     },
@@ -2280,8 +2280,8 @@
     "app_version": "版本",
     "auto_update_check": "自动检查更新",
     "auto_update_check_desc": "每天自动检查一次新版本，有更新时显示通知",
-    "report_auto_popup": "日报生成后自动弹出",
-    "report_auto_popup_desc": "每天的日报写完 AI 摘要后，在主窗口里弹一次；同一天只弹一次。",
+    "report_auto_popup": "有需要判断的事时自动弹出",
+    "report_auto_popup_desc": "当天有需要你判断的事（接力链跑偏、教训反复出现）时，在主窗口弹一次；没事的日子不打扰。",
     "group_handoff": "接力会话分组",
     "group_handoff_desc": "任务列表里把同一条接力链的会话折叠成一组，点击展开，可一键把整条链标为已完成",
     "auto_resume": "限流后自动恢复",
@@ -2368,7 +2368,8 @@
     "scenario_daily_report_lessons": "日报经验提取",
     "scenario_session_analyze": "会话状态分析",
     "scenario_mascot_quips": "吉祥物台词",
-    "scenario_session_explain": "选区追问"
+    "scenario_session_explain": "选区追问",
+    "scenario_drift_check": "偏航检测"
   },
   "hooks": {
     "installed": "Fleet 启动的会话自带 Fleet hooks"
@@ -2545,16 +2546,10 @@
     "tool_breakdown": "工具调用分布",
     "hourly_activity": "每小时活动",
     "project_breakdown": "项目",
-    "ai_summary": "AI 摘要",
-    "no_summary": "AI 摘要尚未生成。",
-    "generate_summary": "生成 AI 摘要",
     "generating": "生成中...",
     "copy_markdown": "复制为 Markdown",
     "share": "复制 Markdown",
     "lessons": "经验教训",
-    "no_lessons": "尚未生成经验教训。",
-    "no_lessons_found": "今天的会话中未发现 AI 错误。",
-    "generate_lessons": "生成经验教训",
     "add_to_claude_md": "添加到 CLAUDE.md",
     "lesson_added": "已添加",
     "no_insights": "暂无动态。收集到数据后报告会出现在这里。",
@@ -2581,10 +2576,21 @@
     "task_review_underclaimed": "自评未完成",
     "task_review_underclaimed_hint": "Agent 当时并未判定完成，老板直接按了「结束任务」——可能是它低报了进度。",
     "task_review_hops": "接力 {{count}} 段",
-    "popup_title": "日报已生成",
+    "popup_title": "有 {{count}} 件事需要你判断",
     "popup_open_full": "查看完整日报",
-    "lessons_failed": "经验教训生成失败",
-    "summary_failed": "AI 摘要生成失败"
+    "attention_title": "需要你判断的事",
+    "attention_empty": "今天没有需要你判断的事。",
+    "attention_drift": "可能跑偏的接力链",
+    "attention_lessons": "反复出现的教训",
+    "attention_violations": "已采纳但又被违反的教训",
+    "attention_open_session": "打开会话",
+    "drift_on_track": "方向正常",
+    "drift_polishing": "原地打磨",
+    "drift_goal_shifted": "目标偏移",
+    "drift_unclear": "看不清",
+    "drift_goal": "目标",
+    "drift_sessions": "{{count}} 棒",
+    "lesson_evidence": "{{count}} 个会话出现"
   },
   "command": {
     "nested": {

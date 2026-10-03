@@ -3960,29 +3960,6 @@ impl LocalBackend {
         Ok(report)
     }
 
-    pub fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
-        let report = self
-            .report_store
-            .lock()
-            .unwrap()
-            .get_report(date)
-            .map_err(|e| format!("load report: {e}"))?
-            .ok_or_else(|| format!("No report found for {date}"))?;
-
-        let lang = self.locale.lock().unwrap().clone();
-        let cfg = self.llm_config.lock().unwrap().clone();
-        let summary = crate::daily_report::generate_ai_summary_routed(&cfg, &report, &lang)
-            .ok_or_else(|| "AI summary generation failed".to_string())?;
-
-        self.report_store
-            .lock()
-            .unwrap()
-            .update_ai_summary(date, &summary)
-            .map_err(|e| format!("save summary: {e}"))?;
-
-        Ok(summary)
-    }
-
     pub fn generate_daily_report_lessons(
         &self,
         date: &str,
@@ -3997,16 +3974,16 @@ impl LocalBackend {
 
         let lang = self.locale.lock().unwrap().clone();
         let cfg = self.llm_config.lock().unwrap().clone();
-        let lessons = crate::daily_report::generate_lessons_routed(&cfg, &report, &lang)
+        let outcome = crate::daily_report::generate_lessons_routed(&cfg, &report, &lang)
             .ok_or_else(|| "Lessons generation failed".to_string())?;
 
         self.report_store
             .lock()
             .unwrap()
-            .update_lessons(date, &lessons)
+            .save_lessons_outcome(date, &outcome)
             .map_err(|e| format!("save lessons: {e}"))?;
 
-        Ok(lessons)
+        Ok(outcome.lessons)
     }
 
     pub fn append_lesson_to_claude_md(
@@ -4014,6 +3991,10 @@ impl LocalBackend {
         lesson: &crate::daily_report::Lesson,
     ) -> Result<(), String> {
         crate::daily_report::append_lesson_to_claude_md(lesson)
+    }
+
+    pub fn get_daily_attention(&self, date: &str) -> claw_fleet_core::daily_report::DailyAttention {
+        claw_fleet_core::daily_report::attention_for_date(date)
     }
 
     pub fn list_task_reviews(&self, date: &str) -> Vec<claw_fleet_core::task_review::TaskReview> {

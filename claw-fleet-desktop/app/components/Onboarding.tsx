@@ -218,7 +218,7 @@ function CelebrationView({
 // welcome subtitle instead of a scroll-eating card.
 
 const HIGHLIGHTS = [
-  { icon: "\u{1F4CA}", titleKey: "onboarding.features.ai_summary_title" },
+  { icon: "\u{1F4CA}", titleKey: "onboarding.features.attention_title" },
   { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title" },
   { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title" },
 ];

@@ -111,7 +111,7 @@ use crate::agent_source::{self, build_sources, find_source_for_path};
 use crate::audit;
 use crate::claude_analyze;
 use crate::daily_report::{
-    append_lesson_to_claude_md, generate_ai_summary_routed, generate_lessons_routed,
+    append_lesson_to_claude_md, generate_lessons_routed,
     generate_report_from_sessions, scan_sessions_for_date, Lesson, ReportStore,
 };
 use crate::elicitation;
@@ -1988,13 +1988,12 @@ fn handle_request(
                 route_daily_report_stats(ctx, request, &query, json_header, path)
             }
             crate::routes::TASK_REVIEWS => route_task_reviews(request, &query, json_header),
+            crate::routes::DAILY_REPORT_ATTENTION => {
+                route_daily_attention(request, &query, json_header)
+            }
 
             crate::routes::DAILY_REPORT_GENERATE => {
                 route_daily_report_generate(ctx, request, &query, json_header, path)
-            }
-
-            crate::routes::DAILY_REPORT_AI_SUMMARY => {
-                route_daily_report_ai_summary(ctx, request, &query, json_header, path)
             }
 
             crate::routes::DAILY_REPORT_LESSONS => {

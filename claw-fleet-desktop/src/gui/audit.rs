@@ -77,17 +77,6 @@ pub(crate) async fn generate_daily_report(
 }
 
 #[tauri::command]
-pub(crate) async fn generate_daily_report_ai_summary(
-    date: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
-    let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.generate_daily_report_ai_summary(&date))
-        .await
-        .map_err(|e| format!("join: {e}"))?
-}
-
-#[tauri::command]
 pub(crate) async fn generate_daily_report_lessons(
     date: String,
     state: tauri::State<'_, AppState>,
@@ -126,6 +115,19 @@ pub(crate) async fn list_task_reviews(
 ) -> Result<Vec<crate::task_review::TaskReview>, String> {
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || backend.list_task_reviews(&date))
+        .await
+        .map_err(|e| format!("join: {e}"))
+}
+
+/// The day's items that need the user's judgment (drift alerts, recurring
+/// lessons, adopted-lesson violations). SQLite reads only, so off the runtime.
+#[tauri::command]
+pub(crate) async fn get_daily_attention(
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::daily_report::DailyAttention, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.get_daily_attention(&date))
         .await
         .map_err(|e| format!("join: {e}"))
 }
