@@ -908,6 +908,13 @@ pub(crate) fn spawn_new_session_impl(
         "new_session: spawned pid {} session {} in {}",
         pid, session_id, workspace_path
     ));
+    crate::fresh_spawns::note_spawned(crate::fresh_spawns::provisional_claude_row(
+        &session_id,
+        workspace_path,
+        pid,
+        entrypoint,
+        prompt,
+    ));
     Ok(SpawnSessionResponse {
         pid,
         session_id: Some(session_id),

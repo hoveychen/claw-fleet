@@ -414,6 +414,11 @@ export function HistoryView() {
   // session and the column switches to it.
   const [pending, setPending] = useState<PendingSpawn | null>(null);
   const [startTimedOut, setStartTimedOut] = useState(false);
+  // The prompt of the session the column just switched to from the composer.
+  // The switch now happens on the backend's provisional row (`fresh_spawns`),
+  // seconds before the CLI writes the prompt into the transcript, so the pane
+  // echoes it meanwhile.
+  const [launchPrompt, setLaunchPrompt] = useState<{ id: string; prompt: string } | null>(null);
   // The step before `pending`: send was pressed and `spawn_new_claude_session`
   // has not answered yet. The pane shows the same "starting…" view from this
   // moment on — the form used to sit greyed out for the whole invoke — while
@@ -869,6 +874,7 @@ export function HistoryView() {
     }
     const match = matchSpawnedSession(adhocSessions, pending);
     if (match) {
+      if (pending.prompt) setLaunchPrompt({ id: match.id, prompt: pending.prompt });
       setOpenId(match.id);
       setQueryById({ [match.id]: null });
       setPending(null);
@@ -1196,6 +1202,9 @@ export function HistoryView() {
                 inline
                 sessionInfo={activeSession}
                 searchQuery={queryById[activeSession.id] ?? null}
+                launchPrompt={
+                  launchPrompt?.id === activeSession.id ? launchPrompt.prompt : null
+                }
               />
             </div>
           ) : pane.kind === "loading" ? (

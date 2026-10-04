@@ -122,6 +122,16 @@ interface OptimisticSend {
   injected?: boolean;
 }
 
+const LAUNCH_ECHO_PREFIX = "optimistic-launch-";
+
+/** Is this echo still waiting for its transcript row? A launch prompt is
+ *  matched by "any user row has landed", not by text: the CLI records it with
+ *  the attached-file list appended, so a text match would never retire it. */
+function echoPending(o: OptimisticSend, landed: Set<string>): boolean {
+  if (o.id.startsWith(LAUNCH_ECHO_PREFIX)) return landed.size === 0;
+  return stillPending(o.text, landed);
+}
+
 /** Build a synthetic `user` RawMessage from an optimistic send so it flows
  *  through the normal MessageList renderer (bubble layout, scroll-to-bottom,
  *  day separators). Passes `isRenderableRow` because it carries a text block. */
@@ -202,8 +212,13 @@ export function SessionDetail({
   searchQuery: standaloneSearchQuery = null,
   paused = false,
   chromeAdaptive = true,
+  launchPrompt = null,
 }: {
   inline?: boolean;
+  /** Standalone mode only: the prompt this session was launched with moments
+   *  ago, echoed as its first bubble until the transcript records it. Read
+   *  when the pane switches to the session; later changes are ignored. */
+  launchPrompt?: string | null;
   /** May this pane fold the window's chrome away when a doc reader leaves the
    *  transcript too narrow (see useChromeYield)? True for the two hosts that ARE
    *  the page—the standalone pane and Tasks detail column. False for the
@@ -267,13 +282,21 @@ export function SessionDetail({
   // transcript row lands. `resumeGrace` arms the tail pollers right away rather
   // than waiting for rescan to flip the session to `live`.
   const [optimisticSends, setOptimisticSends] = useState<OptimisticSend[]>([]);
+  const launchPromptRef = useRef(launchPrompt);
+  launchPromptRef.current = launchPrompt;
   const [resumeGrace, setResumeGrace] = useState(false);
   const optimisticSeq = useRef(0);
 
-  // External sessionInfo prop changed → reset local state and refetch.
+  // External sessionInfo prop changed → reset local state and refetch. The
+  // path counts too: a just-spawned session opens on its provisional row
+  // (`fresh_spawns`), whose predicted transcript path the scanned row corrects
+  // if the CLI chose a different project directory.
   useEffect(() => {
     if (!isStandalone) return;
-    if (sessionInfo && sessionInfo.id !== localSession?.id) {
+    if (
+      sessionInfo &&
+      (sessionInfo.id !== localSession?.id || sessionInfo.jsonlPath !== localSession?.jsonlPath)
+    ) {
       setLocalSession(sessionInfo);
       setLocalMessages([]);
       prevLastIdRef.current = null;
@@ -282,7 +305,7 @@ export function SessionDetail({
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
     }
-  }, [isStandalone, sessionInfo?.id]);
+  }, [isStandalone, sessionInfo?.id, sessionInfo?.jsonlPath]);
 
   // Fetch the tail when localSession.jsonlPath changes — and again whenever a
   // background tab returns to the foreground, which is what makes `paused` a
@@ -433,7 +456,7 @@ export function SessionDetail({
 
   // Optimistic sends that haven't yet appeared in the real transcript.
   const pendingOptimistic = useMemo(
-    () => optimisticSends.filter((o) => stillPending(o.text, realUserTexts)),
+    () => optimisticSends.filter((o) => echoPending(o, realUserTexts)),
     [optimisticSends, realUserTexts],
   );
 
@@ -442,7 +465,7 @@ export function SessionDetail({
   // set state when something actually changed, to avoid a render loop.
   useEffect(() => {
     setOptimisticSends((prev) => {
-      const next = prev.filter((o) => stillPending(o.text, realUserTexts));
+      const next = prev.filter((o) => echoPending(o, realUserTexts));
       return next.length === prev.length ? prev : next;
     });
   }, [realUserTexts]);
@@ -793,9 +816,14 @@ export function SessionDetail({
 
   useEffect(() => {
     setDecisionRecords([]);
-    // Switching sessions must not carry another session's pending echo over.
-    setOptimisticSends([]);
-    setResumeGrace(false);
+    // Switching sessions must not carry another session's pending echo over —
+    // except the prompt this session was just launched with, which the CLI
+    // will not write for a few seconds yet.
+    const launched = launchPromptRef.current?.trim();
+    setOptimisticSends(
+      launched ? [{ id: `${LAUNCH_ECHO_PREFIX}${liveSession?.id ?? ""}`, text: launched }] : [],
+    );
+    setResumeGrace(!!launched);
     // "I pinned the rail open on that session" is not an opinion about the next
     // one — hand the new session back to the content-follows default.
     setRailOverride(null);
