@@ -21,6 +21,7 @@ import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
+  decisionAnchorTop,
   initialFollowState,
   nextFollowState,
   type FollowInput,
@@ -1275,11 +1276,83 @@ export function SessionDetail({
     return () => ro.disconnect();
   }, [liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
 
+  // Read an unanswered decision card from its head. The card is the last thing
+  // in the transcript, so the bottom pin above parks the reader on its options
+  // with the question scrolled out of sight. When one appears — or the session
+  // is opened with one waiting — and it is taller than the visible area, align
+  // its top with the top of the viewport and let go of the bottom.
+  //
+  // Held, not applied once: on open the transcript above the card is still
+  // settling (and the lazy card itself starts as a skeleton), so the card's
+  // offset keeps moving for a few frames. Re-align on every height change until
+  // the reader touches the scroller; after that the position is theirs.
+  const pendingCardId = simplifiedMode
+    ? pendingDecisions.find((d) => d.request.sessionId === liveSession?.id)?.id
+    : inlineFleetAsk?.id;
+  const dockHeightRef = useRef(0);
+  dockHeightRef.current = dockHeight;
+  /** Which card the hold belongs to, and whether it still holds. Kept across
+   *  effect re-runs so a transcript that finishes loading keeps the hold, and a
+   *  reader who scrolled away is not grabbed again by the same card. */
+  const anchorRef = useRef<{ id: string | undefined; active: boolean }>({
+    id: undefined,
+    active: false,
+  });
+  const anchorPendingCard = useCallback(() => {
+    const el = scrollRef.current;
+    const card = el?.querySelector<HTMLElement>("[data-decision-anchor]");
+    if (!el || !card) return false;
+    const cardTop =
+      card.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    const top = decisionAnchorTop(
+      cardTop,
+      card.offsetHeight,
+      el.clientHeight - dockHeightRef.current,
+    );
+    if (top === null) return false;
+    autoScrollingRef.current = false;
+    followRef.current = { following: false, detached: true };
+    setIsFollowing(false);
+    el.scrollTop = top;
+    return true;
+  }, []);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !pendingCardId) return;
+    if (anchorRef.current.id !== pendingCardId) {
+      // A new card pulls a reader who is following the conversation; one who
+      // scrolled up to read history stays there (the follow pill leads here).
+      anchorRef.current = { id: pendingCardId, active: !followRef.current.detached };
+    }
+    const hold = () => {
+      if (anchorRef.current.active) anchorPendingCard();
+    };
+    const release = () => {
+      anchorRef.current.active = false;
+    };
+    const ro = new ResizeObserver(hold);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    hold();
+    el.addEventListener("wheel", release, { passive: true });
+    el.addEventListener("pointerdown", release, { passive: true });
+    el.addEventListener("keydown", release);
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("wheel", release);
+      el.removeEventListener("pointerdown", release);
+      el.removeEventListener("keydown", release);
+    };
+  }, [liveSession?.id, pendingCardId, hasMessages, anchorPendingCard]);
+
+  // With an unanswered card that does not fit, "jump to latest" first means its
+  // head; pressed again from there, the real bottom.
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const before = el.scrollTop;
+    if (pendingCardId && anchorPendingCard() && Math.abs(el.scrollTop - before) > 2) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, []);
+  }, [pendingCardId, anchorPendingCard]);
 
   // ── Scroll-freeze snapshot (⌥⇧S) ────────────────────────────────────────────
   // The transcript occasionally refuses to scroll until the window is resized,
@@ -1906,14 +1979,23 @@ export function SessionDetail({
                       apiErrorCtx={apiErrorCtx}
                     />
                     {simplifiedMode && pendingDecisions.filter((d) => d.request.sessionId === liveSession?.id).map((decision) => (
-                      <div key={decision.id} className={styles.inline_fleet_ask} data-testid="inline-task-decision">
+                      <div
+                        key={decision.id}
+                        className={styles.inline_fleet_ask}
+                        data-testid="inline-task-decision"
+                        data-decision-anchor={decision.id === pendingCardId ? "" : undefined}
+                      >
                         <Suspense fallback={<SkeletonCard height={140} />}>
                           <InlineDecisionCard decision={decision} compact />
                         </Suspense>
                       </div>
                     ))}
                     {!simplifiedMode && inlineFleetAsk && (
-                      <div className={styles.inline_fleet_ask} data-testid="inline-pending-fleet-ask">
+                      <div
+                        className={styles.inline_fleet_ask}
+                        data-testid="inline-pending-fleet-ask"
+                        data-decision-anchor=""
+                      >
                         <Suspense fallback={<SkeletonCard height={140} />}>
                           <InlineFleetAskCard decision={inlineFleetAsk} compact />
                         </Suspense>
