@@ -57,3 +57,27 @@ export function nextFollowState(current: FollowState, input: FollowInput): Follo
   }
   return { following: input.distFromBottom < FOLLOW_SLACK_PX, detached: false };
 }
+
+/** Gap kept above a pending decision card when its head is scrolled into view. */
+export const DECISION_ANCHOR_MARGIN_PX = 12;
+
+/**
+ * Where to put the viewport so an unanswered decision card is read from its
+ * head, or `null` when following the bottom already shows all of it.
+ *
+ * The card sits at the end of the transcript, so the bottom pin lands on its
+ * options and leaves the question it asks — the part that has to be read first
+ * — above the fold. A card that fits the visible area is left to the pin.
+ *
+ * @param cardTop    the card's offset from the top of the scroll content
+ * @param cardHeight the card's rendered height
+ * @param visible    the scroller's height minus what the floating dock covers
+ */
+export function decisionAnchorTop(
+  cardTop: number,
+  cardHeight: number,
+  visible: number,
+): number | null {
+  if (cardHeight + DECISION_ANCHOR_MARGIN_PX <= visible) return null;
+  return Math.max(0, cardTop - DECISION_ANCHOR_MARGIN_PX);
+}

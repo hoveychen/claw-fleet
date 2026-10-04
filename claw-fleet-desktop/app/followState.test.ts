@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DECISION_ANCHOR_MARGIN_PX,
+  decisionAnchorTop,
   FOLLOW_SLACK_PX,
   initialFollowState,
   nextFollowState,
@@ -52,5 +54,21 @@ describe("nextFollowState", () => {
   it("drops following when content scrolls far from the bottom", () => {
     const far = nextFollowState(following, { kind: "scroll", distFromBottom: FOLLOW_SLACK_PX + 1 });
     expect(far.following).toBe(false);
+  });
+});
+
+describe("decisionAnchorTop", () => {
+  it("leaves a card that fits the visible area to the bottom pin", () => {
+    expect(decisionAnchorTop(2000, 300, 600)).toBeNull();
+  });
+
+  it("puts the head of a card taller than the viewport at the top", () => {
+    // The bug this encodes: a long card pinned to the bottom shows only its
+    // options, and the reader has to scroll up to find what it is asking.
+    expect(decisionAnchorTop(2000, 900, 600)).toBe(2000 - DECISION_ANCHOR_MARGIN_PX);
+  });
+
+  it("never asks for a negative scroll position", () => {
+    expect(decisionAnchorTop(4, 900, 600)).toBe(0);
   });
 });
