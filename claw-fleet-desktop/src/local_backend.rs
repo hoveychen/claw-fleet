@@ -303,6 +303,19 @@ impl LocalBackend {
         // run concurrent scans (see ScanGate doc above).
         let scan_gate: Arc<ScanGate> = Arc::new(ScanGate::new());
 
+        // Republish the current list the moment anything in this process spawns
+        // a session (the composer, a phone, a handoff…), so its provisional row
+        // reaches the UI now rather than with the next rescan.
+        {
+            let app_fs = app.clone();
+            let sess_fs = sessions.clone();
+            claw_fleet_core::fresh_spawns::set_listener(move || {
+                let snapshot = sess_fs.lock().unwrap().clone();
+                emit_sessions(&app_fs, &snapshot);
+                publish_mobile_sessions(&snapshot);
+            });
+        }
+
         // Initial scan — run in a background thread so the UI appears immediately.
         {
             let app_bg = app.clone();
@@ -1586,7 +1599,11 @@ fn session_rows(sessions: &[SessionInfo]) -> Vec<Value> {
 /// Push `sessions` to the frontend as the next frame. Emits nothing when the
 /// list is unchanged since the last frame.
 fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) {
-    claw_fleet_core::spawn_latency::observe(sessions.iter().map(|s| s.id.as_str()));
+    // A just-spawned session goes out as a provisional row until a scan finds
+    // its transcript (see `fresh_spawns`), so the composer can switch to it now.
+    claw_fleet_core::fresh_spawns::observe(sessions);
+    let overlaid = claw_fleet_core::fresh_spawns::overlay(sessions);
+    let sessions = overlaid.as_deref().unwrap_or(sessions);
     let rows = session_rows(sessions);
     let mut tracker = SESSIONS_TRACKER.lock().unwrap();
     if let Some(frame) = tracker.frame(&rows) {
@@ -1602,6 +1619,8 @@ fn publish_mobile_sessions(sessions: &[claw_fleet_core::session::SessionInfo]) {
     if !claw_fleet_core::mobile_relay::is_connected() {
         return;
     }
+    let overlaid = claw_fleet_core::fresh_spawns::overlay(sessions);
+    let sessions = overlaid.as_deref().unwrap_or(sessions);
     if let Ok(v) = serde_json::to_value(sessions) {
         claw_fleet_core::mobile_relay::publish_sessions(&v);
     }

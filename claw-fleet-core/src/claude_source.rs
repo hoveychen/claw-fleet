@@ -64,8 +64,19 @@ impl AgentSource for ClaudeCodeSource {
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         let mut messages =
-            crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
-                .map_err(|e| e.to_string())?;
+            match crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n) {
+                Ok(m) => m,
+                // A session opened from its provisional row: the CLI has not
+                // written the transcript yet. Empty, not an error — the pane
+                // keeps polling and fills in once the file appears.
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::NotFound
+                        && crate::fresh_spawns::is_pending_transcript(path) =>
+                {
+                    Vec::new()
+                }
+                Err(e) => return Err(e.to_string()),
+            };
         crate::queued_command::mark_pending(&mut messages);
         messages.iter_mut().for_each(crate::queued_command::unfold);
         messages.iter_mut().for_each(crate::fleet_event::annotate);
