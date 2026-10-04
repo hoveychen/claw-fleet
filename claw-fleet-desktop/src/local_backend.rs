@@ -1586,6 +1586,7 @@ fn session_rows(sessions: &[SessionInfo]) -> Vec<Value> {
 /// Push `sessions` to the frontend as the next frame. Emits nothing when the
 /// list is unchanged since the last frame.
 fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) {
+    claw_fleet_core::spawn_latency::observe(sessions.iter().map(|s| s.id.as_str()));
     let rows = session_rows(sessions);
     let mut tracker = SESSIONS_TRACKER.lock().unwrap();
     if let Some(frame) = tracker.frame(&rows) {

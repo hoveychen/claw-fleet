@@ -908,6 +908,7 @@ pub(crate) fn spawn_new_session_impl(
         "new_session: spawned pid {} session {} in {}",
         pid, session_id, workspace_path
     ));
+    crate::spawn_latency::note_spawned(&session_id);
     Ok(SpawnSessionResponse {
         pid,
         session_id: Some(session_id),
