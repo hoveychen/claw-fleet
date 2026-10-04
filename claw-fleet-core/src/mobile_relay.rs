@@ -1464,6 +1464,26 @@ const TAIL_TOOL_INPUT_FIELDS: [&str; 9] = [
     "instruction",
 ];
 
+/// Extra `input` keys kept for Fleet's MCP control tools (`fleet__plan`, …).
+/// The phone's rail label (`fleetSummary` in `mobile-web/src/views/FleetBody.tsx`)
+/// is built from `action` plus the target id, and appends the free-text intent
+/// (`note` → `prompt` → `text`). Without these every control call collapses to
+/// its bare tool name ("plan", "notes"), and a run of plan checks reads as a
+/// column of identical rows. String values are capped at
+/// [`ASK_SUMMARY_MAX_CHARS`] — a handoff note or spawn prompt can be many KB.
+const TAIL_FLEET_TOOL_INPUT_FIELDS: [&str; 11] = [
+    "action", "plan_id", "plan", "task", "id", "slug", "title", "line_no", "note", "prompt",
+    "text",
+];
+
+/// True for a Fleet control tool's wire name (`mcp__fleet__fleet__plan`) or a
+/// bare `fleet__plan`; matched on the tail like the clients' `isFleetTool`.
+fn is_fleet_control_tool(name: &str) -> bool {
+    crate::mcp_control::CONTROL_TOOL_NAMES
+        .iter()
+        .any(|tool| name.ends_with(tool))
+}
+
 /// Chars kept of a decision card's summary line / chosen answer. Long enough to
 /// tell two cards apart on a phone-width chip, short enough that the skeleton
 /// stream stays KB-scale.
@@ -1833,6 +1853,20 @@ fn slim_tail_block(block: &Value) -> Value {
         for key in TAIL_TOOL_INPUT_FIELDS {
             if let Some(v) = input.get(key) {
                 slim_input.insert(key.into(), v.clone());
+            }
+        }
+        if obj
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(is_fleet_control_tool)
+        {
+            for key in TAIL_FLEET_TOOL_INPUT_FIELDS {
+                let Some(v) = input.get(key) else { continue };
+                let v = match v.as_str() {
+                    Some(s) => Value::String(truncate_chars(s, ASK_SUMMARY_MAX_CHARS)),
+                    None => v.clone(),
+                };
+                slim_input.insert(key.into(), v);
             }
         }
         if !slim_input.is_empty() {
@@ -8715,6 +8749,43 @@ mod tests {
             slim[0]["message"]["content"][0].get("_digest").is_none(),
             "string toolUseResult yields no digest"
         );
+    }
+
+    /// A Fleet control call keeps the `action` + target ids its rail label is
+    /// built from, with free-text intent capped; a non-Fleet tool does not get
+    /// the extra keys. Without them every `fleet__plan` row read "plan".
+    #[test]
+    fn slim_tail_keeps_fleet_control_tool_label_fields() {
+        let tool_use = |name: &str, input: Value| {
+            json!({
+                "type": "assistant", "uuid": "a1",
+                "message": { "role": "assistant", "content": [{
+                    "type": "tool_use", "id": "toolu_1", "name": name, "input": input
+                }]}
+            })
+        };
+        let long_note = "x".repeat(500);
+        let slim = slim_tail_messages(vec![tool_use(
+            "mcp__fleet__fleet__plan",
+            json!({ "action": "check", "plan_id": "evo-purple", "task": "P1",
+                    "note": long_note, "goal": "dropped" }),
+        )]);
+        let input = &slim[0]["message"]["content"][0]["input"];
+        assert_eq!(input["action"], "check");
+        assert_eq!(input["plan_id"], "evo-purple");
+        assert_eq!(input["task"], "P1");
+        assert!(input.get("goal").is_none());
+        let note = input["note"].as_str().unwrap();
+        assert_eq!(note.chars().count(), ASK_SUMMARY_MAX_CHARS + 1);
+
+        let slim = slim_tail_messages(vec![tool_use(
+            "Write",
+            json!({ "file_path": "/a", "action": "x", "text": "body" }),
+        )]);
+        let input = &slim[0]["message"]["content"][0]["input"];
+        assert_eq!(input["file_path"], "/a");
+        assert!(input.get("action").is_none());
+        assert!(input.get("text").is_none());
     }
 
     /// A decision card (`AskUserQuestion` / `fleet__ask` / codex's
