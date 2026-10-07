@@ -48,22 +48,53 @@ struct JsonRpcError {
 }
 
 /// Run the MCP server on stdin/stdout until EOF.
+///
+/// `tools/call` requests are each handled on their own thread. Several tools
+/// block for minutes (`fleet__ask` until the user answers, `fleet__job` wait),
+/// and one server process is shared by a session and every subagent it spawns —
+/// handled inline, a subagent's wait would hold the parent's decision card
+/// hostage. Everything else stays inline so `initialize` / `tools/list` keep
+/// their order relative to each other.
 pub fn run() -> std::io::Result<()> {
     let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
+    let out = std::sync::Arc::new(std::sync::Mutex::new(std::io::stdout()));
 
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(resp) = handle_line(&line) {
-            writeln!(out, "{}", resp)?;
-            out.flush()?;
+        if is_tool_call(&line) {
+            let out = out.clone();
+            std::thread::spawn(move || {
+                if let Some(resp) = handle_line(&line) {
+                    let _ = write_response(&out, &resp);
+                }
+            });
+        } else if let Some(resp) = handle_line(&line) {
+            write_response(&out, &resp)?;
         }
     }
     Ok(())
+}
+
+fn is_tool_call(line: &str) -> bool {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .and_then(|v| v.get("method").and_then(Value::as_str).map(|m| m == "tools/call"))
+        .unwrap_or(false)
+}
+
+/// One whole line per response under the lock, so concurrent workers never
+/// interleave bytes on the wire.
+fn write_response(
+    out: &std::sync::Mutex<std::io::Stdout>,
+    resp: &str,
+) -> std::io::Result<()> {
+    let stdout = out.lock().unwrap_or_else(|e| e.into_inner());
+    let mut w = stdout.lock();
+    writeln!(w, "{}", resp)?;
+    w.flush()
 }
 
 /// Process one JSON-RPC line. Returns `None` for notifications (no id).
