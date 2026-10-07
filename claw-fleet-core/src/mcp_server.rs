@@ -412,6 +412,13 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
             return Ok(refusal);
         }
     }
+    if name == "fleet__job" && crate::mcp_control::flag(&args, "wake") {
+        if let Some(refusal) =
+            refuse_if_subagent(name, crate::mcp_control::JOB_WAKE_EFFECT, &args)
+        {
+            return Ok(refusal);
+        }
+    }
     let sid = current_session_id();
     let session_id = (!sid.is_empty()).then_some(sid.as_str());
     let cwd = resolve_workspace_cwd();

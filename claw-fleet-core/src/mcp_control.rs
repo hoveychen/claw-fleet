@@ -550,7 +550,46 @@ fn handle_history(args: &Value, sid: Option<&str>) -> Result<String, String> {
 
 // ── job ──────────────────────────────────────────────────────────────────────
 
-fn handle_job(args: &Value, _sid: Option<&str>, cwd: &Path) -> Result<String, String> {
+/// What a subagent's `fleet__job` call with `wake: true` would do to its parent;
+/// `mcp_server` refuses that one flag for subagents with this clause.
+pub const JOB_WAKE_EFFECT: &str =
+    "registered a watch that resumes your PARENT session when the job ends";
+
+/// `wake: true` on run: a watch on `fleet job done <id>` that resumes `sid`
+/// with the job's status and tail once it exits.
+fn register_job_wake(sid: Option<&str>, exe: &Path, rec: &crate::proc_runner::ProcRecord) -> Result<String, String> {
+    use crate::watch;
+    let sid = sid.ok_or("cannot resolve this session's id, so nothing could be woken; use action=wait instead")?;
+    if sid.starts_with("agent-") {
+        return Err("subagents cannot be woken — use action=wait".into());
+    }
+    let fleet = shell_words::quote(&exe.to_string_lossy()).into_owned();
+    let ctx = crate::session::inherit_launch_context(Some(sid));
+    let (w, _probe) = watch::create(
+        sid,
+        &ctx.workspace,
+        &format!("{fleet} job done {}", rec.id),
+        Some(&format!("{fleet} job status {} --tail 40", rec.id)),
+        Some(&format!("job {} finished: {}", rec.id, rec.command)),
+        watch::DEFAULT_POLL_SECS,
+        24 * 60 * 60,
+        ctx.model.as_deref(),
+        ctx.effort.as_deref(),
+        ctx.source.as_deref(),
+        None,
+        Some(&format!("{fleet} job status {} --tail 0", rec.id)),
+    )?;
+    let armed = match watch::arm_timer(&w) {
+        Ok(_) => String::new(),
+        Err(e) => format!(" (timer failed to start: {e}; Fleet re-arms it within 30s while the desktop or fleet serve runs)"),
+    };
+    Ok(format!(
+        "wake: watch {} resumes this session when the job ends{armed}. You may end your turn now.",
+        w.id
+    ))
+}
+
+fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, String> {
     use crate::job;
     let tail = usize_arg(args, "tail", job::DEFAULT_TAIL_LINES)?;
     match action_of(args)?.as_str() {
@@ -565,6 +604,22 @@ fn handle_job(args: &Value, _sid: Option<&str>, cwd: &Path) -> Result<String, St
             };
             let exe = std::env::current_exe().map_err(|e| format!("cannot locate fleet: {e}"))?;
             let rec = job::run(&exe, &dir.to_string_lossy(), &command)?;
+            if flag(args, "wake") {
+                let wake = match register_job_wake(sid, &exe, &rec) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        // Don't leave a job running that nobody was told about.
+                        let _ = job::stop(&rec.id);
+                        return Err(format!("job {} stopped: wake failed: {e}", rec.id));
+                    }
+                };
+                return Ok(format!(
+                    "ok: job {} started in {}.\nlog: {}\n{wake}",
+                    rec.id,
+                    rec.workspace_path,
+                    job::log_path(&rec.id)?.display()
+                ));
+            }
             Ok(format!(
                 "ok: job {id} started in {dir}.\nlog: {log}\n\
                  Keep working; collect it with action=wait id={id} (blocks up to {max}s per call — \
