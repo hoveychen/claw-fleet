@@ -75,6 +75,7 @@ pub const INJECT_RULES: &[&str] = &[
     "mcp__fleet__fleet__control",
     "mcp__fleet__fleet__notes",
     "mcp__fleet__fleet__history",
+    "mcp__fleet__fleet__job",
     "mcp__fleet__fleet__image",
     "mcp__fleet__fleet__image_edit",
 ];

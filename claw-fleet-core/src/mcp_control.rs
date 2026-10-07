@@ -31,7 +31,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Names of the control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 12] = [
+pub const CONTROL_TOOL_NAMES: [&str; 13] = [
     "fleet__spawn",
     "fleet__plan",
     "fleet__handoff",
@@ -44,6 +44,7 @@ pub const CONTROL_TOOL_NAMES: [&str; 12] = [
     "fleet__control",
     "fleet__notes",
     "fleet__history",
+    "fleet__job",
 ];
 
 /// True when `name` is one of the control tools this module owns.
@@ -107,6 +108,7 @@ pub fn control_tool_defs() -> Vec<Value> {
         crate::mcp_inspect::control_tool_def(),
         notes_tool_def(),
         history_tool_def(),
+        job_tool_def(),
     ]
 }
 
@@ -200,6 +202,27 @@ fn handoff_tool_def() -> Value {
                 "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."},
                 "goal": {"type": "string", "description": "What this whole relay chain is for — one sentence of \"the work is done when …\". Set it on the FIRST hop: you are registering at the end of your turn, so you already know what the boss settled on even if it only emerged mid-conversation. Later hops inherit it and are judged against it rather than against the plan they happen to hold. Omit (or repeat the same text) to leave it alone."},
                 "goalReason": {"type": "string", "description": "Why you are replacing a goal the chain already has. Required for a change, refused as unnecessary for setting the first one. Changing course is fine — the boss does it; silently narrowing the chain's objective down to your current plan is what this makes impossible. Tell the boss you changed it."}
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn job_tool_def() -> Value {
+    json!({
+        "name": "fleet__job",
+        "description": "Run a long shell command (a full test suite, a build, a render — anything that may take more than a few minutes) as a Fleet-hosted JOB, then wait on it by id. Use this instead of a foreground Bash that may hit its 600s cap, a background Bash / Monitor (killed when your turn ends — for a subagent, when it returns), or `nohup … &` + `ps | grep` + tail-the-log polling. A job runs detached under Fleet, survives your turn, your subagent and your session, and keeps a real exit code and a log. Typical use: `run`, keep working, then `wait` (blocks up to 540s per call; call it again while it reports running) — a subagent must not return while its job is still running. A top-level session that would rather end its turn can pass `wake: true` on run to be resumed when the job finishes. Actions: run (--command required; --cwd/--wake optional), wait (--id required; --timeout seconds, default and max 540), status (--id required), stop (--id required), list (this workspace's jobs). wait/status show the last `tail` lines of output (default 20).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["run", "wait", "status", "stop", "list"]},
+                "command": {"type": "string", "description": "Shell command line (run only). Runs under your login shell on a pty."},
+                "cwd": {"type": "string", "description": "Directory to run in (run only) — e.g. your plan's `.worktrees/<id>` checkout. Defaults to the session's workspace."},
+                "wake": {"type": "boolean", "description": "Resume THIS session with the job's result when it finishes, so you can end your turn now (run only; top-level sessions only — a subagent waits instead)."},
+                "id": {"type": "string", "description": "Job id. Required for wait/status/stop."},
+                "timeout": {"type": "integer", "description": "Seconds to block (wait only), max 540."},
+                "tail": {"type": "integer", "description": "Output lines to show (wait/status), default 20, max 200."}
             },
             "required": ["action"],
             "additionalProperties": false
@@ -347,6 +370,7 @@ pub fn handle(
         "fleet__control" => crate::mcp_inspect::handle_control(args, &action_of(args)?),
         "fleet__notes" => handle_notes(args, session_id),
         "fleet__history" => handle_history(args, session_id),
+        "fleet__job" => handle_job(args, session_id, cwd),
         other => Err(format!("unknown control tool: {other}")),
     }
 }
@@ -521,6 +545,72 @@ fn handle_history(args: &Value, sid: Option<&str>) -> Result<String, String> {
             )
         }
         other => Err(format!("unknown history action: {other}")),
+    }
+}
+
+// ── job ──────────────────────────────────────────────────────────────────────
+
+fn handle_job(args: &Value, _sid: Option<&str>, cwd: &Path) -> Result<String, String> {
+    use crate::job;
+    let tail = usize_arg(args, "tail", job::DEFAULT_TAIL_LINES)?;
+    match action_of(args)?.as_str() {
+        "run" => {
+            let command = req(args, "command")?;
+            let dir = match arg(args, "cwd") {
+                Some(d) => {
+                    let p = Path::new(&d);
+                    if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) }
+                }
+                None => cwd.to_path_buf(),
+            };
+            let exe = std::env::current_exe().map_err(|e| format!("cannot locate fleet: {e}"))?;
+            let rec = job::run(&exe, &dir.to_string_lossy(), &command)?;
+            Ok(format!(
+                "ok: job {id} started in {dir}.\nlog: {log}\n\
+                 Keep working; collect it with action=wait id={id} (blocks up to {max}s per call — \
+                 call again while it is still running). Do not end your turn or return from a \
+                 subagent while it runs unless you registered wake.",
+                id = rec.id,
+                dir = rec.workspace_path,
+                log = job::log_path(&rec.id)?.display(),
+                max = job::MAX_WAIT_SECS,
+            ))
+        }
+        "wait" => {
+            let id = req(args, "id")?;
+            let secs = match int_arg(args, "timeout")? {
+                Some(v) if v > 0 => v as u64,
+                Some(v) => return Err(format!("`timeout` must be > 0, got {v}")),
+                None => job::MAX_WAIT_SECS,
+            };
+            let rec = job::wait(&id, secs)?;
+            let mut out = job::render(&rec, tail);
+            if !job::is_done(&rec) {
+                out.push_str(&format!(
+                    "still running — call action=wait id={id} again.\n"
+                ));
+            }
+            Ok(out)
+        }
+        "status" => Ok(job::render(&job::get(&req(args, "id")?)?, tail)),
+        "stop" => {
+            let id = req(args, "id")?;
+            job::stop(&id)?;
+            Ok(format!("ok: sent SIGTERM to job {id}'s process group (SIGKILL after 2s)."))
+        }
+        "list" => {
+            let ws = cwd.to_string_lossy();
+            let jobs = job::list(&ws);
+            if jobs.is_empty() {
+                return Ok(format!("no jobs under {ws}"));
+            }
+            Ok(jobs
+                .iter()
+                .map(|r| format!("{}  {}  {}  ({})", r.id, job::status_line(r), r.command, r.workspace_path))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        other => Err(format!("unknown job action: {other}")),
     }
 }
 
@@ -1863,7 +1953,7 @@ mod tests {
     /// A new tool added to CONTROL_TOOL_NAMES fails here until someone decides.
     #[test]
     fn parent_scoped_control_tools_are_classified() {
-        const SESSION_AGNOSTIC: [&str; 7] = [
+        const SESSION_AGNOSTIC: [&str; 8] = [
             // `fleet__spawn` reads the caller's id only to inherit model /
             // effort / workspace; it writes nothing against that session, so a
             // subagent calling it starts a *new* session rather than disturbing
@@ -1875,6 +1965,9 @@ mod tests {
             "fleet__control",
             "fleet__notes",
             "fleet__history",
+            // Runs commands; only its `wake` flag writes against the session,
+            // and that one flag is refused for subagents in mcp_server.
+            "fleet__job",
         ];
         for name in CONTROL_TOOL_NAMES {
             let parent_scoped = parent_scoped_effect(name).is_some();

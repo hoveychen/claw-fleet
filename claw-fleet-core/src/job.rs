@@ -78,11 +78,12 @@ pub fn stop(id: &str) -> Result<(), String> {
     proc_runner::kill_proc(id, false)
 }
 
-/// Jobs (any proc) started in `workspace`, newest first.
+/// Jobs (any proc) started in `workspace` or below it (a plan's
+/// `.worktrees/<id>` checkout), newest first.
 pub fn list(workspace: &str) -> Vec<ProcRecord> {
     proc_runner::list_procs()
         .into_iter()
-        .filter(|r| r.workspace_path == workspace)
+        .filter(|r| Path::new(&r.workspace_path).starts_with(workspace))
         .collect()
 }
 
