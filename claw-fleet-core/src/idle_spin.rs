@@ -122,6 +122,7 @@ pub const DENY_REASON: &str =
 \n\
 • 等一个能前台跑的命令（编译、测试、脚本）→ 直接前台跑它，并把 Bash 的 `timeout` \
 调大（上限 600000 毫秒）。一次调用等到底，只花一个 round trip。\n\
+• 命令可能超过 10 分钟 → `fleet__job` 的 `run` 交给 Fleet 托管，再反复 `wait`（每次最多 540 秒）。\n\
 • 等一个已经在跑的条件 → 用 `Monitor` 的 until 轮询。它在回合*内*阻塞，轮询本身不花 \
 round trip。（若你已经 armed 了 Monitor，那就等它——不要在旁边另开空转。）\n\
 • 等的事跨回合（CI、构建产物、部署上线）→ \

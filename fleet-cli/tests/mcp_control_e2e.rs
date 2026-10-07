@@ -373,3 +373,161 @@ fn fleet_session_artifact_add_really_stores_the_file() {
     let listed = resps[1]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(listed.contains("Q3 deck"), "list text: {listed}");
 }
+
+fn text_of(resps: &[Value], id: u64) -> String {
+    let r = resps
+        .iter()
+        .find(|r| r["id"] == id)
+        .unwrap_or_else(|| panic!("no response for id {id}: {resps:?}"));
+    assert_eq!(r["result"]["isError"], false, "call {id} errored: {r}");
+    r["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// A short FLEET_HOME: the job host binds a unix socket under it, and macOS's
+/// per-user `$TMPDIR` is long enough to blow `sockaddr_un`'s ~104-byte cap.
+fn short_home() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("fj")
+        .tempdir_in("/tmp")
+        .unwrap()
+}
+
+/// `fleet__job` over the real MCP wire: a detached job outlives the server that
+/// started it (that `fleet mcp` process has exited before we wait), and a later
+/// server's wait reports its real exit code and the ANSI-free output tail.
+#[cfg(unix)]
+#[test]
+fn job_survives_the_starting_server_and_reports_its_exit() {
+    let home = short_home();
+    let ws = tempfile::tempdir().unwrap();
+    let started = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+            "name":"fleet__job","arguments":{"action":"run",
+            "command":"sleep 1; printf '\\033[32mPASS\\033[0m all\\n'; exit 3"}}})],
+    );
+    let text = text_of(&started, 1);
+    let id = text
+        .strip_prefix("ok: job ")
+        .and_then(|t| t.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no job id in: {text}"))
+        .to_string();
+
+    let waited = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+            "name":"fleet__job","arguments":{"action":"wait","id":id,"timeout":30}}})],
+    );
+    let text = text_of(&waited, 2);
+    assert!(text.contains("exited 3 after"), "{text}");
+    assert!(text.contains("\nPASS all"), "tail must be ANSI-free: {text}");
+}
+
+/// A blocking job wait must not stall the calls queued behind it on the same
+/// server — a subagent's wait would otherwise freeze its parent's tools.
+#[cfg(unix)]
+#[test]
+fn a_blocking_job_wait_does_not_hold_later_calls() {
+    let home = short_home();
+    let ws = tempfile::tempdir().unwrap();
+    let started = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+            "name":"fleet__job","arguments":{"action":"run","command":"sleep 30"}}})],
+    );
+    let text = text_of(&started, 1);
+    let id = text
+        .strip_prefix("ok: job ")
+        .and_then(|t| t.split_whitespace().next())
+        .unwrap()
+        .to_string();
+
+    let resps = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+                "name":"fleet__job","arguments":{"action":"wait","id":id,"timeout":3}}}),
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"fleet__job","arguments":{"action":"status","id":id}}}),
+        ],
+    );
+    let order: Vec<u64> = resps.iter().filter_map(|r| r["id"].as_u64()).collect();
+    assert_eq!(order, vec![3, 2], "status must answer while wait blocks");
+    assert!(text_of(&resps, 2).contains("still running"));
+
+    let _ = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+            "name":"fleet__job","arguments":{"action":"stop","id":id}}})],
+    );
+}
+
+/// `wake: true` registers a watch on this session whose condition is the job
+/// finishing. The watch is stopped before its first poll (30s): letting it
+/// fire would `claude --resume` the fake test session for real.
+#[cfg(unix)]
+#[test]
+fn job_wake_registers_a_watch_on_job_done() {
+    let home = short_home();
+    let ws = tempfile::tempdir().unwrap();
+    let resps = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+            "name":"fleet__job","arguments":{"action":"run","command":"sleep 600","wake":true}}})],
+    );
+    let text = text_of(&resps, 1);
+    let job_id = text
+        .strip_prefix("ok: job ")
+        .and_then(|t| t.split_whitespace().next())
+        .unwrap()
+        .to_string();
+    let watch_id = text
+        .split("wake: watch ")
+        .nth(1)
+        .and_then(|t| t.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no watch in: {text}"))
+        .to_string();
+
+    let rec: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            home.path()
+                .join(".fleet")
+                .join("watches")
+                .join(format!("{watch_id}.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let stop = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+                "name":"fleet__watch","arguments":{"action":"stop","id":watch_id}}}),
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"fleet__job","arguments":{"action":"stop","id":job_id}}}),
+        ],
+    );
+    text_of(&stop, 2);
+    text_of(&stop, 3);
+
+    let until = rec["untilCmd"].as_str().or(rec["until_cmd"].as_str()).unwrap_or_else(|| panic!("{rec}"));
+    assert!(until.ends_with(&format!("job done {job_id}")), "{until}");
+    assert_eq!(rec["sessionId"].as_str().or(rec["session_id"].as_str()), Some(SID), "{rec}");
+}

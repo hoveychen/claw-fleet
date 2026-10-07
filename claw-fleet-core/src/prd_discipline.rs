@@ -223,6 +223,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 **别为了撑住回合发什么都不做的命令**——`echo waiting`、`true`、`:`、裸 `sleep 30`，以及它们用 `;` / `&&` 串起来的组合。一次空转不比一次真工作便宜：你每个回合都要重读整个上下文。按你在等什么挑：
 
 - **能前台跑的命令**（编译、测试、脚本）→ 直接前台跑，把 Bash 的 `timeout` 调大（上限 600000 毫秒），一次调用等到底。
+- **可能超过 10 分钟的长命令**（全量回归、大构建、渲染）→ `fleet__job` 的 `run` 交给 Fleet 托管，再反复 `wait`（每次最多阻塞 540 秒）直到跑完；顶层会话想先收工就在 `run` 时带 `wake: true`，跑完会唤醒你。它不随回合或子代理结束被杀，有真实退出码。**子代理尤其如此**：任务没跑完不许返回。别用 `nohup … &`，也别用 `ps | grep <名字>` 等进程——那会匹配到你自己 `claude -p` 的命令行，对着一个早已死掉的进程空等。
 - **已经在跑的条件** → `Monitor` 的 until 轮询（回合内阻塞，轮询本身不花 round trip）。
 - **跨回合的事**（CI、构建产物、部署上线）→ `fleet watch`，然后干净地结束回合。
 - **真的无事可等** → 直接结束回合。
@@ -450,6 +451,7 @@ Always pass `--title <a few words>` when creating a `fleet loop` or `fleet sched
 **Do not send a command that does nothing just to keep the turn alive** — `echo waiting`, `true`, `:`, a bare `sleep 30`, and any of them chained with `;` or `&&`. A spin is not cheaper than real work: you re-read the whole context every turn. Pick by what you are waiting for:
 
 - **A command you can run in the foreground** (a compile, a test, a script) → just run it, raising Bash's `timeout` (up to 600000 ms), and wait it out in one call.
+- **A long command that may exceed 10 minutes** (a full regression, a big build, a render) → hand it to Fleet with `fleet__job` `run`, then call `wait` (blocks up to 540s each) until it finishes; a top-level session that would rather end its turn passes `wake: true` on `run` and is resumed when it ends. A job survives your turn and your subagent and keeps a real exit code. **Subagents especially**: do not return while your job is running. Never `nohup … &`, and never wait on a process via `ps | grep <name>` — it matches your own `claude -p` command line and waits forever on a process that is long gone.
 - **A condition already running** → `Monitor`'s until-polling, which blocks *inside* the turn and costs no extra round trip.
 - **Something that spans turns** (CI, build artifacts, a deploy) → `fleet watch`, then end the turn cleanly.
 - **Nothing to wait for** → just end the turn.

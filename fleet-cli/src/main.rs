@@ -122,6 +122,12 @@ enum Commands {
         #[command(subcommand)]
         action: HistoryCommands,
     },
+    /// Run a long shell command as a Fleet-hosted job that survives your turn
+    /// and subagent, then wait on it by id. CLI face of the `fleet__job` MCP tool.
+    Job {
+        #[command(subcommand)]
+        action: JobCommands,
+    },
     /// Start the HTTP probe server (used by Fleet app for remote monitoring)
     Serve {
         /// Port to listen on.  Pass 0 to let the OS pick a free ephemeral port;
@@ -905,6 +911,46 @@ pub(crate) enum HandoffCommands {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum JobCommands {
+    /// Start a command as a detached job; prints its id and log path.
+    Run {
+        /// Shell command line (run under your login shell on a pty).
+        command: String,
+        /// Directory to run in (defaults to the current directory).
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Resume this session with the job's result when it finishes
+        /// (top-level sessions only).
+        #[arg(long)]
+        wake: bool,
+    },
+    /// Block until the job exits or the timeout passes (max 540s).
+    Wait {
+        id: String,
+        /// Seconds to block.
+        #[arg(long)]
+        timeout: Option<u64>,
+        /// Output lines to show.
+        #[arg(long)]
+        tail: Option<usize>,
+    },
+    /// Show a job's status and output tail without blocking.
+    Status {
+        id: String,
+        #[arg(long)]
+        tail: Option<usize>,
+    },
+    /// Terminate a job's whole process group.
+    Stop { id: String },
+    /// Jobs started in this workspace (or below it).
+    List,
+    /// [internal] Exit 0 once the job has finished — the condition a `wake`
+    /// watch polls.
+    #[command(hide = true)]
+    Done { id: String },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum NotesCommands {
     /// Create or replace a note file (virtual path, e.g. `checkpoint.md`).
     Write {
@@ -1374,6 +1420,7 @@ fn main() {
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
         Commands::Artifact { action } => commands::artifact::cmd_artifact(action),
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
+        Commands::Job { action } => commands::job::cmd_job(action),
         Commands::Notes { action, session } => commands::notes::cmd_notes(action, session.as_deref()),
         Commands::History { action } => commands::notes::cmd_history(action),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),

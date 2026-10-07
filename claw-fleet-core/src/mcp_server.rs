@@ -48,22 +48,68 @@ struct JsonRpcError {
 }
 
 /// Run the MCP server on stdin/stdout until EOF.
+///
+/// Calls that block for minutes ([`is_blocking_call`]: a decision card waiting
+/// for the user, a `fleet__job` wait) each get their own thread. One server
+/// process is shared by a session and every subagent it spawns, so handled
+/// inline, a subagent's job wait would hold the parent's decision card hostage
+/// and vice versa. Everything else stays inline and in order — a client may
+/// pipeline dependent calls (write a note, then read it back).
 pub fn run() -> std::io::Result<()> {
     let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
+    let out = std::sync::Arc::new(std::sync::Mutex::new(std::io::stdout()));
+    let mut workers = Vec::new();
 
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(resp) = handle_line(&line) {
-            writeln!(out, "{}", resp)?;
-            out.flush()?;
+        if is_blocking_call(&line) {
+            let out = out.clone();
+            workers.push(std::thread::spawn(move || {
+                if let Some(resp) = handle_line(&line) {
+                    let _ = write_response(&out, &resp);
+                }
+            }));
+            workers.retain(|w| !w.is_finished());
+        } else if let Some(resp) = handle_line(&line) {
+            write_response(&out, &resp)?;
         }
     }
+    // EOF: answer what is already in flight before the process exits — a
+    // client that writes its requests and closes stdin still gets every reply.
+    for w in workers {
+        let _ = w.join();
+    }
     Ok(())
+}
+
+fn is_blocking_call(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    if v.get("method").and_then(Value::as_str) != Some("tools/call") {
+        return false;
+    }
+    let params = &v["params"];
+    match params["name"].as_str() {
+        Some("fleet__ask" | "fleet__render_a2ui" | "fleet__permission_prompt") => true,
+        Some("fleet__job") => params["arguments"]["action"].as_str() == Some("wait"),
+        _ => false,
+    }
+}
+
+/// One whole line per response under the lock, so concurrent workers never
+/// interleave bytes on the wire.
+fn write_response(
+    out: &std::sync::Mutex<std::io::Stdout>,
+    resp: &str,
+) -> std::io::Result<()> {
+    let stdout = out.lock().unwrap_or_else(|e| e.into_inner());
+    let mut w = stdout.lock();
+    writeln!(w, "{}", resp)?;
+    w.flush()
 }
 
 /// Process one JSON-RPC line. Returns `None` for notifications (no id).
@@ -363,6 +409,13 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     if let Some(effect) = crate::mcp_control::parent_scoped_effect(name) {
         if let Some(refusal) = refuse_if_subagent(name, effect, &args) {
+            return Ok(refusal);
+        }
+    }
+    if name == "fleet__job" && crate::mcp_control::flag(&args, "wake") {
+        if let Some(refusal) =
+            refuse_if_subagent(name, crate::mcp_control::JOB_WAKE_EFFECT, &args)
+        {
             return Ok(refusal);
         }
     }
@@ -1533,6 +1586,22 @@ mod tests {
     fn call(line: &str) -> Option<Value> {
         let raw = handle_line(line)?;
         serde_json::from_str(&raw).ok()
+    }
+
+    #[test]
+    fn only_user_and_job_waits_leave_the_ordered_loop() {
+        let call = |name: &str, args: Value| {
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                   "params":{"name":name,"arguments":args}})
+            .to_string()
+        };
+        assert!(is_blocking_call(&call("fleet__ask", json!({}))));
+        assert!(is_blocking_call(&call("fleet__job", json!({"action":"wait"}))));
+        assert!(!is_blocking_call(&call("fleet__job", json!({"action":"run"}))));
+        assert!(!is_blocking_call(&call("fleet__notes", json!({"action":"read"}))));
+        assert!(!is_blocking_call(
+            &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}).to_string()
+        ));
     }
 
     #[test]
