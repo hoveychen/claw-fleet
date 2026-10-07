@@ -70,6 +70,7 @@ pub mod harness_login;
 pub mod harness_status;
 pub mod headless_runtime;
 pub mod hook_timing;
+pub mod job;
 pub mod hooks;
 pub mod hooks_server;
 pub mod host_identity;

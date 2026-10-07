@@ -408,6 +408,25 @@ pub fn list_procs_in(dir: &Path) -> Vec<ProcRecord> {
     out
 }
 
+/// One proc's current record, self-healed like [`list_procs`] does.
+pub fn get_proc(id: &str) -> Result<ProcRecord, String> {
+    let dir = require_dir()?;
+    get_proc_in(&dir, id)
+}
+
+pub fn get_proc_in(dir: &Path, id: &str) -> Result<ProcRecord, String> {
+    let mut rec = read_record(dir, id)?;
+    if heal_stale(dir, &mut rec) {
+        let _ = write_record(dir, &rec);
+    }
+    Ok(rec)
+}
+
+/// Path of a proc's raw output log (may not exist yet while starting).
+pub fn output_file_in(dir: &Path, id: &str) -> PathBuf {
+    out_path(dir, id)
+}
+
 /// Returns true (and mutates `rec` to `exited`) when the record claims to be
 /// live but its host process is provably gone.
 fn heal_stale(dir: &Path, rec: &mut ProcRecord) -> bool {
