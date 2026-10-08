@@ -97,9 +97,6 @@
       },
       "artifact": {
         "note": "Note"
-      },
-      "job": {
-        "timeout": "Wait (s)"
       }
     },
     "summary": {

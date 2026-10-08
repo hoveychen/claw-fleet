@@ -97,9 +97,6 @@
       },
       "artifact": {
         "note": "说明"
-      },
-      "job": {
-        "timeout": "等待秒数"
       }
     },
     "summary": {
