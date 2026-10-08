@@ -3102,6 +3102,7 @@ export const MOCK_MODEL_CATALOG = withCliFlags([
       m("claude-opus-5-5", "Opus 5.5", "claude", "premium", CLAUDE_LADDER, null, "2.1.280"),
       m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER, null, "2.1.219"),
       m("claude-sonnet-5-5", "Sonnet 5.5", "claude", "standard", CLAUDE_LADDER, null, "2.1.284"),
+      m("claude-haiku-5-5", "Haiku 5.5", "claude", "fast", CLAUDE_LADDER, null, "2.1.293"),
       m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER, null, "2.0.17"),
     ],
   },

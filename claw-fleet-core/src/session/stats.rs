@@ -27,7 +27,8 @@ fn claude_family_version(model_lower: &str, family: &str) -> Option<(u32, u32)> 
 /// recognised without another edit:
 ///   * Opus & Sonnet — 4.6+ within major 4, and every later major (5.x …).
 ///   * Mythos research preview (Project Glasswing) — always 1M.
-///   * Opus ≤4.5, Sonnet ≤4.5, all Haiku, Claude 3.x — 200K.
+///   * Haiku — 5.x and later majors.
+///   * Opus ≤4.5, Sonnet ≤4.5, Haiku ≤4.5, Claude 3.x — 200K.
 ///
 /// Note Sonnet 4 / 4.5 are 200K models: Sonnet 4's brief 1M was a public-beta
 /// header, not the default, and Sonnet 4.5 never shipped 1M.
@@ -35,11 +36,17 @@ fn claude_model_supports_1m(model_lower: &str) -> bool {
     // Always-1M families (Fable, Mythos) are handled unconditionally by
     // `claude_model_always_1m` before this version-gated check is reached, so
     // they're intentionally not matched here.
-    // Opus and Sonnet share the same 4.6+ gate; Haiku never qualifies.
+    // Opus and Sonnet share the same 4.6+ gate.
     for family in ["opus", "sonnet"] {
         if let Some((major, minor)) = claude_family_version(model_lower, family) {
             return major > 4 || (major == 4 && minor >= 6);
         }
+    }
+    // Haiku gained 1M at major 5 (Haiku 5.5, 2026-10). The upper bound keeps the
+    // Claude 3 id shape `claude-3-5-haiku-20241022`, where the number after
+    // "haiku" is a date, on 200K.
+    if let Some((major, _)) = claude_family_version(model_lower, "haiku") {
+        return (5..100).contains(&major);
     }
     false
 }
@@ -89,7 +96,7 @@ pub fn context_window_for_model(model: &str, _observed_max_input_tokens: u64) ->
         if m.contains("[1m]") || claude_model_always_1m(&m) || claude_model_supports_1m(&m) {
             return Some(1_000_000);
         }
-        // Everything else — Opus/Sonnet ≤4.5, all Haiku, Claude 3.x — is a
+        // Everything else — Opus/Sonnet ≤4.5, Haiku ≤4.5, Claude 3.x — is a
         // genuine 200K model.
         return Some(200_000);
     }
@@ -257,7 +264,7 @@ impl StatsAcc {
     /// [`SessionAcc`] can parse each line once and fan the same `Value` out to
     /// every extractor, instead of re-parsing the file per extractor.
     pub fn push_value(&mut self, v: &Value) {
-        use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
+        use crate::model_cost::{get_model_costs_for_prompt, turn_cost_usd, TurnUsage};
 
         {
             // `compact_boundary` is a system meta event Claude Code emits each time
@@ -285,7 +292,9 @@ impl StatsAcc {
                 // assistant turn has been seen yet (defensive — compact almost
                 // never precedes the first assistant turn).
                 let pricing_model = self.last_model.as_deref().unwrap_or("");
-                let costs = get_model_costs(pricing_model);
+                // The compact request's prompt is the pre-compaction context,
+                // which decides Haiku 5.5's long-prompt tier.
+                let costs = get_model_costs_for_prompt(pricing_model, pre);
                 self.compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
                     + (post as f64 / 1_000_000.0) * costs.output;
                 return;
@@ -589,6 +598,17 @@ mod context_window_tests {
                 context_window_for_model(model, 0),
                 Some(200_000),
                 "{model} defaults to a 200K window",
+            );
+        }
+    }
+
+    #[test]
+    fn haiku_5_5_is_1m() {
+        for model in ["claude-haiku-5-5", "claude-haiku-5-5-20261001"] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(1_000_000),
+                "{model} ships a native 1M window",
             );
         }
     }

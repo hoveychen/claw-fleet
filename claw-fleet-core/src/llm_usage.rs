@@ -200,7 +200,7 @@ fn estimate_tokens(s: &str) -> u64 {
 /// Non-alias inputs pass through untouched.
 fn canonical_claude_model(alias: &str) -> &str {
     match alias {
-        "haiku" => "claude-haiku-4-5",
+        "haiku" => "claude-haiku-5-5",
         "sonnet" => "claude-sonnet-5-5",
         "opus" => "claude-opus-5-5",
         "fable" => "claude-fable-5-1",
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn canonical_claude_aliases() {
-        assert_eq!(canonical_claude_model("haiku"), "claude-haiku-4-5");
+        assert_eq!(canonical_claude_model("haiku"), "claude-haiku-5-5");
         assert_eq!(canonical_claude_model("sonnet"), "claude-sonnet-5-5");
         assert_eq!(canonical_claude_model("opus"), "claude-opus-5-5");
         assert_eq!(canonical_claude_model("fable"), "claude-fable-5-1");

@@ -135,6 +135,16 @@ efforts = ["low", "medium", "high", "xhigh", "max"]
 min_cli_version = "2.1.45"
 superseded_by = "claude-sonnet-5-5"
 
+# Haiku 5.5 is a tenth of 4.5's price ($0.10/$0.50 vs $1/$5, plus a 5x tier for
+# prompts over 100K), so 4.5 is not superseded by it: each keeps its own row.
+[[model]]
+id = "claude-haiku-5-5"
+label = "Haiku 5.5"
+family = "claude-code"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.293"
+
 # 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
 # `--model haiku-4-5` 用的是不带日期的。两个都列，省得靠模糊匹配去猜；
 # 不带日期的那条不进速查表，免得同一个模型在表里出现两行。

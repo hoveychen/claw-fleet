@@ -143,6 +143,35 @@ pub const COST_HAIKU_45: ModelCosts = ModelCosts {
     web_search: 0.01,
 };
 
+// Haiku 5.5: $0.10 / $0.50 per Mtok for prompts up to 100K tokens. The first
+// Claude model priced by prompt length — see `COST_HAIKU_55_LONG_PROMPT`.
+pub const COST_HAIKU_55: ModelCosts = ModelCosts {
+    input: 0.10,
+    output: 0.50,
+    cache_write: 0.125,
+    cache_write_1h: 0.20,
+    cache_read: 0.01,
+    web_search: 0.01,
+};
+
+// Haiku 5.5 for prompts over 100K tokens: every rate is 5× the short tier
+// ($0.50 / $2.50). Both tiers match the Anthropic pricing page and the
+// `haiku_55.long_prompt` entry baked into the Claude Code 2.1.294 catalog
+// (2026-10-08).
+pub const COST_HAIKU_55_LONG_PROMPT: ModelCosts = ModelCosts {
+    input: 0.50,
+    output: 2.50,
+    cache_write: 0.625,
+    cache_write_1h: 1.0,
+    cache_read: 0.05,
+    web_search: 0.01,
+};
+
+/// Prompt size above which Haiku 5.5 bills at its long-prompt tier. Claude
+/// Code compares `input + cache_read + cache_creation` against it with a strict
+/// `>`, and so do we.
+pub const HAIKU_55_LONG_PROMPT_ABOVE: u64 = 100_000;
+
 // --- OpenAI GPT / Codex tiers ---------------------------------------------
 // Used by Codex CLI sessions (see `codex_source.rs`). Codex rollouts report
 // the model as e.g. `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`,
@@ -385,7 +414,12 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         return COST_TIER_3_15;
     }
 
-    // Haiku tiers.
+    // Haiku tiers. 5.5 first: the bare-`haiku` fallback below would otherwise
+    // price it as Haiku 3.5, 8× too high. Parsed like `opus-5-` so a dated
+    // `claude-haiku-5-5-20261001` still matches.
+    if single_digit_minor(&m, "haiku-5-") == Some(5) {
+        return COST_HAIKU_55;
+    }
     if m.contains("haiku-4-5") || m.contains("haiku-4") {
         return COST_HAIKU_45;
     }
@@ -394,6 +428,19 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
     }
 
     DEFAULT_UNKNOWN_COST
+}
+
+/// Pricing for one request of `prompt_tokens` (input + cache writes + cache
+/// reads). Identical to [`get_model_costs`] except for models priced by prompt
+/// length, where a prompt over the threshold switches every rate to the
+/// long-prompt tier.
+pub fn get_model_costs_for_prompt(model: &str, prompt_tokens: u64) -> ModelCosts {
+    let is_haiku_55 =
+        single_digit_minor(&model.to_ascii_lowercase(), "haiku-5-") == Some(5);
+    if is_haiku_55 && prompt_tokens > HAIKU_55_LONG_PROMPT_ABOVE {
+        return COST_HAIKU_55_LONG_PROMPT;
+    }
+    get_model_costs(model)
 }
 
 /// The minor version right after `prefix` (e.g. `opus-5-` → `5` for
@@ -443,7 +490,9 @@ pub fn parse_cache_creation_1h(usage: Option<&serde_json::Value>) -> u64 {
 
 /// Compute USD cost for one assistant turn under the given model.
 pub fn turn_cost_usd(model: &str, usage: &TurnUsage) -> f64 {
-    let c = get_model_costs(model);
+    let prompt_tokens =
+        usage.input_tokens + usage.cache_creation_tokens + usage.cache_read_tokens;
+    let c = get_model_costs_for_prompt(model, prompt_tokens);
     // `cache_creation_1h_tokens` is a subset of the total; saturating_sub keeps a
     // malformed pair (1h > total) from wrapping into an astronomical 5m figure.
     let write_1h = usage
@@ -503,6 +552,8 @@ mod tests {
             COST_TIER_10_50_READ_0_25,
             COST_HAIKU_35,
             COST_HAIKU_45,
+            COST_HAIKU_55,
+            COST_HAIKU_55_LONG_PROMPT,
         ] {
             assert!((c.cache_write - c.input * 1.25).abs() < 1e-9, "5m: {c:?}");
             assert!((c.cache_write_1h - c.input * 2.0).abs() < 1e-9, "1h: {c:?}");
@@ -803,6 +854,56 @@ mod tests {
         // 6.1 Sol halves 6 Sol's cached-input price.
         assert!((turn_cost_usd("gpt-6.1-sol", &usage) - 0.10).abs() < 1e-9);
         assert!((turn_cost_usd("gpt-6-luna", &usage) - 0.01).abs() < 1e-9);
+    }
+
+    /// Haiku 5.5 must not fall through to the bare-`haiku` (3.5) branch, and
+    /// its dated form must resolve too.
+    #[test]
+    fn haiku_5_5_short_prompt_tier() {
+        let usage = TurnUsage {
+            input_tokens: 50_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        // 50K × $0.10/M + 1M × $0.50/M.
+        for model in ["claude-haiku-5-5", "claude-haiku-5-5-20261001"] {
+            assert!((turn_cost_usd(model, &usage) - 0.505).abs() < 1e-9, "{model}");
+        }
+        // Haiku 4.5 is untouched.
+        assert!((turn_cost_usd("claude-haiku-4-5", &usage) - 5.05).abs() < 1e-9);
+    }
+
+    /// The tier switch counts input + cache writes + cache reads, with a strict
+    /// `>` — exactly 100K stays on the short tier, one more token flips every
+    /// rate in the turn to the long tier.
+    #[test]
+    fn haiku_5_5_long_prompt_threshold() {
+        let at = TurnUsage {
+            input_tokens: 10_000,
+            cache_creation_tokens: 40_000,
+            cache_creation_1h_tokens: 40_000,
+            cache_read_tokens: 50_000,
+            output_tokens: 1_000,
+            ..Default::default()
+        };
+        // 10K×0.10 + 40K×0.20 + 50K×0.01 + 1K×0.50, per M.
+        let short = turn_cost_usd("claude-haiku-5-5", &at);
+        assert!((short - 0.0100).abs() < 1e-9, "short={short}");
+
+        let over = TurnUsage {
+            input_tokens: 10_001,
+            ..at
+        };
+        // 10001×0.50 + 40K×1.00 + 50K×0.05 + 1K×2.50, per M.
+        let long = turn_cost_usd("claude-haiku-5-5", &over);
+        assert!((long - 0.0500005).abs() < 1e-9, "long={long}");
+
+        // Other models never switch tiers.
+        assert!((turn_cost_usd("claude-sonnet-5-5", &over)
+            - turn_cost_usd("claude-sonnet-5-5", &at)
+            - 0.000002)
+            .abs()
+            < 1e-9);
     }
 
     #[test]
