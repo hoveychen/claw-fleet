@@ -102,6 +102,8 @@ function summaryVars(input: Record<string, unknown>): Record<string, string> {
     // line number (a JSON number, so it needs stringifying, unlike the rest).
     path: s("path"),
     line: typeof input.line_no === "number" ? String(input.line_no) : s("line_no"),
+    // `job run` is identified by the command line it launches.
+    command: s("command"),
   };
 }
 

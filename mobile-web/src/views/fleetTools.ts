@@ -35,6 +35,7 @@ export const FLEET_CONTROL_TOOLS = [
   "control",
   "notes",
   "history",
+  "job",
 ] as const;
 
 export type FleetTool = (typeof FLEET_CONTROL_TOOLS)[number];
@@ -254,14 +255,16 @@ function isJsonRecordAction(tool: FleetTool, action: string): boolean {
  * back to `raw` (never drops the text) when a parse doesn't apply or fails.
  */
 /**
- * The five tools whose returns the Rust side already formats for the eye
+ * The six tools whose returns the Rust side already formats for the eye
  * (`mcp_inspect.rs` agent tables, `render_note_files`, `render_history_hits`,
+ * `job::render`,
  * the artifact listing). Their read actions go to `raw`, which keeps the line
  * breaks; the actions listed per tool are mutates returning one `ok: …` line.
  */
 const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
   inspect: [],
   history: [],
+  job: ["stop"],
   notes: ["write", "edit", "append"],
   artifact: ["add", "delete"],
   control: ["stop", "interrupt"],

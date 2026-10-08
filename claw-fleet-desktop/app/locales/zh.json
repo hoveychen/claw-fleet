@@ -27,7 +27,8 @@
       "inspect": "巡检",
       "control": "信号",
       "notes": "笔记",
-      "history": "历史"
+      "history": "历史",
+      "job": "作业"
     },
     "param": {
       "plan_id": "计划",
@@ -81,7 +82,11 @@
       "progress": "进度命令",
       "old_text": "原文",
       "new_text": "新文",
-      "to": "目标位置"
+      "to": "目标位置",
+      "command": "命令",
+      "cwd": "目录",
+      "wake": "完成后唤醒",
+      "tail": "尾部行数"
     },
     "param_for": {
       "handoff": {
@@ -175,6 +180,13 @@
       "history": {
         "search": "搜索历史记录 {{query}}",
         "read": "读取历史第 {{line}} 行"
+      },
+      "job": {
+        "run": "运行作业 {{command}}",
+        "wait": "等待作业 {{id}}",
+        "status": "作业状态 {{id}}",
+        "stop": "停止作业 {{id}}",
+        "list": "列出作业"
       }
     },
     "rec": {
@@ -1992,6 +2004,7 @@
       "control": "信号",
       "notes": "笔记",
       "history": "历史",
+      "job": "作业",
       "image": "生成图片",
       "image_edit": "修改图片",
       "permission_prompt": "权限询问"
