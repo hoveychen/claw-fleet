@@ -946,6 +946,7 @@ mod tests {
             "claude-sonnet-5-5",
             "claude-sonnet-5",
             "claude-sonnet-4-6",
+            "claude-haiku-5-5",
             "claude-haiku-4-5-20251001",
             "gpt-6.1-sol",
             "gpt-6-astra",
@@ -1141,6 +1142,9 @@ mod tests {
         // Sonnet 5 *is* superseded: same price as 5.5, so only 5.5 is offered.
         assert!(all.contains(&"claude-sonnet-5-5"));
         assert!(!all.contains(&"claude-sonnet-5"));
+        // Haiku 5.5 is a tenth of 4.5's price, so both stay listed.
+        assert!(all.contains(&"claude-haiku-5-5"));
+        assert!(all.contains(&"claude-haiku-4-5-20251001"));
 
         let claude = &cat[0];
         for m in &claude.models {

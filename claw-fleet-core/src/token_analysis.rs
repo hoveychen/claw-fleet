@@ -532,6 +532,7 @@ fn analyze_messages(
     let mut sources = SourceBuckets::default();
     let mut output = OutputBuckets::default();
     let mut usage = UsageTotals::default();
+    let mut cost_usd = 0.0_f64;
     let mut model: Option<String> = None;
     let mut is_sidechain = false;
 
@@ -640,6 +641,18 @@ fn analyze_messages(
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
+        // Priced per turn, not from the session totals: Haiku 5.5's rate depends
+        // on each request's prompt size, which a summed total no longer shows.
+        let turn_usage = UsageTotals {
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens: cache_creation,
+            cache_read_tokens: cache_read,
+            ephemeral_5m_tokens: eph_5m,
+            ephemeral_1h_tokens: eph_1h,
+        };
+        cost_usd += estimate_cost_usd(&turn_usage, model.as_deref());
+
         usage.input_tokens += input_tokens;
         usage.output_tokens += output_tokens;
         usage.cache_creation_tokens += cache_creation;
@@ -715,8 +728,7 @@ fn analyze_messages(
         prev_tool_use_chars = a.tool_use;
     }
 
-    let model_for_cost = model.as_deref();
-    let estimated_cost_usd = Some(estimate_cost_usd(&usage, model_for_cost));
+    let estimated_cost_usd = Some(cost_usd);
     let total_attributed_input = sources.total().saturating_sub(sources.residual_unexplained);
     let total_new_content = usage.input_tokens + usage.cache_creation_tokens;
     let fit_confidence = if total_new_content == 0 {
