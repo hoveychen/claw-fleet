@@ -261,7 +261,7 @@
         {
           "h2": "Pick the model, and how hard it thinks",
           "body": [
-            "You choose the model when you brief a task, from Claude Code's own catalogue — Fable 5.1 and Fable 5, Opus 5 and Opus 4.8, Sonnet 5 and Sonnet 4.6, Haiku 4.5 — and the reasoning effort along with it, across the five levels the CLI accepts: low, medium, high, xhigh and max. Permission mode is on the same composer, so a task you want to run unattended and one you want to approve step by step are two different picks, not two different setups.",
+            "You choose the model when you brief a task, from Claude Code's own catalogue — Fable 5.1, Opus 5.5 and Opus 5, Sonnet 5.5, Haiku 5.5 and Haiku 4.5 — and the reasoning effort along with it, across the five levels the CLI accepts: low, medium, high, xhigh and max. Permission mode is on the same composer, so a task you want to run unattended and one you want to approve step by step are two different picks, not two different setups.",
             "Model subscriptions and API usage stay on your own Anthropic account, exactly as they are now. Fleet reads what your sessions consumed and shows tokens, estimated cost, output speed and your quota windows, so the numbers you see are your own usage rather than a bill from us.",
             "Commands your agents run are recorded and grouped by risk category, which is a different thing from approving them one by one — it is the record you read afterwards."
           ]
