@@ -134,6 +134,14 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "search": return t("搜索历史记录 {0}", str(input, "query"));
       case "read": return t("读取历史第 {0} 行", String(input.line_no ?? ""));
     }
+  } else if (tool === "job") {
+    switch (action) {
+      case "run": return t("运行作业 {0}", str(input, "command"));
+      case "wait": return t("等待作业 {0}", id);
+      case "status": return t("作业状态 {0}", id);
+      case "stop": return t("停止作业 {0}", id);
+      case "list": return t("列出作业");
+    }
   }
   return action || tool;
 }

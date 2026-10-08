@@ -27,7 +27,8 @@
       "inspect": "Inspect",
       "control": "Signal",
       "notes": "Notes",
-      "history": "History"
+      "history": "History",
+      "job": "Job"
     },
     "param": {
       "plan_id": "Plan",
@@ -81,7 +82,11 @@
       "progress": "Progress command",
       "old_text": "Old text",
       "new_text": "New text",
-      "to": "Target"
+      "to": "Target",
+      "command": "Command",
+      "cwd": "Directory",
+      "wake": "Wake on finish",
+      "tail": "Tail lines"
     },
     "param_for": {
       "handoff": {
@@ -92,6 +97,9 @@
       },
       "artifact": {
         "note": "Note"
+      },
+      "job": {
+        "timeout": "Wait (s)"
       }
     },
     "summary": {
@@ -175,6 +183,13 @@
       "history": {
         "search": "Searched history {{query}}",
         "read": "Read history line {{line}}"
+      },
+      "job": {
+        "run": "Run job {{command}}",
+        "wait": "Wait for job {{id}}",
+        "status": "Job status {{id}}",
+        "stop": "Stop job {{id}}",
+        "list": "List jobs"
       }
     },
     "rec": {
@@ -1995,6 +2010,7 @@
       "control": "Signal",
       "notes": "Notes",
       "history": "History",
+      "job": "Job",
       "image": "Image",
       "image_edit": "Image edit",
       "permission_prompt": "Permission prompt"
