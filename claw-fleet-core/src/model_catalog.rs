@@ -1103,7 +1103,11 @@ mod tests {
         assert!(sonnet.needs_cli_upgrade);
         assert!(!pick(&old, "claude-opus-5-5").needs_cli_upgrade, "280 is Opus 5.5's floor");
 
-        let new = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.284")));
+        let mid = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.284")));
+        assert!(!pick(&mid, "claude-sonnet-5-5").needs_cli_upgrade);
+        assert!(pick(&mid, "claude-haiku-5-5").needs_cli_upgrade, "Haiku 5.5 needs 2.1.293");
+
+        let new = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.293")));
         assert!(new[0].models.iter().all(|m| !m.needs_cli_upgrade));
 
         // An unreadable version flags nothing.
