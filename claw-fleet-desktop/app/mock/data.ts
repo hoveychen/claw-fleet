@@ -2499,6 +2499,105 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
     },
     {
       type: "assistant",
+      uuid: "msg-fleet-job-run",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-1",
+            name: "mcp__fleet__fleet__job",
+            input: { action: "run", command: "cargo test -p claw-fleet-core", cwd: ".worktrees/fix-job-tool-ui" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-run-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-1",
+            content: "ok: job j7k2m9 started in /Users/dev/proj/.worktrees/fix-job-tool-ui.\nlog: /Users/dev/.fleet/jobs/j7k2m9/output.log\nKeep working; collect it with action=wait id=j7k2m9 (blocks up to 540s per call — call again while it is still running). Do not end your turn or return from a subagent while it runs unless you registered wake.",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-wait",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-2",
+            name: "mcp__fleet__fleet__job",
+            input: { action: "wait", id: "j7k2m9" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-wait-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-2",
+            content: "job j7k2m9: exited 0 after 4m12s\ncommand: cargo test -p claw-fleet-core\nworkspace: /Users/dev/proj/.worktrees/fix-job-tool-ui\nlog: /Users/dev/.fleet/jobs/j7k2m9/output.log\n--- last 3 lines ---\ntest result: ok. 3312 passed; 0 failed; 4 ignored\n   Doc-tests claw_fleet_core\ntest result: ok. 12 passed; 0 failed",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-stop",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-3",
+            name: "mcp__fleet__fleet__job",
+            input: { action: "stop", id: "q4w8e1" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-stop-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-3",
+            content: "ok: sent SIGTERM to job q4w8e1's process group (SIGKILL after 2s).",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
       uuid: "msg-fleet-artifact-add",
       timestamp: new Date(NOW - 1 * MIN).toISOString(),
       message: {
