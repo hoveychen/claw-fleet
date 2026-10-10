@@ -66,6 +66,34 @@
   text-overflow: ellipsis;
 }
 
+/* Active workspace filter; the whole chip clears it. */
+.ws_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 6px;
+  font-size: var(--font-size-2xs);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.ws_chip:hover {
+  border-color: var(--color-accent);
+}
+.ws_chip_name {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws_chip_x {
+  color: var(--color-text-dim);
+}
+
 .close_btn {
   padding: 3px 8px;
   background: none;

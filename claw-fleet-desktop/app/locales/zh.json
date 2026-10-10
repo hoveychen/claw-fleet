@@ -905,7 +905,13 @@
     "col_share": "占比",
     "row_cache_write_5m": "缓存写入 5m",
     "trend_metric_cost": "花费",
-    "trend_metric_tokens": "Tokens"
+    "trend_metric_tokens": "Tokens",
+    "ws_title": "按 workspace",
+    "ws_hint": "点击行只看该 workspace",
+    "ws_clear": "查看全部 workspace",
+    "col_workspace": "Workspace",
+    "history_model": "更早日期",
+    "history_note": "7 天前的会话记录已清理,这些日子只能从日报取该 workspace 的总额,没有按模型的明细"
   },
   "chart": {
     "title": "Token 速度",

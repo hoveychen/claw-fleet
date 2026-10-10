@@ -592,8 +592,15 @@ pub(crate) fn route_usage_range_breakdown(
         .get("to_ms")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(i64::MAX);
+    // Optional repo filter; empty means the all-workspace view.
+    let workspace = query.get("workspace").filter(|w| !w.is_empty());
     let sessions = ctx.snapshot.sessions();
-    let breakdown = crate::today_usage::usage_range_breakdown(&sessions, from_ms, to_ms);
+    let breakdown = crate::today_usage::usage_range_breakdown(
+        &sessions,
+        from_ms,
+        to_ms,
+        workspace.map(String::as_str),
+    );
     let body = serde_json::to_string(&breakdown).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }

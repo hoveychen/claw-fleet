@@ -34,21 +34,14 @@ pub(crate) async fn today_usage(
 }
 
 #[tauri::command]
-pub(crate) async fn today_usage_breakdown(
-    state: tauri::State<'_, AppState>,
-) -> Result<claw_fleet_core::today_usage::TodayUsageBreakdown, String> {
-    let backend = state.backend.clone();
-    run_blocking(move || backend.today_usage_breakdown()).await
-}
-
-#[tauri::command]
 pub(crate) async fn usage_range_breakdown(
     from_ms: i64,
     to_ms: i64,
+    workspace: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::today_usage::UsageRangeBreakdown, String> {
     let backend = state.backend.clone();
-    run_blocking(move || backend.usage_range_breakdown(from_ms, to_ms)).await
+    run_blocking(move || backend.usage_range_breakdown(from_ms, to_ms, workspace.as_deref())).await
 }
 
 #[tauri::command]
