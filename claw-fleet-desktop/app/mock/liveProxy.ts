@@ -1403,11 +1403,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/today_usage",
   }),
 
-  today_usage_breakdown: () => ({
-    method: "GET",
-    path: "/today_usage_breakdown",
-  }),
-
   uninstall_plugin: (a) => ({
     method: "POST",
     path: "/plugins/uninstall",
@@ -1430,7 +1425,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   usage_range_breakdown: (a) => ({
     method: "GET",
     path: "/usage_range_breakdown",
-    query: { from_ms: q(a.fromMs), to_ms: q(a.toMs) },
+    query: { from_ms: q(a.fromMs), to_ms: q(a.toMs), workspace: q(a.workspace) },
   }),
 
   write_workspace_proc_input: (a) => ({

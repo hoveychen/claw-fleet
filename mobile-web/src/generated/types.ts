@@ -120,7 +120,13 @@ export type UsageRangeBreakdown = {
 fromDate: string, toDate: string, 
 lines: Array<ModelReceiptLine>, 
 daily: Array<DailyUsagePoint>, totalInputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalOutputTokens: number, totalCostUsd: number, agentCostUsd: number, fleetCostUsd: number, 
-hasCodexApproximation: boolean, };
+hasCodexApproximation: boolean, 
+workspace: string | null, 
+byWorkspace: Array<WorkspaceUsageLine>, };
+
+export type WorkspaceUsageLine = { workspacePath: string, workspaceName: string, 
+inputTokens: number, 
+cacheCreationTokens: number, cacheReadTokens: number, outputTokens: number, costUsd: number, };
 
 export type SearchHit = { sessionId: string, jsonlPath: string, snippet: string, rank: number, };
 

@@ -37,11 +37,11 @@ fn real_range_breakdown_is_fast_on_second_call() {
     let from = now - 6 * 86_400_000;
 
     let t0 = Instant::now();
-    let cold = claw_fleet_core::today_usage::usage_range_breakdown(&sessions, from, now);
+    let cold = claw_fleet_core::today_usage::usage_range_breakdown(&sessions, from, now, None);
     let cold_ms = t0.elapsed().as_millis();
 
     let t1 = Instant::now();
-    let warm = claw_fleet_core::today_usage::usage_range_breakdown(&sessions, from, now);
+    let warm = claw_fleet_core::today_usage::usage_range_breakdown(&sessions, from, now, None);
     let warm_ms = t1.elapsed().as_millis();
 
     let codex_lines = cold.lines.iter().filter(|l| l.source == "codex").count();
@@ -104,7 +104,7 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
         ("30d", now - 29 * 86_400_000, false),
         ("all", 0, false),
     ] {
-        let b = claw_fleet_core::today_usage::usage_range_breakdown(&sessions, from, now);
+        let b = claw_fleet_core::today_usage::usage_range_breakdown(&sessions, from, now, None);
         let mut worst = 0.0f64;
         for l in &b.lines {
             let per_m = |tok: u64, price: f64| (tok as f64 / 1_000_000.0) * price;

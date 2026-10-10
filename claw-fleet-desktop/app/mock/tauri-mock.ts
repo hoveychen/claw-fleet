@@ -1120,9 +1120,18 @@ async function handleIPC(
       const toMs = (args.toMs as number) ?? Date.now();
       const dayMs = 86_400_000;
       const n = Math.min(90, Math.max(1, Math.round((toMs - fromMs) / dayMs)));
+      // Fixed workspace shares of the spend; a workspace filter scales every
+      // figure down to that workspace's share.
+      const wsShares: Array<[string, string, number]> = [
+        ["/Users/demo/workspace/claude-fleet", "claude-fleet", 0.58],
+        ["/Users/demo/workspace/netferry", "netferry", 0.27],
+        ["/Users/demo/workspace/maliang", "maliang", 0.15],
+      ];
+      const wsFilter = (args.workspace as string | null | undefined) ?? null;
+      const wsShare = wsFilter ? (wsShares.find(([p]) => p === wsFilter)?.[2] ?? 0) : 1;
       const daily = Array.from({ length: n }, (_, i) => {
         const d = new Date(toMs - (n - 1 - i) * dayMs);
-        const k = 0.35 + 0.65 * Math.abs(Math.sin(i * 1.7 + 0.4));
+        const k = (0.35 + 0.65 * Math.abs(Math.sin(i * 1.7 + 0.4))) * wsShare;
         return {
           date: localDateKey(d),
           inputTokens: Math.round(280_600 * k),
@@ -1160,6 +1169,20 @@ async function handleIPC(
         agentCostUsd: total("costUsd"),
         fleetCostUsd: 0,
         hasCodexApproximation: false,
+        workspace: wsFilter,
+        // Always every workspace, unscaled by the filter (as the backend does).
+        byWorkspace: wsShares.map(([path, name, share]) => {
+          const f = wsShare > 0 ? share / wsShare : 0;
+          return {
+            workspacePath: path,
+            workspaceName: name,
+            inputTokens: Math.round(total("inputTokens") * f),
+            cacheCreationTokens: Math.round(total("cacheCreationTokens") * f),
+            cacheReadTokens: Math.round(total("cacheReadTokens") * f),
+            outputTokens: Math.round(total("outputTokens") * f),
+            costUsd: total("costUsd") * f,
+          };
+        }),
       };
     }
     case "today_usage_breakdown":

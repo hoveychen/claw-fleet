@@ -908,7 +908,13 @@
     "col_share": "Share",
     "row_cache_write_5m": "Cache write (5m)",
     "trend_metric_cost": "Spend",
-    "trend_metric_tokens": "Tokens"
+    "trend_metric_tokens": "Tokens",
+    "ws_title": "By workspace",
+    "ws_hint": "Click a row to see only that workspace",
+    "ws_clear": "Show all workspaces",
+    "col_workspace": "Workspace",
+    "history_model": "Earlier days",
+    "history_note": "Session transcripts older than 7 days are gone, so those days come from the daily reports as this workspace's totals, without a per-model split"
   },
   "chart": {
     "title": "Token speed",

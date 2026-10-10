@@ -1613,7 +1613,6 @@ pub fn run() {
             list_sessions,
             sessions_snapshot,
             today_usage,
-            today_usage_breakdown,
             usage_range_breakdown,
             search_sessions,
             get_messages,

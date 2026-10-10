@@ -4,8 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   DailyUsagePoint,
   ModelReceiptLine,
-  TodayUsageBreakdown,
   UsageRangeBreakdown,
+  WorkspaceUsageLine,
 } from "../types";
 import styles from "./TokenReceiptModal.module.css";
 import { useExiting } from "./Presence";
@@ -39,6 +39,8 @@ interface UsageView {
   daily: DailyUsagePoint[];
   /** Any Codex session attributed whole-to-one-day → trend is approximate. */
   hasCodexApproximation: boolean;
+  /** Per-workspace totals over the window, across every workspace. */
+  byWorkspace: WorkspaceUsageLine[];
 }
 
 /** 1.23M / 45.6K / 780 — compact token counts. */
@@ -97,6 +99,11 @@ const SOURCE_LABEL: Record<string, string> = {
   fleet: "Fleet",
 };
 
+/** Source of the receipt line that carries a single workspace's daily-report
+ * days (`today_usage::REPORT_SOURCE`): the report has no per-model split for
+ * one workspace, so those days arrive as one mixed-model line. */
+const REPORT_SOURCE = "report";
+
 function sourceLabel(source: string): string {
   return SOURCE_LABEL[source] ?? source;
 }
@@ -123,21 +130,7 @@ function rangeBounds(range: RangeKey): { fromMs: number; toMs: number } {
   }
 }
 
-function normalizeToday(r: TodayUsageBreakdown): UsageView {
-  return {
-    label: r.date,
-    lines: r.lines,
-    totalInputTokens: r.totalInputTokens,
-    totalCacheCreationTokens: r.totalCacheCreationTokens,
-    totalCacheReadTokens: r.totalCacheReadTokens,
-    totalOutputTokens: r.totalOutputTokens,
-    totalCostUsd: r.totalCostUsd,
-    daily: [],
-    hasCodexApproximation: false,
-  };
-}
-
-function normalizeRange(r: UsageRangeBreakdown): UsageView {
+function normalizeRange(r: UsageRangeBreakdown, range: RangeKey): UsageView {
   return {
     label: r.fromDate === r.toDate ? r.fromDate : `${r.fromDate} → ${r.toDate}`,
     lines: r.lines,
@@ -146,8 +139,10 @@ function normalizeRange(r: UsageRangeBreakdown): UsageView {
     totalCacheReadTokens: r.totalCacheReadTokens,
     totalOutputTokens: r.totalOutputTokens,
     totalCostUsd: r.totalCostUsd,
-    daily: r.daily,
+    // The single-day view has no trend to draw.
+    daily: range === "today" ? [] : r.daily,
     hasCodexApproximation: r.hasCodexApproximation,
+    byWorkspace: r.byWorkspace ?? [],
   };
 }
 
@@ -180,6 +175,8 @@ export function TokenReceiptModal({ onClose }: Props) {
   const exiting = useExiting();
   const { t } = useTranslation();
   const [range, setRange] = useState<RangeKey>("today");
+  /** Repo-root path the receipt is narrowed to; null = every workspace. */
+  const [workspace, setWorkspace] = useState<{ path: string; name: string } | null>(null);
   const [data, setData] = useState<UsageView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,17 +196,16 @@ export function TokenReceiptModal({ onClose }: Props) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const req =
-      range === "today"
-        ? invoke<TodayUsageBreakdown>("today_usage_breakdown").then(normalizeToday)
-        : (() => {
-            const { fromMs, toMs } = rangeBounds(range);
-            return invoke<UsageRangeBreakdown>("usage_range_breakdown", {
-              fromMs,
-              toMs,
-            }).then(normalizeRange);
-          })();
-    req
+    // "Today" goes through the range fold too: the backend's today receipt is
+    // that same fold over [local midnight, now], and only the range form takes
+    // a workspace filter.
+    const { fromMs, toMs } = rangeBounds(range);
+    invoke<UsageRangeBreakdown>("usage_range_breakdown", {
+      fromMs,
+      toMs,
+      workspace: workspace?.path ?? null,
+    })
+      .then((r) => normalizeRange(r, range))
       .then((r) => {
         if (!cancelled) setData(r);
       })
@@ -222,7 +218,7 @@ export function TokenReceiptModal({ onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, workspace]);
 
   const ranges: { key: RangeKey; label: string }[] = [
     { key: "today", label: t("token_receipt.range_today", "今天") },
@@ -242,6 +238,17 @@ export function TokenReceiptModal({ onClose }: Props) {
               <span className={styles.window_label}>{data.label}</span>
             ) : (
               !error && <Skeleton inline width={150} height={9} />
+            )}
+            {workspace && (
+              <button
+                className={styles.ws_chip}
+                title={workspace.path}
+                onClick={() => setWorkspace(null)}
+                aria-label={t("token_receipt.ws_clear", "查看全部 workspace")}
+              >
+                <span className={styles.ws_chip_name}>{workspace.name}</span>
+                <span className={styles.ws_chip_x}>✕</span>
+              </button>
             )}
           </div>
           <div className={styles.range_bar} role="tablist">
@@ -270,7 +277,19 @@ export function TokenReceiptModal({ onClose }: Props) {
               {t("token_receipt.no_usage_range", "此区间还没有用量")}
             </div>
           )}
-          {!error && data && data.lines.length > 0 && <UsageBody data={data} />}
+          {!error && data && data.lines.length > 0 && (
+            <UsageBody
+              data={data}
+              workspace={workspace?.path ?? null}
+              onPickWorkspace={(w) =>
+                setWorkspace(
+                  w && w.workspacePath !== workspace?.path
+                    ? { path: w.workspacePath, name: w.workspaceName }
+                    : null,
+                )
+              }
+            />
+          )}
         </div>
       </div>
     </div>
@@ -297,7 +316,15 @@ function UsageSkeleton() {
   );
 }
 
-function UsageBody({ data }: { data: UsageView }) {
+function UsageBody({
+  data,
+  workspace,
+  onPickWorkspace,
+}: {
+  data: UsageView;
+  workspace: string | null;
+  onPickWorkspace: (w: WorkspaceUsageLine | null) => void;
+}) {
   const { t } = useTranslation();
   const totalTokens =
     data.totalInputTokens +
@@ -349,6 +376,14 @@ function UsageBody({ data }: { data: UsageView }) {
           output: data.totalOutputTokens,
         }}
       />
+
+      {data.byWorkspace.length > 0 && (
+        <WorkspaceTable
+          rows={data.byWorkspace}
+          selected={workspace}
+          onPick={onPickWorkspace}
+        />
+      )}
 
       <ModelTable lines={lines} totalCost={data.totalCostUsd} />
 
@@ -582,6 +617,75 @@ function TokenMix({ values }: { values: Record<TokenKind, number> }) {
   );
 }
 
+/**
+ * Spend per workspace (repo root, worktrees folded in). Always lists every
+ * workspace in the window; clicking a row narrows the whole receipt to it,
+ * clicking the selected row again widens it back.
+ */
+function WorkspaceTable({
+  rows,
+  selected,
+  onPick,
+}: {
+  rows: WorkspaceUsageLine[];
+  selected: string | null;
+  onPick: (w: WorkspaceUsageLine | null) => void;
+}) {
+  const { t } = useTranslation();
+  const total = rows.reduce((acc, r) => acc + r.costUsd, 0);
+
+  return (
+    <section className={styles.section}>
+      <SectionHead
+        title={t("token_receipt.ws_title", "按 workspace")}
+        aside={t("token_receipt.ws_hint", "点击行只看该 workspace")}
+      />
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th className={styles.col_model}>{t("token_receipt.col_workspace", "Workspace")}</th>
+            <th className={styles.num}>{t("token_receipt.kpi_tokens", "Tokens")}</th>
+            <th className={styles.num}>{t("token_receipt.row_output", "输出")}</th>
+            <th className={styles.num}>{t("token_receipt.col_cost", "花费")}</th>
+            <th className={styles.col_share}>{t("token_receipt.col_share", "占比")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const active = r.workspacePath === selected;
+            const share = total > 0 ? r.costUsd / total : 0;
+            const tokens =
+              r.inputTokens + r.cacheCreationTokens + r.cacheReadTokens + r.outputTokens;
+            return (
+              <tr
+                key={r.workspacePath}
+                className={`${styles.row} ${active ? styles.row_open : ""}`}
+                onClick={() => onPick(active ? null : r)}
+                title={r.workspacePath}
+                aria-selected={active}
+              >
+                <td className={styles.col_model}>
+                  <span className={styles.caret}>{active ? "●" : ""}</span>
+                  <span className={styles.model}>{r.workspaceName || r.workspacePath}</span>
+                </td>
+                <td className={styles.num}>{fmtTok(tokens)}</td>
+                <td className={styles.num}>{fmtTok(r.outputTokens)}</td>
+                <td className={`${styles.num} ${styles.cost}`}>{fmtUsd(r.costUsd)}</td>
+                <td className={styles.col_share}>
+                  <span className={styles.share_track}>
+                    <span className={styles.share_fill} style={{ width: `${share * 100}%` }} />
+                  </span>
+                  <span className={styles.share_pct}>{fmtPct(share)}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function ModelTable({ lines, totalCost }: { lines: ModelReceiptLine[]; totalCost: number }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<string | null>(null);
@@ -618,8 +722,14 @@ function ModelTable({ lines, totalCost }: { lines: ModelReceiptLine[]; totalCost
                 >
                   <td className={styles.col_model}>
                     <span className={styles.caret}>{expanded ? "▾" : "▸"}</span>
-                    <span className={styles.model}>{prettyModel(line.model)}</span>
-                    <span className={styles.source}>{sourceLabel(line.source)}</span>
+                    <span className={styles.model}>
+                      {line.source === REPORT_SOURCE
+                        ? t("token_receipt.history_model", "更早日期")
+                        : prettyModel(line.model)}
+                    </span>
+                    {line.source !== REPORT_SOURCE && (
+                      <span className={styles.source}>{sourceLabel(line.source)}</span>
+                    )}
                     {flagged && <span className={styles.flag}>*</span>}
                   </td>
                   <td className={styles.num}>{fmtTok(line.inputTokens)}</td>
@@ -707,7 +817,11 @@ function LineDetail({ line }: { line: ModelReceiptLine }) {
 
   return (
     <div className={styles.detail}>
-      <div className={styles.detail_model}>{line.model || "unknown"}</div>
+      <div className={styles.detail_model}>
+        {line.source === REPORT_SOURCE
+          ? t("token_receipt.history_model", "更早日期")
+          : line.model || "unknown"}
+      </div>
       <div className={styles.detail_grid}>
         {rows.map((r) =>
           r.tokens > 0 ? (
@@ -728,7 +842,16 @@ function LineDetail({ line }: { line: ModelReceiptLine }) {
         <span />
         <span className={`${styles.num} ${styles.detail_total}`}>{fmtUsd(line.costUsd)}</span>
       </div>
-      {priced && (
+      {priced && line.source === REPORT_SOURCE && (
+        <div className={styles.note_warn}>
+          *{" "}
+          {t(
+            "token_receipt.history_note",
+            "7 天前的会话记录已清理,这些日子只能从日报取该 workspace 的总额,没有按模型的明细",
+          )}
+        </div>
+      )}
+      {priced && line.source !== REPORT_SOURCE && (
         <div className={styles.note_warn}>
           *{" "}
           {t(

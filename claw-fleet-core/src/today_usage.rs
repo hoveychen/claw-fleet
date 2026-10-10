@@ -399,7 +399,7 @@ fn build_breakdown_cached(
     cache: &mut UsageBreakdownCache,
 ) -> TodayUsageBreakdown {
     let (day_start_ms, _day_end_ms, date) = day_bounds_ms(now_ms);
-    let r = build_range_breakdown_cached(sessions, day_start_ms, now_ms, cache);
+    let r = build_range_breakdown_cached(sessions, day_start_ms, now_ms, None, cache);
 
     TodayUsageBreakdown {
         // The range header reports the earliest day it found data for, which is
@@ -440,7 +440,9 @@ fn build_lines(
             // are NOT what an open model space charged), so the UI must render
             // this line as tokens + real spend and stop expecting `Σ rows =
             // cost_usd`. Every other source is priced by the table and reconciles.
-            let priced_by_provider = source == "dsh";
+            // The report-history line mixes models, so no single rate fits it
+            // either; it carries the report's stored cost the same way.
+            let priced_by_provider = source == "dsh" || source == REPORT_SOURCE;
             ModelReceiptLine {
                 model,
                 source,
@@ -575,6 +577,36 @@ pub struct UsageRangeBreakdown {
     /// rather than their own. Drives a UI footnote. False for a fully timestamped
     /// rollout, which is every real one measured on this host.
     pub has_codex_approximation: bool,
+    /// The workspace this breakdown was narrowed to (repo-root path, worktrees
+    /// folded), or `None` for the all-workspace view.
+    #[serde(default)]
+    pub workspace: Option<String>,
+    /// Per-workspace totals over the same window, sorted by descending cost.
+    /// Always computed across **every** workspace, even when `workspace` narrows
+    /// the rest of the breakdown, so the UI can keep listing the alternatives.
+    #[serde(default)]
+    pub by_workspace: Vec<WorkspaceUsageLine>,
+}
+
+/// One workspace's spend in a range breakdown.
+///
+/// Keyed by repo root ([`crate::session::repo_root_path`]): a plan's
+/// `.worktrees/<task-id>` checkout bills to the repo it was branched from, the
+/// same folding the session list and launcher use.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceUsageLine {
+    pub workspace_path: String,
+    pub workspace_name: String,
+    /// Net input, excluding the two cache figures (same basis as
+    /// [`ModelReceiptLine::input_tokens`]).
+    pub input_tokens: u64,
+    /// Cache writes, both TTLs combined.
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
 }
 
 /// Epoch-ms → `YYYY-MM-DD` in the user's local timezone.
@@ -1437,14 +1469,18 @@ pub fn warm_usage_cache(sessions: &[SessionInfo]) {
 /// `sessions` is the already-scanned session list; each in-window session is
 /// projected into cached cells (folded from disk only on a miss). Fleet's own LLM
 /// spend in the window is folded per model from `fleet_llm_usage.jsonl`.
+///
+/// `workspace` narrows the lines, trend and totals to one repo (any path inside
+/// it, worktrees included); `by_workspace` always spans every workspace.
 pub fn usage_range_breakdown(
     sessions: &[SessionInfo],
     from_ms: i64,
     to_ms: i64,
+    workspace: Option<&str>,
 ) -> UsageRangeBreakdown {
     let mut cache = usage_cache().lock().unwrap();
     cache.retain_sessions(&live_ids(sessions));
-    let out = build_range_breakdown_cached(sessions, from_ms, to_ms, &mut cache);
+    let out = build_range_breakdown_cached(sessions, from_ms, to_ms, workspace, &mut cache);
     persist_cache(&mut cache);
     out
 }
@@ -1461,6 +1497,7 @@ fn build_range_breakdown(
         sessions,
         from_ms,
         to_ms,
+        None,
         &mut UsageBreakdownCache::default(),
     )
 }
@@ -1509,8 +1546,10 @@ fn infer_report_source(model: &str) -> String {
 fn fold_report_days(
     from_date: &str,
     upto_exclusive: &str,
+    workspace: Option<&str>,
     by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
     by_day: &mut std::collections::BTreeMap<String, LineAcc>,
+    by_workspace: &mut std::collections::HashMap<String, LineAcc>,
 ) {
     if from_date >= upto_exclusive {
         return; // live pool already covers the whole requested window
@@ -1529,10 +1568,107 @@ fn fold_report_days(
         let Ok(Some(report)) = store.get_report(d) else {
             continue;
         };
-        for (model, mt) in &report.metrics.model_breakdown {
-            fold_report_model(&date, model, mt, by_model, by_day);
+        fold_report_projects(
+            &date,
+            &report.metrics.projects,
+            workspace,
+            by_model,
+            by_day,
+            by_workspace,
+        );
+        if workspace.is_none() {
+            for (model, mt) in &report.metrics.model_breakdown {
+                fold_report_model(&date, model, mt, by_model, by_day);
+            }
         }
     }
+}
+
+/// Model id of the receipt line that carries a single workspace's report-DB
+/// days. The report stores per-project totals and per-model totals but not
+/// their cross product, so a workspace-narrowed view of those days cannot be
+/// split by model. Paired with source [`REPORT_SOURCE`].
+pub const REPORT_HISTORY_MODEL: &str = "history";
+/// Source of the [`REPORT_HISTORY_MODEL`] line.
+pub const REPORT_SOURCE: &str = "report";
+
+/// Fold one report day's per-project totals into `by_workspace`, and — when
+/// `workspace` narrows the view — the matching project into the receipt as a
+/// single [`REPORT_HISTORY_MODEL`] line plus its trend point.
+///
+/// The all-workspace view takes its lines and trend from `model_breakdown`
+/// instead (see [`fold_report_days`]); folding both would double-count.
+fn fold_report_projects(
+    date: &str,
+    projects: &[crate::daily_report::ProjectMetrics],
+    workspace: Option<&str>,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+    by_day: &mut std::collections::BTreeMap<String, LineAcc>,
+    by_workspace: &mut std::collections::HashMap<String, LineAcc>,
+) {
+    for p in projects {
+        // Same netting as `fold_report_model`: the stored input is
+        // `Σ(input + cache_write + cache_read)`.
+        let net_input = p
+            .total_input_tokens
+            .saturating_sub(p.total_cache_creation_tokens)
+            .saturating_sub(p.total_cache_read_tokens);
+        let key = crate::session::repo_root_path(&p.workspace_path);
+        let add = |acc: &mut LineAcc| {
+            acc.add(
+                net_input,
+                p.total_cache_creation_tokens,
+                0,
+                p.total_cache_read_tokens,
+                p.total_output_tokens,
+                p.total_cost_usd,
+            )
+        };
+        if workspace.is_some_and(|w| workspace_matches(&key, w)) {
+            add(by_model
+                .entry((REPORT_SOURCE.to_string(), REPORT_HISTORY_MODEL.to_string()))
+                .or_default());
+            add(by_day.entry(date.to_string()).or_default());
+        }
+        add(by_workspace.entry(key).or_default());
+    }
+}
+
+/// Whether a repo-root key belongs to the workspace filter `filter` (any path
+/// inside the repo, worktree checkouts included).
+fn workspace_matches(repo_root: &str, filter: &str) -> bool {
+    crate::session::same_workspace_path(repo_root, &crate::session::repo_root_path(filter))
+}
+
+/// Turn the per-repo-root accumulators into wire lines, sorted by descending
+/// cost (then name, for a stable order among ties). Workspaces with neither
+/// tokens nor cost in the window are dropped.
+fn build_workspace_lines(
+    by_workspace: std::collections::HashMap<String, LineAcc>,
+) -> Vec<WorkspaceUsageLine> {
+    let mut lines: Vec<WorkspaceUsageLine> = by_workspace
+        .into_iter()
+        .filter(|(_, acc)| {
+            acc.cost > 0.0
+                || acc.input + acc.cache_creation + acc.cache_read + acc.output > 0
+        })
+        .map(|(path, acc)| WorkspaceUsageLine {
+            workspace_name: crate::session::workspace_name(&path),
+            workspace_path: path,
+            input_tokens: acc.input,
+            cache_creation_tokens: acc.cache_creation,
+            cache_read_tokens: acc.cache_read,
+            output_tokens: acc.output,
+            cost_usd: acc.cost,
+        })
+        .collect();
+    lines.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.workspace_name.cmp(&b.workspace_name))
+    });
+    lines
 }
 
 /// Fold one report day's `(model, ModelTokens)` entry into the receipt
@@ -1621,12 +1757,14 @@ fn build_range_breakdown_cached(
     sessions: &[SessionInfo],
     from_ms: i64,
     to_ms: i64,
+    workspace: Option<&str>,
     cache: &mut UsageBreakdownCache,
 ) -> UsageRangeBreakdown {
     use std::collections::{BTreeMap, HashMap};
 
     let mut by_model: HashMap<(String, String), LineAcc> = HashMap::new();
     let mut by_day: BTreeMap<String, LineAcc> = BTreeMap::new();
+    let mut by_workspace: HashMap<String, LineAcc> = HashMap::new();
     let mut has_codex_approximation = false;
 
     // Date-granularity window bounds; cells carry `YYYY-MM-DD` keys.
@@ -1657,6 +1795,24 @@ fn build_range_breakdown_cached(
             continue;
         }
         let cells = cache.cells(s);
+        let ws_key = crate::session::repo_root_path(&s.workspace_path);
+        let ws_acc = by_workspace.entry(ws_key.clone()).or_default();
+        for ((date, _model), acc) in cells {
+            if date.is_empty() || date.as_str() < live_from_date.as_str() || date.as_str() > to_date.as_str() {
+                continue;
+            }
+            ws_acc.add(
+                acc.input,
+                acc.cache_creation,
+                acc.cache_creation_1h,
+                acc.cache_read,
+                acc.output,
+                acc.cost,
+            );
+        }
+        if workspace.is_some_and(|w| !workspace_matches(&ws_key, w)) {
+            continue;
+        }
         if s.agent_source == "codex" && codex_cells_are_approximate(cells) {
             has_codex_approximation = true;
         }
@@ -1673,9 +1829,17 @@ fn build_range_breakdown_cached(
     // Backfill the pre-live-window portion `[from_date, live_from_date)` from the
     // durable daily-report DB. No-op for the today/7d presets (whose `from_date`
     // is already at or after the live floor).
-    fold_report_days(&from_date, &live_from_date, &mut by_model, &mut by_day);
+    fold_report_days(
+        &from_date,
+        &live_from_date,
+        workspace,
+        &mut by_model,
+        &mut by_day,
+        &mut by_workspace,
+    );
 
     let lines = build_lines(by_model);
+    let workspace_lines = build_workspace_lines(by_workspace);
 
     let mut total_input = 0u64;
     let mut total_cache_creation = 0u64;
@@ -1732,6 +1896,8 @@ fn build_range_breakdown_cached(
         // the split don't see `undefined`.
         fleet_cost_usd: 0.0,
         has_codex_approximation,
+        workspace: workspace.map(crate::session::repo_root_path),
+        by_workspace: workspace_lines,
     }
 }
 
@@ -2776,6 +2942,124 @@ mod range_breakdown_tests {
     }
 
     #[test]
+    fn workspace_filter_narrows_receipt_but_by_workspace_lists_all() {
+        let d = "2026-07-15T10:00:00Z";
+        let from = ts(d) - 1000;
+        let to = ts(d) + 1000;
+        let mut main = claude_session(
+            "ws-main",
+            from,
+            to,
+            &turn_at("m", d, "claude-sonnet-4-5", 1000, 0, 0, 100),
+        );
+        main.id = "ws-main".into(); // the projection cache is keyed by id
+        main.workspace_path = "/r/alpha".into();
+        // A plan worktree of the same repo bills to the repo.
+        let mut wt = claude_session(
+            "ws-wt",
+            from,
+            to,
+            &turn_at("w", d, "claude-sonnet-4-5", 2000, 0, 0, 200),
+        );
+        wt.id = "ws-wt".into(); // the projection cache is keyed by id
+        wt.workspace_path = "/r/alpha/.worktrees/some-plan".into();
+        let mut other = claude_session(
+            "ws-other",
+            from,
+            to,
+            &turn_at("o", d, "claude-haiku-4-5", 4000, 0, 0, 400),
+        );
+        other.id = "ws-other".into(); // the projection cache is keyed by id
+        other.workspace_path = "/r/beta".into();
+        let sessions = [main, wt, other];
+
+        let all = build_range_breakdown(&sessions, from, to);
+        assert_eq!(all.workspace, None);
+        assert_eq!(all.total_input_tokens, 7000);
+        assert_eq!(all.by_workspace.len(), 2, "worktree folded into its repo");
+        let alpha = all
+            .by_workspace
+            .iter()
+            .find(|w| w.workspace_path == "/r/alpha")
+            .expect("alpha row");
+        assert_eq!(alpha.workspace_name, "alpha");
+        assert_eq!(alpha.input_tokens, 3000);
+        assert_eq!(alpha.output_tokens, 300);
+        let ws_cost: f64 = all.by_workspace.iter().map(|w| w.cost_usd).sum();
+        assert!((ws_cost - all.total_cost_usd).abs() < 1e-9, "Σ workspaces == total");
+
+        // Filter by a path inside the repo (here: the worktree itself).
+        let narrowed = build_range_breakdown_cached(
+            &sessions,
+            from,
+            to,
+            Some("/r/alpha/.worktrees/some-plan"),
+            &mut UsageBreakdownCache::default(),
+        );
+        assert_eq!(narrowed.workspace.as_deref(), Some("/r/alpha"));
+        assert_eq!(narrowed.total_input_tokens, 3000);
+        assert_eq!(narrowed.total_output_tokens, 300);
+        assert_eq!(narrowed.lines.len(), 1);
+        assert_eq!(narrowed.lines[0].model, "claude-sonnet-4-5");
+        assert!((narrowed.total_cost_usd - alpha.cost_usd).abs() < 1e-9);
+        let day_cost: f64 = narrowed.daily.iter().map(|p| p.cost_usd).sum();
+        assert!((day_cost - narrowed.total_cost_usd).abs() < 1e-9);
+        assert_eq!(narrowed.by_workspace.len(), 2, "alternatives stay listed");
+    }
+
+    #[test]
+    fn report_projects_fold_per_repo_and_into_history_line_when_narrowed() {
+        use crate::daily_report::ProjectMetrics;
+        use std::collections::{BTreeMap, HashMap};
+        let project = |path: &str, input: u64, cc: u64, cr: u64, cost: f64| ProjectMetrics {
+            workspace_path: path.into(),
+            workspace_name: String::new(),
+            session_count: 1,
+            subagent_count: 0,
+            total_input_tokens: input,
+            total_output_tokens: 10,
+            total_cache_creation_tokens: cc,
+            total_cache_read_tokens: cr,
+            total_web_search_requests: 0,
+            total_cost_usd: cost,
+            tool_calls: 0,
+            sessions: Vec::new(),
+        };
+        let projects = vec![
+            project("/r/alpha", 1000, 200, 300, 1.0),
+            project("/r/alpha/.worktrees/p", 500, 0, 0, 0.5),
+            project("/r/beta", 100, 0, 0, 2.0),
+        ];
+
+        // All-workspace view: only by_workspace is touched here.
+        let (mut by_model, mut by_day, mut by_ws) = (HashMap::new(), BTreeMap::new(), HashMap::new());
+        fold_report_projects("2026-06-01", &projects, None, &mut by_model, &mut by_day, &mut by_ws);
+        assert!(by_model.is_empty() && by_day.is_empty());
+        let alpha = &by_ws["/r/alpha"];
+        assert_eq!(alpha.input, 500 + 500, "input netted of both cache figures");
+        assert!((alpha.cost - 1.5).abs() < 1e-9);
+
+        // Narrowed: the matching projects become one provider-priced history line.
+        let (mut by_model, mut by_day, mut by_ws) = (HashMap::new(), BTreeMap::new(), HashMap::new());
+        fold_report_projects(
+            "2026-06-01",
+            &projects,
+            Some("/r/alpha"),
+            &mut by_model,
+            &mut by_day,
+            &mut by_ws,
+        );
+        assert_eq!(by_ws.len(), 2);
+        let lines = build_lines(by_model);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].source, REPORT_SOURCE);
+        assert_eq!(lines[0].model, REPORT_HISTORY_MODEL);
+        assert!(lines[0].priced_by_provider);
+        assert!((lines[0].cost_usd - 1.5).abs() < 1e-9);
+        assert!((by_day["2026-06-01"].cost - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
     fn out_of_window_turns_excluded_but_spanning_session_still_read() {
         // Session created before `from` and active after `to` — must be read
         // (not pruned) and filtered per turn: only the middle turn counts.
@@ -3131,7 +3415,7 @@ mod range_breakdown_tests {
         let when = chrono::Local::now().timestamp_millis();
         seed_fleet_entry(when);
 
-        let b = usage_range_breakdown(&[], when - 86_400_000, when + 1000);
+        let b = usage_range_breakdown(&[], when - 86_400_000, when + 1000, None);
         std::env::remove_var("FLEET_HOME");
 
         assert!(
