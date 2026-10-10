@@ -57,6 +57,11 @@ pub struct TodayUsage {
     pub session_count: u64,
 }
 
+/// Local midnight of the day containing `now_ms`, in epoch ms.
+pub fn local_day_start_ms(now_ms: i64) -> i64 {
+    day_bounds_ms(now_ms).0
+}
+
 /// Local-timezone [start, end] of the day containing `now_ms`, plus the
 /// `YYYY-MM-DD` label. `end` is the last millisecond of the day (inclusive),
 /// matching `llm_usage::list_usage_daily_buckets`' inclusive window.
