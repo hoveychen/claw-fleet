@@ -13,6 +13,7 @@ import type { AccountUsage, TodayUsage, UsageBar } from "../types";
 import { FoxyIcon } from "./AgentSourceIcon";
 import { UsageChart } from "./UsageChart";
 import { CodexUsageChart } from "./CodexUsageChart";
+import { WorkspaceUsageCard } from "./WorkspaceUsage";
 import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
@@ -284,6 +285,14 @@ export function UsageView({
             )}
           </div>
         </div>
+
+        {/* ── Spend by workspace (current device) ── */}
+        {client && (
+          <div className={styles.section}>
+            <SectionHead label={t("按 workspace 花费")} device={activeDeviceLabel} />
+            <WorkspaceUsageCard key={reloadKey} client={client} />
+          </div>
+        )}
 
         {error && <div className={styles.hint}>{t("用量加载失败：{0}", error)}</div>}
         {/* First load: hold the Claude account card's place (rows + two bars). */}

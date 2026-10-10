@@ -4,7 +4,12 @@
 // that data instead of rescanning sessions.
 
 import type { FleetTransport } from "./transport";
-import type { AccountUsage, CodexUsageHistoryPoint, UsageHistoryPoint } from "./types";
+import type {
+  AccountUsage,
+  CodexUsageHistoryPoint,
+  UsageHistoryPoint,
+  UsageRangeBreakdown,
+} from "./types";
 
 /** Claude account profile + rate limits from each source.
  *  Desktop actually hits Anthropic / codex APIs for this. */
@@ -31,6 +36,22 @@ export function fetchCodexUsageHistory(
   toMs: number,
 ): Promise<CodexUsageHistoryPoint[]> {
   return client.request<CodexUsageHistoryPoint[]>("codex_usage_history", { fromMs, toMs });
+}
+
+/** Usage receipt over `[fromMs, toMs]` with its per-workspace split; `workspace`
+ *  (a repo path) narrows the lines and totals to that workspace. A first fold of
+ *  a long window reads every transcript in it, hence the longer timeout. */
+export function fetchUsageRangeBreakdown(
+  client: FleetTransport,
+  fromMs: number,
+  toMs: number,
+  workspace: string | null,
+): Promise<UsageRangeBreakdown> {
+  return client.request<UsageRangeBreakdown>(
+    "usage_range_breakdown",
+    { fromMs, toMs, workspace },
+    ACCOUNT_TIMEOUT_MS,
+  );
 }
 
 /** Desktop makes network calls (even reads keychain); default timeout is insufficient. */

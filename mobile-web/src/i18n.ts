@@ -1042,6 +1042,14 @@ const DICT: Record<string, string> = {
   "{0} 分钟后重置": "resets in {0}m",
   "上一周期 {0}%": "prev {0}%",
   "占用率变化 · 近 24 小时": "Occupancy · last 24h",
+  "按 workspace 花费": "Spend by workspace",
+  "今天": "Today",
+  "近 7 天": "Last 7 days",
+  "近 30 天": "Last 30 days",
+  "此区间还没有用量": "No usage in this range yet",
+  "更早日期": "Earlier days",
+  "7 天前的会话记录已清理，这些日子只有该 workspace 的总额，没有按模型的明细":
+    "Transcripts older than 7 days are gone, so those days only have this workspace's total, with no per-model split",
   "近 24 小时占用率": "Occupancy over the last 24 hours",
   "还没有攒够采样点，桌面端跑一阵子再看。":
     "Not enough samples yet — leave the desktop running for a while.",

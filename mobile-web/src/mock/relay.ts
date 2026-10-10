@@ -369,6 +369,44 @@ export class MockRelayClient extends RelayClient {
         };
       case "account_usage":
         return { claude: null, claudeError: null, sources: [] };
+      case "usage_range_breakdown": {
+        const ws = (params?.workspace as string | null | undefined) ?? null;
+        const byWorkspace = [
+          ["/Users/demo/workspace/claude-fleet", "claude-fleet", 18.42, 41_200_000],
+          ["/Users/demo/workspace/netferry", "netferry", 6.1, 12_800_000],
+        ].map(([workspacePath, workspaceName, costUsd, tokens]) => ({
+          workspacePath,
+          workspaceName,
+          inputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: tokens as number,
+          outputTokens: 0,
+          costUsd,
+        }));
+        const picked = byWorkspace.find((w) => w.workspacePath === ws);
+        const lines = picked
+          ? [
+              {
+                model: "claude-opus-4-8",
+                source: "claude-code",
+                inputTokens: 0,
+                cacheCreationTokens: 0,
+                cacheCreation1hTokens: 0,
+                cacheReadTokens: picked.cacheReadTokens,
+                outputTokens: 0,
+                inputPrice: 0,
+                outputPrice: 0,
+                cacheWritePrice: 0,
+                cacheWrite1hPrice: 0,
+                cacheReadPrice: 0,
+                costUsd: picked.costUsd,
+                pricedByProvider: false,
+                unpricedCalls: 0,
+              },
+            ]
+          : [];
+        return { lines, daily: [], workspace: ws, byWorkspace };
+      }
       // Everything under the mock store dir is "still there". Returning a blank
       // list (the old fixture) made the composer's restore-validation prune
       // every chip the moment it was added, so attachments never rendered here.

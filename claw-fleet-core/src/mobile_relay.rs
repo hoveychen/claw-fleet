@@ -2525,6 +2525,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "token_breakdown" => serve_token_breakdown(params),
         "today_usage" => serve_today_usage(params),
         "today_usage_breakdown" => serve_today_usage_breakdown(params),
+        "usage_range_breakdown" => serve_usage_range_breakdown(params),
         "account_usage" => serve_account_usage(params),
         "usage_history" => serve_usage_history(params),
         "codex_usage_history" => serve_codex_usage_history(params),
@@ -3267,11 +3268,33 @@ fn current_sessions() -> Vec<crate::session::SessionInfo> {
 }
 
 // Per-model receipt breakdown behind the header counter (mirrors
-// `LocalBackend::today_usage_breakdown` / `/today_usage_breakdown`).
+// `/today_usage_breakdown`).
 fn serve_today_usage_breakdown(_params: &Value) -> Result<Value, String> {
     // Same projection, same list — see `current_sessions`. Uncached (unlike
     // `today_usage`) because this one is opened by hand, not polled.
     let breakdown = crate::today_usage::today_usage_breakdown(&current_sessions());
+    serde_json::to_value(breakdown).map_err(|e| e.to_string())
+}
+
+// Range receipt with the per-workspace split, optionally narrowed to one
+// workspace (mirrors `LocalBackend::usage_range_breakdown` /
+// `/usage_range_breakdown`). Defaults to today when the window is omitted.
+fn serve_usage_range_breakdown(params: &Value) -> Result<Value, String> {
+    let now_ms = chrono::Local::now().timestamp_millis();
+    let to_ms = params.get("toMs").and_then(Value::as_i64).unwrap_or(now_ms);
+    let from_ms = params.get("fromMs").and_then(Value::as_i64).unwrap_or_else(|| {
+        crate::today_usage::local_day_start_ms(now_ms)
+    });
+    let workspace = params
+        .get("workspace")
+        .and_then(Value::as_str)
+        .filter(|w| !w.is_empty());
+    let breakdown = crate::today_usage::usage_range_breakdown(
+        &current_sessions(),
+        from_ms,
+        to_ms,
+        workspace,
+    );
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
