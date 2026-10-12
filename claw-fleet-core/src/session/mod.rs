@@ -2491,6 +2491,58 @@ mod tests {
         assert_eq!(s.status, SessionStatus::Executing);
     }
 
+    fn make_quiet_subagent() -> SessionInfo {
+        let mut s = make_session(SessionStatus::Executing);
+        s.is_subagent = true;
+        s.pending_tool_batch = true;
+        s
+    }
+
+    #[test]
+    fn subagent_in_a_long_tool_stays_executing_while_its_parent_lives() {
+        // The fleet-cloud case: a subagent ten minutes into one Bash call. Age
+        // alone demotes it to Idle; the live parent plus the unresolved tool_use
+        // must bring it back.
+        let mut s = make_quiet_subagent();
+        age_out_status(&mut s, 600.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+        apply_subagent_tool_liveness(&mut s, true, 600.0);
+        assert_eq!(s.status, SessionStatus::Executing);
+    }
+
+    #[test]
+    fn subagent_anchor_needs_a_live_parent_and_an_open_batch() {
+        let mut s = make_quiet_subagent();
+        s.status = SessionStatus::Idle;
+        apply_subagent_tool_liveness(&mut s, false, 600.0);
+        assert_eq!(s.status, SessionStatus::Idle, "parent process gone");
+
+        let mut s = make_quiet_subagent();
+        s.status = SessionStatus::Idle;
+        s.pending_tool_batch = false;
+        apply_subagent_tool_liveness(&mut s, true, 600.0);
+        assert_eq!(s.status, SessionStatus::Idle, "finished subagent");
+
+        let mut s = make_quiet_subagent();
+        s.status = SessionStatus::Idle;
+        apply_subagent_tool_liveness(&mut s, true, STUCK_TOOL_BATCH_FLOOR_SECS);
+        assert_eq!(s.status, SessionStatus::Idle, "past the stuck floor");
+    }
+
+    #[test]
+    fn subagent_anchor_ignores_main_sessions_and_non_idle_statuses() {
+        let mut main = make_quiet_subagent();
+        main.is_subagent = false;
+        main.status = SessionStatus::Idle;
+        apply_subagent_tool_liveness(&mut main, true, 600.0);
+        assert_eq!(main.status, SessionStatus::Idle);
+
+        let mut s = make_quiet_subagent();
+        s.status = SessionStatus::WaitingInput;
+        apply_subagent_tool_liveness(&mut s, true, 600.0);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
     #[test]
     fn pid_liveness_anchor_leaves_a_real_waiting_input_alone() {
         // WaitingInput derived by this scan (an `end_turn` tail, a Stop hook, an
