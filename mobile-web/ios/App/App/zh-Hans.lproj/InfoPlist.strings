@@ -1,0 +1,4 @@
+/* Chinese copy of the permission prompts in Info.plist. */
+"NSMicrophoneUsageDescription" = "用于把你说的话转成文字，填进输入框。";
+"NSSpeechRecognitionUsageDescription" = "用于把你说的话转成文字，填进输入框。";
+"NSCameraUsageDescription" = "用于扫描电脑上 Fleet 显示的配对二维码。";
