@@ -232,6 +232,33 @@ pub fn apply_pid_liveness(
 
 /// Check if a cached session entry is still valid (mtime matches).
 /// Returns `(cached_info, age_secs)` on hit.
+/// Tool-batch anchor for subagents, the counterpart of the one in
+/// [`apply_pid_liveness`] (which skips subagents because they have no process of
+/// their own).
+///
+/// A background subagent parked in a long tool call (a 10-minute `Bash`
+/// download, say) writes nothing to its transcript, so `age_out_status` demotes
+/// its Executing to Idle after 60s and the UI shows it as finished while the
+/// parent is still waiting on it. Observed 2026-10-12 on fleet-cloud: a
+/// storyboard agent reported `idle` with `pending_tool_batch` set and its
+/// parent's `claude -p` alive, and its transcript kept growing minutes later.
+///
+/// The parent's Fleet-registered process being alive is the evidence: a
+/// subagent runs inside it, and the unresolved `tool_use` says it is mid-call.
+/// Capped at [`STUCK_TOOL_BATCH_FLOOR_SECS`] so a subagent that died with an
+/// unanswered `tool_use` (the parent stopped it, say) does not read as busy for
+/// the rest of the parent's turn.
+pub fn apply_subagent_tool_liveness(info: &mut SessionInfo, parent_proc_alive: bool, age_secs: f64) {
+    if info.is_subagent
+        && parent_proc_alive
+        && info.pending_tool_batch
+        && info.status == SessionStatus::Idle
+        && age_secs < STUCK_TOOL_BATCH_FLOOR_SECS
+    {
+        info.status = SessionStatus::Executing;
+    }
+}
+
 fn check_session_cache(
     path: &Path,
     cache: &HashMap<String, (u64, SessionInfo)>,
@@ -617,6 +644,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         check_session_cache(&agent_path, &session_cache_snapshot)
                     {
                         age_out_status(&mut info, age);
+                        apply_subagent_tool_liveness(&mut info, sub_pid.is_some(), age);
                         // Same re-stamp as the main-session cache hit above.
                         info.workspace_path = workspace_path.clone();
                         info.workspace_name = ws_name.clone();
