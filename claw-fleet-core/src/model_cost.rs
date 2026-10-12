@@ -187,7 +187,10 @@ pub const HAIKU_55_LONG_PROMPT_ABOVE: u64 = 100_000;
 // surcharge is deliberately NOT modeled here. Codex rollouts only give
 // cumulative per-session token totals, not per-request counts, so applying a
 // per-request multiplier to the cumulative sum would over-count. See
-// `codex_source::codex_cost_and_input`.
+// `codex_source::codex_cost_and_input`. Since 2026-10-12 OpenAI also waives
+// the surcharge for gpt-6.1-sol under ChatGPT subscription quotas (alongside
+// raising its Codex default window to 500K), so for subscription-billed Codex
+// sessions on that model the flat rate is the correct figure anyway.
 
 // gpt-6-astra standard short-context pricing: $10 / $50 per Mtok, with
 // cached input at $1 and explicit cache writes at $12.50 (verified 2026-09-06).
