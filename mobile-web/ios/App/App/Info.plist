@@ -24,13 +24,27 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- 语音输入（src/voiceCapacitor.ts）。iOS 上 SFSpeechRecognizer 要两个授权
-	     且缺一不可：只有识别授权而没有麦克风授权，start 会直接崩。文案会原样
-	     显示在系统弹窗里，所以写清楚用途而不是写「需要权限」。 -->
+	<!-- Voice input (src/voiceCapacitor.ts). SFSpeechRecognizer needs both
+	     grants: with recognition authorised but no microphone grant, start
+	     crashes outright. The strings are shown verbatim in the system prompt,
+	     so they state the purpose rather than "permission needed".
+	     These are the English defaults (the app ships to non-mainland stores,
+	     whose reviewers read English); zh-Hans.lproj/InfoPlist.strings carries
+	     the Chinese copy for Chinese-language devices. -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>用于把你说的话转成文字，填进输入框。</string>
+	<string>Turns what you say into text in the message box.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>用于把你说的话转成文字，填进输入框。</string>
+	<string>Turns what you say into text in the message box.</string>
+	<!-- The pairing viewfinder (views/PairScanner.tsx) opens the camera through
+	     getUserMedia inside the WebView; without this key iOS kills the app the
+	     moment it asks. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Scans the pairing QR code shown by Fleet on your computer.</string>
+	<!-- Relay traffic is encrypted only with the OS-provided WebCrypto
+	     (HKDF + AES-GCM) and TLS, which is exempt; declaring it here skips the
+	     export-compliance question on every TestFlight / App Store upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

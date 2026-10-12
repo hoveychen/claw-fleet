@@ -26,7 +26,16 @@
 #
 # Usage:
 #   ./scripts/build-android-apk.sh
+#   ./scripts/build-android-apk.sh --aab     # Play Store upload bundle instead
 #   RELAY_URL=https://relay.example.com ./scripts/build-android-apk.sh
+#
+# --aab builds an Android App Bundle (bundleRelease) for Google Play, signed
+# with the same release key. Play installs APKs it generates from the bundle
+# and signs them with the *app signing key* Play holds — so unless that key is
+# this same keystore (Play Console: "use my own app signing key"), the
+# installed app's SHA-256 differs from the one in assetlinks.json and pairing
+# links stop opening the app. Either enrol this key as the app signing key, or
+# add Play's app-signing fingerprint to the relay's assetlinks.json.
 #
 # Environment overrides:
 #   RELAY_URL           fallback relay baked into the bundle (see above)
@@ -38,10 +47,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+FORMAT=apk
 while [ $# -gt 0 ]; do
   case "$1" in
+    --aab)
+      FORMAT=aab
+      shift
+      ;;
     -h|--help)
-      sed -n '2,40p' "$0"
+      sed -n '2,45p' "$0"
       exit 0
       ;;
     *)
@@ -138,12 +152,10 @@ VERSION_NAME="${BASE_VERSION}+${VERSION_CODE}.${GIT_SHA}${DIRTY}"
 mkdir -p "$OUT_DIR"
 
 APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-OUT_APK="$OUT_DIR/Fleet-${VERSION_NAME}.apk"
+AAB_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+OUT_APK="$OUT_DIR/Fleet-${VERSION_NAME}.$FORMAT"
 
-build_apk() {
-  local apk="$APK_PATH"
-  local out="$OUT_APK"
-
+build_web() {
   # build-shell.sh bakes VITE_RELAY_URL into the bundle and runs `cap sync`,
   # which is what copies it into android/app/src/main/assets/public. Passing an
   # empty RELAY_URL lets its own default apply rather than overriding it here.
@@ -152,17 +164,53 @@ build_apk() {
   else
     ./scripts/build-shell.sh
   fi
+}
 
-  echo "==> assembling signed release APK (versionCode=$VERSION_CODE versionName=$VERSION_NAME)"
-  rm -f "$apk" "${apk%.apk}-unsigned.apk"
+run_gradle() {
   (
     cd android
     FLEET_KEYSTORE_PATH="$KEYSTORE" \
     FLEET_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" \
     FLEET_VERSION_CODE="$VERSION_CODE" \
     FLEET_VERSION_NAME="$VERSION_NAME" \
-      ./gradlew --quiet assembleRelease
+      ./gradlew --quiet "$1"
   )
+}
+
+build_aab() {
+  local aab="$AAB_PATH"
+  local out="$OUT_APK"
+
+  build_web
+  echo "==> bundling signed release AAB (versionCode=$VERSION_CODE versionName=$VERSION_NAME)"
+  rm -f "$aab"
+  run_gradle bundleRelease
+  [ -f "$aab" ] || fail "gradle reported success but $aab is missing"
+
+  # An AAB is jar-signed, so apksigner does not apply; keytool reads the
+  # signer certificate out of the bundle. No certificate means gradle skipped
+  # the signing config, and Play rejects an unsigned upload.
+  echo "==> verifying signature"
+  local actual_fp
+  actual_fp="$(
+    "$JAVA_HOME/bin/keytool" -printcert -jarfile "$aab" 2>/dev/null |
+      awk '/^[[:space:]]*SHA256:/ { print $2; exit }' | normalize_fp
+  )"
+  [ -n "$actual_fp" ] || fail "$aab carries no signer certificate — gradle did not pick up FLEET_KEYSTORE_PATH/$KEYSTORE"
+  [ "$actual_fp" = "$EXPECTED_FP" ] || fail \
+    "AAB is signed with $actual_fp but the release keystore is $EXPECTED_FP"
+
+  mv "$aab" "$out"
+}
+
+build_apk() {
+  local apk="$APK_PATH"
+  local out="$OUT_APK"
+
+  build_web
+  echo "==> assembling signed release APK (versionCode=$VERSION_CODE versionName=$VERSION_NAME)"
+  rm -f "$apk" "${apk%.apk}-unsigned.apk"
+  run_gradle assembleRelease
   # Unsigned builds land under a *different* name (app-release-unsigned.apk),
   # so a missing app-release.apk is the tell that the signing config was
   # skipped — verified 2026-09-01 by running assembleRelease with the env unset.
@@ -191,6 +239,16 @@ build_apk() {
 
   mv "$apk" "$out"
 }
+
+if [ "$FORMAT" = aab ]; then
+  build_aab
+  echo
+  echo "  $OUT_APK"
+  echo "    size   $(du -h "$OUT_APK" | cut -f1)"
+  echo "    versionCode $VERSION_CODE  versionName $VERSION_NAME"
+  echo "  Upload to Play Console. See --help on app signing vs assetlinks.json."
+  exit 0
+fi
 
 build_apk
 
