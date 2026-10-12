@@ -18,6 +18,8 @@ PAGE_PAIRS = [('', 'zh/'), ('benchmark.html', 'zh/benchmark.html')]
 # and the lastmod map) by adding its content block and one line.
 CONTENT_SLUGS = ['claude-code-gui', 'codex-gui', 'deepseek-harness-gui', 'supported-tools']
 PAGE_PAIRS += [(f'{slug}.html', f'zh/{slug}.html') for slug in CONTENT_SLUGS]
+# The mobile app's privacy policy; its URL is what the app stores link to.
+PAGE_PAIRS.append(('privacy.html', 'zh/privacy.html'))
 # One entry per download row, positionally matched to content['platforms'].
 # Each row names its icon and the buttons it carries, so a row with two builds
 # (Linux) or a new platform (Android) is a data change, not an index trick.
@@ -134,7 +136,7 @@ def build(lang, c):
 <section class="faq wrap"><h2>{c['faqHeading']}</h2><div>{faq}</div></section>
 <section class="closing wrap"><h2>{c['closing']}</h2><a class="button primary" href="#download">{c['cta']}<span aria-hidden="true">↓</span></a></section>
 </main>
-<footer class="wrap"><div class="footer-top"><a class="brand" href="#main"><img src="{base}icon.png" width="28" height="28" alt="">Claw Fleet</a><div><a href="{GITHUB}">{c['sourceCode']}</a><a href="{GITHUB}/blob/main/README.md">{c['guide']}</a><a href="{GITHUB}/blob/main/LICENSE">{c['license']}</a><a class="language" href="{other}">{c['language']}</a></div></div><p>{c['footer']}</p></footer>
+<footer class="wrap"><div class="footer-top"><a class="brand" href="#main"><img src="{base}icon.png" width="28" height="28" alt="">Claw Fleet</a><div><a href="{GITHUB}">{c['sourceCode']}</a><a href="{GITHUB}/blob/main/README.md">{c['guide']}</a><a href="{GITHUB}/blob/main/LICENSE">{c['license']}</a><a href="privacy.html">{c['privacy']}</a><a class="language" href="{other}">{c['language']}</a></div></div><p>{c['footer']}</p></footer>
 </body></html>'''
 
 
@@ -188,6 +190,7 @@ def build_404(content, asset):
 if __name__ == '__main__':
     import benchmark
     import content_page
+    import privacy
     bm_copy=json.loads((ROOT/'scripts/site/content/benchmark.json').read_text())
     bm_data=json.loads((ROOT/'scripts/site/content/benchmark-data.json').read_text())
     for lang in ('en','zh'):
@@ -224,6 +227,16 @@ if __name__ == '__main__':
                 other=('../' + en_path) if lang == 'zh' else zh_path,
                 github=GITHUB, social_head=head, structured=structured))
             print(out.relative_to(ROOT))
+        policy = json.loads((ROOT / 'scripts/site/content/privacy.json').read_text())[lang]
+        policy_path = 'zh/privacy.html' if lang == 'zh' else 'privacy.html'
+        (ROOT / 'docs' / policy_path).write_text(privacy.render(
+            lang, policy, asset=asset, home=base,
+            other='../privacy.html' if lang == 'zh' else 'zh/privacy.html', github=GITHUB,
+            social_head=seo.head(lang=lang, en_path='privacy.html', zh_path='zh/privacy.html',
+                                 title=policy['title'], description=policy['description'],
+                                 image=f'screenshots/current/work-{lang}.png',
+                                 image_alt=policy['h1'], page_type='article')))
+        print(policy_path)
         bm=ROOT/'docs'/('zh/benchmark.html' if lang=='zh' else 'benchmark.html')
         bm.write_text(benchmark.build(lang,bm_copy[lang],bm_data,asset,base,
             '../benchmark.html' if lang=='zh' else 'zh/benchmark.html',GITHUB))
