@@ -214,6 +214,7 @@
   "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic.",
   "sourceCode": "Source code",
   "license": "License",
+  "privacy": "Privacy",
   "screenshotAlt": "Current Fleet project workspace, with tasks and the new-session composer",
   "mobileAlt": "Fleet mobile review with a launch decision and two concrete options",
   "guide": "Project guide",

@@ -1,0 +1,188 @@
+{
+  "en": {
+    "title": "Privacy Policy — Fleet mobile app",
+    "description": "What the Fleet mobile app for iOS and Android does with your data: no accounts, no analytics, end-to-end encrypted pairing with your own computer.",
+    "skip": "Skip to content",
+    "backHome": "Home",
+    "eyebrow": "Fleet mobile app",
+    "h1": "Privacy Policy",
+    "effective": "Effective date: 2026-10-12",
+    "lede": "This policy covers the <strong>Fleet</strong> mobile app for iOS and Android (bundle ID <code>com.hoveychen.clawfleet</code>) and the pairing relay it connects to. Fleet is the mobile companion to <a href=\"https://github.com/hoveychen/claw-fleet\">Claw Fleet</a>, an open-source desktop app. Both are operated by Muvee AI (“we”).",
+    "sections": [
+      {
+        "h2": "The short version",
+        "blocks": [
+          {"ul": [
+            "Fleet has <strong>no accounts, no ads, no analytics and no tracking SDKs</strong>. We do not sell or share data with anyone for advertising.",
+            "Your coding sessions, decision cards, files and messages live on <strong>your own computer</strong>. The app only shows them to you.",
+            "Everything travelling between the app and your computer is <strong>end-to-end encrypted</strong>. The relay that forwards it cannot read it."
+          ]}
+        ]
+      },
+      {
+        "h2": "How Fleet works",
+        "blocks": [
+          {"p": "You pair the app with the Claw Fleet desktop app by scanning a QR code. The QR code contains the address of a relay server and a random pairing secret. Both the app and your computer derive two keys from that secret: one identifies your private channel on the relay, the other encrypts every message with AES-256-GCM. The relay only moves encrypted messages between the two ends."},
+          {"p": "By default the app uses the relay we run at <code>fleet-relay.muveeai.com</code>. You can run your own relay instead; in that case none of the relay data described below ever reaches us."}
+        ]
+      },
+      {
+        "h2": "What data is involved, and where it goes",
+        "blocks": [
+          {"h3": "Stored only on your phone"},
+          {"ul": [
+            "<strong>Pairing secrets and the list of paired computers</strong>, kept in the app’s local storage so you stay paired. Removing a device in the app, or uninstalling the app, deletes them.",
+            "<strong>Drafts and display preferences</strong>, such as an unsent message, theme and language."
+          ]},
+          {"h3": "Passed through the relay, end-to-end encrypted"},
+          {"p": "Session lists, decision cards and your answers, conversation messages, wiki documents, usage figures, and any files or text you share into the app. The relay sees only ciphertext. If your computer is offline, an encrypted message may wait in the relay’s memory <strong>for up to 10 minutes</strong> and is then discarded."},
+          {"h3": "Seen by the relay, not encrypted"},
+          {"ul": [
+            "<strong>Channel identifier</strong>: a value derived from your pairing secret. It routes messages but reveals nothing about their content.",
+            "<strong>IP address</strong>: used in memory to rate-limit connections. It is written to the relay’s server log only when a connection is rejected for exceeding a limit."
+          ]},
+          {"h3": "Notifications"},
+          {"p": "The current iOS and Android versions of Fleet do not send push notifications, and do not register with Apple Push Notification service or Firebase Cloud Messaging. If a future version adds notifications, this policy will be updated before that version is released."},
+          {"h3": "Camera"},
+          {"p": "Used only to scan the pairing QR code. The image is decoded on your device and is never stored or uploaded."},
+          {"h3": "Microphone and speech recognition"},
+          {"p": "Used only when you tap the voice-input button, to turn speech into text in the message box. Recognition is performed by your phone’s operating system: depending on your device and settings it runs on the device or is sent to Apple (iOS) or Google (Android) for processing under their privacy policies. Fleet does not record or keep audio."}
+        ]
+      },
+      {
+        "h2": "What we do not do",
+        "blocks": [
+          {"ul": [
+            "We do not collect your name, email, contacts or location, and we do not use device identifiers for tracking.",
+            "We do not use your data for advertising or profiling, and we do not sell it.",
+            "We do not use third-party analytics or crash-reporting services."
+          ]}
+        ]
+      },
+      {
+        "h2": "Retention and deletion",
+        "blocks": [
+          {"p": "Data on your phone stays until you remove the device in the app or uninstall the app. Encrypted messages queued on the relay expire after 10 minutes, and rejected-connection log lines are rotated with the relay’s server logs. Because there are no accounts and we hold no readable content, there is nothing else to delete."}
+        ]
+      },
+      {
+        "h2": "Children",
+        "blocks": [
+          {"p": "Fleet is a developer tool and is not directed at children under 13, or under the equivalent minimum age in your country."}
+        ]
+      },
+      {
+        "h2": "Where data is processed",
+        "blocks": [
+          {"p": "The default relay is hosted in Kuala Lumpur, Malaysia. Using it means the encrypted traffic and the limited data described above are processed there."}
+        ]
+      },
+      {
+        "h2": "Changes to this policy",
+        "blocks": [
+          {"p": "If we change this policy we will update the effective date at the top of this page. Material changes will also be mentioned in the app’s release notes."}
+        ]
+      },
+      {
+        "h2": "Contact",
+        "blocks": [
+          {"p": "Questions or requests about privacy: <a href=\"mailto:support@muvee.ai\">support@muvee.ai</a>."}
+        ]
+      }
+    ],
+    "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+  },
+  "zh": {
+    "title": "隐私政策 — Fleet 移动端",
+    "description": "Fleet iOS 与 Android 移动端如何处理你的数据：没有账号、没有统计分析，与你自己的电脑端到端加密配对。",
+    "skip": "跳到正文",
+    "backHome": "首页",
+    "eyebrow": "Fleet 移动端",
+    "h1": "隐私政策",
+    "effective": "生效日期：2026-10-12",
+    "lede": "本政策适用于 iOS 与 Android 上的 <strong>Fleet</strong> 移动应用（包名 <code>com.hoveychen.clawfleet</code>）及其连接的配对中转服务（relay）。Fleet 是开源桌面应用 <a href=\"https://github.com/hoveychen/claw-fleet\">Claw Fleet</a> 的移动端，二者均由 Muvee AI（下称「我们」）运营。",
+    "sections": [
+      {
+        "h2": "简要说明",
+        "blocks": [
+          {"ul": [
+            "Fleet <strong>没有账号、没有广告、没有统计分析、没有任何追踪 SDK</strong>。我们不会为广告目的出售或共享任何数据。",
+            "你的编码会话、决策卡、文件和消息都保存在<strong>你自己的电脑上</strong>，应用只是把它们展示给你。",
+            "应用与电脑之间传输的所有内容都经过<strong>端到端加密</strong>，负责转发的 relay 无法读取。"
+          ]}
+        ]
+      },
+      {
+        "h2": "工作方式",
+        "blocks": [
+          {"p": "你用应用扫描 Claw Fleet 桌面端显示的二维码完成配对。二维码里包含一个 relay 地址和一个随机生成的配对密钥。应用与电脑都会从这个密钥派生出两把钥匙：一把用于在 relay 上标识你的私有通道，另一把用 AES-256-GCM 加密每一条消息。relay 只在两端之间搬运密文。"},
+          {"p": "应用默认使用我们运营的 <code>fleet-relay.muveeai.com</code>。你也可以自建 relay，此时本政策所述的 relay 侧数据都不会经过我们。"}
+        ]
+      },
+      {
+        "h2": "涉及哪些数据、去往何处",
+        "blocks": [
+          {"h3": "只保存在你的手机上"},
+          {"ul": [
+            "<strong>配对密钥与已配对电脑列表</strong>：保存在应用本地存储中，以便保持配对。在应用内移除设备或卸载应用即删除。",
+            "<strong>草稿与显示偏好</strong>：如未发送的消息、主题和语言。"
+          ]},
+          {"h3": "经 relay 转发，端到端加密"},
+          {"p": "会话列表、决策卡及你的答复、对话消息、知识库文档、用量数据，以及你分享进应用的文件或文字。relay 只能看到密文。电脑离线时，加密消息最多在 relay 内存中<strong>暂存 10 分钟</strong>，随后丢弃。"},
+          {"h3": "relay 能看到的未加密数据"},
+          {"ul": [
+            "<strong>通道标识</strong>：由配对密钥派生的值，只用于路由，不透露任何内容。",
+            "<strong>IP 地址</strong>：仅在内存中用于连接限流；只有当连接因超限被拒绝时才会写入 relay 的服务器日志。"
+          ]},
+          {"h3": "通知"},
+          {"p": "当前的 iOS 与 Android 版本不发送推送通知，也不会向 Apple 推送通知服务或 Firebase 云消息注册。如果以后的版本加入通知功能，我们会在该版本发布前更新本政策。"},
+          {"h3": "相机"},
+          {"p": "仅用于扫描配对二维码。图像在设备本地解码，不会被保存或上传。"},
+          {"h3": "麦克风与语音识别"},
+          {"p": "仅在你点击语音输入按钮时使用，把语音转成输入框里的文字。识别由手机操作系统完成：视设备与设置不同，可能在本机进行，也可能发送给 Apple（iOS）或 Google（Android）处理，适用其各自的隐私政策。Fleet 不录制、不保留音频。"}
+        ]
+      },
+      {
+        "h2": "我们不做的事",
+        "blocks": [
+          {"ul": [
+            "不收集你的姓名、邮箱、通讯录或位置，也不使用设备标识符进行追踪。",
+            "不将你的数据用于广告或用户画像，也不出售数据。",
+            "不使用任何第三方统计分析或崩溃上报服务。"
+          ]}
+        ]
+      },
+      {
+        "h2": "保留与删除",
+        "blocks": [
+          {"p": "手机上的数据会一直保留，直到你在应用内移除设备或卸载应用。relay 上暂存的加密消息 10 分钟后过期，被拒连接的日志随 relay 服务器日志轮转。由于没有账号体系，我们也不持有可读内容，除此之外没有其他需要删除的数据。"}
+        ]
+      },
+      {
+        "h2": "儿童",
+        "blocks": [
+          {"p": "Fleet 是面向开发者的工具，不面向 13 岁以下（或你所在国家/地区规定的相应年龄以下）的儿童。"}
+        ]
+      },
+      {
+        "h2": "数据处理地点",
+        "blocks": [
+          {"p": "默认 relay 部署在马来西亚吉隆坡。使用默认 relay，即表示上述加密流量与有限数据在当地处理。"}
+        ]
+      },
+      {
+        "h2": "政策变更",
+        "blocks": [
+          {"p": "如本政策有变更，我们会更新本页顶部的生效日期；重大变更还会在应用的版本更新说明中告知。"}
+        ]
+      },
+      {
+        "h2": "联系我们",
+        "blocks": [
+          {"p": "有关隐私的问题或请求，请发邮件至 <a href=\"mailto:support@muvee.ai\">support@muvee.ai</a>。"}
+        ]
+      }
+    ],
+    "footer": "一个独立的开源项目，与 OpenAI、Anthropic 均无关联。"
+  }
+}

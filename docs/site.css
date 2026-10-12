@@ -1354,6 +1354,39 @@ html[lang="zh-CN"] .hero-copy .intro {
 .doc-faq p a:hover {
   color: var(--action);
 }
+/* Legal page (privacy policy): subheadings and bullet lists inside sections,
+   which the marketing prose pages never use. */
+.doc-effective {
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.doc-legal h3 {
+  margin-top: 28px;
+  font-size: 19px;
+  line-height: 1.3;
+}
+.doc-legal section ul {
+  margin-top: 14px;
+  padding-left: 1.2em;
+  list-style: disc;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.62;
+}
+.doc-legal section li + li {
+  margin-top: 8px;
+}
+.doc-legal strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.doc-legal .doc-lede a,
+.doc-legal section li a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .doc-shot {
   margin-top: 30px;
 }
