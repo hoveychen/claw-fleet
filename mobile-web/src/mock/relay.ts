@@ -43,6 +43,7 @@ import {
 } from "./data";
 
 import scenes from "../../../scripts/site/fixtures/scenes.json";
+import { localizeMock } from "./demoLocale";
 
 /** Host continuation switches (`resume_settings`); `set_resume_settings` merges into it. */
 let mockResumeSettings: Record<string, unknown> = {
@@ -115,7 +116,7 @@ export class MockRelayClient extends RelayClient {
     // The session list arrives with the first frame, so `?slow` holds it back too.
     setTimeout(() => {
       this.mockHandlers.onStatus?.(true);
-      this.mockHandlers.onSessions?.(MOCK_SESSIONS);
+      this.mockHandlers.onSessions?.(localizeMock(MOCK_SESSIONS));
       this.mockHandlers.onSessionsKind?.("full");
       // A healthy round-trip so the header light comes up green in screenshots,
       // segmented so the More page's link-timing row has something to render.
@@ -126,7 +127,7 @@ export class MockRelayClient extends RelayClient {
     // A later incremental push, so the More page demonstrates the delta path
     // engaged (incremental ✓) in mock/screenshot mode.
     setTimeout(() => {
-      this.mockHandlers.onSessions?.(MOCK_SESSIONS);
+      this.mockHandlers.onSessions?.(localizeMock(MOCK_SESSIONS));
       this.mockHandlers.onSessionsKind?.("delta");
     }, 1200);
   }
@@ -148,12 +149,13 @@ export class MockRelayClient extends RelayClient {
   }
 
   override request<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    // Every reply goes out through localizeMock so an English UI gets English
+    // fixtures (demoLocale.ts); `serve` may itself return a promise.
+    const reply = () => Promise.resolve(this.serve(method, params)).then((v) => localizeMock(v) as T);
     if (MOCK_SLOW_MS > 0) {
-      return new Promise((resolve) =>
-        setTimeout(() => resolve(this.serve(method, params) as T), MOCK_SLOW_MS),
-      );
+      return new Promise((resolve) => setTimeout(() => resolve(reply()), MOCK_SLOW_MS));
     }
-    return Promise.resolve(this.serve(method, params) as T);
+    return reply();
   }
 
   /** Mirrors `mobile_relay.rs::serve_request`. Methods with no fixture return a
@@ -267,7 +269,10 @@ export class MockRelayClient extends RelayClient {
           dismissed: false,
         };
         this.mockExplains.set(id, rec);
-        const words = MOCK_EXPLAIN_ANSWER.match(/[^，。；、！？\s]+[，。；、！？\s]*/g) ?? [MOCK_EXPLAIN_ANSWER];
+        // Localized before it is cut up: the streamed prefixes would not match
+        // demoLocale's exact-string map on the way out.
+        const answer = localizeMock(MOCK_EXPLAIN_ANSWER);
+        const words = answer.match(/[^，。；、！？\s]+[，。；、！？\s]*/g) ?? [answer];
         let n = 0;
         const timer = setInterval(() => {
           const cur = this.mockExplains.get(id);
@@ -283,7 +288,7 @@ export class MockRelayClient extends RelayClient {
           clearInterval(timer);
           this.mockExplains.set(id, {
             ...cur,
-            text: MOCK_EXPLAIN_ANSWER,
+            text: answer,
             status: "done",
             updatedMs: Date.now(),
             model: "claude-fable-5-1",
