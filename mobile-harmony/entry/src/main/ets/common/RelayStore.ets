@@ -109,20 +109,43 @@ export class RelayStore {
     await p.flush();
   }
 
-  static async loadPairing(context: common.UIAbilityContext): Promise<RelayPairing | null> {
-    const p = await RelayStore.prefs(context);
-    const relayUrl = await p.get(KEY_RELAY_URL, '') as string;
-    const secret = await p.get(KEY_SECRET, '') as string;
-    if (relayUrl.length === 0 || secret.length === 0) {
-      return null;
-    }
-    return { relayUrl, secret };
-  }
-
   static async clearPairing(context: common.UIAbilityContext): Promise<void> {
     const p = await RelayStore.prefs(context);
     await p.delete(KEY_RELAY_URL);
     await p.delete(KEY_SECRET);
     await p.flush();
+  }
+
+  /// The page removed a device (mobile-web::nativeScan.ts::forgetNativePairing). The store
+  /// holds only the last scan, which may belong to a device the user kept — then nothing
+  /// changes. Otherwise the secret goes; with `othersLeft` the relay URL stays behind as a
+  /// "page still has devices" marker, so launch keeps loading the page (without `#k=`) instead
+  /// of dropping to the native pairing screen and hiding the remaining devices.
+  static async forgetPairing(
+    context: common.UIAbilityContext, secret: string, othersLeft: boolean,
+  ): Promise<void> {
+    const p = await RelayStore.prefs(context);
+    const stored = await p.get(KEY_SECRET, '') as string;
+    if (stored.length > 0 && stored !== secret) {
+      return;
+    }
+    if (!othersLeft) {
+      await RelayStore.clearPairing(context);
+      return;
+    }
+    await p.delete(KEY_SECRET);
+    await p.flush();
+  }
+
+  /// Launch state: `null` = never paired (native pairing screen); a pairing with an empty
+  /// secret = the page owns its device book and nothing needs re-injecting.
+  static async loadLaunch(context: common.UIAbilityContext): Promise<RelayPairing | null> {
+    const p = await RelayStore.prefs(context);
+    const relayUrl = await p.get(KEY_RELAY_URL, '') as string;
+    const secret = await p.get(KEY_SECRET, '') as string;
+    if (relayUrl.length === 0) {
+      return null;
+    }
+    return { relayUrl, secret };
   }
 }

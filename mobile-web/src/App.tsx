@@ -78,6 +78,7 @@ import {
 } from "./devices";
 import { relayBaseFor } from "./relayBase";
 import { onPairingLink } from "./deepLink";
+import { forgetNativePairing } from "./nativeScan";
 import type { PairedLink } from "./pairingLink";
 import { PairPasteForm } from "./views/PairPasteForm";
 import { PairScanner } from "./views/PairScanner";
@@ -327,9 +328,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  connections to handshake. The retry effect on next boot will complete them. */
   const unpairAll = useCallback(() => {
     const now = Date.now();
-    markSecretsRemoved(
-      bookRef.current.devices.flatMap((d) => (d.kind === "relay" ? [d.secret] : [])),
-    );
+    const removed = bookRef.current.devices.flatMap((d) => (d.kind === "relay" ? [d.secret] : []));
+    markSecretsRemoved(removed);
+    for (const secret of removed) forgetNativePairing(secret, false);
     for (const d of bookRef.current.devices) {
       // Only relay devices have a push channel to unsubscribe from; HTTP direct
       // connections don't have a push channel at all.
@@ -434,7 +435,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
       clearCachedSessions(device.id);
       clearDraftsByPrefix(scopedKey(device.id, ""));
-      if (device.kind === "relay") markSecretsRemoved([device.secret]);
+      if (device.kind === "relay") {
+        markSecretsRemoved([device.secret]);
+        forgetNativePairing(device.secret, bookRef.current.devices.some((d) => d.id !== device.id));
+      }
       setBook((prev) => {
         const next = removeDevice(prev, device.id);
         persistBook(next);
