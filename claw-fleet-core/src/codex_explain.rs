@@ -244,7 +244,10 @@ impl CodexExecFold {
             });
         }
         let cost_usd = match (model, self.usage.as_ref()) {
-            (Some(m), Some(u)) => Some(crate::model_cost::turn_cost_usd(m, u)),
+            // `turn.completed` usage spans every request of the turn (one per
+            // tool call), so it is not one request and must not be compared
+            // against the per-request long-context threshold.
+            (Some(m), Some(u)) => Some(crate::model_cost::flat_turn_cost_usd(m, u)),
             _ => None,
         };
         Ok(ForkAskOutcome {

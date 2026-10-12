@@ -172,6 +172,22 @@ pub const COST_HAIKU_55_LONG_PROMPT: ModelCosts = ModelCosts {
 /// `>`, and so do we.
 pub const HAIKU_55_LONG_PROMPT_ABOVE: u64 = 100_000;
 
+/// Request input size above which OpenAI GPT models bill at long-context rates
+/// ("Short context: ≤272K input tokens. Long context: >272K input tokens.").
+pub const OPENAI_LONG_CONTEXT_ABOVE: u64 = 272_000;
+
+/// OpenAI's long-context tier: 2x every input-side rate, 1.5x output.
+fn openai_long_context(c: ModelCosts) -> ModelCosts {
+    ModelCosts {
+        input: c.input * 2.0,
+        output: c.output * 1.5,
+        cache_write: c.cache_write * 2.0,
+        cache_write_1h: c.cache_write_1h * 2.0,
+        cache_read: c.cache_read * 2.0,
+        web_search: c.web_search,
+    }
+}
+
 // --- OpenAI GPT / Codex tiers ---------------------------------------------
 // Used by Codex CLI sessions (see `codex_source.rs`). Codex rollouts report
 // the model as e.g. `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`,
@@ -183,14 +199,14 @@ pub const HAIKU_55_LONG_PROMPT_ABOVE: u64 = 100_000;
 // report cache-write tokens so `cache_write` is currently unused for Codex.
 // `web_search` is 0 (not applicable to the Codex token accounting we parse).
 //
-// NOTE: OpenAI's ">272K input tokens per request => 2x input / 1.5x output"
-// surcharge is deliberately NOT modeled here. Codex rollouts only give
-// cumulative per-session token totals, not per-request counts, so applying a
-// per-request multiplier to the cumulative sum would over-count. See
-// `codex_source::codex_cost_and_input`. Since 2026-10-12 OpenAI also waives
-// the surcharge for gpt-6.1-sol under ChatGPT subscription quotas (alongside
-// raising its Codex default window to 500K), so for subscription-billed Codex
-// sessions on that model the flat rate is the correct figure anyway.
+// Long context: a request over `OPENAI_LONG_CONTEXT_ABOVE` input tokens bills
+// the *whole request* at 2x input / cache rates and 1.5x output (pricing page,
+// verified 2026-10-12: gpt-6.1-sol short $2 / $0.10 / $10, long $4 / $0.20 /
+// $15). `get_model_costs_for_prompt` applies it, so callers must price one
+// request at a time — Codex rollouts give that per `token_count` delta (see
+// `codex_source::codex_token_deltas_from_lines`), never a cumulative total.
+// Since 2026-10-12 OpenAI waives it for gpt-6.1-sol under ChatGPT subscription
+// quotas; `codex_turn_cost_usd` carries that exemption.
 
 // gpt-6-astra standard short-context pricing: $10 / $50 per Mtok, with
 // cached input at $1 and explicit cache writes at $12.50 (verified 2026-09-06).
@@ -443,7 +459,38 @@ pub fn get_model_costs_for_prompt(model: &str, prompt_tokens: u64) -> ModelCosts
     if is_haiku_55 && prompt_tokens > HAIKU_55_LONG_PROMPT_ABOVE {
         return COST_HAIKU_55_LONG_PROMPT;
     }
+    if is_openai_gpt(model) && prompt_tokens > OPENAI_LONG_CONTEXT_ABOVE {
+        return openai_long_context(get_model_costs(model));
+    }
     get_model_costs(model)
+}
+
+fn is_openai_gpt(model: &str) -> bool {
+    model.to_ascii_lowercase().starts_with("gpt-")
+}
+
+/// Whether ChatGPT subscription billing waives the long-context surcharge for
+/// `model`. Only gpt-6.1-sol so far (announced 2026-10-12); API-key billing
+/// still pays it for every model.
+fn long_context_waived_under_subscription(model: &str) -> bool {
+    model.to_ascii_lowercase().starts_with("gpt-6.1-sol")
+}
+
+/// Price `usage` at the model's base rates, ignoring any prompt-length tier.
+/// For usage that aggregates several requests, where the per-request
+/// threshold cannot be applied.
+pub fn flat_turn_cost_usd(model: &str, usage: &TurnUsage) -> f64 {
+    cost_with(&get_model_costs(model), usage)
+}
+
+/// [`turn_cost_usd`] for one Codex request, honouring how the account is
+/// billed: `chatgpt_billing` (a ChatGPT login rather than an API key) prices a
+/// model whose surcharge the subscription waives at its flat rate.
+pub fn codex_turn_cost_usd(model: &str, usage: &TurnUsage, chatgpt_billing: bool) -> f64 {
+    if chatgpt_billing && long_context_waived_under_subscription(model) {
+        return flat_turn_cost_usd(model, usage);
+    }
+    turn_cost_usd(model, usage)
 }
 
 /// The minor version right after `prefix` (e.g. `opus-5-` → `5` for
@@ -495,7 +542,10 @@ pub fn parse_cache_creation_1h(usage: Option<&serde_json::Value>) -> u64 {
 pub fn turn_cost_usd(model: &str, usage: &TurnUsage) -> f64 {
     let prompt_tokens =
         usage.input_tokens + usage.cache_creation_tokens + usage.cache_read_tokens;
-    let c = get_model_costs_for_prompt(model, prompt_tokens);
+    cost_with(&get_model_costs_for_prompt(model, prompt_tokens), usage)
+}
+
+fn cost_with(c: &ModelCosts, usage: &TurnUsage) -> f64 {
     // `cache_creation_1h_tokens` is a subset of the total; saturating_sub keeps a
     // malformed pair (1h > total) from wrapping into an astronomical 5m figure.
     let write_1h = usage
@@ -513,6 +563,39 @@ pub fn turn_cost_usd(model: &str, usage: &TurnUsage) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpt_long_context_tier_starts_above_272k() {
+        // gpt-6.1-sol on the pricing page: short $2 / $0.10 / $10, long $4 /
+        // $0.20 / $15. 272K itself is still short.
+        let at = |input: u64, cached: u64, output: u64| {
+            turn_cost_usd(
+                "gpt-6.1-sol",
+                &TurnUsage {
+                    input_tokens: input,
+                    cache_read_tokens: cached,
+                    output_tokens: output,
+                    ..Default::default()
+                },
+            )
+        };
+        let short = at(172_000, 100_000, 1_000_000);
+        assert!((short - (0.172 * 2.0 + 0.1 * 0.10 + 10.0)).abs() < 1e-9);
+        let long = at(172_001, 100_000, 1_000_000);
+        assert!((long - (0.172001 * 4.0 + 0.1 * 0.20 + 15.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn subscription_waives_long_context_only_for_gpt_61_sol() {
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            ..Default::default()
+        };
+        assert!((codex_turn_cost_usd("gpt-6.1-sol", &usage, true) - 2.0).abs() < 1e-9);
+        assert!((codex_turn_cost_usd("gpt-6.1-sol", &usage, false) - 4.0).abs() < 1e-9);
+        // gpt-6-sol keeps the surcharge even on a ChatGPT login.
+        assert!((codex_turn_cost_usd("gpt-6-sol", &usage, true) - 4.0).abs() < 1e-9);
+    }
 
     #[test]
     fn sonnet_pricing() {
@@ -808,23 +891,23 @@ mod tests {
         };
         // 5.6 Sol: $4 + $20 = $24. Bare gpt-5.6 also routes to Sol.
         for model in ["gpt-5.6-sol", "gpt-5.6", "GPT-5.6-Sol"] {
-            let cost = turn_cost_usd(model, &usage);
+            let cost = flat_turn_cost_usd(model, &usage);
             assert!((cost - 24.0).abs() < 1e-9, "{model} -> {cost}, want 24.0");
         }
         // 5.6 Terra: $2 + $12 = $14.
-        assert!((turn_cost_usd("gpt-5.6-terra", &usage) - 14.0).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-5.6-terra", &usage) - 14.0).abs() < 1e-9);
         // 5.6 Luna: $0.20 + $1.20 = $1.40.
-        assert!((turn_cost_usd("gpt-5.6-luna", &usage) - 1.40).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-5.6-luna", &usage) - 1.40).abs() < 1e-9);
         // GPT-6 Sol: $2 + $10 = $12 — not the 5.6 Sol tier.
-        assert!((turn_cost_usd("gpt-6-sol", &usage) - 12.0).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-6-sol", &usage) - 12.0).abs() < 1e-9);
         // GPT-6.1 Sol: same $2 + $10 = $12.
-        assert!((turn_cost_usd("GPT-6.1-Sol", &usage) - 12.0).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("GPT-6.1-Sol", &usage) - 12.0).abs() < 1e-9);
         // GPT-6 Luna: $0.10 + $0.50 = $0.60 — not the 5.6 Luna tier.
-        assert!((turn_cost_usd("GPT-6-Luna", &usage) - 0.60).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("GPT-6-Luna", &usage) - 0.60).abs() < 1e-9);
         // gpt-5.5 kept its $5 + $30 = $35 when 5.6 was cut.
-        assert!((turn_cost_usd("gpt-5.5", &usage) - 35.0).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-5.5", &usage) - 35.0).abs() < 1e-9);
         // Codex tier: $1.75 + $14 = $15.75.
-        assert!((turn_cost_usd("gpt-5.3-codex", &usage) - 15.75).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-5.3-codex", &usage) - 15.75).abs() < 1e-9);
     }
 
     #[test]
@@ -842,7 +925,7 @@ mod tests {
             cache_read_tokens: 1_000_000,
             ..Default::default()
         };
-        assert!((turn_cost_usd("GPT-6-Astra", &usage) - 61.0).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("GPT-6-Astra", &usage) - 61.0).abs() < 1e-9);
     }
 
     #[test]
@@ -852,11 +935,11 @@ mod tests {
             cache_read_tokens: 1_000_000,
             ..Default::default()
         };
-        assert!((turn_cost_usd("gpt-5.6-sol", &usage) - 0.40).abs() < 1e-9);
-        assert!((turn_cost_usd("gpt-6-sol", &usage) - 0.20).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-5.6-sol", &usage) - 0.40).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-6-sol", &usage) - 0.20).abs() < 1e-9);
         // 6.1 Sol halves 6 Sol's cached-input price.
-        assert!((turn_cost_usd("gpt-6.1-sol", &usage) - 0.10).abs() < 1e-9);
-        assert!((turn_cost_usd("gpt-6-luna", &usage) - 0.01).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-6.1-sol", &usage) - 0.10).abs() < 1e-9);
+        assert!((flat_turn_cost_usd("gpt-6-luna", &usage) - 0.01).abs() < 1e-9);
     }
 
     /// Haiku 5.5 must not fall through to the bare-`haiku` (3.5) branch, and

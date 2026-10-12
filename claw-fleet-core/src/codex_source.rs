@@ -1141,8 +1141,15 @@ fn compute_token_stats(lines: &[Value], model: Option<&str>) -> CodexTokenStats 
 }
 
 /// Compute USD cost and cumulative input tokens for a Codex session from its
-/// rollout lines, reading the last `token_count` event's cumulative
-/// `total_token_usage` (input / cached_input / output).
+/// rollout lines.
+///
+/// Cost is priced **per request**, summing the deltas between consecutive
+/// cumulative `total_token_usage` snapshots ([`codex_token_deltas_from_lines`]):
+/// OpenAI's long-context tier applies to a single request over 272K input
+/// tokens, so pricing the session's cumulative total as one request would bill
+/// every long session at the long rate. The deltas telescope to the final total
+/// (bar the rare backwards snapshot, clamped to zero), so below the threshold
+/// this is the same figure as pricing the total.
 ///
 /// Codex's `output_tokens` already includes `reasoning_output_tokens` — verified
 /// against real rollouts where `input_tokens + output_tokens == total_tokens` —
@@ -1150,66 +1157,63 @@ fn compute_token_stats(lines: &[Value], model: Option<&str>) -> CodexTokenStats 
 /// `input_tokens`, so full-price input is `input - cached` and the cached portion
 /// is billed at the model's cache-read (90%-off) rate.
 ///
-/// Returns `(cost_usd, total_input_tokens)`, or `(0.0, 0)` when no `token_count`
-/// with a `total_token_usage` block is present. `model` selects the price tier
-/// via `model_cost::get_model_costs`; an absent model falls back to `"gpt"`,
-/// which routes to the GPT Sol tier.
+/// Returns `(cost_usd, total_input_tokens)`, where the input is the last
+/// cumulative snapshot's raw input, or `(0.0, 0)` when no `token_count` with a
+/// `total_token_usage` block is present. `model` selects the price tier via
+/// `model_cost::get_model_costs`; an absent model falls back to `"gpt"`, which
+/// routes to the GPT Sol tier.
 fn codex_cost_and_input(lines: &[Value], model: Option<&str>) -> (f64, u64) {
-    for line in lines.iter().rev() {
-        if line.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
-            continue;
+    let Some((input, _, _)) = latest_total_token_usage(lines) else {
+        return (0.0, 0);
+    };
+    let model = model.unwrap_or("gpt");
+    let chatgpt_billing = codex_chatgpt_billing();
+    let cost = codex_token_deltas_from_lines(lines)
+        .iter()
+        .map(|d| {
+            let turn = crate::model_cost::TurnUsage {
+                input_tokens: d.input_tokens,
+                output_tokens: d.output_tokens,
+                cache_read_tokens: d.cached_input_tokens,
+                // Codex rollouts report no cache writes at all, so there is no
+                // TTL split to bill — both figures stay 0.
+                cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
+                web_search_requests: 0,
+            };
+            crate::model_cost::codex_turn_cost_usd(model, &turn, chatgpt_billing)
+        })
+        .sum();
+    (cost, input)
+}
+
+/// Whether Codex is billed through a ChatGPT login rather than an API key,
+/// which decides whether a subscription long-context waiver applies (see
+/// `model_cost::codex_turn_cost_usd`). Cached for a minute: the cost-rate path
+/// prices every `token_count` event, and `auth.json` changes only on a login.
+/// It is the login *now*, applied to every rollout — a rollout does not record
+/// how its own requests were billed.
+pub(crate) fn codex_chatgpt_billing() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, v)) = *guard {
+        if at.elapsed() < Duration::from_secs(60) {
+            return v;
         }
-        let payload = match line.get("payload") {
-            Some(p) => p,
-            None => continue,
-        };
-        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
-            continue;
-        }
-        let usage = match payload.get("info").and_then(|i| i.get("total_token_usage")) {
-            Some(u) => u,
-            None => continue,
-        };
-        let input = usage
-            .get("input_tokens")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        // cached is a subset of input; clamp defensively so `input - cached`
-        // never underflows if a rollout ever reports cached > input.
-        let cached = usage
-            .get("cached_input_tokens")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0)
-            .min(input);
-        let output = usage
-            .get("output_tokens")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        if input == 0 && output == 0 {
-            continue;
-        }
-        let turn = crate::model_cost::TurnUsage {
-            input_tokens: input - cached,
-            output_tokens: output,
-            cache_read_tokens: cached,
-            // Codex rollouts report no cache writes at all, so there is no TTL
-            // split to bill — both figures stay 0.
-            cache_creation_tokens: 0,
-            cache_creation_1h_tokens: 0,
-            web_search_requests: 0,
-        };
-        let cost = crate::model_cost::turn_cost_usd(model.unwrap_or("gpt"), &turn);
-        return (cost, input);
     }
-    (0.0, 0)
+    let v = crate::codex_launch::codex_uses_chatgpt_auth();
+    *guard = Some((Instant::now(), v));
+    v
 }
 
 /// Price one `token_count` event's **incremental** usage — the `last_token_usage`
 /// block, i.e. what that single turn cost, not the running total.
 ///
-/// [`codex_cost_and_input`] answers "what has this session cost so far" by
-/// pricing the last event's *cumulative* `total_token_usage`. A cost *rate*
-/// needs the opposite: per-event deltas it can sum over a time window. Codex
+/// [`codex_cost_and_input`] answers "what has this session cost so far" over
+/// the whole rollout. A cost *rate* needs per-event deltas it can sum over a
+/// time window instead. Codex
 /// already reports that delta itself (`last_token_usage`), so the rate needs no
 /// differencing of cumulative counters — which matters because Codex resends
 /// the whole prompt every turn, so the cumulative input counter climbs by the
@@ -1254,9 +1258,10 @@ fn codex_event_incremental_cost(usage: &Value, model: Option<&str>) -> Option<f6
         cache_creation_1h_tokens: 0,
         web_search_requests: 0,
     };
-    Some(crate::model_cost::turn_cost_usd(
+    Some(crate::model_cost::codex_turn_cost_usd(
         model.unwrap_or("gpt"),
         &turn,
+        codex_chatgpt_billing(),
     ))
 }
 
@@ -2699,15 +2704,15 @@ mod tests {
         // Defensive: a rollout reporting cached > input must not underflow the
         // `input - cached` subtraction (it is u64). Everything bills as cached.
         let last_token_usage = json!({
-            "input_tokens": 1_000_000,
-            "cached_input_tokens": 5_000_000u64,
+            "input_tokens": 100_000,
+            "cached_input_tokens": 500_000u64,
             "output_tokens": 0
         });
         let cost = codex_event_incremental_cost(&last_token_usage, Some("gpt-5.6-sol"))
             .expect("clamped usage still prices");
         assert!(
-            (cost - 0.40).abs() < 1e-9,
-            "1M tokens all billed at the cache-read rate = $0.40, got {cost}"
+            (cost - 0.04).abs() < 1e-9,
+            "100K tokens all billed at the cache-read rate = $0.04, got {cost}"
         );
     }
 
@@ -4027,6 +4032,34 @@ mod tests {
         assert_eq!(input, 136970, "reports cumulative input");
         // (136970-123392)/1M*$4 + 123392/1M*$0.40 + 565/1M*$20
         let expected = 13578.0 / 1e6 * 4.0 + 123392.0 / 1e6 * 0.40 + 565.0 / 1e6 * 20.0;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "cost {cost} != expected {expected}"
+        );
+    }
+
+    #[test]
+    fn codex_cost_and_input_surcharges_only_the_long_request() {
+        // Two requests: 100K raw input, then 300K raw input. Only the second is
+        // over 272K, so only it bills at the long tier — pricing the 400K
+        // cumulative total as one request would surcharge both. gpt-6-sol has
+        // no subscription waiver, so the result does not depend on auth.json.
+        let tc = |input: u64, output: u64| {
+            json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": { "total_token_usage": {
+                        "input_tokens": input, "cached_input_tokens": 0, "output_tokens": output
+                    }}
+                }
+            })
+        };
+        let lines = vec![tc(100_000, 1_000), tc(400_000, 3_000)];
+        let (cost, input) = codex_cost_and_input(&lines, Some("gpt-6-sol"));
+        assert_eq!(input, 400_000);
+        // gpt-6-sol: $2 / $10 short, $4 / $15 long.
+        let expected = 0.1 * 2.0 + 0.001 * 10.0 + 0.3 * 4.0 + 0.002 * 15.0;
         assert!(
             (cost - expected).abs() < 1e-9,
             "cost {cost} != expected {expected}"

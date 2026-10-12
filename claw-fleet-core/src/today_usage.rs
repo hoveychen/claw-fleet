@@ -894,7 +894,7 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
 /// figure attributes to `attribute_ms`'s local day — same as
 /// [`fold_codex_session_range`]. Returns empty cells on error / zero usage.
 fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
-    use crate::model_cost::{turn_cost_usd, TurnUsage};
+    use crate::model_cost::{codex_turn_cost_usd, TurnUsage};
 
     let mut cells = SessionCells::new();
     let Ok(timeline) = crate::codex_source::codex_token_timeline(uri) else {
@@ -904,6 +904,7 @@ fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
         return cells;
     }
     let model = timeline.model.clone().unwrap_or_else(|| "gpt".to_string());
+    let chatgpt_billing = crate::codex_source::codex_chatgpt_billing();
 
     let mut had_undated = false;
     for d in &timeline.deltas {
@@ -940,7 +941,7 @@ fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
             0,
             d.cached_input_tokens,
             d.output_tokens,
-            turn_cost_usd(&model, &turn),
+            codex_turn_cost_usd(&model, &turn, chatgpt_billing),
         );
     }
     if had_undated {
