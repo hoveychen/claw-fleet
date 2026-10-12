@@ -203,6 +203,9 @@ listed = false
 # 400 "not supported when using Codex with a ChatGPT account". Premium, like
 # gpt-6-sol. It does not supersede gpt-6-sol: same $2/$10 but cached input is
 # $0.10 vs $0.20, and a superseded row renders as "same price".
+# Default window raised 272K -> 500K server-side (models_cache.json fetched
+# 2026-10-12 on 0.159.2); the 872K ceiling is unchanged and every other Codex
+# model is still 272K.
 [[model]]
 id = "gpt-6.1-sol"
 label = "GPT-6.1 Sol"
@@ -210,7 +213,7 @@ family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
-context = 272000
+context = 500000
 max_context = 872000
 min_cli_version = "0.159.0"
 
