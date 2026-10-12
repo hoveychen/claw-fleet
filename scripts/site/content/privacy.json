@@ -116,7 +116,7 @@
         "h2": "工作方式",
         "blocks": [
           {"p": "你用应用扫描 Claw Fleet 桌面端显示的二维码完成配对。二维码里包含一个 relay 地址和一个随机生成的配对密钥。应用与电脑都会从这个密钥派生出两把钥匙：一把用于在 relay 上标识你的私有通道，另一把用 AES-256-GCM 加密每一条消息。relay 只在两端之间搬运密文。"},
-          {"p": "应用默认使用我们运营的 <code>fleet-relay.muveeai.com</code>。你也可以自建 relay，这种情况下下文所述的 relay 侧数据都不会经过我们。"}
+          {"p": "应用默认使用我们运营的 <code>fleet-relay.muveeai.com</code>。你也可以自建 relay，此时本政策所述的 relay 侧数据都不会经过我们。"}
         ]
       },
       {
