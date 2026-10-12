@@ -60,11 +60,13 @@ import {
   adoptScannedDevice,
   clearBook,
   consumeHashPairing,
+  isRemovedBootPairing,
   dropPendingUnsub,
   emptyBook,
   loadBookFromIdb,
   loadBookSync,
   loadPendingUnsub,
+  markSecretsRemoved,
   nextDeviceLabel,
   persistBook,
   removeDevice,
@@ -199,7 +201,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     // Check if this page load came with a pairing fragment (`#k=`).
 
     const scanned = consumeHashPairing();
-    if (!scanned) return stored;
+    if (!scanned || isRemovedBootPairing(stored, scanned)) return stored;
     return adoptScannedDevice(
       stored,
       scanned.secret,
@@ -325,6 +327,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  connections to handshake. The retry effect on next boot will complete them. */
   const unpairAll = useCallback(() => {
     const now = Date.now();
+    markSecretsRemoved(
+      bookRef.current.devices.flatMap((d) => (d.kind === "relay" ? [d.secret] : [])),
+    );
     for (const d of bookRef.current.devices) {
       // Only relay devices have a push channel to unsubscribe from; HTTP direct
       // connections don't have a push channel at all.
@@ -429,6 +434,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
       clearCachedSessions(device.id);
       clearDraftsByPrefix(scopedKey(device.id, ""));
+      if (device.kind === "relay") markSecretsRemoved([device.secret]);
       setBook((prev) => {
         const next = removeDevice(prev, device.id);
         persistBook(next);
