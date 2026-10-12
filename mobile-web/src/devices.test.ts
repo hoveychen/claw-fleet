@@ -10,6 +10,8 @@ import {
   bookFromLegacySecret,
   clearBook,
   emptyBook,
+  isRemovedBootPairing,
+  markSecretsRemoved,
   loadBookSync,
   nextDeviceLabel,
   parseBook,
@@ -398,6 +400,41 @@ describe("bookFromLegacySecret", () => {
     const book = bookFromLegacySecret(A, { id: "d1", label: "设备 1", now: 5 });
     expect(asRelay(book.devices[0]).relayBase).toBeNull();
     expect(book.activeId).toBe("d1");
+  });
+});
+
+// The Harmony shell re-injects its last scanned pairing as `#k=…&boot=1` on every launch.
+// Removing that device in the page used to be undone by the next launch.
+describe("removed pairings vs the shell's boot re-inject", () => {
+  const boot = (secret: string) =>
+    ({ kind: "relay", secret, relayBase: null, boot: true }) as const;
+
+  it("ignores the boot re-inject of a removed device", () => {
+    const book = removeDevice(twoDevices(), "d2");
+    markSecretsRemoved([B]);
+    expect(isRemovedBootPairing(book, boot(B))).toBe(true);
+  });
+
+  it("still adopts a boot re-inject the user never removed (storage-wipe recovery)", () => {
+    expect(isRemovedBootPairing(emptyBook(), boot(A))).toBe(false);
+  });
+
+  it("never suppresses a device that is still in the book", () => {
+    markSecretsRemoved([A]);
+    expect(isRemovedBootPairing(twoDevices(), boot(A))).toBe(false);
+  });
+
+  it("a fresh scan of a removed code brings it back on later boots", () => {
+    markSecretsRemoved([B]);
+    expect(isRemovedBootPairing(emptyBook(), { ...boot(B), boot: false })).toBe(false);
+    adoptScannedDevice(emptyBook(), B, mint("d9"));
+    expect(isRemovedBootPairing(emptyBook(), boot(B))).toBe(false);
+  });
+
+  it("the boot re-inject itself does not clear the removal", () => {
+    markSecretsRemoved([B]);
+    adoptScannedDevice(twoDevices(), B, mint("d9"), null, { focus: false });
+    expect(isRemovedBootPairing(emptyBook(), boot(B))).toBe(true);
   });
 });
 

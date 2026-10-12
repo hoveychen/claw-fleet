@@ -488,6 +488,8 @@ export function adoptScannedDevice(
   // to say "startup reinject, not a fresh scan".
   const keepFocus = opts?.focus === false && deduped;
   const next = keepFocus ? { ...added, activeId: book.activeId ?? added.activeId } : added;
+  // A real scan (not the shell's boot re-inject) brings a removed pairing back for good.
+  if (opts?.focus !== false) unmarkSecretRemoved(secret);
   persistBook(next);
   return { book: next, device, added: !deduped };
 }
@@ -503,6 +505,15 @@ export type HashPairing = {
   relayBase: string | null;
   boot: boolean;
 };
+
+/** Is this pairing the shell's boot re-inject of a device the user removed? Such a pairing
+ *  must not be adopted — see "Removed pairings" below. A device still in the book is never
+ *  suppressed (the re-inject also refreshes its relay address). */
+export function isRemovedBootPairing(book: DeviceBook, pairing: HashPairing): boolean {
+  if (!pairing.boot) return false;
+  if (book.devices.some((d) => d.kind === "relay" && d.secret === pairing.secret)) return false;
+  return loadRemovedSecrets().includes(pairing.secret);
+}
 
 /** Extract "add device" from fragment and **immediately wipe the fragment from the address bar** —
  *  secrets and tokens shouldn't stay there to be screenshot or captured in history.
@@ -587,6 +598,54 @@ export function addPendingUnsub(entry: PendingUnsub): void {
 /** Clear the entry after successful unsubscribe. */
 export function dropPendingUnsub(secret: string, now: number): void {
   savePendingUnsub(loadPendingUnsub(now).filter((e) => e.secret !== secret));
+}
+
+// ── Removed pairings ───────────────────────────────────────────────────────────
+//
+// The Harmony shell keeps the last scanned pairing in its own preferences and re-injects it as
+// `#k=…&boot=1` on every app start (mobile-harmony WebShell.ets). The page never tells the shell
+// about removals, so without this list a removed device came straight back on the next launch.
+// A boot re-inject whose secret is listed here is ignored; a fresh scan of the same code takes it
+// off the list, because scanning again is the user asking for the device back.
+//
+// Lives in localStorage only: if the WebView's storage is wiped, the book is gone too, and then
+// the shell's re-inject is exactly the recovery we want.
+
+const REMOVED_SECRETS_KEY = "fleet-removed-secrets";
+/** Bound the list: each entry is one explicit removal, so this is plenty. */
+const REMOVED_SECRETS_MAX = 32;
+
+export function loadRemovedSecrets(): string[] {
+  const raw = readLocal(REMOVED_SECRETS_KEY);
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value.filter((s): s is string => typeof s === "string" && !!s) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRemovedSecrets(list: string[]): void {
+  try {
+    if (list.length === 0) localStorage.removeItem(REMOVED_SECRETS_KEY);
+    else localStorage.setItem(REMOVED_SECRETS_KEY, JSON.stringify(list));
+  } catch {
+    // Storage full / private mode — worst case the shell's re-inject brings the device back
+  }
+}
+
+/** Remember that the user removed these pairings. */
+export function markSecretsRemoved(secrets: string[]): void {
+  if (secrets.length === 0) return;
+  const rest = loadRemovedSecrets().filter((s) => !secrets.includes(s));
+  saveRemovedSecrets([...rest, ...secrets].slice(-REMOVED_SECRETS_MAX));
+}
+
+/** The user scanned this code again — it is wanted back. */
+export function unmarkSecretRemoved(secret: string): void {
+  const list = loadRemovedSecrets();
+  if (list.includes(secret)) saveRemovedSecrets(list.filter((s) => s !== secret));
 }
 
 /** Clear all pairings ("re-pair" entry point). Also clear old keys, or the migration path
