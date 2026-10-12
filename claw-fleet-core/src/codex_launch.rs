@@ -875,7 +875,7 @@ fn ws_disable_provider_args() -> Vec<String> {
 /// per `$CODEX_HOME/auth.json` (falling back to `~/.codex/auth.json`). Gates
 /// [`codex_ws_disable_args`]. Any read/parse failure returns `false` — we never
 /// repoint a session we can't positively confirm is a ChatGPT login.
-fn codex_uses_chatgpt_auth() -> bool {
+pub(crate) fn codex_uses_chatgpt_auth() -> bool {
     let Some(codex_home) = std::env::var_os("CODEX_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))
