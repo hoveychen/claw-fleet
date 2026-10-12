@@ -49,9 +49,20 @@ export class ExitGuard {
  *  navigation (text is decided by browser, not customizable). Returns an uninstall function. */
 export function installUnloadPrompt(): () => void {
   const onBeforeUnload = (e: BeforeUnloadEvent) => {
+    if (deliberateReload) return;
     e.preventDefault();
     e.returnValue = "";
   };
   window.addEventListener("beforeunload", onBeforeUnload);
   return () => window.removeEventListener("beforeunload", onBeforeUnload);
+}
+
+/** Set by `reloadDeliberately`: the app itself is reloading on the user's explicit
+ *  action, so "leave this page?" would only question a choice they just made. */
+let deliberateReload = false;
+
+/** Reload the page without tripping the unload prompt. */
+export function reloadDeliberately(): void {
+  deliberateReload = true;
+  window.location.reload();
 }

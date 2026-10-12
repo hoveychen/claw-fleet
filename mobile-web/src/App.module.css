@@ -342,6 +342,17 @@
   color: var(--color-text-secondary);
 }
 
+/* Secondary way out of the pairing gate for anyone without a desktop to pair
+   with (store reviewers included): a quiet text link, so it never competes
+   with the real pairing actions above it. */
+.gateDemo {
+  margin-top: 20px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* 栈底返回时的「再按一次退出」提示。只在没有浮层、且已在主页 tab 时出现，
    所以 z-index 不必压过浮层（最高 50 是目录选择器），60 只是留一档余量。 */
 .exitToast {

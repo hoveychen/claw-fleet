@@ -172,6 +172,9 @@ const DICT: Record<string, string> = {
   // In-app QR scanning + paste pairing. Native shell (system camera QR can't reach the app) and iOS home
   // screen web app (no address bar, Safari's storage not shared) both only have these two paths.
   扫码配对: "Scan to pair",
+  "没有电脑？先看看演示": "No computer yet? Try the demo",
+  "演示模式：这里都是示例数据，没有连接任何电脑。": "Demo mode: everything here is sample data. No computer is connected.",
+  退出演示: "Exit demo",
   "正在打开摄像头…": "Opening the camera…",
   "对准桌面端「移动端」板块里的二维码。": "Point at the QR code in the desktop's Mobile panel.",
   "这个二维码不是配对码。请对准桌面端「移动端」板块里的那张。":

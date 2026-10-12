@@ -48,7 +48,7 @@ import {
 // RelayClient; importing it here would statically drag the entire relay dependency
 // tree into same-origin builds — that logic belongs in transportRelay.ts instead.
 
-import { isMockMode } from "./mockMode";
+import { enterDemoMode, exitDemoMode, isDemoMode, isMockMode } from "./mockMode";
 import type { RepoSummary, SessionInfo, WikiDoc } from "./types";
 import type { HostIdentity } from "./generated/types";
 import { randomId } from "./clientId";
@@ -148,6 +148,9 @@ function newDeviceMint(book: DeviceBook): { id: string; label: string; now: numb
 // `?mock` runs the whole app on fixtures (no relay, no pairing) — used by the
 // promo screen-recording pipeline and for quick UI work in a plain browser.
 const MOCK = isMockMode();
+// The persistent, user-facing flavour of the mock (mockMode.ts). Same fixtures; it
+// adds an exit banner and hands any real pairing over to the non-demo app.
+const DEMO = isDemoMode();
 
 /** Factory to instantiate the appropriate transport layer for this deployment.
     Injected by main.tsx based on build mode. */
@@ -165,7 +168,7 @@ export type TransportFactory = (
 const MOCK_DEVICE: PairedDevice = {
   kind: "relay",
   id: "mock",
-  label: "Mock",
+  label: DEMO ? "Demo" : "Mock",
   secret: "mock-secret",
   relayBase: null,
   addedAt: 0,
@@ -305,6 +308,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  so losing it means we can only connect to the relay baked in at build time; custom
    *  relay hosts become unreachable. */
   const adoptPaired = useCallback((paired: PairedLink) => {
+    // The demo runs on a synthesized device and never reads the book, so a pairing
+    // made from inside it (More-page scanner, native deep link) has to leave the demo
+    // and be adopted by a fresh boot of the real app.
+    if (DEMO) {
+      const relay = paired.relayBase ? `&relay=${encodeURIComponent(paired.relayBase)}` : "";
+      exitDemoMode(`#k=${paired.secret}${relay}`);
+      return;
+    }
     setBook(
       (prev) => adoptScannedDevice(prev, paired.secret, newDeviceMint(prev), paired.relayBase).book,
     );
@@ -1152,6 +1163,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               </p>
             )}
             <PairPasteForm onPaired={adoptPaired} />
+            <button className={styles.gateDemo} onClick={enterDemoMode}>
+              {t("没有电脑？先看看演示")}
+            </button>
           </>
         )}
       </div>
@@ -1276,6 +1290,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           and A2HS only stores the manifest's start_url, not the fragment with the secret.
           Without this warning, users tapping the icon and hitting the pairing gate would
           think something broke (see the pairing gate comments). */}
+
+      {DEMO && (
+        <div className={styles.pushBanner}>
+          <span>{t("演示模式：这里都是示例数据，没有连接任何电脑。")}</span>
+          <button className={styles.pushButton} onClick={() => exitDemoMode()}>
+            {t("退出演示")}
+          </button>
+        </div>
+      )}
 
       {NEEDS_PAIRING && !MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
