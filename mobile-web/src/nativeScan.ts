@@ -22,6 +22,7 @@ const BRIDGE = "fleetNative";
 
 interface NativeBridge {
   scanPairing?: () => void;
+  forgetPairing?: (secret: string, othersLeft: boolean) => void;
 }
 
 function bridge(): NativeBridge | undefined {
@@ -38,4 +39,18 @@ export function canScanPairing(): boolean {
  *  pairing, so there's no callback here — the next page load tells whether it was added. */
 export function scanPairing(): void {
   bridge()?.scanPairing?.();
+}
+
+/** Tell the shell the user removed this pairing. The Harmony shell keeps its last scanned
+ *  pairing and re-injects it on every launch; if that is the removed one, it drops it.
+ *  `othersLeft` decides what the shell shows on next launch: the page (other devices remain)
+ *  or its native pairing screen (none left). Shells
+ *  without the method (older Harmony builds, Capacitor) are covered by the page's own
+ *  removed-pairings list (devices.ts), so a missing method is fine. */
+export function forgetNativePairing(secret: string, othersLeft: boolean): void {
+  try {
+    bridge()?.forgetPairing?.(secret, othersLeft);
+  } catch {
+    // A bridge failure must not block the removal
+  }
 }

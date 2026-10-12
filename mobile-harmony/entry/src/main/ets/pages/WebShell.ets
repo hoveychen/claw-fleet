@@ -93,6 +93,16 @@ class NativeBridge {
     this.onScanRequested();
   }
 
+  /// The page removed a pairing (mobile-web::nativeScan.ts::forgetNativePairing). Without this
+  /// the shell keeps re-injecting its stored pairing on every launch and the removed device
+  /// comes back. The current WebView src still carries the old `#k=`, but the page consumed
+  /// and scrubbed it at load, so only the next launch reads the store again.
+  forgetPairing(secret: string, othersLeft: boolean): void {
+    RelayStore.forgetPairing(this.ctx, secret, othersLeft).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'forgetPairing failed: %{public}s', e.message);
+    });
+  }
+
   /// Launcher icon badge: the number of decision cards still waiting for an answer.
   /// A push can set it (notification.badge.setNum), but nothing clears it — opening the
   /// app or dismissing the notification leaves the number alone — so the page keeps it
@@ -222,7 +232,7 @@ struct WebShell {
   /// `fresh` = just scanned a code (take focus on that device); default is startup re-inject (don't take focus).
   private loadPairing(fresh: boolean = false): void {
     const ctx = getContext(this) as common.UIAbilityContext;
-    RelayStore.loadPairing(ctx).then((p: RelayPairing | null) => {
+    RelayStore.loadLaunch(ctx).then((p: RelayPairing | null) => {
       this.pairChecked = true;
       // Secret in URL fragment: mobile-web's consumeHashSecret already reads #k= from
       // window.location.hash (desktop QR uses this shape), so we reuse the same path and
@@ -247,9 +257,15 @@ struct WebShell {
       // who switched to another device in the list gets pulled back on every app restart—unwanted focus theft.
       // Fresh scan uses loadPairing(true) without this flag—then taking focus is what the user expects.
       const boot = fresh ? '' : '&boot=1';
-      this.src = p === null
-        ? ''
-        : ORIGIN + 'index.html#k=' + p.secret + '&relay=' + encodeURIComponent(p.relayUrl) + boot;
+      if (p === null) {
+        this.src = '';
+      } else if (p.secret.length === 0) {
+        // The stored pairing was removed in the page (forgetPairing) but other devices remain
+        // in the page's own book: load the page with nothing to re-inject.
+        this.src = ORIGIN + 'index.html';
+      } else {
+        this.src = ORIGIN + 'index.html#k=' + p.secret + '&relay=' + encodeURIComponent(p.relayUrl) + boot;
+      }
     }).catch(() => { this.pairChecked = true; this.src = ''; });
   }
 
@@ -721,7 +737,7 @@ struct WebShell {
             object: this.bridge,
             name: 'fleetNative',
             methodList: [
-              'saveFile', 'keepAwake', 'shareContent', 'scanPairing', 'setBadge',
+              'saveFile', 'keepAwake', 'shareContent', 'scanPairing', 'setBadge', 'forgetPairing',
               // Voice input. Web side uses startVoice presence in detectVoiceProvider—
               // old shell with new web: if these three methods don't exist, page auto-fallsback,
               // won't call non-existent implementations.
