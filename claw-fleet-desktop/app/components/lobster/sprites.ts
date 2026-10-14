@@ -1,11 +1,15 @@
 /**
- * Procedural pixel-art lobsters (captains) and shrimp (sub-agent crew).
+ * Procedural pixel-art crew in the likeness of the Claw Fleet mascot — a
+ * lobster robot with a CRT-screen face, a captain's cap and a navy uniform.
+ * Main sessions are full-size captains; sub-agents are small cap-less cadets
+ * (still called "shrimp" in the layout code).
  *
  * A sprite is first composed as a grid of palette keys — body halves mirrored
  * for a symmetric front view, claws stamped where the pose puts them, arms
  * drawn as lines from the shoulder — then rasterised once, outlined, and
- * cached. The composer is pure so tests can assert on the grid without a
- * canvas. Approach after rezored/cubicle-crew (MIT); the art is original.
+ * cached. The screen's eyes and mouth glow in the state colour. The composer
+ * is pure so tests can assert on the grid without a canvas. Approach after
+ * rezored/cubicle-crew (MIT); the art is original.
  */
 
 /** Everything a lobster can be doing on screen. */
@@ -42,23 +46,24 @@ export const LOBSTER_H = 30;
 export const SHRIMP_W = 16;
 export const SHRIMP_H = 14;
 
-/** Palette keys → colours. `S`/`Z` are the state scarf, filled per sprite. */
+/** Palette keys → colours. `S`/`Z` are the screen glow (state colour and its
+ *  scanline shade), filled per sprite. */
 const PALETTE: Record<string, string> = {
   r: "#d9452b", // shell
   R: "#a52a1a", // shell shadow
   h: "#f27a55", // shell highlight
-  t: "#c43a24", // tail fan
-  T: "#8f2414", // tail fan shadow
   l: "#9b2717", // legs
   c: "#e5532f", // claw
   C: "#b23420", // claw shadow
-  k: "#141018", // eye
-  w: "#ffffff", // eye glint
-  a: "#f08a6a", // antenna
+  k: "#121318", // screen
+  u: "#2a3760", // uniform
+  U: "#1c2645", // uniform shadow
+  b: "#11172a", // belt
+  G: "#e8b93a", // gold trim
+  g: "#b07f22", // gold shadow
   // Captain's cap
-  H: "#f4f1ea",
-  B: "#1d2433",
-  G: "#e8b93a",
+  H: "#1d2130",
+  v: "#343a4f", // visor
   // Props
   K: "#5b6170", // keyboard body
   q: "#c9ced8", // keycap
@@ -66,11 +71,8 @@ const PALETTE: Record<string, string> = {
   i: "#6d6250", // ink
   M: "#f4f1ea", // mug
   m: "#6b3e22", // coffee
-  // Shrimp
-  p: "#f59a80",
-  n: "#d8694f",
 };
-const OUTLINE = "#2a0d0a";
+const OUTLINE = "#0d0a12";
 
 type Grid = string[][];
 
@@ -94,38 +96,51 @@ function stamp(g: Grid, map: string[], x: number, y: number, flip = false) {
 /** Mirror each left-half row into a full symmetric row. */
 const mirror = (half: string[]) => half.map((row) => row + [...row].reverse().join(""));
 
-// Front-facing lobster body, left half (8 cols → 16 wide). Row 8 is the scarf.
-const BODY = mirror([
-  "...kk...",
-  "...wk...",
-  "....r...",
-  "....rr..",
-  "....hrrr",
-  "...hrrrr",
-  "...rrrrr",
-  "...rrrrr",
-  "...SSSSS",
-  ".l.rZrrr",
-  "l..RRrrr",
-  ".l.rrrrr",
-  "l...RRrr",
+// Front-facing mascot, left halves (8 cols → 16 wide): a red shell holding a
+// black screen, a double-breasted uniform with epaulettes, a belt, red legs.
+const HEAD = mirror([
   "....rrrr",
-  "....Rrrr",
-  "...ttrrr",
-  "..tttTrr",
-  "..tTt.tT",
+  "..rrhhrr",
+  ".rhkkkkk",
+  ".rkkkkkk",
+  "rrkkkkkk",
+  "rrkkkkkk",
+  "rrkkkkkk",
+  "rRkkkkkk",
+  ".rRkkkkk",
+  "..RRrrrr",
+]);
+const TORSO = mirror([
+  "GGgUuuGr",
+  "gGUuuuuG",
+  "..uuuGuu",
+  "..uuuuuu",
+  "..uuuGuu",
+  "..bbbbbG",
+  "..UuuuuU",
+  "...rrrrr",
+  "..l.l.l.",
+  ".l.l.l..",
 ]);
 const BODY_X = 8;
-const BODY_Y = 8;
+const BODY_Y = 6;
+/** Rows from the head's top to the uniform's collar. */
+const TORSO_DY = 10;
+/** Rows from the head's top to the face overlay (eyes, mouth). */
+const FACE_DY = 3;
 
-const EYES_CLOSED = mirror(["........", "...kk..."]);
-const EYES_X = mirror(["...wk...", "...kw..."]);
-const EYES_UP = mirror(["...wk...", "...kk..."]);
+// Face overlays on the screen, left halves. Eyes and mouth glow in `S`.
+const FACE_OPEN = mirror(["........", "...SSS..", "...ZZZ..", "......S.", ".......S"]);
+const FACE_CLOSED = mirror(["........", "........", "...SSS..", "......S.", ".......S"]);
+const FACE_UP = mirror(["...SSS..", "...ZZZ..", "........", "........", ".......S"]);
+const FACE_X = mirror(["...S.S..", "....S...", "...S.S..", ".......S", "......S."]);
 
 const CLAW_OPEN = ["c....c", "cc..cc", "cCccCc", "cCCCCc", ".cCCc.", "..cc.."];
 const CLAW_SHUT = ["..cc..", ".cCcc.", "cCCcCc", "cCCCCc", ".cCCc.", "..cc.."];
 
-const CAP = ["..HHHH..", ".HHGGHH.", "HHHHHHHH", "BBBBBBBB"];
+/** Peaked cap with a gold star and band; its visor shades the screen's top. */
+const CAP = mirror(["....HHHH", "..HHHHHG", ".HHHHHGG", "HHHHHHHG", "GGGGGGGG", ".vvvvvvv"]);
+const CAP_DY = -4;
 const KEYBOARD = [
   "KKKKKKKKKKKKKKKKKKKK",
   "KqKqKqKqKqKqKqKqKqKK",
@@ -135,8 +150,8 @@ const KEYBOARD = [
 const PAPER = ["PPPPPPPPPPP", "PiiiPiiPiiP", "PPPPPPPPPPP", "PiiPiiiiPPP", "PPPPPPPPPPP", "PiiiiPiiPPP", "PPPPPPPPPPP"];
 const MUG = ["MMMM.", "MmmMM", "MmmM.M", "MMMMM", ".MMM."];
 
-const SHOULDER_L = { x: 11, y: 17 };
-const SHOULDER_R = { x: 20, y: 17 };
+const SHOULDER_L = { x: 9, y: 17 };
+const SHOULDER_R = { x: 22, y: 17 };
 
 /** Bresenham line of `ch`, two pixels thick (arm). */
 function line(g: Grid, x0: number, y0: number, x1: number, y1: number, ch: string) {
@@ -180,7 +195,7 @@ function rigFor(pose: Pose, f: number): Rig {
     case "idle":
       return { ...rest(f), eyes: f ? "closed" : "open" };
     case "think":
-      return { ...rest(), left: { x: 9, y: 12 + f, open: false } };
+      return { ...rest(), left: { x: 8, y: 14 + f, open: false }, eyes: "up" };
     case "type":
       return {
         left: { x: 7, y: f ? 21 : 19, open: false },
@@ -217,7 +232,7 @@ function rigFor(pose: Pose, f: number): Rig {
 export interface LobsterSpec {
   pose: Pose;
   frame: number;
-  /** Scarf colour (hex) — the state colour. */
+  /** Screen glow (hex) — the state colour. */
   color: string;
   captain: boolean;
 }
@@ -228,27 +243,21 @@ export function composeLobster(spec: LobsterSpec): string[] {
   const rig = rigFor(spec.pose, spec.frame % POSE_FRAMES[spec.pose].n);
   const by = BODY_Y + rig.bodyDy;
 
-  // Antennae: long whiskers sweeping out and up from the head.
-  line(g, BODY_X + 4, by + 4, BODY_X - 2, by - 8, "a");
-  line(g, BODY_X + 11, by + 4, BODY_X + 17, by - 8, "a");
+  stamp(g, HEAD, BODY_X, by);
+  stamp(g, TORSO, BODY_X, by + TORSO_DY);
+  const face =
+    rig.eyes === "closed" ? FACE_CLOSED : rig.eyes === "x" ? FACE_X : rig.eyes === "up" ? FACE_UP : FACE_OPEN;
+  stamp(g, face, BODY_X, by + FACE_DY);
+  if (spec.captain) stamp(g, CAP, BODY_X, by + CAP_DY);
 
-  stamp(g, BODY, BODY_X, by);
-  const eyes = rig.eyes === "closed" ? EYES_CLOSED : rig.eyes === "x" ? EYES_X : rig.eyes === "up" ? EYES_UP : null;
-  if (eyes) {
-    // Clear the open eyes, then draw the variant.
-    for (let r = 0; r < 2; r++) for (let c = 0; c < 16; c++) if ("kw".includes(g[by + r][BODY_X + c])) g[by + r][BODY_X + c] = ".";
-    stamp(g, eyes, BODY_X, by);
-  }
-  if (spec.captain) stamp(g, CAP, BODY_X + 4, by + 1);
-
-  if (rig.prop === "paper") stamp(g, PAPER, BODY_X + 2, by + 9);
+  if (rig.prop === "paper") stamp(g, PAPER, BODY_X + 2, by + TORSO_DY);
   for (const [claw, shoulder, flip] of [
     [rig.left, SHOULDER_L, false],
     [rig.right, SHOULDER_R, true],
   ] as const) {
-    // Aim the arm at the claw's centre; the claw is stamped over the arm's
-    // end, so the joint looks right whether the claw is raised or lowered.
-    line(g, shoulder.x, shoulder.y + rig.bodyDy, claw.x + 2 + (flip ? 1 : 0), claw.y + 2, "r");
+    // Aim the sleeve at the claw's centre; the claw is stamped over the
+    // sleeve's end, so the joint looks right whether it is raised or lowered.
+    line(g, shoulder.x, shoulder.y + rig.bodyDy, claw.x + 2 + (flip ? 1 : 0), claw.y + 2, "u");
     stamp(g, claw.open ? CLAW_OPEN : CLAW_SHUT, claw.x, claw.y, flip);
   }
   if (rig.prop === "keyboard") stamp(g, KEYBOARD, 6, 26);
@@ -257,40 +266,41 @@ export function composeLobster(spec: LobsterSpec): string[] {
   return g.map((row) => row.join(""));
 }
 
-// Shrimp, side view facing right; two frames (tail flick).
+// Cadet (sub-agent): a small cap-less mascot, front view, left halves. Two
+// frames — claws bob and the legs step.
 const SHRIMP = [
-  [
-    "................",
-    ".......aaaa.....",
-    "....pppp...aa...",
-    "...ppppkp.......",
-    "..pppppppp......",
-    "..SSSSpppp......",
-    "...pZpppnp......",
-    "...pppppnn......",
-    "....ppppn.......",
-    ".....pppn.......",
-    "......pp........",
-    "....nppp........",
-    "...nn.n.........",
-    "................",
-  ],
-  [
-    "................",
-    "........aaaa....",
-    "....pppp....a...",
-    "...ppppkp.......",
-    "..pppppppp......",
-    "..SSSSpppp......",
-    "...pZpppnp......",
-    "...pppppnn......",
-    "....ppppn.......",
-    ".....pppn.......",
-    ".....ppp........",
-    "....ppnn........",
-    "....n.nn........",
-    "................",
-  ],
+  mirror([
+    "........",
+    ".....rrr",
+    "....rkkk",
+    "....rkSk",
+    "....rkZk",
+    "....rkkS",
+    ".c...rrr",
+    "cCc.Guuu",
+    ".cuuuuGu",
+    "....uuuu",
+    "....bbbG",
+    ".....rrr",
+    ".....l.l",
+    "....l.l.",
+  ]),
+  mirror([
+    "........",
+    ".....rrr",
+    "....rkkk",
+    "....rkSk",
+    "....rkZk",
+    "....rkkS",
+    ".....rrr",
+    ".c..Guuu",
+    "cCcuuuGu",
+    ".c..uuuu",
+    "....bbbG",
+    ".....rrr",
+    "....l.l.",
+    ".....l.l",
+  ]),
 ];
 
 export interface ShrimpSpec {
@@ -315,9 +325,9 @@ export function shade(hex: string, k: number): string {
   return `#${[f(r), f(g), f(b)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Palette lookup for creature sprites: `S`/`Z` are the scarf and its shadow. */
-const creatureColours = (scarf: string) => (ch: string) =>
-  ch === "S" ? scarf : ch === "Z" ? shade(scarf, 0.72) : PALETTE[ch] ?? "#ff00ff";
+/** Palette lookup for crew sprites: `S`/`Z` are the screen glow and its scanline. */
+const creatureColours = (glow: string) => (ch: string) =>
+  ch === "S" ? glow : ch === "Z" ? shade(glow, 0.72) : PALETTE[ch] ?? "#ff00ff";
 
 /** Grid → outlined canvas. Any transparent cell touching an opaque one (4-way)
  *  becomes outline, which keeps the sprite readable on any backdrop. */

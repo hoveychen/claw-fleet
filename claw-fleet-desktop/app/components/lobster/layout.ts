@@ -160,7 +160,7 @@ export interface BridgeLayout {
 }
 
 /** Seats sit this far below their row's top so the console screens behind
- *  them show above the lobsters' heads (only the thin antennae cross them). */
+ *  them show above the crew's caps. */
 const CONSOLE_RISE = 4;
 const BRIDGE_ROW_H = SLOT_H + CONSOLE_RISE;
 
