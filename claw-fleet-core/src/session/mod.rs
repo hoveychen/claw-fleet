@@ -209,6 +209,13 @@ pub struct SessionInfo {
     /// wedged on instead of only that it is; `None` whenever the bool is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stuck_tool: Option<StuckTool>,
+    /// Tool the session is running right now (see [`detect::current_tool`]):
+    /// the oldest unanswered `tool_use` of the latest batch, interactive waits
+    /// included. Only set while the status is a live working/waiting one, so
+    /// views can tell editing from reading from running a shell. `None` for
+    /// harnesses that do not report it yet (codex, dsh).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_tool: Option<String>,
     pub last_skill: Option<String>,
     /// Approximate context-window utilisation (0.0 – 1.0) derived from the
     /// last finalized assistant message's usage fields.  `None` when no
@@ -775,6 +782,7 @@ mod tests {
             proc_alive: false,
             pending_tool_batch: false,
             stuck_tool: None,
+            current_tool: None,
             last_skill: None,
             context_percent: None,
             agent_source: "claude-code".into(),
@@ -865,6 +873,59 @@ mod tests {
                 "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]
             }
         })
+    }
+
+    #[test]
+    fn current_tool_names_the_oldest_unanswered_block() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![
+                    tool_use_block_id("Read", "r1"),
+                    tool_use_block_id("Bash", "b1"),
+                    tool_use_block_id("Edit", "e1"),
+                ],
+                None,
+            ),
+            tool_result_msg("r1"),
+        ];
+        assert_eq!(current_tool(&lines).as_deref(), Some("Bash"));
+    }
+
+    #[test]
+    fn current_tool_is_none_once_the_batch_resolves() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![tool_use_block_id("Grep", "g1")], None),
+            tool_result_msg("g1"),
+        ];
+        assert_eq!(current_tool(&lines), None);
+        assert_eq!(current_tool(&[user_msg()]), None);
+    }
+
+    #[test]
+    fn current_tool_includes_interactive_waits() {
+        // Unlike the stuck detector, a parked AskUserQuestion is reported:
+        // the view draws the session as waiting on that tool.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![tool_use_block_id("AskUserQuestion", "ask1")], None),
+        ];
+        assert_eq!(current_tool(&lines).as_deref(), Some("AskUserQuestion"));
+    }
+
+    #[test]
+    fn settle_current_tool_keeps_it_only_while_in_flight() {
+        let mut busy = crate::session::scan::test_session("busy");
+        busy.status = SessionStatus::Executing;
+        busy.current_tool = Some("Bash".into());
+        let mut aged = crate::session::scan::test_session("aged");
+        aged.status = SessionStatus::Idle;
+        aged.current_tool = Some("Bash".into());
+        let mut list = vec![busy, aged];
+        crate::session::scan::settle_current_tool(&mut list);
+        assert_eq!(list[0].current_tool.as_deref(), Some("Bash"));
+        assert_eq!(list[1].current_tool, None);
     }
 
     #[test]

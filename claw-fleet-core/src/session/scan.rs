@@ -922,6 +922,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         proc_alive: false,
         pending_tool_batch: false,
         stuck_tool: None,
+        current_tool: None,
         last_skill: None,
         context_percent: None,
         agent_source: "claude-code".into(),
@@ -963,6 +964,27 @@ pub fn enrich_all(sessions: &mut [SessionInfo]) {
     // process Fleet has already killed.
     crate::remote_disconnect::enrich_sessions(sessions);
     crate::mirror_guard::enrich_sessions(sessions);
+    // After every status override above.
+    settle_current_tool(sessions);
+}
+
+/// Drop `current_tool` from sessions whose final status says no tool is in
+/// flight. The parse records the latest unanswered `tool_use` regardless of
+/// age, and the scan then rewrites `status` in many places (aged out, pid
+/// dead, disconnected…); only this last pass sees the status the UI will.
+pub(crate) fn settle_current_tool(sessions: &mut [SessionInfo]) {
+    for s in sessions.iter_mut() {
+        let in_flight = matches!(
+            s.status,
+            SessionStatus::Executing
+                | SessionStatus::WaitingInput
+                | SessionStatus::Stuck
+                | SessionStatus::Delegating
+        );
+        if !in_flight {
+            s.current_tool = None;
+        }
+    }
 }
 
 /// Scan all registered agent sources and merge into a single sorted list.

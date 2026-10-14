@@ -399,6 +399,7 @@ mod tests {
             proc_alive: false,
             pending_tool_batch: false,
             stuck_tool: None,
+            current_tool: None,
             last_skill: None,
             context_percent: None,
             agent_source: "claude-code".into(),
