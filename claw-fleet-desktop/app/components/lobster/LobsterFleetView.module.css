@@ -1,11 +1,11 @@
 /* The canvas is sized in whole art pixels, so it may be a few CSS pixels
-   short of the stage; the deep-water fill hides the seam. */
+   short of the stage; the deep-space fill hides the seam. */
 .stage {
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #0b2240;
+  background: #060a1c;
 }
 
 .canvas {
@@ -27,31 +27,86 @@
 }
 
 /* Overlays are positioned in art pixels × cssPerPx by the view. Colours are
-   fixed on purpose: they sit on the painted sea, not on themed chrome. */
-.podLabel {
+   fixed on purpose: they sit on the painted scene, not on themed chrome. */
+.ship {
   position: absolute;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.ship:hover,
+.ship:focus-visible {
+  background: rgba(127, 216, 240, 0.08);
+}
+
+.ship:focus-visible {
+  outline: 2px solid #f2c862;
+  outline-offset: 1px;
+}
+
+/* The name plate under a ship. */
+.plate {
+  position: absolute;
+  left: 0;
+  right: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 0 4px;
+  pointer-events: none;
+}
+
+.plateName {
+  max-width: 100%;
   overflow: hidden;
   color: #e6f2fa;
   font-size: 11px;
   font-weight: 600;
-  pointer-events: none;
-}
-
-.podName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.podMore {
-  flex: none;
-  color: #f2c862;
+.plateCrew {
+  color: #9fb3c8;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.bridgeBar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 2px 2px;
+  background: rgba(6, 10, 28, 0.78);
+  border-radius: var(--radius-pill);
+}
+
+.back {
+  padding: 2px 10px;
+  border: 1px solid #5d6a8a;
+  border-radius: var(--radius-pill);
+  background: #232a3d;
+  color: #e6f2fa;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.back:hover {
+  background: #39425b;
+}
+
+.back:focus-visible {
+  outline: 2px solid #f2c862;
+  outline-offset: 1px;
+}
+
+.bridgeName {
+  color: #e6f2fa;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .seat {
@@ -133,7 +188,7 @@
   pointer-events: none;
 }
 
-.morePods {
+.more {
   position: absolute;
   right: 8px;
   bottom: 8px;
@@ -148,4 +203,9 @@
   .alert {
     animation: none;
   }
+}
+
+/* On a ship the view places the marker over the canopy (inline left/top). */
+.ship .alert {
+  z-index: 1;
 }

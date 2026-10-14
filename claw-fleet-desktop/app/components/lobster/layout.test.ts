@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { SessionInfo, SessionStatus } from "../../types";
-import { buildRoster, layoutFleet, POD_LABEL_H, RECENT_MS, SLOT_H, SLOT_W, type PodIn } from "./layout";
+import {
+  buildRoster,
+  layoutBridge,
+  layoutShips,
+  RECENT_MS,
+  SHIP_CELL_H,
+  SLOT_H,
+  SLOT_W,
+  type PodIn,
+} from "./layout";
+import { SHIP_H, SHIP_W } from "./ship";
+import { LOBSTER_W } from "./sprites";
 
 const NOW = 10_000_000;
 
@@ -83,48 +94,60 @@ describe("buildRoster", () => {
   });
 });
 
-describe("layoutFleet", () => {
-  it("places every seat inside its pod, below the label strip", () => {
-    const { pods, hiddenPods } = layoutFleet([pod("a", 3, 1), pod("b", 1)], 400, 200);
-    expect(hiddenPods).toBe(0);
-    for (const p of pods) {
-      for (const s of p.seats) {
-        expect(s.x).toBeGreaterThanOrEqual(p.x);
-        expect(s.y).toBeGreaterThanOrEqual(p.y + POD_LABEL_H);
-        expect(s.x + SLOT_W - 6).toBeLessThanOrEqual(p.x + p.w);
-        expect(s.y + SLOT_H).toBeLessThanOrEqual(p.y + p.h);
-      }
+const overlap = (a: { x: number; y: number }, b: { x: number; y: number }, w: number, h: number) =>
+  !(a.x + w <= b.x || b.x + w <= a.x || a.y + h <= b.y || b.y + h <= a.y);
+
+describe("layoutShips", () => {
+  it("places every workspace's ship inside the sky without overlaps", () => {
+    const pods = Array.from({ length: 15 }, (_, i) => pod(`ws${i}`, 1));
+    const { ships, hidden } = layoutShips(pods, 426, 240);
+    expect(hidden).toBe(0);
+    expect(ships).toHaveLength(15);
+    for (const a of ships) {
+      expect(a.x).toBeGreaterThanOrEqual(0);
+      expect(a.x + SHIP_W).toBeLessThanOrEqual(426);
+      expect(a.y + SHIP_H).toBeLessThanOrEqual(240);
+      for (const b of ships) if (a !== b) expect(overlap(a, b, SHIP_W, SHIP_H)).toBe(false);
     }
-    expect(pods[0].seats[0].shrimp).toHaveLength(1);
   });
 
-  it("fits twenty-plus sessions on a desktop-sized sea", () => {
-    const many = Array.from({ length: 8 }, (_, i) => pod(`ws${i}`, 3));
-    const { pods, hiddenPods } = layoutFleet(many, 426, 226);
-    expect(hiddenPods).toBe(0);
-    expect(pods.reduce((n, p) => n + p.seats.length, 0)).toBe(24);
-    // No two pods overlap.
-    for (const a of pods)
-      for (const b of pods)
-        if (a !== b) expect(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y).toBe(true);
+  it("centres a lone ship", () => {
+    const { ships } = layoutShips([pod("solo", 2)], 400, 200);
+    expect(Math.abs(ships[0].x + SHIP_W / 2 - 200)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ships[0].y - 100)).toBeLessThan(SHIP_CELL_H);
   });
 
-  it("wraps a crowded workspace onto more rows instead of overflowing the width", () => {
-    const { pods } = layoutFleet([pod("big", 15)], 200, 400);
-    expect(pods[0].x + pods[0].w).toBeLessThanOrEqual(200);
-    expect(pods[0].seats).toHaveLength(15);
+  it("counts the workspaces that do not fit", () => {
+    const pods = Array.from({ length: 40 }, (_, i) => pod(`ws${i}`, 1));
+    const { ships, hidden } = layoutShips(pods, 200, 100);
+    expect(ships.length + hidden).toBe(40);
+    expect(hidden).toBeGreaterThan(0);
+  });
+});
+
+describe("layoutBridge", () => {
+  it("seats the crew below the viewport, inside the bridge", () => {
+    const crew = pod("a", 7, 1).crew;
+    const b = layoutBridge(crew, 426, 240);
+    expect(b.more).toBe(0);
+    expect(b.seats).toHaveLength(7);
+    for (const s of b.seats) {
+      expect(s.y).toBeGreaterThan(b.viewportH);
+      expect(s.x + LOBSTER_W).toBeLessThanOrEqual(426);
+      expect(s.y + SLOT_H).toBeLessThanOrEqual(240);
+      expect(s.shrimp).toHaveLength(1);
+    }
+    for (const a of b.seats) for (const c of b.seats) if (a !== c) expect(overlap(a, c, SLOT_W - 6, SLOT_H)).toBe(false);
+    expect(b.rowTops.length).toBeGreaterThan(0);
   });
 
-  it("counts pods and crew that do not fit instead of squeezing them", () => {
-    const { pods, hiddenPods } = layoutFleet([pod("a", 30), pod("b", 1)], 200, 120);
-    expect(pods).toHaveLength(1);
-    expect(pods[0].more).toBe(30 - pods[0].seats.length);
-    expect(pods[0].more).toBeGreaterThan(0);
-    expect(hiddenPods).toBe(1);
+  it("counts crew that do not fit instead of squeezing them", () => {
+    const b = layoutBridge(pod("a", 60).crew, 200, 160);
+    expect(b.more).toBe(60 - b.seats.length);
+    expect(b.more).toBeGreaterThan(0);
   });
 
   it("caps the drawn shrimp per seat", () => {
-    const { pods } = layoutFleet([pod("a", 1, 5)], 400, 200);
-    expect(pods[0].seats[0].shrimp).toHaveLength(2);
+    expect(layoutBridge(pod("a", 1, 5).crew, 400, 200).seats[0].shrimp).toHaveLength(2);
   });
 });

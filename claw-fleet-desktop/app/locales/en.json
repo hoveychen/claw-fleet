@@ -3064,11 +3064,15 @@
   },
   "view_lobsters": "Lobster Fleet",
   "lobsters": {
-    "empty": "All quiet on the sea floor — no sessions running",
+    "empty": "All quiet out there — no sessions running",
     "waiting": "Needs you",
     "parked": "Card timed out",
     "subagents": "{{n}} shrimp",
     "open_title": "Click to open this session",
-    "more_pods": "{{n}} more subs"
+    "board": "Board this ship",
+    "crew": "{{n}} crew",
+    "back": "Fleet",
+    "more_ships": "{{n}} more ships",
+    "more_crew": "{{n}} more crew"
   }
 }

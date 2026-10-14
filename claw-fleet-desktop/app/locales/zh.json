@@ -3060,11 +3060,15 @@
   },
   "view_lobsters": "龙虾舰队",
   "lobsters": {
-    "empty": "海底静悄悄——还没有在跑的会话",
+    "empty": "星空静悄悄——还没有在跑的会话",
     "waiting": "等你",
     "parked": "卡片已超时",
     "subagents": "{{n}} 只小虾",
     "open_title": "点击打开这个会话",
-    "more_pods": "还有 {{n}} 艘潜艇"
+    "board": "登上这艘飞船",
+    "crew": "{{n}} 名队员",
+    "back": "舰队",
+    "more_ships": "还有 {{n}} 艘飞船",
+    "more_crew": "还有 {{n}} 名队员"
   }
 }

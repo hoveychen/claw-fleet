@@ -1,161 +1,192 @@
 /**
- * The sea-floor backdrop: water gradient, light shafts, sand. Fixed art
- * colours on purpose — this is a painted scene, not themed chrome.
+ * Painted backdrops: open space for the fleet overview, and the inside of a
+ * ship's bridge once boarded. Fixed art colours on purpose — this is a
+ * painted scene, not themed chrome.
  */
 
-export const WATER_TOP = "#1d5f86";
-export const WATER_BOTTOM = "#0b2240";
-export const SAND = "#c9a46a";
-export const SAND_DARK = "#a9844f";
-
-/** Height in art pixels of the sand strip along the bottom. */
-export const SAND_H = 14;
-
-export function drawOcean(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, WATER_TOP);
-  g.addColorStop(1, WATER_BOTTOM);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-
-  // Slow light shafts from the surface, swaying a few pixels.
-  ctx.save();
-  ctx.globalAlpha = 0.07;
-  ctx.fillStyle = "#ffffff";
-  for (let i = 0; i < 5; i++) {
-    const x0 = ((i + 0.5) * w) / 5 + Math.sin(t / 3000 + i) * 6;
-    ctx.beginPath();
-    ctx.moveTo(x0 - 6, 0);
-    ctx.lineTo(x0 + 6, 0);
-    ctx.lineTo(x0 + 26, h - SAND_H);
-    ctx.lineTo(x0 + 2, h - SAND_H);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // Sand with a dithered top edge.
-  const sy = h - SAND_H;
-  ctx.fillStyle = SAND;
-  ctx.fillRect(0, sy, w, SAND_H);
-  ctx.fillStyle = SAND_DARK;
-  for (let x = 0; x < w; x += 2) ctx.fillRect(x, sy + ((x / 2) % 2), 1, 1);
-  for (let x = 3; x < w; x += 7) ctx.fillRect(x, sy + 5 + (x % 5), 1, 1);
-}
-
-// ── Ambient life ────────────────────────────────────────────────────────────
-
-/** Cheap deterministic hash → [0, 1); keeps the reef stable across frames. */
+/** Cheap deterministic hash → [0, 1); keeps the sky stable across frames. */
 export function hash01(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 
-const WEED = ["#2f8a4e", "#3fa45f", "#26703f"];
+const SKY_TOP = "#060a1c";
+const SKY_BOTTOM = "#170b30";
+const STAR_TINTS = ["#ffffff", "#cfe0ff", "#ffe9c4"];
 
-/** Kelp fronds rooted in the sand, swaying with the current. */
-export function drawSeaweed(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
-  const floor = h - SAND_H;
-  for (let i = 0, x = 5; x < w; i++, x += 13 + Math.floor(hash01(i) * 22)) {
-    const tall = 10 + Math.floor(hash01(i + 50) * 22);
-    ctx.fillStyle = WEED[i % WEED.length];
-    for (let y = 0; y < tall; y++) {
-      // Sway grows towards the tip; each frond has its own phase.
-      const k = y / tall;
-      const dx = Math.round(Math.sin(t / 1400 + i * 1.7 + y * 0.25) * 2.5 * k);
-      ctx.fillRect(x + dx, floor + 2 - y, y > tall - 3 ? 1 : 2, 1);
-      if (y % 5 === 3) ctx.fillRect(x + dx + (i % 2 ? 2 : -1), floor + 2 - y, 1, 1);
-    }
+/** Stars in three parallax layers drifting left, twinkling. `speed` scales the
+ *  drift (the bridge viewport streams them fast while the crew works). */
+export function drawStars(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+  speed = 1,
+  streak = false,
+) {
+  const count = Math.ceil((w * h) / 140);
+  for (let i = 0; i < count; i++) {
+    const layer = i % 3;
+    const v = (0.4 + layer * 0.8) * speed;
+    const x = x0 + Math.floor((((hash01(i) * w - (t / 1000) * v * 6) % w) + w) % w);
+    const y = y0 + Math.floor(hash01(i + 7777) * h);
+    const tw = 0.45 + 0.55 * Math.abs(Math.sin(t / (900 + layer * 500) + i));
+    ctx.globalAlpha = layer === 2 ? tw : tw * 0.6;
+    ctx.fillStyle = STAR_TINTS[i % STAR_TINTS.length];
+    const len = streak ? 2 + layer * 3 : 1;
+    ctx.fillRect(x, y, Math.min(len, x0 + w - x), 1);
   }
+  ctx.globalAlpha = 1;
 }
 
-/** Rising bubbles from each source point; a few per source, staggered. */
-export function drawBubbles(ctx: CanvasRenderingContext2D, t: number, sources: { x: number; y: number }[]) {
-  ctx.save();
-  ctx.fillStyle = "#d8f1ff";
-  sources.forEach((src, i) => {
-    for (let k = 0; k < 2; k++) {
-      const seed = i * 7 + k * 3;
-      const rise = 40 + hash01(seed) * 30;
-      const p = ((t / 1000) * (6 + hash01(seed + 1) * 5) + hash01(seed + 2) * rise) % rise;
-      const x = Math.round(src.x + Math.sin(t / 600 + seed) * 1.5 + (hash01(seed + 3) - 0.5) * 8);
-      const y = Math.round(src.y - p);
-      ctx.globalAlpha = 0.75 * (1 - p / rise);
-      const big = hash01(seed + 4) > 0.6;
-      if (big) {
-        ctx.fillRect(x, y - 1, 2, 1);
-        ctx.fillRect(x - 1, y, 1, 2);
-        ctx.fillRect(x + 2, y, 1, 2);
-        ctx.fillRect(x, y + 2, 2, 1);
-      } else {
-        ctx.fillRect(x, y, 1, 1);
+/** Open space: gradient sky, dithered nebulae, a ringed planet, stars. */
+export function drawSpace(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, SKY_TOP);
+  g.addColorStop(1, SKY_BOTTOM);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+
+  // Nebulae: sparse dithered clouds, so they read as pixel art, not blur.
+  const clouds = [
+    { cx: w * 0.22, cy: h * 0.3, r: Math.min(w, h) * 0.32, c: "#6a2c8f" },
+    { cx: w * 0.78, cy: h * 0.72, r: Math.min(w, h) * 0.28, c: "#1d5f7a" },
+  ];
+  for (const cl of clouds) {
+    ctx.fillStyle = cl.c;
+    for (let y = Math.floor(cl.cy - cl.r); y < cl.cy + cl.r; y++) {
+      for (let x = Math.floor(cl.cx - cl.r); x < cl.cx + cl.r; x++) {
+        const d = Math.hypot((x - cl.cx) / cl.r, (y - cl.cy) / (cl.r * 0.7));
+        if (d >= 1) continue;
+        // Ordered dither, denser towards the centre.
+        const bayer = ((x & 1) * 2 + (y & 1) * 3) % 4;
+        if ((1 - d) * 4 * 0.55 > bayer + hash01(x * 31 + y) * 0.8) {
+          ctx.globalAlpha = 0.28;
+          ctx.fillRect(x, y, 1, 1);
+        }
       }
     }
-  });
-  ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+
+  drawStars(ctx, t, 0, 0, w, h, 0.4);
+  drawPlanet(ctx, w - Math.round(Math.min(w, h) * 0.16), h - Math.round(Math.min(w, h) * 0.12), Math.round(Math.min(w, h) * 0.13));
 }
 
-/** Drifting caustic flecks on the sand. */
-export function drawCaustics(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
-  ctx.save();
-  ctx.fillStyle = "#fff3cf";
-  const floor = h - SAND_H;
-  for (let i = 0; i < Math.ceil(w / 18); i++) {
-    const x = Math.round((hash01(i + 90) * w + t / 180) % w);
-    const y = floor + 3 + Math.floor(hash01(i + 91) * (SAND_H - 5));
-    ctx.globalAlpha = 0.25 + 0.25 * Math.sin(t / 700 + i);
-    ctx.fillRect(x, y, 2 + (i % 2), 1);
+function drawPlanet(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  // Back half of the ring.
+  ctx.fillStyle = "#b98c5a";
+  for (let x = -r * 1.9; x <= r * 1.9; x++) {
+    const y = Math.round((x * 0.18) - Math.sqrt(Math.max(0, 1 - (x / (r * 1.9)) ** 2)) * r * 0.22);
+    ctx.fillRect(Math.round(cx + x), cy + y, 1, 1);
   }
-  ctx.restore();
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      if (x * x + y * y > r * r) continue;
+      // Lit from the upper left; banded.
+      const lit = (-(x + y) / (r * 1.6) + 0.5);
+      const band = Math.floor((y / r + 1) * 3) % 2;
+      ctx.fillStyle = lit > 0.55 ? "#e3a06a" : lit > 0.25 ? (band ? "#c4774a" : "#b86b40") : "#6e3b2a";
+      ctx.fillRect(cx + x, cy + y, 1, 1);
+    }
+  }
+  // Front half of the ring.
+  ctx.fillStyle = "#e8c48e";
+  for (let x = -r * 1.9; x <= r * 1.9; x++) {
+    const y = Math.round((x * 0.18) + Math.sqrt(Math.max(0, 1 - (x / (r * 1.9)) ** 2)) * r * 0.22);
+    ctx.fillRect(Math.round(cx + x), cy + y, 1, 1);
+  }
 }
 
-// ── Pods ────────────────────────────────────────────────────────────────────
+// ── Bridge ──────────────────────────────────────────────────────────────────
 
-const HULL = "#3a5d78";
-const HULL_DARK = "#26425a";
-const HULL_EDGE = "#0c1d2b";
-const RIVET = "#86a7bd";
-const BRASS = "#c99a3c";
+const WALL = "#232a3d";
+const WALL_DARK = "#181d2c";
+const FRAME = "#3c4660";
+const FRAME_LIGHT = "#5d6a8a";
+const DECK = "#2b3247";
+const DECK_LINE = "#1f2536";
+const CONSOLE = "#39425b";
+const CONSOLE_TOP = "#4d5878";
 
-/** A submarine cabin: hull frame, rivet strip carrying the label, a glass
- *  window the crew sits behind, and a periscope. */
-export function drawPod(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, labelH: number) {
-  // Periscope above the top-right corner.
-  ctx.fillStyle = BRASS;
-  ctx.fillRect(x + w - 9, y - 5, 2, 5);
-  ctx.fillRect(x + w - 9, y - 6, 5, 2);
-  // Outline, then the hull with the corners cut for a rounded look.
-  ctx.fillStyle = HULL_EDGE;
-  ctx.fillRect(x + 1, y - 1, w - 2, h + 2);
-  ctx.fillRect(x - 1, y + 1, w + 2, h - 2);
-  ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = HULL;
-  ctx.fillRect(x + 1, y, w - 2, h);
-  ctx.fillRect(x, y + 1, w, h - 2);
-  // Label strip with rivets.
-  ctx.fillStyle = HULL_DARK;
-  ctx.fillRect(x + 1, y + 1, w - 2, labelH - 2);
-  ctx.fillStyle = RIVET;
-  for (let rx = x + 3; rx < x + w - 3; rx += 6) {
-    ctx.fillRect(rx, y + 1, 1, 1);
-    ctx.fillRect(rx, y + h - 2, 1, 1);
-  }
-  // Window: lighter water behind glass, plus a diagonal glare.
-  const wx = x + 2;
-  const wy = y + labelH;
-  const ww = w - 4;
-  const wh = h - labelH - 3;
-  ctx.fillStyle = "#1f6f96";
-  ctx.fillRect(wx, wy, ww, wh);
+/**
+ * The bridge interior: a forward viewport onto streaming stars across the top
+ * (faster, streaked, while the crew works), wall plating, and the deck.
+ */
+export function drawBridge(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  w: number,
+  h: number,
+  viewportH: number,
+  warp: boolean,
+) {
+  ctx.fillStyle = WALL;
+  ctx.fillRect(0, 0, w, h);
+  // Deck plating below the viewport, with seams.
+  ctx.fillStyle = DECK;
+  ctx.fillRect(0, viewportH + 6, w, h - viewportH - 6);
+  ctx.fillStyle = DECK_LINE;
+  for (let y = viewportH + 14; y < h; y += 12) ctx.fillRect(0, y, w, 1);
+  for (let x = 7; x < w; x += 24) ctx.fillRect(x, viewportH + 6, 1, h);
+
+  // Viewport: space beyond, a mullioned frame in front.
+  const vx = 6;
+  const vy = 4;
+  const vw = w - 12;
+  const vh = viewportH - 6;
+  ctx.fillStyle = SKY_TOP;
+  ctx.fillRect(vx, vy, vw, vh);
+  drawStars(ctx, t, vx, vy, vw, vh, warp ? 9 : 1.2, warp);
+  ctx.fillStyle = FRAME;
+  ctx.fillRect(vx - 2, vy - 2, vw + 4, 2);
+  ctx.fillRect(vx - 2, vy + vh, vw + 4, 3);
+  ctx.fillRect(vx - 2, vy, 2, vh);
+  ctx.fillRect(vx + vw, vy, 2, vh);
+  const panes = Math.max(2, Math.round(vw / 90));
+  for (let i = 1; i < panes; i++) ctx.fillRect(vx + Math.round((vw * i) / panes) - 1, vy, 2, vh);
+  ctx.fillStyle = FRAME_LIGHT;
+  ctx.fillRect(vx - 2, vy - 2, vw + 4, 1);
+  // Glare on the glass.
   ctx.save();
-  ctx.globalAlpha = 0.12;
+  ctx.globalAlpha = 0.07;
   ctx.fillStyle = "#ffffff";
-  for (let i = 0; i < wh && 15 + i < ww; i++) {
-    ctx.fillRect(wx + 4 + i, wy + i, 3, 1);
-    ctx.fillRect(wx + 12 + i, wy + i, 1, 1);
-  }
+  for (let i = 0; i < vh; i++) ctx.fillRect(vx + 10 + i, vy + i, 4, 1);
   ctx.restore();
-  // Brass trim along the window's sill.
-  ctx.fillStyle = BRASS;
-  ctx.fillRect(wx, wy + wh, ww, 1);
+  // Wall band under the viewport, with blinking indicator lights.
+  ctx.fillStyle = WALL_DARK;
+  ctx.fillRect(0, viewportH + 1, w, 5);
+  for (let x = 10, i = 0; x < w - 4; x += 15, i++) {
+    const on = Math.sin(t / (500 + (i % 5) * 170) + i) > 0;
+    ctx.fillStyle = on ? ["#4ac26b", "#e0c24a", "#4a8fe0"][i % 3] : "#141826";
+    ctx.fillRect(x, viewportH + 3, 2, 1);
+  }
+}
+
+/** A console bank behind one row of seats: screens at head height glowing in
+ *  each seated crew member's state colour. */
+export function drawConsoleBank(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  screens: { x: number; w: number; color: string }[],
+  top: number,
+) {
+  for (const s of screens) {
+    ctx.fillStyle = CONSOLE;
+    ctx.fillRect(s.x, top + 2, s.w, 13);
+    ctx.fillStyle = CONSOLE_TOP;
+    ctx.fillRect(s.x, top + 2, s.w, 1);
+    // The screen, with a scrolling scanline.
+    ctx.fillStyle = "#0b1020";
+    ctx.fillRect(s.x + 3, top + 4, s.w - 6, 8);
+    ctx.fillStyle = s.color;
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(s.x + 3, top + 4, s.w - 6, 8);
+    ctx.globalAlpha = 0.9;
+    const scan = top + 4 + (Math.floor(t / 180 + s.x) % 8);
+    ctx.fillRect(s.x + 3, scan, s.w - 6, 1);
+    ctx.globalAlpha = 1;
+  }
 }
