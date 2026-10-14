@@ -17,6 +17,14 @@ describe("pickScale", () => {
     expect(pickScale(8000, 5000).scale).toBe(8);
   });
 
+  it("keeps the scale a multiple of the detail factor", () => {
+    // 1280x720 → 720/(220*2) = 1 fine pixel per device pixel → scale 2.
+    expect(pickScale(1280, 720, 220, 2)).toEqual({ scale: 2, w: 640, h: 360 });
+    expect(pickScale(1920, 1080, 180, 2).scale).toBe(6);
+    expect(pickScale(8000, 5000, 140, 2).scale).toBe(8);
+    expect(pickScale(300, 200, 140, 2).scale).toBe(2);
+  });
+
   it("returns a non-empty canvas for a zero-size host", () => {
     const px = pickScale(0, 0);
     expect(px.w).toBeGreaterThan(0);

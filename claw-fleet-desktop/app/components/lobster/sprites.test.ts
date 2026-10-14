@@ -8,6 +8,7 @@ import {
   POSE_FRAMES,
   SHRIMP_H,
   SHRIMP_W,
+  SPRITE_DETAIL,
   type Pose,
 } from "./sprites";
 
@@ -22,8 +23,8 @@ describe("composeLobster", () => {
     for (const pose of POSES) {
       for (let f = 0; f < POSE_FRAMES[pose].n; f++) {
         const rows = lobster(pose, f);
-        expect(rows).toHaveLength(LOBSTER_H);
-        for (const r of rows) expect(r).toHaveLength(LOBSTER_W);
+        expect(rows).toHaveLength(LOBSTER_H * SPRITE_DETAIL);
+        for (const r of rows) expect(r, pose).toHaveLength(LOBSTER_W * SPRITE_DETAIL);
         // The screen glow (state colour) is always visible.
         expect(rows.join("")).toContain("S");
       }
@@ -33,6 +34,14 @@ describe("composeLobster", () => {
   it("puts a cap only on captains", () => {
     expect(lobster("idle", 0, true).join("")).toContain("H");
     expect(lobster("idle", 0, false).join("")).not.toContain("H");
+  });
+
+  it("centres the eyes and mouth on the screen", () => {
+    const rows = lobster("idle", 0, true);
+    for (const r of rows) {
+      const eyes = r.replace(/[^SZ]/g, ".");
+      expect(eyes).toEqual([...eyes].reverse().join(""));
+    }
   });
 
   it("draws a screen face whose eyes change with the pose", () => {
@@ -65,7 +74,7 @@ describe("composeLobster", () => {
   it("leaves no sleeve stub hanging below a lowered claw", () => {
     for (const pose of ["idle", "stuck", "type"] as Pose[]) {
       // Only the left claw's columns: the body and legs sit lower in the middle.
-      const rows = lobster(pose).map((r) => r.slice(0, 8));
+      const rows = lobster(pose).map((r) => r.slice(0, 16));
       const lowestClaw = rows.reduce((acc, r, i) => (r.includes("c") ? i : acc), -1);
       const below = rows.slice(lowestClaw + 1).join("");
       expect(below, pose).not.toContain("u");
@@ -81,8 +90,8 @@ describe("composeShrimp", () => {
   it("has two frames at the fixed size with a glowing screen and no cap", () => {
     for (const frame of [0, 1]) {
       const rows = composeShrimp({ frame, color: "#4ac26b" });
-      expect(rows).toHaveLength(SHRIMP_H);
-      for (const r of rows) expect(r).toHaveLength(SHRIMP_W);
+      expect(rows).toHaveLength(SHRIMP_H * SPRITE_DETAIL);
+      for (const r of rows) expect(r).toHaveLength(SHRIMP_W * SPRITE_DETAIL);
       expect(rows.join("")).toContain("S");
       expect(rows.join("")).not.toContain("H");
     }

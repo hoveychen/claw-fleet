@@ -21,12 +21,19 @@ const TARGET_LOGICAL_H = 220;
 const MIN_SCALE = 2;
 const MAX_SCALE = 8;
 
+/** Canvas pixels per art pixel. Scenery is drawn in art pixels under a
+ *  matching transform; the crew sprites are drawn at this finer resolution,
+ *  so they carry more detail than the backdrop without breaking the grid. */
+export const SCENE_DETAIL = 2;
+
 /** Pick the largest integer scale that still leaves ~`targetH` art pixels of
  *  height, then size the logical canvas to fill the device area. A smaller
- *  `targetH` zooms in (bigger sprites, fewer of them fit). */
-export function pickScale(devW: number, devH: number, targetH = TARGET_LOGICAL_H): PixelScale {
-  const raw = Math.floor(devH / targetH);
-  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, raw));
+ *  `targetH` zooms in (bigger sprites, fewer of them fit). With `detail` > 1
+ *  the scale is a multiple of it, so every fine pixel is whole device pixels. */
+export function pickScale(devW: number, devH: number, targetH = TARGET_LOGICAL_H, detail = 1): PixelScale {
+  const raw = Math.floor(devH / (targetH * detail));
+  const fine = Math.min(Math.floor(MAX_SCALE / detail), Math.max(Math.ceil(MIN_SCALE / detail), raw));
+  const scale = fine * detail;
   return {
     scale,
     w: Math.max(1, Math.floor(devW / scale)),
@@ -75,11 +82,11 @@ export class LobsterEngine {
   }
 
   resize(cssW: number, cssH: number, dpr: number, targetH?: number) {
-    const px = pickScale(Math.round(cssW * dpr), Math.round(cssH * dpr), targetH);
+    const px = pickScale(Math.round(cssW * dpr), Math.round(cssH * dpr), targetH, SCENE_DETAIL);
     this.px = px;
     this.cssPerPx = px.scale / dpr;
-    this.canvas.width = px.w;
-    this.canvas.height = px.h;
+    this.canvas.width = px.w * SCENE_DETAIL;
+    this.canvas.height = px.h * SCENE_DETAIL;
     this.canvas.style.width = `${px.w * this.cssPerPx}px`;
     this.canvas.style.height = `${px.h * this.cssPerPx}px`;
     this.ctx.imageSmoothingEnabled = false;
@@ -97,6 +104,7 @@ export class LobsterEngine {
       if (!this.dirty && now - this.lastDraw < 1000 / fps) return;
       this.lastDraw = now;
       this.dirty = false;
+      this.ctx.setTransform(SCENE_DETAIL, 0, 0, SCENE_DETAIL, 0, 0);
       this.renderer.draw(this.ctx, now - this.t0, this.px.w, this.px.h);
     };
     this.raf = requestAnimationFrame(tick);

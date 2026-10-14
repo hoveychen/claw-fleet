@@ -22,7 +22,7 @@ import {
 import { BUSY_POSES, lookFor, STATE_COLORS, type Look } from "./poses";
 import { drawBridge, drawConsoleBank, drawSpace } from "./scene";
 import { paintFor, SHIP_CANOPY_X, SHIP_H, SHIP_W, SHIP_WINDOWS, shipSprite } from "./ship";
-import { frameAt, LOBSTER_H, LOBSTER_W, lobsterSprite, shrimpSprite } from "./sprites";
+import { frameAt, LOBSTER_H, LOBSTER_W, lobsterSprite, SHRIMP_H, SHRIMP_W, shrimpSprite } from "./sprites";
 import styles from "./LobsterFleetView.module.css";
 
 /** Stable per-id animation offset so a crowd does not move in lockstep. */
@@ -158,11 +158,19 @@ export function LobsterFleetView() {
             lobsterSprite({ pose: look.pose, frame: frameAt(look.pose, now, phaseOf(s.id)), color: look.color, captain: true }),
             seat.x,
             seat.y,
+            LOBSTER_W,
+            LOBSTER_H,
           );
           seat.shrimp.forEach((pos, k) => {
             const sub = seat.member.subagents[k];
             const frame = Math.floor(now / 250 + phaseOf(sub.id)) % 2;
-            ctx.drawImage(shrimpSprite({ frame, color: sc.looks.get(sub.id)?.color ?? STATE_COLORS.idle }), pos.x, pos.y);
+            ctx.drawImage(
+              shrimpSprite({ frame, color: sc.looks.get(sub.id)?.color ?? STATE_COLORS.idle }),
+              pos.x,
+              pos.y,
+              SHRIMP_W,
+              SHRIMP_H,
+            );
           });
         }
       },
