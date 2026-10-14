@@ -807,3 +807,30 @@ describe("terminal feature toggle (host_features)", () => {
     expect(useUIStore.getState().terminalNav?.workspacePath).toBe("/repo");
   });
 });
+
+describe("lobster fleet setting", () => {
+  beforeEach(() => vi.resetModules());
+
+  it("is off by default and keeps the page out of reach until switched on", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+    expect(useUIStore.getState().lobsterFleetEnabled).toBe(false);
+    useUIStore.getState().setViewMode("lobsters");
+    expect(useUIStore.getState().viewMode).toBe("history");
+    useUIStore.getState().setLobsterFleetEnabled(true);
+    expect(getItem("lobster-fleet-enabled")).toBe("true");
+    useUIStore.getState().setViewMode("lobsters");
+    expect(useUIStore.getState().viewMode).toBe("lobsters");
+    // Switching it off while on the page drops back to Tasks.
+    useUIStore.getState().setLobsterFleetEnabled(false);
+    expect(useUIStore.getState().viewMode).toBe("history");
+  });
+
+  it("does not boot into the page when the setting is off", async () => {
+    const { setItem } = await import("./storage");
+    setItem("viewMode", "lobsters");
+    setItem("lobster-fleet-enabled", "false");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().viewMode).toBe("history");
+  });
+});

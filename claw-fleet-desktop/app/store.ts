@@ -253,6 +253,8 @@ interface UIState {
    *  component state) for the same unmount reason as the filters above, and is
    *  written to disk so the choice survives a restart. */
   historyGroupHandoff: boolean;
+  /** Settings opt-in for the Lobster Fleet page; off by default. */
+  lobsterFleetEnabled: boolean;
   /** Workspace paths whose folder section in the task rail is folded shut.
    *  Component state would not survive the filter segments: the sections are
    *  rendered from the *filtered* rows, so a workspace with no match under
@@ -278,6 +280,7 @@ interface UIState {
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryQuery: (q: string) => void;
   setHistoryGroupHandoff: (on: boolean) => void;
+  setLobsterFleetEnabled: (on: boolean) => void;
   toggleHistoryWorkspaceCollapsed: (workspacePath: string) => void;
   setHistoryGroupMode: (m: HistoryGroupMode) => void;
   /** "+ New project" CTA → ProjectsView opens the
@@ -507,10 +510,13 @@ function readHistoryWorkspaceFilter(): string {
   return raw;
 }
 
+const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true";
+
 /** The stored page, or the Tasks page when it names one that no longer exists —
  *  the retired Sessions page ("list" / "gallery") above all. */
 function readViewMode(): ViewMode {
   const stored = getItem("viewMode");
+  if (stored === "lobsters" && !readLobsterFleetEnabled()) return "history";
   return isViewMode(stored) ? stored : "history";
 }
 
@@ -519,6 +525,7 @@ function readViewMode(): ViewMode {
  *  this (setViewMode and the nav requests below). */
 function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
   if (s.simplifiedMode && m !== "history" && m !== "artifacts") m = "history";
+  if (m === "lobsters" && !s.lobsterFleetEnabled) m = "history";
   setItem("viewMode", m);
   return { viewMode: m };
 }
@@ -593,6 +600,7 @@ export const useUIStore = create<UIState>((set) => ({
   // Default on — the empty/absent case yields grouping; only an explicit
   // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
   historyGroupHandoff: getItem("history-group-handoff") !== "false",
+  lobsterFleetEnabled: readLobsterFleetEnabled(),
   historyCollapsedWorkspaces: readCollapsedWorkspaces(),
   historyGroupMode: readGroupMode(),
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
@@ -622,6 +630,13 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("history-group-handoff", on ? "true" : "false");
     set({ historyGroupHandoff: on });
   },
+  setLobsterFleetEnabled: (on) =>
+    set((s) => {
+      setItem("lobster-fleet-enabled", on ? "true" : "false");
+      // Switching it off while on the page drops back to the Tasks page.
+      const next = { ...s, lobsterFleetEnabled: on };
+      return { lobsterFleetEnabled: on, ...viewModePatch(next, s.viewMode) };
+    }),
   toggleHistoryWorkspaceCollapsed: (workspacePath) =>
     set((s) => {
       const next = s.historyCollapsedWorkspaces.includes(workspacePath)
