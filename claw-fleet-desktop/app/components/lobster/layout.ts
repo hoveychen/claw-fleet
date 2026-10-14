@@ -37,7 +37,8 @@ export function onDeck(s: SessionInfo, now: number, keep: (id: string) => boolea
 }
 
 /** Group the on-deck main sessions by workspace, each with its live sub-agents.
- *  Pods with something live (or a card waiting) come first, then by recency. */
+ *  Pods with something live (or a card waiting) come first, then by name —
+ *  not by recency, which would reshuffle the whole sea on every transcript write. */
 export function buildRoster(
   sessions: SessionInfo[],
   now: number,
@@ -67,22 +68,27 @@ export function buildRoster(
     out.push({ key, crew });
   }
   const podRank = (p: PodIn) => Math.max(...p.crew.map(rank));
-  const podRecent = (p: PodIn) => Math.max(...p.crew.map((c) => c.session.lastActivityMs));
-  out.sort((a, b) => podRank(b) - podRank(a) || podRecent(b) - podRecent(a) || a.key.localeCompare(b.key));
+  out.sort((a, b) => podRank(b) - podRank(a) || a.key.localeCompare(b.key));
   return out;
 }
 
 // ── Geometry (art pixels) ───────────────────────────────────────────────────
 
-/** One seat: a lobster plus a row of shrimp under it. */
+/** Strip under each lobster that the DOM name label sits in. */
+export const NAME_H = 5;
+/** The shrimp sprite's blank top and bottom rows, tucked into the seat. */
+const SHRIMP_TRIM = 1;
+/** One seat: a lobster, its name strip, and a row of shrimp under that, the
+ *  shrimp standing on the window sill. */
 export const SLOT_W = LOBSTER_W + 6;
-export const SLOT_H = LOBSTER_H + SHRIMP_H + 2;
+export const SLOT_H = LOBSTER_H + NAME_H + SHRIMP_H - 3 * SHRIMP_TRIM;
 /** Shrimp drawn per seat; the rest are a DOM count badge. */
 export const MAX_SHRIMP = 2;
 export const POD_PAD = 4;
 /** Hull strip on top of each pod that carries the workspace name. */
 export const POD_LABEL_H = 10;
-const GAP = 6;
+/** Room between pods; the periscope pokes 6px above a hull. */
+const GAP = 9;
 const MARGIN = 6;
 
 export interface Rect {
@@ -164,7 +170,7 @@ export function layoutFleet(pods: PodIn[], w: number, floor: number): FleetLayou
       const nShrimp = Math.min(MAX_SHRIMP, pod.crew[j].subagents.length);
       const shrimp = Array.from({ length: nShrimp }, (_, k) => ({
         x: sx + LOBSTER_W / 2 - (nShrimp * SHRIMP_W) / 2 + k * SHRIMP_W,
-        y: sy + LOBSTER_H + 1,
+        y: sy + LOBSTER_H + NAME_H - SHRIMP_TRIM,
       }));
       seats.push({ member: pod.crew[j], x: sx, y: sy, shrimp });
     }

@@ -62,16 +62,16 @@ describe("buildRoster", () => {
     expect(pods[0].crew[0].subagents.map((s) => s.id)).toEqual(["s1"]);
   });
 
-  it("puts busy pods first, then the most recently active", () => {
+  it("puts busy pods first, then by name so pods do not reshuffle on activity", () => {
     const pods = buildRoster(
       [
-        session("resting", "quiet", "idle", { lastActivityMs: NOW - 10 }),
-        session("older-busy", "busy-old", "executing", { lastActivityMs: NOW - 5000 }),
-        session("newer-busy", "busy-new", "thinking", { lastActivityMs: NOW - 100 }),
+        session("resting", "a-quiet", "idle", { lastActivityMs: NOW - 10 }),
+        session("older-busy", "b-busy", "executing", { lastActivityMs: NOW - 5000 }),
+        session("newer-busy", "c-busy", "thinking", { lastActivityMs: NOW - 100 }),
       ],
       NOW,
     );
-    expect(pods.map((p) => p.key)).toEqual(["busy-new", "busy-old", "quiet"]);
+    expect(pods.map((p) => p.key)).toEqual(["b-busy", "c-busy", "a-quiet"]);
   });
 
   it("seats a pod's crew by creation time", () => {

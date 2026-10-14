@@ -246,7 +246,7 @@ const MOCK_SESSIONS_SEED: Array<
     agentDescription: null,
     slug: "fix/auth-middleware",
     aiTitle: "Fix JWT token validation in auth middleware",
-    status: "executing",
+    status: "executing", currentTool: "Edit",
     tokenSpeed: 22.5,
     agentTokenSpeed: 22.5,
     totalOutputTokens: 95240,
@@ -628,7 +628,7 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     lastActivityMs: NOW - 40 * MIN, createdAtMs: NOW - 3.1 * HOUR,
   }),
   mkSession({
-    id: "sess-billing-3", workspaceName: "billing-service", status: "executing",
+    id: "sess-billing-3", workspaceName: "billing-service", status: "executing", currentTool: "Bash",
     aiTitle: "Usage-based billing migration — P4 cutover switches",
     lastMessagePreview: "Flipping read path behind usage_billing_v2 flag...",
     handoff: { chainId: "chain-billing", hop: 3, chainLen: 3 },
@@ -708,7 +708,7 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     lastActivityMs: NOW - 1.5 * HOUR, createdAtMs: NOW - 4 * HOUR,
   }),
   mkSession({
-    id: "sess-pay-2", workspaceName: "payments-gateway", status: "thinking",
+    id: "sess-pay-2", workspaceName: "payments-gateway", status: "thinking", currentTool: "WebFetch",
     aiTitle: "Reconcile Stripe webhooks with ledger — P2 idempotency keys",
     lastMessagePreview: "Choosing idempotency key scheme for replayed events...",
     handoff: { chainId: "chain-payments", hop: 2, chainLen: 2 },
@@ -727,7 +727,7 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     lastActivityMs: NOW - 55 * MIN, createdAtMs: NOW - 5 * HOUR,
   }),
   mkSession({
-    id: "sess-search-2", workspaceName: "search-service", status: "executing",
+    id: "sess-search-2", workspaceName: "search-service", status: "executing", currentTool: "Bash",
     aiTitle: "Reindex pipeline for v2.4 search facets — verify & cutover",
     lastMessagePreview: "Comparing facet counts old vs new index...",
     handoff: { chainId: "chain-search", hop: 2, chainLen: 2 },
@@ -783,7 +783,7 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
 
   // design-system — migration + a waiting audit
   mkSession({
-    id: "sess-ds-main", workspaceName: "design-system", status: "executing",
+    id: "sess-ds-main", workspaceName: "design-system", status: "executing", currentTool: "Read",
     aiTitle: "Migrate web-frontend to DS tokens for v2.4",
     lastMessagePreview: "Replacing hardcoded colors in 47 components...",
     tokenSpeed: 23.9, contextPercent: 0.52, pid: 71006, pidPrecise: true,
@@ -815,13 +815,13 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
 
   // notif-service / release-tools / infra — the long tail of a release day
   mkSession({
-    id: "sess-notif", workspaceName: "notif-service", status: "executing",
+    id: "sess-notif", workspaceName: "notif-service", status: "executing", currentTool: "Grep",
     aiTitle: "Batch push notifications — cut p95 latency",
     lastMessagePreview: "Coalescing per-user pushes into 500ms windows...",
     tokenSpeed: 20.6, contextPercent: 0.29, pid: 71008, pidPrecise: true,
   }),
   mkSession({
-    id: "sess-release-changelog", workspaceName: "release-tools", status: "executing",
+    id: "sess-release-changelog", workspaceName: "release-tools", status: "executing", currentTool: "Write",
     aiTitle: "Assemble v2.4 changelog from merged PRs",
     lastMessagePreview: "Grouping 63 merged PRs by scope...",
     tokenSpeed: 17.3, contextPercent: 0.24, pid: 71009, pidPrecise: true,

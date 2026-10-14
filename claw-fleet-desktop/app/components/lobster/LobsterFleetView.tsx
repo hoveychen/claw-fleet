@@ -5,7 +5,7 @@ import { useDecisionStore, useSessionsStore, useUIStore } from "../../store";
 import { preferredSessionTitle, type SessionInfo } from "../../types";
 import { PageShell } from "../PageShell";
 import { LobsterEngine, type PixelScale } from "./engine";
-import { buildRoster, layoutFleet, MAX_SHRIMP, POD_LABEL_H, type FleetLayout } from "./layout";
+import { buildRoster, layoutFleet, MAX_SHRIMP, NAME_H, POD_LABEL_H, SLOT_H, type FleetLayout } from "./layout";
 import { BUSY_POSES, lookFor, type Look } from "./poses";
 import { drawBubbles, drawCaustics, drawOcean, drawPod, drawSeaweed, SAND_H } from "./scene";
 import { frameAt, LOBSTER_H, LOBSTER_W, lobsterSprite, shrimpSprite } from "./sprites";
@@ -154,7 +154,7 @@ export function LobsterFleetView() {
                   key={s.id}
                   type="button"
                   className={styles.seat}
-                  style={{ ...at(seat.x, seat.y), width: LOBSTER_W * k, height: LOBSTER_H * k }}
+                  style={{ ...at(seat.x, seat.y), width: LOBSTER_W * k, height: (SLOT_H - 1) * k }}
                   title={`${title}\n${t("lobsters.open_title")}`}
                   onClick={() => requestOpenTask(s.id)}
                 >
@@ -166,9 +166,13 @@ export function LobsterFleetView() {
                       !
                     </span>
                   )}
-                  <span className={styles.name}>{title}</span>
+                  <span className={styles.name} style={{ top: LOBSTER_H * k, height: NAME_H * k, lineHeight: `${NAME_H * k}px` }}>
+                    {title}
+                  </span>
                   {subs > MAX_SHRIMP && (
-                    <span className={styles.crewBadge}>{t("lobsters.subagents", { n: subs })}</span>
+                    <span className={styles.crewBadge} title={t("lobsters.subagents", { n: subs })}>
+                      ×{subs}
+                    </span>
                   )}
                 </button>
               );
