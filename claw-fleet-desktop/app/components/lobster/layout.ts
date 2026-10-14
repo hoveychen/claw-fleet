@@ -190,7 +190,7 @@ export function layoutBridge(crew: CrewMember[], w: number, h: number): BridgeLa
 }
 
 /** Zoom levels (logical heights) the bridge tries, closest first. */
-const BRIDGE_ZOOM = [140, 180];
+const BRIDGE_ZOOM = [100, 110, 120, 140, 180];
 /** Default height: what the overview, and a crowded bridge, use. */
 export const FLEET_TARGET_H = 220;
 

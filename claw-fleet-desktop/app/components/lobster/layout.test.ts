@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { SessionInfo, SessionStatus } from "../../types";
 import {
+  bridgeTargetH,
   buildRoster,
+  FLEET_TARGET_H,
   layoutBridge,
   layoutShips,
   RECENT_MS,
@@ -149,5 +151,21 @@ describe("layoutBridge", () => {
 
   it("caps the drawn shrimp per seat", () => {
     expect(layoutBridge(pod("a", 1, 5).crew, 400, 200).seats[0].shrimp).toHaveLength(2);
+  });
+});
+
+describe("bridgeTargetH", () => {
+  // A 1280x800 window at 2x, less the sidebar and header.
+  const DEV_W = 1984;
+  const DEV_H = 1504;
+
+  it("draws a small crew close up", () => {
+    expect(bridgeTargetH(pod("w", 1).crew, DEV_W, DEV_H)).toBe(100);
+  });
+
+  it("zooms out as the crew grows, and never past the fleet view", () => {
+    const zooms = [1, 4, 8, 16, 60].map((n) => bridgeTargetH(pod("w", n).crew, DEV_W, DEV_H));
+    for (let i = 1; i < zooms.length; i++) expect(zooms[i]).toBeGreaterThanOrEqual(zooms[i - 1]);
+    expect(zooms[zooms.length - 1]).toBe(FLEET_TARGET_H);
   });
 });
