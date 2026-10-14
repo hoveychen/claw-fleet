@@ -25,3 +25,129 @@
   font-size: 13px;
   pointer-events: none;
 }
+
+/* Overlays are positioned in art pixels × cssPerPx by the view. Colours are
+   fixed on purpose: they sit on the painted sea, not on themed chrome. */
+.podLabel {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  overflow: hidden;
+  color: #e6f2fa;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.podName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.podMore {
+  flex: none;
+  color: #f2c862;
+}
+
+.seat {
+  position: absolute;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.seat:hover .name,
+.seat:focus-visible .name {
+  background: rgba(10, 24, 38, 0.92);
+  color: #ffffff;
+}
+
+.seat:focus-visible {
+  outline: 2px solid #f2c862;
+  outline-offset: 1px;
+}
+
+.name {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: 0;
+  padding: 0 2px;
+  overflow: hidden;
+  background: rgba(10, 24, 38, 0.66);
+  border-radius: var(--radius-hair);
+  color: #dbe9f3;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The "your turn" marker over a lobster's head. */
+.alert {
+  position: absolute;
+  left: 50%;
+  top: -14px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  background: #f2c862;
+  border: 2px solid #2a0d0a;
+  border-radius: var(--radius-xs);
+  color: #2a0d0a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 12px;
+  text-align: center;
+  animation: lobster-alert 0.9s steps(2, end) infinite;
+}
+
+.alertParked {
+  background: #9aa3ad;
+  animation: none;
+}
+
+@keyframes lobster-alert {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.crewBadge {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  background: rgba(10, 24, 38, 0.8);
+  border-radius: var(--radius-pill);
+  color: #f59a80;
+  font-size: 10px;
+  line-height: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.morePods {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  background: rgba(10, 24, 38, 0.8);
+  border-radius: var(--radius-pill);
+  color: #e6f2fa;
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alert {
+    animation: none;
+  }
+}
