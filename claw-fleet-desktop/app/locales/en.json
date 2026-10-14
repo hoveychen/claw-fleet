@@ -3061,5 +3061,14 @@
     "decisions_parked": "Timed out: {{n}}",
     "decisions_title": "Open the task that is waiting on you",
     "decisions_title_where": "Open: {{where}}"
+  },
+  "view_lobsters": "Lobster Fleet",
+  "lobsters": {
+    "empty": "All quiet on the sea floor — no sessions running",
+    "waiting": "Needs you",
+    "parked": "Card timed out",
+    "subagents": "{{n}} shrimp",
+    "open_title": "Click to open this session",
+    "more_pods": "{{n}} more subs"
   }
 }

@@ -3057,5 +3057,14 @@
     "decisions_parked": "{{n}} 张卡已超时",
     "decisions_title": "点击打开等你回复的任务",
     "decisions_title_where": "点击打开：{{where}}"
+  },
+  "view_lobsters": "龙虾舰队",
+  "lobsters": {
+    "empty": "海底静悄悄——还没有在跑的会话",
+    "waiting": "等你",
+    "parked": "卡片已超时",
+    "subagents": "{{n}} 只小虾",
+    "open_title": "点击打开这个会话",
+    "more_pods": "还有 {{n}} 艘潜艇"
   }
 }

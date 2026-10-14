@@ -14,6 +14,7 @@
  *  forgotten there fails that test instead of silently vanishing from the nav. */
 export const ALL_VIEW_MODES = [
   "history",
+  "lobsters",
   "audit",
   "report",
   "memory",

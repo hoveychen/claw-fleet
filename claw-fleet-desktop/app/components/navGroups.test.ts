@@ -22,7 +22,7 @@ describe("nav More split", () => {
   });
 
   it("keeps the agent-work pages at the top level", () => {
-    for (const view of ["history", "files", "terminal", "wiki", "artifacts"] as const) {
+    for (const view of ["history", "lobsters", "files", "terminal", "wiki", "artifacts"] as const) {
       expect(isInNavMore(view)).toBe(false);
     }
   });

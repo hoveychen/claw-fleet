@@ -1,0 +1,27 @@
+/* The canvas is sized in whole art pixels, so it may be a few CSS pixels
+   short of the stage; the deep-water fill hides the seam. */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #0b2240;
+}
+
+.canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  image-rendering: pixelated;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cfe6f5;
+  font-size: 13px;
+  pointer-events: none;
+}
