@@ -246,7 +246,9 @@ export function composeLobster(spec: LobsterSpec): string[] {
     [rig.left, SHOULDER_L, false],
     [rig.right, SHOULDER_R, true],
   ] as const) {
-    line(g, shoulder.x, shoulder.y + rig.bodyDy, claw.x + 2 + (flip ? 1 : 0), claw.y + 5, "r");
+    // Aim the arm at the claw's centre; the claw is stamped over the arm's
+    // end, so the joint looks right whether the claw is raised or lowered.
+    line(g, shoulder.x, shoulder.y + rig.bodyDy, claw.x + 2 + (flip ? 1 : 0), claw.y + 2, "r");
     stamp(g, claw.open ? CLAW_OPEN : CLAW_SHUT, claw.x, claw.y, flip);
   }
   if (rig.prop === "keyboard") stamp(g, KEYBOARD, 6, 26);
