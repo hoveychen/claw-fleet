@@ -268,8 +268,11 @@ PKG_STAGING=$(mktemp -d)
 cp -R "$APP_BUNDLE" "$PKG_STAGING/"
 COMPONENT_PLIST="$PKG_STAGING/component.plist"
 pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
-/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
-/usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$COMPONENT_PLIST"
+# `plutil -replace` creates the key when absent: since macOS 27 `pkgbuild
+# --analyze` no longer emits BundleIsRelocatable, and PlistBuddy's `Set`
+# fails on a missing key.
+plutil -replace 0.BundleIsRelocatable -bool NO "$COMPONENT_PLIST"
+plutil -replace 0.BundleIsVersionChecked -bool NO "$COMPONENT_PLIST"
 
 PKG_VERSION="0.0.0-dev.${BUILD_STAMP}"
 if [[ -n "$APPLE_INSTALLER_IDENTITY" ]]; then
