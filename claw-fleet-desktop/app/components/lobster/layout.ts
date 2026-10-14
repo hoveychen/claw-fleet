@@ -7,7 +7,7 @@
 
 import type { SessionInfo } from "../../types";
 import { isLiveMember } from "../../types";
-import { pickScale } from "./engine";
+import { pickScale, SCENE_DETAIL } from "./engine";
 import { SHIP_H, SHIP_W } from "./ship";
 import { LOBSTER_H, LOBSTER_W, SHRIMP_H, SHRIMP_W } from "./sprites";
 
@@ -198,7 +198,7 @@ export const FLEET_TARGET_H = 220;
  *  (device pixels) bridge, so a small crew is drawn large. */
 export function bridgeTargetH(crew: CrewMember[], devW: number, devH: number): number {
   for (const target of BRIDGE_ZOOM) {
-    const p = pickScale(devW, devH, target);
+    const p = pickScale(devW, devH, target, SCENE_DETAIL);
     if (layoutBridge(crew, p.w, p.h).more === 0) return target;
   }
   return FLEET_TARGET_H;
