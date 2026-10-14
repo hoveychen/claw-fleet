@@ -37,10 +37,10 @@ describe("composeLobster", () => {
 
   it("draws a screen face whose eyes change with the pose", () => {
     const face = (pose: Pose) => lobster(pose).filter((r) => r.includes("k")).join("\n");
-    expect(face("idle")).toContain("SS");
+    expect(face("idle")).toContain("SSS");
     expect(face("think")).not.toEqual(face("idle"));
     expect(face("error")).not.toEqual(face("idle"));
-    expect(face("read")).toContain("SSS");
+    expect(face("read")).not.toContain("Z");
   });
 
   it("dresses the mascot in a uniform with gold trim", () => {

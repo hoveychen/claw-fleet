@@ -130,9 +130,9 @@ const TORSO_DY = 10;
 const FACE_DY = 3;
 
 // Face overlays on the screen, left halves. Eyes and mouth glow in `S`.
-const FACE_OPEN = mirror(["........", "....SS..", "....ZZ..", "......S.", ".......S"]);
+const FACE_OPEN = mirror(["........", "...SSS..", "...ZZZ..", "......S.", ".......S"]);
 const FACE_CLOSED = mirror(["........", "........", "...SSS..", "......S.", ".......S"]);
-const FACE_UP = mirror(["....SS..", "....ZZ..", "........", "........", ".......S"]);
+const FACE_UP = mirror(["...SSS..", "...ZZZ..", "........", "........", ".......S"]);
 const FACE_X = mirror(["...S.S..", "....S...", "...S.S..", ".......S", "......S."]);
 
 const CLAW_OPEN = ["c....c", "cc..cc", "cCccCc", "cCCCCc", ".cCCc.", "..cc.."];
