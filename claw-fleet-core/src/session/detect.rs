@@ -389,6 +389,58 @@ pub(crate) fn is_interactive_wait_tool(name: &str) -> bool {
 /// when the transcript carries none — older records predate the field, and a
 /// missing clock must not suppress the mark itself.
 pub(crate) fn pending_noninteractive_tool_batch(last_lines: &[Value]) -> Option<PendingToolBatch> {
+    let batch = last_tool_batch(last_lines)?;
+
+    // Stuck iff some issued tool_use is unresolved AND non-interactive. Report
+    // the first such block: with several hung at once, the earliest issued is
+    // the one that has been waiting longest.
+    let (_, tool_name) = batch
+        .issued
+        .iter()
+        .find(|(id, name)| !batch.resolved.contains(id) && !is_interactive_wait_tool(name))?;
+
+    let since_ms = last_lines[batch.batch_start]
+        .get("timestamp")
+        .and_then(|t| t.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp_millis() as u64);
+
+    Some(PendingToolBatch {
+        tool_name: tool_name.clone(),
+        since_ms,
+    })
+}
+
+/// Name of the tool the session is running right now: the earliest-issued
+/// block of the most recent tool_use batch that has no `tool_result` yet.
+/// Interactive waits (AskUserQuestion, fleet__ask, permission prompts) count
+/// too — a session parked on one is "running" that tool from the UI's point
+/// of view. `None` when the last batch is fully resolved.
+///
+/// Pure over `last_lines` and age-unaware: an abandoned transcript keeps its
+/// unresolved block forever, so the caller gates on a live status.
+pub(crate) fn current_tool(last_lines: &[Value]) -> Option<String> {
+    let batch = last_tool_batch(last_lines)?;
+    batch
+        .issued
+        .into_iter()
+        .find(|(id, _)| !batch.resolved.contains(id))
+        .map(|(_, name)| name)
+}
+
+/// The most recent API response that issued `tool_use` blocks, with which of
+/// them have been answered. Shared by [`pending_noninteractive_tool_batch`] and
+/// [`current_tool`].
+struct LastToolBatch {
+    /// Index in `last_lines` of the batch's first assistant record.
+    batch_start: usize,
+    /// (tool_use_id, tool_name) in issue order.
+    issued: Vec<(String, String)>,
+    /// tool_use_ids that received a `tool_result`.
+    resolved: std::collections::HashSet<String>,
+}
+
+fn last_tool_batch(last_lines: &[Value]) -> Option<LastToolBatch> {
     let msg_blocks = |v: &Value| -> Option<Vec<Value>> {
         v.get("message")
             .and_then(|m| m.get("content"))
@@ -471,22 +523,10 @@ pub(crate) fn pending_noninteractive_tool_batch(last_lines: &[Value]) -> Option<
         }
     }
 
-    // Stuck iff some issued tool_use is unresolved AND non-interactive. Report
-    // the first such block: with several hung at once, the earliest issued is
-    // the one that has been waiting longest.
-    let (_, tool_name) = issued
-        .iter()
-        .find(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))?;
-
-    let since_ms = last_lines[batch_start]
-        .get("timestamp")
-        .and_then(|t| t.as_str())
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|dt| dt.timestamp_millis() as u64);
-
-    Some(PendingToolBatch {
-        tool_name: tool_name.clone(),
-        since_ms,
+    Some(LastToolBatch {
+        batch_start,
+        issued,
+        resolved,
     })
 }
 

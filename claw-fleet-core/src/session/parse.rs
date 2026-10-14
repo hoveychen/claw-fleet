@@ -965,6 +965,9 @@ pub fn parse_session_info(
         proc_alive: false,
         pending_tool_batch,
         stuck_tool,
+        // Raw, status-unaware; `settle_current_tool` clears it once the final
+        // status is known.
+        current_tool: current_tool(&last_n),
         context_percent,
         last_skill,
         agent_source: "claude-code".to_string(),
