@@ -19,7 +19,7 @@ export interface PixelScale {
  *  is at least this tall, which keeps a lobster readable on any window. */
 const TARGET_LOGICAL_H = 220;
 const MIN_SCALE = 2;
-const MAX_SCALE = 8;
+const MAX_SCALE = 16;
 
 /** Canvas pixels per art pixel. Scenery is drawn in art pixels under a
  *  matching transform; the crew sprites are drawn at this finer resolution,
