@@ -309,15 +309,19 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function shade(hex: string, k: number): string {
+export function shade(hex: string, k: number): string {
   const [r, g, b] = hexToRgb(hex);
   const f = (v: number) => Math.max(0, Math.min(255, Math.round(v * k)));
   return `#${[f(r), f(g), f(b)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** Palette lookup for creature sprites: `S`/`Z` are the scarf and its shadow. */
+const creatureColours = (scarf: string) => (ch: string) =>
+  ch === "S" ? scarf : ch === "Z" ? shade(scarf, 0.72) : PALETTE[ch] ?? "#ff00ff";
+
 /** Grid → outlined canvas. Any transparent cell touching an opaque one (4-way)
- *  becomes outline, which keeps the sprite readable on any water colour. */
-function rasterise(rows: string[], scarf: string): HTMLCanvasElement {
+ *  becomes outline, which keeps the sprite readable on any backdrop. */
+export function rasterise(rows: string[], hexOf: (ch: string) => string, outlineHex = OUTLINE): HTMLCanvasElement {
   const h = rows.length;
   const w = rows[0].length;
   const canvas = document.createElement("canvas");
@@ -329,12 +333,11 @@ function rasterise(rows: string[], scarf: string): HTMLCanvasElement {
   const colours: Record<string, [number, number, number]> = {};
   const colourOf = (ch: string) => {
     if (!colours[ch]) {
-      const hex = ch === "S" ? scarf : ch === "Z" ? shade(scarf, 0.72) : PALETTE[ch] ?? "#ff00ff";
-      colours[ch] = hexToRgb(hex);
+      colours[ch] = hexToRgb(hexOf(ch));
     }
     return colours[ch];
   };
-  const outline = hexToRgb(OUTLINE);
+  const outline = hexToRgb(outlineHex);
   const opaque = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && rows[y][x] !== ".";
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -360,7 +363,7 @@ export function lobsterSprite(spec: LobsterSpec): HTMLCanvasElement {
   const key = `L|${spec.pose}|${frame}|${spec.color}|${spec.captain ? 1 : 0}`;
   let c = cache.get(key);
   if (!c) {
-    c = rasterise(composeLobster({ ...spec, frame }), spec.color);
+    c = rasterise(composeLobster({ ...spec, frame }), creatureColours(spec.color));
     cache.set(key, c);
   }
   return c;
@@ -371,7 +374,7 @@ export function shrimpSprite(spec: ShrimpSpec): HTMLCanvasElement {
   const key = `S|${frame}|${spec.color}`;
   let c = cache.get(key);
   if (!c) {
-    c = rasterise(composeShrimp({ ...spec, frame }), spec.color);
+    c = rasterise(composeShrimp({ ...spec, frame }), creatureColours(spec.color));
     cache.set(key, c);
   }
   return c;

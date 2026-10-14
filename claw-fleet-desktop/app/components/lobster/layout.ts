@@ -1,11 +1,14 @@
 /**
- * Who is on screen and where: sessions grouped into one submarine pod per
- * workspace, pods shelf-packed across the sea. Pure (no canvas, no DOM) so the
- * packing is unit-tested; the view draws whatever boxes this returns.
+ * Who is on screen and where. The fleet overview is one ship per workspace;
+ * boarding a ship shows its bridge, the workspace's sessions seated at their
+ * consoles. Pure (no canvas, no DOM) so the geometry is unit-tested; the view
+ * draws whatever boxes this returns.
  */
 
 import type { SessionInfo } from "../../types";
 import { isLiveMember } from "../../types";
+import { pickScale } from "./engine";
+import { SHIP_H, SHIP_W } from "./ship";
 import { LOBSTER_H, LOBSTER_W, SHRIMP_H, SHRIMP_W } from "./sprites";
 
 /** A main session that ended this recently stays on deck, resting, so a turn
@@ -78,25 +81,12 @@ export function buildRoster(
 export const NAME_H = 5;
 /** The shrimp sprite's blank top and bottom rows, tucked into the seat. */
 const SHRIMP_TRIM = 1;
-/** One seat: a lobster, its name strip, and a row of shrimp under that, the
- *  shrimp standing on the window sill. */
+/** One seat: a lobster, its name strip, and a row of shrimp under that. */
 export const SLOT_W = LOBSTER_W + 6;
 export const SLOT_H = LOBSTER_H + NAME_H + SHRIMP_H - 3 * SHRIMP_TRIM;
 /** Shrimp drawn per seat; the rest are a DOM count badge. */
 export const MAX_SHRIMP = 2;
-export const POD_PAD = 4;
-/** Hull strip on top of each pod that carries the workspace name. */
-export const POD_LABEL_H = 10;
-/** Room between pods; the periscope pokes 6px above a hull. */
-const GAP = 9;
 const MARGIN = 6;
-
-export interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
 export interface SeatBox {
   member: CrewMember;
@@ -107,90 +97,109 @@ export interface SeatBox {
   shrimp: { x: number; y: number }[];
 }
 
-export interface PodBox extends Rect {
-  key: string;
-  seats: SeatBox[];
-  /** Crew that did not fit in this pod. */
-  more: number;
+/** Centre `n` cells of `cw`×`ch` in a `w`-wide band starting at `top`, keeping
+ *  only as many rows as end above `bottom`. */
+function grid(n: number, cw: number, ch: number, w: number, top: number, bottom: number) {
+  const cols = Math.max(1, Math.min(n, Math.floor((w - 2 * MARGIN) / cw)));
+  const rows = Math.max(0, Math.min(Math.ceil(n / cols), Math.floor((bottom - top) / ch)));
+  const shown = Math.min(n, rows * cols);
+  const cells: { x: number; y: number }[] = [];
+  for (let i = 0; i < shown; i++) {
+    const row = Math.floor(i / cols);
+    // The last row may be short; centre it on its own.
+    const inRow = Math.min(cols, shown - row * cols);
+    const x0 = Math.floor((w - inRow * cw) / 2);
+    cells.push({ x: x0 + (i % cols) * cw, y: top + row * ch });
+  }
+  return { cells, rows, hidden: n - shown };
+}
+
+// Overview: one ship per workspace.
+
+/** A ship's cell: the sprite plus room under it for the DOM name plate. */
+export const SHIP_CELL_W = SHIP_W + 16;
+export const SHIP_CELL_H = SHIP_H + 18;
+
+export interface ShipBox {
+  pod: PodIn;
+  /** Top-left of the ship sprite. */
+  x: number;
+  y: number;
 }
 
 export interface FleetLayout {
-  pods: PodBox[];
-  /** Pods that did not fit on screen at all. */
-  hiddenPods: number;
+  ships: ShipBox[];
+  /** Workspaces that did not fit on screen. */
+  hidden: number;
 }
 
-/**
- * Shelf-pack pods into a `w`×`h` sea whose usable floor is `floor` (the top of
- * the sand). Each pod is as wide as its crew needs, up to the sea's width;
- * shelves are centred. Pods that do not fit are counted, never squeezed.
- */
-export function layoutFleet(pods: PodIn[], w: number, floor: number): FleetLayout {
-  const maxCols = Math.max(1, Math.floor((w - 2 * MARGIN - 2 * POD_PAD) / SLOT_W));
-  const out: PodBox[] = [];
-  let shelf: PodBox[] = [];
-  let x = MARGIN;
-  let y = MARGIN;
-  let shelfH = 0;
-  let hiddenPods = 0;
-
-  const closeShelf = () => {
-    if (!shelf.length) return;
-    const used = shelf[shelf.length - 1].x + shelf[shelf.length - 1].w - MARGIN;
-    const dx = Math.floor((w - 2 * MARGIN - used) / 2);
-    for (const p of shelf) shift(p, Math.max(0, dx), 0);
-    out.push(...shelf);
-    shelf = [];
+/** Grid the ships across the sky, centred both ways. */
+export function layoutShips(pods: PodIn[], w: number, h: number): FleetLayout {
+  const g = grid(pods.length, SHIP_CELL_W, SHIP_CELL_H, w, MARGIN, h - MARGIN);
+  const dy = Math.max(0, Math.floor((h - 2 * MARGIN - g.rows * SHIP_CELL_H) / 2));
+  return {
+    ships: g.cells.map((c, i) => ({
+      pod: pods[i],
+      x: c.x + (SHIP_CELL_W - SHIP_W) / 2,
+      y: c.y + dy + 4,
+    })),
+    hidden: g.hidden,
   };
+}
 
-  for (let i = 0; i < pods.length; i++) {
-    const pod = pods[i];
-    const cols = Math.min(pod.crew.length, maxCols);
-    let rows = Math.ceil(pod.crew.length / cols);
-    const podW = cols * SLOT_W + 2 * POD_PAD;
-    if (shelf.length && x + podW > w - MARGIN) {
-      closeShelf();
-      y += shelfH + GAP;
-      x = MARGIN;
-      shelfH = 0;
-    }
-    // A pod taller than the room left keeps as many rows as fit.
-    const room = floor - y - POD_LABEL_H - 2 * POD_PAD;
-    rows = Math.min(rows, Math.floor(room / SLOT_H));
-    if (rows < 1) {
-      hiddenPods = pods.length - i;
-      break;
-    }
-    const podH = rows * SLOT_H + 2 * POD_PAD + POD_LABEL_H;
-    const seats: SeatBox[] = [];
-    const shown = Math.min(pod.crew.length, rows * cols);
-    for (let j = 0; j < shown; j++) {
-      const sx = x + POD_PAD + (j % cols) * SLOT_W + (SLOT_W - LOBSTER_W) / 2;
-      const sy = y + POD_LABEL_H + POD_PAD + Math.floor(j / cols) * SLOT_H;
-      const nShrimp = Math.min(MAX_SHRIMP, pod.crew[j].subagents.length);
-      const shrimp = Array.from({ length: nShrimp }, (_, k) => ({
+// Bridge: the boarded workspace's crew at their consoles.
+
+export interface BridgeLayout {
+  /** Height of the forward viewport across the top of the bridge. */
+  viewportH: number;
+  seats: SeatBox[];
+  /** Top of each seat row (the view draws a console bank behind each). */
+  rowTops: number[];
+  /** Crew that did not fit. */
+  more: number;
+}
+
+/** Seats sit this far below their row's top so the console screens behind
+ *  them show above the lobsters' heads (only the thin antennae cross them). */
+const CONSOLE_RISE = 4;
+const BRIDGE_ROW_H = SLOT_H + CONSOLE_RISE;
+
+export function layoutBridge(crew: CrewMember[], w: number, h: number): BridgeLayout {
+  const viewportH = Math.max(36, Math.min(80, Math.round(h * 0.3)));
+  const top = viewportH + 8;
+  const g = grid(crew.length, SLOT_W, BRIDGE_ROW_H, w, top, h - 2);
+  // Centre the rows on the deck so a small crew does not huddle under the
+  // viewport with an empty floor below.
+  const dy = Math.max(0, Math.floor((h - 2 - top - g.rows * BRIDGE_ROW_H) / 2));
+  const seats = g.cells.map((c, i): SeatBox => {
+    const sx = c.x + (SLOT_W - LOBSTER_W) / 2;
+    const sy = c.y + dy + CONSOLE_RISE;
+    const nShrimp = Math.min(MAX_SHRIMP, crew[i].subagents.length);
+    return {
+      member: crew[i],
+      x: sx,
+      y: sy,
+      shrimp: Array.from({ length: nShrimp }, (_, k) => ({
         x: sx + LOBSTER_W / 2 - (nShrimp * SHRIMP_W) / 2 + k * SHRIMP_W,
         y: sy + LOBSTER_H + NAME_H - SHRIMP_TRIM,
-      }));
-      seats.push({ member: pod.crew[j], x: sx, y: sy, shrimp });
-    }
-    shelf.push({ key: pod.key, x, y, w: podW, h: podH, seats, more: pod.crew.length - shown });
-    x += podW + GAP;
-    shelfH = Math.max(shelfH, podH);
-  }
-  closeShelf();
-  return { pods: out, hiddenPods };
+      })),
+    };
+  });
+  const rowTops = Array.from({ length: g.rows }, (_, r) => top + dy + r * BRIDGE_ROW_H);
+  return { viewportH, seats, rowTops, more: g.hidden };
 }
 
-function shift(p: PodBox, dx: number, dy: number) {
-  p.x += dx;
-  p.y += dy;
-  for (const s of p.seats) {
-    s.x += dx;
-    s.y += dy;
-    for (const sh of s.shrimp) {
-      sh.x += dx;
-      sh.y += dy;
-    }
+/** Zoom levels (logical heights) the bridge tries, closest first. */
+const BRIDGE_ZOOM = [140, 180];
+/** Default height: what the overview, and a crowded bridge, use. */
+export const FLEET_TARGET_H = 220;
+
+/** The closest zoom at which the whole crew still fits on a `devW`×`devH`
+ *  (device pixels) bridge, so a small crew is drawn large. */
+export function bridgeTargetH(crew: CrewMember[], devW: number, devH: number): number {
+  for (const target of BRIDGE_ZOOM) {
+    const p = pickScale(devW, devH, target);
+    if (layoutBridge(crew, p.w, p.h).more === 0) return target;
   }
+  return FLEET_TARGET_H;
 }

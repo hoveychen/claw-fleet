@@ -21,10 +21,11 @@ const TARGET_LOGICAL_H = 220;
 const MIN_SCALE = 2;
 const MAX_SCALE = 8;
 
-/** Pick the largest integer scale that still leaves ~TARGET_LOGICAL_H art
- *  pixels of height, then size the logical canvas to fill the device area. */
-export function pickScale(devW: number, devH: number): PixelScale {
-  const raw = Math.floor(devH / TARGET_LOGICAL_H);
+/** Pick the largest integer scale that still leaves ~`targetH` art pixels of
+ *  height, then size the logical canvas to fill the device area. A smaller
+ *  `targetH` zooms in (bigger sprites, fewer of them fit). */
+export function pickScale(devW: number, devH: number, targetH = TARGET_LOGICAL_H): PixelScale {
+  const raw = Math.floor(devH / targetH);
   const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, raw));
   return {
     scale,
@@ -73,8 +74,8 @@ export class LobsterEngine {
     this.dirty = true;
   }
 
-  resize(cssW: number, cssH: number, dpr: number) {
-    const px = pickScale(Math.round(cssW * dpr), Math.round(cssH * dpr));
+  resize(cssW: number, cssH: number, dpr: number, targetH?: number) {
+    const px = pickScale(Math.round(cssW * dpr), Math.round(cssH * dpr), targetH);
     this.px = px;
     this.cssPerPx = px.scale / dpr;
     this.canvas.width = px.w;
