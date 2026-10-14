@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal, Ellipsis, ChevronLeft, ChevronRight } from "lucide-react";
+import { Shield, ListChecks, Shrimp, Coffee, ListTree, Package, SquareTerminal, Ellipsis, ChevronLeft, ChevronRight } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettings, runningProcTotal, useAuditStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -24,6 +24,7 @@ import { TerminalView } from "./TerminalView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
 import { HistoryView } from "./HistoryView";
+import { LobsterFleetView } from "./lobster/LobsterFleetView";
 import { TopProgress } from "./loading";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
@@ -260,6 +261,13 @@ export function SessionList() {
         <span className={styles.nav_label}>{t("view_history", "任务")}</span>
       </button>
       <button
+        className={`${styles.nav_item} ${viewMode === "lobsters" ? styles.nav_active : ""}`}
+        onClick={() => navTo("lobsters")}
+      >
+        <span className={styles.nav_icon}><Shrimp size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_lobsters", "龙虾舰队")}</span>
+      </button>
+      <button
         className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}
         onClick={() => navTo("files")}
       >
@@ -477,6 +485,8 @@ export function SessionList() {
       {/* Main content area */}
       {viewMode === "history" ? (
         <HistoryView />
+      ) : viewMode === "lobsters" ? (
+        <LobsterFleetView />
       ) : viewMode === "audit" ? (
         <AuditView />
       ) : viewMode === "memory" ? (
