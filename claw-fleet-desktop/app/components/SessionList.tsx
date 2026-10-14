@@ -59,6 +59,7 @@ export function SessionList() {
   // Terminal page only exists if backend started with FLEET_TERMINAL (see core's feature_flags).
   // When off, not even the nav item shows, rather than letting users click in and get rejected by backend.
   const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
+  const lobsterFleetEnabled = useUIStore((s) => s.lobsterFleetEnabled);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
   // Views that own a secondary sidebar (two-level sidebar). Re-clicking the nav item of
   // the already-active one collapses/expands its sidebar instead of being a
@@ -260,13 +261,15 @@ export function SessionList() {
         <span className={styles.nav_icon}><ListChecks size={14} strokeWidth={1.5} /></span>
         <span className={styles.nav_label}>{t("view_history", "任务")}</span>
       </button>
-      <button
-        className={`${styles.nav_item} ${viewMode === "lobsters" ? styles.nav_active : ""}`}
-        onClick={() => navTo("lobsters")}
-      >
-        <span className={styles.nav_icon}><Shrimp size={14} strokeWidth={1.5} /></span>
-        <span className={styles.nav_label}>{t("view_lobsters", "龙虾舰队")}</span>
-      </button>
+      {lobsterFleetEnabled && (
+        <button
+          className={`${styles.nav_item} ${viewMode === "lobsters" ? styles.nav_active : ""}`}
+          onClick={() => navTo("lobsters")}
+        >
+          <span className={styles.nav_icon}><Shrimp size={14} strokeWidth={1.5} /></span>
+          <span className={styles.nav_label}>{t("view_lobsters", "龙虾舰队")}</span>
+        </button>
+      )}
       <button
         className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}
         onClick={() => navTo("files")}

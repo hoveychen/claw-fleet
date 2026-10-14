@@ -2306,6 +2306,8 @@
     "report_auto_popup_desc": "On days with something to decide (a drifting relay chain, a recurring lesson), raise it in the main window once. Quiet days push nothing.",
     "group_handoff": "Group handoff sessions",
     "group_handoff_desc": "Collapse sessions from the same handoff relay chain into one group in the task list; click to expand, and mark the whole chain done at once",
+    "lobster_fleet": "Lobster Fleet page",
+    "lobster_fleet_desc": "Show Lobster Fleet in the sidebar: one ship per workspace; board one to see its pixel crew on the bridge (experimental)",
     "auto_resume": "Auto-resume after rate limit",
     "auto_resume_desc": "When a session is stopped by a rate limit, resume it automatically once the reset time has passed",
     "auto_resume_max_wait": "Max wait window (hours)",

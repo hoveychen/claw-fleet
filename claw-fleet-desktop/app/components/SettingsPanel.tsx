@@ -1095,6 +1095,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // this is flipped, rather than only after a restart.
   const groupHandoff = useUIStore((s) => s.historyGroupHandoff);
   const setGroupHandoff = useUIStore((s) => s.setHistoryGroupHandoff);
+  const lobsterFleet = useUIStore((s) => s.lobsterFleetEnabled);
+  const setLobsterFleet = useUIStore((s) => s.setLobsterFleetEnabled);
 
   // ── LLM provider state ──────────────────────────────────────────────────
   const [llmProviders, setLlmProviders] = useState<LlmProviderInfo[]>([]);
@@ -1388,6 +1390,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+
+                <ToggleRow
+                  label={t("settings.lobster_fleet")}
+                  desc={t("settings.lobster_fleet_desc")}
+                  checked={lobsterFleet}
+                  onChange={setLobsterFleet}
+                />
 
                 {keepAwakeSupported && (
                   <div className={styles.row}>
