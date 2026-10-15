@@ -196,6 +196,7 @@ pub(crate) fn set_outcome_in(
     match outcome {
         None => {
             let _ = fs::remove_file(&path);
+            crate::json_dir_cache::note_changed(&path);
             Ok(())
         }
         Some(outcome) => {
@@ -208,7 +209,9 @@ pub(crate) fn set_outcome_in(
                 updated: now_ms(),
             };
             let json = serde_json::to_string(&rec).map_err(|e| format!("serialize: {e}"))?;
-            fs::write(&path, json).map_err(|e| format!("write task-outcome: {e}"))
+            let res = fs::write(&path, json).map_err(|e| format!("write task-outcome: {e}"));
+            crate::json_dir_cache::note_changed(&path);
+            res
         }
     }
 }
@@ -220,7 +223,9 @@ pub(crate) fn read_in(dir: &std::path::Path, session_id: &str) -> Option<TaskOut
 
 pub(crate) fn clear_on_resume_in(dir: &std::path::Path, session_id: &str) {
     if read_in(dir, session_id).is_some() {
-        let _ = fs::remove_file(dir.join(format!("{session_id}.json")));
+        let path = dir.join(format!("{session_id}.json"));
+        let _ = fs::remove_file(&path);
+        crate::json_dir_cache::note_changed(&path);
     }
 }
 

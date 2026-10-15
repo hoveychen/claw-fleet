@@ -182,6 +182,7 @@ fn write(session_id: &str, spec: &LaunchSpec) {
             let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let tmp = path.with_extension(format!("json.{}-{seq}.tmp", std::process::id()));
             let res = fs::write(&tmp, json).and_then(|()| fs::rename(&tmp, &path));
+            crate::json_dir_cache::note_changed(&path);
             if let Err(e) = res {
                 let _ = fs::remove_file(&tmp);
                 crate::log_debug(&format!("launch_spec: write {session_id}: {e}"));
@@ -300,43 +301,21 @@ pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
     let Some(dir) = spec_dir() else {
         return HashMap::new();
     };
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return HashMap::new();
-    };
     let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     // A different directory (tests swap FLEET_HOME) invalidates everything.
     if guard.as_ref().is_some_and(|(d, _)| *d != dir) {
         *guard = None;
     }
+    // A watched dir with no change reported since the last listing is reused
+    // as it stands — the per-note `stat`s below were most of what an idle
+    // registry cost with thousands of notes (see `json_dir_cache::gate_dir`).
+    let reuse = guard.is_some() && crate::json_dir_cache::listing_fresh(&dir);
     let old = guard.take().map(|(_, c)| c).unwrap_or_default();
-    let mut fresh: Cached = HashMap::with_capacity(old.len());
-    for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        let Some(id) = name.strip_suffix(".json") else {
-            continue;
-        };
-        let Ok(meta) = entry.metadata() else {
-            continue;
-        };
-        let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        let len = meta.len();
-        if let Some((m, l, spec)) = old.get(id) {
-            if *m == mtime && *l == len {
-                fresh.insert(id.to_string(), (mtime, len, spec.clone()));
-                continue;
-            }
-        }
-        let Some(spec) = fs::read_to_string(entry.path())
-            .ok()
-            .and_then(|s| serde_json::from_str::<LaunchSpec>(&s).ok())
-        else {
-            continue;
-        };
-        fresh.insert(id.to_string(), (mtime, len, spec));
-    }
-
+    let mut fresh: Cached = if reuse {
+        old
+    } else {
+        list_notes(&dir, old)
+    };
     // A note with no source is invisible to every source's scan. Fill it in
     // from the agent stores — on every change, not once per host: a Fleet
     // build older than `note_spawn` keeps writing such notes for as long as
@@ -378,6 +357,47 @@ pub fn registry() -> std::collections::HashMap<String, LaunchSpec> {
         .collect();
     *guard = Some((dir, fresh));
     out
+}
+
+/// One full pass over the notes dir for [`registry`]: notes whose `(mtime,
+/// len)` match `old` are carried over, the rest are read.
+fn list_notes(
+    dir: &std::path::Path,
+    old: std::collections::HashMap<String, (std::time::SystemTime, u64, LaunchSpec)>,
+) -> std::collections::HashMap<String, (std::time::SystemTime, u64, LaunchSpec)> {
+    use std::time::SystemTime;
+    crate::json_dir_cache::begin_full_listing(dir);
+    let mut fresh = std::collections::HashMap::with_capacity(old.len());
+    let Ok(entries) = fs::read_dir(dir) else {
+        return fresh;
+    };
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Some(id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        let len = meta.len();
+        if let Some((m, l, spec)) = old.get(id) {
+            if *m == mtime && *l == len {
+                fresh.insert(id.to_string(), (mtime, len, spec.clone()));
+                continue;
+            }
+        }
+        let Some(spec) = fs::read_to_string(entry.path())
+            .ok()
+            .and_then(|s| serde_json::from_str::<LaunchSpec>(&s).ok())
+        else {
+            continue;
+        };
+        fresh.insert(id.to_string(), (mtime, len, spec));
+    }
+    fresh
 }
 
 impl LaunchSpec {
@@ -715,7 +735,8 @@ pub fn was_fleet_spawned(session_id: &str) -> bool {
 /// that has no transcript. No-op when there is nothing to remove.
 pub fn forget(session_id: &str) {
     if let Some(path) = spec_path(session_id) {
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(&path);
+        crate::json_dir_cache::note_changed(&path);
     }
 }
 
