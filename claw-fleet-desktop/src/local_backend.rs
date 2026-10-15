@@ -664,7 +664,14 @@ impl LocalBackend {
                     if codex_source_idx.is_some_and(|i| dirty_sources.contains(&i)) {
                         codex_probe_flushes += 1;
                     }
-                    incremental_rescan_and_emit(&sources2, &app2, &sess2, &so2, &dirty_sources);
+                    incremental_rescan_and_emit(
+                        &sources2,
+                        &app2,
+                        &sess2,
+                        &so2,
+                        &dirty_sources,
+                        None,
+                    );
                     detect_waiting_transitions(
                         &sess2,
                         &mut prev_statuses,
@@ -801,6 +808,7 @@ impl LocalBackend {
                 // idempotent (frontend just sets `scanReady = true`), so the
                 // common case where the initial scan already emitted is harmless.
                 let mut emitted_scan_ready = false;
+                let mut poll_skip = PollSkip::default();
 
                 loop {
                     std::thread::sleep(interval);
@@ -820,12 +828,13 @@ impl LocalBackend {
                         }
                     };
                     let started = Instant::now();
-                    incremental_rescan_and_emit(
+                    let committed = incremental_rescan_and_emit(
                         &sources3,
                         &app3,
                         &sess3,
                         &so3,
                         &poll_source_indices,
+                        Some(&mut poll_skip),
                     );
                     if !emitted_scan_ready {
                         let _ = app3.emit("scan-ready", true);
@@ -851,8 +860,11 @@ impl LocalBackend {
                         &sess3, &ar3, &arif3, &arfail3, &arse3,
                     );
                     claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess3);
-                    // Send to indexer thread (non-blocking).
-                    let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
+                    // Send to indexer thread (non-blocking). A skipped tick
+                    // changed nothing, so there is nothing new to index.
+                    if committed {
+                        let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
+                    }
                 }
             });
         }
@@ -1869,16 +1881,59 @@ fn commit_rescan(
     merged
 }
 
+/// Lets the polling thread skip publishing a tick whose scan came back identical.
+///
+/// dsh is polled every 3s whether or not anything changed, and each tick used
+/// to re-merge, re-enrich and re-serialize all ~1.5k sessions for the frontend
+/// and the phone — about 10% of a core on a debug build (measured 2026-10-15)
+/// for frames that were byte-identical to the previous one. A full commit is
+/// still forced every [`POLL_FORCE_COMMIT_EVERY`], because the enrichers also
+/// fold in state the scan does not see (marks, titles, outcome tags written by
+/// the CLI), and the fs-watch thread only refreshes it when a transcript moves.
+#[derive(Default)]
+struct PollSkip {
+    last_fingerprint: Option<u64>,
+    last_commit: Option<Instant>,
+}
+
+const POLL_FORCE_COMMIT_EVERY: Duration = Duration::from_secs(30);
+
+impl PollSkip {
+    /// True when `scanned` matches the last committed scan and the forced
+    /// refresh is not due yet. Otherwise records `scanned` as committed.
+    fn should_skip(&mut self, scanned: &[SessionInfo], now: Instant) -> bool {
+        use std::hash::{Hash, Hasher};
+        let fingerprint = serde_json::to_vec(scanned).ok().map(|bytes| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            bytes.hash(&mut h);
+            h.finish()
+        });
+        let fresh = self
+            .last_commit
+            .is_some_and(|t| now.duration_since(t) < POLL_FORCE_COMMIT_EVERY);
+        if fresh && fingerprint.is_some() && fingerprint == self.last_fingerprint {
+            return true;
+        }
+        self.last_fingerprint = fingerprint;
+        self.last_commit = Some(now);
+        false
+    }
+}
+
 /// Incremental rescan: only rescan sources whose indices appear in `dirty`.
 /// Sessions from clean sources are kept as-is, avoiding expensive readdir/stat
 /// calls for directories that haven't changed.
+///
+/// With `skip`, a scan identical to the last committed one is dropped before
+/// the merge; returns whether the rescan was committed and emitted.
 fn incremental_rescan_and_emit(
     sources: &[Box<dyn AgentSource>],
     app: &AppHandle,
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
     dirty: &HashSet<usize>,
-) {
+    skip: Option<&mut PollSkip>,
+) -> bool {
     // Scan the dirty sources WITHOUT holding `sessions`. The scan takes tens of
     // seconds on a busy box (`[POLL] scan slow: took 55s` is a routine log line
     // here), and holding the mutex across it blocks every other consumer for the
@@ -1891,6 +1946,9 @@ fn incremental_rescan_and_emit(
     let started = Instant::now();
     let scanned = scan_dirty_sources(sources, dirty);
     let scan_took = started.elapsed();
+    if skip.is_some_and(|s| s.should_skip(&scanned, Instant::now())) {
+        return false;
+    }
 
     // Read the outcome tags before taking `sessions`, so the two mutexes are
     // never held nested and the lock order can't matter.
@@ -1922,6 +1980,7 @@ fn incremental_rescan_and_emit(
             s.len()
         ));
     }
+    true
 }
 
 /// Returns true when `path` resides inside a known memory directory.
@@ -4690,6 +4749,7 @@ mod tests {
             slug: None,
             ai_title: None,
             status: SessionStatus::Idle,
+            current_tool: None,
             token_speed: 0.0,
             agent_token_speed: 0.0,
             total_output_tokens: 0,
@@ -5294,5 +5354,40 @@ mod tests {
             gate.try_enter().is_some(),
             "gate must be free after all contenders exit"
         );
+    }
+
+    #[test]
+    fn poll_skip_commits_first_tick_then_skips_identical_scans() {
+        let mut skip = PollSkip::default();
+        let rows = vec![mk_session("dsh-1", "dsh")];
+        let t0 = Instant::now();
+        assert!(!skip.should_skip(&rows, t0), "first tick must commit");
+        assert!(skip.should_skip(&rows, t0 + Duration::from_secs(3)));
+        assert!(skip.should_skip(&rows, t0 + Duration::from_secs(6)));
+    }
+
+    #[test]
+    fn poll_skip_commits_when_scan_changes() {
+        let mut skip = PollSkip::default();
+        let t0 = Instant::now();
+        assert!(!skip.should_skip(&[mk_session("dsh-1", "dsh")], t0));
+        let mut changed = mk_session("dsh-1", "dsh");
+        changed.ai_title = Some("renamed".into());
+        assert!(!skip.should_skip(&[changed.clone()], t0 + Duration::from_secs(3)));
+        assert!(skip.should_skip(&[changed], t0 + Duration::from_secs(6)));
+        // A source going away (empty scan) is a change too.
+        assert!(!skip.should_skip(&[], t0 + Duration::from_secs(9)));
+    }
+
+    #[test]
+    fn poll_skip_forces_a_commit_after_the_refresh_window() {
+        let mut skip = PollSkip::default();
+        let rows = vec![mk_session("dsh-1", "dsh")];
+        let t0 = Instant::now();
+        assert!(!skip.should_skip(&rows, t0));
+        assert!(skip.should_skip(&rows, t0 + POLL_FORCE_COMMIT_EVERY - Duration::from_secs(1)));
+        assert!(!skip.should_skip(&rows, t0 + POLL_FORCE_COMMIT_EVERY));
+        // The window restarts from the forced commit.
+        assert!(skip.should_skip(&rows, t0 + POLL_FORCE_COMMIT_EVERY + Duration::from_secs(3)));
     }
 }
