@@ -189,6 +189,7 @@ fn write_title_in(
     match trimmed {
         None => {
             let _ = fs::remove_file(&path);
+            crate::json_dir_cache::note_changed(&path);
             Ok(())
         }
         Some(title) => {
@@ -200,7 +201,9 @@ fn write_title_in(
                 source,
             };
             let json = serde_json::to_string(&rec).map_err(|e| format!("serialize: {e}"))?;
-            fs::write(&path, json).map_err(|e| format!("write session-title: {e}"))
+            let res = fs::write(&path, json).map_err(|e| format!("write session-title: {e}"));
+            crate::json_dir_cache::note_changed(&path);
+            res
         }
     }
 }

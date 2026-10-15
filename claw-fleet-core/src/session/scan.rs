@@ -20,6 +20,27 @@ pub struct ScanCache {
     /// Last time `session_cache` was flushed to disk via `scan_cache_disk::save`.
     /// `None` means never persisted in this process.
     pub last_persisted_at: Mutex<Option<Instant>>,
+    /// `<id>/subagents` dir → its agent transcripts, keyed on the mtimes of
+    /// the dirs they were listed from. See [`list_agent_transcripts`].
+    agent_listings: Mutex<HashMap<PathBuf, AgentListing>>,
+}
+
+/// One listed `subagents/` dir: the direct `agent-*.jsonl` transcripts, plus
+/// those of each `workflows/<run>/` dir. Every level carries the mtime it was
+/// read at — a file created in a run dir bumps that dir's mtime only, so each
+/// level has to be stamped on its own.
+#[derive(Clone)]
+struct AgentListing {
+    mtime: SystemTime,
+    direct: Vec<PathBuf>,
+    workflows: Option<(SystemTime, Vec<RunListing>)>,
+}
+
+#[derive(Clone)]
+struct RunListing {
+    dir: PathBuf,
+    mtime: SystemTime,
+    agents: Vec<PathBuf>,
 }
 
 /// Minimum gap between `scan_cache_disk::save` flushes. The cache is overwritten
@@ -45,8 +66,101 @@ impl ScanCache {
             session_cache: Mutex::new(crate::scan_cache_disk::load()),
             incr_cache: Mutex::new(HashMap::new()),
             last_persisted_at: Mutex::new(None),
+            agent_listings: Mutex::new(HashMap::new()),
         }
     }
+}
+
+fn dir_mtime(dir: &Path) -> Option<SystemTime> {
+    fs::metadata(dir)
+        .ok()
+        .filter(|m| m.is_dir())
+        .and_then(|m| m.modified().ok())
+}
+
+fn jsonl_entries(dir: &Path, keep: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl") && keep(p))
+        .collect()
+}
+
+/// The agent transcripts under one session's `subagents/` dir: direct
+/// subagents (`subagents/agent-*.jsonl`) plus Claude Code Workflow fan-out
+/// agents (`subagents/workflows/wf_*/agent-*.jsonl`), so workflow nodes can
+/// link to an openable session. `None` when there is no `subagents/` dir.
+///
+/// Every fs-watch rescan walks ~465 of these dirs, and re-listing them was
+/// ~10% of a debug-build Claude scan (measured 2026-10-15). A listing is reused
+/// while each dir it came from keeps its mtime, so a quiet dir costs one `stat`
+/// per level instead of a `read_dir`.
+fn list_agent_transcripts(subagents_dir: &Path, scan_cache: &ScanCache) -> Option<Vec<PathBuf>> {
+    let mtime = dir_mtime(subagents_dir)?;
+    let prev = scan_cache
+        .agent_listings
+        .lock()
+        .unwrap()
+        .get(subagents_dir)
+        .cloned();
+
+    let direct = match &prev {
+        Some(p) if p.mtime == mtime => p.direct.clone(),
+        _ => jsonl_entries(subagents_dir, |_| true),
+    };
+
+    let wf_dir = subagents_dir.join("workflows");
+    let workflows = dir_mtime(&wf_dir).map(|wf_mtime| {
+        let prev_runs = prev.as_ref().and_then(|p| p.workflows.as_ref());
+        let run_dirs: Vec<PathBuf> = match prev_runs {
+            Some((m, runs)) if *m == wf_mtime => runs.iter().map(|r| r.dir.clone()).collect(),
+            _ => fs::read_dir(&wf_dir)
+                .map(|it| it.flatten().map(|e| e.path()).collect())
+                .unwrap_or_default(),
+        };
+        let runs = run_dirs
+            .into_iter()
+            .filter_map(|dir| {
+                let run_mtime = dir_mtime(&dir)?;
+                let cached = prev_runs
+                    .and_then(|(_, runs)| runs.iter().find(|r| r.dir == dir))
+                    .filter(|r| r.mtime == run_mtime);
+                let agents = match cached {
+                    Some(r) => r.agents.clone(),
+                    None => jsonl_entries(&dir, |p| {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with("agent-"))
+                    }),
+                };
+                Some(RunListing {
+                    dir,
+                    mtime: run_mtime,
+                    agents,
+                })
+            })
+            .collect::<Vec<_>>();
+        (wf_mtime, runs)
+    });
+
+    let mut out = direct.clone();
+    if let Some((_, runs)) = &workflows {
+        for r in runs {
+            out.extend(r.agents.iter().cloned());
+        }
+    }
+    scan_cache.agent_listings.lock().unwrap().insert(
+        subagents_dir.to_path_buf(),
+        AgentListing {
+            mtime,
+            direct,
+            workflows,
+        },
+    );
+    Some(out)
 }
 
 /// Downgrade a cached session's status when the file hasn't been touched
@@ -259,29 +373,43 @@ pub fn apply_subagent_tool_liveness(info: &mut SessionInfo, parent_proc_alive: b
     }
 }
 
-fn check_session_cache(
-    path: &Path,
-    cache: &HashMap<String, (u64, SessionInfo)>,
-) -> Option<(SessionInfo, f64)> {
-    let metadata = fs::metadata(path).ok()?;
-    let last_modified = metadata.modified().ok()?;
-    let mtime_ms = last_modified.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
+enum CacheLookup {
+    /// Unchanged since it was parsed: the cached info and the file's age.
+    Hit(SessionInfo, f64),
+    /// Untouched for over 7 days. `parse_session_info` drops such a file, so
+    /// there is nothing to parse — and on a busy box these are most of the
+    /// registered transcripts (~3.5k of ~4.9k, measured 2026-10-15), each of
+    /// which used to be stat'ed again and have its meta.json read every scan.
+    Expired,
+    Miss,
+}
+
+fn check_session_cache(path: &Path, cache: &HashMap<String, (u64, SessionInfo)>) -> CacheLookup {
+    let Some(last_modified) = fs::metadata(path).ok().and_then(|m| m.modified().ok()) else {
+        return CacheLookup::Miss;
+    };
+    let Some(mtime_ms) = last_modified
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as u64)
+    else {
+        return CacheLookup::Miss;
+    };
     let age_secs = SystemTime::now()
         .duration_since(last_modified)
         .unwrap_or(Duration::from_secs(3600))
         .as_secs_f64();
 
     if age_secs > 7.0 * 24.0 * 3600.0 {
-        return None;
+        return CacheLookup::Expired;
     }
 
-    let key = path.to_string_lossy();
-    let (cached_mt, cached_info) = cache.get(key.as_ref())?;
-    if *cached_mt != mtime_ms {
-        return None;
+    match cache.get(path.to_string_lossy().as_ref()) {
+        Some((cached_mt, cached_info)) if *cached_mt == mtime_ms => {
+            CacheLookup::Hit(cached_info.clone(), age_secs)
+        }
+        _ => CacheLookup::Miss,
     }
-
-    Some((cached_info.clone(), age_secs))
 }
 
 // ── Public entry point ───────────────────────────────────────────────────────
@@ -419,6 +547,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     let groups = registered_claude_transcripts(&projects_dir);
     // Every slug below decodes against the filesystem; list each level once.
     let _sweep = super::paths::DecodeSweep::begin();
+    let mut listed_subagent_dirs: HashSet<PathBuf> = HashSet::new();
 
     for (workspace_dir, members) in groups {
 
@@ -496,7 +625,10 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 let exact_proc_alive = session_pid.is_some();
 
                 // Try session cache first (skip re-reading unchanged files).
-                if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
+                let lookup = check_session_cache(&path, &session_cache_snapshot);
+                if let CacheLookup::Expired = lookup {
+                    // Fall through to the subagent dir: it is a separate path.
+                } else if let CacheLookup::Hit(mut info, age) = lookup {
                     age_out_status(&mut info, age);
                     // Re-stamp the workspace identity resolved above rather than
                     // trusting the cached copy. The cache is keyed on transcript
@@ -580,42 +712,10 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     .to_string();
 
                 let subagents_dir = path.join("subagents");
-                let Ok(agent_entries) = fs::read_dir(&subagents_dir) else {
+                let Some(agent_paths) = list_agent_transcripts(&subagents_dir, scan_cache) else {
                     continue;
                 };
-
-                // Collect agent transcripts: direct subagents
-                // (`subagents/agent-*.jsonl`) plus Claude Code Workflow fan-out
-                // agents (`subagents/workflows/wf_*/agent-*.jsonl`), so workflow
-                // nodes can link to an openable session.
-                let mut agent_paths: Vec<PathBuf> = Vec::new();
-                for agent_entry in agent_entries.flatten() {
-                    let p = agent_entry.path();
-                    if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                        agent_paths.push(p);
-                    }
-                }
-                if let Ok(wf_runs) = fs::read_dir(subagents_dir.join("workflows")) {
-                    for run in wf_runs.flatten() {
-                        let run_dir = run.path();
-                        if !run_dir.is_dir() {
-                            continue;
-                        }
-                        if let Ok(wf_agents) = fs::read_dir(&run_dir) {
-                            for a in wf_agents.flatten() {
-                                let p = a.path();
-                                if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
-                                    && p.file_name()
-                                        .and_then(|n| n.to_str())
-                                        .map(|n| n.starts_with("agent-"))
-                                        .unwrap_or(false)
-                                {
-                                    agent_paths.push(p);
-                                }
-                            }
-                        }
-                    }
-                }
+                listed_subagent_dirs.insert(subagents_dir);
 
                 for agent_path in agent_paths {
                     let agent_id = agent_path
@@ -624,25 +724,16 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         .unwrap_or_default()
                         .to_string();
 
-                    // Read optional meta.json
-                    let meta_path = agent_path.with_extension("meta.json");
-                    let meta = fs::read_to_string(&meta_path)
-                        .ok()
-                        .and_then(|s| serde_json::from_str::<SubagentMeta>(&s).ok());
-
-                    let agent_type = meta.as_ref().and_then(|m| m.agent_type.clone());
-                    let agent_description = meta.as_ref().and_then(|m| m.description.clone());
-                    let meta_model = meta.as_ref().and_then(|m| m.model.clone());
-                    let meta_thinking_level = meta.and_then(|m| m.thinking_level.clone());
-
                     // Subagents run in the parent's process; never precise on their
                     // own since we can't kill just the subagent independently.
                     let sub_pid = live_pids.get(parent_session_id.as_str()).copied();
 
                     // Try session cache first for subagents too.
-                    if let Some((mut info, age)) =
-                        check_session_cache(&agent_path, &session_cache_snapshot)
-                    {
+                    let lookup = check_session_cache(&agent_path, &session_cache_snapshot);
+                    if let CacheLookup::Expired = lookup {
+                        continue;
+                    }
+                    if let CacheLookup::Hit(mut info, age) = lookup {
                         age_out_status(&mut info, age);
                         apply_subagent_tool_liveness(&mut info, sub_pid.is_some(), age);
                         // Same re-stamp as the main-session cache hit above.
@@ -656,6 +747,17 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         // Guard dropped before the call — see the note at the
                         // main-session call site.
                         let prev_incr = scan_cache.incr_cache.lock().unwrap().get(&key).cloned();
+
+                        // The optional meta.json only feeds the parse, so it is
+                        // read on a miss alone — reading it for every cached
+                        // subagent was a quarter of a quiet scan (~1.9k reads).
+                        let meta = fs::read_to_string(agent_path.with_extension("meta.json"))
+                            .ok()
+                            .and_then(|s| serde_json::from_str::<SubagentMeta>(&s).ok());
+                        let agent_type = meta.as_ref().and_then(|m| m.agent_type.clone());
+                        let agent_description = meta.as_ref().and_then(|m| m.description.clone());
+                        let meta_model = meta.as_ref().and_then(|m| m.model.clone());
+                        let meta_thinking_level = meta.and_then(|m| m.thinking_level.clone());
 
                         if let Some((info, incr)) = parse_session_info(
                             &agent_path,
@@ -712,6 +814,12 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         for state in incr.values_mut() {
             state.acc.prune(now_secs);
         }
+        drop(incr);
+        scan_cache
+            .agent_listings
+            .lock()
+            .unwrap()
+            .retain(|k, _| listed_subagent_dirs.contains(k));
     }
 
     sort_sessions(&mut sessions);
@@ -1192,5 +1300,68 @@ mod rollup_tests {
         aggregate_subagent_rollup(&mut sessions);
         assert!((sessions[0].agent_total_cost_usd - 0.42).abs() < 1e-9);
         assert!((sessions[0].agent_token_speed - 7.0).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod agent_listing_tests {
+    use super::*;
+
+    fn sorted_names(paths: Vec<PathBuf>) -> Vec<String> {
+        let mut v: Vec<String> = paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn missing_subagents_dir_lists_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = ScanCache::new();
+        assert!(list_agent_transcripts(&tmp.path().join("subagents"), &cache).is_none());
+    }
+
+    #[test]
+    fn lists_direct_and_workflow_agents_and_sees_new_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("subagents");
+        let run = sub.join("workflows").join("wf_1");
+        fs::create_dir_all(&run).unwrap();
+        fs::write(sub.join("agent-a.jsonl"), "").unwrap();
+        fs::write(sub.join("agent-a.meta.json"), "{}").unwrap();
+        fs::write(run.join("agent-b.jsonl"), "").unwrap();
+        fs::write(run.join("journal.jsonl"), "").unwrap();
+        let cache = ScanCache::new();
+
+        let first = list_agent_transcripts(&sub, &cache).unwrap();
+        assert_eq!(sorted_names(first), vec!["agent-a.jsonl", "agent-b.jsonl"]);
+        // A second call with nothing changed comes from the cache, unchanged.
+        let again = list_agent_transcripts(&sub, &cache).unwrap();
+        assert_eq!(sorted_names(again), vec!["agent-a.jsonl", "agent-b.jsonl"]);
+
+        // New files at each level bump only their own dir's mtime.
+        std::thread::sleep(Duration::from_millis(10));
+        fs::write(run.join("agent-c.jsonl"), "").unwrap();
+        let run2 = sub.join("workflows").join("wf_2");
+        fs::create_dir_all(&run2).unwrap();
+        fs::write(run2.join("agent-d.jsonl"), "").unwrap();
+        fs::write(sub.join("agent-e.jsonl"), "").unwrap();
+        let after = list_agent_transcripts(&sub, &cache).unwrap();
+        assert_eq!(
+            sorted_names(after),
+            vec![
+                "agent-a.jsonl",
+                "agent-b.jsonl",
+                "agent-c.jsonl",
+                "agent-d.jsonl",
+                "agent-e.jsonl"
+            ]
+        );
+
+        fs::remove_file(run.join("agent-b.jsonl")).unwrap();
+        let removed = list_agent_transcripts(&sub, &cache).unwrap();
+        assert!(!sorted_names(removed).contains(&"agent-b.jsonl".to_string()));
     }
 }

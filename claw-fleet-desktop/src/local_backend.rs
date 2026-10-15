@@ -172,9 +172,9 @@ impl LocalBackend {
             claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
         };
-        emit_sessions(&self.app, &snapshot);
+        let rows = emit_sessions(&self.app, &snapshot);
         crate::update_tray(&self.app, &snapshot);
-        publish_mobile_sessions(&snapshot);
+        publish_mobile_rows(rows);
     }
 
     pub fn new(
@@ -311,8 +311,8 @@ impl LocalBackend {
             let sess_fs = sessions.clone();
             claw_fleet_core::fresh_spawns::set_listener(move || {
                 let snapshot = sess_fs.lock().unwrap().clone();
-                emit_sessions(&app_fs, &snapshot);
-                publish_mobile_sessions(&snapshot);
+                let rows = emit_sessions(&app_fs, &snapshot);
+                publish_mobile_rows(rows);
             });
         }
 
@@ -343,10 +343,10 @@ impl LocalBackend {
                     ));
                 }
                 *sess_bg.lock().unwrap() = initial.clone();
-                emit_sessions(&app_bg, &initial);
+                let rows = emit_sessions(&app_bg, &initial);
                 let _ = app_bg.emit("scan-ready", true);
                 crate::update_tray(&app_bg, &initial);
-                publish_mobile_sessions(&initial);
+                publish_mobile_rows(rows);
 
                 // Send to indexer thread (non-blocking).
                 let _ = idx_tx.send(sessions_to_index_request(&initial));
@@ -444,6 +444,9 @@ impl LocalBackend {
         }
 
         step!("skills startup reconcile done");
+
+        crate::fleet_dir_gate::start();
+        step!("fleet dir gate started");
 
         // Shared analyzing set — prevents duplicate analysis when both the
         // filesystem watcher and the polling thread detect the same transition.
@@ -1609,8 +1612,10 @@ fn session_rows(sessions: &[SessionInfo]) -> Vec<Value> {
 }
 
 /// Push `sessions` to the frontend as the next frame. Emits nothing when the
-/// list is unchanged since the last frame.
-fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) {
+/// list is unchanged since the last frame. Returns the serialized rows (fresh
+/// spawns overlaid) for [`publish_mobile_rows`], so the phone mirror does not
+/// serialize the whole list a second time.
+fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) -> Vec<Value> {
     // A just-spawned session goes out as a provisional row until a scan finds
     // its transcript (see `fresh_spawns`), so the composer can switch to it now.
     claw_fleet_core::fresh_spawns::observe(sessions);
@@ -1621,21 +1626,17 @@ fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) {
     if let Some(frame) = tracker.frame(&rows) {
         let _ = app.emit(SESSIONS_FRAME_EVENT, &frame);
     }
+    rows
 }
 
-/// Mirror a sessions snapshot onto the mobile relay channel. The relay side
-/// additionally throttles (≥2s between pushes) and skips when no mobile
-/// client is online; the `is_connected` gate here just avoids serializing
-/// the whole list when the channel is down.
-fn publish_mobile_sessions(sessions: &[claw_fleet_core::session::SessionInfo]) {
+/// Mirror a sessions snapshot onto the mobile relay channel, from the rows
+/// [`emit_sessions`] already serialized. The relay side additionally throttles
+/// (≥2s between pushes) and skips when no mobile client is online.
+fn publish_mobile_rows(rows: Vec<Value>) {
     if !claw_fleet_core::mobile_relay::is_connected() {
         return;
     }
-    let overlaid = claw_fleet_core::fresh_spawns::overlay(sessions);
-    let sessions = overlaid.as_deref().unwrap_or(sessions);
-    if let Ok(v) = serde_json::to_value(sessions) {
-        claw_fleet_core::mobile_relay::publish_sessions(&v);
-    }
+    claw_fleet_core::mobile_relay::publish_sessions(&Value::Array(rows));
 }
 
 /// Mirror a new pending decision onto the mobile relay channel, alongside the
@@ -1727,9 +1728,9 @@ fn rescan_and_emit(
     }
 
     *sessions.lock().unwrap() = s.clone();
-    emit_sessions(app, &s);
+    let rows = emit_sessions(app, &s);
     crate::update_tray(app, &s);
-    publish_mobile_sessions(&s);
+    publish_mobile_rows(rows);
     // Pre-fold changed sessions so the cost-breakdown modal opens warm.
     claw_fleet_core::today_usage::warm_usage_cache(&s);
 }
@@ -1958,9 +1959,9 @@ fn incremental_rescan_and_emit(
     let s = commit_rescan(sources, sessions, scanned, dirty, &outcome_tags);
     let lock_took = lock_started.elapsed();
 
-    emit_sessions(app, &s);
+    let rows = emit_sessions(app, &s);
     crate::update_tray(app, &s);
-    publish_mobile_sessions(&s);
+    publish_mobile_rows(rows);
     // Pre-fold changed sessions so the cost-breakdown modal opens warm.
     claw_fleet_core::today_usage::warm_usage_cache(&s);
     // This path runs on BOTH the fs-watch thread and the polling thread, and
@@ -2164,9 +2165,9 @@ fn refresh_dead_codex_liveness_and_emit(sessions: &Arc<Mutex<Vec<SessionInfo>>>,
         }
     };
     if let Some(s) = updated {
-        emit_sessions(app, &s);
+        let rows = emit_sessions(app, &s);
         crate::update_tray(app, &s);
-        publish_mobile_sessions(&s);
+        publish_mobile_rows(rows);
     }
 }
 

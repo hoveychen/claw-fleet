@@ -8,6 +8,7 @@ pub use claw_fleet_core::*;
 pub mod app_nap;
 mod cmd_probe;
 pub mod fleet_binary;
+mod fleet_dir_gate;
 mod gui;
 pub mod keep_awake;
 pub mod local_backend;

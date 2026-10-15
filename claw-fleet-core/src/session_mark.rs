@@ -141,6 +141,7 @@ pub(crate) fn set_mark_in(
     match mark {
         None => {
             let _ = fs::remove_file(&path);
+            crate::json_dir_cache::note_changed(&path);
             Ok(())
         }
         Some(mark) => {
@@ -151,7 +152,9 @@ pub(crate) fn set_mark_in(
                 updated: now_ms(),
             };
             let json = serde_json::to_string(&rec).map_err(|e| format!("serialize: {e}"))?;
-            fs::write(&path, json).map_err(|e| format!("write session-mark: {e}"))
+            let res = fs::write(&path, json).map_err(|e| format!("write session-mark: {e}"));
+            crate::json_dir_cache::note_changed(&path);
+            res
         }
     }
 }
