@@ -227,23 +227,9 @@ pub(crate) fn clear_on_resume_in(dir: &std::path::Path, session_id: &str) {
 /// Read the whole `task-outcome/` directory into `session_id → record`.
 /// Malformed or non-`.json` entries are skipped.
 pub fn outcome_index(dir: &std::path::Path) -> HashMap<String, TaskOutcomeRecord> {
-    let mut idx = HashMap::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return idx;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if let Some(rec) = read_in(dir, id) {
-            idx.insert(id.to_string(), rec);
-        }
-    }
-    idx
+    static CACHE: crate::json_dir_cache::JsonDirCache<TaskOutcomeRecord> =
+        crate::json_dir_cache::JsonDirCache::new();
+    CACHE.load(dir).into_iter().collect()
 }
 
 #[cfg(test)]

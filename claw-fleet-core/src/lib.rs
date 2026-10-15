@@ -81,6 +81,7 @@ pub mod image_api;
 pub mod interaction_mode;
 pub mod interaction_mode_diagnostics;
 pub mod interaction_mode_test;
+pub mod json_dir_cache;
 pub mod jsonl_tail;
 pub mod lan_access;
 pub mod launch_spec;

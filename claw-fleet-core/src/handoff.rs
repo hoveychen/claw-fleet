@@ -636,14 +636,9 @@ pub fn list_chains() -> Vec<HandoffChain> {
 }
 
 fn list_chains_in(dir: &Path) -> Vec<HandoffChain> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().ends_with(".json"))
-        .filter_map(|e| read_chain_file(&e.path()))
-        .collect()
+    static CACHE: crate::json_dir_cache::JsonDirCache<HandoffChain> =
+        crate::json_dir_cache::JsonDirCache::new();
+    CACHE.load(dir).into_iter().map(|(_, chain)| chain).collect()
 }
 
 /// The chain a session appears on (as source or successor of any link).

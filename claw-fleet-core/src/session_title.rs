@@ -213,23 +213,13 @@ pub(crate) fn read_in(dir: &std::path::Path, session_id: &str) -> Option<Session
 /// Read the whole `session-title/` directory into `session_id → title`.
 /// Malformed or non-`.json` entries are skipped.
 fn title_index(dir: &std::path::Path) -> HashMap<String, String> {
-    let mut idx = HashMap::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return idx;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if let Some(rec) = read_in(dir, id) {
-            idx.insert(id.to_string(), rec.title);
-        }
-    }
-    idx
+    static CACHE: crate::json_dir_cache::JsonDirCache<SessionTitleRecord> =
+        crate::json_dir_cache::JsonDirCache::new();
+    CACHE
+        .load(dir)
+        .into_iter()
+        .map(|(id, rec)| (id, rec.title))
+        .collect()
 }
 
 #[cfg(test)]

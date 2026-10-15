@@ -384,21 +384,10 @@ pub fn list_procs() -> Vec<ProcRecord> {
 }
 
 pub fn list_procs_in(dir: &Path) -> Vec<ProcRecord> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
+    static CACHE: crate::json_dir_cache::JsonDirCache<ProcRecord> =
+        crate::json_dir_cache::JsonDirCache::new();
     let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(id) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
-            continue;
-        };
-        let Ok(mut rec) = read_record(dir, &id) else {
-            continue;
-        };
+    for (_, mut rec) in CACHE.load(dir) {
         if heal_stale(dir, &mut rec) {
             let _ = write_record(dir, &rec);
         }
@@ -430,7 +419,9 @@ pub fn output_file_in(dir: &Path, id: &str) -> PathBuf {
 /// Returns true (and mutates `rec` to `exited`) when the record claims to be
 /// live but its host process is provably gone.
 fn heal_stale(dir: &Path, rec: &mut ProcRecord) -> bool {
-    let host_alive = match (rec.host_pid, rec.host_start_time) {
+    // Lazy: almost every record on disk is long `Exited`, and probing a pid
+    // for each of them on every list poll was measurable.
+    let host_alive = || match (rec.host_pid, rec.host_start_time) {
         (Some(pid), start) => {
             crate::session::is_process_alive(pid)
                 && (start.is_none() || crate::session::process_start_time(pid) == start)
@@ -439,9 +430,9 @@ fn heal_stale(dir: &Path, rec: &mut ProcRecord) -> bool {
     };
     let stale = match rec.status {
         ProcStatus::Exited => false,
-        ProcStatus::Running => !host_alive,
+        ProcStatus::Running => !host_alive(),
         ProcStatus::Starting => {
-            !host_alive && now_ms().saturating_sub(rec.started_ms) > STARTING_TIMEOUT_MS
+            !host_alive() && now_ms().saturating_sub(rec.started_ms) > STARTING_TIMEOUT_MS
         }
     };
     if !stale {
