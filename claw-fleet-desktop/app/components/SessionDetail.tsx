@@ -124,6 +124,15 @@ interface OptimisticSend {
 
 const LAUNCH_ECHO_PREFIX = "optimistic-launch-";
 
+/** Rail order for subagent cards: oldest first, by when they were spawned. It
+ *  used to be most-recently-active first, which reshuffled the stack every
+ *  time a parallel sibling printed — dragging an expanded transcript up and
+ *  down under the reader. Creation time never changes, so a card keeps its slot
+ *  and new agents append below. Id breaks ties (and orders a missing time). */
+function byCreation(a: SessionInfo, b: SessionInfo): number {
+  return a.createdAtMs - b.createdAtMs || a.id.localeCompare(b.id);
+}
+
 /** Is this echo still waiting for its transcript row? A launch prompt is
  *  matched by "any user row has landed", not by text: the CLI records it with
  *  the attached-file list appended, so a text match would never retire it. */
@@ -1481,7 +1490,7 @@ export function SessionDetail({
           s.id !== liveSession.id &&
           isLiveMember(s),
       )
-      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+      .sort(byCreation);
   }, [liveSession, sessions]);
 
   /** The same family, finished ones included — what the library facet lists.
@@ -1639,7 +1648,7 @@ export function SessionDetail({
     const pinnedId = aux.pinnedAgent;
     if (!pinnedId || live.some((s) => s.id === pinnedId)) return live;
     const pinned = sessions.find((s) => s.id === pinnedId);
-    return pinned ? [pinned, ...live] : live;
+    return pinned ? [pinned, ...live].sort(byCreation) : live;
   }, [aux.pinnedAgent, aux.dismissedAgents, liveSubagents, sessions]);
   const railCards = railAgents.length + aux.docs.length + explains.length;
   /* The rail follows its content by default — present when it has cards, zero

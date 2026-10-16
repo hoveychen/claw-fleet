@@ -574,6 +574,14 @@
   padding: 8px 10px 10px;
 }
 
+/* The subagent reader's scroller — see SessionAuxAgent. */
+.aux_agent_scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 /* ── Auxiliary card rail ────────────────────────────────────────────────────
    The ambient layer: one raised card per thing in play (each running subagent,
    each doc the reader opened).
