@@ -91,6 +91,7 @@ import { t as translate, useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
+import { SessionMentionNavProvider } from "./views/SessionMention";
 import { clearDraftsByPrefix, loadDraft, saveDraft } from "./draft";
 import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
 import { onNativePushToken } from "./nativePush";
@@ -1069,6 +1070,38 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [transportFor],
   );
 
+  // A chip tapped inside the new-session sheet opens its target *above* the
+  // sheet (detail/wiki pages sit below it, z 30 vs 40), so back returns to the
+  // half-written form. The base records the stack depths at the tap: only pages
+  // pushed past it are lifted, never a detail that was already under the sheet.
+  const [sheetPeekBase, setSheetPeekBase] = useState<{ detail: number; wiki: number } | null>(
+    null,
+  );
+  const sheetPeek =
+    showNewSession &&
+    sheetPeekBase !== null &&
+    (detailStack.length > sheetPeekBase.detail || wikiStack.length > sheetPeekBase.wiki);
+  const markSheetPeek = useCallback(() => {
+    if (!sheetPeek) setSheetPeekBase({ detail: detailStack.length, wiki: wikiStack.length });
+  }, [sheetPeek, detailStack.length, wikiStack.length]);
+
+  // Reference chips in the new-session sheet name sessions / docs of the
+  // sheet's target device, not of the device the app is scoped to.
+  const newSessionMentionNav = useMemo(
+    () => ({
+      open: (id: string) => {
+        markSheetPeek();
+        openSessionById(newSessionTargetId, id);
+      },
+      has: (id: string) => newSessionSessions.some((s) => s.id === id),
+      openWiki: (slug: string) => {
+        markSheetPeek();
+        openWikiSlug(newSessionTargetId, slug);
+      },
+    }),
+    [markSheetPeek, openSessionById, openWikiSlug, newSessionTargetId, newSessionSessions],
+  );
+
   // A secondary page (session detail / wiki doc / repo / usage / new session)
   // is covering the tab body. Used to decide whether the global decision drawer
   // should take over as the answering surface.
@@ -1487,6 +1520,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         />
       </Presence>
 
+      <div className={sheetPeek ? styles.aboveSheet : undefined}>
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
       ))}
@@ -1550,6 +1584,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         />
       )}
       </Presence>
+      </div>
 
       {showRepo && <HistoryLayer onBack={() => setShowRepo(false)} />}
       <Presence when={showRepo}>
@@ -1617,6 +1652,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               each device to restore its own. */}
 
           <DeviceScopeProvider deviceId={newSessionScopeId}>
+            <SessionMentionNavProvider nav={newSessionMentionNav}>
             <NewSessionSheet
               key={newSessionTargetId}
               sessions={newSessionSessions}
@@ -1641,11 +1677,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
                 // not the one picked last time — remembering it would let someone open
                 // the form on page A and silently spawn on B.
                 setNewSessionDeviceId(null);
+                setSheetPeekBase(null);
                 // Consumed by the sheet — don't re-upload on reopen.
                 setSharedFiles([]);
 
               }}
             />
+            </SessionMentionNavProvider>
           </DeviceScopeProvider>
       </Presence>
 

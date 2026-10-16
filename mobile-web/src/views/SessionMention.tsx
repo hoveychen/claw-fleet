@@ -356,11 +356,18 @@ export function RefChips({
   onRemove?: (r: PromptRef) => void;
 }) {
   const nav = useContext(SessionMentionNavContext);
+  // A sent `[[slug]]` carries no title; ask the view to fetch its wiki list.
+  const untitledWiki = refs.some((r) => r.kind === "wiki" && !r.title);
+  const wantWikiTitles = nav?.wantWikiTitles;
+  useEffect(() => {
+    if (untitledWiki) wantWikiTitles?.();
+  }, [untitledWiki, wantWikiTitles]);
   if (refs.length === 0) return null;
   return (
     <div className={styles.refChips}>
       {refs.map((r) => {
-        const label = r.kind === "session" ? r.title : r.title || r.slug;
+        const label =
+          r.kind === "session" ? r.title : r.title || nav?.wikiTitle?.(r.slug) || r.slug;
         const Icon = r.kind === "session" ? MessagesSquare : BookOpen;
         const openable =
           r.kind === "session" ? Boolean(nav?.has(r.id)) : Boolean(nav?.openWiki);
@@ -402,6 +409,23 @@ export interface SessionMentionNav {
   has: (sessionId: string) => boolean;
   /** Open a wiki doc of this view's device by slug. */
   openWiki?: (slug: string) => void;
+  /** Title of a wiki doc by slug, once the view's wiki list is loaded. */
+  wikiTitle?: (slug: string) => string | undefined;
+  /** A chip needs `wikiTitle`; the view fetches its wiki list lazily on this. */
+  wantWikiTitles?: () => void;
+}
+
+/** `wikiTitle` / `wantWikiTitles` for a view's nav: fetches the device's wiki
+ *  list only once a chip asks for a title. */
+export function useWikiTitles(client: FleetTransport | null) {
+  const [want, setWant] = useState(false);
+  const docs = useWikiDocList(client, want);
+  const wantWikiTitles = useCallback(() => setWant(true), []);
+  const wikiTitle = useCallback(
+    (slug: string) => docs?.find((d) => d.slug === slug)?.title || undefined,
+    [docs],
+  );
+  return { wikiTitle, wantWikiTitles };
 }
 
 const SessionMentionNavContext = createContext<SessionMentionNav | null>(null);

@@ -384,3 +384,11 @@
     transform: translate(-50%, 0);
   }
 }
+
+/* Detail / wiki pages opened from a chip in the new-session sheet (z 40) are
+   lifted above it; see `sheetPeek` in App.tsx. Stays below DirPicker and the
+   decision drawer. */
+.aboveSheet {
+  position: relative;
+  z-index: 45;
+}

@@ -96,7 +96,13 @@ import {
   splitRefsBlock,
   stripRefsBlock,
 } from "../../../shared-ts/sessionMentions";
-import { MentionText, RefChips, RefsNote, SessionMentionNavProvider } from "./SessionMention";
+import {
+  MentionText,
+  RefChips,
+  RefsNote,
+  SessionMentionNavProvider,
+  useWikiTitles,
+} from "./SessionMention";
 import { HistoryLayer } from "../useNavStack";
 import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
@@ -1377,13 +1383,16 @@ export function SessionDetailView({
   // `@` mention chips in user bubbles: open the named session when this
   // device's snapshot has it. `sessions` is this device's slice only, so a
   // same-numbered id on another paired device can never be opened by mistake.
+  const { wikiTitle, wantWikiTitles } = useWikiTitles(client);
   const mentionNav = useMemo(
     () => ({
       open: (id: string) => onOpenSessionId(id),
       has: (id: string) => sessions.some((s) => s.id === id),
       openWiki: onOpenWikiSlug,
+      wikiTitle,
+      wantWikiTitles,
     }),
-    [sessions, onOpenSessionId, onOpenWikiSlug],
+    [sessions, onOpenSessionId, onOpenWikiSlug, wikiTitle, wantWikiTitles],
   );
   // When viewing a subagent, the owning main session (for the parent breadcrumb).
   const parentSession = useMemo(
