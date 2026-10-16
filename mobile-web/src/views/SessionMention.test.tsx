@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { splitRefsBlock } from "../../../shared-ts/sessionMentions";
-import { MentionText, RefsNote, SessionMentionNavProvider } from "./SessionMention";
+import { MentionText, RefChips, RefsNote, SessionMentionNavProvider } from "./SessionMention";
 
 const nav = { open: () => {}, has: (id: string) => id === "known" };
 
@@ -46,5 +46,26 @@ describe("referenced-sessions block collapse", () => {
 
   it("renders nothing when no block was attached", () => {
     expect(renderToStaticMarkup(<RefsNote count={0} />)).toBe("");
+  });
+});
+
+describe("RefChips", () => {
+  it("makes known sessions and wiki docs tappable, unknown sessions inert", () => {
+    const html = renderToStaticMarkup(
+      <SessionMentionNavProvider nav={{ ...nav, openWiki: () => {} }}>
+        <RefChips
+          refs={[
+            { kind: "session", id: "known", title: "Known one" },
+            { kind: "session", id: "gone", title: "Gone" },
+            { kind: "wiki", slug: "arch/x" },
+          ]}
+          onRemove={() => {}}
+        />
+      </SessionMentionNavProvider>,
+    );
+    expect(html).toContain("Known one");
+    expect(html).toContain("arch/x");
+    expect(html.match(/data-inert="true"/g)?.length).toBe(1);
+    expect(html.match(/移除引用|Remove reference/g)?.length).toBe(3);
   });
 });

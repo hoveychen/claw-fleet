@@ -98,3 +98,159 @@
   color: var(--color-text-secondary);
   font-size: var(--t-aux, 12px);
 }
+
+.rowIcon {
+  flex: none;
+  margin-right: 5px;
+  vertical-align: -2px;
+  color: var(--color-accent);
+}
+
+/* ── "+" menu and reference picker ──────────────────────────────────────────
+   Fixed to the viewport so the same pieces work over the new-session sheet
+   and under a session detail's floating pill. */
+.menuBackdrop,
+.sheetBackdrop {
+  composes: overlay_enter from "../motion.module.css";
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.menuBackdrop {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.plusMenu,
+.sheet {
+  composes: sheet_enter from "../motion.module.css";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 81;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  background: var(--color-bg-card);
+  box-shadow: 0 -16px 38px rgba(0, 0, 0, 0.26);
+}
+
+.menuItem {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  padding: 0 14px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text);
+  font-size: var(--t-ctl, 15px);
+  text-align: left;
+}
+
+.menuItem:last-child {
+  border-bottom: none;
+}
+
+.menuItem:active {
+  background: var(--color-bg-card-hover);
+}
+
+.sheet {
+  height: 72dvh;
+  gap: 8px;
+}
+
+.sheetTitle {
+  flex: none;
+  padding: 6px 4px 0;
+  font-weight: 650;
+  font-size: var(--t-ctl, 15px);
+  color: var(--color-text);
+}
+
+.search {
+  flex: none;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  /* 16px keeps iOS from zooming the page on focus. */
+  font-size: 16px;
+  outline: none;
+}
+
+.sheetList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.empty {
+  padding: 16px 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+}
+
+/* ── Reference chips (composer strip and sent bubble) ─────────────────────── */
+.refChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.refChip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 4px 0 2px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 9px;
+  background: var(--color-bg-card);
+}
+
+.refOpen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: var(--t-aux, 13px);
+}
+
+.refChip[data-inert="true"] .refOpen {
+  color: var(--color-text-secondary);
+}
+
+.refName {
+  min-width: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refRemove {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  line-height: 1;
+}

@@ -1135,4 +1135,10 @@ const DICT: Record<string, string> = {
   引用会话: "Reference a session",
   "打开会话 {0}": "Open session {0}",
   "已附上 {0} 个会话的摘要": "Summaries of {0} session(s) attached",
+  引用知识库: "Reference a wiki doc",
+  "打开文档 {0}": "Open doc {0}",
+  移除引用: "Remove reference",
+  "搜索会话标题、项目…": "Search session titles, projects…",
+  "搜索知识库文档…": "Search wiki docs…",
+  没有匹配的结果: "No matches",
 };

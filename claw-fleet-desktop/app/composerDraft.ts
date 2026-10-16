@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ChatComposerAttachment } from "./components/ChatComposer";
+import type { PromptRef } from "../../shared-ts/sessionMentions";
 
 /** Everything a user types / picks in a NewSessionForm or ResumeComposer
  *  before submitting. Lifted out of component `useState` so it survives the
@@ -12,6 +13,8 @@ export interface ComposerDraft {
   effort: string;
   permissionMode: string;
   attachments: ChatComposerAttachment[];
+  /** Referenced sessions / wiki docs, shown as chips beside the attachments. */
+  refs: PromptRef[];
   /** New-session only: the chosen workspace directory. */
   workspace: string;
   /** New-session only: which agent tool to launch ("" / "claude" / "codex").
@@ -25,6 +28,7 @@ const EMPTY_DRAFT: ComposerDraft = {
   effort: "",
   permissionMode: "",
   attachments: [],
+  refs: [],
   workspace: "",
   tool: "",
 };

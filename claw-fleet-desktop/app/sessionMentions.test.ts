@@ -2,7 +2,12 @@
 // block shapes must match claw-fleet-core/src/session_refs.rs exactly.
 import { describe, expect, it } from "vitest";
 import {
+  addPromptRef,
+  appendPromptRefs,
   pickMentionableSessions,
+  previewWithRefs,
+  splitPromptRefs,
+  type PromptRef,
   plainMentions,
   sessionIdFromHref,
   sessionMentionToken,
@@ -71,5 +76,37 @@ describe("pickMentionableSessions", () => {
 
   it("excluding any hop excludes its whole chain", () => {
     expect(pickMentionableSessions(rows, "", { exclude: ["h1"] }).map((r) => r.id)).toEqual(["old"]);
+  });
+});
+
+describe("reference list", () => {
+  const refs: PromptRef[] = [
+    { kind: "session", id: "s-1", title: "修 [CPU]" },
+    { kind: "wiki", slug: "arch/overview", title: "架构" },
+  ];
+
+  it("round-trips through the trailing list", () => {
+    const text = appendPromptRefs("看下这些", refs);
+    expect(text).toBe("看下这些\n\nReferences:\n- [@修 ［CPU］](fleet-session:s-1)\n- [[arch/overview]]");
+    expect(splitPromptRefs(text)).toEqual({
+      body: "看下这些",
+      refs: [
+        { kind: "session", id: "s-1", title: "修 ［CPU］" },
+        { kind: "wiki", slug: "arch/overview" },
+      ],
+    });
+    expect(appendPromptRefs("x", [])).toBe("x");
+  });
+
+  it("leaves prose that only says References alone", () => {
+    const prose = "a\n\nReferences:\n- some book";
+    expect(splitPromptRefs(prose)).toEqual({ body: prose, refs: [] });
+    expect(splitPromptRefs("no list")).toEqual({ body: "no list", refs: [] });
+  });
+
+  it("dedups by identity and previews on one line", () => {
+    expect(addPromptRef(refs, { kind: "wiki", slug: "arch/overview" })).toBe(refs);
+    expect(addPromptRef([], refs[0])).toEqual([refs[0]]);
+    expect(previewWithRefs(appendPromptRefs("看下", refs))).toBe("看下 @修 ［CPU］ [[arch/overview]]");
   });
 });

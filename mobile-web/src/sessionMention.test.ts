@@ -65,4 +65,10 @@ describe("mentionPreview", () => {
       "compare with [@Old run](fleet-session:abc)\n\n<fleet-referenced-sessions>\n## Old run\nsummary\n</fleet-referenced-sessions>";
     expect(mentionPreview(sent)).toBe("compare with @Old run");
   });
+
+  it("reads reference chips and drops attachments", () => {
+    const sent =
+      "look\n\nReferences:\n- [@Old run](fleet-session:abc)\n- [[arch/x]]\n\n<fleet-referenced-sessions>\n## Old run\n</fleet-referenced-sessions>\n\nContext files:\n- /p.png";
+    expect(mentionPreview(sent)).toBe("look @Old run [[arch/x]]");
+  });
 });

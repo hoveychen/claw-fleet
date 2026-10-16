@@ -1,0 +1,41 @@
+/* The list scrolls under a pinned search box instead of the whole menu. */
+.picker {
+  max-height: 320px;
+  overflow: hidden;
+}
+
+.search {
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 13px;
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--color-accent);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.item {
+  flex: none;
+}
+
+.empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}

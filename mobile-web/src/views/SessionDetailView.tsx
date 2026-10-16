@@ -91,8 +91,12 @@ import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ImageResultSummary, IngestSummary, ToolDigest } from "../types";
 import { memberDisplayStatus } from "../../../shared-ts/memberStatus";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
-import { stripRefsBlock, splitRefsBlock } from "../../../shared-ts/sessionMentions";
-import { MentionText, RefsNote, SessionMentionNavProvider } from "./SessionMention";
+import {
+  splitPromptRefs,
+  splitRefsBlock,
+  stripRefsBlock,
+} from "../../../shared-ts/sessionMentions";
+import { MentionText, RefChips, RefsNote, SessionMentionNavProvider } from "./SessionMention";
 import { HistoryLayer } from "../useNavStack";
 import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
@@ -489,6 +493,8 @@ interface Props {
   onBack: () => void;
   /** Push a session id as a new drill-down layer (subagent / parent nav). */
   onOpenSessionId: (id: string) => void;
+  /** Open a wiki doc of this session's device by slug (reference chips). */
+  onOpenWikiSlug?: (slug: string) => void;
   /** Count of pending decision cards for this session. Decision cards are an
    *  aggregated inbox across devices (`App`'s `aggregateDecisions`), not stored on
    *  `SessionInfo`, so the App counts them by sessionId and passes them here —
@@ -1198,9 +1204,12 @@ const MessageRow = memo(function MessageRow({
     // `@` mentions make the desktop append a `<fleet-referenced-sessions>`
     // summary block (between the prose and `Context files:`); fold it into one
     // muted line instead of showing the raw summaries.
-    const { text, refs } = splitRefsBlock(withRefs);
+    const { text: withChips, refs } = splitRefsBlock(withRefs);
+    // Reference chips from the composers ride as a trailing `References:` list.
+    const { body: text, refs: chips } = splitPromptRefs(withChips);
     const thumbs = imageThumbs(msg);
-    if (!text && thumbs.length === 0 && attachments.length === 0 && refs === 0) return null;
+    if (!text && thumbs.length === 0 && attachments.length === 0 && refs === 0 && chips.length === 0)
+      return null;
     // Every synthetic `isMeta` user turn — a SKILL.md body a `Skill` load
     // injects, or codex's developer-role boilerplate — is harness/runtime
     // content, not a user turn. Fold them all into one card that self-labels
@@ -1241,6 +1250,11 @@ const MessageRow = memo(function MessageRow({
           {display && (
             <div className={styles.userText}>
               <MentionText text={display} />
+            </div>
+          )}
+          {chips.length > 0 && (
+            <div className={styles.userRefChips}>
+              <RefChips refs={chips} />
             </div>
           )}
           <RefsNote count={refs} />
@@ -1318,6 +1332,7 @@ export function SessionDetailView({
   client,
   onBack,
   onOpenSessionId,
+  onOpenWikiSlug,
   pendingDecisions = 0,
 }: Props) {
   /** The active pane — one of the five tabs that used to sit on the old bar —
@@ -1366,8 +1381,9 @@ export function SessionDetailView({
     () => ({
       open: (id: string) => onOpenSessionId(id),
       has: (id: string) => sessions.some((s) => s.id === id),
+      openWiki: onOpenWikiSlug,
     }),
-    [sessions, onOpenSessionId],
+    [sessions, onOpenSessionId, onOpenWikiSlug],
   );
   // When viewing a subagent, the owning main session (for the parent breadcrumb).
   const parentSession = useMemo(

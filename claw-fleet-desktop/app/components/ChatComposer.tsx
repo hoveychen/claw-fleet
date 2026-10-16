@@ -16,6 +16,14 @@ import { useAttachmentThumb } from "../attachmentThumb";
 import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions, type SessionMentionOptions } from "./useWikiMentions";
+import { BookOpen, MessagesSquare } from "lucide-react";
+import { RefChip } from "./RefChip";
+import { RefPicker } from "./RefPicker";
+import {
+  addPromptRef,
+  promptRefKey,
+  type PromptRef,
+} from "../../../shared-ts/sessionMentions";
 import { Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./ChatComposer.module.css";
@@ -254,6 +262,14 @@ export interface ChatComposerProps {
    * session and resume/follow-up — not decision-card answers.
    */
   sessionMentions?: SessionMentionOptions;
+  /**
+   * Referenced sessions / wiki docs held as chips. Providing `onRefsChange`
+   * turns an `@` pick into a chip (instead of inserted text) and adds
+   * "引用会话" / "引用知识库" to the "+" menu. The host serialises them into
+   * the prompt at send time (`appendPromptRefs`).
+   */
+  refs?: PromptRef[];
+  onRefsChange?: (next: PromptRef[]) => void;
   disabled?: boolean;
   className?: string;
   /** Submit button label (defaults to a paper-plane glyph). */
@@ -293,6 +309,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     addMenuItems,
     wikiMentions,
     sessionMentions,
+    refs,
+    onRefsChange,
     disabled,
     className,
     submitLabel,
@@ -444,13 +462,42 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const refList = refs ?? [];
+  const addRef = onRefsChange ? (r: PromptRef) => onRefsChange(addPromptRef(refList, r)) : undefined;
+  // Which "+" reference picker is open, if any.
+  const [refPicker, setRefPicker] = useState<"session" | "wiki" | null>(null);
+  const closeRefPicker = useCallback(() => setRefPicker(null), []);
+
   const mentions = useWikiMentions(
     Boolean(wikiMentions),
     value,
     onChange,
     textareaRef,
     sessionMentions,
+    addRef,
   );
+
+  const menuItems: ChatComposerAddMenuItem[] | undefined = onRefsChange
+    ? [
+        ...(addMenuItems ?? []),
+        ...(sessionMentions
+          ? [
+              {
+                id: "ref-session",
+                label: t("composer.ref_session", "引用会话"),
+                onSelect: () => setRefPicker("session"),
+                icon: <MessagesSquare size={14} strokeWidth={1.5} />,
+              },
+            ]
+          : []),
+        {
+          id: "ref-wiki",
+          label: t("composer.ref_wiki", "引用知识库"),
+          onSelect: () => setRefPicker("wiki"),
+          icon: <BookOpen size={14} strokeWidth={1.5} />,
+        },
+      ]
+    : addMenuItems;
 
   const reportError = useCallback(
     (msg: string) => {
@@ -671,12 +718,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const triggerAttach = useCallback(() => {
     if (addBusy) return;
-    if (addMenuItems && addMenuItems.length > 0) {
+    if (menuItems && menuItems.length > 0) {
       setMenuOpen((v) => !v);
     } else {
       handlePickFiles();
     }
-  }, [addBusy, addMenuItems, handlePickFiles]);
+  }, [addBusy, menuItems, handlePickFiles]);
 
   const hero = Boolean(contextSlot || toolbarSlot);
 
@@ -689,9 +736,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         disabled={disabled}
         title={t("composer.attach_tooltip", "Attach file or image")}
         aria-label={t("composer.attach_tooltip", "Attach file or image")}
-        aria-haspopup={addMenuItems && addMenuItems.length > 0 ? "menu" : undefined}
+        aria-haspopup={menuItems && menuItems.length > 0 ? "menu" : undefined}
         aria-expanded={
-          addMenuItems && addMenuItems.length > 0 ? menuOpen : undefined
+          menuItems && menuItems.length > 0 ? menuOpen : undefined
         }
         aria-busy={addBusy || undefined}
       >
@@ -711,13 +758,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         </svg>
         )}
       </button>
-      <Presence when={Boolean(addMenuItems && addMenuItems.length > 0 && menuOpen)}>{addMenuItems && addMenuItems.length > 0 && menuOpen && (
+      <Presence when={Boolean(menuItems && menuItems.length > 0 && menuOpen)}>{menuItems && menuItems.length > 0 && menuOpen && (
         <div
           className={`${styles.menu} ${menuSide === "above" ? styles.menu_above : styles.menu_below}`}
           ref={menuRef}
           role="menu"
         >
-          {addMenuItems.map((item) => (
+          {menuItems.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -820,9 +867,27 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         </div>
       )}
       {mentions.menu}
+      {refPicker && addRef && (
+        <RefPicker
+          kind={refPicker}
+          exclude={sessionMentions?.exclude}
+          onPick={addRef}
+          onClose={closeRefPicker}
+        />
+      )}
       {contextSlot && <div className={styles.context_row}>{contextSlot}</div>}
-      {(attachments.length > 0 || pending.length > 0) && (
+      {(attachments.length > 0 || pending.length > 0 || refList.length > 0) && (
         <div className={styles.chips}>
+          {refList.map((r) => (
+            <RefChip
+              key={promptRefKey(r)}
+              value={r}
+              disabled={disabled}
+              onRemove={() =>
+                onRefsChange?.(refList.filter((x) => promptRefKey(x) !== promptRefKey(r)))
+              }
+            />
+          ))}
           {attachments.map((a) => (
             <AttachmentChip
               key={a.path}

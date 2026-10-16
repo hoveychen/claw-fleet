@@ -2488,6 +2488,15 @@
     "abandon_task_tooltip": "The agent does not consider the task done. Ending here marks this session unfinished."
   },
   "composer": {
+    "ref_session": "Reference a session",
+    "ref_wiki": "Reference a wiki doc",
+    "ref_search_sessions": "Search session titles, projects…",
+    "ref_search_wiki": "Search wiki docs…",
+    "ref_empty": "No matches",
+    "ref_open_session": "Open this session",
+    "ref_session_gone": "Session is no longer listed",
+    "ref_open_wiki": "Open in wiki",
+    "ref_remove": "Remove reference",
     "attach": "Attach files",
     "placeholder": "Type a message…",
     "attach_tooltip": "Attach file or image",

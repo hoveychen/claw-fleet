@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSessionsStore } from "../store";
 import { splitContextFiles } from "../userAttachments";
-import { plainMentions, stripRefsBlock } from "../../../shared-ts/sessionMentions";
+import { previewWithRefs, stripRefsBlock } from "../../../shared-ts/sessionMentions";
 import type {
   ContentBlock,
   RawMessage,
@@ -79,7 +79,7 @@ export function stripPromptEnvelope(text: string): string {
     .replace(/<command-(name|message|args)>[\s\S]*?<\/command-\1>/g, "")
     .replace(/<local-command-std(out|err)>[\s\S]*?<\/local-command-std\1>/g, "")
     .trim();
-  return plainMentions(splitContextFiles(stripRefsBlock(stripped)).body.trim());
+  return previewWithRefs(splitContextFiles(stripRefsBlock(stripped)).body).trim();
 }
 
 /** Flatten a tool_result's content, which is a string on the wire for built-in

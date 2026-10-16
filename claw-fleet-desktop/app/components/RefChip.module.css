@@ -1,0 +1,74 @@
+/* A referenced session / wiki doc. Same box as the composer's file chip so
+   the attachment row reads as one kind of thing; the accent tint on the label
+   says "this opens something". */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 240px;
+  padding: 2px 4px 2px 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 2px;
+  background: transparent;
+  border: none;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.open:hover:not(:disabled) .name {
+  text-decoration: underline;
+}
+
+.open:disabled {
+  cursor: default;
+  color: var(--color-text-secondary);
+}
+
+.icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gone {
+  border-style: dashed;
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.remove:hover:not(:disabled) {
+  background: rgba(229, 62, 62, 0.15);
+  color: #e53e3e;
+}

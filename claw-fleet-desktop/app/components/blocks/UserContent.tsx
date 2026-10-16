@@ -3,7 +3,12 @@ import { useTranslation } from "react-i18next";
 import type { ContentBlock, ImageBlock } from "../../types";
 import { splitContextFiles } from "../../userAttachments";
 import { useSessionsStore, useUIStore } from "../../store";
-import { splitRefsBlock } from "../../../../shared-ts/sessionMentions";
+import {
+  promptRefKey,
+  splitPromptRefs,
+  splitRefsBlock,
+} from "../../../../shared-ts/sessionMentions";
+import { RefChip } from "../RefChip";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { AttachmentRow } from "./AttachmentRow";
 import { ImageThumb } from "./ImageThumb";
@@ -148,7 +153,8 @@ function withMentions(body: string, index: number, renderText: Props["renderText
 /**
  * One text run of a user turn, with the composer's trailing `Context files:`
  * block lifted out of the prose and rendered as attachments instead of as a
- * paragraph of absolute paths. The summary Fleet inlined for session mentions
+ * paragraph of absolute paths. Referenced sessions / wiki docs (the composer's
+ * `References:` list) become chips the same way. The summary Fleet inlined for session mentions
  * collapses to one line — it is for the agent, not something the user typed.
  */
 function UserText({
@@ -162,11 +168,19 @@ function UserText({
 }) {
   const { t } = useTranslation();
   const { text: withoutRefs, refs } = splitRefsBlock(text);
-  const { body, paths } = splitContextFiles(withoutRefs);
-  if (!body.trim() && paths.length === 0 && refs === 0) return null;
+  const { body: withChips, paths } = splitContextFiles(withoutRefs);
+  const { body, refs: chips } = splitPromptRefs(withChips);
+  if (!body.trim() && paths.length === 0 && refs === 0 && chips.length === 0) return null;
   return (
     <>
       {body.trim() && <div className={styles.text}>{withMentions(body, index, renderText)}</div>}
+      {chips.length > 0 && (
+        <div className={styles.ref_chips}>
+          {chips.map((r) => (
+            <RefChip key={promptRefKey(r)} value={r} />
+          ))}
+        </div>
+      )}
       {refs > 0 && (
         <div className={styles.refs_note}>
           {t("detail.session_refs_attached", "已附上 {{n}} 个会话的摘要", { n: refs })}

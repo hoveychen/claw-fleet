@@ -119,6 +119,18 @@ describe("findLastUserInput", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "这个卡片怎么回事" });
   });
 
+  it("previews reference chips inline after the prose", () => {
+    const msgs = [
+      userPrompt(
+        "参考一下\n\nReferences:\n- [@修 CPU](fleet-session:abc)\n- [[arch/x]]\n\n<fleet-referenced-sessions>\n## 修 CPU\n</fleet-referenced-sessions>\n\nContext files:\n- /p.png",
+      ),
+    ];
+    expect(findLastUserInput(msgs)).toEqual({
+      kind: "prompt",
+      text: "参考一下 @修 CPU [[arch/x]]",
+    });
+  });
+
   it("leaves a prompt that merely mentions Context files mid-sentence alone", () => {
     const text = "Context files: 这个格式是谁定的？";
     expect(findLastUserInput([userPrompt(text)])).toEqual({ kind: "prompt", text });

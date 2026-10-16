@@ -64,3 +64,11 @@
   font-size: var(--t-ui, 12px);
   color: var(--color-text-dim);
 }
+
+/* Referenced sessions / wiki docs, peeled off the composer's References list. */
+.ref_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}

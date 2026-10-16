@@ -51,7 +51,19 @@ import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { Skeleton, SkeletonList, Spinner } from "./loading";
 import { Presence } from "../Presence";
 import { mentionPreview } from "../sessionMention";
-import { MentionSuggestions, useSessionMention } from "./SessionMention";
+import {
+  MentionSuggestions,
+  PlusMenu,
+  RefChips,
+  RefPickerSheet,
+  useSessionMention,
+} from "./SessionMention";
+import {
+  addPromptRef,
+  appendPromptRefs,
+  promptRefKey,
+  type PromptRef,
+} from "../../../shared-ts/sessionMentions";
 
 // Model and effort choices were once hardcoded here and manually sync'd with the
 // desktop's modelChoices.ts. Both drifted: each claimed Codex efforts were
@@ -394,6 +406,23 @@ function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, text: str
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [ref, text]);
+}
+
+/**
+ * Referenced sessions / wiki docs held as chips, persisted with the draft
+ * (device scope: a session id names a transcript on one machine only), plus
+ * the "+" menu and picker state that add to them.
+ */
+function useComposerRefs(draftKey: string) {
+  const [refs, setRefs, clearRefs] = useDeviceDraft<PromptRef[]>(draftKey, []);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [picker, setPicker] = useState<"session" | "wiki" | null>(null);
+  const add = useCallback((r: PromptRef) => setRefs((cur) => addPromptRef(cur, r)), [setRefs]);
+  const remove = useCallback(
+    (r: PromptRef) => setRefs((cur) => cur.filter((x) => promptRefKey(x) !== promptRefKey(r))),
+    [setRefs],
+  );
+  return { refs, add, remove, clearRefs, plusOpen, setPlusOpen, picker, setPicker };
 }
 
 function withContextFiles(prompt: string, attachments: Attachment[]): string {
@@ -857,11 +886,14 @@ export function NewSessionSheet({
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : draft.prompt);
   // `sessions` is already the target device's slice (App filters by
   // newSessionTargetId), so the picker never offers another machine's session.
+  const refState = useComposerRefs("new-session:refs");
   const mention = useSessionMention({
     value: draft.prompt,
     onChange: (next) => setDraft((d) => ({ ...d, prompt: next })),
     sessions,
     textareaRef: voiceTailRef,
+    onPickRef: refState.add,
+    client,
   });
   const newFileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -995,7 +1027,7 @@ export function NewSessionSheet({
     const sessionId = crypto.randomUUID();
     const params = {
       workspacePath: effectiveWorkspace,
-      prompt: withContextFiles(prompt.trim(), attachments),
+      prompt: withContextFiles(appendPromptRefs(prompt.trim(), refState.refs), attachments),
       sessionId,
       tool,
       ...(model ? { model } : {}),
@@ -1019,6 +1051,7 @@ export function NewSessionSheet({
       // already-launched task. Brief stay is only for success feedback.
       clearDraft();
       reset();
+      refState.clearRefs();
       closeTimerRef.current = window.setTimeout(() => {
         onClose();
       }, 650);
@@ -1159,8 +1192,10 @@ export function NewSessionSheet({
               )}
             </button>
           </div>
-          {(attachments.length > 0 || pending.length > 0) && !voice.active && (
+          {(attachments.length > 0 || pending.length > 0 || refState.refs.length > 0) &&
+            !voice.active && (
             <div className={styles.resumeThumbs}>
+              <RefChips refs={refState.refs} onRemove={refState.remove} />
               <AttachmentThumbs
                 paths={attachments.map((a) => a.path)}
                 pending={pending}
@@ -1181,7 +1216,7 @@ export function NewSessionSheet({
               <button
                 className={styles.pillBtn}
                 disabled={uploading}
-                onClick={() => newFileRef.current?.click()}
+                onClick={() => refState.setPlusOpen(true)}
                 aria-label={uploading ? t("上传中…") : t("附件")}
               >
                 {uploading ? (
@@ -1248,6 +1283,28 @@ export function NewSessionSheet({
           </span>
         </div>
 
+        {refState.plusOpen && (
+          <PlusMenu
+            onClose={() => refState.setPlusOpen(false)}
+            onFiles={() => {
+              refState.setPlusOpen(false);
+              newFileRef.current?.click();
+            }}
+            onRef={(kind) => {
+              refState.setPlusOpen(false);
+              refState.setPicker(kind);
+            }}
+          />
+        )}
+        {refState.picker && (
+          <RefPickerSheet
+            kind={refState.picker}
+            sessions={sessions}
+            client={client}
+            onPick={refState.add}
+            onClose={() => refState.setPicker(null)}
+          />
+        )}
         {picker && (
           <>
             <HistoryLayer onBack={() => setPicker(null)} />
@@ -1511,12 +1568,15 @@ export function ResumeComposer({
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : prompt);
   // Never offer the session being followed up (nor, via the shared helper,
   // its own relay chain).
+  const refState = useComposerRefs(`resume:${session.id}:refs`);
   const mention = useSessionMention({
     value: prompt,
     onChange: setPrompt,
     sessions,
     exclude: [session.id],
     textareaRef: voiceTailRef,
+    onPickRef: refState.add,
+    client,
   });
   // Actual measured height reported to parent: the pill floats without taking layout height, so the
   // transcript relies on this number to pad its bottom, or the last message stays buried under the pill.
@@ -1585,7 +1645,7 @@ export function ResumeComposer({
 
   const submit = async () => {
     if (!client || busy || uploading) return;
-    const text = withContextFiles(prompt.trim(), attachments);
+    const text = withContextFiles(appendPromptRefs(prompt.trim(), refState.refs), attachments);
     // Enqueue needs actual text (there's no "continue" fallback for a queued
     // follow-up); resume tolerates empty (= continue).
     if (enqueueing && !text) return;
@@ -1607,6 +1667,7 @@ export function ResumeComposer({
       if (!enqueueing && text) onOptimisticSend?.(text);
       clearPrompt();
       reset();
+      refState.clearRefs();
       setSent(true);
       setBusy(false);
       // Ack arrived, write delivered: resume parent's polling for the real
@@ -1712,8 +1773,10 @@ export function ResumeComposer({
       {/* Thumbnails on their own row, taking height only when there are actual
           attachments — previously squeezed with 📎/🎤 on a permanent 44px
           attachRow, taking space even when empty. */}
-      {(attachments.length > 0 || pending.length > 0) && !voice.active && (
+      {(attachments.length > 0 || pending.length > 0 || refState.refs.length > 0) &&
+        !voice.active && (
         <div className={styles.resumeThumbs}>
+          <RefChips refs={refState.refs} onRemove={refState.remove} />
           <AttachmentThumbs
             paths={attachments.map((a) => a.path)}
             pending={pending}
@@ -1751,7 +1814,7 @@ export function ResumeComposer({
           <button
             className={styles.pillBtn}
             disabled={uploading}
-            onClick={() => fileRef.current?.click()}
+            onClick={() => refState.setPlusOpen(true)}
             aria-label={uploading ? t("上传中…") : t("附件")}
           >
             {uploading ? (
@@ -1819,6 +1882,29 @@ export function ResumeComposer({
             }}
           />
         </div>
+      )}
+      {refState.plusOpen && (
+        <PlusMenu
+          onClose={() => refState.setPlusOpen(false)}
+          onFiles={() => {
+            refState.setPlusOpen(false);
+            fileRef.current?.click();
+          }}
+          onRef={(kind) => {
+            refState.setPlusOpen(false);
+            refState.setPicker(kind);
+          }}
+        />
+      )}
+      {refState.picker && (
+        <RefPickerSheet
+          kind={refState.picker}
+          sessions={sessions}
+          exclude={[session.id]}
+          client={client}
+          onPick={refState.add}
+          onClose={() => refState.setPicker(null)}
+        />
       )}
       <Presence when={pickerOpen}>
         <div className={styles.resumePicker}>

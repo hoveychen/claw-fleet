@@ -112,6 +112,7 @@ import { UsageView } from "./views/UsageView";
 import { WikiView } from "./views/WikiView";
 import { AttentionView } from "./views/AttentionView";
 import { WikiDocView } from "./views/WikiDocView";
+import { listWikiDocs } from "./wiki";
 import { Presence } from "./Presence";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
@@ -1052,6 +1053,22 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [],
   );
 
+  // A reference chip names a wiki doc by slug only; resolve it against that
+  // device's list and push the doc reader. A slug that is gone opens nothing.
+  const openWikiSlug = useCallback(
+    (deviceId: string, slug: string) => {
+      const client = transportFor(deviceId);
+      if (!client) return;
+      listWikiDocs(client)
+        .then((docs) => {
+          const doc = docs.find((d) => d.slug === slug);
+          if (doc) setWikiStack((s) => [...s, { deviceId, doc }]);
+        })
+        .catch(() => {});
+    },
+    [transportFor],
+  );
+
   // A secondary page (session detail / wiki doc / repo / usage / new session)
   // is covering the tab body. Used to decide whether the global decision drawer
   // should take over as the answering surface.
@@ -1486,6 +1503,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
+          onOpenWikiSlug={(slug: string) => openWikiSlug(detailSession.deviceId, slug)}
           // The "N pending decisions" count in the header timeline uses this. Decision cards
           // are a merged cross-device inbox, not attached to SessionInfo, so we count by
           // (device, session) here — only this device's cards, so a same-numbered session

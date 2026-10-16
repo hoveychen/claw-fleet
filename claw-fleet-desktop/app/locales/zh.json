@@ -2485,6 +2485,15 @@
     "abandon_task_tooltip": "Agent 认为任务尚未完成。结束后本会话标记为「未完成·已放弃」。"
   },
   "composer": {
+    "ref_session": "引用会话",
+    "ref_wiki": "引用知识库",
+    "ref_search_sessions": "搜索会话标题、项目…",
+    "ref_search_wiki": "搜索知识库文档…",
+    "ref_empty": "没有匹配的结果",
+    "ref_open_session": "打开这个会话",
+    "ref_session_gone": "会话已不在列表中",
+    "ref_open_wiki": "在知识库打开",
+    "ref_remove": "移除引用",
     "attach": "添加附件",
     "placeholder": "输入消息…",
     "attach_tooltip": "附加文件或图片",
