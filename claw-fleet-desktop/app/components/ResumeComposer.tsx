@@ -19,6 +19,7 @@ import { DirPickerDialog } from "./DirPickerDialog";
 import type { Delivery, SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
 import { Presence } from "./Presence";
+import { plainMentions, stripRefsBlock } from "../../../shared-ts/sessionMentions";
 
 function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/");
@@ -239,7 +240,7 @@ export function ResumeComposer({
           </div>
           {visiblePending.map(({ text: m, index: i }) => (
             <div key={i} className={styles.queued_chip}>
-              <span className={styles.queued_text}>{m}</span>
+              <span className={styles.queued_text}>{plainMentions(stripRefsBlock(m))}</span>
               <button
                 type="button"
                 className={styles.queued_cancel}
@@ -278,6 +279,7 @@ export function ResumeComposer({
         }
         disabled={submitting}
         wikiMentions
+        sessionMentions={{ exclude: [sessionId] }}
         toolbarSlot={
           enqueueing ? undefined : (
           <SessionOptionPills

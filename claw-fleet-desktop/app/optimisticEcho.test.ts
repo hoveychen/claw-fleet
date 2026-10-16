@@ -28,6 +28,18 @@ describe("landedUserTexts", () => {
     expect(stillPending("修一下花费明细", landed)).toBe(false);
   });
 
+  // Core inlines a summary block for `@`-mentioned sessions; the echo holds the
+  // text as typed. Without stripping it on the landed side the echo never retires.
+  it("matches a landed prompt that gained a mention summary block", () => {
+    const typed = "看 [@a](fleet-session:a)\n\nContext files:\n- /p.png";
+    const landed = landedUserTexts([
+      user(
+        "看 [@a](fleet-session:a)\n\n<fleet-referenced-sessions>\n## a\n</fleet-referenced-sessions>\n\nContext files:\n- /p.png",
+      ),
+    ]);
+    expect(stillPending(typed, landed)).toBe(false);
+  });
+
   it("ignores leading and trailing whitespace on both sides", () => {
     const landed = landedUserTexts([user("  继续  ")]);
     expect(stillPending("继续\n", landed)).toBe(false);

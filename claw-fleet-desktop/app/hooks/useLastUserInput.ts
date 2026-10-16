@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSessionsStore } from "../store";
 import { splitContextFiles } from "../userAttachments";
+import { plainMentions, stripRefsBlock } from "../../../shared-ts/sessionMentions";
 import type {
   ContentBlock,
   RawMessage,
@@ -69,7 +70,8 @@ function asArray(content: ContentBlock[] | string | undefined): ContentBlock[] {
  * `<system-reminder>` blocks (hook context, memory recalls) and
  * `<command-name>`/`<command-message>` envelopes, plus the composer's own
  * trailing `Context files:` block (a wall of absolute attachment paths, which
- * the user never typed) — leaving what the user actually said.
+ * the user never typed) and the session-mention summary Fleet inlined — leaving
+ * what the user actually said, with `@`-mentions shown as plain `@title`.
  */
 export function stripPromptEnvelope(text: string): string {
   const stripped = text
@@ -77,7 +79,7 @@ export function stripPromptEnvelope(text: string): string {
     .replace(/<command-(name|message|args)>[\s\S]*?<\/command-\1>/g, "")
     .replace(/<local-command-std(out|err)>[\s\S]*?<\/local-command-std\1>/g, "")
     .trim();
-  return splitContextFiles(stripped).body.trim();
+  return plainMentions(splitContextFiles(stripRefsBlock(stripped)).body.trim());
 }
 
 /** Flatten a tool_result's content, which is a string on the wire for built-in

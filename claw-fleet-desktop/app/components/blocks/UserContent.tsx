@@ -1,7 +1,9 @@
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ContentBlock, ImageBlock } from "../../types";
 import { splitContextFiles } from "../../userAttachments";
+import { useSessionsStore, useUIStore } from "../../store";
+import { splitRefsBlock } from "../../../../shared-ts/sessionMentions";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { AttachmentRow } from "./AttachmentRow";
 import { ImageThumb } from "./ImageThumb";
@@ -101,10 +103,53 @@ export function UserContent({ content, renderText, paths }: Props) {
   return parts.length > 0 ? <>{parts}</> : null;
 }
 
+const MENTION_RE = /\[@([^\]\n]*)\]\(fleet-session:([A-Za-z0-9_-]+)\)/g;
+
+/** A `[@title](fleet-session:<id>)` mention: opens that session when it is
+ *  still in the scan, otherwise reads as an inert `@title`. */
+function SessionMentionChip({ id, title }: { id: string; title: string }) {
+  const { t } = useTranslation();
+  const known = useSessionsStore((s) => s.sessions.some((x) => x.id === id));
+  if (!known) {
+    return (
+      <span className={`${styles.mention} ${styles.mention_gone}`} title={id}>
+        @{title}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={styles.mention}
+      title={t("detail.open_mentioned_session", "打开这个会话")}
+      onClick={() => useUIStore.getState().requestOpenTask(id)}
+    >
+      @{title}
+    </button>
+  );
+}
+
+/** Plain text with session mentions swapped for chips. */
+function withMentions(body: string, index: number, renderText: Props["renderText"]): ReactNode {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let k = 0;
+  for (const m of body.matchAll(MENTION_RE)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(<Fragment key={k++}>{renderText(body.slice(last, at), index)}</Fragment>);
+    out.push(<SessionMentionChip key={k++} id={m[2]} title={m[1]} />);
+    last = at + m[0].length;
+  }
+  if (last === 0) return renderText(body, index);
+  if (last < body.length) out.push(<Fragment key={k++}>{renderText(body.slice(last), index)}</Fragment>);
+  return out;
+}
+
 /**
  * One text run of a user turn, with the composer's trailing `Context files:`
  * block lifted out of the prose and rendered as attachments instead of as a
- * paragraph of absolute paths.
+ * paragraph of absolute paths. The summary Fleet inlined for session mentions
+ * collapses to one line — it is for the agent, not something the user typed.
  */
 function UserText({
   text,
@@ -115,11 +160,18 @@ function UserText({
   index: number;
   renderText: Props["renderText"];
 }) {
-  const { body, paths } = splitContextFiles(text);
-  if (!body.trim() && paths.length === 0) return null;
+  const { t } = useTranslation();
+  const { text: withoutRefs, refs } = splitRefsBlock(text);
+  const { body, paths } = splitContextFiles(withoutRefs);
+  if (!body.trim() && paths.length === 0 && refs === 0) return null;
   return (
     <>
-      {body.trim() && <div className={styles.text}>{renderText(body, index)}</div>}
+      {body.trim() && <div className={styles.text}>{withMentions(body, index, renderText)}</div>}
+      {refs > 0 && (
+        <div className={styles.refs_note}>
+          {t("detail.session_refs_attached", "已附上 {{n}} 个会话的摘要", { n: refs })}
+        </div>
+      )}
       <AttachmentRow paths={paths} />
     </>
   );

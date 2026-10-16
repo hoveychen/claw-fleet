@@ -70,3 +70,23 @@
   font-size: 12px;
   color: var(--color-text-dim);
 }
+
+.row {
+  display: contents;
+}
+
+.section {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.session_title {
+  flex-shrink: 0;
+  max-width: 60%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-accent);
+  font-size: 12px;
+}

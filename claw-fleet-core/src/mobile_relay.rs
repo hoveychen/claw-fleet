@@ -3785,7 +3785,7 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
         entrypoint: String::new(),
         images: Vec::new(),
     };
-    let resp = crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
+    let resp = crate::session_refs::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
     record_if_dedupable(preassigned.as_deref(), resp.session_id.as_deref(), resp.pid);
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
@@ -3825,7 +3825,11 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
         &crate::agent_source::ResumeSpec {
             session_id: req.session_id.clone(),
             workspace_path: req.workspace_path.clone(),
-            prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
+            prompt: req
+                .prompt
+                .as_deref()
+                .map(|t| crate::session_refs::prepare(&req.session_id, t))
+                .unwrap_or_else(|| "continue".to_string()),
             model: req.model.clone(),
             effort: req.effort.clone(),
             permission_mode: req.permission_mode.clone(),
@@ -3848,7 +3852,7 @@ fn serve_enqueue_message(params: &Value) -> Result<Value, String> {
     let delivery = crate::pending_message::enqueue(
         &req.session_id,
         &req.workspace_path,
-        &req.text,
+        &crate::session_refs::prepare(&req.session_id, &req.text),
         crate::pending_message::Sender::User,
     )?;
     Ok(json!({ "ok": true, "delivery": delivery }))

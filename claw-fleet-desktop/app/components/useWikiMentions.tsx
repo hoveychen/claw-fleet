@@ -1,8 +1,13 @@
-// `@`-mention autocomplete over the wiki, shared by every prompt box.
+// `@`-mention autocomplete over the wiki — and, for composers that start or
+// continue a session, over other sessions — shared by every prompt box.
 //
 // Picking a doc inserts a `[[slug]]` reference rather than a path: the slug is
 // the doc's stable address (it survives version bumps and the wiki's on-disk
 // escaping), and `fleet wiki cat <slug>` is what the agent runs to read it.
+//
+// Picking a session inserts `[@title](fleet-session:<id>)`; core's
+// `session_refs` inlines that chain's summary and grants history access when
+// the prompt is sent (see shared-ts/sessionMentions.ts).
 
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
@@ -11,11 +16,28 @@ import type { WikiDoc } from "./WikiView";
 import { useAutoFlip } from "./useAutoFlip";
 import { Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
+import { useSessionsStore } from "../store";
+import type { SessionInfo } from "../types";
+import {
+  mentionTitleOf,
+  pickMentionableSessions,
+  sessionMentionToken,
+} from "../../../shared-ts/sessionMentions";
 import styles from "./useWikiMentions.module.css";
 
 /** Longest `@…` run still treated as a mention query rather than prose. */
 const MAX_MENTION_QUERY = 48;
 const MAX_MENTION_RESULTS = 8;
+const MAX_SESSION_RESULTS = 5;
+
+/** Opt-in for session mentions: `exclude` lists the session being continued. */
+export interface SessionMentionOptions {
+  exclude?: string[];
+}
+
+type MentionItem =
+  | { kind: "session"; key: string; session: SessionInfo }
+  | { kind: "wiki"; key: string; doc: WikiDoc };
 
 /**
  * Find the `@query` the caret currently sits inside, if any. A mention starts
@@ -72,12 +94,14 @@ export interface WikiMentions {
  * @param enabled  Off by default so composers opt in.
  * @param value    Current textarea text.
  * @param onChange Called with the text after a doc is inserted.
+ * @param sessionOpts When set, sessions are offered above the wiki docs.
  */
 export function useWikiMentions(
   enabled: boolean,
   value: string,
   onChange: (next: string) => void,
   textareaRef: RefObject<HTMLTextAreaElement | null>,
+  sessionOpts?: SessionMentionOptions | null,
 ): WikiMentions {
   const { t } = useTranslation();
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
@@ -101,11 +125,27 @@ export function useWikiMentions(
     };
   }, [enabled, mention, docs]);
 
-  const matches = mention && docs ? filterWikiDocs(docs, mention.query) : [];
+  // Sessions are read from the store at match time rather than subscribed to:
+  // the roster changes on every scan, and the composer has no reason to
+  // re-render for that while no `@` is open.
+  const sessionMatches =
+    enabled && mention && sessionOpts
+      ? pickMentionableSessions(useSessionsStore.getState().sessions, mention.query, {
+          exclude: sessionOpts.exclude,
+          limit: MAX_SESSION_RESULTS,
+        })
+      : [];
+  const docMatches = mention && docs ? filterWikiDocs(docs, mention.query) : [];
+  const matches: MentionItem[] = [
+    ...sessionMatches.map((s): MentionItem => ({ kind: "session", key: `s:${s.id}`, session: s })),
+    ...docMatches.map((d): MentionItem => ({ kind: "wiki", key: `w:${d.slug}`, doc: d })),
+  ];
   const open = Boolean(mention) && matches.length > 0;
   // The first `@` waits on the list: show a one-row spinner instead of nothing.
   // It does not claim the keyboard (`open` stays false), so Enter still sends.
-  const showLoading = useDelayedFlag(enabled && Boolean(mention) && docs === null);
+  const showLoading = useDelayedFlag(
+    enabled && Boolean(mention) && docs === null && sessionMatches.length === 0,
+  );
   const visible = open || showLoading;
 
   // Prefer opening upward (the composer usually sits low), but fall back to
@@ -129,11 +169,14 @@ export function useWikiMentions(
   );
 
   const accept = useCallback(
-    (doc: WikiDoc) => {
+    (item: MentionItem) => {
       const el = textareaRef.current;
       if (!el || !mention) return;
       const caret = el.selectionStart ?? value.length;
-      const ref = `[[${doc.slug}]] `;
+      const ref =
+        item.kind === "wiki"
+          ? `[[${item.doc.slug}]] `
+          : `${sessionMentionToken(mentionTitleOf(item.session) ?? "", item.session.id)} `;
       onChange(value.slice(0, mention.start) + ref + value.slice(caret));
       setMention(null);
       const next = mention.start + ref.length;
@@ -201,23 +244,45 @@ export function useWikiMentions(
       ref={wrapRef}
       role="listbox"
     >
-      {matches.map((doc, i) => (
-        <button
-          key={doc.slug}
-          type="button"
-          role="option"
-          aria-selected={i === activeIdx}
-          className={`${styles.item} ${i === activeIdx ? styles.active : ""}`}
-          // mousedown fires before the textarea's blur, which would close us.
-          onMouseDown={(e) => {
-            e.preventDefault();
-            accept(doc);
-          }}
-          onMouseEnter={() => setActiveIdx(i)}
-        >
-          <span className={styles.slug}>{doc.slug}</span>
-          <span className={styles.title}>{doc.title}</span>
-        </button>
+      {matches.map((item, i) => (
+        <div key={item.key} className={styles.row}>
+          {i === 0 || matches[i - 1].kind !== item.kind ? (
+            <div className={styles.section}>
+              {item.kind === "session"
+                ? t("wiki.mention_section_sessions", "会话")
+                : t("wiki.mention_section_wiki", "知识库")}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            role="option"
+            aria-selected={i === activeIdx}
+            className={`${styles.item} ${i === activeIdx ? styles.active : ""}`}
+            // mousedown fires before the textarea's blur, which would close us.
+            onMouseDown={(e) => {
+              e.preventDefault();
+              accept(item);
+            }}
+            onMouseEnter={() => setActiveIdx(i)}
+          >
+            {item.kind === "wiki" ? (
+              <>
+                <span className={styles.slug}>{item.doc.slug}</span>
+                <span className={styles.title}>{item.doc.title}</span>
+              </>
+            ) : (
+              <>
+                <span className={styles.session_title}>{mentionTitleOf(item.session)}</span>
+                <span className={styles.title}>
+                  {item.session.workspaceName}
+                  {item.session.handoff
+                    ? ` · ${t("wiki.mention_chain", "接力 {{n}} 棒", { n: item.session.handoff.chainLen })}`
+                    : ""}
+                </span>
+              </>
+            )}
+          </button>
+        </div>
       ))}
     </div>
   ) : null;

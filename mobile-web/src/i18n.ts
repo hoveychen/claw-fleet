@@ -1131,4 +1131,8 @@ const DICT: Record<string, string> = {
   打开会话: "Open session",
   "{0} 个会话出现": "Seen in {0} sessions",
   "添加到 CLAUDE.md": "Add to CLAUDE.md",
+  // ── `@` session mentions (composer picker / user bubble) ──
+  引用会话: "Reference a session",
+  "打开会话 {0}": "Open session {0}",
+  "已附上 {0} 个会话的摘要": "Summaries of {0} session(s) attached",
 };

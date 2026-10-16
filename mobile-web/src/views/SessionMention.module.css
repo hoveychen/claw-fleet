@@ -1,0 +1,100 @@
+/* Suggestion list: sits in the composer's column right above the pill, in the
+   same card language as the queued-message chips. */
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32);
+}
+
+.row {
+  /* The list scrolls; rows must not shrink to fit it (that clipped titles). */
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 46px;
+  padding: 7px 12px;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:active {
+  background: var(--color-bg-card-hover);
+}
+
+.title {
+  flex: none;
+  min-width: 0;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-ctl, 15px);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+}
+
+.workspace {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: var(--color-accent);
+}
+
+/* A sent mention inside a user bubble. */
+.chip {
+  display: inline;
+  margin: 0 1px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font: inherit;
+  line-height: inherit;
+  /* Long titles wrap with the bubble instead of overflowing it. */
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  cursor: pointer;
+}
+
+.chip[data-inert="true"] {
+  cursor: default;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+}
+
+.refsNote {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+}

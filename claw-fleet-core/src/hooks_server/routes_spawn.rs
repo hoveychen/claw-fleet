@@ -47,7 +47,11 @@ pub(crate) fn route_resume_session(
                 &crate::agent_source::ResumeSpec {
                     session_id: req.session_id.clone(),
                     workspace_path: req.workspace_path.clone(),
-                    prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
+                    prompt: req
+                        .prompt
+                        .as_deref()
+                        .map(|t| crate::session_refs::prepare(&req.session_id, t))
+                        .unwrap_or_else(|| "continue".to_string()),
                     model: req.model.clone(),
                     effort: req.effort.clone(),
                     permission_mode: req.permission_mode.clone(),
@@ -100,7 +104,7 @@ pub(crate) fn route_enqueue_message(
         Ok(req) => match crate::pending_message::enqueue(
             &req.session_id,
             &req.workspace_path,
-            &req.text,
+            &crate::session_refs::prepare(&req.session_id, &req.text),
             crate::pending_message::Sender::User,
         ) {
             Ok(delivery) => {
@@ -354,7 +358,7 @@ pub(crate) fn route_spawn_session(
                 entrypoint: String::new(),
                 images: Vec::new(),
             };
-            match crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)
+            match crate::session_refs::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)
             {
                 Ok(resp) => {
                     // The roster the routes serve is a snapshot; without

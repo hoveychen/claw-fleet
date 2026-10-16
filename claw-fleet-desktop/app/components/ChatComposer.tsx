@@ -15,7 +15,7 @@ import { htmlHasTable, htmlTableToMarkdown } from "../clipboardTable";
 import { useAttachmentThumb } from "../attachmentThumb";
 import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
-import { useWikiMentions } from "./useWikiMentions";
+import { useWikiMentions, type SessionMentionOptions } from "./useWikiMentions";
 import { Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./ChatComposer.module.css";
@@ -248,6 +248,12 @@ export interface ChatComposerProps {
   addMenuItems?: ChatComposerAddMenuItem[];
   /** Enable `@` autocomplete over the wiki, inserting a `[[slug]]` reference. */
   wikiMentions?: boolean;
+  /**
+   * Also offer other sessions in the `@` picker (requires `wikiMentions`).
+   * Only for composers whose text goes through core's `session_refs` — new
+   * session and resume/follow-up — not decision-card answers.
+   */
+  sessionMentions?: SessionMentionOptions;
   disabled?: boolean;
   className?: string;
   /** Submit button label (defaults to a paper-plane glyph). */
@@ -286,6 +292,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     placeholder,
     addMenuItems,
     wikiMentions,
+    sessionMentions,
     disabled,
     className,
     submitLabel,
@@ -437,7 +444,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const mentions = useWikiMentions(Boolean(wikiMentions), value, onChange, textareaRef);
+  const mentions = useWikiMentions(
+    Boolean(wikiMentions),
+    value,
+    onChange,
+    textareaRef,
+    sessionMentions,
+  );
 
   const reportError = useCallback(
     (msg: string) => {
