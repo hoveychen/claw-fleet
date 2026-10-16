@@ -560,7 +560,8 @@ export function NewSessionForm({
       setError(t("new_session.error_workspace_required"));
       return;
     }
-    if (!prompt.trim()) {
+    // A reference chip alone is a complete ask ("pick this chain up").
+    if (!prompt.trim() && refs.length === 0) {
       setError(t("new_session.error_prompt_required"));
       return;
     }
@@ -777,7 +778,7 @@ export function NewSessionForm({
         onAttachmentError={setError}
         onSubmit={handleSubmit}
         submitting={submitting}
-        submitDisabled={!workspace.trim() || !prompt.trim()}
+        submitDisabled={!workspace.trim() || (!prompt.trim() && refs.length === 0)}
         placeholder={t("new_session.prompt_placeholder")}
         disabled={submitting}
         wikiMentions

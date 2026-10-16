@@ -191,7 +191,7 @@ export function ResumeComposer({
   };
 
   const handleSubmit = async () => {
-    if (!prompt.trim() || submitting) return;
+    if ((!prompt.trim() && refs.length === 0) || submitting) return;
     let finalPrompt = appendPromptRefs(prompt.trim(), refs);
     if (attachments.length > 0) {
       finalPrompt += `\n\nContext files:\n${attachments.map((a) => `- ${a.path}`).join("\n")}`;
@@ -273,7 +273,7 @@ export function ResumeComposer({
         onAttachmentError={setError}
         onSubmit={handleSubmit}
         submitting={submitting}
-        submitDisabled={!prompt.trim()}
+        submitDisabled={!prompt.trim() && refs.length === 0}
         emptyTrailingControl={
           enqueueing && session && canControl(session) ? (
             <StopControl session={session} variant="solid" />

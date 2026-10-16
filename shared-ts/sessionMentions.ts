@@ -114,9 +114,17 @@ export function appendPromptRefs(prose: string, refs: PromptRef[]): string {
  * is left alone.
  */
 export function splitPromptRefs(text: string): { body: string; refs: PromptRef[] } {
-  const idx = text.lastIndexOf(REFS_MARKER);
+  // A chips-only message (no prose) is the list alone; it may also have lost
+  // its leading blank lines to a trim along the way.
+  const bare = REFS_MARKER.trimStart();
+  let idx = text.lastIndexOf(REFS_MARKER);
+  let start = idx + REFS_MARKER.length;
+  if (idx < 0 && text.startsWith(bare)) {
+    idx = 0;
+    start = bare.length;
+  }
   if (idx < 0) return { body: text, refs: [] };
-  const tail = text.slice(idx + REFS_MARKER.length).replace(/\n$/, "");
+  const tail = text.slice(start).replace(/\n$/, "");
   if (!tail) return { body: text, refs: [] };
   const refs: PromptRef[] = [];
   for (const line of tail.split("\n")) {
