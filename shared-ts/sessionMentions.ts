@@ -64,6 +64,84 @@ export function plainMentions(text: string): string {
   return text.replace(/\[@([^\]\n]*)\]\(fleet-session:[A-Za-z0-9_-]+\)/g, "@$1");
 }
 
+// ── Reference chips ─────────────────────────────────────────────────────────
+//
+// The composers hold referenced sessions and wiki docs as attachment chips,
+// not as text in the prose. At send time the chips become one trailing list,
+// placed after the prose and before the `Context files:` block:
+//
+//   <prose>\n\nReferences:\n- [@title](fleet-session:<id>)\n- [[slug]]
+//
+// Core's `session_refs` finds the session links anywhere in the text, so it
+// needs no knowledge of this list; it inlines its summary block after the
+// list (before `Context files:`). The wiki lines are what the agent reads to
+// run `fleet wiki cat <slug>`. History views peel the list back off into chips.
+
+/** A reference chip in a composer or a sent message. */
+export type PromptRef =
+  | { kind: "session"; id: string; title: string }
+  | { kind: "wiki"; slug: string; title?: string };
+
+const REFS_MARKER = "\n\nReferences:\n";
+const SESSION_LINE_RE = /^- \[@([^\]\n]*)\]\(fleet-session:([A-Za-z0-9_-]+)\)$/;
+const WIKI_LINE_RE = /^- \[\[([^\]|\n]+)(?:\|[^\]\n]*)?\]\]$/;
+
+/** Stable identity of a ref, for dedup and React keys. */
+export function promptRefKey(r: PromptRef): string {
+  return r.kind === "session" ? `s:${r.id}` : `w:${r.slug}`;
+}
+
+/** `refs` plus `r`, unless a ref with the same identity is already there. */
+export function addPromptRef(refs: PromptRef[], r: PromptRef): PromptRef[] {
+  const key = promptRefKey(r);
+  return refs.some((x) => promptRefKey(x) === key) ? refs : [...refs, r];
+}
+
+/** `prose` with the references list appended (unchanged when `refs` is empty). */
+export function appendPromptRefs(prose: string, refs: PromptRef[]): string {
+  if (refs.length === 0) return prose;
+  const lines = refs.map((r) =>
+    r.kind === "session" ? `- ${sessionMentionToken(r.title, r.id)}` : `- [[${r.slug}]]`,
+  );
+  return `${prose}${REFS_MARKER}${lines.join("\n")}`;
+}
+
+/**
+ * Split a trailing references list off `text` (pass it the message with the
+ * summary block and `Context files:` already removed). Anchored to the exact
+ * shape `appendPromptRefs` emits: every line of the list must be a session or
+ * wiki line, running to end of text, so prose that merely says "References:"
+ * is left alone.
+ */
+export function splitPromptRefs(text: string): { body: string; refs: PromptRef[] } {
+  const idx = text.lastIndexOf(REFS_MARKER);
+  if (idx < 0) return { body: text, refs: [] };
+  const tail = text.slice(idx + REFS_MARKER.length).replace(/\n$/, "");
+  if (!tail) return { body: text, refs: [] };
+  const refs: PromptRef[] = [];
+  for (const line of tail.split("\n")) {
+    const s = SESSION_LINE_RE.exec(line);
+    if (s) {
+      refs.push({ kind: "session", title: s[1], id: s[2] });
+      continue;
+    }
+    const w = WIKI_LINE_RE.exec(line);
+    if (w) {
+      refs.push({ kind: "wiki", slug: w[1] });
+      continue;
+    }
+    return { body: text, refs: [] };
+  }
+  return { body: text.slice(0, idx), refs };
+}
+
+/** One-line preview text of `body` plus its refs (`@title`, `[[slug]]`). */
+export function previewWithRefs(text: string): string {
+  const { body, refs } = splitPromptRefs(text);
+  const tail = refs.map((r) => (r.kind === "session" ? `@${r.title}` : `[[${r.slug}]]`));
+  return plainMentions([body.trim(), ...tail].filter(Boolean).join(" "));
+}
+
 /**
  * Sessions a picker offers for `query`: one row per relay chain (its latest
  * hop, which is what "that chain" means to the user), no subagents, none in

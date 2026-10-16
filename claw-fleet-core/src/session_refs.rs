@@ -106,6 +106,30 @@ pub fn strip_block(text: &str) -> String {
     format!("{head}{tail}")
 }
 
+/// Marker of the composers' trailing reference-chip list (see
+/// `shared-ts/sessionMentions.ts`): `- [@title](fleet-session:<id>)` and
+/// `- [[slug]]` lines after the prose, before `Context files:`.
+const REFS_LIST_MARKER: &str = "\n\nReferences:\n";
+
+/// `text` without a trailing reference-chip list (pass it text whose
+/// `Context files:` block is already gone). Unchanged unless every line of the
+/// list is one of the two shapes the composers emit.
+pub fn strip_refs_list(text: &str) -> &str {
+    let Some(idx) = text.rfind(REFS_LIST_MARKER) else {
+        return text;
+    };
+    let tail = &text[idx + REFS_LIST_MARKER.len()..];
+    let tail = tail.strip_suffix('\n').unwrap_or(tail);
+    let is_ref_line = |l: &str| {
+        (l.starts_with("- [@") && l.contains(&format!("]({SCHEME}")) && l.ends_with(')'))
+            || (l.starts_with("- [[") && l.ends_with("]]") && l.len() > 6)
+    };
+    if tail.is_empty() || !tail.split('\n').all(is_ref_line) {
+        return text;
+    }
+    &text[..idx]
+}
+
 // ── Grants ───────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
@@ -432,6 +456,28 @@ mod tests {
         // The attachment block is still parseable after insertion.
         assert_eq!(crate::context_files::split(&out).1, vec!["/x.png"]);
         assert_eq!(insert_block("hi\n", "<B>"), "hi\n\n<B>");
+    }
+
+    #[test]
+    fn chip_list_mentions_parse_and_block_lands_before_context_files() {
+        let text = "看下\n\nReferences:\n- [@a](fleet-session:a)\n- [[arch/x]]\n\nContext files:\n- /x.png";
+        assert_eq!(parse_mentions(text).len(), 1);
+        let out = insert_block(text, "<B>");
+        assert_eq!(
+            out,
+            "看下\n\nReferences:\n- [@a](fleet-session:a)\n- [[arch/x]]\n\n<B>\n\nContext files:\n- /x.png"
+        );
+        let real = insert_block(text, &format!("{BLOCK_OPEN}\nx\n{BLOCK_CLOSE}"));
+        let prose = strip_block(&real);
+        let (prose, _) = crate::context_files::split(&prose);
+        assert_eq!(strip_refs_list(prose), "看下");
+    }
+
+    #[test]
+    fn strip_refs_list_leaves_prose_alone() {
+        let text = "a\n\nReferences:\n- some book";
+        assert_eq!(strip_refs_list(text), text);
+        assert_eq!(strip_refs_list("plain"), "plain");
     }
 
     #[test]

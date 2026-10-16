@@ -530,7 +530,9 @@ fn derive_codex_title(text: &str) -> Option<String> {
     const MAX_TITLE_CHARS: usize = 48;
 
     let without_refs = crate::session_refs::strip_block(text);
-    let cleaned = strip_trailing_context_files(strip_leading_fleet_context(&without_refs));
+    let cleaned = crate::session_refs::strip_refs_list(strip_trailing_context_files(
+        strip_leading_fleet_context(&without_refs),
+    ));
     if cleaned.is_empty() {
         return None;
     }
