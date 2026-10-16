@@ -8,6 +8,9 @@
 // Picking a session inserts `[@title](fleet-session:<id>)`; core's
 // `session_refs` inlines that chain's summary and grants history access when
 // the prompt is sent (see shared-ts/sessionMentions.ts).
+//
+// A composer that holds references as chips passes `onPickRef`: the pick then
+// removes the typed `@query` and hands the ref over instead of inserting text.
 
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
@@ -22,6 +25,7 @@ import {
   mentionTitleOf,
   pickMentionableSessions,
   sessionMentionToken,
+  type PromptRef,
 } from "../../../shared-ts/sessionMentions";
 import styles from "./useWikiMentions.module.css";
 
@@ -35,7 +39,7 @@ export interface SessionMentionOptions {
   exclude?: string[];
 }
 
-type MentionItem =
+export type MentionItem =
   | { kind: "session"; key: string; session: SessionInfo }
   | { kind: "wiki"; key: string; doc: WikiDoc };
 
@@ -62,16 +66,55 @@ export function detectMention(
 }
 
 /** Rank docs whose slug or title contains the query; slug matches come first. */
-export function filterWikiDocs(docs: WikiDoc[], query: string): WikiDoc[] {
+export function filterWikiDocs(
+  docs: WikiDoc[],
+  query: string,
+  limit = MAX_MENTION_RESULTS,
+): WikiDoc[] {
   const q = query.trim().toLowerCase();
-  if (!q) return docs.slice(0, MAX_MENTION_RESULTS);
+  if (!q) return docs.slice(0, limit);
   const bySlug: WikiDoc[] = [];
   const byTitle: WikiDoc[] = [];
   for (const d of docs) {
     if (d.slug.toLowerCase().includes(q)) bySlug.push(d);
     else if (d.title.toLowerCase().includes(q)) byTitle.push(d);
   }
-  return [...bySlug, ...byTitle].slice(0, MAX_MENTION_RESULTS);
+  return [...bySlug, ...byTitle].slice(0, limit);
+}
+
+/** The chip a picked item becomes. */
+export function mentionItemRef(item: MentionItem): PromptRef {
+  return item.kind === "wiki"
+    ? { kind: "wiki", slug: item.doc.slug, title: item.doc.title }
+    : {
+        kind: "session",
+        id: item.session.id,
+        title: mentionTitleOf(item.session) ?? item.session.id.slice(0, 8),
+      };
+}
+
+/** The label of one picker row (shared with the "+" menu's reference picker). */
+export function MentionItemLabel({ item }: { item: MentionItem }) {
+  const { t } = useTranslation();
+  if (item.kind === "wiki") {
+    return (
+      <>
+        <span className={styles.slug}>{item.doc.slug}</span>
+        <span className={styles.title}>{item.doc.title}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className={styles.session_title}>{mentionTitleOf(item.session)}</span>
+      <span className={styles.title}>
+        {item.session.workspaceName}
+        {item.session.handoff
+          ? ` · ${t("wiki.mention_chain", "接力 {{n}} 棒", { n: item.session.handoff.chainLen })}`
+          : ""}
+      </span>
+    </>
+  );
 }
 
 export interface WikiMentions {
@@ -95,6 +138,7 @@ export interface WikiMentions {
  * @param value    Current textarea text.
  * @param onChange Called with the text after a doc is inserted.
  * @param sessionOpts When set, sessions are offered above the wiki docs.
+ * @param onPickRef When set, a pick becomes a chip instead of inserted text.
  */
 export function useWikiMentions(
   enabled: boolean,
@@ -102,6 +146,7 @@ export function useWikiMentions(
   onChange: (next: string) => void,
   textareaRef: RefObject<HTMLTextAreaElement | null>,
   sessionOpts?: SessionMentionOptions | null,
+  onPickRef?: (ref: PromptRef) => void,
 ): WikiMentions {
   const { t } = useTranslation();
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
@@ -173,6 +218,17 @@ export function useWikiMentions(
       const el = textareaRef.current;
       if (!el || !mention) return;
       const caret = el.selectionStart ?? value.length;
+      if (onPickRef) {
+        onChange(value.slice(0, mention.start) + value.slice(caret));
+        onPickRef(mentionItemRef(item));
+        setMention(null);
+        const at = mention.start;
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(at, at);
+        });
+        return;
+      }
       const ref =
         item.kind === "wiki"
           ? `[[${item.doc.slug}]] `
@@ -185,7 +241,7 @@ export function useWikiMentions(
         el.setSelectionRange(next, next);
       });
     },
-    [mention, onChange, textareaRef, value],
+    [mention, onChange, onPickRef, textareaRef, value],
   );
 
   // Close on outside click, leaving clicks on the textarea itself alone.
@@ -265,22 +321,7 @@ export function useWikiMentions(
             }}
             onMouseEnter={() => setActiveIdx(i)}
           >
-            {item.kind === "wiki" ? (
-              <>
-                <span className={styles.slug}>{item.doc.slug}</span>
-                <span className={styles.title}>{item.doc.title}</span>
-              </>
-            ) : (
-              <>
-                <span className={styles.session_title}>{mentionTitleOf(item.session)}</span>
-                <span className={styles.title}>
-                  {item.session.workspaceName}
-                  {item.session.handoff
-                    ? ` · ${t("wiki.mention_chain", "接力 {{n}} 棒", { n: item.session.handoff.chainLen })}`
-                    : ""}
-                </span>
-              </>
-            )}
+            <MentionItemLabel item={item} />
           </button>
         </div>
       ))}

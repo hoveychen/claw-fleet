@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { appendPromptRefs, type PromptRef } from "../../../shared-ts/sessionMentions";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -266,6 +267,8 @@ export function NewSessionForm({
     permissionMode: "acceptEdits",
   });
   const { prompt, model, effort, permissionMode, attachments, workspace } = draft;
+  const refs = draft.refs ?? [];
+  const setRefs = (next: PromptRef[]) => patch({ refs: next });
   // Empty tool means there is no in-progress override, so restore the durable
   // last choice when it is available. Older drafts remain compatible.
   const tool = draft.tool || defaultAgentTool(toolChoices, loadLastAgentTool());
@@ -561,7 +564,7 @@ export function NewSessionForm({
       setError(t("new_session.error_prompt_required"));
       return;
     }
-    let finalPrompt = prompt.trim();
+    let finalPrompt = appendPromptRefs(prompt.trim(), refs);
     if (attachments.length > 0) {
       finalPrompt += `\n\nContext files:\n${attachments.map((a) => `- ${a.path}`).join("\n")}`;
     }
@@ -778,6 +781,8 @@ export function NewSessionForm({
         placeholder={t("new_session.prompt_placeholder")}
         disabled={submitting}
         wikiMentions
+        refs={refs}
+        onRefsChange={setRefs}
         sessionMentions={NO_SESSION_EXCLUDES}
         contextSlot={
           <>

@@ -13,13 +13,18 @@ import { SessionOptionPills } from "./SessionOptionPills";
 import { toolForAgentSource } from "../modelChoices";
 import { StopControl, canControl } from "./StopControl";
 import { useComposerDraft } from "../composerDraft";
-import { resolveStagedAttachment } from "../userAttachments";
+import { resolveStagedAttachment, splitContextFiles } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
 import { DirPickerDialog } from "./DirPickerDialog";
 import type { Delivery, SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
 import { Presence } from "./Presence";
-import { plainMentions, stripRefsBlock } from "../../../shared-ts/sessionMentions";
+import {
+  appendPromptRefs,
+  previewWithRefs,
+  stripRefsBlock,
+  type PromptRef,
+} from "../../../shared-ts/sessionMentions";
 
 function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/");
@@ -77,6 +82,8 @@ export function ResumeComposer({
   // its own draft slot.
   const { draft, patch, clear } = useComposerDraft(sessionId);
   const { prompt, model, effort, permissionMode, attachments } = draft;
+  const refs = draft.refs ?? [];
+  const setRefs = (next: PromptRef[]) => patch({ refs: next });
   const setPrompt = (v: string) => patch({ prompt: v });
   const setModel = (v: string) => patch({ model: v });
   const setEffort = (v: string) => patch({ effort: v });
@@ -185,7 +192,7 @@ export function ResumeComposer({
 
   const handleSubmit = async () => {
     if (!prompt.trim() || submitting) return;
-    let finalPrompt = prompt.trim();
+    let finalPrompt = appendPromptRefs(prompt.trim(), refs);
     if (attachments.length > 0) {
       finalPrompt += `\n\nContext files:\n${attachments.map((a) => `- ${a.path}`).join("\n")}`;
     }
@@ -240,7 +247,7 @@ export function ResumeComposer({
           </div>
           {visiblePending.map(({ text: m, index: i }) => (
             <div key={i} className={styles.queued_chip}>
-              <span className={styles.queued_text}>{plainMentions(stripRefsBlock(m))}</span>
+              <span className={styles.queued_text}>{previewWithRefs(splitContextFiles(stripRefsBlock(m)).body)}</span>
               <button
                 type="button"
                 className={styles.queued_cancel}
@@ -279,6 +286,8 @@ export function ResumeComposer({
         }
         disabled={submitting}
         wikiMentions
+        refs={refs}
+        onRefsChange={setRefs}
         sessionMentions={{ exclude: [sessionId] }}
         toolbarSlot={
           enqueueing ? undefined : (
