@@ -847,11 +847,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     </button>
   ) : null;
 
-  // While the input is empty, an enqueue composer surfaces its Stop control in
+  // While the input is empty (no text, no reference chips), an enqueue composer surfaces its Stop control in
   // the send slot instead of a dead (disabled) send arrow; typing anything
   // hands the slot back to the send button so a follow-up can still be queued.
   const trailingControl =
-    emptyTrailingControl && !value.trim() ? emptyTrailingControl : sendControl;
+    emptyTrailingControl && !value.trim() && refList.length === 0
+      ? emptyTrailingControl
+      : sendControl;
 
   return (
     <div

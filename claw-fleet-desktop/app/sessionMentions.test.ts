@@ -98,6 +98,23 @@ describe("reference list", () => {
     expect(appendPromptRefs("x", [])).toBe("x");
   });
 
+  it("parses a chips-only message, with or without its leading blank lines", () => {
+    const text = appendPromptRefs("", refs);
+    const parsed = {
+      body: "",
+      refs: [
+        { kind: "session", id: "s-1", title: "修 ［CPU］" },
+        { kind: "wiki", slug: "arch/overview" },
+      ],
+    };
+    expect(splitPromptRefs(text)).toEqual(parsed);
+    expect(splitPromptRefs(text.trimStart())).toEqual(parsed);
+    expect(splitPromptRefs("References:\n- some book")).toEqual({
+      body: "References:\n- some book",
+      refs: [],
+    });
+  });
+
   it("leaves prose that only says References alone", () => {
     const prose = "a\n\nReferences:\n- some book";
     expect(splitPromptRefs(prose)).toEqual({ body: prose, refs: [] });
