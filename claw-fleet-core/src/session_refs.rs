@@ -29,9 +29,6 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::handoff::HandoffChain;
@@ -61,28 +58,38 @@ pub struct Mention {
     pub session_id: String,
 }
 
-fn mention_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\[@([^\]\n]*)\]\(fleet-session:([A-Za-z0-9_-]+)\)").expect("mention regex")
-    })
-}
-
 /// Mentions in `text`, in order of first appearance, one per session id.
 /// Mentions inside an already-inlined block are ignored.
 pub fn parse_mentions(text: &str) -> Vec<Mention> {
     let text = strip_block(text);
     let mut seen = BTreeSet::new();
-    mention_re()
-        .captures_iter(&text)
-        .filter_map(|c| {
-            let id = c[2].to_string();
-            seen.insert(id.clone()).then(|| Mention {
-                title: c[1].trim().to_string(),
-                session_id: id,
-            })
-        })
-        .collect()
+    let mut out = Vec::new();
+    let mut rest = text.as_str();
+    while let Some(open) = rest.find("[@") {
+        let after = &rest[open + 2..];
+        let Some(close) = after.find(']') else { break };
+        let title = &after[..close];
+        let tail = &after[close + 1..];
+        let link_prefix = format!("({SCHEME}");
+        if title.contains('\n') || !tail.starts_with(&link_prefix) {
+            rest = after;
+            continue;
+        }
+        let id_part = &tail[link_prefix.len()..];
+        let Some(end) = id_part.find(')') else {
+            rest = after;
+            continue;
+        };
+        let id = &id_part[..end];
+        if is_plain_id(id) && seen.insert(id.to_string()) {
+            out.push(Mention {
+                title: title.trim().to_string(),
+                session_id: id.to_string(),
+            });
+        }
+        rest = &id_part[end + 1..];
+    }
+    out
 }
 
 /// `text` with the inlined summary block removed (for titles and previews).
@@ -282,26 +289,66 @@ fn summarise(m: &Mention) -> RefSummary {
     }
 }
 
-/// Run a user-authored prompt for `session_id` through the mention pipeline:
-/// grant history access to every referenced chain and inline their summaries.
+/// Run a user-authored prompt for an existing `session_id` (resume, follow-up)
+/// through the mention pipeline: grant history access to every referenced
+/// chain and inline their summaries.
 ///
 /// Text without mentions is returned untouched. A grant failure is logged and
 /// does not block the message — the inlined summary still lands.
 pub fn prepare(session_id: &str, text: &str) -> String {
-    let mentions: Vec<Mention> = parse_mentions(text)
-        .into_iter()
-        .filter(|m| m.session_id != session_id)
-        .collect();
-    if mentions.is_empty() {
-        return text.to_string();
+    grant_mentions(session_id, text);
+    inline(text, Some(session_id))
+}
+
+/// Spawn a new session whose prompt may carry mentions: inline the summaries
+/// before the spawn, grant once the spawned session's id is known (codex only
+/// learns its thread id after the child starts).
+pub fn spawn_session(
+    tool: &str,
+    spec: &crate::agent_source::SpawnSpec,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    if parse_mentions(&spec.prompt).is_empty() {
+        return crate::agent_source::spawn_session(tool, spec);
     }
-    let ids: Vec<String> = mentions.iter().map(|m| m.session_id.clone()).collect();
+    let mut spec = spec.clone();
+    spec.prompt = inline(&spec.prompt, spec.session_id.as_deref());
+    let resp = crate::agent_source::spawn_session(tool, &spec)?;
+    match resp.session_id.as_deref().or(spec.session_id.as_deref()) {
+        Some(sid) => grant_mentions(sid, &spec.prompt),
+        None => crate::log_debug("[session_refs] spawned session has no id; mentions not granted"),
+    }
+    Ok(resp)
+}
+
+/// Record `session_id`'s history grant for every mention in `text`.
+pub fn grant_mentions(session_id: &str, text: &str) {
+    let ids: Vec<String> = parse_mentions(text)
+        .into_iter()
+        .map(|m| m.session_id)
+        .filter(|id| id != session_id)
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
     if let Some(dir) = grants_dir() {
         if let Err(e) = grant_in(&dir, session_id, &ids) {
             crate::log_debug(&format!("[session_refs] grant for {session_id} failed: {e}"));
         }
     }
+}
+
+/// `text` with the summary block of its mentions inserted. Idempotent: a text
+/// that already carries a block is returned as is. `self_id` (the receiving
+/// session, when known) is never summarised.
+pub fn inline(text: &str, self_id: Option<&str>) -> String {
     if text.contains(BLOCK_OPEN) {
+        return text.to_string();
+    }
+    let mentions: Vec<Mention> = parse_mentions(text)
+        .into_iter()
+        .filter(|m| Some(m.session_id.as_str()) != self_id)
+        .collect();
+    if mentions.is_empty() {
         return text.to_string();
     }
     // Two mentions of sessions on the same chain summarise that chain once.
@@ -418,6 +465,15 @@ mod tests {
         assert!(!out.contains("note 0"));
         assert!(out.contains("搞定了"));
         assert!(out.contains("另有 2 个"));
+    }
+
+    #[test]
+    fn inline_is_idempotent_and_skips_the_receiver() {
+        let text = "看 [@x](fleet-session:zz-no-such-session-1)";
+        let once = inline(text, None);
+        assert!(once.contains(BLOCK_OPEN) && once.contains("zz-no-such-session-1"));
+        assert_eq!(inline(&once, None), once);
+        assert_eq!(inline(text, Some("zz-no-such-session-1")), text);
     }
 
     #[test]

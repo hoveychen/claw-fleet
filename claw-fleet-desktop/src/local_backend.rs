@@ -2381,6 +2381,7 @@ impl LocalBackend {
         claw_fleet_core::remote_disconnect::clear(&session_id);
         claw_fleet_core::mirror_guard::clear(&session_id);
         self.restamp_marks_and_emit();
+        let prompt = prompt.map(|t| claw_fleet_core::session_refs::prepare(&session_id, &t));
         resume_session_impl(
             &session_id,
             &workspace_path,
@@ -2412,6 +2413,7 @@ impl LocalBackend {
         // The composer behind this is a person typing, so the injected copy is
         // signed as such — the CLI would otherwise tell the receiver it came
         // from another agent.
+        let text = claw_fleet_core::session_refs::prepare(&session_id, &text);
         let delivery = claw_fleet_core::pending_message::enqueue(
             &session_id,
             &workspace_path,
@@ -2539,7 +2541,7 @@ impl LocalBackend {
             entrypoint: String::new(),
             images: Vec::new(),
         };
-        let resp = claw_fleet_core::agent_source::spawn_session(&tool, &spec)?;
+        let resp = claw_fleet_core::session_refs::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
         // in the session list without waiting for the next scheduled scan.
         let app = self.app.clone();
