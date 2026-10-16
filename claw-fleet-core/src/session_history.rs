@@ -10,8 +10,9 @@
 //! handoff relay — and adds "read this record back" by line number, which the
 //! desktop's per-session-collapsed search never needed.
 //!
-//! Scope is the same as [`crate::session_notes::readable_sessions`]: the
-//! session itself and its relay predecessors, never its successors.
+//! Scope is [`crate::session_refs::history_scope`]: the session itself and its
+//! relay predecessors (never its successors), plus every chain one of them
+//! referenced with an `@` mention in a prompt.
 //!
 //! # Coverage (stated, not hidden)
 //!
@@ -102,7 +103,7 @@ fn no_transcript_error(session_id: &str) -> String {
 /// predecessors'. Re-indexes those transcripts incrementally first, so a record
 /// written seconds ago is findable even when nothing else keeps the index warm.
 pub fn search(session_id: &str, query: &str, limit: usize) -> Result<Vec<HistoryHit>, String> {
-    let readable = crate::session_notes::readable_sessions(session_id);
+    let readable = crate::session_refs::history_scope(session_id);
     let transcripts = transcripts_for(&readable);
     if transcripts.is_empty() {
         // Surface the *reason* for the caller's own session (missing vs
@@ -158,7 +159,7 @@ pub fn read(
     offset_chars: usize,
     limit_chars: Option<usize>,
 ) -> Result<String, String> {
-    let readable = crate::session_notes::readable_sessions(session_id);
+    let readable = crate::session_refs::history_scope(session_id);
     let target = ensure_readable(&readable, target_session.unwrap_or(session_id))?;
     let path = find_transcript(target)?;
     read_record(
@@ -176,8 +177,8 @@ pub fn ensure_readable<'a>(readable: &[String], target: &'a str) -> Result<&'a s
         Ok(target)
     } else {
         Err(format!(
-            "session {target} is not in this session's history scope (own session and handoff \
-             predecessors only)"
+            "session {target} is not in this session's history scope (own session, handoff \
+             predecessors and sessions referenced with an @ mention only)"
         ))
     }
 }

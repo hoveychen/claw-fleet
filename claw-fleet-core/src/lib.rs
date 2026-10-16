@@ -247,6 +247,7 @@ pub mod session_launch;
 pub mod fresh_spawns;
 pub mod session_mark;
 pub mod session_notes;
+pub mod session_refs;
 pub mod session_snapshot;
 pub mod session_title;
 pub mod session_title_guidance;

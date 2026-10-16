@@ -529,7 +529,8 @@ fn derive_codex_title(text: &str) -> Option<String> {
     const NOTE_CLOSE: &str = "\n---\n";
     const MAX_TITLE_CHARS: usize = 48;
 
-    let cleaned = strip_trailing_context_files(strip_leading_fleet_context(text));
+    let without_refs = crate::session_refs::strip_block(text);
+    let cleaned = strip_trailing_context_files(strip_leading_fleet_context(&without_refs));
     if cleaned.is_empty() {
         return None;
     }
