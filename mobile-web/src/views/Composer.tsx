@@ -50,6 +50,8 @@ import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThum
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { Skeleton, SkeletonList, Spinner } from "./loading";
 import { Presence } from "../Presence";
+import { mentionPreview } from "../sessionMention";
+import { MentionSuggestions, useSessionMention } from "./SessionMention";
 
 // Model and effort choices were once hardcoded here and manually sync'd with the
 // desktop's modelChoices.ts. Both drifted: each claimed Codex efforts were
@@ -853,6 +855,14 @@ export function NewSessionSheet({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : draft.prompt);
+  // `sessions` is already the target device's slice (App filters by
+  // newSessionTargetId), so the picker never offers another machine's session.
+  const mention = useSessionMention({
+    value: draft.prompt,
+    onChange: (next) => setDraft((d) => ({ ...d, prompt: next })),
+    sessions,
+    textareaRef: voiceTailRef,
+  });
   const newFileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState(false);
@@ -1161,6 +1171,9 @@ export function NewSessionSheet({
               />
             </div>
           )}
+          {mention.open && !voice.active && (
+            <MentionSuggestions candidates={mention.candidates} onPick={mention.accept} />
+          )}
           {voice.active ? (
             <VoiceBar rec={voice} />
           ) : (
@@ -1185,7 +1198,12 @@ export function NewSessionSheet({
                 rows={1}
                 value={voice.showingPreview ? voice.preview : prompt}
                 readOnly={voice.showingPreview}
-                onChange={(e) => patch({ prompt: e.target.value })}
+                onChange={(e) => {
+                  patch({ prompt: e.target.value });
+                  mention.sync(e.target);
+                }}
+                onSelect={(e) => mention.sync(e.currentTarget)}
+                onBlur={mention.dismiss}
               />
               {voice.available && !prompt.trim() && (
                 <span className={styles.pillMic}>
@@ -1398,11 +1416,15 @@ interface ResumeProps {
    *  without taking layout height; the parent uses this to pad the scroll area's
    *  bottom so the last message isn't buried under the pill. */
   onHeight?: (px: number) => void;
+  /** Sessions the `@` picker may offer — must be the slice of the device this
+   *  session lives on (SessionDetailView already receives exactly that). */
+  sessions?: readonly SessionInfo[];
 }
 
 export function ResumeComposer({
   session,
   client,
+  sessions = [],
   mode = "resume",
   onOptimisticSend,
   onSubmitInFlight,
@@ -1487,6 +1509,15 @@ export function ResumeComposer({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : prompt);
+  // Never offer the session being followed up (nor, via the shared helper,
+  // its own relay chain).
+  const mention = useSessionMention({
+    value: prompt,
+    onChange: setPrompt,
+    sessions,
+    exclude: [session.id],
+    textareaRef: voiceTailRef,
+  });
   // Actual measured height reported to parent: the pill floats without taking layout height, so the
   // transcript relies on this number to pad its bottom, or the last message stays buried under the pill.
   const boxRef = useRef<HTMLDivElement>(null);
@@ -1665,7 +1696,7 @@ export function ResumeComposer({
           <div className={styles.queuedLabel}>{t("没能直接送进去，已排队")}</div>
           {visiblePending.map(({ text: m, index: i }) => (
             <div key={i} className={styles.queuedChip}>
-              <span className={styles.queuedText}>{m}</span>
+              <span className={styles.queuedText}>{mentionPreview(m)}</span>
               <button
                 type="button"
                 className={styles.queuedCancel}
@@ -1710,6 +1741,9 @@ export function ResumeComposer({
           ))}
         </div>
       )}
+      {mention.open && !voice.active && (
+        <MentionSuggestions candidates={mention.candidates} onPick={mention.accept} />
+      )}
       {voice.active ? (
         <VoiceBar rec={voice} />
       ) : (
@@ -1737,7 +1771,12 @@ export function ResumeComposer({
             rows={1}
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              mention.sync(e.target);
+            }}
+            onSelect={(e) => mention.sync(e.currentTarget)}
+            onBlur={mention.dismiss}
           />
           {/* When there's text, yield mic position to send: two buttons side-by-side
               squeeze the right edge into two 40px targets, but users only want one. */}

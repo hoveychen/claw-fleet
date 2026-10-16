@@ -91,6 +91,8 @@ import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ImageResultSummary, IngestSummary, ToolDigest } from "../types";
 import { memberDisplayStatus } from "../../../shared-ts/memberStatus";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
+import { stripRefsBlock, splitRefsBlock } from "../../../shared-ts/sessionMentions";
+import { MentionText, RefsNote, SessionMentionNavProvider } from "./SessionMention";
 import { HistoryLayer } from "../useNavStack";
 import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
@@ -337,7 +339,9 @@ export function settlePending(rows: RawMessage[], alive = true): RawMessage[] {
   for (let i = rows.length - 1; i >= 0; i--) {
     const m = rows[i];
     if (m.type !== "user" || m.isMeta) continue;
-    const text = userText(m);
+    // The real row carries the `<fleet-referenced-sessions>` summary block the
+    // desktop appended for `@` mentions; the pending echo does not.
+    const text = stripRefsBlock(userText(m));
     if (m.fleetPending) keep[i] = !laterReal.has(text);
     else laterReal.add(text);
   }
@@ -1190,9 +1194,13 @@ const MessageRow = memo(function MessageRow({
     // `Context files:` block, which Claude Code freezes into the transcript
     // verbatim. Peel it back off: the paths become thumbnails, and the bubble
     // shows what the person actually typed instead of a wall of absolute paths.
-    const { body: text, paths: attachments } = splitContextFiles(userText(msg));
+    const { body: withRefs, paths: attachments } = splitContextFiles(userText(msg));
+    // `@` mentions make the desktop append a `<fleet-referenced-sessions>`
+    // summary block (between the prose and `Context files:`); fold it into one
+    // muted line instead of showing the raw summaries.
+    const { text, refs } = splitRefsBlock(withRefs);
     const thumbs = imageThumbs(msg);
-    if (!text && thumbs.length === 0 && attachments.length === 0) return null;
+    if (!text && thumbs.length === 0 && attachments.length === 0 && refs === 0) return null;
     // Every synthetic `isMeta` user turn — a SKILL.md body a `Skill` load
     // injects, or codex's developer-role boilerplate — is harness/runtime
     // content, not a user turn. Fold them all into one card that self-labels
@@ -1230,7 +1238,12 @@ const MessageRow = memo(function MessageRow({
           {thumbs.length > 0 && (
             <ThumbRow srcs={thumbs.map((x) => x.src)} addrs={thumbs.map((x) => x.addr)} />
           )}
-          {display && <div className={styles.userText}>{display}</div>}
+          {display && (
+            <div className={styles.userText}>
+              <MentionText text={display} />
+            </div>
+          )}
+          <RefsNote count={refs} />
           <AttachmentThumbs paths={attachments} client={client ?? null} />
         </div>
         <div className={styles.rowTime}>
@@ -1343,6 +1356,16 @@ export function SessionDetailView({
     () => ({
       open: (agentId: string) => onOpenSessionId(`agent-${agentId}`),
       has: (agentId: string) => sessions.some((s) => s.id === `agent-${agentId}`),
+    }),
+    [sessions, onOpenSessionId],
+  );
+  // `@` mention chips in user bubbles: open the named session when this
+  // device's snapshot has it. `sessions` is this device's slice only, so a
+  // same-numbered id on another paired device can never be opened by mistake.
+  const mentionNav = useMemo(
+    () => ({
+      open: (id: string) => onOpenSessionId(id),
+      has: (id: string) => sessions.some((s) => s.id === id),
     }),
     [sessions, onOpenSessionId],
   );
@@ -1736,7 +1759,9 @@ export function SessionDetailView({
   const realUserTexts = useMemo(() => {
     const set = new Set<string>();
     for (const m of messages ?? []) {
-      if (m.type === "user") set.add(userText(m));
+      // Compare without the mention summary block Fleet appended on delivery,
+      // which the optimistic echo (what the composer sent) never carries.
+      if (m.type === "user") set.add(stripRefsBlock(userText(m)));
     }
     return set;
   }, [messages]);
@@ -1811,6 +1836,7 @@ export function SessionDetailView({
 
   return (
     <AgentNavProvider nav={nav}>
+    <SessionMentionNavProvider nav={mentionNav}>
     <InFlightToolsContext.Provider value={inFlightTools}>
     <div className={styles.page}>
       {/* `seamless`: below the header comes either the status rail (which has its
@@ -2053,6 +2079,7 @@ export function SessionDetailView({
       {canResumeSession(session) && (
         <ResumeComposer
           session={session}
+          sessions={sessions}
           client={client}
           onOptimisticSend={handleOptimisticSend}
           onSubmitInFlight={handleSubmitInFlight}
@@ -2062,6 +2089,7 @@ export function SessionDetailView({
       {canEnqueueSession(session) && (
         <ResumeComposer
           session={session}
+          sessions={sessions}
           client={client}
           mode="enqueue"
           onSubmitInFlight={handleSubmitInFlight}
@@ -2070,6 +2098,7 @@ export function SessionDetailView({
       )}
     </div>
     </InFlightToolsContext.Provider>
+    </SessionMentionNavProvider>
     </AgentNavProvider>
   );
 }

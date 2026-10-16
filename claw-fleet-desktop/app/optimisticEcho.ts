@@ -9,6 +9,16 @@
 
 import type { RawMessage } from "./types";
 import { messageToText } from "./messageRows";
+import { stripRefsBlock } from "../../shared-ts/sessionMentions";
+
+/**
+ * The text an echo is matched on. Core appends a `<fleet-referenced-sessions>`
+ * summary to a prompt that `@`-mentions a session, so the landed row carries a
+ * block the echoed (as-typed) text never had; both sides compare without it.
+ */
+function echoKey(text: string): string {
+  return stripRefsBlock(text).trim();
+}
 
 /**
  * Trimmed text of every transcript row that renders as the *user's own bubble*.
@@ -24,7 +34,7 @@ import { messageToText } from "./messageRows";
 export function landedUserTexts(messages: RawMessage[]): Set<string> {
   const set = new Set<string>();
   for (const m of messages) {
-    if (m.type === "user" && !m.isMeta) set.add(messageToText(m).trim());
+    if (m.type === "user" && !m.isMeta) set.add(echoKey(messageToText(m)));
   }
   return set;
 }
@@ -48,7 +58,7 @@ export function shouldEchoSend(
 
 /** Whether one echoed text is still waiting for its real transcript row. */
 export function stillPending(text: string, landed: Set<string>): boolean {
-  return !landed.has(text.trim());
+  return !landed.has(echoKey(text));
 }
 
 /**
@@ -66,7 +76,7 @@ export function settlePending(messages: RawMessage[], alive = true): RawMessage[
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.type !== "user" || m.isMeta) continue;
-    const text = messageToText(m).trim();
+    const text = echoKey(messageToText(m));
     if (m.fleetPending) keep[i] = !laterReal.has(text);
     else laterReal.add(text);
   }

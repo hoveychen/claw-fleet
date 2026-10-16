@@ -48,6 +48,7 @@ import { compactDuration, watchProgressView, watchRing } from "../../../shared-t
 import { WatchRing } from "./WatchRing";
 import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
+import { mentionPreview } from "../sessionMention";
 import {
   STATUS_BUCKETS,
   chainBucketOf,
@@ -915,7 +916,11 @@ export function TasksView({
       ? group.markMembers.length > 0 && group.markMembers.every((m) => m.userMark === "done")
       : s.userMark === "done";
     const title =
-      s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
+      s.titleOverride ||
+      s.aiTitle ||
+      s.slug ||
+      (s.lastMessagePreview ? mentionPreview(s.lastMessagePreview) : "") ||
+      t("（无标题）");
     const snippet =
       search.trim().length >= 2 ? snippetByKey.get(itemKey(s.deviceId, s.jsonlPath)) : undefined;
     const live = LIVE.includes(s.status);
@@ -1062,7 +1067,9 @@ export function TasksView({
         {snippet ? (
           <div className={styles.snippet}>{renderSnippet(snippet)}</div>
         ) : (
-          s.lastMessagePreview && <div className={styles.preview}>{s.lastMessagePreview}</div>
+          s.lastMessagePreview && (
+            <div className={styles.preview}>{mentionPreview(s.lastMessagePreview)}</div>
+          )
         )}
         <div className={styles.opsRow} onClick={(e) => e.stopPropagation()}>
           <button
