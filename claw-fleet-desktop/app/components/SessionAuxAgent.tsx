@@ -39,17 +39,23 @@ export function SessionAuxAgent({
 
   return (
     <div className={styles.aux_doc_pane}>
-      <MessageList
-        messages={messages}
-        isLoading={isLoading}
-        stalled={stalled}
-        onRetry={retry}
-        // Drives the activity indicator under the newest message, so a
-        // thinking agent reads as thinking rather than as stopped.
-        status={live ? agent.status : null}
-        paths={paths}
-        jsonlPath={agent.jsonlPath}
-      />
+      {/* MessageList scrolls its *parent* (follow-bottom, load-earlier anchor),
+          the way `.scroll_area` wraps it in the main view. Without this wrapper
+          its parent was the pane itself, which clips — so the transcript could
+          not be scrolled at all. */}
+      <div className={styles.aux_agent_scroll}>
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          stalled={stalled}
+          onRetry={retry}
+          // Drives the activity indicator under the newest message, so a
+          // thinking agent reads as thinking rather than as stopped.
+          status={live ? agent.status : null}
+          paths={paths}
+          jsonlPath={agent.jsonlPath}
+        />
+      </div>
       {/* A subagent's transcript is short and complete; there is no
           "load earlier" because the preview opens on the whole of a run that
           fits in its window. Say so only when the window is genuinely empty —

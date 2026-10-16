@@ -166,7 +166,7 @@ export function SubagentLiveCards({
   onGripDown,
   renderPane,
 }: {
-  /** Subagents to card, most-recently-active first. Live ones, plus at most
+  /** Subagents to card, oldest-spawned first. Live ones, plus at most
    *  one finished agent the reader pinned by opening it (see `pinnedAgent`). */
   agents: SessionInfo[];
   /** The expanded card's id, doc or agent. Only an `agent:` id matches here. */
@@ -190,10 +190,10 @@ export function SubagentLiveCards({
   const { t } = useTranslation();
   const [menu, setMenu] = useState<{ anchor: ContextMenuAnchor; agent: SessionInfo } | null>(null);
   if (agents.length === 0) return null;
-  // The one being read is never capped out. The list is sorted by activity, so
-  // a fan-out of seven can push the agent you are reading past the cap between
-  // two scan ticks — which would unmount its transcript while the rail stayed
-  // widened around the hole where it had been.
+  // The one being read is never capped out. In a fan-out of seven the agent
+  // you open from "+N" (or a pinned finished one) can sit past the cap, and
+  // capping it would unmount its transcript while the rail stayed widened
+  // around the hole where it had been.
   const openIdx = agents.findIndex((a) => agentCardId(a.id) === expandedId);
   const ordered =
     openIdx >= LIVE_CARD_CAP
