@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { BookOpen, MessagesSquare } from "lucide-react";
 import { useSessionsStore, useUIStore } from "../store";
-import { revealSlugInWikiPage } from "../hooks/useWikiDocs";
+import { revealSlugInWikiPage, useWikiDocsStore } from "../hooks/useWikiDocs";
 import type { PromptRef } from "../../../shared-ts/sessionMentions";
 import styles from "./RefChip.module.css";
 
@@ -25,7 +25,12 @@ export function RefChip({
   const known = useSessionsStore((s) =>
     r.kind === "session" ? s.sessions.some((x) => x.id === r.id) : true,
   );
-  const label = r.kind === "session" ? r.title : r.title || r.slug;
+  // A sent message only carries the slug; use the doc's title when the shared
+  // list already has it (never fetched just for this).
+  const docTitle = useWikiDocsStore((s) =>
+    r.kind === "wiki" && !r.title ? s.docs.find((d) => d.slug === r.slug)?.title : undefined,
+  );
+  const label = r.kind === "session" ? r.title : r.title || docTitle || r.slug;
   const Icon = r.kind === "session" ? MessagesSquare : BookOpen;
   const open = () => {
     if (r.kind === "session") useUIStore.getState().requestOpenTask(r.id);
