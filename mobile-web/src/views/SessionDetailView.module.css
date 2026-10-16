@@ -993,3 +993,8 @@
     box-shadow: 0 0 0 2px transparent;
   }
 }
+
+/* Reference chips peeled off the composer's References list. */
+.userRefChips {
+  margin-top: 6px;
+}

@@ -5,11 +5,12 @@
 
 import {
   mentionTitleOf,
-  plainMentions,
+  previewWithRefs,
   sessionMentionToken,
   stripRefsBlock,
   type MentionableSession,
 } from "../../shared-ts/sessionMentions";
+import { splitContextFiles } from "./userAttachments";
 
 /** Longest `@query` still treated as an open mention (mirrors the desktop). */
 export const MAX_MENTION_QUERY = 48;
@@ -83,5 +84,5 @@ export function mentionSegments(text: string): MentionSegment[] {
 /** One-line preview of a prompt that may carry mentions and the summary block
  *  Fleet inlined for them: block dropped, links reduced to `@title`. */
 export function mentionPreview(text: string): string {
-  return plainMentions(stripRefsBlock(text));
+  return previewWithRefs(splitContextFiles(stripRefsBlock(text)).body);
 }
