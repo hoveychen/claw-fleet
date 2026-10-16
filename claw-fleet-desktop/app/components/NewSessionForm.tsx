@@ -28,6 +28,10 @@ import { repoRootPath } from "../../../shared-ts/repoPath";
 import { Presence } from "./Presence";
 import { Skeleton, Spinner } from "./loading";
 
+
+/** Stable empty opt-in for the `@` session picker (nothing to exclude). */
+const NO_SESSION_EXCLUDES = {};
+
 export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
    *  `SessionInfo.pid` to locate the freshly-created session. */
@@ -774,6 +778,7 @@ export function NewSessionForm({
         placeholder={t("new_session.prompt_placeholder")}
         disabled={submitting}
         wikiMentions
+        sessionMentions={NO_SESSION_EXCLUDES}
         contextSlot={
           <>
             {chatModePill}

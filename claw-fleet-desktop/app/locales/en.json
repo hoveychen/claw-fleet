@@ -859,6 +859,9 @@
     "delete_folder_confirm": "Delete all {{count}} docs under “{{path}}” (including every version)? This cannot be undone.",
     "version": "Version",
     "mention_loading": "Loading wiki…",
+    "mention_section_sessions": "Sessions",
+    "mention_section_wiki": "Wiki",
+    "mention_chain": "{{n}}-hop relay",
     "searching": "Searching…"
   },
   "live": {
@@ -1926,6 +1929,8 @@
     "result_capped": "Too long to render; the last {{count}} characters are omitted (copy to get all)",
     "open_subagent": "Open subagent",
     "slash_command": "slash command",
+    "open_mentioned_session": "Open this session",
+    "session_refs_attached": "Summaries of {{n}} sessions attached",
     "skill_loaded": "SKILL LOADED",
     "codex_meta": "System context",
     "codex_meta_permissions": "Permissions / sandbox",

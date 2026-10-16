@@ -36,3 +36,31 @@
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
 }
+
+/* An `@`-mentioned session inside the prose. */
+.mention {
+  display: inline;
+  padding: 0 4px;
+  margin: 0 1px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mention:hover { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+
+.mention_gone {
+  cursor: default;
+  color: var(--color-text-dim);
+  background: color-mix(in srgb, var(--color-text-dim) 12%, transparent);
+}
+
+/* "Summaries of N sessions attached" — stands in for the inlined block. */
+.refs_note {
+  margin-top: 4px;
+  font-size: var(--t-ui, 12px);
+  color: var(--color-text-dim);
+}

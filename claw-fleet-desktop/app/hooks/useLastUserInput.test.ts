@@ -159,6 +159,14 @@ describe("answerLabel", () => {
 });
 
 describe("stripPromptEnvelope", () => {
+  it("drops the inlined session-mention summary and flattens mentions", () => {
+    expect(
+      stripPromptEnvelope(
+        "参考 [@修 CPU](fleet-session:abc) 的做法\n\n<fleet-referenced-sessions>\n## 修 CPU\n</fleet-referenced-sessions>",
+      ),
+    ).toBe("参考 @修 CPU 的做法");
+  });
+
   it("drops slash-command envelopes", () => {
     expect(
       stripPromptEnvelope("<command-name>/loop</command-name>\n手写内容"),
