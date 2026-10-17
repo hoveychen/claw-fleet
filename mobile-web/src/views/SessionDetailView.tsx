@@ -1155,6 +1155,30 @@ function toolMetaEqual(a?: Map<string, ToolMeta>, b?: Map<string, ToolMeta>): bo
   return true;
 }
 
+/** Context-compaction boundary (Claude's `isCompactSummary` record, or a
+ *  codex auto-compact Fleet retags as one): a hairline rule like the interrupt
+ *  marker, tap to read the summary. Mirrors the desktop's CompactSummaryBlock. */
+export function CompactSummaryRule({ summary }: { summary: string }) {
+  const [open, setOpen] = useState(false);
+  const hasSummary = summary.trim().length > 0;
+  return (
+    <div data-testid="compact-rule">
+      <button
+        type="button"
+        className={`${styles.interruptRule} ${styles.compactRule}`}
+        onClick={() => hasSummary && setOpen((o) => !o)}
+        aria-expanded={hasSummary ? open : undefined}
+      >
+        <span className={styles.interruptRuleLabel}>
+          {t("上下文已压缩")}
+          {hasSummary ? (open ? " ▾" : " ▸") : ""}
+        </span>
+      </button>
+      {open && <LazyMarkdown text={summary} />}
+    </div>
+  );
+}
+
 /** One conversation row. Memoized so appending new tailed lines every 2.5s
  *  doesn't re-render (and re-parse the markdown of) the rows already on screen —
  *  the long-session jank the desktop never hit because it doesn't poll. */
@@ -1190,6 +1214,9 @@ const MessageRow = memo(function MessageRow({
         <span className={styles.interruptRuleLabel}>{t("已中断")}</span>
       </div>
     );
+  }
+  if (msg.type === "user" && msg.isCompactSummary) {
+    return <CompactSummaryRule summary={userText(msg)} />;
   }
   if (msg.type === "user") {
     // Automation payloads must travel through the harness's user-prompt

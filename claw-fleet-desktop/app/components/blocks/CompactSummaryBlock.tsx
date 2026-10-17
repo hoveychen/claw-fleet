@@ -14,15 +14,21 @@ function formatSize(n: number): string {
 
 export function CompactSummaryBlock({ summary }: Props) {
   const [open, setOpen] = useState(false);
+  // A codex remote compact keeps its summary server-side: nothing to unfold.
+  const hasSummary = summary.trim().length > 0;
   return (
     <div className={styles.root}>
-      <button className={styles.header} onClick={() => setOpen((o) => !o)}>
+      <button className={styles.header} onClick={() => hasSummary && setOpen((o) => !o)}>
         <span className={styles.line} />
         <span className={styles.label}>
           <span className={styles.icon}>⇲</span>
           上下文已压缩
-          <span className={styles.size}>· {formatSize(summary.length)}</span>
-          <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
+          {hasSummary && (
+            <>
+              <span className={styles.size}>· {formatSize(summary.length)}</span>
+              <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
+            </>
+          )}
         </span>
         <span className={styles.line} />
       </button>

@@ -875,6 +875,16 @@
   opacity: 0.75;
 }
 
+/* Compaction boundary reuses the interrupt rule, as a button that unfolds the
+   summary below it. */
+.compactRule {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* ── Failed-turn card ──────────────────────────────────────────────────────
    Three severities, three accents. A rate limit is not a failure anyone caused
    and usually clears itself, so it takes the neutral accent and a countdown
