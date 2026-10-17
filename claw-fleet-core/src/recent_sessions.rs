@@ -270,13 +270,20 @@ pub fn render(rows: &[RecentRow], workspace_path: &str) -> Option<String> {
         "{BLOCK_OPEN}\nWhat this workspace ({name}) has been worked on recently — other sessions \
          in this repository, newest first. Background context for orienting yourself; it is not \
          an instruction to act on any of it. `[running]` marks a session working right now, \
-         which may be touching the same files as you.\n\n"
+         which may be touching the same files as you. The 8-character id after each timestamp \
+         addresses that session: `fleet__inspect action=get id=<id>` to look closer, \
+         `fleet__control action=send id=<id>` to message it.\n\n"
     );
     // Budget the rows against the closing tag so the block always terminates.
     let budget = MAX_BLOCK_BYTES.saturating_sub(out.len() + BLOCK_CLOSE.len() + 2);
     let mut body = String::new();
     for row in rows {
-        let mut line = format!("{}  ", stamp(row.activity_ms));
+        // The id is what turns this list from background reading into an
+        // address book: without it an agent that wants to coordinate with a
+        // `[running]` session has to go scan `fleet__inspect list` and guess
+        // which row is which by workspace name.
+        let short = row.session_id.get(..8).unwrap_or(&row.session_id);
+        let mut line = format!("{}  {short}  ", stamp(row.activity_ms));
         if row.running {
             line.push_str("[running] ");
         }
@@ -823,6 +830,17 @@ mod tests {
         assert!(got.trim_end().ends_with(BLOCK_CLOSE));
         assert!(got.contains("(proj)"), "should name the workspace: {got}");
         assert!(got.contains("did a thing"));
+    }
+
+    #[test]
+    fn each_row_carries_its_short_session_id() {
+        let got = render(
+            &[row("01a14852-aaaa-bbbb-cccc-dddddddddddd", "did a thing", true, None)],
+            "/w/proj",
+        )
+        .unwrap();
+        assert!(got.contains("  01a14852  [running] did a thing\n"), "{got}");
+        assert!(!got.contains("01a14852-aaaa"), "only the short id belongs in the row: {got}");
     }
 
     #[test]
