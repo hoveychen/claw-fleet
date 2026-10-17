@@ -430,11 +430,20 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
     // `claude --resume` without putting a second process on somebody's
     // transcript — so that gate is not repeated here.
     // An agent steering another session: the CLI's peer framing is already the
-    // truth here, so nothing is signed onto the body.
+    // truth here, so `Sender::Agent` adds no framing of its own. What neither
+    // path carries is *which* session wrote it — the socket frame has no
+    // sender field and the queued path arrives as a plain resume prompt — so
+    // the return address is written into the body here, once, for both.
+    let body = with_reply_address(
+        text,
+        self_id
+            .as_deref()
+            .map(|id| (id, sessions.iter().find(|s| s.id == id))),
+    );
     let delivery = crate::pending_message::enqueue(
         &target.id,
         &target.workspace_path,
-        text,
+        &body,
         crate::pending_message::Sender::Agent,
     )?;
     // A retired hop is re-addressed to whoever inherited its work, so report the
@@ -464,6 +473,26 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
         short_id(&target.id),
         target.workspace_name
     ))
+}
+
+/// Append who sent `text` and how to answer it.
+///
+/// `sender` is `None` when the caller has no session of its own (a person
+/// running `fleet send` in a terminal) — there is nothing to reply to then, so
+/// the body goes out untouched. The sender's own scan row is optional too: a
+/// session that has not been scanned yet still has a usable id.
+fn with_reply_address(text: &str, sender: Option<(&str, Option<&SessionInfo>)>) -> String {
+    let Some((id, row)) = sender else {
+        return text.to_string();
+    };
+    let from = match row {
+        Some(s) => format!("{id}（{}）", s.workspace_name),
+        None => id.to_string(),
+    };
+    format!(
+        "{text}\n\n---\n（这条消息来自 Fleet 会话 {from}。要回复它，用 \
+         `fleet__control action=send id={id} text=<回复>`（CLI：`fleet send {id} <回复>`）。）"
+    )
 }
 
 pub fn handle_control(args: &Value, action: &str) -> Result<String, String> {
@@ -637,6 +666,24 @@ mod tests {
         let ok = vet_send_target(&s, "bbbb", Some("cccccccc-3")).unwrap();
         assert_eq!(ok.id, "bbbbbbbb-2");
         assert_eq!(vet_send_target(&s, "beta", None).unwrap().id, "bbbbbbbb-2");
+    }
+
+    /// The receiver sees neither a sender field on the socket nor anything but
+    /// a prompt on the queued path, so the id has to ride in the body — and a
+    /// sender with no session of its own must not invent one.
+    #[test]
+    fn reply_address_names_the_sender_only_when_there_is_one() {
+        assert_eq!(with_reply_address("hi", None), "hi");
+
+        let me = sample("cccccccc-3333", "gamma", SessionStatus::Executing);
+        let got = with_reply_address("hi", Some(("cccccccc-3333", Some(&me))));
+        assert!(got.starts_with("hi\n\n---\n"), "{got}");
+        assert!(got.contains("cccccccc-3333（gamma）"), "{got}");
+        assert!(got.contains("action=send id=cccccccc-3333"), "{got}");
+
+        let got = with_reply_address("hi", Some(("dddddddd-4444", None)));
+        assert!(got.contains("dddddddd-4444"), "{got}");
+        assert!(!got.contains("（gamma）"), "{got}");
     }
 
     /// Ambiguity must be refused here too — queueing a steering message for the
