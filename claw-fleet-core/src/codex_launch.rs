@@ -596,10 +596,15 @@ struct GuidanceRoute {
 ///
 /// Normally as `developer_instructions`: codex freezes that into the thread
 /// when it is created (measured on 0.159.2: a resume passing a different value,
-/// or none, keeps the original and does not duplicate it), so it is given on
-/// spawn only. It replaces the user's own top-level `developer_instructions`
-/// from config.toml rather than adding to it, which is why `user_own` is
-/// carried in front.
+/// or none, keeps the original and does not duplicate it). It replaces the
+/// user's own top-level `developer_instructions` from config.toml rather than
+/// adding to it, which is why `user_own` is carried in front.
+///
+/// The freeze does not survive auto-compaction, though: codex rebuilds the
+/// thread's initial context from the *running process's* config, so a compact
+/// inside a resume that passed nothing drops the guidance for good (measured
+/// on 0.159.2, 2026-10-17 — session 01a14852 stopped raising decision cards
+/// after one). Resumes therefore pass it too; see [`resume_guidance_args`].
 ///
 /// On Windows the guidance (~28K UTF-16 units) plus the prompt does not fit
 /// the 32,767-unit command line, so the guidance rides in front of the prompt
@@ -639,6 +644,17 @@ fn route_guidance(
         prompt,
         stdin: None,
     }
+}
+
+/// The `-c developer_instructions=…` args a resume carries, so an auto-compact
+/// during the resumed turn rebuilds the thread with Fleet's guidance still in
+/// it (see [`route_guidance`]). Empty on Windows, where the guidance cannot ride
+/// the command line and re-sending ~28K of prompt text every turn is too much.
+fn resume_guidance_args(guidance: Option<&str>, user_own: Option<&str>, windows: bool) -> Vec<String> {
+    if windows {
+        return Vec::new();
+    }
+    route_guidance(guidance, user_own, String::new(), false).args
 }
 
 /// The user's own top-level `developer_instructions` from codex's config.toml.
@@ -1487,6 +1503,12 @@ pub fn resume_codex_session(
     // Channel B: prepend the workspace's active TASKS.md plans; this resume knows
     // its thread id, so the backtrack backstop can fire for a completed child.
     let prompt = maybe_prepend_active_plans(&workspace_path, Some(session_id), prompt);
+    // Fleet's standing guidance again, so a compact in this turn keeps it.
+    pre_prompt.extend(resume_guidance_args(
+        crate::codex_guidance::launch_guidance().as_deref(),
+        user_developer_instructions().as_deref(),
+        cfg!(windows),
+    ));
     pre_prompt.extend(codex_image_args(images));
     let args = build_codex_resume_args(session_id, &prompt, model, effort, &pre_prompt);
 
@@ -1733,6 +1755,19 @@ mod tests {
         let stdin = r.stdin.expect("stdin text");
         assert!(stdin.starts_with("<system-reminder>\nfleet rules\n</system-reminder>"));
         assert!(stdin.ends_with("\n\ndo it"));
+    }
+
+    /// A resume must re-send the guidance: codex rebuilds the initial context
+    /// from the running process's config on auto-compact, so a resume that
+    /// passed nothing loses it at the first compact.
+    #[test]
+    fn resume_re_sends_guidance_except_on_windows() {
+        let args = resume_guidance_args(Some("fleet"), Some("mine"), false);
+        assert_eq!(args[0], "-c");
+        let parsed: toml::Table = args[1].parse().unwrap();
+        assert_eq!(parsed["developer_instructions"].as_str(), Some("mine\n\nfleet"));
+        assert!(resume_guidance_args(Some("fleet"), None, true).is_empty());
+        assert!(resume_guidance_args(None, Some("mine"), false).is_empty());
     }
 
     #[test]
