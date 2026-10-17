@@ -2153,10 +2153,10 @@ mod tests {
         codex_usage_from_app_server_result, codex_usage_from_foxy, compute_token_stats,
         derive_codex_title, determine_status, exec_note_from_script, extract_context_percent,
         extract_first_user_prompt, last_rollout_rate_limits, latest_total_token_usage,
-        normalize_messages, parse_codex_session, plan_type_from_foxy_label,
+        normalize_messages, parse_codex_session, plain_text, plan_type_from_foxy_label,
         read_rollout_originator, strip_leading_system_reminder,
         strip_trailing_context_files, CodexRateLimitWindow, CodexUsageItem,
-        SqliteThread, USAGE_SOURCE_FOXY,
+        SqliteThread, CODEX_COMPACT_PREAMBLE_END, USAGE_SOURCE_FOXY,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
@@ -3332,6 +3332,54 @@ mod tests {
             out[1].get("isMeta").is_none(),
             "real user messages must NOT be tagged isMeta"
         );
+    }
+
+    fn assistant_item(text: &str) -> serde_json::Value {
+        json!({"type": "response_item", "payload": {
+            "type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": text}]
+        }})
+    }
+
+    /// A local compact: the summary reply is retagged as the compaction marker
+    /// and keeps the uuid it had before the `compacted` line landed.
+    #[test]
+    fn local_compact_retags_summary_reply_keeping_its_uuid() {
+        let summary = "## 交接摘要\n\n当前任务：审计重建算法。";
+        let before = normalize_messages(vec![assistant_item("earlier"), assistant_item(summary)]);
+        let lines = vec![
+            assistant_item("earlier"),
+            assistant_item(summary),
+            json!({"type": "compacted", "payload": {
+                "message": format!("Another language model started to solve this problem ... {CODEX_COMPACT_PREAMBLE_END}\n{summary}"),
+                "replacement_history": []
+            }}),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 2, "no extra row for the compaction");
+        assert_eq!(out[0]["type"], json!("assistant"));
+        assert_eq!(out[1]["type"], json!("user"));
+        assert_eq!(out[1]["isCompactSummary"], json!(true));
+        assert_eq!(out[1]["message"]["role"], json!("user"));
+        assert_eq!(plain_text(&out[1]), summary);
+        assert_eq!(out[1]["uuid"], before[1]["uuid"], "uuid must survive the retag");
+    }
+
+    /// A remote compact has no summary reply and an empty `message`: emit a bare
+    /// marker and leave the preceding ordinary reply alone.
+    #[test]
+    fn remote_compact_emits_a_bare_marker() {
+        let lines = vec![
+            assistant_item("A is the letter before B."),
+            json!({"type": "compacted", "payload": {"message": "", "replacement_history": []}}),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["type"], json!("assistant"));
+        assert!(out[0].get("isCompactSummary").is_none());
+        assert_eq!(out[1]["type"], json!("user"));
+        assert_eq!(out[1]["isCompactSummary"], json!(true));
+        assert_eq!(plain_text(&out[1]), "");
     }
 
     #[test]
@@ -6028,6 +6076,8 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
     }
 
     let mut messages: Vec<Value> = Vec::new();
+    // Indices of assistant replies that turned out to be compaction summaries.
+    let mut compact_summaries: Vec<usize> = Vec::new();
 
     for line in lines {
         let timestamp = line.get("timestamp").cloned().unwrap_or(Value::Null);
@@ -6801,15 +6851,82 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                     }
                 }
             }
+            "compacted" => {
+                // Codex auto-compaction. A local compact first has the model
+                // write a handoff-style summary as an ordinary assistant reply,
+                // then records it (behind a fixed preamble) in `message`; shown
+                // as-is it reads like the agent announcing a relay. Retag that
+                // reply as the compaction marker; a remote compact (empty
+                // `message`, no summary reply) gets a bare marker instead.
+                let message = payload
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or_default();
+                let prev_is_summary = messages.last().is_some_and(|m| {
+                    let text = plain_text(m);
+                    m.get("type").and_then(|t| t.as_str()) == Some("assistant")
+                        && !text.trim().is_empty()
+                        && message.contains(text.trim())
+                });
+                if prev_is_summary {
+                    compact_summaries.push(messages.len() - 1);
+                } else {
+                    let summary = message
+                        .split_once(CODEX_COMPACT_PREAMBLE_END)
+                        .map_or(message, |(_, s)| s)
+                        .trim();
+                    messages.push(json!({
+                        "type": "user",
+                        "isCompactSummary": true,
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": summary}]
+                        },
+                        "timestamp": timestamp
+                    }));
+                }
+            }
             _ => {
-                // Skip session_meta, turn_context, compacted, etc.
+                // Skip session_meta, turn_context, etc.
             }
         }
     }
 
     messages.iter_mut().for_each(crate::fleet_event::annotate);
     assign_stable_uuids(&mut messages);
+    // Retag after the uuids are stamped, so the summary keeps the uuid it had
+    // as an assistant reply: the incremental tail may already have shipped it
+    // in that form before the `compacted` line landed, and clients dedup on
+    // uuid rather than adding a second row.
+    for idx in compact_summaries {
+        let m = &mut messages[idx];
+        m["type"] = json!("user");
+        m["isCompactSummary"] = json!(true);
+        m["message"]["role"] = json!("user");
+        if let Some(obj) = m["message"].as_object_mut() {
+            obj.remove("stop_reason");
+        }
+    }
     messages
+}
+
+/// The end of the fixed preamble codex puts in front of the summary in a
+/// `compacted` record's `message` (codex-cli 0.159.2).
+const CODEX_COMPACT_PREAMBLE_END: &str = "use the information in this summary to assist with your own analysis:";
+
+/// The concatenated `text` blocks of a normalized message.
+fn plain_text(m: &Value) -> String {
+    m.get("message")
+        .and_then(|msg| msg.get("content"))
+        .and_then(|c| c.as_array())
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<String>()
+        })
+        .unwrap_or_default()
 }
 
 /// Stamp each normalized Codex message with a stable, position-independent
