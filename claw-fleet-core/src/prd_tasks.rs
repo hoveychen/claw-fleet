@@ -1549,7 +1549,16 @@ pub const PLAN_REMINDER_MARK: &str = "Fleet PRD Discipline mode";
 /// nothing to inject (no TASKS.md anywhere, or a clean file with no active plan
 /// and no structural problem) — callers then no-op.
 pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Option<String> {
-    let goal = render_chain_goal_block(session_id);
+    // The chain goal and, for a sub-task, its role line ride together above
+    // the plans: both say what this session answers to.
+    let lead: Vec<String> = [
+        crate::task_roles_guidance::render_role_reminder(session_id),
+        render_chain_goal_block(session_id),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let goal = (!lead.is_empty()).then(|| lead.join("\n\n"));
     match (goal, render_plans_reminder_body(cwd, session_id)) {
         (None, body) => body,
         (Some(g), None) => Some(format!("<system-reminder>\n{g}\n</system-reminder>")),

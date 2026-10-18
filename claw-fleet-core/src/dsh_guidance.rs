@@ -489,6 +489,8 @@ done, user abandoned it\" is its strongest signal.\n\
 ABANDONED` (the terminal button), or {title} says in free text that you are \
 done (\"收工\", \"done\"), end with a one-line plain-text \
 acknowledgement instead of another card.\n\
+- **Sub-task exemption:** when the per-turn injection says \"你的角色：子任务\", end the turn \
+with your result as plain text and no card, unless {title} has a call to make.\n\
 - **Handoff-registered exemption:** once `fleet handoff` has returned `ok` this \
 turn, raise NO card — not even a decision-free wrap-up. The relay fires when \
 the turn *ends*, and a card holds the turn open waiting for a click, so the \
@@ -498,12 +500,15 @@ dropped anyway. End the turn with one line of plain text.\n\
 mode, present the plan through `exit_plan_mode`, not through \
 `ask_user_question`. Do not ask \"should I proceed?\" as a card there.\n\
 \n\
-{explain_marks}",
+{explain_marks}\n\
+\n\
+{task_roles}",
         title = title,
         ix_lang = ix_lang,
         // The dsh block is English-only (locale only picks `ix_lang`), so the
         // shared section is rendered in English too.
         explain_marks = crate::explain_marks_guidance::render_explain_marks_section(&title, "en"),
+        task_roles = crate::task_roles_guidance::render_section_compact(&title),
     )
 }
 

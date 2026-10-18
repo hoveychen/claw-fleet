@@ -240,6 +240,12 @@ pub fn maybe_raise(
     if !is_task_session(session) {
         return Ok(None);
     }
+    // Only a task's main conversation reports to the boss. A sub-task's final
+    // reply is its report to that conversation, which collects it through a
+    // session watch; a card here would put it in the boss's inbox instead.
+    if session.parent_task_id.is_some() {
+        return Ok(None);
+    }
     // A live process at WaitingInput means "parked on a decision card", not
     // "turn ended" — resuming would race the live turn, so skip it. dsh has no
     // per-session process, so this guard is a no-op there.
@@ -493,6 +499,14 @@ mod tests {
             let chat = session(&chat.to_string_lossy());
             assert!(matches!(maybe_raise(&chat, "done", 0), Ok(None)));
         }
+    }
+
+    #[test]
+    fn maybe_raise_skips_sub_tasks() {
+        // Returns before any disk read, so no FLEET_HOME lock is needed.
+        let mut sub = session("/definitely/not/chat/project");
+        sub.parent_task_id = Some("main-1".into());
+        assert!(matches!(maybe_raise(&sub, "done", 0), Ok(None)));
     }
 
     #[test]

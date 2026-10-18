@@ -260,6 +260,7 @@ pub mod skills;
 pub mod subagent_caller;
 pub mod task_migration;
 pub mod task_model;
+pub mod task_roles_guidance;
 pub mod task_outcome;
 pub mod task_progress;
 pub mod task_review;
