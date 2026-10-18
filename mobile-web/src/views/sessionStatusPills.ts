@@ -138,11 +138,33 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
       target: "sheet",
     });
   }
-  if (s.watches && s.watches.length > 0) {
+  const sessionWatches = (s.watches ?? []).filter((w) => w.targets && w.targets.length > 0);
+  for (const w of sessionWatches) {
+    // A session watch says how many of the awaited sessions are done; a failed
+    // one is about to wake this session with the reason, so it reads as alert.
+    const targets = w.targets ?? [];
+    const done = targets.filter((x) => x.phase === "done").length;
+    pills.push({
+      key: "watch-sessions",
+      label: t("等会话 {0}/{1}", done, targets.length),
+      tone: targets.some((x) => x.phase === "failed") ? "alert" : "live",
+      target: "sheet",
+    });
+  }
+  if (s.waitedBy && s.waitedBy.length > 0) {
+    pills.push({
+      key: "waited-by",
+      label: t("被 {0} 个会话等待", new Set(s.waitedBy.map((e) => e.sessionId)).size),
+      tone: "neutral",
+      target: "sheet",
+    });
+  }
+  const shellWatches = (s.watches ?? []).filter((w) => !w.targets || w.targets.length === 0);
+  if (shellWatches.length > 0) {
     // A watch whose until command cannot run at all is not waiting, it is
     // stuck — the poll count is a reassuring lie in that state, so show an
     // alert pill instead of it.
-    const broken = s.watches.filter((w) => (w.structuralFailStreak ?? 0) > 0).length;
+    const broken = shellWatches.filter((w) => (w.structuralFailStreak ?? 0) > 0).length;
     if (broken > 0) {
       pills.push({
         key: "watch",
@@ -155,9 +177,9 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
       // evidence that "it's alive and still waiting". For multiple, report the count;
       // each one's poll count is in the half-screen.
       const label =
-        s.watches.length === 1
-          ? t("守望 ×{0}", s.watches[0].pollCount)
-          : t("{0} 个守望", s.watches.length);
+        shellWatches.length === 1
+          ? t("守望 ×{0}", shellWatches[0].pollCount)
+          : t("{0} 个守望", shellWatches.length);
       pills.push({ key: "watch", label, tone: "live", target: "sheet" });
     }
   }

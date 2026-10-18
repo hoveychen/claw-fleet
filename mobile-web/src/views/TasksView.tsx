@@ -19,6 +19,7 @@ import {
   MonitorSmartphone,
   Inbox,
   CreditCard,
+  Hourglass,
   Radar,
   Search,
   SearchX,
@@ -1019,6 +1020,24 @@ export function TasksView({
             </span>
           )}
           {s.watches?.map((w) => {
+            if (w.targets && w.targets.length > 0) {
+              // A session watch: how many of the awaited sessions are done.
+              const done = w.targets.filter((x) => x.phase === "done").length;
+              const failed = w.targets.some((x) => x.phase === "failed");
+              return (
+                <span
+                  key={w.id}
+                  className={styles.handoff}
+                  data-tone={failed ? "warning" : undefined}
+                  title={w.note ?? undefined}
+                >
+                  <Radar size={11} />
+                  {w.note && <span className={styles.watchNote}>{w.note}</span>}
+                  {w.note && " · "}
+                  {t("等会话 {0}/{1}", done, w.targets.length)}
+                </span>
+              );
+            }
             const pv = watchProgressView(w, Date.now());
             const ring = watchRing(pv);
             // Progress replaces the poll count when there is any: it is the
@@ -1057,6 +1076,12 @@ export function TasksView({
               </span>
             );
           })}
+          {s.waitedBy && s.waitedBy.length > 0 && (
+            <span className={styles.handoff} data-tone="warning">
+              <Hourglass size={11} />
+              {t("被 {0} 个会话等待", new Set(s.waitedBy.map((e) => e.sessionId)).size)}
+            </span>
+          )}
           {(live || tone === "quiet") && (
             <span className={styles.runtime} data-tone={tone ?? undefined}>
               <Clock size={11} />

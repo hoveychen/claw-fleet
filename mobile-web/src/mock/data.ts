@@ -114,6 +114,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     // Fleet-spawned Codex session, turn ended → shows the Codex mark and is
     // resumable (entrypoint carries Codex's originator "fleet").
     id: "sess-codex-refactor",
+    waitedBy: [{ sessionId: "sess-e2e-main", watchId: "watch-e2e-sessions", note: "等重构和账本会话都结束再合并" }],
     workspacePath: "/Users/demo/workspace/payments-core",
     workspaceName: "payments-core",
     aiTitle: "Extract the settlement ledger into its own module",
@@ -140,6 +141,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     // a dsh session in the roster the dsh Token tab (and its 花费 (Cost) line) had no
     // way to be seen outside a live relay.
     id: "session-dsh-ledger",
+    waitedBy: [{ sessionId: "sess-e2e-main", watchId: "watch-e2e-sessions", note: "等重构和账本会话都结束再合并" }],
     workspacePath: "/Users/demo/workspace/claude-fleet",
     workspaceName: "claude-fleet",
     aiTitle: "把 dsh 计价改成逐次调用账本",
@@ -233,6 +235,22 @@ export const MOCK_SESSIONS: SessionInfo[] = [
         pollCount: 9,
         structuralFailStreak: 0,
         expectBy: NOW + 6 * MIN,
+      },
+      {
+        // A session watch across engines (codex + dsh), so the per-target rows
+        // and the "waited on by" mark on both targets show in mock mode.
+        id: "watch-e2e-sessions",
+        note: "等重构和账本会话都结束再合并",
+        created: NOW - 7 * MIN,
+        pollSecs: 30,
+        deadlineAt: NOW + 2 * 60 * MIN,
+        pollCount: 14,
+        structuralFailStreak: 0,
+        waitMode: "all",
+        targets: [
+          { id: "sess-codex-refactor", source: "codex", phase: "running", detail: "turn in progress", addedAt: NOW - 7 * MIN },
+          { id: "session-dsh-ledger", source: "dsh", phase: "done", detail: "turn ended", addedAt: NOW - 7 * MIN },
+        ],
       },
     ],
     pendingMessages: ["顺手把 quarantine 的那条 flaky 也重跑一遍"],
