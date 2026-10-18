@@ -211,6 +211,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
   - **until 只做判断，不带副作用**：别在 until 里拉起录制、下载这类动作。需要先动手就在注册前自己起好，until 只断言它的产物。
   - **知道条件大概什么时候该成立，就传 `--expect-by`**（时长如 `8h`，或本地时间如 `"2026-09-23 14:30"`）：过了这个点还没成立，Fleet 会唤醒你一次去自查，watch 本身继续跑。
   - **等的东西数得出进度，就传 `--progress '<命令>'`**（多个 step 做完、处理了多少条、几个 job 绿了）：每次轮询顺带跑一次，stdout 第一行打印 `3/8` 或 `42%` 就会显示成进度条，也可以打印一句简短状态。它只给老板看，不触发也不唤醒你；不传的话，一等半小时老板只能看到轮询次数，还得来问你进度。
+- **等其他会话（或你 spawn 出去的会话）结束后继续*本*会话 → 同样用 `fleet watch`，但给 `--sessions` 而不是 `--until`**：`fleet watch create --sessions <id1>,<id2> [--mode all|any] --note '<在等什么>'`（MCP：`sessions` 数组 + `mode`）。claude / codex / dsh 会话都能等，目标交过棒会自动追到链尾，停在决策卡上不算结束；限流、5xx、断网这类 Fleet 会自动重试的情况继续等，真失败（403、进程中途死、重试耗尽、被打断）立刻唤醒你并附原因。中途要改等谁用 `fleet watch add/remove <watch-id> <会话 id…>`。**绝不写 Bash 循环去扫别的会话的 transcript 或 `fleet inspect`**——那是前台工具调用，老板的追问你一条都收不到。
 - **把工作交给全新后继者 → `fleet handoff`**。
 - **现在就在另一个 workspace 起一个会话干活 → `fleet spawn`**（MCP 工具 `fleet__spawn`）：`fleet spawn --workspace <项目目录> --prompt '<完整简报>' --title <几个字>`。当场 spawn 一个 detached 会话并把它的 session id 回给你（之后用 `fleet send <id>` 转达、`fleet interrupt <id>` 打断）。刚写完一个属于别的项目的计划、想立刻交给那个项目的会话去执行，就用它——别拿 `fleet schedule --in 60s` 当「立刻」使。
 
@@ -439,6 +440,7 @@ A handoff changes *who*; this section covers one session crossing context window
   - **The `until` only tests; it has no side effects**: do not start a recording or a download from inside it. If something has to be kicked off, start it yourself before registering and let the `until` assert on its output.
   - **When you know roughly when the condition should hold, pass `--expect-by`** (a duration like `8h`, or a local time like `"2026-09-23 14:30"`): if it still has not held by then, Fleet wakes you once to check, and the watch keeps running.
   - **When the wait is countable, pass `--progress '<command>'`** (steps finished, items processed, jobs green): it runs on every poll, and a first stdout line of `3/8` or `42%` is drawn as a progress bar; a short status line works too. It is display only, for the boss — it never fires or wakes you. Without it a half-hour wait shows the boss nothing but a poll count, and they have to ask you how far along it is.
+- **Wait for other sessions (or ones you spawned) to finish and then continue *this* session → `fleet watch` too, with `--sessions` instead of `--until`**: `fleet watch create --sessions <id1>,<id2> [--mode all|any] --note '<what you are waiting for>'` (MCP: a `sessions` array plus `mode`). It can wait on claude / codex / dsh sessions, follows a target that handed off to the end of its chain, and does not count a target parked on a decision card as finished; rate limits, 5xx and network drops that Fleet retries keep it waiting, while a real failure (403, the process dying mid-turn, retries exhausted, an interrupt) wakes you at once with the reason. To change whom you wait on, `fleet watch add/remove <watch-id> <session ids…>`. **Never write a Bash loop that scans other sessions' transcripts or `fleet inspect`** — it is a foreground tool call, and none of the boss's follow-ups reach you while it runs.
 - **Hand the work to a fresh successor → `fleet handoff`**.
 - **Start a session working in another workspace right now → `fleet spawn`** (MCP tool `fleet__spawn`): `fleet spawn --workspace <project dir> --prompt '<full briefing>' --title <a few words>`. It spawns a detached session immediately and hands you its session id (then `fleet send <id>` to relay, `fleet interrupt <id>` to interrupt). Reach for it when you have just written a plan that belongs to another project and want that project's session on it now — do not use `fleet schedule --in 60s` as a stand-in for "now".
 
@@ -668,6 +670,23 @@ mod tests {
             assert!(
                 g.contains("--progress"),
                 "[{locale}] watch guidance must mention --progress"
+            );
+        }
+    }
+
+    /// Sessions that waited on other sessions used to hold a foreground Bash
+    /// loop over their transcripts, deaf to the boss's follow-ups. The
+    /// guidance must point at `fleet watch --sessions` and ban the loop.
+    #[test]
+    fn watch_guidance_teaches_waiting_on_sessions_in_both_locales() {
+        for locale in ["zh", "en"] {
+            let g = render_guidance("Boss", locale);
+            for needle in ["--sessions", "fleet watch add/remove", "--mode all|any"] {
+                assert!(g.contains(needle), "[{locale}] missing {needle}");
+            }
+            assert!(
+                g.contains("绝不写 Bash 循环") || g.contains("Never write a Bash loop"),
+                "[{locale}] must ban polling other sessions from a foreground loop"
             );
         }
     }

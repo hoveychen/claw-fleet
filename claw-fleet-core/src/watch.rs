@@ -1470,7 +1470,7 @@ fn targets_headline(rec: &WatchRecord, timed_out: bool) -> String {
 }
 
 /// One line per target: id (and the chain end it resolved to), engine, phase, why.
-fn targets_table(rec: &WatchRecord) -> String {
+pub fn targets_table(rec: &WatchRecord) -> String {
     rec.targets
         .iter()
         .map(|t| {

@@ -233,19 +233,21 @@ fn job_tool_def() -> Value {
 fn watch_tool_def() -> Value {
     json!({
         "name": "fleet__watch",
-        "description": "Register a one-shot condition wait that resumes THIS session when a shell condition succeeds — the survivable replacement for Monitor / background Bash / ScheduleWakeup. Use this instead of the `fleet watch` CLI. Actions: create (--until required; --capture/--progress/--note/--poll/--timeout/--expect_by optional), stop, list.",
+        "description": "Register a one-shot wait that resumes THIS session when a shell condition succeeds OR when other sessions finish — the survivable replacement for Monitor / background Bash / ScheduleWakeup, and for scripts that poll other sessions' transcripts. Use this instead of the `fleet watch` CLI. Actions: create (exactly one of --until or --sessions; --mode/--capture/--progress/--note/--poll/--timeout/--expect_by optional), add / remove (--id + --sessions: change which sessions a session watch waits on), stop, list.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["create", "stop", "list"], "default": "create"},
-                "until": {"type": "string", "description": "Shell command that exits 0 when the condition is met. Required for create. It is RUN ONCE at registration: a command the shell cannot run (missing binary, bad quoting) is rejected on the spot, and one that already exits 0 comes back with a warning that the watch will fire immediately. Assert a FACT that will become true (an artifact exists, a run's status is 'completed'), not a transient phenomenon (a line scrolling past in a log you may already have missed). The registration run cannot catch a condition that will NEVER become true — that looks exactly like 'not yet' — so before registering, run it yourself against a real sample where the condition already holds and confirm it exits 0. Keep it side-effect free: it only tests, it does not start the work."},
+                "action": {"type": "string", "enum": ["create", "add", "remove", "stop", "list"], "default": "create"},
+                "sessions": {"type": "array", "items": {"type": "string"}, "description": "Session ids (full or a ≥6-char prefix) to wait on instead of an until command — any engine (claude / codex / dsh). Fleet probes them natively: a target that handed off is followed to the live end of its chain; one parked on a decision card is NOT done until the boss answers and its turn really ends; rate limits / 5xx / network blips that Fleet auto-retries keep it waiting, while a real failure (403 / account error, process died mid-turn, retries exhausted, interrupted) wakes you at once with the reason and the other targets' state. Required for create when until is absent, and for add / remove."},
+                "mode": {"type": "string", "enum": ["all", "any"], "description": "With sessions: fire when ALL targets are done (default) or as soon as ANY one is. A failed target always fires immediately."},
+                "until": {"type": "string", "description": "Shell command that exits 0 when the condition is met. Required for create unless sessions is given. It is RUN ONCE at registration: a command the shell cannot run (missing binary, bad quoting) is rejected on the spot, and one that already exits 0 comes back with a warning that the watch will fire immediately. Assert a FACT that will become true (an artifact exists, a run's status is 'completed'), not a transient phenomenon (a line scrolling past in a log you may already have missed). The registration run cannot catch a condition that will NEVER become true — that looks exactly like 'not yet' — so before registering, run it yourself against a real sample where the condition already holds and confirm it exits 0. Keep it side-effect free: it only tests, it does not start the work."},
                 "capture": {"type": "string", "description": "Shell command whose stdout is reported back on the resumed turn."},
                 "progress": {"type": "string", "description": "Shell command sampled on every poll; its first stdout line is shown to the boss as the watch's live progress. Print `N/M` (steps done / total, e.g. `3/8`) or `N%` to get a progress bar, or a short status line. Display only — it never fires or wakes you. Pass it whenever the wait is countable (steps finished, items processed, jobs green); a wait with no progress makes the boss ask you how far along it is. Keep it cheap and side-effect free, like until."},
                 "note": {"type": "string", "description": "What you're waiting for."},
                 "poll": {"type": "string", "description": "Poll interval, e.g. 30s / 5m (default 30s)."},
                 "timeout": {"type": "string", "description": "Give-up deadline, e.g. 2h (default 2h)."},
                 "expect_by": {"type": "string", "description": "When you expect the condition to hold: a duration from now (8h) or a local time (\"2026-09-23 14:30\", 14:30). If it still has not held by then, this session is woken ONCE to check whether the until is wrong; the watch keeps running. Must fall before the timeout. Pass it whenever you know roughly when the event should happen (a match start time, a CI run's usual length)."},
-                "id": {"type": "string", "description": "Watch id. Required for stop."}
+                "id": {"type": "string", "description": "Watch id. Required for stop / add / remove."}
             },
             "required": ["action"],
             "additionalProperties": false
@@ -1016,7 +1018,15 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
     let action = action_of(args)?;
     match action.as_str() {
         "create" => {
-            let until = req(args, "until")?;
+            let sessions = session_list(args);
+            let until = arg(args, "until");
+            match (&until, sessions.is_empty()) {
+                (Some(_), false) => {
+                    return Err("`until` 和 `sessions` 只能二选一：等 shell 条件用 until，等其他会话结束用 sessions".to_string())
+                }
+                (None, true) => return Err("`until` or `sessions` is required for create".to_string()),
+                _ => {}
+            }
             let sid = sid.ok_or(
                 "cannot resolve this session's id (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID \
                  unset). `fleet watch` reanimates the calling session.",
@@ -1044,6 +1054,35 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 None => None,
             };
             let ctx = crate::session::inherit_launch_context(Some(sid));
+            let Some(until) = until else {
+                let mode = watch::WaitMode::parse(arg(args, "mode").as_deref().unwrap_or(""))?;
+                let (rec, warn) = watch::create_for_sessions(
+                    sid,
+                    &ctx.workspace,
+                    &sessions,
+                    mode,
+                    arg(args, "capture").as_deref(),
+                    arg(args, "note").as_deref(),
+                    poll_secs,
+                    timeout_secs,
+                    ctx.model.as_deref(),
+                    ctx.effort.as_deref(),
+                    ctx.source.as_deref(),
+                    expect_by,
+                )?;
+                let armed = arm_note(&rec);
+                return Ok(format!(
+                    "ok: watch {} created — waiting on {} session(s) ({}), resumes session {}. {armed}。{warn}\n{}\n\
+                     {}现在可以正常结束这个 turn。增删目标用 action=add/remove id={}，停止用 action=stop。",
+                    rec.id,
+                    rec.targets.len(),
+                    if mode == watch::WaitMode::Any { "any" } else { "all" },
+                    rec.session_id,
+                    watch::targets_table(&rec),
+                    watch::expect_by_note(&rec),
+                    rec.id
+                ));
+            };
             let (rec, probe) = watch::create(
                 sid,
                 &ctx.workspace,
@@ -1058,10 +1097,7 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 expect_by,
                 arg(args, "progress").as_deref(),
             )?;
-            let armed = match watch::arm_timer(&rec) {
-                Ok(pid) => format!("计时器已启动 (pid {pid})"),
-                Err(e) => format!("但计时器启动失败: {e}(Fleet 桌面端或 fleet serve 运行时会在 30 秒内补上)"),
-            };
+            let armed = arm_note(&rec);
             Ok(format!(
                 "ok: watch {} created — polling, resumes session {}. {armed}。\
                  {}{}{}\
@@ -1072,6 +1108,24 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 watch::expect_by_note(&rec),
                 watch::progress_note(&rec),
                 rec.id
+            ))
+        }
+        "add" | "remove" => {
+            let id = req(args, "id")?;
+            let sessions = session_list(args);
+            if sessions.is_empty() {
+                return Err(format!("`sessions` is required for {action}"));
+            }
+            let rec = if action == "add" {
+                watch::add_targets(&id, &sessions)?
+            } else {
+                watch::remove_targets(&id, &sessions)?
+            };
+            Ok(format!(
+                "ok: watch {} now waits on {} session(s); the timer picks this up on its next poll.\n{}",
+                rec.id,
+                rec.targets.len(),
+                watch::targets_table(&rec)
             ))
         }
         "stop" => {
@@ -1092,6 +1146,32 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
             serde_json::to_string_pretty(&watches).map_err(|e| e.to_string())
         }
         other => Err(format!("unknown watch action: {other}")),
+    }
+}
+
+/// `sessions` as a JSON array, or a comma/space separated string (some MCP
+/// clients flatten arrays).
+fn session_list(args: &Value) -> Vec<String> {
+    match args.get("sessions") {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Some(Value::String(s)) => s
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn arm_note(rec: &crate::watch::WatchRecord) -> String {
+    match crate::watch::arm_timer(rec) {
+        Ok(pid) => format!("计时器已启动 (pid {pid})"),
+        Err(e) => format!("但计时器启动失败: {e}(Fleet 桌面端或 fleet serve 运行时会在 30 秒内补上)"),
     }
 }
 
@@ -1914,7 +1994,40 @@ mod tests {
             Path::new("/tmp"),
         )
         .unwrap_err();
-        assert!(err.contains("until"));
+        assert!(err.contains("until") && err.contains("sessions"), "{err}");
+    }
+
+    #[test]
+    fn watch_create_with_both_until_and_sessions_errors() {
+        let err = handle(
+            "fleet__watch",
+            &json!({"action": "create", "until": "true", "sessions": ["abcdef12"]}),
+            Some("sess-1"),
+            Path::new("/tmp"),
+        )
+        .unwrap_err();
+        assert!(err.contains("二选一"), "{err}");
+    }
+
+    #[test]
+    fn watch_add_and_remove_need_sessions() {
+        for action in ["add", "remove"] {
+            let err = handle(
+                "fleet__watch",
+                &json!({"action": action, "id": "w1"}),
+                Some("sess-1"),
+                Path::new("/tmp"),
+            )
+            .unwrap_err();
+            assert!(err.contains("sessions"), "{action}: {err}");
+        }
+    }
+
+    #[test]
+    fn session_list_accepts_arrays_and_flattened_strings() {
+        assert_eq!(session_list(&json!({"sessions": ["a1", " b2 ", ""]})), vec!["a1", "b2"]);
+        assert_eq!(session_list(&json!({"sessions": "a1, b2 c3"})), vec!["a1", "b2", "c3"]);
+        assert!(session_list(&json!({})).is_empty());
     }
 
     #[test]
