@@ -1051,6 +1051,20 @@ fn roster_context_percent(projections: &Value) -> Option<f64> {
 /// already folded, so this is a field rename rather than a transcript parse.
 /// Everything Fleet derives from a transcript it does not have here (entrypoint,
 /// pid liveness, todos, skills) stays at its default.
+/// The roster's `running` bit for one dsh session: `Ok(None)` when the
+/// server does not list it. Shares the roster cache with the scanner, so a
+/// poller asking about several sessions costs one `session/list` per TTL.
+pub(crate) fn session_running(session_id: &str) -> Result<Option<bool>, String> {
+    let roster = DshSource::new().roster()?;
+    Ok(roster
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|item| item.get("sessionId").and_then(Value::as_str) == Some(session_id))
+        .map(|item| item.get("running").and_then(Value::as_bool).unwrap_or(false)))
+}
+
 pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     let id = item.get("sessionId").and_then(Value::as_str)?.to_string();
     let workspace_path = item
