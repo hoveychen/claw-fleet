@@ -60,7 +60,7 @@ type WorkspaceRailSectionProps = {
   /** "Show only this project". Given only for repository sections — a status
    *  bucket is not a scope. Hover reveals the button; while `focused` it stays
    *  visible and clicking it again leaves the scope. */
-  onFocus?: (name: string) => void;
+  onFocus?: (path: string) => void;
   focused?: boolean;
   children: ReactNode;
 };
@@ -121,7 +121,7 @@ export function WorkspaceRailSection({
             aria-pressed={focused}
             aria-label={focusLabel}
             title={focusLabel}
-            onClick={() => onFocus(name)}
+            onClick={() => onFocus(path)}
           >
             <Crosshair size={12} strokeWidth={1.9} />
           </button>

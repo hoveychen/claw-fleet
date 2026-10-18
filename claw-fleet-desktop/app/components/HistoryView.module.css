@@ -51,31 +51,23 @@
   flex-shrink: 0;
 }
 
-/* Workspace scope set by a `ws:` token / a heading's "only this project". */
+/* Project scope: the "all projects ▾" menu, plus an × once a project is picked. */
 .scope_row {
   display: flex;
-  min-width: 0;
-}
-
-.scope_chip {
-  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 2px;
   min-width: 0;
-  max-width: 100%;
-  padding: 3px 4px 3px 8px;
-  border-radius: 999px;
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  font-size: 11px;
-  font-weight: 600;
 }
 
-.scope_name {
+/* Let the pill shrink and ellipsize inside the rail instead of overflowing. */
+.scope_menu {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+.scope_menu > button {
+  max-width: 100%;
+  margin-left: -7px;
 }
 
 .scope_clear {
@@ -83,18 +75,19 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: inherit;
+  color: var(--color-text-dim);
   cursor: pointer;
 }
 
 .scope_clear:hover {
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  background: var(--color-bg-row-hover);
+  color: var(--color-text);
 }
 
 /* Non-directory filters (mark segments) sit in their own compact row. */

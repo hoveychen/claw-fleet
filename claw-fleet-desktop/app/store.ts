@@ -491,23 +491,12 @@ function readMarkFilter(): MarkFilter {
   return raw === "pending" || raw === "done" ? raw : "all";
 }
 
-/** Values the workspace filter used to take when the pure-chat workspace was
- *  still one of the `<select>`'s options, and later a "chat only" toggle. Both are
- *  retired — the chat section is simply pinned to the top of the rail now — so
- *  either legacy word collapses to "all". Every real value is an absolute path,
- *  so these bare words could never collide with one. The rewrite is persisted,
- *  not just derived: leaving the legacy string on disk would let it re-narrow
- *  the rail on the next boot. */
-const LEGACY_CHAT_ONLY_FILTER = "chat";
-const LEGACY_CHAT_HIDDEN_FILTER = "no-chat";
-
+/** The task rail's project scope: "all", or one repository root path. Stored
+ *  under a key of its own, not the retired `<select>`'s `history-workspace-filter`:
+ *  nothing read that key for months, so whatever path sits in it on a user's disk
+ *  is long forgotten and must not silently narrow the rail after an upgrade. */
 function readHistoryWorkspaceFilter(): string {
-  const raw = getItem("history-workspace-filter") ?? "all";
-  if (raw === LEGACY_CHAT_ONLY_FILTER || raw === LEGACY_CHAT_HIDDEN_FILTER) {
-    setItem("history-workspace-filter", "all");
-    return "all";
-  }
-  return raw;
+  return getItem("history-project-scope") || "all";
 }
 
 const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true";
@@ -622,7 +611,7 @@ export const useUIStore = create<UIState>((set) => ({
     set({ historyMarkFilter: f });
   },
   setHistoryWorkspaceFilter: (p) => {
-    setItem("history-workspace-filter", p);
+    setItem("history-project-scope", p);
     set({ historyWorkspaceFilter: p });
   },
   setHistoryQuery: (q) => set({ historyQuery: q }),

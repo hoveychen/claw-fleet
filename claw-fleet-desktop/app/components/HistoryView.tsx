@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   Circle,
   Copy,
-  Crosshair,
   Folder,
   FolderOpen,
   List,
@@ -56,17 +55,14 @@ import { RenameSessionDialog } from "./RenameSessionDialog";
 import { buildRenderItems } from "./sessionGroups";
 import { groupSessionsByWorkspace } from "./workspaceSessionGroups";
 import {
-  filterByWorkspaceScope,
-  parseWorkspaceScope,
-  withWorkspaceScope,
-} from "../../../shared-ts/workspaceScope";
-import {
   groupItemsByStatus,
   type StatusBucket,
 } from "./sessionStatusGroups";
 import styles from "./HistoryView.module.css";
 import { canRevealPath } from "../canReveal";
 import { Presence } from "./Presence";
+import { PillMenu } from "./PillMenu";
+import pillStyles from "./PillMenu.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
  *  list for the matching `SessionInfo` and swap the detail column over to it. */
@@ -366,24 +362,26 @@ export function HistoryView() {
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
   // the user's back (a waiting-input alert forcing setViewMode("list") is enough).
-  const rawQuery = useUIStore((s) => s.historyQuery);
+  const query = useUIStore((s) => s.historyQuery);
   const setQuery = useUIStore((s) => s.setHistoryQuery);
-  // A `ws:<name>` token in the box scopes the list to one workspace by name;
-  // everything below searches only the remaining text, so the full-text search
-  // never sees the token (and never drags in sessions that merely mention the
-  // project). The token is the whole scope state — see shared-ts/workspaceScope.
-  const scope = useMemo(() => parseWorkspaceScope(rawQuery), [rawQuery]);
-  const query = scope.text;
-  const scopedWorkspace = scope.workspace;
-  // Section heading action: scope to that project, or leave the scope when it is
-  // the one already in force. The user's search text survives both ways.
-  const toggleWorkspaceFocus = useCallback(
-    (name: string) => {
-      const on = scopedWorkspace?.toLowerCase() === name.toLowerCase();
-      setQuery(withWorkspaceScope(rawQuery, on ? null : name));
-    },
-    [rawQuery, scopedWorkspace, setQuery],
+  // Project scope: one repository root, or null for every project. Kept apart
+  // from the query on purpose — the full-text search would otherwise also pull
+  // in every session elsewhere that merely mentions the project's name.
+  const workspaceFilter = useUIStore((s) => s.historyWorkspaceFilter);
+  const setWorkspaceFilter = useUIStore((s) => s.setHistoryWorkspaceFilter);
+  const scopedPath = workspaceFilter === "all" ? null : workspaceFilter;
+  const setScope = useCallback(
+    (path: string | null) => setWorkspaceFilter(path ?? "all"),
+    [setWorkspaceFilter],
   );
+  // Section heading shortcut: scope to that project, or back to all of them when
+  // it is the one already in force.
+  const toggleWorkspaceFocus = useCallback(
+    (path: string) => setScope(scopedPath === path ? null : path),
+    [scopedPath, setScope],
+  );
+  // Text typed into the project menu's filter box; cleared on every open.
+  const [projectDraft, setProjectDraft] = useState("");
   // Re-render on a slow tick so the relative "last updated" and the live
   // Elapsed-runtime durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
@@ -477,12 +475,33 @@ export function HistoryView() {
   // top (see `pinnedPath` below) so it never sinks among busier repos.
   const chatPath = useChatWorkspace();
 
+  // Every project on the task page, for the scope menu: the same sections (and
+  // order, chat pinned first) the rail draws, counted in units of work across
+  // every mark — the menu answers "which project", not "what is on screen".
+  const projectOptions = useMemo(
+    () =>
+      groupSessionsByWorkspace(adhocSessions, { pinnedPath: chatPath }).map((g) => ({
+        path: g.path,
+        name: g.name,
+        count: countChainUnits(g.sessions, (s) => chainUnitKey(s, groupHandoff)),
+      })),
+    [adhocSessions, chatPath, groupHandoff],
+  );
+  // The scoped project's display name. A scope whose project has left the task
+  // page still shows (by its folder name) so it can be seen and cleared.
+  const scopedName = scopedPath
+    ? (projectOptions.find((p) => p.path === scopedPath)?.name ??
+      scopedPath.split(/[\\/]/).filter(Boolean).pop() ??
+      scopedPath)
+    : null;
+
   const { rows, markCounts } = useMemo(() => {
     const q = query.trim().toLowerCase();
     // Everything except the mark filter — the segment counts are taken over
     // this set so each count reflects how many rows its segment would reveal
     // under the current query.
-    const preMark = filterByWorkspaceScope(adhocSessions, scopedWorkspace)
+    const preMark = adhocSessions
+      .filter((s) => !scopedPath || repoRootPath(s.workspacePath) === scopedPath)
       .filter((s) => {
         if (!q) return true;
         const clientMatch =
@@ -520,7 +539,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, scopedWorkspace, query, ftsMatchPaths, markFilter, groupHandoff]);
+  }, [adhocSessions, scopedPath, query, ftsMatchPaths, markFilter, groupHandoff]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -983,7 +1002,7 @@ export function HistoryView() {
       count={scanReady ? markCounts[markFilter] : null}
       countLoading={!scanReady}
       search={{
-        value: rawQuery,
+        value: query,
         onChange: setQuery,
         placeholder: t("history.search_placeholder", "搜索标题、计划、全文…"),
         busy: searching,
@@ -1079,25 +1098,64 @@ export function HistoryView() {
               })}
             </div>
           </div>
-          {scopedWorkspace && (
-            <div className={styles.scope_row}>
-              <span className={styles.scope_chip}>
-                <Crosshair size={11} strokeWidth={2} aria-hidden="true" />
-                <span className={styles.scope_name}>
-                  {t("history.scope_only", "只看 {{name}}", { name: scopedWorkspace })}
-                </span>
-                <button
-                  type="button"
-                  className={styles.scope_clear}
-                  onClick={() => setQuery(withWorkspaceScope(rawQuery, null))}
-                  aria-label={t("history.unfocus_workspace", "显示全部项目")}
-                  title={t("history.unfocus_workspace", "显示全部项目")}
-                >
-                  <X size={11} strokeWidth={2.2} />
-                </button>
-              </span>
-            </div>
-          )}
+          <div className={styles.scope_row}>
+            <PillMenu
+              placement="below"
+              className={styles.scope_menu}
+              icon={<Folder size={13} strokeWidth={1.8} />}
+              label={scopedName ?? t("history.all_projects", "全部项目")}
+              title={scopedPath ?? t("history.all_projects", "全部项目")}
+              testId="project-scope-pill"
+              onOpen={() => setProjectDraft("")}
+              menuHeader={() =>
+                projectOptions.length > 8 ? (
+                  <div className={pillStyles.menu_header}>
+                    <input
+                      type="text"
+                      className={pillStyles.menu_header_input}
+                      value={projectDraft}
+                      onChange={(e) => setProjectDraft(e.target.value)}
+                      placeholder={t("history.project_filter_placeholder", "筛选项目…")}
+                      spellCheck={false}
+                      autoFocus
+                    />
+                  </div>
+                ) : null
+              }
+              items={[
+                {
+                  id: "all",
+                  label: t("history.all_projects", "全部项目"),
+                  checked: scopedPath == null,
+                  onSelect: () => setScope(null),
+                },
+                ...projectOptions
+                  .filter(
+                    (p) =>
+                      !projectDraft.trim() ||
+                      p.name.toLowerCase().includes(projectDraft.trim().toLowerCase()),
+                  )
+                  .map((p) => ({
+                    id: p.path,
+                    label: p.name,
+                    sub: t("history.project_task_count", "{{count}} 个任务", { count: p.count }),
+                    checked: p.path === scopedPath,
+                    onSelect: () => setScope(p.path),
+                  })),
+              ]}
+            />
+            {scopedPath && (
+              <button
+                type="button"
+                className={styles.scope_clear}
+                onClick={() => setScope(null)}
+                aria-label={t("history.unfocus_workspace", "显示全部项目")}
+                title={t("history.unfocus_workspace", "显示全部项目")}
+              >
+                <X size={12} strokeWidth={2.2} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div
@@ -1138,13 +1196,10 @@ export function HistoryView() {
                 count={section.items.length}
                 // A scoped list is one project the user asked to see; a fold
                 // left over from browsing would hide exactly that.
-                collapsed={!scopedWorkspace && collapsedWorkspaces.includes(section.key)}
+                collapsed={!scopedPath && collapsedWorkspaces.includes(section.key)}
                 onToggle={toggleWorkspaceCollapsed}
                 onFocus={groupMode === "workspace" ? toggleWorkspaceFocus : undefined}
-                focused={
-                  scopedWorkspace != null &&
-                  scopedWorkspace.toLowerCase() === section.name.toLowerCase()
-                }
+                focused={scopedPath === section.key}
               >
                 <SessionRail
                   items={section.items}

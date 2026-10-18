@@ -82,7 +82,8 @@ const ALL_KEYS = [
   // Launchpad (HistoryView) rail filters — the search box is deliberately absent,
   // it stays in-memory only.
   "history-mark-filter",
-  "history-workspace-filter",
+  // The rail's project scope ("all" or a repo root path).
+  "history-project-scope",
   "history-group-handoff",
   "lobster-fleet-enabled",
   // Task-rail workspace sections the reader has folded shut, as a JSON array of
