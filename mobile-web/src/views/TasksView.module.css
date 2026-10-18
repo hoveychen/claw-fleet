@@ -216,31 +216,48 @@
   opacity: 1;
 }
 
-/* Workspace scope set by a `ws:` token / a heading's focus button. */
+/* Project scope: a native select styled as a quiet pill, plus an × once set. */
 .scopeRow {
   display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
-.scopeChip {
+.scopeSelectWrap {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  padding: 4px 4px 4px 10px;
-  border-radius: 999px;
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--color-text-secondary);
   font-size: var(--t-aux, 12px);
   font-weight: 600;
 }
 
-.scopeName {
+.scopeSelectWrap[data-on="true"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* The select carries the label itself so the native picker opens on a tap
+   anywhere on the pill; its own chrome is stripped. */
+.scopeSelect {
+  appearance: none;
+  -webkit-appearance: none;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
 }
 
 .scopeClear {

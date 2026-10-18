@@ -66,7 +66,7 @@ describe("launchpad rail filters", () => {
 
     useUIStore.getState().setHistoryWorkspaceFilter("/Users/x/workspace/maliang");
 
-    expect(getItem("history-workspace-filter")).toBe("/Users/x/workspace/maliang");
+    expect(getItem("history-project-scope")).toBe("/Users/x/workspace/maliang");
   });
 
   it("keeps the search box out of the settings store", async () => {
