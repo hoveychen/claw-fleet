@@ -1049,6 +1049,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         compact_cost_usd: 0.0,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        waited_by: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
         out_of_credits: None,

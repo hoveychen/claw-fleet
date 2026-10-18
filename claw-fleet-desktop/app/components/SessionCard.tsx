@@ -4,7 +4,7 @@ import { CreditCard, FileWarning, Play, Server, ServerOff } from "lucide-react";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
-import { WatchStatusRow } from "./WatchStatusRow";
+import { WaitedByRow, WatchStatusRow } from "./WatchStatusRow";
 import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 import { isKeyboardActivationKey } from "../keyboard";
@@ -920,6 +920,9 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
       {session.watches && session.watches.length > 0 && (
         <WatchStatusRow session={session} />
       )}
+
+      {/* Sessions waiting on this one (`fleet watch --sessions`) */}
+      {session.waitedBy && session.waitedBy.length > 0 && <WaitedByRow session={session} />}
 
       {/* Footer row */}
       <div className={styles.footer}>

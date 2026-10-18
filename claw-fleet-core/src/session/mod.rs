@@ -310,6 +310,11 @@ pub struct SessionInfo {
     /// waiting session's jsonl doesn't.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub watches: Vec<crate::watch::WatchSummary>,
+    /// The reverse of `watches`: the session watches (`fleet watch
+    /// --sessions`) other sessions hold on this one — what makes the card say
+    /// "waited on by N sessions". Stamped by `watch::enrich_sessions` too.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub waited_by: Vec<crate::watch::WaitedBy>,
     /// Set when this session's remote workspace lost its transport mid-run and
     /// Fleet stopped the agent (see [`crate::remote_disconnect`]). `None` for
     /// every local session and every healthy remote one. Carries the reason,
@@ -801,6 +806,7 @@ mod tests {
             compact_cost_usd: 0.0,
             pending_messages: Vec::new(),
             watches: Vec::new(),
+            waited_by: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,

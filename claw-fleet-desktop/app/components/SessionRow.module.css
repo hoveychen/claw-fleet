@@ -192,6 +192,13 @@
   color: var(--color-warning);
 }
 
+/* Other sessions are waiting on this one (`fleet watch --sessions`). Warning
+   colour: someone's turn is blocked until this session finishes. */
+.row_waited_by {
+  composes: row_handoff;
+  color: var(--color-warning);
+}
+
 /* Live elapsed run time (clock icon + "5分钟"). Stays dim — the status dot
    beside the title already carries the busy/waiting colour. */
 .row_runtime {

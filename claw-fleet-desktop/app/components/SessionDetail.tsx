@@ -32,7 +32,7 @@ import { currentViewMetrics, formatSnapshot, takeScrollSnapshot } from "../scrol
 import { AgentNavProvider } from "./AgentNavContext";
 import { HandoffChainRow } from "./HandoffChainRow";
 import { PlanProgressRow } from "./PlanProgressRow";
-import { WatchStatusRow } from "./WatchStatusRow";
+import { WaitedByRow, WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { ApiErrorContext } from "./blocks/ApiErrorActions";
 import type { PathLinkContext } from "../markdown/pathLinks";
@@ -1901,6 +1901,9 @@ export function SessionDetail({
                     {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
                     {liveSession.watches && liveSession.watches.length > 0 && (
                       <WatchStatusRow session={liveSession} inline />
+                    )}
+                    {liveSession.waitedBy && liveSession.waitedBy.length > 0 && (
+                      <WaitedByRow session={liveSession} inline />
                     )}
                     {/* Reveals the numeric chips above. Sits last so the identity run
                         reads uninterrupted and the control lands at the row's end. */}

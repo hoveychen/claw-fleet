@@ -162,6 +162,7 @@ fn build_bundle() -> String {
         claw_fleet_core::plan_forest::PlanForest,
         claw_fleet_core::watch::WatchSummary,
         claw_fleet_core::watch::WatchTarget,
+        claw_fleet_core::watch::WaitedBy,
         claw_fleet_core::watch::WaitMode,
         claw_fleet_core::session_probe::Phase,
         claw_fleet_core::live_thinking::LiveThinking,

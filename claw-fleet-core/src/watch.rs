@@ -963,8 +963,9 @@ pub struct WatchSummary {
     /// what the waiter's card lists. Empty for a shell-condition watch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<WatchTarget>,
-    #[serde(default)]
-    pub wait_mode: WaitMode,
+    /// `all` / `any` — only for a target watch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_mode: Option<WaitMode>,
 }
 
 impl From<&WatchRecord> for WatchSummary {
@@ -983,21 +984,65 @@ impl From<&WatchRecord> for WatchSummary {
             progress_fraction: r.progress.as_deref().and_then(parse_progress_fraction),
             progress_changed_at: r.progress_changed_at,
             targets: r.targets.clone(),
-            wait_mode: r.wait_mode,
+            wait_mode: r.is_target_watch().then_some(r.wait_mode),
         }
     }
 }
 
-/// Session-id → its active watches. Built once per scanner pass so per-session
-/// enrichment stays O(1). A session almost always has zero or one watch.
-fn session_watch_index_in(dir: &Path) -> std::collections::HashMap<String, Vec<WatchSummary>> {
-    let mut map: std::collections::HashMap<String, Vec<WatchSummary>> = Default::default();
+/// The reverse edge of a target watch, stamped on the session being waited
+/// on: which session waits for it, through which watch. The waited-on card
+/// reads "waited on by N sessions" from these.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct WaitedBy {
+    /// The waiting session — the one the watch will resume.
+    pub session_id: String,
+    pub watch_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// dsh ids are `session-<uuid>` in some registries and bare elsewhere; compare
+/// them on the uuid.
+fn id_key(id: &str) -> &str {
+    id.strip_prefix("session-").unwrap_or(id)
+}
+
+#[derive(Default)]
+struct WatchIndex {
+    /// Waiter session id → its active watches.
+    by_waiter: std::collections::HashMap<String, Vec<WatchSummary>>,
+    /// Waited-on session id (normalised by [`id_key`]) → who waits on it. A
+    /// target is indexed under both its registered id and its chain's live
+    /// end, so the waited-on mark follows a handoff to the successor's card.
+    by_target: std::collections::HashMap<String, Vec<WaitedBy>>,
+}
+
+/// Built once per scanner pass so per-session enrichment stays O(1). A session
+/// almost always has zero or one watch and is waited on by nobody.
+fn session_watch_index_in(dir: &Path) -> WatchIndex {
+    let mut idx = WatchIndex::default();
     for rec in list_in(dir) {
-        map.entry(rec.session_id.clone())
+        for t in &rec.targets {
+            let edge = WaitedBy {
+                session_id: rec.session_id.clone(),
+                watch_id: rec.id.clone(),
+                note: rec.note.clone(),
+            };
+            for id in std::iter::once(&t.id).chain(t.effective_id.as_ref()) {
+                let list = idx.by_target.entry(id_key(id).to_string()).or_default();
+                if !list.contains(&edge) {
+                    list.push(edge.clone());
+                }
+            }
+        }
+        idx.by_waiter
+            .entry(rec.session_id.clone())
             .or_default()
             .push(WatchSummary::from(&rec));
     }
-    map
+    idx
 }
 
 /// Stamp active-watch summaries onto scanned sessions. Called at scan-aggregation
@@ -1023,11 +1068,14 @@ pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
 
 pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::SessionInfo]) {
     let idx = session_watch_index_in(dir);
-    if idx.is_empty() {
+    if idx.by_waiter.is_empty() {
         return;
     }
     for s in sessions.iter_mut() {
-        if let Some(w) = idx.get(&s.id) {
+        if let Some(edges) = idx.by_target.get(id_key(&s.id)) {
+            s.waited_by = edges.clone();
+        }
+        if let Some(w) = idx.by_waiter.get(&s.id) {
             s.watches = w.clone();
             if watch_status_applies(s) {
                 s.status = crate::session::SessionStatus::Watching;
@@ -2829,7 +2877,6 @@ mod tests {
 
     // ── P3: heartbeat + reconcile ──────────────────────────────────────────────
 
-    #[test]
     /// The core of the registration gate: a command the shell cannot run is
     /// rejected outright. Before this, `watch --until 'ghh run view 1'` armed a
     /// timer that polled 127 for two hours and then reported "condition not met",
@@ -3005,6 +3052,40 @@ mod tests {
             sessions[2].watches.is_empty(),
             "a session with no watch is left empty"
         );
+    }
+
+    /// The reverse edge: a target watch marks every session it waits on — by
+    /// registered id and by chain end, dsh ids matched with or without their
+    /// `session-` prefix — and nobody else.
+    #[test]
+    fn enrich_stamps_waited_by_onto_targets_and_their_chain_ends() {
+        let d = dir();
+        let mut chained = WatchTarget::new("hop-1", 1_000);
+        chained.effective_id = Some("hop-2".into());
+        let targets = vec![chained, WatchTarget::new("session-dsh-uuid", 1_000)];
+        insert_in(
+            d.path(), "waiter", "/ws", "", targets, WaitMode::Any, None, Some("both"), 30, 60,
+            None, None, None, "w1", 1_000,
+        )
+        .unwrap();
+
+        let mk = |id: &str| {
+            let mut s = crate::session::SessionInfo::default();
+            s.id = id.to_string();
+            s
+        };
+        let mut sessions = vec![mk("hop-1"), mk("hop-2"), mk("dsh-uuid"), mk("waiter"), mk("other")];
+        enrich_sessions_in(d.path(), &mut sessions);
+
+        for s in &sessions[..3] {
+            assert_eq!(s.waited_by.len(), 1, "{} must be marked", s.id);
+            assert_eq!(s.waited_by[0].session_id, "waiter");
+            assert_eq!(s.waited_by[0].watch_id, "w1");
+            assert_eq!(s.waited_by[0].note.as_deref(), Some("both"));
+        }
+        assert!(sessions[3].waited_by.is_empty());
+        assert_eq!(sessions[3].watches[0].targets.len(), 2);
+        assert!(sessions[4].waited_by.is_empty());
     }
 
     /// The status override: a parked session (`Idle`/`WaitingInput`, no process)

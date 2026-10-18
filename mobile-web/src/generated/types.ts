@@ -71,6 +71,7 @@ compactPostTokens: number,
 compactCostUsd: number, 
 pendingMessages: Array<string>, 
 watches?: Array<WatchSummary>, 
+waitedBy?: Array<WaitedBy>, 
 remoteDisconnect?: RemoteDisconnect | null, 
 mirrorWrite?: MirrorWrite | null, 
 outOfCredits?: string | null, };
@@ -381,7 +382,8 @@ expectBy?: number | null,
 progress?: string | null, 
 progressFraction?: number | null, 
 progressChangedAt?: number | null, 
-targets?: Array<WatchTarget>, waitMode: WaitMode, };
+targets?: Array<WatchTarget>, 
+waitMode?: WaitMode | null, };
 
 export type WatchTarget = { 
 id: string, 
@@ -391,6 +393,9 @@ phase?: Phase | null,
 detail?: string, 
 phaseSince?: number | null, 
 addedAt: number, };
+
+export type WaitedBy = { 
+sessionId: string, watchId: string, note?: string | null, };
 
 export type WaitMode = "all" | "any";
 

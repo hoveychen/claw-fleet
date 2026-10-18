@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, ChevronRight, Clock, FolderGit2, MessageCircleQuestion, Radar, Waypoints } from "lucide-react";
+import { Bot, ChevronRight, Clock, FolderGit2, Hourglass, MessageCircleQuestion, Radar, Waypoints } from "lucide-react";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isQuietAlive, isQuietAliveSticky, rowBarColor } from "../types";
 import { pendingDecisionState } from "../pendingDecisionState";
@@ -259,6 +259,33 @@ export const SessionRow = memo(function SessionRow({
               </span>
             )}
             {s.watches?.map((w) => {
+              if (w.targets && w.targets.length > 0) {
+                // A session watch: how many of the awaited sessions are done.
+                // The row is a button, so the targets themselves are listed in
+                // the tooltip and are clickable only in the detail header.
+                const done = w.targets.filter((x) => x.phase === "done").length;
+                const failed = w.targets.some((x) => x.phase === "failed");
+                return (
+                  <span
+                    key={w.id}
+                    className={failed ? styles.row_watch_stalled : styles.row_watch}
+                    title={[
+                      w.note ?? undefined,
+                      ...w.targets.map(
+                        (x) =>
+                          `${(x.effectiveId ?? x.id).replace(/^session-/, "").slice(0, 8)} · ${t(`card.watch_phase_${x.phase ?? "unknown"}`)}`,
+                      ),
+                    ]
+                      .filter(Boolean)
+                      .join("\n")}
+                  >
+                    <Radar size={10} strokeWidth={1.6} />
+                    <span className={styles.row_watch_text}>
+                      {done}/{w.targets.length}
+                    </span>
+                  </span>
+                );
+              }
               const pv = watchProgressView(w, Date.now());
               const ring = watchRing(pv);
               // A percentage, the status line, or elapsed against the expected
@@ -306,6 +333,17 @@ export const SessionRow = memo(function SessionRow({
                 </span>
               );
             })}
+            {s.waitedBy && s.waitedBy.length > 0 && (
+              <span
+                className={styles.row_waited_by}
+                title={s.waitedBy
+                  .map((e) => `${e.sessionId.slice(0, 8)}${e.note ? ` — ${e.note}` : ""}`)
+                  .join("\n")}
+              >
+                <Hourglass size={10} strokeWidth={1.6} />
+                {t("card.waited_by_chip", { count: new Set(s.waitedBy.map((e) => e.sessionId)).size })}
+              </span>
+            )}
             {(LIVE_STATUSES.has(s.status) || quiet) && (
               <span
                 className={styles.row_runtime}

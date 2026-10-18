@@ -4785,6 +4785,7 @@ mod tests {
             todos: None,
             background_tasks: Vec::new(),
             watches: Vec::new(),
+            waited_by: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
