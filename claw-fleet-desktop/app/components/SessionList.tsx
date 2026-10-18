@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Folder, Settings, SquareCheckBig } from "lucide-react";
+import { FileText, Folder, History, Settings, SquareCheckBig } from "lucide-react";
 import { openSettings, runningProcTotal, useAuditStore, useDecisionStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import type { SessionsFrame } from "../../../shared-ts/sessionsFrame";
@@ -181,16 +181,25 @@ export function SessionList() {
               )
             }
           />
+          {/* Secondary entry beside Settings: the daily review. A fresh one
+              dots it, as the daily report's entry used to. */}
+          <NavEntry
+            icon={<History size={18} strokeWidth={1.6} />}
+            label={t("nav_section_review", "回顾")}
+            active={!settingsOpen && current === "review"}
+            onClick={() => goSection("review")}
+            badge={hasNewReport && <span className={styles.nav_dot} />}
+          />
           <NavEntry
             icon={<Settings size={18} strokeWidth={1.6} />}
             label={t("nav_section_settings", "设置")}
             active={settingsOpen || current === "settings"}
             onClick={openSettings}
-            // An unread critical audit event or a fresh daily report used to
-            // badge its own nav item; those pages now live under Settings, so
-            // the nudge rides on its entry — a dot, since a red count reads as
-            // an error rather than a nudge.
-            badge={(unreadCriticalCount > 0 || hasNewReport) && <span className={styles.nav_dot} />}
+            // An unread critical audit event used to badge its own nav item;
+            // that page now lives under Settings, so the nudge rides on its
+            // entry — a dot, since a red count reads as an error rather than
+            // a nudge.
+            badge={unreadCriticalCount > 0 && <span className={styles.nav_dot} />}
           />
         </nav>
 

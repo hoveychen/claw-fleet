@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_NAV_SECTIONS,
   NAV_HOME,
   NAV_SECTIONS,
   NAV_SECTION_VIEWS,
@@ -21,7 +22,7 @@ describe("nav sections", () => {
   });
 
   it("assigns every view mode to exactly one section", () => {
-    const listed = NAV_SECTIONS.flatMap((s) => NAV_SECTION_VIEWS[s]);
+    const listed = ALL_NAV_SECTIONS.flatMap((s) => NAV_SECTION_VIEWS[s]);
     expect(new Set(listed).size).toBe(listed.length);
     expect([...listed].sort()).toEqual([...ALL_VIEW_MODES].sort());
   });
@@ -33,6 +34,8 @@ describe("nav sections", () => {
       expect(navSectionOf(v)).toBe("projects");
     }
     expect(navSectionOf("lobsters")).toBe("settings");
+    // The daily review is its own secondary entry beside Settings.
+    expect(navSectionOf("report")).toBe("review");
   });
 
   it("lands home on the task page", () => {
@@ -55,7 +58,7 @@ describe("nav sections", () => {
 
   it("folds plugins into the Skills segment and never offers the lobster fleet", () => {
     const avail = { terminal: true, mobile: true, lobsters: true };
-    expect(navSectionTabs("settings", avail)).toEqual(["audit", "report", "skills", "mobile"]);
+    expect(navSectionTabs("settings", avail)).toEqual(["audit", "skills", "mobile"]);
     expect(navTabOf("plugins")).toBe("skills");
     expect(navTabOf("audit")).toBe("audit");
   });

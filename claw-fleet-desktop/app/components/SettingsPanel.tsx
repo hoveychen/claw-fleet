@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { REPORT_AUTO_POPUP_KEY, useAuditStore, useReportStore, useUIStore, type ViewMode } from "../store";
+import { REPORT_AUTO_POPUP_KEY, useAuditStore, useUIStore, type ViewMode } from "../store";
 import { ChevronRight } from "lucide-react";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { useKeepAwake } from "../hooks/useKeepAwake";
@@ -183,7 +183,6 @@ function TriStateSkeleton() {
  *  below the everyday tabs: each row closes the overlay and opens its page. */
 function MenuPageLinks({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const hasNewReport = useReportStore((s) => s.hasNewReport);
   const avail = useNavAvailability();
   const open = (view: ViewMode, prep?: () => void) => {
     onClose();
@@ -195,7 +194,6 @@ function MenuPageLinks({ onClose }: { onClose: () => void }) {
     ...(avail.mobile
       ? [{ key: "mobile", label: t("settings.page_devices", "设备"), onClick: () => open("mobile") }]
       : []),
-    { key: "report", label: t("nav_tab_report", "日报"), dot: hasNewReport, onClick: () => open("report") },
     {
       key: "memory",
       label: t("settings.page_global_memory", "全局记忆"),
