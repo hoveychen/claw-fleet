@@ -1086,88 +1086,27 @@
   },
   "onboarding": {
     "welcome": "Welcome to Claw Fleet",
-    "subtitle": "Monitor your AI coding agents, get daily AI summaries, and turn mistakes into knowledge",
+    "subtitle": "One idea, one task. It does the work and comes to you only when it needs your call.",
     "checking": "Checking setup...",
     "check_timeout": {
       "title": "Environment check timed out",
       "description": "Detection hasn't returned yet, but nothing is blocked — start right away, or retry."
     },
-    "dismiss": "Got it, let's go",
+    "dismiss": "Look around first",
     "recheck": "Re-check",
-    "no_claude_at_all": {
-      "title": "Claude Code not detected",
-      "description": "Claw Fleet monitors AI agent tasks. No Claude Code CLI, IDE extension, or prior tasks were found on this machine.",
-      "install_vscode": "Install VS Code extension",
-      "install_vscode_hint": "Search for \"Claude Code\" in the VS Code Extensions marketplace, or install via the Anthropic website."
-    },
-    "cli_not_installed": {
-      "install_npm": "Install CLI via npm",
-      "install_npm_cmd": "npm install -g @anthropic-ai/claude-code",
-      "install_brew": "Install CLI via Homebrew (macOS)",
-      "install_brew_cmd": "brew install claude-code",
-      "after_install": "After installation, restart Claw Fleet or click Re-check."
-    },
-    "cli_not_in_path": {
-      "title": "CLI not in PATH (optional)",
-      "description": "Claude Code is working via your IDE extension. The standalone CLI binary was not found in your PATH, but this is completely fine.",
-      "optional_hint": "Installing the standalone CLI is optional — it gives you terminal access to Claude Code but won't affect task monitoring."
-    },
-    "not_logged_in": {
-      "title": "Not logged in to Claude",
-      "description": "Claw Fleet needs your Claude credentials to display account info and usage. Choose your tool below for login instructions.",
-      "api_key": "Using an API key?",
-      "api_key_hint": "If you use an API key instead of OAuth, account info won't be available, but task monitoring still works."
-    },
-    "login_tabs": {
-      "detected": "detected",
-      "cli": {
-        "label": "CLI",
-        "hint": "Run this in your terminal to authenticate:",
-        "browser": "This will open a browser window to log in with your Anthropic account."
-      },
-      "vscode": {
-        "label": "VS Code",
-        "step1": "1. Open VS Code with the Claude Code extension installed.",
-        "step2": "2. Open the Claude Code sidebar panel (or Cmd+Shift+P > \"Claude Code: Open\").",
-        "step3": "3. Follow the sign-in prompt — it will open your browser to authenticate."
-      },
-      "jetbrains": {
-        "label": "JetBrains",
-        "step1": "1. Open your JetBrains IDE with the Claude Code plugin installed.",
-        "step2": "2. Open the Claude Code tool window and follow the sign-in prompt."
-      },
-      "desktop": {
-        "label": "Desktop",
-        "step1": "1. Open the Claude Desktop app.",
-        "step2": "2. Sign in with your Anthropic account when prompted."
-      }
-    },
     "celebration": {
-      "title": "First task detected!",
-      "description": "Congratulations! Claw Fleet is now monitoring your tasks. Enjoy the dashboard!"
+      "title": "Your first task is here!",
+      "description": "It is in the task column on the home page. When it needs your call, a card pins to the bottom of its conversation; once it delivers, it moves to \"To accept\"."
     },
     "sources": {
       "title": "Agent Sources",
-      "description": "Multiple AI agent tools detected on your system. Choose which ones to monitor.",
+      "description": "More than one agent tool is installed here. Pick the ones Fleet should read and start tasks with.",
       "detected": "detected",
       "not_detected": "not detected"
     },
     "whats_new": {
-      "title": "What's New",
-      "subtitle": "Claw Fleet has new features since your last visit. Take a moment to configure them."
-    },
-    "all_good": {
-      "title": "All set!",
-      "description": "Claude Code is installed, you're logged in, and tasks are being monitored."
-    },
-    "ready": {
-      "title": "You're all set!",
-      "description": "Environment checks passed. Start Claude Code in any project directory and Fleet will pick it up automatically."
-    },
-    "features": {
-      "attention_title": "Daily “needs your judgment” digest",
-      "live_status_title": "Live Status Dashboard",
-      "audit_title": "Security Audit"
+      "title": "Fleet has a new look",
+      "subtitle": "Home is every task across all projects, with whatever needs you on top. Here is what changed, plus a few switches worth setting while you are here."
     },
     "advanced": {
       "title": "Advanced settings",
@@ -1179,7 +1118,7 @@
     },
     "settings_notif": {
       "title": "Notifications & Assistant",
-      "description": "Configure how you get notified when agents are waiting, and set your floating assistant preferences. You can change these later in Settings.",
+      "description": "Configure how you get notified when a task needs you, and set your floating assistant preferences. You can change these later in Settings.",
       "mascot_title": "Assistant",
       "sound_title": "Alert Sound"
     },
@@ -1214,22 +1153,31 @@
     },
     "wiki_guidance": {
       "title": "New: Docs",
-      "description": "Agents' HTML reports, demos and markdown docs get archived into shared Docs (~/.fleet/wiki) via `fleet wiki publish` and browsed in Docs with version history. This toggle injects a short guidance block into ~/.claude/CLAUDE.md so agents publish finished artifacts there automatically."
+      "description": "Agents' HTML reports, demos and markdown docs get archived into shared Docs (~/.fleet/wiki) via `fleet wiki publish` and browsed in Library with version history. This toggle injects a short guidance block into ~/.claude/CLAUDE.md so agents publish finished artifacts there automatically."
     },
     "skill_interop": {
       "title": "New: automatic skill interop",
       "description": "Detected both Claude Code and Codex. Turn on to keep your two skill folders in sync automatically: a skill dropped into one is adopted and mirrored to the other, and a skill deleted from one is removed from both. Off by default because deletion propagates.",
       "toggle_hint": "Watches ~/.claude/skills and ~/.agents/skills. Deleting a skill from either side removes it from both."
     },
-    "copy_hint": "Click to copy",
     "env_setup": {
       "title": "A few setup steps left",
       "description": "Fleet can install and log in what’s missing for you — just use the buttons below, no terminal needed."
     },
-    "nav_sections": {
-      "title": "New: the nav is down to four entries",
-      "description": "The icon rail on the left is now Tasks / Library / Projects / Review / Settings. Library holds docs and deliverables; Projects holds each project's routines, memory and code; Review sums up each day's progress by project; security, plugins & skills and devices live under Settings.",
-      "hint": "Home is every task across all projects. A new review puts a red dot on Review; an unread critical audit event puts one on Settings."
+    "new_form": {
+      "title": "New: one idea, one task",
+      "description": "The left column of the home page is every task in every project, grouped into Needs you / Running / Waiting / To accept, each row saying what it is doing right now. Select a task and its conversation fills the middle; when it needs your call, the card pins to the bottom of the conversation: number keys pick, ⌘↵ submits, and answering moves on to the next one. The right rail holds its subtasks, steps and material.",
+      "hint": "\"What should get done?\" at the top starts a task any time (⌘N). The nav is Tasks / Library / Projects / Review / Settings: Library holds docs and deliverables, Projects holds each project's routines, memory and code, and Review sums up each day's progress by project.",
+      "screenshot_alt": "The new home: task column on the left, conversation in the middle, steps and material on the right"
+    },
+    "launch": {
+      "title": "What should get done?",
+      "description": "Write down an idea and pick the project it belongs to; Fleet opens a task and gets on with it. Whenever it needs your call, the card shows up at the top of the home page.",
+      "start": "Start",
+      "projects_label": "Project (recently active directories)",
+      "projects_loading": "Looking for directories you've worked in…",
+      "projects_empty": "No recent directories yet. Press Enter and pick one in the new task.",
+      "choose_later": "Choose later"
     }
   },
   "mascot": {
@@ -1734,8 +1682,8 @@
     "next": "Next",
     "done": "Got it",
     "new_session": {
-      "title": "Start a task here",
-      "desc": "This is the Tasks page — click \"New Task\" at the top of the task rail, pick a project, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by project."
+      "title": "Start here",
+      "desc": "This box at the top of the home page is where work starts: write what should get done, press Enter, pick a project and it is underway. ⌘N brings you back any time. Every task is in the column below, with whatever needs you on top."
     }
   },
   "sidebar": {

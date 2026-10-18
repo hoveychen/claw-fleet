@@ -125,9 +125,11 @@ const ALL_KEYS = [
 // Each ID represents a configurable feature card in onboarding.
 // Adding a new ID here will trigger a "What's New" overlay for existing users.
 export const ONBOARDING_FEATURES = [
-  // Not a toggle like the rest — it tells upgrading users the nav is now four
-  // entries (Tasks / Library / Projects / Settings) and where each page went.
-  "nav_sections",
+  // Not a toggle like the rest — it introduces the new form to upgrading users:
+  // the home page is every task across projects, cards pin to the bottom of
+  // the task, and the nav is Tasks / Library / Projects / Review / Settings.
+  // (Replaces "nav_sections", which only described the nav.)
+  "new_form",
   "appearance",
   "notifications",
   "hooks_guard_elicitation",

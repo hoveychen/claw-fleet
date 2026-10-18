@@ -255,10 +255,14 @@ function App() {
     }
   }, [theme]);
 
-  const finishOnboarding = useCallback(() => {
+  const finishOnboarding = useCallback((launched?: boolean) => {
     setOnboardingMode(null);
     setItem(ONBOARDING_DISMISSED_KEY, "1");
-    if (!getItem(WIZARD_COMPLETED_KEY)) {
+    // The wizard points at the "What should get done?" box. Someone who just
+    // used it from onboarding has nothing left to be shown.
+    if (launched) {
+      setItem(WIZARD_COMPLETED_KEY, "1");
+    } else if (!getItem(WIZARD_COMPLETED_KEY)) {
       setShowWizard(true);
     }
   }, []);
