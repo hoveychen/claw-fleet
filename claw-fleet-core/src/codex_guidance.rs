@@ -432,6 +432,8 @@ question. The one exception stays the session-end exemption below.\n\
 \n\
 {explain_marks}\n\
 \n\
+{task_roles}\n\
+\n\
 ### Deferred-tool wait invariant\n\
 \n\
 Codex may execute this deferred MCP call inside its outer code-mode `exec`. \
@@ -510,6 +512,8 @@ done, user abandoned it\" is its strongest signal.\n\
 ABANDONED` (the terminal button), or {title} says in free text that you are \
 done (\"收工\", \"done\"), end with a one-line plain-text \
 acknowledgement instead of another card.\n\
+- **Sub-task exemption:** when the per-turn injection says \"你的角色：子任务\", end the turn \
+with your result as plain text and no card, unless {title} has a call to make.\n\
 - **Handoff-registered exemption:** once `fleet handoff` has returned `ok` this \
 turn, raise NO card — not even a decision-free wrap-up. The relay fires when \
 the turn *ends*, and a card holds the turn open waiting for a click, so the \
@@ -532,6 +536,7 @@ toolset this turn (rare), respond with plain text as normal.",
         // English-only block, and the compact rendering: the full section left
         // AGENTS.md 264 bytes under its 32 KiB ceiling (see that function's doc).
         explain_marks = crate::explain_marks_guidance::render_explain_marks_section_compact(&title),
+        task_roles = crate::task_roles_guidance::render_section_compact(&title),
     )
 }
 
@@ -1228,14 +1233,17 @@ mod tests {
         // AGENTS.md has a 32 KiB (project_doc_max_bytes) limit; all four blocks
         // plus markers must stay comfortably under it. Raised from 30_000 to
         // 31_000 when the Sonnet 5.5 row landed at 30_014; that still leaves
-        // ~1.7 KiB of headroom below the hard limit.
+        // ~1.7 KiB of headroom below the hard limit. Raised to 32_000 when the
+        // task-roles section landed at 31_552: the blocks now reach codex as
+        // `developer_instructions` (see `launch_guidance_path`), not through
+        // AGENTS.md, so 32 KiB is a size guard rather than a hard cut-off.
         let prd = render_codex_prd_block("老板", "zh");
         let ix = render_codex_interaction_block("老板", "zh");
         let wiki = render_codex_wiki_block("zh");
         let model = render_codex_model_block("zh");
         let total = prd.len() + ix.len() + wiki.len() + model.len();
         assert!(
-            total < 31_000,
+            total < 32_000,
             "prd+interaction+wiki+model = {total} must stay well under 32 KiB \
 (prd {}, ix {}, wiki {}, model {})",
             prd.len(),

@@ -175,7 +175,7 @@ const REMINDER_ACTION: &str = "现在只需做一件事：把上一轮的结论�
 pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationRequest {
     let body = last_text.trim();
     let question = if body.is_empty() {
-        "任务已结束，但会话没有留下可展示的结论。".to_string()
+        "任务已结束，但没有留下可展示的结论。".to_string()
     } else {
         format!("任务已完成：\n\n{body}")
     };
@@ -191,12 +191,12 @@ pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationReq
             options: vec![
                 ElicitationOption {
                     label: "收到".into(),
-                    description: "确认收到，并提醒会话下次用决策卡汇报".into(),
+                    description: "确认收到，并提醒它下次用决策卡汇报".into(),
                     preview: None,
                 },
                 ElicitationOption {
                     label: "继续".into(),
-                    description: "收到并让会话继续推进".into(),
+                    description: "收到并让它继续推进".into(),
                     preview: None,
                 },
             ],
@@ -238,6 +238,12 @@ pub fn maybe_raise(
     since_epoch_ms: u64,
 ) -> Result<Option<String>, String> {
     if !is_task_session(session) {
+        return Ok(None);
+    }
+    // Only a task's main conversation reports to the boss. A sub-task's final
+    // reply is its report to that conversation, which collects it through a
+    // session watch; a card here would put it in the boss's inbox instead.
+    if session.parent_task_id.is_some() {
         return Ok(None);
     }
     // A live process at WaitingInput means "parked on a decision card", not
@@ -493,6 +499,14 @@ mod tests {
             let chat = session(&chat.to_string_lossy());
             assert!(matches!(maybe_raise(&chat, "done", 0), Ok(None)));
         }
+    }
+
+    #[test]
+    fn maybe_raise_skips_sub_tasks() {
+        // Returns before any disk read, so no FLEET_HOME lock is needed.
+        let mut sub = session("/definitely/not/chat/project");
+        sub.parent_task_id = Some("main-1".into());
+        assert!(matches!(maybe_raise(&sub, "done", 0), Ok(None)));
     }
 
     #[test]

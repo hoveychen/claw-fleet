@@ -67,12 +67,12 @@ const WEEK_MS: u64 = 7 * 24 * 3600 * 1000;
 const WITHDRAWN_SNOOZE_MS: u64 = 24 * 3600 * 1000;
 
 // Card labels. Product copy (Chinese), matched back on answer.
-const OPT_REVIVE: &str = "起新会话继续";
-const OPT_RETRY: &str = "再唤醒一次";
-const OPT_WEEK: &str = "静默 7 天";
-const OPT_FOREVER: &str = "别再管这个计划";
-const OPT_RESUME: &str = "登录已修好，恢复唤醒";
-const OPT_TURN_OFF: &str = "关闭自动唤醒";
+const OPT_REVIVE: &str = "接着做";
+const OPT_RETRY: &str = "再试一次";
+const OPT_WEEK: &str = "7 天内别管";
+const OPT_FOREVER: &str = "别再管这件事";
+const OPT_RESUME: &str = "登录已修好，恢复";
+const OPT_TURN_OFF: &str = "关闭自动接续";
 
 /// Claude Code's `error` tag on the synthetic turn it writes when a request is
 /// refused for the account rather than the request: nothing a fresh session
@@ -870,6 +870,21 @@ fn plan_label(view: &PlanView) -> String {
     }
 }
 
+/// The plan as the boss knows it on a card: its title, else its id, with no
+/// markup — cards speak of tasks and steps, not plan ids.
+fn card_label(view: &PlanView) -> String {
+    view.title.clone().unwrap_or_else(|| view.plan_id.clone())
+}
+
+/// A step's text without its `**P3** — ` label.
+fn step_text(task: &str) -> &str {
+    let t = task.trim();
+    match t.strip_prefix("**P").and_then(|r| r.split_once("** — ")) {
+        Some((n, rest)) if n.chars().all(|c| c.is_ascii_digit()) => rest,
+        _ => t,
+    }
+}
+
 fn workspace_label(ws: &str) -> String {
     Path::new(ws)
         .file_name()
@@ -1197,9 +1212,9 @@ pub fn continue_after_finish(session_id: &str) {
 
 fn build_pause_card(pause: &RevivePause) -> ElicitationRequest {
     let question = format!(
-        "唤醒会话一启动就鉴权失败，Fleet 已暂停自动唤醒。\n---\n\
-         刚起的唤醒会话 `{sid}` 第一条请求就被拒：{reason}\n\n\
-         这是账号层面的问题，再起多少个会话都会死在同一处，所以 Fleet 停下了所有计划的自动唤醒；\
+        "自动接续的任务一启动就鉴权失败，Fleet 已暂停自动接续。\n---\n\
+         刚接着做的 `{sid}` 第一条请求就被拒：{reason}\n\n\
+         这是账号层面的问题，再试多少次都会死在同一处，所以 Fleet 停下了所有任务的自动接续；\
          这次失败不算进「连续 3 次没推进」。\n\n\
          登录修好后要恢复吗？",
         sid = pause.session_id,
@@ -1209,20 +1224,20 @@ fn build_pause_card(pause: &RevivePause) -> ElicitationRequest {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: pause.session_id.clone(),
         workspace_name: "Fleet".to_string(),
-        ai_title: Some("计划自动唤醒已暂停".to_string()),
+        ai_title: Some("自动接续已暂停".to_string()),
         task: None,
         questions: vec![ElicitationQuestion {
             question,
-            header: "唤醒已暂停".to_string(),
+            header: "接续已暂停".to_string(),
             options: vec![
                 ElicitationOption {
                     label: OPT_RESUME.into(),
-                    description: "解除暂停，没人负责的计划照常在 30 分钟后起新会话".into(),
+                    description: "解除暂停，没人推进的任务照常在 30 分钟后自动接着做".into(),
                     preview: None,
                 },
                 ElicitationOption {
                     label: OPT_TURN_OFF.into(),
-                    description: "关掉设置里的计划自动唤醒，要用时再手动打开".into(),
+                    description: "关掉设置里的自动接续，要用时再手动打开".into(),
                     preview: None,
                 },
             ],
@@ -1298,64 +1313,57 @@ fn tick_pause(state: &mut StateFile, now: u64, transcript: &dyn Fn(&str) -> Opti
 
 fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
     let pending = view.total.saturating_sub(view.done);
-    let next = view.next_task.as_deref().unwrap_or("—");
+    let next = view.next_task.as_deref().map(step_text).unwrap_or("—");
     let (header, question, first) = match kind {
         AskKind::BossClosed => (
-            "计划唤醒",
+            "任务接续",
             format!(
-                "计划 {label} 还剩 {pending} 个 P 没做，要起新会话接着干吗？\n---\n\
-                 你之前已经收掉了负责它的会话（按了「结束任务」或标了「已完成」），所以 Fleet 没有自动唤醒，先来问你。\n\n\
-                 - 进度：{done}/{total}，下一个：{next}\n\
-                 - 上一个会话：`{owner}`\n\n\
-                 要让新会话接手吗？",
-                label = plan_label(view),
+                "「{label}」还剩 {pending} 步没做，要接着做吗？\n---\n\
+                 你之前已经收掉了它（按了「结束任务」或标了「已完成」），所以 Fleet 没有自动接着做，先来问你。\n\n\
+                 - 进度：{done}/{total} 步，下一步：{next}\n\n\
+                 要接着做吗？",
+                label = card_label(view),
                 done = view.done,
                 total = view.total,
-                owner = view.newest_owner,
             ),
             ElicitationOption {
                 label: OPT_REVIVE.into(),
-                description: "起一个新会话认领这个计划，从下一个 P 接着做".into(),
+                description: "从下一步接着做".into(),
                 preview: None,
             },
         ),
         AskKind::ExploreChild => (
-            "计划唤醒",
+            "任务接续",
             format!(
-                "探索产出的计划 {label} 还没人开工，要起新会话执行吗？\n---\n\
-                 它挂在一个 explore 计划下面，是调研得出的待办，还没有任何会话认领过。\
-                 Fleet 不替你拍板开工，先来问你。\n\n\
-                 - 进度：{done}/{total}，下一个：{next}\n\
-                 - 做调研的会话：`{owner}`\n\n\
-                 要让新会话开始执行吗？",
-                label = plan_label(view),
+                "调研拆出来的「{label}」还没开工，要开始做吗？\n---\n\
+                 它是一次调研得出的待办，还没有人开工。Fleet 不替你拍板开工，先来问你。\n\n\
+                 - 进度：{done}/{total} 步，第一步：{next}\n\n\
+                 要开始做吗？",
+                label = card_label(view),
                 done = view.done,
                 total = view.total,
-                owner = view.newest_owner,
             ),
             ElicitationOption {
                 label: OPT_REVIVE.into(),
-                description: "起一个新会话认领这个计划，从第一个 P 开始做".into(),
+                description: "从第一步开始做".into(),
                 preview: None,
             },
         ),
         AskKind::Fruitless => (
-            "唤醒无进展",
+            "接续无进展",
             format!(
-                "计划 {label} 连续唤醒 {n} 次都没推进，已自动静默 24 小时。\n---\n\
-                 Fleet 为它起过 {n} 个新会话，没有一个勾掉任何一个框，所以先停手来问你。\n\n\
-                 - 进度：{done}/{total}，下一个：{next}\n\
-                 - 最近一次唤醒的会话：`{owner}`\n\n\
+                "「{label}」连续自动接续 {n} 次都没推进，已暂停 24 小时。\n---\n\
+                 Fleet 为它接着做了 {n} 次，没有一次完成任何一步，所以先停手来问你。\n\n\
+                 - 进度：{done}/{total} 步，下一步：{next}\n\n\
                  接下来怎么处理？",
-                label = plan_label(view),
+                label = card_label(view),
                 n = MAX_FRUITLESS,
                 done = view.done,
                 total = view.total,
-                owner = view.newest_owner,
             ),
             ElicitationOption {
                 label: OPT_RETRY.into(),
-                description: "解除静默，马上再起一个新会话试一次".into(),
+                description: "解除暂停，马上再试一次".into(),
                 preview: None,
             },
         ),
@@ -1373,12 +1381,12 @@ fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
                 first,
                 ElicitationOption {
                     label: OPT_WEEK.into(),
-                    description: "7 天内不再唤醒，也不再问".into(),
+                    description: "7 天内不再自动接着做，也不再问".into(),
                     preview: None,
                 },
                 ElicitationOption {
                     label: OPT_FOREVER.into(),
-                    description: "一直静默，直到有人手动解除（fleet plan unsnooze）".into(),
+                    description: "一直不再自动接着做，直到你手动恢复".into(),
                     preview: None,
                 },
             ],

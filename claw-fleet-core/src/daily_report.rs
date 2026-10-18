@@ -1789,9 +1789,9 @@ fn attention_push_body(a: &DailyAttention, locale: &str) -> Option<String> {
     let mut parts = Vec::new();
     if !a.drift.is_empty() {
         parts.push(if zh {
-            format!("{} 条接力链可能跑偏", a.drift.len())
+            format!("{} 个任务可能跑偏", a.drift.len())
         } else {
-            format!("{} relay chain(s) may be drifting", a.drift.len())
+            format!("{} task(s) may be drifting", a.drift.len())
         });
     }
     if !a.lessons.is_empty() {

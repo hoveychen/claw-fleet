@@ -136,14 +136,17 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 判据不是「纯文本能不能表达」（永远能），而是「更丰富的渲染对{title_zh}是不是更好的答案」：要 diff 表 / 截图网格用 `html`，要展示本地图片用 `images`，要结构化输入用 `formFields`，可以复合。视觉呈现本身就是{title_zh}所求时（一幅画、带样式的 diff、一张图表），大方用 `html`，别退回 ASCII。需要 tab / 模态框 / 视频 / 音频这类超出上述词汇的布局时，改调 `fleet__render_a2ui`（A2UI v0.9 消息树，顶层 `{{ \"messageTree\": … }}`，返回 `{{ actionName, actionContext }}`；Fleet 不校验这棵树，无效的树产出空卡）。\n\
 \n\
+{task_roles}\n\
+\n\
 ## 何时不发卡（豁免）\n\
 \n\
-用户作答后若答案指派你执行，就在同一回合执行，不要把执行回合再包一张卡。以下四种情形以**一行纯文本**结束回合，且无需点出与「每回合都要问」的冲突：\n\
+用户作答后若答案指派你执行，就在同一回合执行，不要把执行回合再包一张卡。以下五种情形以**一行纯文本**结束回合，且无需点出与「每回合都要问」的冲突：\n\
 \n\
 1. **会话结束豁免**：用户按了结束按钮（工具返回 TASK FINISHED / TASK ABANDONED），或在自由文本里表示收工（「下班」「收工」等）。\n\
 2. **无人值守任务豁免**：本回合来自 `fleet schedule` / `fleet loop` 的**自动**触发（prompt 结尾的 footer 会标注「无人值守」）——背后没有真人能回答决策卡。手动「立即运行」有真人在场，不在此列。\n\
 3. **接力登记豁免**：本回合跑过 `fleet handoff`（或 `fleet__handoff` 的 `action=\"register\"`）并拿到 ok 之后，**一张卡都不要再发**，连不带决策的收尾卡也不要。接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），卡会把回合挂住等人点，卡不点后继者就不起来；而且 note 在登记那一刻已冻结，{title_zh}在卡上的任何回答都到不了后继者，只会被静默丢弃。要问的事先问、拿到答案、再按答案写 note 去登记。\n\
 4. **你是子代理**（Agent/Task 工具派出的 sidechain）：**一张卡都不许发**。子代理与父会话跑在同一个 claude CLI 进程里、共用同一个 fleet MCP server，session id 取自进程 env，所以你的卡会记在**父会话**名下，那颗终态按钮关掉的是父会话的任务——{title_zh}一按，`TASK FINISHED` 回给的是你，你的汇报当场被截断。把报告、选项、要问的问题作为**最终文本结果**返回给父会话。`fleet__set_session_title` 同理会改掉父会话标题，`fleet__plan` 会挪走父会话的计划焦点。\n\
+5. **你是子任务**（每轮注入里有「你的角色：子任务」）：回合结束不发汇报卡，结果写进最终回复，由任务主对话来取；只有必须由{title_zh}拍板的事才发卡，见「任务、子任务与汇报」一节。\n\
 \n\
 服务端也会拒掉第 3、4 种情形的调用——那是安全网，不是许可。\n\
 \n\
@@ -161,6 +164,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
             thinking_line = thinking_line,
             explain_marks =
                 crate::explain_marks_guidance::render_explain_marks_section(&title_zh, "zh"),
+            task_roles = crate::task_roles_guidance::render_section(&title_zh, "zh"),
         );
     }
 
@@ -220,14 +224,17 @@ Each `label` must be a concrete next action or answer, not a meta-choice like \"
 \n\
 The test is not \"could plain text express this?\" (it always can) but \"is the richer rendering a better answer for {title_en}?\": a diff table or screenshot grid wants `html`, a local image wants `images`, structured input wants `formFields`, and they compose. When the visual IS the deliverable — a drawing, a styled diff, a chart — reach for `html` rather than falling back to ASCII. For layouts beyond that vocabulary (tabs, modals, video, audio) call `fleet__render_a2ui` instead (an A2UI v0.9 message tree, top-level `{{ \"messageTree\": … }}`, returning `{{ actionName, actionContext }}`; Fleet does not validate the tree, and an invalid one yields an empty card).\n\
 \n\
+{task_roles}\n\
+\n\
 ## When Not To Raise A Card (exemptions)\n\
 \n\
-After the user answers, if the answer assigns you an action, perform it in that same turn — do not wrap the execution turn in another card. These four cases end the turn with **one line of plain text**, and you need not point out any conflict with the every-turn rule:\n\
+After the user answers, if the answer assigns you an action, perform it in that same turn — do not wrap the execution turn in another card. These five cases end the turn with **one line of plain text**, and you need not point out any conflict with the every-turn rule:\n\
 \n\
 1. **Session-end exemption**: the user pressed the terminal button (the tool returned TASK FINISHED / TASK ABANDONED) or said in free text that they are done (\"下班\", \"收工\", \"we're done\").\n\
 2. **Unattended-task exemption**: this turn came from an **automatic** `fleet schedule` / `fleet loop` firing — the prompt's footer says so explicitly — and no human is behind it. A manual \"run now\" does have a human and is NOT exempt.\n\
 3. **Handoff-registered exemption**: once you have run `fleet handoff` (or `fleet__handoff` with `action=\"register\"`) this turn and got ok, raise **no card at all** — not even a decision-free wrap-up. The relay fires on the turn *ending* (the Stop hook consumes the registration and spawns the successor), and a card holds the turn open waiting for a click; until it is clicked the successor never starts. The note also froze at registration, so any answer on that card can never reach the successor and is silently discarded. Ask first, get the answer, then write the note and register.\n\
 4. **You are a subagent** (an Agent/Task sidechain): **raise no cards at all**. A subagent shares the parent session's claude CLI process and fleet MCP server, and the session id comes from the process env — so your card is filed under the **parent** session and its terminal button closes the parent's task; one press returns `TASK FINISHED` to *you* and truncates your report mid-sentence. Return the report, the options and the questions as your **final text result** and let the parent decide. `fleet__set_session_title` likewise renames the parent session and `fleet__plan` steals the parent's plan focus.\n\
+5. **You are a sub-task** (the per-turn injection says \"你的角色：子任务\"): end the turn with no report card; write the result as your final reply for the task's main conversation to collect. Raise a card only for a call {title_en} has to make — see \"Tasks, Sub-tasks And Who Reports\".\n\
 \n\
 The server also rejects cases 3 and 4 — that gate is a safety net, not a licence.\n\
 \n\
@@ -248,6 +255,7 @@ If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — n
         thinking_line = thinking_line,
         explain_marks =
             crate::explain_marks_guidance::render_explain_marks_section(&title_en, "en"),
+        task_roles = crate::task_roles_guidance::render_section(&title_en, "en"),
     )
 }
 

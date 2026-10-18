@@ -9449,7 +9449,7 @@ mod tests {
         let frame: Value = serde_json::from_str(&frame).unwrap();
         assert_eq!(frame["type"], "notify");
         assert_eq!(frame["title"], "需要你判断的事");
-        assert_eq!(frame["body"], "1 条接力链可能跑偏");
+        assert_eq!(frame["body"], "1 个任务可能跑偏");
         assert_eq!(frame["url"], format!("/#d=attention:{today}"));
         assert_eq!(fs::read_to_string(&marker).unwrap(), today);
 
