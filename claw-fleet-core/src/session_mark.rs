@@ -177,13 +177,17 @@ pub(crate) fn clear_done_on_resume_in(
 /// Read the whole `session-mark/` directory into `session_id → mark`. Malformed
 /// or non-`.json` entries are skipped.
 fn mark_index(dir: &std::path::Path) -> HashMap<String, SessionMark> {
-    static CACHE: crate::json_dir_cache::JsonDirCache<SessionMarkRecord> =
-        crate::json_dir_cache::JsonDirCache::new();
-    CACHE
-        .load(dir)
+    mark_index_records(dir)
         .into_iter()
         .map(|(id, rec)| (id, rec.mark))
         .collect()
+}
+
+/// Every mark record in `dir`, keyed by session id.
+pub(crate) fn mark_index_records(dir: &std::path::Path) -> Vec<(String, SessionMarkRecord)> {
+    static CACHE: crate::json_dir_cache::JsonDirCache<SessionMarkRecord> =
+        crate::json_dir_cache::JsonDirCache::new();
+    CACHE.load(dir).into_iter().collect()
 }
 
 #[cfg(test)]

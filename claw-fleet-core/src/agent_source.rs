@@ -551,6 +551,13 @@ pub fn spawn_session(
     if let (Some(parent), Some(sid)) = (spec.spawned_by.as_deref(), resp.session_id.as_deref()) {
         crate::launch_spec::note_spawned_by(sid, parent);
     }
+    // Keep the project list current; a unit test's fake workspace must not
+    // land in the developer's own registry.
+    if !cfg!(test) {
+        if let Err(e) = crate::project_registry::ensure(&spec.workspace_path) {
+            crate::log_debug(&format!("project registry: {e}"));
+        }
+    }
     Ok(resp)
 }
 

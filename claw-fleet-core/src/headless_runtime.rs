@@ -576,6 +576,8 @@ pub fn run<F: Fn() -> Vec<SessionInfo>>(scan: F, running: Arc<AtomicBool>) {
     reconcile_timers();
     // Take back whatever an older Fleet wrote into the global agent config.
     crate::scope_migration::run_and_log("headless");
+    // Directories become projects and Done marks become task outcomes, once.
+    crate::task_migration::run_and_log("headless");
     run_with_interval(scan, running, TICK_INTERVAL);
 }
 
