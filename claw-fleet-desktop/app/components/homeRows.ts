@@ -13,9 +13,11 @@
 
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import {
+  subtaskStateOf,
   taskStateOf,
   type TaskMemberView,
   type TaskState,
+  type TaskView,
 } from "../../../shared-ts/taskState";
 import { isFleetOwnedTask, type PendingDecision, type SessionInfo } from "../types";
 
@@ -156,7 +158,8 @@ export function buildHomeRows(
     // not necessarily the line key when the session predates the task model.
     const taskId = tip.taskId ?? null;
     const lines = taskId ? subs.get(taskId) : undefined;
-    const subtasks = foldSubtasks(key, lines ?? new Map(), view, isPending);
+    const outcome = hops.find((h) => h.taskOutcome)?.taskOutcome ?? null;
+    const subtasks = foldSubtasks(key, lines ?? new Map(), view, isPending, outcome);
     const allSubHops = subtasks.flatMap((st) => st.hops);
     for (const h of hops) covered.add(h.id);
     for (const h of allSubHops) covered.add(h.id);
@@ -170,7 +173,7 @@ export function buildHomeRows(
       state: taskStateOf({
         main: hops.map((h) => view(h, h !== tip)),
         subtasks: subtasks.flatMap((st) => st.hops.map((h) => view(h, h !== st.tip))),
-        outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+        outcome,
       }),
       title: sessionTitle(tip, opts.untitled),
       projectPath: repoRootPath(tip.workspacePath),
@@ -229,6 +232,7 @@ function foldSubtasks(
   lines: Map<string, SessionInfo[]>,
   view: (s: SessionInfo, superseded: boolean) => TaskMemberView,
   isPending: (s: SessionInfo) => boolean,
+  parentOutcome: TaskView["outcome"],
 ): SubtaskRow[] {
   const out: SubtaskRow[] = [];
   for (const [sk, hops] of lines) {
@@ -237,11 +241,14 @@ function foldSubtasks(
       key: `${keyPrefix}::${sk}`,
       tip,
       hops,
-      state: taskStateOf({
-        main: hops.map((h) => view(h, h !== tip)),
-        subtasks: [],
-        outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
-      }),
+      state: subtaskStateOf(
+        {
+          main: hops.map((h) => view(h, h !== tip)),
+          subtasks: [],
+          outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+        },
+        parentOutcome,
+      ),
       pending: hops.some(isPending),
     });
   }

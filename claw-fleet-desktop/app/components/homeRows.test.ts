@@ -109,6 +109,17 @@ describe("buildHomeRows", () => {
     expect(rows[0].state).toBe("done");
   });
 
+  it("closes a stopped sub-task along with its accepted parent, not a moving one", () => {
+    const rows = build([
+      session("main", { taskOutcome: "completed" }),
+      session("stopped", { parentTaskId: "main", taskId: "stopped" }),
+      session("moving", { parentTaskId: "main", taskId: "moving", status: "executing", procAlive: true }),
+    ]);
+    const row = rows[0] as TaskRow;
+    const byId = Object.fromEntries(row.subtasks.map((st) => [st.tip.id, st.state]));
+    expect(byId).toEqual({ stopped: "done", moving: "running" });
+  });
+
   it("ignores an error on a relay hop a later hop took over from", () => {
     // Seen on real data: hop 13 of a finished 14-hop chain ended serverErrored,
     // and the whole task sat in needs-you on the desktop but not the phone.
