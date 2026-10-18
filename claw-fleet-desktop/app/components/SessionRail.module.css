@@ -7,6 +7,11 @@
   gap: 2px;
 }
 
+/* Positions the hover-revealed "only this project" button over the heading. */
+.workspace_head {
+  position: relative;
+}
+
 .workspace_header {
   width: 100%;
   min-width: 0;
@@ -41,6 +46,48 @@
   white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Sits just left of the count + chevron. The name gives way on hover so a long
+   one ellipsizes before it instead of running underneath. */
+.workspace_focus {
+  position: absolute;
+  top: 50%;
+  right: 44px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.workspace_head:hover .workspace_focus,
+.workspace_focus:focus-visible,
+.workspace_focus[data-on="true"] {
+  opacity: 1;
+}
+
+.workspace_focus:hover {
+  background: var(--color-bg-row-hover);
+  color: var(--color-text);
+}
+
+.workspace_focus[data-on="true"] {
+  color: var(--color-accent);
+}
+
+.workspace_head:hover .workspace_name,
+.workspace_head:has(.workspace_focus[data-on="true"]) .workspace_name {
+  padding-right: 24px;
 }
 
 .workspace_count {

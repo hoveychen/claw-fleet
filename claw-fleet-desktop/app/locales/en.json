@@ -2656,7 +2656,10 @@
   },
   "history": {
     "title": "Tasks",
-    "search_placeholder": "Search title, plan, full text…",
+    "search_placeholder": "Search title, full text; ws:name for one project…",
+    "focus_workspace": "Show only this project",
+    "unfocus_workspace": "Show all projects",
+    "scope_only": "Only {{name}}",
     "enqueue_placeholder": "Session is running — your message goes straight into this turn…",
     "empty": "No sessions yet — start one from the button above",
     "no_match": "No matching sessions",

@@ -2653,7 +2653,10 @@
   },
   "history": {
     "title": "任务",
-    "search_placeholder": "搜索标题、计划、全文…",
+    "search_placeholder": "搜索标题、全文，ws:项目名 限定项目…",
+    "focus_workspace": "只看此项目",
+    "unfocus_workspace": "显示全部项目",
+    "scope_only": "只看 {{name}}",
     "empty": "还没有会话，点上方“新会话”发起一个",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
