@@ -25,8 +25,9 @@ export interface TaskMemberView {
   /** `SessionInfo.status`. */
   status: string;
   procAlive: boolean;
-  /** The caller's latched "process alive but transcript gone quiet" verdict
-   *  (see `statusBuckets.statusBucketOf` for why it is passed in). */
+  /** The caller's latched "process alive but transcript gone quiet" verdict.
+   *  Passed in because the latch keeps state across scans, which a pure
+   *  function cannot. */
   quiet: boolean;
   /** A decision card from this session is waiting for an answer. */
   hasPendingDecision: boolean;
