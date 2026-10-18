@@ -182,7 +182,7 @@ export function SessionSheet({
     }
   }, [client, stopping, session, confirm, onClose]);
 
-  const title = session.titleOverride || session.aiTitle || session.slug || t("会话");
+  const title = session.titleOverride || session.aiTitle || session.slug || t("未命名任务");
   const resume = resumeCommand(session);
 
   // Static fields compressed into chip row (model / reasoning effort / workspace /
@@ -195,7 +195,7 @@ export function SessionSheet({
   if (pendingDecisions > 0) {
     nowRows.push({
       pane: "decisions",
-      label: t("待决策"),
+      label: t("待你处理"),
       value: t("{0} 张", pendingDecisions),
       hot: true,
     });
@@ -417,7 +417,7 @@ export function SessionSheet({
                 )}
                 <span className={styles.stopText}>
                   <span className={styles.stopLabel}>
-                    {mode === "interrupt" ? t("中断当前回合") : t("停止这个会话")}
+                    {mode === "interrupt" ? t("中断当前回合") : t("停止这个任务")}
                   </span>
                   {/* Big difference between the two, but the button labels can't explain
                       it: interrupt kills only the current turn, session stays and you can

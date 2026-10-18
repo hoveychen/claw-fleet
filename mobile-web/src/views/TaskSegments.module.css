@@ -1,0 +1,169 @@
+/* Segmented control under the header: 对话 / 子任务 / 步骤 / 资料. */
+.bar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  margin: 8px 12px 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--color-bg-input);
+  font-family: var(--font-sans);
+}
+
+.seg {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  border-radius: 8px;
+  font-size: var(--t-ui, 14px);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.seg[data-active="true"] {
+  background: var(--color-bg-selected, var(--color-bg-card));
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.segCount {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The pane under the bar, in place of the transcript. */
+.pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px calc(16px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+  font-family: var(--font-sans);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md, 14px);
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 8px 11px 14px;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+
+.row + .row {
+  border-top: 1px solid var(--color-border);
+}
+
+.row:active {
+  background: var(--color-bg-card-hover);
+}
+
+.dot {
+  align-self: flex-start;
+  margin-top: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-dim);
+}
+
+.dot[data-state="needsYou"] {
+  background: var(--color-error);
+}
+
+.dot[data-state="running"] {
+  background: var(--color-running);
+}
+
+.dot[data-state="waiting"] {
+  background: var(--color-warning);
+}
+
+.dot[data-state="review"] {
+  background: var(--color-success);
+}
+
+.rowBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rowTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-ctl, 15px);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.rowMeta,
+.rowTime {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+}
+
+.rowTime {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.libraryPane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 0 2px;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.groupEmpty {
+  padding: 12px 14px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--r-md, 14px);
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
+
+.error {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-error);
+  background: var(--color-bg-card);
+}

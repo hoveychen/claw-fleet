@@ -156,7 +156,7 @@ export function AttentionView({ client, onOpenSession, onBack }: Props) {
                 {d.latestSessionId && (
                   <div className={styles.actions}>
                     <button className={styles.btn} onClick={() => onOpenSession(d.latestSessionId)}>
-                      {t("打开会话")}
+                      {t("打开任务")}
                     </button>
                   </div>
                 )}
@@ -194,7 +194,7 @@ export function AttentionView({ client, onOpenSession, onBack }: Props) {
                 {v.sessionIds[0] && (
                   <div className={styles.actions}>
                     <button className={styles.btn} onClick={() => onOpenSession(v.sessionIds[0])}>
-                      {t("打开会话")}
+                      {t("打开任务")}
                     </button>
                   </div>
                 )}

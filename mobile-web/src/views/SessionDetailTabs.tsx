@@ -298,7 +298,14 @@ export function TaskPlansTab({
 
   if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={6} meta={false} />} />;
   if (data.length === 0)
-    return <EmptyState compact icon={ListTodo} title={t("该会话没有 TASKS.md 计划")} />;
+    return (
+      <EmptyState
+        compact
+        icon={ListTodo}
+        title={t("还没有步骤")}
+        description={t("任务拆成几步来做时，每一步会列在这里。")}
+      />
+    );
 
   const current = session.taskPlan?.currentTask;
   return (

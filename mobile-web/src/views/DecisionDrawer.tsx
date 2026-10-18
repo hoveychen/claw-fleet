@@ -18,6 +18,7 @@ interface Props {
   workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
   onAnswered: (deviceId: string, id: string) => void;
   onOpenSession: (deviceId: string, sessionId: string) => void;
+  resolveTaskTip?: (deviceId: string, taskId: string) => string | null;
   deviceLabelOf: (deviceId: string) => string | null;
   /** The tab bar (and its raised centre FAB) is showing under the peek, so the
    *  peek must sit above the FAB instead of just above the bar. */
@@ -93,7 +94,7 @@ export function DecisionDrawer(props: Props) {
           onClick={() => setExpanded(false)}
           aria-hidden="true"
         />
-        <div className={styles.sheet} role="dialog" aria-label={t("决策")}>
+        <div className={styles.sheet} role="dialog" aria-label={t("待你处理")}>
           <button
             className={styles.grabberRow}
             onClick={() => setExpanded(false)}
@@ -103,7 +104,7 @@ export function DecisionDrawer(props: Props) {
           </button>
           <div className={styles.sheetHead}>
             <span className={styles.sheetTitle}>
-              {t("决策")}
+              {t("待你处理")}
               {count > 1 ? ` · ${count}` : ""}
             </span>
             <button
@@ -125,7 +126,7 @@ export function DecisionDrawer(props: Props) {
           className={styles.peek}
           data-clear-fab={props.clearFab}
           onClick={() => setExpanded(true)}
-          aria-label={t("查看待处理决策")}
+          aria-label={t("查看待你处理的事")}
         >
           <span className={styles.peekDot} />
           <span className={styles.peekMain}>

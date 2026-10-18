@@ -1089,7 +1089,7 @@ export function NewSessionSheet({
         // it success; if not, error.
         const confirmed = await waitForSessionId(sessionId, () => sessionsRef.current);
         if (confirmed) succeed();
-        else window.alert(e2 instanceof Error ? e2.message : t("创建会话失败"));
+        else window.alert(e2 instanceof Error ? e2.message : t("创建任务失败"));
       }
     } finally {
       setBusy(false);
@@ -1098,7 +1098,7 @@ export function NewSessionSheet({
 
   return (
     <div className={styles.sheetBackdrop}>
-      <div className={styles.sheet} role="dialog" aria-label={t("新会话")}>
+      <div className={styles.sheet} role="dialog" aria-label={t("新任务")}>
         <div className={styles.sheetHead}>
           <button
             className={styles.sheetClose}
@@ -1108,7 +1108,7 @@ export function NewSessionSheet({
           >
             <X size={21} />
           </button>
-          <span className={styles.sheetTitle}>{t("新会话")}</span>
+          <span className={styles.sheetTitle}>{t("新任务")}</span>
           <span
             className={styles.connectionDot}
             data-online={relayReady !== false}
@@ -1250,7 +1250,7 @@ export function NewSessionSheet({
                 data-success={created || undefined}
                 disabled={!canSubmit}
                 onClick={() => void submit()}
-                aria-label={created ? t("已启动") : busy ? t("创建中…") : t("启动会话")}
+                aria-label={created ? t("已启动") : busy ? t("创建中…") : t("启动任务")}
               >
                 {created ? (
                   <Check size={17} />
@@ -1724,7 +1724,7 @@ export function ResumeComposer({
           try {
             await client.request("resume_session", { ...params, idempotencyKey: randomId(), allowRetired: true });
           } catch (e2) {
-            window.alert(e2 instanceof Error ? e2.message : t("恢复会话失败"));
+            window.alert(e2 instanceof Error ? e2.message : t("继续任务失败"));
           }
         } else {
           window.alert(t("未继续：已被 {0} 接替", id));
@@ -1745,7 +1745,7 @@ export function ResumeComposer({
       if (settled) return;
       // Never ack, no reply — request may not have reached desktop at all
       // (relay is best-effort, no re-send); report timeout honestly.
-      window.alert(e instanceof Error ? e.message : t("恢复会话失败"));
+      window.alert(e instanceof Error ? e.message : t("继续任务失败"));
       setBusy(false);
     }
   };
@@ -1830,7 +1830,7 @@ export function ResumeComposer({
                expands the box to two lines at rest — exactly what we're eliminating.
                The mic is right there, no need for text explanation. "Empty = continue"
                behavior unchanged, just not written in the box. */
-            placeholder={enqueueing ? t("直接插一句…") : t("继续这个会话…")}
+            placeholder={enqueueing ? t("直接插一句…") : t("继续这个任务…")}
             rows={1}
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}
@@ -1860,7 +1860,7 @@ export function ResumeComposer({
                   : t("发送中…")
                 : enqueueing
                   ? t("排队")
-                  : t("继续会话")
+                  : t("继续任务")
             }
           >
             {busy ? (

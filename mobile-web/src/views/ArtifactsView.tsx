@@ -1,8 +1,6 @@
-// Artifacts tab — the mobile version of the desktop artifact library. Data
-// comes via the relay's `artifact_list` / `artifact_blob` (see
-// claw-fleet-core/src/mobile_relay.rs). The list is the tab body (streaming,
-// scrolling with messages), tapping an artifact opens ArtifactDetail as a
-// fullscreen overlay.
+// One artifact, full screen — opened from the 资料 tab's list (LibraryList)
+// and from ingest cards in a transcript. Bytes come via the relay's
+// `artifact_blob` (see claw-fleet-core/src/mobile_relay.rs).
 //
 // Preview and download part ways above MAX_RELAY_BYTES. A preview is one frame
 // of base64 and has to fit in memory, so over that size the card says so and
@@ -17,7 +15,7 @@
 // True streaming would mean a Service Worker translating the element's Range
 // requests into relay calls; deliberately not built yet.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Archive,
   FileSpreadsheet,
@@ -26,12 +24,9 @@ import {
   Film,
   Image as ImageIcon,
   Music,
-  Package,
   Presentation,
   TriangleAlert,
-  WifiOff,
 } from "lucide-react";
-import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { useHistoryLayer } from "../useNavStack";
 import type { FleetTransport } from "../transport";
@@ -42,21 +37,16 @@ import {
   formatBytes,
   isFetchable,
   isTextPreview,
-  listArtifacts,
   previewKind,
 } from "../artifacts";
 import styles from "./ArtifactsView.module.css";
 import { AppHeader } from "./AppHeader";
 import { PreviewBody, type PreviewSource } from "./ArtifactPreviewBody";
 import { ZipBrowser } from "./ZipBrowser";
-import { SkeletonCard, SkeletonList, SkeletonNumber, SkeletonText } from "./loading";
-import { Presence } from "../Presence";
+import { SkeletonCard, SkeletonText } from "./loading";
 
-interface Props {
-  client: FleetTransport | null;
-}
-
-const KIND_ICON: Record<string, typeof FileText> = {
+/** Icon per artifact kind; the library list uses it too. */
+export const KIND_ICON: Record<string, typeof FileText> = {
   image: ImageIcon,
   video: Film,
   audio: Music,
@@ -67,100 +57,6 @@ const KIND_ICON: Record<string, typeof FileText> = {
   archive: Archive,
   text: FileText,
 };
-
-export function ArtifactsView({ client }: Props) {
-  const [items, setItems] = useState<Artifact[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!client) return;
-    let alive = true;
-    listArtifacts(client)
-      .then((list) => {
-        if (alive) {
-          setItems(list);
-          setError(null);
-        }
-      })
-      .catch((e) => {
-        // Leave `items` alone: an empty list here would add "nothing yet"
-        // under the error, as if the library were genuinely empty.
-        if (alive) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [client]);
-
-  const open = useMemo(
-    () => (items ?? []).find((a) => a.id === openId) ?? null,
-    [items, openId],
-  );
-
-  return (
-    <div className={styles.page}>
-      <div className={styles.listHead}>
-        <span className={styles.listTitle}>{t("产出")}</span>
-        {items ? (
-          <span className={styles.listCount}>{items.length}</span>
-        ) : (
-          client && !error && <SkeletonNumber className={styles.listCount} width={14} />
-        )}
-      </div>
-
-      {error && <div className={styles.error}>{error}</div>}
-
-      <div className={styles.body}>
-        {items === null ? (
-          !client ? (
-            <EmptyState icon={WifiOff} title={t("桌面端离线")} />
-          ) : error ? null : (
-            <SkeletonList rows={6} avatar />
-          )
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={Package}
-            title={t("还没有产出")}
-            description={t("Agent 把交付物存进产出库后会出现在这里。")}
-          />
-        ) : (
-          items.map((a) => <ArtifactRow key={a.id} artifact={a} onOpen={() => setOpenId(a.id)} />)
-        )}
-      </div>
-
-      <Presence when={!!open}>
-        {open && <ArtifactDetail artifact={open} client={client} onBack={() => setOpenId(null)} />}
-      </Presence>
-    </div>
-  );
-}
-
-function ArtifactRow({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
-  const Icon = KIND_ICON[artifact.kind] ?? FileText;
-  return (
-    <button className={styles.row} onClick={onOpen}>
-      <span className={styles.rowIcon}>
-        <Icon size={20} strokeWidth={1.4} />
-      </span>
-      <span className={styles.rowText}>
-        <span className={styles.rowTitle}>{artifact.title}</span>
-        <span className={styles.rowMeta}>
-          <span>{formatBytes(artifact.sizeBytes)}</span>
-          <span className={styles.wsChip}>{artifact.workspaceName}</span>
-          {artifact.drifted && (
-            <TriangleAlert size={11} className={styles.driftFlag} aria-label={t("源文件已被改写")} />
-          )}
-        </span>
-      </span>
-      {/* Stated on the card, not discovered after a failed fetch: the list
-          already carries sizeBytes, so the phone knows before it asks. It no
-          longer means "desktop only" — the bytes can come over in chunks; what
-          is off the table is opening it here. */}
-      {!isFetchable(artifact) && <span className={styles.tooBig}>{t("仅下载")}</span>}
-    </button>
-  );
-}
 
 export function ArtifactDetail({
   artifact,

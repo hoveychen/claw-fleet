@@ -270,7 +270,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
             <span>{tasksLoaded ? tasks.length : loading ? <SkeletonNumber width={16} /> : "—"}</span>
           </button>
           <button data-active={tab === "decisions"} onClick={() => setTab("decisions")}>
-            <Inbox size={16} />{t("决策")}{" "}
+            <Inbox size={16} />{t("待你处理")}{" "}
             <span>
               {detailsLoaded ? openDecisions.length : loading ? <SkeletonNumber width={16} /> : "—"}
             </span>
@@ -281,7 +281,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
           <div className={styles.sectionHead}>
             <div>
               <div className={styles.eyebrow}>{tab === "tasks" ? "RUN QUEUE" : "HUMAN LOOP"}</div>
-              <h1>{tab === "tasks" ? t("云任务") : t("待处理决策")}</h1>
+              <h1>{tab === "tasks" ? t("云任务") : t("待你处理")}</h1>
             </div>
             <Cloud size={20} aria-hidden="true" />
           </div>
@@ -335,7 +335,7 @@ function TaskList({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => vo
 
 function DecisionList({ client, decisions, details, onOpenTask, onResolved }: { client: FleetCloudClient; decisions: Decision[]; details: Record<string, TaskDetail>; onOpenTask: (id: string) => void; onResolved: (decision: Decision) => void }) {
   if (decisions.length === 0) {
-    return <EmptyState icon={CheckCircle2} title={t("没有待处理的决策")} description={t("Agent 请求人工输入时，会连同所属 Attempt 出现在这里。")} />;
+    return <EmptyState icon={CheckCircle2} title={t("没有待你处理的事")} description={t("Agent 请求人工输入时，会连同所属 Attempt 出现在这里。")} />;
   }
   return (
     <div className={styles.decisionList}>

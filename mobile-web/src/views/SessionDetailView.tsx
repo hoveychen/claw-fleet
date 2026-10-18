@@ -57,6 +57,7 @@ import type {
   RawMessage,
   SessionInfo,
   SessionStatus,
+  WikiDoc,
 } from "../types";
 import { canResumeSession, canEnqueueSession } from "../types";
 import { detailPathForSession } from "../agentSource";
@@ -125,6 +126,15 @@ import { FleetEventCard } from "./FleetEventCard";
 import { ApiErrorCard } from "./ApiErrorCard";
 import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { Presence } from "../Presence";
+import {
+  SegmentBar,
+  SubtasksPane,
+  TaskLibraryPane,
+  taskSegments,
+  useSubtasks,
+  type TaskSegment,
+} from "./TaskSegments";
+import segStyles from "./TaskSegments.module.css";
 
 const TAIL_POLL_MS = 2500;
 /** Consecutive failed polls before a view that already has messages says so.
@@ -501,6 +511,11 @@ interface Props {
   onOpenSessionId: (id: string) => void;
   /** Open a wiki doc of this session's device by slug (reference chips). */
   onOpenWikiSlug?: (slug: string) => void;
+  /** Open a wiki doc of this session's device (the 资料 segment). */
+  onOpenWikiDoc?: (doc: WikiDoc) => void;
+  /** Ids of this device's sessions with a card waiting — the 子任务 segment
+   *  files a sub-task under 待你处理 from it. */
+  pendingSessionIds?: ReadonlySet<string>;
   /** Count of pending decision cards for this session. Decision cards are an
    *  aggregated inbox across devices (`App`'s `aggregateDecisions`), not stored on
    *  `SessionInfo`, so the App counts them by sessionId and passes them here —
@@ -1366,8 +1381,15 @@ export function SessionDetailView({
   onBack,
   onOpenSessionId,
   onOpenWikiSlug,
+  onOpenWikiDoc,
+  pendingSessionIds,
   pendingDecisions = 0,
 }: Props) {
+  /** 对话 / 子任务 / 步骤 / 资料. Anything but 对话 lays its pane over the
+   *  transcript, which stays mounted (scroll position, composer draft). */
+  const [segment, setSegment] = useState<TaskSegment>("chat");
+  const segments = taskSegments(session);
+  const subtaskRows = useSubtasks(session, sessions, pendingSessionIds);
   /** The active pane — one of the five tabs that used to sit on the old bar —
    *  or `null` to stay on the message page.
    *
@@ -1923,7 +1945,7 @@ export function SessionDetailView({
               onClick={() => setSheetOpen(true)}
             >
               <span className={styles.headerTitleText}>
-                {session.titleOverride || session.aiTitle || session.slug || t("会话")}
+                {session.titleOverride || session.aiTitle || session.slug || t("未命名任务")}
               </span>
             </button>
           </div>
@@ -1948,6 +1970,15 @@ export function SessionDetailView({
       />
 
       <StatusRail pills={statusPills} onOpen={openTarget} />
+
+      {segments.length > 0 && (
+        <SegmentBar
+          segments={segments}
+          value={segment}
+          onChange={setSegment}
+          subtaskCount={subtaskRows.length}
+        />
+      )}
 
       <Presence when={sheetOpen}>
         <SessionSheet
@@ -2019,11 +2050,33 @@ export function SessionDetailView({
           transcript itself is what is on screen and the session can be forked. */}
       <SelectionAskBar
         scroller={scrollRef}
-        enabled={!!client && !!session.jsonlPath && pane === null && !sheetOpen}
+        enabled={
+          !!client && !!session.jsonlPath && pane === null && !sheetOpen && segment === "chat"
+        }
         busy={explainBusy}
         onAsk={askExplain}
       />
 
+      {segment !== "chat" && (
+        <div className={segStyles.pane}>
+          {segment === "subtasks" && (
+            <SubtasksPane rows={subtaskRows} onOpenSessionId={onOpenSessionId} />
+          )}
+          {segment === "steps" && <TaskPlansTab session={session} client={client} />}
+          {segment === "library" && (
+            <TaskLibraryPane
+              session={session}
+              sessions={sessions}
+              client={client}
+              onOpenDoc={(doc) => (onOpenWikiDoc ? onOpenWikiDoc(doc) : onOpenWikiSlug?.(doc.slug))}
+            />
+          )}
+        </div>
+      )}
+
+      {/* `contents` keeps the transcript's flex layout untouched while shown;
+          `none` hides it (and the fixed composer) without unmounting. */}
+      <div style={{ display: segment === "chat" ? "contents" : "none" }}>
       <div
         className={styles.scroll}
         ref={scrollRef}
@@ -2150,6 +2203,7 @@ export function SessionDetailView({
           onHeight={setComposerHeight}
         />
       )}
+      </div>
     </div>
     </InFlightToolsContext.Provider>
     </SessionMentionNavProvider>

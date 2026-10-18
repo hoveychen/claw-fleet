@@ -11,6 +11,12 @@ import { installNativeWakeLock } from "./wakeLockNative";
 import { lockZoom } from "./lockZoom";
 import { ConfirmProvider } from "./confirmDialog";
 import { Skeleton, SkeletonCard } from "./views/loading";
+// Inter, bundled like the desktop's (claw-fleet-desktop/app/fonts.ts) — the
+// relay build and the app shell both run offline-first, so no font CDN.
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
 import "./index.css";
 
 initTheme();

@@ -43,7 +43,7 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
   const task = str(input, "task");
   const id = str(input, "id");
   if (tool === "spawn") {
-    return t("新会话 {0}", str(input, "title"));
+    return t("新任务 {0}", str(input, "title"));
   } else if (tool === "plan") {
     switch (action) {
       case "check": return t("勾选 {0} · {1}", task, plan);

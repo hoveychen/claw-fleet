@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Inbox, ListChecks, MoreHorizontal, Package, Plus, X } from "lucide-react";
+import { FolderOpen, Inbox, ListChecks, Plus, UserRound, X } from "lucide-react";
 import styles from "./App.module.css";
 import {
   disablePush,
@@ -100,8 +100,7 @@ import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
 import { DeviceSwitcher } from "./views/DeviceSwitcher";
-import { PlansView } from "./views/PlansView";
-import { ArtifactsView } from "./views/ArtifactsView";
+import { LibraryView } from "./views/LibraryView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { TerminalView, type TerminalWorkspace } from "./views/TerminalView";
@@ -110,7 +109,6 @@ import { SessionDetailView } from "./views/SessionDetailView";
 import { sessionDetailKey } from "./sessionDetailKey";
 import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
-import { WikiView } from "./views/WikiView";
 import { AttentionView } from "./views/AttentionView";
 import { WikiDocView } from "./views/WikiDocView";
 import { listWikiDocs } from "./wiki";
@@ -128,16 +126,16 @@ function fmtTokens(n: number): string {
   return `${n}`;
 }
 
-type Tab = "decisions" | "tasks" | "artifacts" | "more";
+type Tab = "decisions" | "tasks" | "library" | "me";
 
 /** Display name of each tab. Used only for error boundary fallback titles and console
  *  logs (bottom navigation text is still inlined in each button). Having "decisions page
  *  failed to display" is more useful than "decisions page failed to display". */
 const TAB_LABEL: Record<Tab, string> = {
-  decisions: "决策",
+  decisions: "待你处理",
   tasks: "任务",
-  artifacts: "产出",
-  more: "更多",
+  library: "资料",
+  me: "我的",
 };
 
 /** Default fields for a newly paired device. The default name goes through i18n, so this
@@ -745,8 +743,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // not opened.
 
   const [terminal, setTerminal] = useState<{ workspace: TerminalWorkspace | null } | null>(null);
-  const [showPlans, setShowPlans] = useState(false);
-  const [showWiki, setShowWiki] = useState(false);
   const [showAttention, setShowAttention] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   // Which device the new session opens on. null = follow the current scoped device
@@ -980,15 +976,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [states, deviceOrder],
   );
 
-  /** Sessions on the current scoped device. Used by device-scoped pages (new session,
-   *  plans, subagent resolution in session detail) — those pages ask "what's on this
-   *  device?", so mixing in others would make them see IDs they can't fetch. */
-
-  const scopedSessions = useMemo(
-    () => mergedSessions.filter((s) => s.deviceId === activeDeviceId),
-    [mergedSessions, activeDeviceId],
-  );
-
   /** Which directories the terminal can open in — every workspace seen in tasks,
    *  de-duped by device. Kept cross-device: terminal processes run on their owning host,
    *  so "which device" and "which directory" are a single unit. */
@@ -1046,6 +1033,32 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const openSessionRoot = useCallback(
     (deviceId: string, id: string) => setDetailStack([{ deviceId, id }]),
     [],
+  );
+  // Sessions with a card waiting, for the task list's needs-you section.
+  const pendingKeys = useMemo(
+    () => new Set(decisions.map((d) => itemKey(d.deviceId, d.request.sessionId))),
+    [decisions],
+  );
+  const detailDeviceId = detailSession?.deviceId ?? null;
+  const detailPendingIds = useMemo(
+    () =>
+      new Set(
+        decisions.filter((d) => d.deviceId === detailDeviceId).map((d) => d.request.sessionId),
+      ),
+    [decisions, detailDeviceId],
+  );
+  // A task is opened at its latest main-conversation hop: the hop that is
+  // talking now, not the first one the task id is named after.
+  const resolveTaskTip = useCallback(
+    (deviceId: string, taskId: string) => {
+      let tip: SessionInfo | null = null;
+      for (const s of mergedSessions) {
+        if (s.deviceId !== deviceId || s.taskId !== taskId || s.parentTaskId) continue;
+        if (!tip || s.lastActivityMs > tip.lastActivityMs) tip = s;
+      }
+      return tip?.id ?? null;
+    },
+    [mergedSessions],
   );
   // Drill into a subagent from within a detail view — push another layer so the
   // back button returns to the opener. `AgentNav.open` prefixes `agent-`.
@@ -1111,8 +1124,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     showRepo ||
     repoDetail !== null ||
     showUsage ||
-    showPlans ||
-    showWiki ||
     showAttention ||
     showNewSession;
   // Float the decision drawer over everything the user is looking at — EXCEPT the
@@ -1129,12 +1140,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const overlayKey = [
     detailSession ? `detail:${detailSession.deviceId}:${detailSession.id}` : "",
-    showWiki ? "wiki" : "",
     showAttention ? "attention" : "",
     wikiStack.length ? `wiki:${wikiStack.length}:${wikiStack[wikiStack.length - 1].doc.slug}` : "",
     showRepo ? "repo" : "",
     repoDetail ? `repoDetail:${repoDetail.repo.root}` : "",
-    showPlans ? "plans" : "",
     showUsage ? "usage" : "",
     showNewSession ? `newSession:${newSessionTargetId}` : "",
     showDecisionDrawer ? "drawer" : "",
@@ -1152,12 +1161,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const closeAllOverlays = useCallback(() => {
     setDetailStack([]);
-    setShowWiki(false);
     setShowAttention(false);
     setWikiStack([]);
     setShowRepo(false);
     setRepoDetail(null);
-    setShowPlans(false);
     setShowUsage(false);
     setTerminal(null);
     setShowNewSession(false);
@@ -1295,7 +1302,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           open={deviceMenuOpen}
           onOpenChange={setDeviceMenuOpen}
           onSwitch={switchDevice}
-          onManage={() => setTab("more")}
+          onManage={() => setTab("me")}
         />
         {/* First `today_usage` reply not in yet: hold the pill's place instead
             of popping it in and shifting the header. */}
@@ -1388,7 +1395,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             <span>{t("通知权限已被拒绝，请在系统设置中为本站点重新开启。")}</span>
           ) : (
             <>
-              <span>{t("开启通知，第一时间收到新决策卡。")}</span>
+              <span>{t("开启通知，有事需要你决定时第一时间知道。")}</span>
               <button
                 className={styles.pushButton}
                 onClick={() => void enablePushFromBanner()}
@@ -1429,6 +1436,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             workspaceOf={workspaceOf}
             onAnswered={markAnswered}
             onOpenSession={openSessionRoot}
+            resolveTaskTip={resolveTaskTip}
             deviceLabelOf={deviceLabelOf}
             offlineDevices={offlineDevices}
             focusDecision={focusDecision}
@@ -1436,6 +1444,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : tab === "tasks" ? (
           <TasksView
             sessions={mergedSessions}
+            pendingKeys={pendingKeys}
             deviceLabelOf={runtimeDevices.length > 1 ? deviceLabelOf : undefined}
             clientFor={transportFor}
             connected={connected}
@@ -1444,8 +1453,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             agentPending={agentPending}
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
           />
-        ) : tab === "artifacts" ? (
-          <ArtifactsView client={client} />
+        ) : tab === "library" ? (
+          <LibraryView
+            client={client}
+            onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
+          />
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
@@ -1478,8 +1490,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onDisablePush={handleDisablePush}
             agentPending={agentPending}
             onOpenRepo={() => setShowRepo(true)}
-            onOpenPlans={() => setShowPlans(true)}
-            onOpenWiki={() => setShowWiki(true)}
             onOpenAttention={() => setShowAttention(true)}
             onOpenUsage={() => setShowUsage(true)}
           />
@@ -1538,6 +1548,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
           onOpenWikiSlug={(slug: string) => openWikiSlug(detailSession.deviceId, slug)}
+          onOpenWikiDoc={(doc) =>
+            setWikiStack((s) => [...s, { deviceId: detailSession.deviceId, doc }])
+          }
+          pendingSessionIds={detailPendingIds}
           // The "N pending decisions" count in the header timeline uses this. Decision cards
           // are a merged cross-device inbox, not attached to SessionInfo, so we count by
           // (device, session) here — only this device's cards, so a same-numbered session
@@ -1552,18 +1566,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           }
         />
       )}
-      </Presence>
-
-      {/* The wiki list itself is an overlay (entering from "More"), with document details
-          stacked on top — so render it before wikiStack. */}
-
-      {showWiki && <HistoryLayer onBack={() => setShowWiki(false)} />}
-      <Presence when={showWiki}>
-        <WikiView
-          client={client}
-          onBack={() => setShowWiki(false)}
-          onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
-        />
       </Presence>
 
       {/* Each document gets a layer, but only render the top one — lower docs don't need
@@ -1619,15 +1621,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onBack={() => setTerminal(null)}
           />
         )}
-      </Presence>
-
-      {showPlans && <HistoryLayer onBack={() => setShowPlans(false)} />}
-      <Presence when={showPlans}>
-        <PlansView
-          sessions={scopedSessions}
-          client={client}
-          onBack={() => setShowPlans(false)}
-        />
       </Presence>
 
       {showUsage && <HistoryLayer onBack={() => setShowUsage(false)} />}
@@ -1697,6 +1690,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           workspaceOf={workspaceOf}
           onAnswered={markAnswered}
           onOpenSession={openSessionRoot}
+          resolveTaskTip={resolveTaskTip}
           deviceLabelOf={deviceLabelOf}
           clearFab={!overlayOpen}
         />
@@ -1715,7 +1709,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <span className={styles.tabIcon}>
             <Inbox size={20} />
           </span>
-          {t("决策")}
+          {t("待你处理")}
           {decisions.length > 0 && <span className={styles.badge}>{decisions.length}</span>}
         </button>
         <button
@@ -1730,33 +1724,32 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </button>
         <button
           className={styles.centerTab}
-          aria-label={t("新会话")}
+          aria-label={t("新任务")}
           onClick={() => setShowNewSession(true)}
         >
           <span className={styles.centerFab}>
             <Plus size={24} />
           </span>
-          <span className={styles.centerLabel}>{t("新会话")}</span>
         </button>
         <button
           className={styles.tabButton}
-          data-active={tab === "artifacts"}
-          onClick={() => setTab("artifacts")}
+          data-active={tab === "library"}
+          onClick={() => setTab("library")}
         >
           <span className={styles.tabIcon}>
-            <Package size={20} />
+            <FolderOpen size={20} />
           </span>
-          {t("产出")}
+          {t("资料")}
         </button>
         <button
           className={styles.tabButton}
-          data-active={tab === "more"}
-          onClick={() => setTab("more")}
+          data-active={tab === "me"}
+          onClick={() => setTab("me")}
         >
           <span className={styles.tabIcon}>
-            <MoreHorizontal size={20} />
+            <UserRound size={20} />
           </span>
-          {t("更多")}
+          {t("我的")}
         </button>
       </nav>
     </div>

@@ -1,149 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyFrozenOrder,
-  bucketOfTone,
-  buildRenderItems,
-  workspaceFilterValue,
-  groupStatusSections,
-  groupTaskSections,
-  statusTone,
-} from "./TasksView";
+import { applyFrozenOrder, statusTone } from "./TasksView";
 import type { SessionInfo } from "../types";
-import type { WithDevice } from "../deviceRuntime";
-
-describe("groupTaskSections", () => {
-  const CHAT = "/Users/foo/.fleet/chat";
-  function row(id: string, workspacePath: string, workspaceName: string) {
-    return {
-      id,
-      workspacePath,
-      workspaceName,
-      deviceId: "d1",
-    } as unknown as WithDevice<SessionInfo>;
-  }
-
-  it("pins the chat folder to the top however stale it is", () => {
-    const secs = groupTaskSections(
-      [row("a", "/work/repo", "repo"), row("b", CHAT, "Chat")],
-      { chatPathOf: () => CHAT, multiDevice: false },
-    );
-    expect(secs.map((s) => s.path)).toEqual([CHAT, "/work/repo"]);
-  });
-
-  it("keeps the incoming row order otherwise — the freeze must survive grouping", () => {
-    const secs = groupTaskSections(
-      [row("a", "/work/a", "a"), row("b", "/work/b", "b"), row("c", "/work/a", "a")],
-      { chatPathOf: () => null, multiDevice: false },
-    );
-    expect(secs.map((s) => s.path)).toEqual(["/work/a", "/work/b"]);
-    expect(secs[0].sessions.map((s) => s.id)).toEqual(["a", "c"]);
-  });
-
-  // Folders are stable directory list: zebra's newest task (first in input list) can't push it to the front.
-  it("orders folders alphabetically, not by their first member's position", () => {
-    const secs = groupTaskSections(
-      [row("z", "/work/zebra", "zebra"), row("a", "/work/apple", "apple")],
-      { chatPathOf: () => null, multiDevice: false },
-    );
-    expect(secs.map((s) => s.path)).toEqual(["/work/apple", "/work/zebra"]);
-  });
-
-  it("folds a worktree checkout into its repository section", () => {
-    const secs = groupTaskSections(
-      [row("a", "/work/repo", "repo"), row("b", "/work/repo/.worktrees/fix", "repo")],
-      { chatPathOf: () => null, multiDevice: false },
-    );
-    expect(secs).toHaveLength(1);
-    expect(secs[0].path).toBe("/work/repo");
-  });
-
-  // Same path /repos/foo on two devices are two different repositories; merging into one section is confusing.
-  it("splits the same path on two devices, labelling each", () => {
-    const rows = [
-      { ...row("a", "/repos/foo", "foo"), deviceId: "dev-a" },
-      { ...row("b", "/repos/foo", "foo"), deviceId: "dev-b" },
-    ] as Array<WithDevice<SessionInfo>>;
-    const secs = groupTaskSections(rows, {
-      chatPathOf: () => null,
-      multiDevice: true,
-      deviceLabelOf: (id) => (id === "dev-a" ? "MBP" : "Studio"),
-    });
-    expect(secs.map((s) => s.key)).toEqual(["dev-a::/repos/foo", "dev-b::/repos/foo"]);
-    expect(secs.map((s) => s.name)).toEqual(["MBP · foo", "Studio · foo"]);
-  });
-
-  // Remote host's chat folder is its own home path (`/root/.fleet/chat`): comparing with local path never matches,
-  // so that device's Chat section sinks in the middle of projects (actual symptom).
-  it("pins each device's own chat folder, not just the active device's", () => {
-    const REMOTE_CHAT = "/root/.fleet/chat";
-    const rows = [
-      { ...row("a", "/work/repo", "repo"), deviceId: "dev-a" },
-      { ...row("b", REMOTE_CHAT, "Chat"), deviceId: "dev-b" },
-      { ...row("c", CHAT, "Chat"), deviceId: "dev-a" },
-    ] as Array<WithDevice<SessionInfo>>;
-    const secs = groupTaskSections(rows, {
-      chatPathOf: (id) => (id === "dev-a" ? CHAT : REMOTE_CHAT),
-      multiDevice: true,
-    });
-    expect(secs.slice(0, 2).map((s) => s.path).sort()).toEqual([REMOTE_CHAT, CHAT].sort());
-    expect(secs[2].path).toBe("/work/repo");
-  });
-});
-
-/** A session with an optional handoff-chain stamp. */
-function chainSession(
-  id: string,
-  chain?: { chainId: string; hop: number; chainLen: number },
-): SessionInfo {
-  return {
-    id,
-    workspacePath: "/w",
-    workspaceName: "w",
-    handoff: chain ?? null,
-  } as unknown as SessionInfo;
-}
-
-describe("buildRenderItems", () => {
-  it("is a pure single-list passthrough when grouping is off", () => {
-    const rows = [chainSession("a", { chainId: "c", hop: 2, chainLen: 2 }), chainSession("b")];
-    const items = buildRenderItems(rows, false);
-    expect(items).toHaveLength(2);
-    expect(items.every((i) => i.kind === "single")).toBe(true);
-  });
-
-  it("collapses ≥2 members sharing a chainId into one group, tip = highest hop", () => {
-    const rows = [
-      chainSession("tip", { chainId: "c", hop: 3, chainLen: 3 }),
-      chainSession("mid", { chainId: "c", hop: 2, chainLen: 3 }),
-      chainSession("solo"),
-    ];
-    const items = buildRenderItems(rows, true);
-    expect(items).toHaveLength(2);
-    const group = items[0];
-    expect(group.kind).toBe("group");
-    if (group.kind === "group") {
-      expect(group.chainId).toBe("c");
-      expect(group.chainLen).toBe(3);
-      expect(group.tip.id).toBe("tip");
-      // Newest hop first.
-      expect(group.members.map((m) => m.id)).toEqual(["tip", "mid"]);
-    }
-    expect(items[1].kind).toBe("single");
-  });
-
-  it("does NOT group a chain with only one member present (renders as a plain row)", () => {
-    const rows = [chainSession("lonely", { chainId: "c", hop: 5, chainLen: 5 })];
-    const items = buildRenderItems(rows, true);
-    expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe("single");
-  });
-
-  it("treats a chainLen<=1 stamp as a standalone session", () => {
-    const rows = [chainSession("x", { chainId: "c", hop: 1, chainLen: 1 })];
-    const items = buildRenderItems(rows, true);
-    expect(items[0].kind).toBe("single");
-  });
-});
 
 describe("statusTone quiet-alive", () => {
   const row = (over: Partial<SessionInfo>) =>
@@ -202,101 +59,42 @@ describe("statusTone quiet-alive", () => {
   });
 });
 
-// Each row in the merged list must carry which device it belongs to all the way through: after collapsing
-// into relay groups and extracting members, deviceId must not drop — losing it means guessing, and guessing
-// wrong means using another device's transport to fetch a session it doesn't even know about.
-describe("device tag survives grouping", () => {
-  const hop = (id: string, deviceId: string, chainId: string, n: number) =>
-    ({
-      id,
-      deviceId,
-      workspacePath: "/w",
-      workspaceName: "n",
-      status: "idle",
-      handoff: { chainId, chainLen: 2, hop: n },
-    }) as unknown as SessionInfo & { deviceId: string };
-
-  it("carries deviceId through a collapsed relay group", () => {
-    const items = buildRenderItems(
-      [hop("s2", "dev-a", "c1", 2), hop("s1", "dev-a", "c1", 1)],
-      true,
-    );
-    expect(items).toHaveLength(1);
-    const group = items[0];
-    if (group.kind !== "group") throw new Error("expected a group");
-    expect(group.tip.deviceId).toBe("dev-a");
-    expect(group.members.map((m) => m.deviceId)).toEqual(["dev-a", "dev-a"]);
-  });
-
-  it("never folds two devices' same-id chains into one group", () => {
-    const items = buildRenderItems(
-      [
-        hop("s2", "dev-a", "c1", 2),
-        hop("s1", "dev-a", "c1", 1),
-        hop("s2", "dev-b", "c1", 2),
-        hop("s1", "dev-b", "c1", 1),
-      ],
-      true,
-    );
-    expect(items).toHaveLength(2);
-    for (const item of items) {
-      if (item.kind !== "group") throw new Error("expected two groups");
-      const devices = new Set(item.members.map((m) => m.deviceId));
-      expect(devices.size).toBe(1);
-    }
-    // React key must also split; otherwise both groups share the same key.
-    expect(items[0].key).not.toBe(items[1].key);
-  });
-});
-
-// Same path /repos/foo on two devices are two different repositories — if section key is path-only, both
-// devices' sessions merge into one folder section and clicking in is confusing (section splitting itself in groupTaskSections).
-describe("workspaceFilterValue", () => {
-  it("scopes the section key by device when several are paired", () => {
-    expect(workspaceFilterValue("dev-a", "/repos/foo", true)).toBe("dev-a::/repos/foo");
-    // Single device stays as-is: old drafts stored bare path, value change silently breaks filter.
-    expect(workspaceFilterValue("dev-a", "/repos/foo", false)).toBe("/repos/foo");
-  });
-});
-
-// Task bar defaults to lastActivityMs descending; desktop pushes full snapshots every few seconds. If list
-// reorders while scrolling, it swaps the card under the finger for a different one — finger lifts and
-// taps the wrong session. Must freeze order during scroll (and for 5 seconds after stopping).
 describe("applyFrozenOrder", () => {
   const row = (deviceId: string, id: string) =>
     ({ id, deviceId, workspacePath: "/w", workspaceName: "n", status: "idle" }) as unknown as
       SessionInfo & { deviceId: string };
+  const keyOf = (r: { deviceId?: string; id: string }) => `${r.deviceId ?? ""}::${r.id}`;
   const keys = (rows: Array<{ deviceId?: string; id: string }>) =>
     rows.map((r) => `${r.deviceId ?? ""}::${r.id}`);
 
   it("passes rows through untouched when nothing is frozen", () => {
     const rows = [row("d", "a"), row("d", "b")];
-    expect(keys(applyFrozenOrder(rows, null))).toEqual(["d::a", "d::b"]);
+    expect(keys(applyFrozenOrder(rows, null, keyOf))).toEqual(["d::a", "d::b"]);
   });
 
   it("holds the frozen order even after the fresh sort flipped the rows", () => {
     // Freeze captured a, b, c on screen; new snapshot pushed c to the front.
     const frozen = ["d::a", "d::b", "d::c"];
     const resorted = [row("d", "c"), row("d", "a"), row("d", "b")];
-    expect(keys(applyFrozenOrder(resorted, frozen))).toEqual(["d::a", "d::b", "d::c"]);
+    expect(keys(applyFrozenOrder(resorted, frozen, keyOf))).toEqual(["d::a", "d::b", "d::c"]);
   });
 
   it("appends sessions born after the freeze at the bottom, never in the middle", () => {
     // New session should naturally sort first; inserting it would push every card down one slot.
     const frozen = ["d::a", "d::b"];
     const rows = [row("d", "new"), row("d", "a"), row("d", "b")];
-    expect(keys(applyFrozenOrder(rows, frozen))).toEqual(["d::a", "d::b", "d::new"]);
+    expect(keys(applyFrozenOrder(rows, frozen, keyOf))).toEqual(["d::a", "d::b", "d::new"]);
   });
 
   it("keeps several post-freeze arrivals in their own natural order", () => {
     const frozen = ["d::a"];
     const rows = [row("d", "n2"), row("d", "n1"), row("d", "a")];
-    expect(keys(applyFrozenOrder(rows, frozen))).toEqual(["d::a", "d::n2", "d::n1"]);
+    expect(keys(applyFrozenOrder(rows, frozen, keyOf))).toEqual(["d::a", "d::n2", "d::n1"]);
   });
 
   it("silently drops frozen keys whose session is gone (filtered out or ended)", () => {
     const frozen = ["d::a", "d::gone", "d::b"];
-    expect(keys(applyFrozenOrder([row("d", "b"), row("d", "a")], frozen))).toEqual([
+    expect(keys(applyFrozenOrder([row("d", "b"), row("d", "a")], frozen, keyOf))).toEqual([
       "d::a",
       "d::b",
     ]);
@@ -305,88 +103,7 @@ describe("applyFrozenOrder", () => {
   it("scopes the frozen key by device so two machines' same id never swap places", () => {
     const frozen = ["dev-b::s", "dev-a::s"];
     const rows = [row("dev-a", "s"), row("dev-b", "s")];
-    const out = applyFrozenOrder(rows, frozen);
+    const out = applyFrozenOrder(rows, frozen, keyOf);
     expect(keys(out)).toEqual(["dev-b::s", "dev-a::s"]);
-  });
-});
-
-describe("groupStatusSections", () => {
-  function row(id: string, status: string, procAlive = false) {
-    return {
-      id,
-      status,
-      procAlive,
-      lastActivityMs: Date.now(),
-      workspacePath: "/work/repo",
-      workspaceName: "repo",
-      deviceId: "d1",
-    } as unknown as WithDevice<SessionInfo>;
-  }
-
-  /** A card that is hop `hopNo` of a 3-hop relay chain. */
-  function hop(id: string, status: string, hopNo: number, procAlive = false) {
-    return {
-      ...row(id, status, procAlive),
-      handoff: { chainId: "relay-1", chainLen: 3, hop: hopNo },
-    } as unknown as WithDevice<SessionInfo>;
-  }
-
-  /** The page's own pipeline: fold chains, then partition by status. */
-  function group(rows: Array<WithDevice<SessionInfo>>) {
-    return groupStatusSections(buildRenderItems(rows, true));
-  }
-
-  function idsOf(items: ReturnType<typeof group>[number]["items"]): string[] {
-    return items.map((it) => (it.kind === "single" ? it.session.id : it.chainId));
-  }
-
-  it("derives a card's section from the very tone its dot wears", () => {
-    expect(bucketOfTone("working")).toBe("running");
-    expect(bucketOfTone("quiet")).toBe("running");
-    expect(bucketOfTone("waiting")).toBe("waitingInput");
-    expect(bucketOfTone("watching")).toBe("watching");
-    expect(bucketOfTone("error")).toBe("error");
-    expect(bucketOfTone(null)).toBe("ended");
-  });
-
-  it("orders sections by attention, drops empty buckets and keeps row order", () => {
-    const secs = group([
-      row("done-first", "idle"),
-      row("parked", "waitingInput"),
-      row("done-second", "idle"),
-      row("busy", "executing"),
-      row("limited", "rateLimited"),
-    ]);
-
-    expect(secs.map((s) => s.bucket)).toEqual([
-      "running",
-      "waitingInput",
-      "error",
-      "ended",
-    ]);
-    // The freeze must survive grouping, same contract as groupTaskSections.
-    expect(idsOf(secs[3].items)).toEqual(["done-first", "done-second"]);
-  });
-
-  it("keeps a live relay chain whole under running", () => {
-    // Every hop that has handed off is process-less and toneless, so bucketing
-    // hop by hop filed the chain under "ended" beside its own running tip.
-    const secs = group([
-      hop("tip", "executing", 3, true),
-      hop("retired-2", "idle", 2),
-      hop("retired-1", "idle", 1),
-      row("plain-done", "idle"),
-    ]);
-
-    expect(secs.map((s) => s.bucket)).toEqual(["running", "ended"]);
-    expect(idsOf(secs[0].items)).toEqual(["relay-1"]);
-    expect(idsOf(secs[1].items)).toEqual(["plain-done"]);
-  });
-
-  it("files a fully retired chain under ended", () => {
-    const secs = group([hop("last", "idle", 3), hop("first", "idle", 1)]);
-
-    expect(secs.map((s) => s.bucket)).toEqual(["ended"]);
-    expect(idsOf(secs[0].items)).toEqual(["relay-1"]);
   });
 });

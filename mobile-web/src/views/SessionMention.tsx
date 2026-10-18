@@ -278,7 +278,7 @@ export function RefPickerSheet({
           className={styles.search}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={kind === "session" ? t("搜索会话标题、项目…") : t("搜索知识库文档…")}
+          placeholder={kind === "session" ? t("搜索任务标题、项目…") : t("搜索知识库文档…")}
         />
         <div className={styles.sheetList}>
           {loading ? (

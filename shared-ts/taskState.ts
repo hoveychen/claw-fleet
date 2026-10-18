@@ -30,6 +30,10 @@ export interface TaskMemberView {
   quiet: boolean;
   /** A decision card from this session is waiting for an answer. */
   hasPendingDecision: boolean;
+  /** A later relay hop of the same conversation line took over from this one,
+   *  so its run status is history: an error it ended on was already answered
+   *  by the takeover. A card it left waiting still counts. */
+  superseded?: boolean;
 }
 
 export interface TaskView {
@@ -60,7 +64,7 @@ const WORKING_STATUSES = new Set([
 ]);
 
 function needsHuman(m: TaskMemberView): boolean {
-  return m.hasPendingDecision || ERROR_STATUSES.has(m.status);
+  return m.hasPendingDecision || (!m.superseded && ERROR_STATUSES.has(m.status));
 }
 
 /** A turn is in flight. A parked process with a pending card is not "working";
@@ -77,7 +81,8 @@ function isWatching(m: TaskMemberView): boolean {
  * Which section a task belongs to.
  *
  * 1. needsYou — any session of the task (main or sub-task) has a card waiting
- *    or is in an error state. Checked first so a card is never hidden under a
+ *    or is in an error state (errors only on the latest hop of each line —
+ *    see `superseded`). Checked first so a card is never hidden under a
  *    closed task.
  * 2. done — the boss pressed finish / abandon.
  * 3. running — the main conversation has a turn in flight.
