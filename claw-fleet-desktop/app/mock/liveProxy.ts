@@ -809,6 +809,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { id: a.id },
   }),
 
+  list_projects: () => ({
+    method: "GET",
+    path: "/projects",
+  }),
+
   list_schedules: () => ({
     method: "GET",
     path: "/schedules",
@@ -1402,6 +1407,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/plugins/uninstall",
     empty: true,
     body: { plugin_id: a.pluginId },
+  }),
+
+  create_routine: (a) => ({
+    method: "POST",
+    path: "/routines",
+    body: a.spec,
   }),
 
   update_schedule: (a) => ({

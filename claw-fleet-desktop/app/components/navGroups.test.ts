@@ -26,10 +26,10 @@ describe("nav sections", () => {
     expect([...listed].sort()).toEqual([...ALL_VIEW_MODES].sort());
   });
 
-  it("files documents and deliverables under Library, code and routines under Projects", () => {
+  it("files documents and deliverables under Library, code and memory under Projects", () => {
     expect(navSectionOf("wiki")).toBe("library");
     expect(navSectionOf("artifacts")).toBe("library");
-    for (const v of ["files", "terminal", "schedule", "memory"] as const) {
+    for (const v of ["projects", "files", "terminal", "memory"] as const) {
       expect(navSectionOf(v)).toBe("projects");
     }
     expect(navSectionOf("lobsters")).toBe("settings");
@@ -44,13 +44,13 @@ describe("nav sections", () => {
     expect(navSectionTarget("library", {})).toBe("library");
     expect(navSectionTarget("library", { library: "artifacts" })).toBe("artifacts");
     // A stale entry naming a page of another section is ignored.
-    expect(navSectionTarget("projects", { projects: "wiki" })).toBe("files");
+    expect(navSectionTarget("projects", { projects: "wiki" })).toBe("projects");
   });
 
   it("skips pages this host does not have", () => {
     const avail = { terminal: false, mobile: false, lobsters: false };
-    expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("files");
-    expect(navSectionTabs("projects", avail)).toEqual(["files", "schedule", "memory"]);
+    expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("projects");
+    expect(navSectionTabs("projects", avail)).toEqual(["projects", "files", "memory"]);
   });
 
   it("folds plugins into the Skills segment and never offers the lobster fleet", () => {

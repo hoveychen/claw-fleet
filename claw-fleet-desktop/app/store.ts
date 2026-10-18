@@ -71,6 +71,12 @@ export interface MainViewState {
     /** `doc:<slug>` / `artifact:<id>` — see shared-ts/library.ts. */
     selectedKey: string | null;
   };
+  projects: {
+    query: string;
+    /** Repo-root path of the open project. */
+    selectedPath: string | null;
+    tab: "routines" | "memory" | "code";
+  };
   skills: {
     query: string;
     sourceFilter: "all" | "claude-code" | "codex" | "dsh";
@@ -130,6 +136,7 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     versionBySlug: {},
   },
   library: { query: "", project: "", selectedKey: null },
+  projects: { query: "", selectedPath: null, tab: "routines" },
   skills: {
     query: "",
     sourceFilter: "all",

@@ -11,7 +11,7 @@ import { WikiView } from "./WikiView";
 import { LibraryView } from "./LibraryView";
 import { ArtifactsView } from "./ArtifactsView";
 import { AuditView } from "./AuditView";
-import { ScheduleView } from "./ScheduleView";
+import { ProjectsView } from "./ProjectsView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { FilesView } from "./FilesView";
@@ -212,8 +212,8 @@ export function SessionList() {
         <AuditView />
       ) : viewMode === "memory" ? (
         <MemoryView />
-      ) : viewMode === "schedule" ? (
-        <ScheduleView />
+      ) : viewMode === "projects" ? (
+        <ProjectsView />
       ) : viewMode === "library" ? (
         <LibraryView />
       ) : viewMode === "wiki" ? (

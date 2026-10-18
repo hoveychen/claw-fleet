@@ -3068,5 +3068,37 @@
     "load_failed": "Couldn't load deliverables: {{error}}",
     "pick_title": "Pick something to read",
     "pick_sub": "Docs and deliverables in one list; filter by type and project on the left."
+  },
+  "nav_tab_projects": "Projects",
+  "routines": {
+    "title": "Routines",
+    "create": "New routine",
+    "empty_title": "No routines in this project yet",
+    "empty_sub": "Pick a time or an interval and a task starts on its own when it comes round.",
+    "create_title": "New routine",
+    "title_placeholder": "A few words on what it is for",
+    "prompt": "What to do",
+    "prompt_placeholder": "Write it the way you would brief a new task",
+    "once": "Once",
+    "repeat": "Repeat",
+    "every": "Every",
+    "create_confirm": "Create"
+  },
+  "projects": {
+    "empty": "No projects yet. A directory shows up here once a task has run in it.",
+    "no_match": "No project matches",
+    "running": "{{count}} running",
+    "search": "Search name / path…",
+    "tab_routines": "Routines",
+    "tab_memory": "Memory",
+    "tab_code": "Code",
+    "pick_title": "Pick a project",
+    "pick_sub": "See its routines, memory and code.",
+    "memory_empty": "No memory in this project yet",
+    "memory_empty_sub": "What agents note down while working here shows up here.",
+    "procs_running": "{{count}} commands running",
+    "procs_none": "No commands running",
+    "browse_code": "Browse code",
+    "open_terminal": "Open terminal"
   }
 }

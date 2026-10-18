@@ -27,6 +27,7 @@ import {
   type FollowState,
 } from "../followState";
 import { nestedScrollerWillConsume } from "../nestedScroll";
+import { repoRootPath } from "../../../shared-ts/repoPath";
 import { currentViewMetrics, formatSnapshot, takeScrollSnapshot } from "../scrollSnapshot";
 import { AgentNavProvider } from "./AgentNavContext";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -162,7 +163,7 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
 /** "Triggered by schedule X" provenance chip. Shown only for sessions
  *  a one-shot schedule fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the
  *  session id back to the schedule via list_schedules' firedSessionId to name the id.
- *  Clicking jumps to the Schedule page. Falls back to a generic "scheduled"
+ *  Clicking opens the routines of the session's project. Falls back to a generic "scheduled"
  *  label if the schedule record was cancelled/forgotten and no id is recoverable. */
 function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
@@ -196,7 +197,12 @@ function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
     <button
       className={styles.schedule_chip}
       title={t("detail.triggered_by_schedule_tip", "由 Fleet 定时任务触发,点击查看计划")}
-      onClick={() => setViewMode("schedule")}
+      onClick={() => {
+        useUIStore
+          .getState()
+          .updateMainViewState("projects", { selectedPath: repoRootPath(session.workspacePath), tab: "routines" });
+        setViewMode("projects");
+      }}
     >
       <CalendarClock size={11} strokeWidth={2.2} />
       {!resolved ? (

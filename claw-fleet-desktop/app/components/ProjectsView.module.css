@@ -1,0 +1,224 @@
+/* 项目 (Projects): project list and detail. Tokens only — no new colours. */
+.list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.none {
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.row:hover {
+  background: var(--color-bg-row-hover);
+}
+
+.row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.row_active,
+.row_active:hover {
+  background: var(--color-bg-row-selected);
+}
+
+.icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 6px;
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+}
+
+
+.path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.running {
+  flex: 0 0 auto;
+  color: var(--color-success);
+}
+
+.time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.head_text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.head_name {
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.head_path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+}
+
+/* Same pill-tab idiom as SkillsSourceTabs / AuditView's banner switch. */
+.tab_bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.tab_btn {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.tab_btn:hover {
+  color: var(--color-text);
+}
+
+.tab_active {
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane_list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.code {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.code_stat {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.code_actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--color-bg-row-hover);
+}

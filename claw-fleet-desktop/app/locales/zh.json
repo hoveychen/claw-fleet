@@ -3063,5 +3063,37 @@
     "load_failed": "产出加载失败：{{error}}",
     "pick_title": "选一份资料",
     "pick_sub": "文档和产出放在一起；左边按类型和项目筛选。"
+  },
+  "nav_tab_projects": "项目",
+  "routines": {
+    "title": "例行",
+    "create": "新建例行",
+    "empty_title": "这个项目还没有例行",
+    "empty_sub": "定个时间或周期，到点自动开一个任务去做。",
+    "create_title": "新建例行",
+    "title_placeholder": "几个字说清这是干什么的",
+    "prompt": "到点要做的事",
+    "prompt_placeholder": "像交代一个新任务那样写清楚",
+    "once": "单次",
+    "repeat": "重复",
+    "every": "每隔",
+    "create_confirm": "创建"
+  },
+  "projects": {
+    "empty": "还没有项目。在某个目录里开过任务后，它就会出现在这里。",
+    "no_match": "没有符合搜索的项目",
+    "running": "{{count}} 进行中",
+    "search": "搜索项目名 / 路径…",
+    "tab_routines": "例行",
+    "tab_memory": "记忆",
+    "tab_code": "代码",
+    "pick_title": "选一个项目",
+    "pick_sub": "看它的例行、记忆和代码。",
+    "memory_empty": "这个项目还没有记忆",
+    "memory_empty_sub": "agent 在这里干活时记下的要点会出现在这里。",
+    "procs_running": "{{count}} 个命令在运行",
+    "procs_none": "没有在运行的命令",
+    "browse_code": "浏览代码",
+    "open_terminal": "打开终端"
   }
 }

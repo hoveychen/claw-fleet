@@ -23,10 +23,10 @@ export const ALL_VIEW_MODES = [
   "artifacts",
   "skills",
   "plugins",
+  "projects",
   "files",
   "terminal",
   "mobile",
-  "schedule",
 ] as const;
 
 export type ViewMode = (typeof ALL_VIEW_MODES)[number];
