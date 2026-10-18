@@ -17,6 +17,11 @@ import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { VoiceTextarea } from "./VoiceTextarea";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
+import { remarkKeepDunder } from "../../../shared-ts/markdownIdentifiers";
+
+/** The "your last message" preview reads what the boss typed, where a bare
+ *  `__pycache__` is a name, not bold. */
+const PRECEDING_REMARK_PLUGINS = [...mdRemarkPlugins, remarkKeepDunder];
 import { mdComponents } from "../markdown/components";
 import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
 import { SelectionAskBar } from "./SelectionAskBar";
@@ -1138,7 +1143,7 @@ function LastUserInputBlock({
             {a.label ? <div className={styles.precedingQ}>{a.label}</div> : null}
             <div className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={mdRemarkPlugins}
+                remarkPlugins={PRECEDING_REMARK_PLUGINS}
                 rehypePlugins={mdRehypePlugins}
                 components={mdComponents}
               >
