@@ -864,8 +864,8 @@ function GuardAllowRulesSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke<GuardAllowRule[]>("list_guard_allow_rules");
-      setRules(data);
+      const data = await invoke<GuardAllowRule[] | null>("list_guard_allow_rules");
+      setRules(data ?? []);
     } catch (e) {
       console.error("list_guard_allow_rules failed:", e);
       setRules([]);

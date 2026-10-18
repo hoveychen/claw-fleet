@@ -2304,10 +2304,14 @@
     "remote_host_remove_blocked": "这台主机上还有 {{count}} 个 workspace（{{paths}}）——先移除它们，否则它们会指向一个已不存在的主机。",
     "remote_ws_unattached_title": "未归属主机的 workspace（旧条目）",
     "interaction_diagnostics_load_failed": "诊断检查失败",
-    "more_pages": "更多页面",
-    "more_pages_skills": "技能与插件",
-    "more_pages_mobile": "移动端配对",
-    "lobster_fleet_open": "打开龙虾舰队"
+    "lobster_fleet_open": "打开龙虾舰队",
+    "tab_security": "安全",
+    "page_skills": "插件与技能",
+    "page_devices": "设备",
+    "page_global_memory": "全局记忆",
+    "security_pages": "记录与规则",
+    "security_events": "审计记录",
+    "security_rules": "始终允许规则"
   },
   "usage": {
     "total_tokens": "Token 总数",
@@ -3048,10 +3052,10 @@
   "nav_tab_terminal": "终端",
   "nav_tab_schedule": "例行",
   "nav_tab_memory": "记忆",
-  "nav_tab_audit": "审计",
+  "nav_tab_audit": "安全",
   "nav_tab_report": "日报",
-  "nav_tab_skills": "技能",
-  "nav_tab_mobile": "移动端",
+  "nav_tab_skills": "插件与技能",
+  "nav_tab_mobile": "设备",
   "nav_tab_library": "全部",
   "library": {
     "type_doc": "文档",

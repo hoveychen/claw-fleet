@@ -2307,10 +2307,14 @@
     "remote_host_remove_blocked": "This host still has {{count}} workspace(s) ({{paths}}) — remove them first, or they would point at a host that no longer exists.",
     "remote_ws_unattached_title": "Workspaces not attached to a host (legacy entries)",
     "interaction_diagnostics_load_failed": "Diagnostics check failed",
-    "more_pages": "More pages",
-    "more_pages_skills": "Skills & plugins",
-    "more_pages_mobile": "Pair a phone",
-    "lobster_fleet_open": "Open the lobster fleet"
+    "lobster_fleet_open": "Open the lobster fleet",
+    "tab_security": "Security",
+    "page_skills": "Plugins & skills",
+    "page_devices": "Devices",
+    "page_global_memory": "Global memory",
+    "security_pages": "Records and rules",
+    "security_events": "Audit records",
+    "security_rules": "Always-allow rules"
   },
   "usage": {
     "total_tokens": "Tokens",
@@ -3053,10 +3057,10 @@
   "nav_tab_terminal": "Terminal",
   "nav_tab_schedule": "Routines",
   "nav_tab_memory": "Memory",
-  "nav_tab_audit": "Audit",
+  "nav_tab_audit": "Security",
   "nav_tab_report": "Daily report",
-  "nav_tab_skills": "Skills",
-  "nav_tab_mobile": "Mobile",
+  "nav_tab_skills": "Plugins & skills",
+  "nav_tab_mobile": "Devices",
   "nav_tab_library": "All",
   "library": {
     "type_doc": "Docs",

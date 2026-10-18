@@ -493,3 +493,13 @@
   align-items: center;
   gap: 8px;
 }
+
+/* A menu row that opens a page rather than a tab (see MenuPageLinks). */
+.menu_link {
+  justify-content: space-between;
+}
+
+.menu_link_label {
+  display: inline-flex;
+  align-items: center;
+}

@@ -1081,6 +1081,11 @@ async function handleIPC(
       return MOCK_AUDIT_SUMMARY;
     case "get_audit_rules":
       return MOCK_AUDIT_RULES;
+    case "list_guard_allow_rules":
+      return [
+        { id: "allow-1", prefix: "git push origin", sourceTag: "git_push", createdAt: "2026-10-12T09:14:00Z", approvedBy: "desktop" },
+        { id: "allow-2", prefix: "pnpm publish --dry-run", sourceTag: null, createdAt: "2026-10-15T21:02:00Z", approvedBy: "mobile" },
+      ];
     case "detect_ai_tools":
       return MOCK_DETECTED_TOOLS;
     case "get_log_path":

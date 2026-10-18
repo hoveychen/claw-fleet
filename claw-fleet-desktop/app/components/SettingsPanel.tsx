@@ -77,12 +77,12 @@ interface LlmConfig {
 type NotificationMode = "all" | "user_action" | "none";
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
 
-// Redesigned IA: 2 everyday tabs (general / alerts) + the advanced tabs
-// (environment / interaction / model / integration / usage) shown under a
-// collapsible "Advanced" group. See the settings-redesign plan.
-type SettingsTab = "general" | "alerts" | "environment" | "interaction" | "model" | "integration" | "usage";
-const BASE_TABS: SettingsTab[] = ["general", "alerts"];
-const ADVANCED_TABS: SettingsTab[] = ["environment", "interaction", "model", "integration", "usage"];
+// Everyday tabs (general / alerts / security / usage), then rows that open the
+// pages filed under Settings, then the advanced tabs (environment /
+// interaction / model / integration) under a collapsible "Advanced" group.
+type SettingsTab = "general" | "alerts" | "security" | "environment" | "interaction" | "model" | "integration" | "usage";
+const BASE_TABS: SettingsTab[] = ["general", "alerts", "security", "usage"];
+const ADVANCED_TABS: SettingsTab[] = ["environment", "interaction", "model", "integration"];
 
 const tabIcons: Record<SettingsTab, React.ReactNode> = {
   general: (
@@ -97,6 +97,12 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M6 13a2 2 0 0 0 4 0" />
       <path d="M12 7c0-2.76-1.79-5-4-5S4 4.24 4 7c0 3-1.5 4.5-2 5h12c-.5-.5-2-2-2-5z" />
+    </svg>
+  ),
+  // Security = shield: the command guard plus its audit trail and allow rules.
+  security: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M8 1.5l5 2v4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7v-4z" />
     </svg>
   ),
   // Environment = wrench: install/upgrade/login health for the agent harnesses.
@@ -173,36 +179,74 @@ function TriStateSkeleton() {
   return <SkeletonNumber width={132} height={24} />;
 }
 
-/** Pages that live under the Settings nav entry rather than on the rail:
- *  each row closes the overlay and opens its page. */
-function MorePagesSection({ onClose }: { onClose: () => void }) {
+/** Pages filed under Settings rather than on the rail, listed in the menu
+ *  below the everyday tabs: each row closes the overlay and opens its page. */
+function MenuPageLinks({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const setViewMode = useUIStore((s) => s.setViewMode);
-  const unreadCritical = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
   const avail = useNavAvailability();
-  const open = (view: ViewMode) => {
+  const open = (view: ViewMode, prep?: () => void) => {
     onClose();
-    setViewMode(view);
+    prep?.();
+    useUIStore.getState().setViewMode(view);
   };
-  const rows: { view: ViewMode; label: string; dot?: boolean }[] = [
-    { view: "audit", label: t("nav_tab_audit", "审计"), dot: unreadCritical > 0 },
-    { view: "report", label: t("nav_tab_report", "日报"), dot: hasNewReport },
-    { view: "skills", label: t("settings.more_pages_skills", "技能与插件") },
-    ...(avail.mobile ? [{ view: "mobile" as const, label: t("settings.more_pages_mobile", "移动端配对") }] : []),
+  const rows: { key: string; label: string; dot?: boolean; onClick: () => void }[] = [
+    { key: "skills", label: t("settings.page_skills", "插件与技能"), onClick: () => open("skills") },
+    ...(avail.mobile
+      ? [{ key: "mobile", label: t("settings.page_devices", "设备"), onClick: () => open("mobile") }]
+      : []),
+    { key: "report", label: t("nav_tab_report", "日报"), dot: hasNewReport, onClick: () => open("report") },
+    {
+      key: "memory",
+      label: t("settings.page_global_memory", "全局记忆"),
+      onClick: () =>
+        open("memory", () =>
+          useUIStore.getState().updateMainViewState("memory", { workspaceFilter: "__global__", selectedKey: null }),
+        ),
+    },
   ];
   return (
-    <div className={styles.section}>
-      <div className={styles.section_title}>{t("settings.more_pages", "更多页面")}</div>
+    <>
       {rows.map((r) => (
-        <button key={r.view} type="button" className={`${styles.row} ${styles.page_link}`} onClick={() => open(r.view)}>
-          <span className={styles.row_label}>
+        <button key={r.key} type="button" className={`${styles.menu_item} ${styles.menu_link}`} onClick={r.onClick}>
+          <span className={styles.menu_link_label}>
             {r.label}
             {r.dot && <span className={styles.page_link_dot} />}
           </span>
-          <ChevronRight size={14} strokeWidth={1.75} className={styles.page_link_chevron} />
+          <ChevronRight size={13} strokeWidth={1.75} className={styles.page_link_chevron} />
         </button>
       ))}
+    </>
+  );
+}
+
+/** Security tab: the command guard's switches, then its audit trail and the
+ *  always-allow rules, which keep their full page (审计 › 记录 / 规则). */
+function SecurityLinks({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const unreadCritical = useAuditStore((s) => s.unreadCriticalCount);
+  const open = (tab: "events" | "rules") => {
+    onClose();
+    const s = useUIStore.getState();
+    // The allow rules sit in a collapsed footer under the rules tab; the link
+    // names them, so it opens that footer too.
+    s.updateMainViewState("audit", tab === "rules" ? { tab, allowRulesExpanded: true } : { tab });
+    s.setViewMode("audit");
+  };
+  return (
+    <div className={styles.section}>
+      <div className={styles.section_title}>{t("settings.security_pages", "记录与规则")}</div>
+      <button type="button" className={`${styles.row} ${styles.page_link}`} onClick={() => open("events")}>
+        <span className={styles.row_label}>
+          {t("settings.security_events", "审计记录")}
+          {unreadCritical > 0 && <span className={styles.page_link_dot} />}
+        </span>
+        <ChevronRight size={14} strokeWidth={1.75} className={styles.page_link_chevron} />
+      </button>
+      <button type="button" className={`${styles.row} ${styles.page_link}`} onClick={() => open("rules")}>
+        <span className={styles.row_label}>{t("settings.security_rules", "始终允许规则")}</span>
+        <ChevronRight size={14} strokeWidth={1.75} className={styles.page_link_chevron} />
+      </button>
     </div>
   );
 }
@@ -1287,6 +1331,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const tabLabels: Record<SettingsTab, string> = {
     general: t("settings.tab_general"),
     alerts: t("settings.tab_alerts"),
+    security: t("settings.tab_security", "安全"),
     environment: t("settings.tab_environment"),
     interaction: t("settings.tab_interaction"),
     model: t("settings.tab_model"),
@@ -1319,6 +1364,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {/* ── Left: menu — everyday tabs, then a collapsible Advanced group ── */}
           <nav className={styles.menu}>
             {BASE_TABS.map(renderTabButton)}
+            <MenuPageLinks onClose={onClose} />
 
             <button
               type="button"
@@ -1644,7 +1690,43 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </div>
             )}
 
-            {activeTab === "general" && <MorePagesSection onClose={onClose} />}
+            {/* ── Security: guard switches + audit trail / allow rules ── */}
+            {activeTab === "security" && (
+              <>
+              {/* ── Guard ── */}
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.interaction_group_safety")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.guard_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
+                  {prefsSettled ? (
+                    <TriStateToggle
+                      value={guardState}
+                      defaultOn={featureDefault("guard-enabled")}
+                      onChange={handleToggleGuard}
+                    />
+                  ) : (
+                    <TriStateSkeleton />
+                  )}
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
+                  <TriStateToggle
+                    value={guardLlmState}
+                    defaultOn={featureDefault("guard-llm-analysis")}
+                    disabled={!guardEnabled}
+                    onChange={handleToggleGuardLlm}
+                  />
+                </div>
+              </div>
+
+                <SecurityLinks onClose={onClose} />
+              </>
+            )}
 
             {/* ── Appearance (merged into General) ── */}
             {activeTab === "general" && (
@@ -2167,37 +2249,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   ) : (
                     <TriStateSkeleton />
                   )}
-                </div>
-              </div>
-
-              {/* ── Group: safety ── */}
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.interaction_group_safety")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.guard_desc")}
-                  </span>
-                </div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
-                  {prefsSettled ? (
-                    <TriStateToggle
-                      value={guardState}
-                      defaultOn={featureDefault("guard-enabled")}
-                      onChange={handleToggleGuard}
-                    />
-                  ) : (
-                    <TriStateSkeleton />
-                  )}
-                </div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
-                  <TriStateToggle
-                    value={guardLlmState}
-                    defaultOn={featureDefault("guard-llm-analysis")}
-                    disabled={!guardEnabled}
-                    onChange={handleToggleGuardLlm}
-                  />
                 </div>
               </div>
 
