@@ -3051,5 +3051,17 @@
   "nav_tab_audit": "审计",
   "nav_tab_report": "日报",
   "nav_tab_skills": "技能",
-  "nav_tab_mobile": "移动端"
+  "nav_tab_mobile": "移动端",
+  "nav_tab_library": "全部",
+  "library": {
+    "type_doc": "文档",
+    "type_artifact": "产出",
+    "empty": "还没有资料。agent 发布的文档和交付的文件会出现在这里。",
+    "no_match": "没有符合筛选条件的资料",
+    "search": "搜索标题 / 正文…",
+    "project_all": "全部项目",
+    "load_failed": "产出加载失败：{{error}}",
+    "pick_title": "选一份资料",
+    "pick_sub": "文档和产出放在一起；左边按类型和项目筛选。"
+  }
 }

@@ -8,6 +8,7 @@ import type { SessionInfo } from "../types";
 import type { SessionsFrame } from "../../../shared-ts/sessionsFrame";
 import { MemoryView } from "./MemoryView";
 import { WikiView } from "./WikiView";
+import { LibraryView } from "./LibraryView";
 import { ArtifactsView } from "./ArtifactsView";
 import { AuditView } from "./AuditView";
 import { ScheduleView } from "./ScheduleView";
@@ -213,6 +214,8 @@ export function SessionList() {
         <MemoryView />
       ) : viewMode === "schedule" ? (
         <ScheduleView />
+      ) : viewMode === "library" ? (
+        <LibraryView />
       ) : viewMode === "wiki" ? (
         <WikiView />
       ) : viewMode === "artifacts" ? (

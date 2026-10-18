@@ -64,6 +64,13 @@ export interface MainViewState {
     collapsedFolders: string[];
     versionBySlug: Record<string, string>;
   };
+  library: {
+    query: string;
+    /** Repo-root path; empty = every project. */
+    project: string;
+    /** `doc:<slug>` / `artifact:<id>` — see shared-ts/library.ts. */
+    selectedKey: string | null;
+  };
   skills: {
     query: string;
     sourceFilter: "all" | "claude-code" | "codex" | "dsh";
@@ -122,6 +129,7 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     collapsedFolders: [],
     versionBySlug: {},
   },
+  library: { query: "", project: "", selectedKey: null },
   skills: {
     query: "",
     sourceFilter: "all",

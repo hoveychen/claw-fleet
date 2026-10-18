@@ -18,6 +18,7 @@ export const ALL_VIEW_MODES = [
   "audit",
   "report",
   "memory",
+  "library",
   "wiki",
   "artifacts",
   "skills",

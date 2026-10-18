@@ -45,6 +45,7 @@ const ALL_KEYS = [
   "audit-rail-width",
   "report-rail-width",
   "artifacts-rail-width",
+  "library-rail-width",
   // Width of an expanded doc card in a session detail's auxiliary rail, stored
   // as a *fraction* of the pane rather than a pixel count: the same setting has
   // to mean the same thing on a 13" laptop and on a 3440px ultrawide.

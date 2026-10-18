@@ -41,7 +41,7 @@ describe("nav sections", () => {
   });
 
   it("returns to the last page of a section, else its first", () => {
-    expect(navSectionTarget("library", {})).toBe("wiki");
+    expect(navSectionTarget("library", {})).toBe("library");
     expect(navSectionTarget("library", { library: "artifacts" })).toBe("artifacts");
     // A stale entry naming a page of another section is ignored.
     expect(navSectionTarget("projects", { projects: "wiki" })).toBe("files");

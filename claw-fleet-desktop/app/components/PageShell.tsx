@@ -65,6 +65,7 @@ interface Props {
  *  locale-key guard (localeKeys.test.ts) can see every key. */
 function tabLabel(t: TFunction, view: ViewMode): string {
   switch (view) {
+    case "library": return t("nav_tab_library", "全部");
     case "wiki": return t("nav_tab_wiki", "文档");
     case "artifacts": return t("nav_tab_artifacts", "产出");
     case "files": return t("nav_tab_files", "代码");

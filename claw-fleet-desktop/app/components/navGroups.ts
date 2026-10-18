@@ -14,7 +14,7 @@ export const NAV_SECTIONS: readonly NavSection[] = ["tasks", "library", "project
  *  navGroups.test.ts asserts every {@link ViewMode} is listed exactly once. */
 export const NAV_SECTION_VIEWS: Record<NavSection, readonly ViewMode[]> = {
   tasks: ["history"],
-  library: ["wiki", "artifacts"],
+  library: ["library", "wiki", "artifacts"],
   projects: ["files", "terminal", "schedule", "memory"],
   // Reached from the Settings overlay ("more pages"); the nav entry itself
   // opens the overlay. The lobster fleet is an opt-in easter egg launched from
