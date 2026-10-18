@@ -1664,6 +1664,93 @@ export function SessionDetail({
     return () => window.removeEventListener("keydown", onKey);
   }, [activeFacet, aux.expanded]);
 
+  /** The session's technical facts — model, effort, context, cost, tokens,
+   *  compactions, slug. `all` shows the numbers that otherwise wait behind
+   *  the ··· toggle; the developer view always shows them. */
+  const factChips = (liveSession: SessionInfo, all: boolean) => (
+    <>
+      {liveSession.model && (
+        <span
+          className={styles.meta_chip}
+          title={t("card.tip_model", { model: liveSession.model })}
+        >
+          {formatModel(liveSession.model)}
+        </span>
+      )}
+      {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
+          their `medium` cut. On a dense board a chip on every card says
+          nothing; the detail header is the one place you come to ask
+          what this session is actually running at, so `medium` is an
+          answer there. */}
+      {effortChipLabel(liveSession) && (
+        <span
+          className={styles.meta_chip}
+          title={effortTitle(t, liveSession)}
+        >
+          <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
+            <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
+          </svg>
+          {effortChipLabel(liveSession)}
+        </span>
+      )}
+      {/* Context stays out of the fold once it crosses the warn line.
+          Below it, it is a figure; above it, it is an alarm — the
+          session is about to compact — and an alarm you have to click
+          to see is not an alarm. */}
+      {liveSession.contextPercent != null &&
+        (all || liveSession.contextPercent >= 0.8) && (
+        <span
+          className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
+          title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
+        >
+          ctx {Math.round(liveSession.contextPercent * 100)}%
+        </span>
+      )}
+      {all && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
+        <span className={styles.meta_chip} title={t("card.tip_cost")}>
+          ${liveSession.totalCostUsd.toFixed(2)}
+        </span>
+      )}
+      {all && (
+        <span className={styles.meta_chip} title={t("tokens_out")}>
+          {liveSession.totalOutputTokens.toLocaleString()} tok
+        </span>
+      )}
+      {all && liveSession.reasoningOutputTokens > 0 && (
+        <span
+          className={styles.meta_chip}
+          title={t("reasoning_tokens_tip", {
+            tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+            percent: reasoningPercent.toFixed(1),
+          })}
+        >
+          {t("reasoning_tokens_chip", {
+            tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+            percent: reasoningPercent.toFixed(1),
+          })}
+        </span>
+      )}
+      {all && (liveSession.compactCount ?? 0) > 0 && (
+        <span
+          className={styles.meta_chip}
+          title={t("card.tip_compact", {
+            count: liveSession.compactCount ?? 0,
+            pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
+            post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
+            cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
+          })}
+        >
+          ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
+        </span>
+      )}
+      {liveSession.slug && (
+        <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
+          {liveSession.slug}
+        </span>
+      )}
+    </>
+  );
+
   return (
     // Both link capabilities cover the whole component, so the reader modal and
     // every tool-block renderer inherit them too — and both now land in the
@@ -1755,85 +1842,7 @@ export function SessionDetail({
                         when you go looking. Same chip and same one-click
                         continue as the board card. */}
                     <OutOfCreditsNotice session={liveSession} inline />
-                    {liveSession.model && (
-                      <span
-                        className={styles.meta_chip}
-                        title={t("card.tip_model", { model: liveSession.model })}
-                      >
-                        {formatModel(liveSession.model)}
-                      </span>
-                    )}
-                    {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
-                        their `medium` cut. On a dense board a chip on every card says
-                        nothing; the detail header is the one place you come to ask
-                        what this session is actually running at, so `medium` is an
-                        answer there. */}
-                    {effortChipLabel(liveSession) && (
-                      <span
-                        className={styles.meta_chip}
-                        title={effortTitle(t, liveSession)}
-                      >
-                        <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
-                          <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
-                        </svg>
-                        {effortChipLabel(liveSession)}
-                      </span>
-                    )}
-                    {/* Context stays out of the fold once it crosses the warn line.
-                        Below it, it is a figure; above it, it is an alarm — the
-                        session is about to compact — and an alarm you have to click
-                        to see is not an alarm. */}
-                    {liveSession.contextPercent != null &&
-                      (metricsOpen || liveSession.contextPercent >= 0.8) && (
-                      <span
-                        className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
-                        title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
-                      >
-                        ctx {Math.round(liveSession.contextPercent * 100)}%
-                      </span>
-                    )}
-                    {metricsOpen && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
-                      <span className={styles.meta_chip} title={t("card.tip_cost")}>
-                        ${liveSession.totalCostUsd.toFixed(2)}
-                      </span>
-                    )}
-                    {metricsOpen && (
-                      <span className={styles.meta_chip} title={t("tokens_out")}>
-                        {liveSession.totalOutputTokens.toLocaleString()} tok
-                      </span>
-                    )}
-                    {metricsOpen && liveSession.reasoningOutputTokens > 0 && (
-                      <span
-                        className={styles.meta_chip}
-                        title={t("reasoning_tokens_tip", {
-                          tokens: liveSession.reasoningOutputTokens.toLocaleString(),
-                          percent: reasoningPercent.toFixed(1),
-                        })}
-                      >
-                        {t("reasoning_tokens_chip", {
-                          tokens: liveSession.reasoningOutputTokens.toLocaleString(),
-                          percent: reasoningPercent.toFixed(1),
-                        })}
-                      </span>
-                    )}
-                    {metricsOpen && (liveSession.compactCount ?? 0) > 0 && (
-                      <span
-                        className={styles.meta_chip}
-                        title={t("card.tip_compact", {
-                          count: liveSession.compactCount ?? 0,
-                          pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
-                          post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
-                          cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
-                        })}
-                      >
-                        ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
-                      </span>
-                    )}
-                    {liveSession.slug && (
-                      <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
-                        {liveSession.slug}
-                      </span>
-                    )}
+                    {factChips(liveSession, metricsOpen)}
                     <ScheduleProvenanceChip session={liveSession} />
                     {/* Relay position and live watches are chips like any other
                         fact about this session, so they ride the identity row
