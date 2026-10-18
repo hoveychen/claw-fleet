@@ -320,12 +320,9 @@
   "language": "Language",
   "view_list": "List",
   "view_gallery": "Gallery",
-  "keep_awake_on_tooltip": "Keep awake is on — the system won't idle-sleep. Click to turn off",
-  "keep_awake_off_tooltip": "Keep the system awake (like caffeinate -i)",
   "view_audit": "Audit",
   "view_memory": "Memory",
   "view_schedule": "Schedule",
-  "view_plans": "Plan tree",
   "view_wiki": "Wiki",
   "view_artifacts": "Artifacts",
   "view_skills": "Skills",
@@ -1275,11 +1272,6 @@
       "mock_a2": "Roll back the migration",
       "mock_a3": "Show me the failures"
     },
-    "nav_more": {
-      "title": "Changed: one sidebar list, the rest under More",
-      "description": "The Fleet / Work tabs are gone. Tasks, repos, terminal, wiki and deliverables are listed directly; schedules, plan trees, audit, the daily report, memory, skills and phone pairing are under More at the bottom of the list. Clicking More switches the nav to that group; the back row at its top returns to the main list.",
-      "hint": "The nav stays on More while one of its pages is on screen. On the main list, More shows a red dot when there is a new daily report or an unread critical audit event."
-    },
     "prd_mode": {
       "title": "New: PRD Discipline Mode",
       "description": "Keep Claude Code focused across long multi-step plans (P1–P10). Adds a commit-discipline rule (no proactive commits mid-PRD) and persists your macro plan to TASKS.md at the workspace root, with a UserPromptSubmit hook that re-injects the active region every turn — so context compression no longer makes Claude forget remaining tasks."
@@ -1301,6 +1293,11 @@
     "env_setup": {
       "title": "A few setup steps left",
       "description": "Fleet can install and log in what’s missing for you — just use the buttons below, no terminal needed."
+    },
+    "nav_sections": {
+      "title": "New: the nav is down to four entries",
+      "description": "The icon rail on the left is now Tasks / Library / Projects / Settings. Library holds docs and deliverables; Projects holds code, terminal, routines and memory — switch between them from the page title. Audit, daily report, skills and phone pairing live under Settings → More pages.",
+      "hint": "Home is every task across all projects. An unread critical audit event or a new daily report puts a red dot on Settings."
     }
   },
   "mascot": {
@@ -1810,11 +1807,7 @@
       "desc": "This is the Tasks page — click \"New Session\" at the top of the task rail, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by directory."
     }
   },
-  "nav_more": "More",
-  "nav_back": "Back",
   "sidebar": {
-    "collapse": "Collapse sidebar",
-    "expand": "Expand sidebar",
     "secondary_collapse": "Collapse this sidebar",
     "secondary_expand": "Expand sidebar"
   },
@@ -2384,9 +2377,11 @@
     "remote_host_install_btn": "Install rca",
     "remote_host_remove_blocked": "This host still has {{count}} workspace(s) ({{paths}}) — remove them first, or they would point at a host that no longer exists.",
     "remote_ws_unattached_title": "Workspaces not attached to a host (legacy entries)",
-    "simplified_mode": "Simplified mode",
-    "simplified_mode_desc": "Show only Tasks and Artifacts. Answer decisions inside each task.",
-    "interaction_diagnostics_load_failed": "Diagnostics check failed"
+    "interaction_diagnostics_load_failed": "Diagnostics check failed",
+    "more_pages": "More pages",
+    "more_pages_skills": "Skills & plugins",
+    "more_pages_mobile": "Pair a phone",
+    "lobster_fleet_open": "Open the lobster fleet"
   },
   "usage": {
     "total_tokens": "Tokens",
@@ -2696,7 +2691,6 @@
     "menu_rename": "Rename",
     "menu_stop": "Stop session",
     "orphan_with_card": "This session is outside the scan (its record may be deleted, aged out, or unreadable by the current user), but its card is still waiting for you:",
-    "orphan_card_in_panel": "This session is outside the scan; its card is waiting for you in the decision panel.",
     "orphan_not_found": "Session not found: its record may be deleted, aged out, or unreadable by the current user.",
     "orphan_back": "Close",
     "rename_title": "Rename session",
@@ -3112,5 +3106,19 @@
     "back": "Fleet",
     "more_ships": "{{n}} more ships",
     "more_crew": "{{n}} more crew"
-  }
+  },
+  "nav_section_tasks": "Tasks",
+  "nav_section_library": "Library",
+  "nav_section_projects": "Projects",
+  "nav_section_settings": "Settings",
+  "nav_tab_wiki": "Docs",
+  "nav_tab_artifacts": "Deliverables",
+  "nav_tab_files": "Code",
+  "nav_tab_terminal": "Terminal",
+  "nav_tab_schedule": "Routines",
+  "nav_tab_memory": "Memory",
+  "nav_tab_audit": "Audit",
+  "nav_tab_report": "Daily report",
+  "nav_tab_skills": "Skills",
+  "nav_tab_mobile": "Mobile"
 }

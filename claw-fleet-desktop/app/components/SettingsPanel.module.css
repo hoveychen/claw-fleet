@@ -178,6 +178,43 @@
   margin-top: 8px;
 }
 
+/* A row that opens a page (see MorePagesSection): the whole row is the button. */
+.page_link {
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text);
+  font: inherit;
+  /* Bleed the hover fill past the column edge so the label stays aligned
+     with the plain rows above and below. */
+  padding: 0 8px;
+  margin-left: -8px;
+  margin-right: -8px;
+  width: calc(100% + 16px);
+  border-radius: var(--radius-sm);
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.page_link:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.page_link_chevron {
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.page_link_dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--color-error-solid);
+}
+
 .row_label {
   font-size: 13px;
   color: var(--color-text);

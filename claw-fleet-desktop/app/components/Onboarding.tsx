@@ -630,22 +630,22 @@ function PrdModeCard({
   );
 }
 
-/** Purely informational—where the sidebar's pages are. Unlike every other card
- *  here it has no toggle: the layout isn't optional, and an upgrading user who
- *  knew the Fleet / Work tabs needs to be told those pages now sit under More
- *  rather than discovering it by clicking around. That's also why "nav_more" is
- *  in ONBOARDING_FEATURES—it makes this card surface once in What's New for
+/** Purely informational—where the pages are. Unlike every other card here it
+ *  has no toggle: the layout isn't optional, and an upgrading user who knew the
+ *  old sidebar needs to be told where its pages went rather than discovering it
+ *  by clicking around. That's also why "nav_sections" is in
+ *  ONBOARDING_FEATURES—it makes this card surface once in What's New for
  *  existing installs. */
-function NavMoreCard() {
+function NavSectionsCard() {
   const { t } = useTranslation();
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
       <div className={styles.card_header}>
         <span className={styles.card_icon}>&#x1F9ED;</span>
-        <span className={styles.card_title}>{t("onboarding.nav_more.title")}</span>
+        <span className={styles.card_title}>{t("onboarding.nav_sections.title")}</span>
       </div>
-      <p className={styles.card_description}>{t("onboarding.nav_more.description")}</p>
-      <p className={styles.card_description}>{t("onboarding.nav_more.hint")}</p>
+      <p className={styles.card_description}>{t("onboarding.nav_sections.description")}</p>
+      <p className={styles.card_description}>{t("onboarding.nav_sections.hint")}</p>
     </div>
   );
 }
@@ -1375,9 +1375,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
           {/* First card in What's New: it explains where the pages moved, so it
               has to come before any of the toggles. */}
-          {unseenFeatures.has("nav_more") && (
+          {unseenFeatures.has("nav_sections") && (
             <div className={styles.cards}>
-              <NavMoreCard />
+              <NavSectionsCard />
             </div>
           )}
 
@@ -1581,7 +1581,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             )}
 
             <div className={styles.cards}>
-              <NavMoreCard />
+              <NavSectionsCard />
             </div>
 
             <div className={styles.cards}>

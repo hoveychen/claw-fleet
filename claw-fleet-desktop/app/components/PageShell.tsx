@@ -1,4 +1,6 @@
 import { useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
@@ -6,7 +8,8 @@ import { useFadeOnChange } from "../hooks/useFadeOnChange";
 import { ResizeHandle } from "./ResizeHandle";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { RAILS } from "./pageShellConfig";
-import { SimpleNavigation } from "./SimpleNavigation";
+import { navSectionOf, navSectionTabs, navTabOf } from "./navGroups";
+import { useNavAvailability } from "../hooks/useNavAvailability";
 import styles from "./PageShell.module.css";
 import { SkeletonNumber } from "./loading";
 
@@ -58,6 +61,57 @@ interface Props {
   detailKey?: string | number | null;
 }
 
+/** A page's segment label in its section switch. Literal `t()` calls, so the
+ *  locale-key guard (localeKeys.test.ts) can see every key. */
+function tabLabel(t: TFunction, view: ViewMode): string {
+  switch (view) {
+    case "wiki": return t("nav_tab_wiki", "文档");
+    case "artifacts": return t("nav_tab_artifacts", "产出");
+    case "files": return t("nav_tab_files", "代码");
+    case "terminal": return t("nav_tab_terminal", "终端");
+    case "schedule": return t("nav_tab_schedule", "例行");
+    case "memory": return t("nav_tab_memory", "记忆");
+    case "audit": return t("nav_tab_audit", "审计");
+    case "report": return t("nav_tab_report", "日报");
+    case "skills": return t("nav_tab_skills", "技能");
+    case "mobile": return t("nav_tab_mobile", "移动端");
+    default: return view;
+  }
+}
+
+/** The banner title of a page whose nav section holds several pages: the
+ *  section's pages as a switch, the one on screen in title weight. This is how
+ *  the four-entry nav rail reaches every page without a second level. Returns
+ *  null when the page is alone in its section (or is not one of its segments),
+ *  and the caller falls back to the plain title. */
+function useSectionTabs(view: ViewMode): ReactNode {
+  const { t } = useTranslation();
+  const setViewMode = useUIStore((s) => s.setViewMode);
+  const avail = useNavAvailability();
+  const tabs = navSectionTabs(navSectionOf(view), avail);
+  const active = navTabOf(view);
+  if (tabs.length < 2 || !tabs.includes(active)) return null;
+  return (
+    <div className={styles.section_tabs} role="tablist">
+      {tabs.map((v) => {
+        const on = v === active;
+        return (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            className={`${styles.section_tab}${on ? ` ${styles.section_tab_active}` : ""}`}
+            onClick={() => !on && setViewMode(v)}
+          >
+            {tabLabel(t, v)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The page's scrollable body: rail + main. Exported so a page that renders its
  *  shell from more than one place (AuditView's tabs) can compose one itself. */
 export function PageBody({ children }: { children: ReactNode }) {
@@ -102,18 +156,17 @@ export function PageShell({
   detailKey,
 }: Props) {
   const rail = RAILS[view];
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed[view]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
 
   // Hooks cannot be conditional, so a rail-less page still calls this — with a
   // key it never writes, because the drag handle is never rendered.
   const { width, isDragging, onMouseDown } = useResizableWidth(
-    simplifiedMode ? "simplified-rail-width" : rail?.storageKey ?? "__page_shell_no_rail__",
+    rail?.storageKey ?? "__page_shell_no_rail__",
     {
-      min: simplifiedMode ? 240 : rail?.min ?? 0,
-      max: simplifiedMode ? 520 : rail?.max ?? 0,
-      initial: simplifiedMode ? 320 : rail?.initial ?? 0,
+      min: rail?.min ?? 0,
+      max: rail?.max ?? 0,
+      initial: rail?.initial ?? 0,
       side: rail?.side,
     },
   );
@@ -124,8 +177,8 @@ export function PageShell({
   // search box, and losing the page title + search on collapse would be a worse
   // trade than the wide header.
   const hasRail = secondary !== undefined;
-  const effectiveCollapsed = simplifiedMode ? false : collapsed;
-  const inColumn = hasRail && !effectiveCollapsed;
+  const inColumn = hasRail && !collapsed;
+  const sectionTabs = useSectionTabs(view);
 
   const header = (
     <>
@@ -134,7 +187,7 @@ export function PageShell({
         data-tauri-drag-region
       >
         <div className={styles.title_row}>
-          <h1 className={styles.title}>{title}</h1>
+          {sectionTabs ?? <h1 className={styles.title}>{title}</h1>}
           {countLoading ? (
             <span className={styles.count}>
               <SkeletonNumber width={18} />
@@ -178,7 +231,7 @@ export function PageShell({
   const railRef = useRef<HTMLElement>(null);
   useFadeOnChange(railIsList ? mainRef : railRef, detailKey);
 
-  const railEl = !hasRail ? null : effectiveCollapsed ? (
+  const railEl = !hasRail ? null : collapsed ? (
     <CollapsedSidebarRail
       side={rail?.side}
       onExpand={() => setSecondarySidebar(view, false)}
@@ -189,7 +242,6 @@ export function PageShell({
       className={`${styles.rail}${railIsList ? "" : ` ${styles.col_last}`}`}
       style={{ width }}
     >
-      {simplifiedMode && railIsList && <SimpleNavigation />}
       {inColumn && railIsList && header}
       {secondary}
       <ResizeHandle side={rail?.side} active={isDragging} onMouseDown={onMouseDown} />

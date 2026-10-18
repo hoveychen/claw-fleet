@@ -98,12 +98,11 @@ const OrphanDecisionCard = lazy(() =>
  *  saying why, which is exactly what the user hit on fleet-cloud on 2026-09-09. */
 export type PanePlan =
   | { kind: "session" }
-  /** The card is rendered right here: simplified mode mounts no
-   *  `DecisionPanel`, so this is the card's only surface anywhere. */
+  /** The card is rendered right here: the pane is where every card gets
+   *  answered, and this session has no transcript to pin it under. */
   | { kind: "orphan-card"; sessionId: string; decisions: PendingDecision[] }
-  /** Explain the empty pane but do NOT draw the card — full mode's overlay
-   *  already has it, and drawing it twice is its own bug. */
-  | { kind: "orphan-note"; sessionId: string; hasCard: boolean }
+  /** Nothing to show and nothing waiting: say why the pane is empty. */
+  | { kind: "orphan-note"; sessionId: string }
   | { kind: "draft" }
   /** A restored id before the first scan lands: it cannot be told apart from
    *  an orphan yet, and flashing the composer until it resolves read as "your
@@ -115,10 +114,9 @@ export function panePlan(args: {
   openId: string | null;
   activeSession: SessionInfo | null;
   scanReady: boolean;
-  simplifiedMode: boolean;
   decisions: PendingDecision[];
 }): PanePlan {
-  const { openId, activeSession, scanReady, simplifiedMode, decisions } = args;
+  const { openId, activeSession, scanReady, decisions } = args;
   if (activeSession) return { kind: "session" };
   if (openId === DRAFT_ID) return { kind: "draft" };
   if (openId == null) return { kind: "resting" };
@@ -126,9 +124,9 @@ export function panePlan(args: {
   // rather than accusing a session that is simply not loaded yet.
   if (!scanReady) return { kind: "loading" };
   const mine = decisions.filter((d) => d.request.sessionId === openId);
-  return simplifiedMode && mine.length > 0
+  return mine.length > 0
     ? { kind: "orphan-card", sessionId: openId, decisions: mine }
-    : { kind: "orphan-note", sessionId: openId, hasCard: mine.length > 0 };
+    : { kind: "orphan-note", sessionId: openId };
 }
 
 /** Which session the detail column was showing when the app last closed. */
@@ -939,7 +937,6 @@ export function HistoryView() {
     [openId, sessionById],
   );
 
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const pane = useMemo(
     () =>
@@ -947,10 +944,9 @@ export function HistoryView() {
         openId,
         activeSession,
         scanReady,
-        simplifiedMode,
         decisions: pendingDecisions,
       }),
-    [openId, activeSession, scanReady, simplifiedMode, pendingDecisions],
+    [openId, activeSession, scanReady, pendingDecisions],
   );
 
   // Where the composer lives: the draft (until a spawn is pending) or the
@@ -1321,8 +1317,7 @@ export function HistoryView() {
             </div>
           ) : pane.kind === "orphan-card" ? (
             /* Answering a card needs nothing from the transcript, so render it
-               right here — simplified mode mounts no `DecisionPanel`, making
-               this the card's only surface anywhere on screen. */
+               right here. */
             <div className={styles.pane} data-testid="orphan-session-pane">
               <div className={styles.orphan}>
                 <p className={styles.orphan_note}>
@@ -1342,15 +1337,10 @@ export function HistoryView() {
             <div className={styles.pane} data-testid="orphan-session-pane">
               <div className={styles.detail_starting}>
                 <span className={styles.starting_text}>
-                  {pane.hasCard
-                    ? t(
-                        "history.orphan_card_in_panel",
-                        "这个会话不在扫描范围内，它的卡在决策面板里等你回复。",
-                      )
-                    : t(
-                        "history.orphan_not_found",
-                        "找不到这个会话：记录可能已删除、已过期，或当前用户读不到。",
-                      )}
+                  {t(
+                    "history.orphan_not_found",
+                    "找不到这个会话：记录可能已删除、已过期，或当前用户读不到。",
+                  )}
                 </span>
                 <button
                   type="button"

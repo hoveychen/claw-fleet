@@ -2,7 +2,7 @@
 //
 // Host-provided UI language default (backend's FLEET_LOCALE, sent via host_features).
 //
-// Structurally identical to simplified mode's host default, exists for the same reason:
+// It exists because
 // browser builds store settings in localStorage each, so a host configured with FLEET_LOCALE=zh
 // has no way to tell the pages it serves "I'm a Chinese host" — each visitor sees English until
 // they navigate to the settings toggle.

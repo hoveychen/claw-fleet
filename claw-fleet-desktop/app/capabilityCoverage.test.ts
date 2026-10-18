@@ -392,10 +392,10 @@ describe("capability coverage", () => {
     const found = uses();
     expect(found.filter((u) => !u.plugin.startsWith("core:")).length).toBeGreaterThan(10);
     expect(found.filter((u) => u.plugin.startsWith("core:")).length).toBeGreaterThan(5);
-    // The window handle only reachable from the main window's chrome, and the
-    // one the whole audit started from.
+    // A window handle only reachable from the main window's chrome (the
+    // Windows caption overlay's resize grips).
     expect(
-      found.some((u) => u.window === "main" && u.command === "core:window:start_dragging"),
+      found.some((u) => u.window === "main" && u.command === "core:window:start_resize_dragging"),
     ).toBe(true);
   });
 

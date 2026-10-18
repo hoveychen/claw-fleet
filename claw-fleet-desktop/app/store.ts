@@ -152,18 +152,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
   mobile: { urlDraft: "", editingUrl: false },
 };
 
-/** Parse a persisted JSON blob, falling back when absent or corrupt. */
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = getItem(key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 /** Drop `view` from the auto-collapse record — the reader no longer owns a
  *  panel the user has just toggled by hand. */
 function forgetSecondary(

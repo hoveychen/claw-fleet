@@ -4,7 +4,9 @@ import {
   NAV_SECTIONS,
   NAV_SECTION_VIEWS,
   navSectionOf,
+  navSectionTabs,
   navSectionTarget,
+  navTabOf,
 } from "./navGroups";
 import { ALL_VIEW_MODES } from "../viewModes";
 
@@ -43,5 +45,18 @@ describe("nav sections", () => {
     expect(navSectionTarget("library", { library: "artifacts" })).toBe("artifacts");
     // A stale entry naming a page of another section is ignored.
     expect(navSectionTarget("projects", { projects: "wiki" })).toBe("files");
+  });
+
+  it("skips pages this host does not have", () => {
+    const avail = { terminal: false, mobile: false, lobsters: false };
+    expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("files");
+    expect(navSectionTabs("projects", avail)).toEqual(["files", "schedule", "memory"]);
+  });
+
+  it("folds plugins into the Skills segment and never offers the lobster fleet", () => {
+    const avail = { terminal: true, mobile: true, lobsters: true };
+    expect(navSectionTabs("settings", avail)).toEqual(["audit", "report", "skills", "mobile"]);
+    expect(navTabOf("plugins")).toBe("skills");
+    expect(navTabOf("audit")).toBe("audit");
   });
 });

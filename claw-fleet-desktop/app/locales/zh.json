@@ -320,12 +320,9 @@
   "language": "语言",
   "view_list": "列表",
   "view_gallery": "画廊",
-  "keep_awake_on_tooltip": "防休眠已开启——系统不会闲置休眠，点击关闭",
-  "keep_awake_off_tooltip": "保持系统唤醒（相当于 caffeinate -i）",
   "view_audit": "审计",
   "view_memory": "记忆",
   "view_schedule": "计划",
-  "view_plans": "计划树",
   "view_wiki": "知识库",
   "view_artifacts": "产出",
   "view_skills": "技能",
@@ -1272,11 +1269,6 @@
       "mock_a2": "回滚迁移",
       "mock_a3": "先给我看失败详情"
     },
-    "nav_more": {
-      "title": "新变化：侧边栏合成一列，其余页面收进「更多」",
-      "description": "顶部的 舰队 / 工作 切换去掉了。任务、仓库、终端、知识库、产出直接列在侧边栏里；计划、计划树、审计、日报、记忆、技能、移动端配对在列表底部的「更多」里，点进去导航栏会切到这一组，点顶部的返回回到主列表。",
-      "hint": "打开的页面在「更多」里时导航栏会自动停在这一组；回到主列表后如果有新日报或未读的严重审计事件，「更多」上会亮一个红点。"
-    },
     "prd_mode": {
       "title": "新功能：PRD 自律模式",
       "description": "让 Claude 在长 PRD（P1-P10）中保持专注：注入一条 commit 纪律（PRD 进行中不主动发起 commit），并把宏观计划持久化到工作区根目录的 TASKS.md。每次用户发送消息前，UserPromptSubmit 钩子会自动把 TASKS.md 中标记为「活动区」的部分重新注入上下文 —— 即便上下文被压缩，也不会忘记尚未完成的任务。仅对 Claude Code 生效。"
@@ -1298,6 +1290,11 @@
     "env_setup": {
       "title": "环境还差几步",
       "description": "Fleet 可以替你把缺的装好、登好——点下面的按钮即可,不用开终端。"
+    },
+    "nav_sections": {
+      "title": "新变化：导航只剩四个入口",
+      "description": "左侧图标栏现在是 任务 / 资料 / 项目 / 设置。资料里是文档和产出，项目里是代码、终端、例行和记忆，在页面标题处切换；审计、日报、技能和移动端配对在 设置 → 更多页面。",
+      "hint": "首页就是全部项目的全部任务；有未读的严重审计事件或新日报时，「设置」上会亮一个红点。"
     }
   },
   "mascot": {
@@ -1807,11 +1804,7 @@
       "desc": "这里是「任务」页——点任务栏顶部的「新会话」，选好工作目录、模型和第一条指令，就能派一个 Claude 帮你干活。所有你发起的任务都会按目录汇总在这一页。"
     }
   },
-  "nav_more": "更多",
-  "nav_back": "返回",
   "sidebar": {
-    "collapse": "折叠侧边栏",
-    "expand": "展开侧边栏",
     "secondary_collapse": "折叠此侧边栏",
     "secondary_expand": "展开侧边栏"
   },
@@ -2381,9 +2374,11 @@
     "remote_host_install_btn": "安装 rca",
     "remote_host_remove_blocked": "这台主机上还有 {{count}} 个 workspace（{{paths}}）——先移除它们，否则它们会指向一个已不存在的主机。",
     "remote_ws_unattached_title": "未归属主机的 workspace（旧条目）",
-    "simplified_mode": "精简模式",
-    "simplified_mode_desc": "仅显示任务与产出，决策直接在任务内操作。",
-    "interaction_diagnostics_load_failed": "诊断检查失败"
+    "interaction_diagnostics_load_failed": "诊断检查失败",
+    "more_pages": "更多页面",
+    "more_pages_skills": "技能与插件",
+    "more_pages_mobile": "移动端配对",
+    "lobster_fleet_open": "打开龙虾舰队"
   },
   "usage": {
     "total_tokens": "Token 总数",
@@ -2691,7 +2686,6 @@
     "menu_rename": "重命名",
     "menu_stop": "停止会话",
     "orphan_with_card": "这个会话不在扫描范围内（记录可能已删除、已过期，或当前用户读不到），但它的卡还等着回复：",
-    "orphan_card_in_panel": "这个会话不在扫描范围内，它的卡在决策面板里等你回复。",
     "orphan_not_found": "找不到这个会话：记录可能已删除、已过期，或当前用户读不到。",
     "orphan_back": "关闭",
     "rename_title": "重命名会话",
@@ -3107,5 +3101,19 @@
     "back": "舰队",
     "more_ships": "还有 {{n}} 艘飞船",
     "more_crew": "还有 {{n}} 名队员"
-  }
+  },
+  "nav_section_tasks": "任务",
+  "nav_section_library": "资料",
+  "nav_section_projects": "项目",
+  "nav_section_settings": "设置",
+  "nav_tab_wiki": "文档",
+  "nav_tab_artifacts": "产出",
+  "nav_tab_files": "代码",
+  "nav_tab_terminal": "终端",
+  "nav_tab_schedule": "例行",
+  "nav_tab_memory": "记忆",
+  "nav_tab_audit": "审计",
+  "nav_tab_report": "日报",
+  "nav_tab_skills": "技能",
+  "nav_tab_mobile": "移动端"
 }

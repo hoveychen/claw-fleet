@@ -66,8 +66,6 @@ function App() {
   // bar can be summoned from any view; we render it in the searchable returns.
   const find = useFindController();
 
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
-
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
     if (!dismissed) return "full";
@@ -272,7 +270,7 @@ function App() {
   }, []);
 
   return (
-    <div className={simplifiedMode ? "app app_simplified" : "app"}>
+    <div className="app">
       <WindowsFrameOverlay />
       {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
@@ -283,9 +281,9 @@ function App() {
       <div className="app_main" data-find-content>
         <SessionList />
       </div>
-      {!simplifiedMode && <DecisionPanel />}
+      <DecisionPanel />
       <Presence when={settingsOpen}>{settingsOpen && <SettingsPanel onClose={closeSettings} />}</Presence>
-      {!simplifiedMode && <DailyReportPopup />}
+      <DailyReportPopup />
       <UpdateNotice />
       <Presence when={!!updateCheck}>
         {updateCheck && (

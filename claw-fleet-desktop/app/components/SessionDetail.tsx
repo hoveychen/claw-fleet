@@ -160,9 +160,6 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
 const InlineDecisionCard = lazy(() =>
   import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
 );
-const InlineFleetAskCard = lazy(() =>
-  import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
-);
 
 /** "Triggered by schedule X" provenance chip. Shown only for sessions
  *  a one-shot schedule fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the
@@ -520,7 +517,6 @@ export function SessionDetail({
     return sessions.find((s) => s.id === session.id) ?? session;
   }, [session, sessions]);
   const preferredTitle = liveSession ? preferredSessionTitle(liveSession) : null;
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   // Which session `decisionRecords` was last read for. Until it matches the one
@@ -544,6 +540,18 @@ export function SessionDetail({
   const inlineFleetAsk = useMemo(
     () => inlinePendingFleetAsk(liveSession, pendingDecisions, decisionRecords),
     [liveSession, pendingDecisions, decisionRecords],
+  );
+  // Every card this session is waiting on, answered in place. A fleet__ask the
+  // decision history already records as answered is dropped (the reply has not
+  // reached the store yet); inlinePendingFleetAsk owns that rule.
+  const sessionCards = useMemo(
+    () =>
+      pendingDecisions.filter(
+        (d) =>
+          d.request.sessionId === liveSession?.id &&
+          (d.kind !== "fleet-ask" || d.id === inlineFleetAsk?.id),
+      ),
+    [pendingDecisions, liveSession?.id, inlineFleetAsk?.id],
   );
   const reasoningPercent =
     liveSession && liveSession.totalOutputTokens > 0
@@ -1323,9 +1331,7 @@ export function SessionDetail({
   // settling (and the lazy card itself starts as a skeleton), so the card's
   // offset keeps moving for a few frames. Re-align on every height change until
   // the reader touches the scroller; after that the position is theirs.
-  const pendingCardId = simplifiedMode
-    ? pendingDecisions.find((d) => d.request.sessionId === liveSession?.id)?.id
-    : inlineFleetAsk?.id;
+  const pendingCardId = sessionCards[0]?.id;
   const dockHeightRef = useRef(0);
   dockHeightRef.current = dockHeight;
   /** Which card the hold belongs to, and whether it still holds. Kept across
@@ -2018,7 +2024,7 @@ export function SessionDetail({
                       // live-refreshed session the rest of this pane reads.
                       apiErrorCtx={apiErrorCtx}
                     />
-                    {simplifiedMode && pendingDecisions.filter((d) => d.request.sessionId === liveSession?.id).map((decision) => (
+                    {sessionCards.map((decision) => (
                       <div
                         key={decision.id}
                         className={styles.inline_fleet_ask}
@@ -2030,17 +2036,6 @@ export function SessionDetail({
                         </Suspense>
                       </div>
                     ))}
-                    {!simplifiedMode && inlineFleetAsk && (
-                      <div
-                        className={styles.inline_fleet_ask}
-                        data-testid="inline-pending-fleet-ask"
-                        data-decision-anchor=""
-                      >
-                        <Suspense fallback={<SkeletonCard height={140} />}>
-                          <InlineFleetAskCard decision={inlineFleetAsk} compact />
-                        </Suspense>
-                      </div>
-                    )}
                   </AgentNavProvider>
                 </div>
 

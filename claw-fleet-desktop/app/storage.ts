@@ -21,14 +21,6 @@ const cache = new Map<string, string>();
 const ALL_KEYS = [
   "theme",
   "viewMode",
-  "simplified-mode",
-  // This machine's last simplified-mode default value (backend's
-  // FLEET_SIMPLIFIED_MODE). Not a user choice, but a cache: `host_features` is
-  // async, but initial layout must be determined synchronously. Without it,
-  // every open flashes one frame of the full-featured interface. Must be
-  // readable on boot, or that flash persists. The "simplified-mode" above
-  // (user's explicit choice) takes precedence over this.
-  "simplified-mode-host-default",
   // One-shot flag: legacy binary values for the tristate-migrated feature keys
   // have been reset to "default" (see migrateFeatureTristate). MUST be readable
   // on boot, otherwise the migration re-runs every launch and re-wipes whatever
@@ -36,13 +28,10 @@ const ALL_KEYS = [
   "feature-tristate-migrated",
   "lang",
   // This machine's last UI language default value (backend's FLEET_LOCALE).
-  // Same reasoning as "simplified-mode-host-default" above: not a user choice,
-  // but a cache, because `host_features` is async but i18next's lng must be
+  // Not a user choice but a cache, because `host_features` is async but i18next's lng must be
   // determined synchronously. Without it, every open flashes one frame in
   // English. The "lang" above (user's explicit choice) takes precedence over this.
   "lang-host-default",
-  "sidebar-width",
-  "sidebar-collapsed",
   // Per-view collapse map for the secondary sidebars, stored as a JSON blob.
   "secondary-sidebar-collapsed",
   // Secondary sidebar widths — one per view that owns one.
@@ -55,15 +44,7 @@ const ALL_KEYS = [
   "plugins-rail-width",
   "audit-rail-width",
   "report-rail-width",
-  "plans-rail-width",
   "artifacts-rail-width",
-  "simplified-rail-width",
-  // Plan tree folds + repo selection. The view's whole value is that finished
-  // plans stay folded; an unregistered key here means re-folding on every boot.
-  "plans-workspace",
-  "plans-expand-overrides",
-  "plans-show-completed",
-  "plans-done-items",
   // Width of an expanded doc card in a session detail's auxiliary rail, stored
   // as a *fraction* of the pane rather than a pixel count: the same setting has
   // to mean the same thing on a 13" laptop and on a 3440px ultrawide.
@@ -150,9 +131,9 @@ const ALL_KEYS = [
 // Each ID represents a configurable feature card in onboarding.
 // Adding a new ID here will trigger a "What's New" overlay for existing users.
 export const ONBOARDING_FEATURES = [
-  // Not a toggle like the rest — it tells upgrading users that the Fleet / Work
-  // tabs are gone and the admin pages moved under More.
-  "nav_more",
+  // Not a toggle like the rest — it tells upgrading users the nav is now four
+  // entries (Tasks / Library / Projects / Settings) and where each page went.
+  "nav_sections",
   "appearance",
   "notifications",
   "hooks_guard_elicitation",
