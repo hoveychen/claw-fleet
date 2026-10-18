@@ -86,6 +86,9 @@ export interface BuildOptions {
   isPending: (deviceId: string, sessionId: string) => boolean;
   /** The caller's latched quiet-alive verdict (see TasksView `statusTone`). */
   isQuiet: (s: Row) => boolean;
+  /** The caller's latched "just woken" verdict (`isWakingSticky` in
+   *  TasksView), given whether a card from the session is pending. */
+  isWaking?: (s: Row, pending: boolean) => boolean;
   multiDevice: boolean;
   deviceLabelOf?: (deviceId: string) => string | null | undefined;
   untitled: string;
@@ -118,13 +121,17 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
     else mains.set(k, [s]);
   }
 
-  const view = (s: T, superseded: boolean): TaskMemberView => ({
-    status: s.status,
-    procAlive: !!s.procAlive,
-    quiet: opts.isQuiet(s),
-    hasPendingDecision: opts.isPending(s.deviceId, s.id),
-    superseded,
-  });
+  const view = (s: T, superseded: boolean): TaskMemberView => {
+    const pending = opts.isPending(s.deviceId, s.id);
+    return {
+      status: s.status,
+      procAlive: !!s.procAlive,
+      quiet: opts.isQuiet(s),
+      hasPendingDecision: pending,
+      superseded,
+      waking: opts.isWaking?.(s, pending) ?? false,
+    };
+  };
 
   const rows: Array<TaskRow<T>> = [];
   for (const [key, hops] of mains) {
@@ -207,7 +214,11 @@ function foldSubtasks<T extends SessionInfo>(
 export function subtaskRowsOf<T extends SessionInfo>(
   sessions: T[],
   taskId: string,
-  opts: { isPending: (s: T) => boolean; isQuiet: (s: T) => boolean },
+  opts: {
+    isPending: (s: T) => boolean;
+    isQuiet: (s: T) => boolean;
+    isWaking?: (s: T, pending: boolean) => boolean;
+  },
 ): Array<SubtaskRow<T>> {
   const lines = new Map<string, T[]>();
   let parentOutcome: TaskView["outcome"] = null;
@@ -219,13 +230,17 @@ export function subtaskRowsOf<T extends SessionInfo>(
     if (arr) arr.push(s);
     else lines.set(k, [s]);
   }
-  const view = (s: T, superseded: boolean): TaskMemberView => ({
-    status: s.status,
-    procAlive: !!s.procAlive,
-    quiet: opts.isQuiet(s),
-    hasPendingDecision: opts.isPending(s),
-    superseded,
-  });
+  const view = (s: T, superseded: boolean): TaskMemberView => {
+    const pending = opts.isPending(s);
+    return {
+      status: s.status,
+      procAlive: !!s.procAlive,
+      quiet: opts.isQuiet(s),
+      hasPendingDecision: pending,
+      superseded,
+      waking: opts.isWaking?.(s, pending) ?? false,
+    };
+  };
   return foldSubtasks(taskId, lines, view, opts.isPending, parentOutcome);
 }
 

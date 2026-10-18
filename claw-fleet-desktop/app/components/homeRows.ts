@@ -112,6 +112,10 @@ export interface BuildOptions {
   /** The caller's latched quiet-alive verdict (`isQuietAliveSticky`). Passed
    *  in because the latch is stateful and belongs to the view. */
   isQuiet: (s: SessionInfo) => boolean;
+  /** The caller's latched "just woken" verdict (`isWakingSticky`), given
+   *  whether a card from the session is pending. Stateful like `isQuiet`;
+   *  absent means never waking. */
+  isWaking?: (s: SessionInfo, pending: boolean) => boolean;
   untitled: string;
 }
 
@@ -148,6 +152,7 @@ export function buildHomeRows(
     quiet: opts.isQuiet(s),
     hasPendingDecision: isPending(s),
     superseded,
+    waking: opts.isWaking?.(s, isPending(s)) ?? false,
   });
 
   const covered = new Set<string>();

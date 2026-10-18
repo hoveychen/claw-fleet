@@ -20,6 +20,7 @@ import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { compactDuration } from "../../../shared-ts/watchProgress";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
+import { createWakeLatch, isParkedForWake, stickyWaking } from "../../../shared-ts/wakeLatch";
 import type { TaskState } from "../../../shared-ts/taskState";
 import {
   buildTaskRows,
@@ -98,6 +99,20 @@ const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimite
  *  several times a minute, because it writes one line every few minutes and
  *  each write pushes the status back to a live one for core's hard window. */
 const quietLatch = createQuietLatch();
+
+/** Holds a task out of 待验收 between being woken (card answered, watch
+ *  fired, process started) and its transcript's first new line — see
+ *  `shared-ts/wakeLatch.ts`, shared with the desktop home. */
+const wakeLatch = createWakeLatch();
+
+export function isWakingSticky(s: SessionInfo & { deviceId?: string }, pending: boolean): boolean {
+  return stickyWaking(wakeLatch, `${s.deviceId ?? ""}/${s.id}`, {
+    parked: isParkedForWake(s, pending),
+    alive: !!s.procAlive,
+    lastActivityMs: s.lastActivityMs ?? 0,
+    now: Date.now(),
+  });
+}
 
 export function statusTone(s: SessionInfo & { deviceId?: string }): string | null {
   const quiet = stickyQuiet(quietLatch, `${s.deviceId ?? ""}/${s.id}`, {
@@ -254,6 +269,7 @@ export function TasksView({
     const built = buildTaskRows(sessions, {
       isPending: (deviceId, sessionId) => pendingKeys.has(itemKey(deviceId, sessionId)),
       isQuiet: (s) => statusTone(s) === "quiet",
+      isWaking: (s, pending) => isWakingSticky(s, pending),
       multiDevice,
       deviceLabelOf,
       untitled: t("（无标题）"),

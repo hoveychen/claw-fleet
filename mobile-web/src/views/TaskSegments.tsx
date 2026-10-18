@@ -13,7 +13,7 @@ import type { SessionInfo, WikiDoc } from "../types";
 import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
 import { taskLibrary } from "../library";
 import { LibraryList, useLibrary } from "./LibraryList";
-import { statusTone, taskStateLabel, timeAgo } from "./TasksView";
+import { isWakingSticky, statusTone, taskStateLabel, timeAgo } from "./TasksView";
 import { EmptyState } from "./EmptyState";
 import { SkeletonList } from "./loading";
 import styles from "./TaskSegments.module.css";
@@ -80,6 +80,7 @@ export function useSubtasks(
         ? subtaskRowsOf(sessions, session.taskId, {
             isPending: (s) => !!pendingSessionIds?.has(s.id),
             isQuiet: (s) => statusTone(s) === "quiet",
+            isWaking: (s, pending) => isWakingSticky(s, pending),
           })
         : [],
     [session.taskId, session.parentTaskId, sessions, pendingSessionIds],

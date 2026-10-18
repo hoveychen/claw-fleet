@@ -20,7 +20,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useDecisionStore, useSessionsStore, useUIStore } from "../store";
 import type { PendingDecision, SessionInfo } from "../types";
-import { isFleetOwnedTask, isQuietAliveSticky } from "../types";
+import { isFleetOwnedTask, isQuietAliveSticky, isWakingSticky } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
@@ -397,6 +397,7 @@ export function HistoryView() {
   const allRows = useMemo(() => {
     const built = buildHomeRows(sessions, pendingDecisions, {
       isQuiet: (s) => isQuietAliveSticky(s),
+      isWaking: (s, pending) => isWakingSticky(s, pending),
       untitled: t("history.untitled"),
     });
     if (acceptingKeys.size === 0) return built;

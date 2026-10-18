@@ -243,3 +243,28 @@ describe("taskSessionIds", () => {
     expect([...taskSessionIds([one], one)]).toEqual(["lone"]);
   });
 });
+
+describe("buildTaskRows across a wake-up", () => {
+  it("an answered card keeps the task out of review until the transcript moves", async () => {
+    const { createWakeLatch, isParkedForWake, stickyWaking } = await import("../../shared-ts/wakeLatch");
+    const latch = createWakeLatch();
+    const rows = (sessions: Row[], pending: string[]) =>
+      buildTaskRows(sessions, {
+        isPending: (_d, id) => pending.includes(id),
+        isQuiet: () => false,
+        isWaking: (x, p) =>
+          stickyWaking(latch, x.id, {
+            parked: isParkedForWake(x, p),
+            alive: !!x.procAlive,
+            lastActivityMs: x.lastActivityMs,
+            now: 0,
+          }),
+        multiDevice: false,
+        untitled: "untitled",
+      })[0].state;
+    const parked = s({ id: "t", taskId: "t", fleetSpawned: true, status: "waitingInput", lastActivityMs: 10 });
+    expect(rows([parked], ["t"])).toBe("needsYou");
+    expect(rows([parked], [])).toBe("running");
+    expect(rows([{ ...parked, lastActivityMs: 20 }], [])).toBe("review");
+  });
+});
