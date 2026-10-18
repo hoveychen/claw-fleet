@@ -168,7 +168,8 @@ export type TransportFactory = (
 const MOCK_DEVICE: PairedDevice = {
   kind: "relay",
   id: "mock",
-  label: DEMO ? "Demo" : "Mock",
+  // Website captures (`?mock&website=`) show a plausible host name, not "Mock".
+  label: DEMO ? "Demo" : new URLSearchParams(location.search).has("website") ? "MacBook Pro" : "Mock",
   secret: "mock-secret",
   relayBase: null,
   addedAt: 0,
