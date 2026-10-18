@@ -63,7 +63,7 @@ A **project** is a code directory. A **task** is one idea: one main conversation
 
 ### Tasks: every project on one page
 
-The home page is every task across every project, grouped by what it needs from you: **Needs you**, **Running**, **Waiting**, **To accept**, **Done**. A task counts as *needs you* if its main conversation *or any of its sub-tasks* has a question open; *waiting* says what it is waiting on (for example its sub-tasks). Each row carries its project, step and sub-task progress, and spend. Filtering to one project is a click on its name — there is no project to "enter", so nothing makes you switch back and forth.
+The home page is every task across every project, grouped by what it needs from you: **Needs you**, **Running**, **Waiting**, **To accept**, **Done**. A task counts as *needs you* if its main conversation *or any of its sub-tasks* has a question open; *waiting* says what it is waiting on (for example its sub-tasks). Each row carries its project, how long it has been going, and its step and sub-task progress. Filtering to one project is a click on its name — there is no project to "enter", so nothing makes you switch back and forth.
 
 Write what you want done in the box at the top, pick a project, send. Model, reasoning effort and permission mode are picked there too; files can be attached.
 
