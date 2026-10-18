@@ -1925,7 +1925,9 @@ export async function liveInvoke(
     }
     return { handled: false };
   }
-  return { handled: true, value: await callProbe(mapper(args)) };
+  const value = await callProbe(mapper(args));
+  if (cmd === "sessions_snapshot") noteFrame(value);
+  return { handled: true, value };
 }
 
 // ── Pollers (stand-ins for the app's push channels) ─────────────────────────
@@ -1982,6 +1984,25 @@ function noteFrame(frame: unknown) {
   if (typeof seq !== "number") return;
   lastFrameSeq = seq;
   lastFrameAt = Date.now();
+  announceScanReady();
+}
+
+let scanReadyAnnounced = false;
+
+/**
+ * Stand-in for the desktop's one-shot `scan-ready` event. The store only
+ * flips `scanReady` on a non-empty list, because on the desktop an empty one
+ * can come from before the first scan; with no sessions at all the home list
+ * then sat on its skeleton forever, since nothing in this build ever sent
+ * `scan-ready`. Here any frame proves the scan finished — `fleet serve`'s
+ * `/sessions_snapshot` blocks on the first scan, and its SSE broadcaster
+ * frames only a scanned list. Deferred a tick so the frame is applied first
+ * and a non-empty board never flashes its empty state.
+ */
+function announceScanReady() {
+  if (scanReadyAnnounced) return;
+  scanReadyAnnounced = true;
+  window.setTimeout(() => void emit("scan-ready", true), 0);
 }
 
 /** How long SSE may stay silent before the poll below steps in. */

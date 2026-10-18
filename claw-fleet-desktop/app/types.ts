@@ -24,6 +24,12 @@ import {
   resetQuietLatch,
   stickyQuiet,
 } from "../../shared-ts/quietLatch";
+import {
+  createWakeLatch,
+  isParkedForWake,
+  resetWakeLatch,
+  stickyWaking,
+} from "../../shared-ts/wakeLatch";
 import { memberDisplayStatus } from "../../shared-ts/memberStatus";
 
 export { memberDisplayStatus };
@@ -168,6 +174,25 @@ export function isQuietAliveSticky(s: SessionInfo, now: number = Date.now()): bo
 /** Tests only: drop the latch so cases can't inherit one another's state. */
 export function resetQuietAliveLatch(): void {
   resetQuietLatch(quietLatch);
+}
+
+/** Holds a task out of 待验收 between being woken (card answered, watch
+ *  fired, process started) and its transcript's first new line — see
+ *  `shared-ts/wakeLatch.ts`. One latch for the whole view, like `quietLatch`. */
+const wakeLatch = createWakeLatch();
+
+export function isWakingSticky(s: SessionInfo, pending: boolean, now: number = Date.now()): boolean {
+  return stickyWaking(wakeLatch, s.id, {
+    parked: isParkedForWake(s, pending),
+    alive: s.procAlive,
+    lastActivityMs: s.lastActivityMs,
+    now,
+  });
+}
+
+/** Tests only. */
+export function resetWakingLatch(): void {
+  resetWakeLatch(wakeLatch);
 }
 
 /** Run-status colour: green = agent still live, amber = waiting for input,

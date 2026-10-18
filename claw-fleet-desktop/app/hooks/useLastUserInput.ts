@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSessionsStore } from "../store";
 import { splitContextFiles } from "../userAttachments";
+import { stripEmphasisMarkers } from "../../../shared-ts/markdownIdentifiers";
 import { previewWithRefs, stripRefsBlock } from "../../../shared-ts/sessionMentions";
 import type {
   ContentBlock,
@@ -157,10 +158,12 @@ export function oneLineSnippet(text: string, max = MAX_SNIPPET_CHARS): string {
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]*>/g, " ")
-    .replace(/[*_`#>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return plain.length > max ? `${plain.slice(0, max)}…` : plain;
+    .replace(/[`#>|]/g, "")
+    .replace(/\s+/g, " ");
+  // Emphasis markers go, identifier underscores (`test_hello.py`,
+  // `fleet__spawn`, `__pycache__`) stay — stripping every `_` ate them.
+  const flat = stripEmphasisMarkers(plain).trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
 // A short one-liner costs almost nothing to show and saves a click, so the bar

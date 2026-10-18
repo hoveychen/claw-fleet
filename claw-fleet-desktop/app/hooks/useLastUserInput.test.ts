@@ -204,6 +204,18 @@ describe("oneLineSnippet", () => {
   it("clips a wall of text", () => {
     expect(oneLineSnippet("x".repeat(300))).toBe(`${"x".repeat(200)}…`);
   });
+
+  it("keeps underscores that belong to names", () => {
+    expect(oneLineSnippet("run `test_hello.py`, skip __pycache__, then fleet__spawn")).toBe(
+      "run test_hello.py, skip __pycache__, then fleet__spawn",
+    );
+  });
+
+  it("still drops emphasis markers", () => {
+    expect(oneLineSnippet("**bold**, _italic_, __two words__ and *one*")).toBe(
+      "bold, italic, two words and one",
+    );
+  });
 });
 
 describe("shouldAutoExpand", () => {

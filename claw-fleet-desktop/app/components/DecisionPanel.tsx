@@ -3,6 +3,11 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { useDecisionStore } from "../store";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
+import { remarkKeepDunder } from "../../../shared-ts/markdownIdentifiers";
+
+/** The "your last message" preview reads what the boss typed, where a bare
+ *  `__pycache__` is a name, not bold. */
+const PRECEDING_REMARK_PLUGINS = [...safeRemarkPlugins, remarkKeepDunder];
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
@@ -553,7 +558,7 @@ function LastUserInputRegion({
             <div key={i} className={styles.preceding_qa}>
               {a.label && <div className={styles.preceding_q} title={a.label}>{a.label}</div>}
               <div className={styles.preceding_msg}>
-                <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
+                <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={PRECEDING_REMARK_PLUGINS} rehypePlugins={safeRehypePlugins} components={mdComponents}>
                   {normalizeSvgBlankLines(a.value)}
                 </ReactMarkdown>
               </div>
