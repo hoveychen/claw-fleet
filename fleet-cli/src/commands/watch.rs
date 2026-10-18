@@ -45,7 +45,12 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                     w.session_id.clone()
                 };
                 let until = if w.is_target_watch() {
-                    let ids: Vec<String> = w.targets.iter().map(|t| t.id.chars().take(8).collect()).collect();
+                    // dsh ids are `session-<uuid>`; the short id is the uuid's head.
+                    let ids: Vec<String> = w
+                        .targets
+                        .iter()
+                        .map(|t| t.id.strip_prefix("session-").unwrap_or(&t.id).chars().take(8).collect())
+                        .collect();
                     format!("sessions[{:?}]: {}", w.wait_mode, ids.join(","))
                 } else {
                     w.until_cmd.replace('\n', " ")
@@ -382,6 +387,15 @@ fn create(
 /// the most recent check said. `exit 1 ×204` is a healthy wait; `exit 127 ×204`
 /// is a watch that will never fire, and the two used to render identically.
 fn poll_state(w: &claw_fleet_core::watch::WatchRecord) -> String {
+    if w.is_target_watch() {
+        // No shell exit code here: show how many targets are already done.
+        let done = w
+            .targets
+            .iter()
+            .filter(|t| t.phase == Some(claw_fleet_core::session_probe::Phase::Done))
+            .count();
+        return format!("{done}/{} done ×{}", w.targets.len(), w.poll_count);
+    }
     match w.last_exit {
         Some(code) => format!("exit {code} ×{}", w.poll_count),
         // No exit code recorded: either nothing has been polled yet, or this is
