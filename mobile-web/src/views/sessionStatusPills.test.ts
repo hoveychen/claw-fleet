@@ -108,6 +108,41 @@ describe("buildStatusPills", () => {
     expect(two[0].label).not.toContain("12");
   });
 
+  it("a session watch reports done/total and alerts once a target failed", () => {
+    const watch = (phase: "running" | "done" | "failed") => ({
+      id: "w1",
+      created: 0,
+      pollSecs: 30,
+      deadlineAt: 0,
+      pollCount: 3,
+      structuralFailStreak: 0,
+      waitMode: "all" as const,
+      targets: [
+        { id: "a", phase: "done" as const, detail: "", addedAt: 0 },
+        { id: "b", phase, detail: "", addedAt: 0 },
+      ],
+    });
+    const ok = buildStatusPills(session({ watches: [watch("running")] }));
+    expect(ok.map((p) => p.key)).toEqual(["watch-sessions"]);
+    expect(ok[0].label).toContain("1/2");
+    expect(ok[0].tone).toBe("live");
+    expect(buildStatusPills(session({ watches: [watch("failed")] }))[0].tone).toBe("alert");
+  });
+
+  it("a session other sessions wait on says how many waiters, counted once each", () => {
+    const pills = buildStatusPills(
+      session({
+        waitedBy: [
+          { sessionId: "x", watchId: "w1" },
+          { sessionId: "x", watchId: "w2" },
+          { sessionId: "y", watchId: "w3" },
+        ],
+      }),
+    );
+    expect(pills.map((p) => p.key)).toEqual(["waited-by"]);
+    expect(pills[0].label).toContain("2");
+  });
+
   it("a watch whose until cannot run alerts instead of reporting a poll count", () => {
     // 204 polls, all exit 127 — this is not "waited a long time", it is a watch
     // that will never fire.

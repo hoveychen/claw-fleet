@@ -23,6 +23,7 @@ import type {
   TaskPlanSummary,
   SessionHandoffInfo,
   WatchSummary,
+  WaitedBy,
   RemoteDisconnect,
   MirrorWrite,
   GuardRequest,
@@ -148,6 +149,9 @@ export interface SessionInfo {
    *  each watch's poll count and start time. Absent when it has none. Mirrors the
    *  desktop watch chip. */
   watches?: WatchSummary[];
+  /** Sessions waiting on this one through a session watch (`fleet watch
+   *  --sessions`) — the reverse of `watches`. Absent when nobody waits. */
+  waitedBy?: WaitedBy[];
   /** Why a remote session stopped: its rca-over-ssh transport died and Fleet
    *  killed the agent. Absent for every local session and every healthy remote
    *  one. `status` alone would say `remoteDisconnected` without naming the host

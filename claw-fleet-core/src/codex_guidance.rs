@@ -338,6 +338,11 @@ running. When the wait is countable (steps done, items processed, jobs green), \
 pass `--progress '<command>'`: its first stdout line (`3/8`, `42%` or a short \
 status) is shown to the boss as live progress on every poll — display only, it \
 never fires or wakes you.\n\
+- **To wait for other sessions to finish** (any engine, handoff chains \
+followed, failures reported at once): `fleet watch create --sessions \
+<id1>,<id2> [--mode all|any]` instead of `--until`; `fleet watch add/remove \
+<watch-id> <ids…>` changes the set. Never poll another session's transcript \
+from a shell loop — the boss's follow-ups cannot reach you meanwhile.\n\
 - Pick the scheduling relay by *need*, not by the name: **repeat periodically \
 (cron) → `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns \
 a fresh LOCAL session each interval so local creds are present — don't mistake \
@@ -1061,6 +1066,10 @@ mod tests {
         assert!(
             g.contains("fleet watch create"),
             "must teach the Rule 6 watch"
+        );
+        assert!(
+            g.contains("fleet watch create --sessions") && g.contains("fleet watch add/remove"),
+            "must teach waiting on other sessions"
         );
         assert!(
             g.contains("on BOTH branches") && g.contains("side-effect free") && g.contains("--expect-by")

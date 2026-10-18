@@ -25,6 +25,7 @@ const EN: Record<string, string> = {
   "把 dsh 计价改成逐次调用账本": "Bill dsh per call from a ledger",
   "跨天会话的花费现在分到两天了。": "Sessions that span midnight now split their cost across both days.",
   "等 v2.4 回归矩阵全绿": "Wait for the v2.4 regression matrix to go green",
+  "等重构和账本会话都结束再合并": "Merge once the refactor and ledger sessions both finish",
   "等 CI 把 junit.xml 上传完": "Wait for CI to finish uploading junit.xml",
   "顺手把 quarantine 的那条 flaky 也重跑一遍": "Also rerun the quarantined flaky test while you're at it",
   "The checkout spec fails 1 in 8 runs on a race in cart totals. Pick my move:\n\n```mermaid\nflowchart TB\n  A[普通节点] --> CAN[Canonicalize]\n  style CAN fill:#4a3728,stroke:#c9a227\n```":

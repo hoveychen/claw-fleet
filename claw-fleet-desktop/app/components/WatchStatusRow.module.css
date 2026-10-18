@@ -63,3 +63,60 @@
 .watch_stalled {
   color: var(--color-warning);
 }
+
+/* ── Session watch targets / waited-by ───────────────────────────────────── */
+/* One chip per session in a wait relationship. Clickable: opens that session. */
+.target_chip {
+  composes: watch_chip;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.target_chip:hover,
+.target_chip:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+  outline: none;
+}
+
+.target_label {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Waited on by N" — someone's turn is blocked on this session, so it reads a
+   notch louder than the calm watch chip. */
+.waited_chip {
+  composes: watch_chip;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+}
+/* Same palette as the task list's run dot: green = a turn is in flight,
+   amber = waiting on someone, no colour = finished. */
+.dot_running {
+  background: var(--color-success);
+}
+.dot_parked,
+.dot_blocked {
+  background: var(--color-warning);
+}
+.dot_unknown {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-text-secondary);
+}
+.dot_done {
+  background: var(--color-text-secondary);
+}
+.dot_failed {
+  background: var(--color-error);
+}

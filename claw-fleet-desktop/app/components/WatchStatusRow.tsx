@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Radar } from "lucide-react";
+import { AlertTriangle, Hourglass, Radar } from "lucide-react";
 import type { SessionInfo } from "../types";
+import type { Phase, WatchSummary, WatchTarget } from "../generated/types";
+import { useSessionsStore, useUIStore } from "../store";
 import { watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
 import { WatchRing } from "./WatchRing";
 import styles from "./WatchStatusRow.module.css";
@@ -52,6 +54,9 @@ export function WatchStatusRow({
     <>
       {watches.map((w) => {
         const elapsed = formatElapsed(now - w.created);
+        if (w.targets && w.targets.length > 0) {
+          return <TargetWatchChips key={w.id} watch={w} elapsed={elapsed} />;
+        }
         // A non-zero streak means the `until` command cannot run at all, so the
         // poll count is not reassuring — it is the measure of how long this
         // session has been waiting for something that will never happen.
@@ -128,5 +133,130 @@ export function WatchStatusRow({
     </>
   );
 
+  return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
+}
+
+/** Short label for a session id: its live AI title, else a short id. */
+function useSessionLabel() {
+  const sessions = useSessionsStore((s) => s.sessions);
+  return (sid: string) => {
+    const s = sessions.find((x) => x.id === sid);
+    return s?.aiTitle || sid.replace(/^session-/, "").slice(0, 8);
+  };
+}
+
+function openSession(e: SyntheticEvent, sid: string) {
+  // The chip sits on a clickable card; opening the target must not also
+  // select the card underneath.
+  e.stopPropagation();
+  useUIStore.getState().requestOpenTask(sid);
+}
+
+const PHASE_CLASS: Record<Phase, string> = {
+  running: styles.dot_running,
+  parked: styles.dot_parked,
+  blocked: styles.dot_blocked,
+  unknown: styles.dot_unknown,
+  done: styles.dot_done,
+  failed: styles.dot_failed,
+};
+
+/**
+ * A session watch (`fleet watch --sessions`): one summary chip (note, how many
+ * targets are done, all/any, elapsed) followed by one clickable chip per
+ * target with a phase dot. A target that handed off is shown — and opened —
+ * as the live end of its chain, since that is the session the verdict is about.
+ */
+function TargetWatchChips({ watch: w, elapsed }: { watch: WatchSummary; elapsed: string }) {
+  const { t } = useTranslation();
+  const labelOf = useSessionLabel();
+  const targets = w.targets ?? [];
+  const done = targets.filter((x) => x.phase === "done").length;
+  const mode = w.waitMode === "any" ? t("card.watch_mode_any") : t("card.watch_mode_all");
+  return (
+    <>
+      <span className={styles.watch_chip} title={w.note ?? undefined}>
+        <Radar size={11} />
+        {w.note && (
+          <>
+            <span className={styles.watch_note}>{w.note}</span>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        {t("card.watch_targets_chip", { done, total: targets.length, mode, elapsed })}
+      </span>
+      {targets.map((x) => (
+        <TargetChip key={x.id} target={x} label={labelOf(x.effectiveId ?? x.id)} />
+      ))}
+    </>
+  );
+}
+
+function TargetChip({ target: x, label }: { target: WatchTarget; label: string }) {
+  const { t } = useTranslation();
+  const sid = x.effectiveId ?? x.id;
+  const phase: Phase = x.phase ?? "unknown";
+  const title = [
+    t(`card.watch_phase_${phase}`),
+    x.detail || undefined,
+    x.effectiveId ? t("card.watch_target_chain", { from: x.id.slice(0, 8), to: x.effectiveId.slice(0, 8) }) : undefined,
+    x.source ?? undefined,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+  return (
+    <span
+      className={styles.target_chip}
+      role="button"
+      tabIndex={0}
+      title={title}
+      data-phase={phase}
+      onClick={(e) => openSession(e, sid)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") openSession(e, sid);
+      }}
+    >
+      <span className={`${styles.dot} ${PHASE_CLASS[phase]}`} aria-hidden />
+      <span className={styles.target_label}>{label}</span>
+    </span>
+  );
+}
+
+/**
+ * The reverse mark on a session other sessions are waiting for: "waited on by
+ * N", with each waiter one click away. Callers guard on `session.waitedBy?.length`.
+ */
+export function WaitedByRow({ session, inline = false }: { session: SessionInfo; inline?: boolean }) {
+  const { t } = useTranslation();
+  const labelOf = useSessionLabel();
+  const edges = session.waitedBy ?? [];
+  const waiters = [...new Set(edges.map((e) => e.sessionId))];
+  if (waiters.length === 0) return null;
+  const tip = edges
+    .map((e) => `${labelOf(e.sessionId)}${e.note ? ` — ${e.note}` : ""}`)
+    .join("\n");
+  const chips = (
+    <>
+      <span className={styles.waited_chip} title={tip}>
+        <Hourglass size={11} />
+        {t("card.waited_by_chip", { count: waiters.length })}
+      </span>
+      {waiters.map((sid) => (
+        <span
+          key={sid}
+          className={styles.target_chip}
+          role="button"
+          tabIndex={0}
+          title={t("card.tip_waited_by", { session: sid })}
+          onClick={(e) => openSession(e, sid)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openSession(e, sid);
+          }}
+        >
+          <span className={styles.target_label}>{labelOf(sid)}</span>
+        </span>
+      ))}
+    </>
+  );
   return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
 }

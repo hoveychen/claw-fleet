@@ -237,6 +237,7 @@ const MOCK_SESSIONS_SEED: Array<
   // ── 2. Active main session: "api-server" — executing ──
   {
     id: "sess-api-main",
+    waitedBy: [{ sessionId: "sess-web-waiting", watchId: "w-mock04", note: "等 api 重构与数据管线跑完再合并" }],
     workspacePath: "/Users/demo/workspace/api-server",
     workspaceName: "api-server",
     entrypoint: null,
@@ -306,6 +307,7 @@ const MOCK_SESSIONS_SEED: Array<
   // ── 4. Codex session: "data-pipeline" — processing ──
   {
     id: "sess-codex-pipeline",
+    waitedBy: [{ sessionId: "sess-web-waiting", watchId: "w-mock04", note: "等 api 重构与数据管线跑完再合并" }],
     workspacePath: "/Users/demo/workspace/data-pipeline",
     workspaceName: "data-pipeline",
     entrypoint: null,
@@ -385,6 +387,23 @@ const MOCK_SESSIONS_SEED: Array<
         structuralFailStreak: 24,
         lastStderr: "sh: gh: command not found",
       },
+      {
+        // A session watch (`fleet watch --sessions`), so the per-target chips
+        // and their phase dots are visible in mock mode.
+        id: "w-mock04",
+        note: "等 api 重构与数据管线跑完再合并",
+        created: NOW - 9 * MIN,
+        pollSecs: 30,
+        deadlineAt: NOW + 2 * 60 * MIN,
+        pollCount: 18,
+        structuralFailStreak: 0,
+        waitMode: "all",
+        targets: [
+          { id: "sess-codex-pipeline", source: "codex", phase: "running", detail: "turn in progress", addedAt: NOW - 9 * MIN },
+          { id: "sess-api-main", source: "claude", phase: "parked", detail: "parked on a decision card", addedAt: NOW - 9 * MIN },
+          { id: "sess-docs-idle", source: "claude", phase: "done", detail: "turn ended", addedAt: NOW - 9 * MIN },
+        ],
+      },
     ],
   },
 
@@ -392,6 +411,7 @@ const MOCK_SESSIONS_SEED: Array<
   // ── 7. Idle session: "docs-site" ──
   {
     id: "sess-docs-idle",
+    waitedBy: [{ sessionId: "sess-web-waiting", watchId: "w-mock04", note: "等 api 重构与数据管线跑完再合并" }],
     workspacePath: "/Users/demo/workspace/docs-site",
     workspaceName: "docs-site",
     entrypoint: "claw-fleet-newsession",

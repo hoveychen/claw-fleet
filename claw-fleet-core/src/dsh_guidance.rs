@@ -349,7 +349,19 @@ running. When the wait is countable (steps done, items processed, jobs green), \
 pass `--progress '<command>'`: its first stdout line (`3/8`, `42%` or a short \
 status) is shown to the boss as live progress on every poll — display only, it \
 never fires or wakes you.\n\
-- Pick the scheduling relay by *need*: **repeat periodically (cron) → \
+- **Waiting on other sessions to finish** (ones you spawned, a sibling, a \
+handoff chain) is a watch too: `fleet watch create --sessions <id1>,<id2> \
+[--mode all|any] --note \"<what you await>\" --session <your session id>` \
+instead of `--until` (`--sessions` = whom you wait on, `--session` = you). It \
+waits on claude / codex / dsh sessions alike, follows a target that handed off \
+to the end of its chain, does not count a target parked on a decision card as \
+finished, keeps waiting through rate limits / 5xx / network drops that Fleet \
+retries, and wakes you at once with the reason on a real failure (403, process \
+died mid-turn, retries exhausted). `fleet watch add/remove <watch-id> <session \
+ids…>` changes the set. Never write a shell loop that polls another session's \
+transcript or `fleet inspect` — it holds a foreground tool call and the boss's \
+follow-ups cannot reach you.\n\
+- Pick the scheduling relay by *need*:**repeat periodically (cron) → \
 `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns a fresh \
 session each interval); **fire once at a future time → `fleet schedule`** \
 (`--at`/`--in`); **wait for an event then continue → `fleet watch`** (above).\n\
@@ -1144,6 +1156,10 @@ mod tests {
         assert!(
             g.contains("fleet watch create"),
             "must teach the Rule 6 watch"
+        );
+        assert!(
+            g.contains("fleet watch create --sessions") && g.contains("fleet watch add/remove"),
+            "must teach waiting on other sessions"
         );
         assert!(
             g.contains("on BOTH branches") && g.contains("side-effect free") && g.contains("--expect-by")

@@ -1960,6 +1960,8 @@ export function SessionDetailView({
           onClose={() => setSheetOpen(false)}
           onOpenPane={setPane}
           onOpenSession={(s) => onOpenSessionId(s.id)}
+          sessions={sessions}
+          onOpenSessionId={onOpenSessionId}
         />
       </Presence>
 

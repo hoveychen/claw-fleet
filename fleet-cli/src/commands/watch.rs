@@ -44,7 +44,17 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                 } else {
                     w.session_id.clone()
                 };
-                let until = w.until_cmd.replace('\n', " ");
+                let until = if w.is_target_watch() {
+                    // dsh ids are `session-<uuid>`; the short id is the uuid's head.
+                    let ids: Vec<String> = w
+                        .targets
+                        .iter()
+                        .map(|t| t.id.strip_prefix("session-").unwrap_or(&t.id).chars().take(8).collect())
+                        .collect();
+                    format!("sessions[{:?}]: {}", w.wait_mode, ids.join(","))
+                } else {
+                    w.until_cmd.replace('\n', " ")
+                };
                 let until = if until.chars().count() > 44 {
                     format!("{}…", until.chars().take(44).collect::<String>())
                 } else {
@@ -94,20 +104,50 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                 std::process::exit(1);
             }
         }
+        WatchCommands::Add { id, sessions } => edit_targets(&id, &sessions, true),
+        WatchCommands::Remove { id, sessions } => edit_targets(&id, &sessions, false),
         WatchCommands::Create {
             until,
+            sessions,
+            mode,
             capture,
             note,
             poll,
             timeout,
             expect_by,
             progress,
-        } => create(until, capture, note, poll, timeout, expect_by, progress, session),
+        } => create(
+            until, sessions, mode, capture, note, poll, timeout, expect_by, progress, session,
+        ),
     }
 }
 
+fn edit_targets(id: &str, sessions: &[String], add: bool) {
+    use claw_fleet_core::watch;
+    let res = if add {
+        watch::add_targets(id, sessions)
+    } else {
+        watch::remove_targets(id, sessions)
+    };
+    match res {
+        Ok(rec) => println!(
+            "ok: watch {} now waits on {} session(s); the timer picks this up on its next poll.\n{}",
+            rec.id,
+            rec.targets.len(),
+            watch::targets_table(&rec)
+        ),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn create(
-    until: String,
+    until: Option<String>,
+    targets: Vec<String>,
+    mode: Option<String>,
     capture: Option<String>,
     note: Option<String>,
     poll: Option<String>,
@@ -118,11 +158,30 @@ fn create(
 ) {
     use claw_fleet_core::watch;
 
-    let until = until.trim();
-    if until.is_empty() {
-        eprintln!("Error: --until is required.");
-        std::process::exit(2);
+    let until = until.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let targets: Vec<String> = targets
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    match (until.is_some(), targets.is_empty()) {
+        (true, false) => {
+            eprintln!("Error: pass exactly one of --until / --sessions.");
+            std::process::exit(2);
+        }
+        (false, true) => {
+            eprintln!("Error: --until or --sessions is required.");
+            std::process::exit(2);
+        }
+        _ => {}
     }
+    let mode = match watch::WaitMode::parse(mode.as_deref().unwrap_or("")) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error: --mode: {e}");
+            std::process::exit(2);
+        }
+    };
     let poll_secs = match poll.as_deref() {
         Some(s) => match watch::parse_poll(s) {
             Ok(v) => v,
@@ -209,6 +268,59 @@ fn create(
     // `inherit_launch_context_from_roster`).
     let ctx = claw_fleet_core::session::inherit_launch_context_from_roster(&sid, &sessions);
 
+    let Some(until) = until else {
+        match watch::create_for_sessions(
+            &sid,
+            &ctx.workspace,
+            &targets,
+            mode,
+            capture.as_deref(),
+            note.as_deref(),
+            poll_secs,
+            timeout_secs,
+            ctx.model.as_deref(),
+            ctx.effort.as_deref(),
+            ctx.source.as_deref(),
+            expect_by,
+        ) {
+            Ok((rec, warn)) => {
+                if !warn.is_empty() {
+                    println!("{warn}");
+                }
+                let note = watch::expect_by_note(&rec);
+                if !note.is_empty() {
+                    println!("{note}");
+                }
+                let armed = match watch::arm_timer(&rec) {
+                    Ok(pid) => format!("计时器已启动 (pid {pid})"),
+                    Err(e) => format!(
+                        "但计时器启动失败: {e}，Fleet 桌面端或 `fleet serve` 在运行时会在 30 秒内自动补上"
+                    ),
+                };
+                println!(
+                    "ok: watch {} created — waiting on {} session(s) ({}), times out in {}, \
+                     resumes session {}. {armed}。\n{}\n\
+                     增删目标用 `fleet watch add/remove {} <id…>`，停止用 `fleet watch stop {}`。\n\
+                     现在可以正常结束这个 turn：目标结束时 Fleet 会自动 resume 本会话，\
+                     不要再写脚本扫 transcript 去等它。",
+                    rec.id,
+                    rec.targets.len(),
+                    if mode == watch::WaitMode::Any { "any" } else { "all" },
+                    fmt_secs(timeout_secs),
+                    rec.session_id,
+                    watch::targets_table(&rec),
+                    rec.id,
+                    rec.id,
+                );
+            }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    };
+
     match watch::create(
         &sid,
         &ctx.workspace,
@@ -275,6 +387,15 @@ fn create(
 /// the most recent check said. `exit 1 ×204` is a healthy wait; `exit 127 ×204`
 /// is a watch that will never fire, and the two used to render identically.
 fn poll_state(w: &claw_fleet_core::watch::WatchRecord) -> String {
+    if w.is_target_watch() {
+        // No shell exit code here: show how many targets are already done.
+        let done = w
+            .targets
+            .iter()
+            .filter(|t| t.phase == Some(claw_fleet_core::session_probe::Phase::Done))
+            .count();
+        return format!("{done}/{} done ×{}", w.targets.len(), w.poll_count);
+    }
     match w.last_exit {
         Some(code) => format!("exit {code} ×{}", w.poll_count),
         // No exit code recorded: either nothing has been polled yet, or this is

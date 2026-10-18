@@ -34,6 +34,7 @@ import {
   Copy,
   FileJson2,
   Folder,
+  Hourglass,
   Square,
   Terminal,
   Timer,
@@ -42,6 +43,7 @@ import {
 import { t } from "../i18n";
 import { HistoryLayer } from "../useNavStack";
 import type { SessionInfo } from "../types";
+import type { Phase } from "../generated/types";
 import type { FleetTransport } from "../transport";
 import { useConfirm } from "../confirmDialog";
 import { agentIdTail, agentLabel } from "./agentScope";
@@ -104,8 +106,16 @@ export function SessionSheet({
   onClose,
   onOpenPane,
   onOpenSession,
+  sessions = [],
+  onOpenSessionId,
 }: {
   session: SessionInfo;
+  /** Every known session, to name the sessions this one waits on / is waited
+   *  on by. Omitted: those rows fall back to short ids. */
+  sessions?: SessionInfo[];
+  /** Open a session by id — targets of a session watch may not be scanned
+   *  (another device, an ended transcript), so this takes an id, not a row. */
+  onOpenSessionId?: (id: string) => void;
   /** Side questions asked about this session so far. Not in the snapshot —
    *  the detail page reads the list over the relay and passes the count once
    *  it has it; `undefined` until then, which the row renders as silence. */
@@ -191,6 +201,20 @@ export function SessionSheet({
     });
   }
   const watches = session.watches ?? [];
+  const waiters = [...new Set((session.waitedBy ?? []).map((e) => e.sessionId))];
+  const labelOf = (sid: string) => {
+    const s = sessions.find((x) => x.id === sid);
+    return s?.titleOverride || s?.aiTitle || s?.slug || sid.replace(/^session-/, "").slice(0, 8);
+  };
+  const phaseLabel = (p: Phase | undefined | null) =>
+    ({
+      running: t("运行中"),
+      parked: t("停在决策卡上"),
+      blocked: t("受阻，Fleet 重试中"),
+      unknown: t("状态未知"),
+      done: t("已结束"),
+      failed: t("已失败"),
+    })[p ?? "unknown"];
 
   // ── Progress ─────────────────────────────────────────────────────────
   const progressRows: PaneRow[] = [];
@@ -371,7 +395,7 @@ export function SessionSheet({
               </div>
             )}
 
-            {(nowRows.length > 0 || watches.length > 0 || family.length > 0 || stoppable) && (
+            {(nowRows.length > 0 || watches.length > 0 || waiters.length > 0 || family.length > 0 || stoppable) && (
               <div className={styles.section}>{t("此刻")}</div>
             )}
             {nowRows.map(paneRow)}
@@ -411,6 +435,46 @@ export function SessionSheet({
                 we're waiting for, how many polls, when to give up" — fits here,
                 not worth a separate screen. */}
             {watches.map((w) => {
+              if (w.targets && w.targets.length > 0) {
+                const done = w.targets.filter((x) => x.phase === "done").length;
+                return (
+                  <div key={w.id}>
+                    <div className={styles.watchRow}>
+                      <Timer size={15} className={styles.watchIcon} />
+                      <span className={styles.watchText}>
+                        <span className={styles.watchNote}>{w.note || t("未说明在等什么")}</span>
+                        <span className={styles.watchMeta}>
+                          {t(
+                            "等会话 {0}/{1} 结束 · {2}",
+                            done,
+                            w.targets.length,
+                            w.waitMode === "any" ? t("任一") : t("全部"),
+                          )}
+                        </span>
+                      </span>
+                    </div>
+                    {w.targets.map((x) => {
+                      const sid = x.effectiveId ?? x.id;
+                      return (
+                        <button
+                          key={x.id}
+                          type="button"
+                          className={styles.row}
+                          onClick={() => {
+                            onClose();
+                            onOpenSessionId?.(sid);
+                          }}
+                        >
+                          <span className={styles.phaseDot} data-phase={x.phase ?? "unknown"} />
+                          <span className={styles.rowLabel}>{labelOf(sid)}</span>
+                          <span className={styles.rowValue}>{phaseLabel(x.phase)}</span>
+                          <ChevronRight size={15} className={styles.chev} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              }
               const pv = watchProgressView(w, Date.now());
               const ring = watchRing(pv);
               return (
@@ -456,6 +520,30 @@ export function SessionSheet({
                 </div>
               );
             })}
+
+            {waiters.length > 0 && (
+              <div className={styles.watchRow}>
+                <Hourglass size={15} className={styles.watchIcon} />
+                <span className={styles.watchText}>
+                  <span className={styles.watchNote}>{t("被 {0} 个会话等待", waiters.length)}</span>
+                  <span className={styles.watchMeta}>{t("它结束后，这些会话会被自动唤醒")}</span>
+                </span>
+              </div>
+            )}
+            {waiters.map((sid) => (
+              <button
+                key={`waiter-${sid}`}
+                type="button"
+                className={styles.row}
+                onClick={() => {
+                  onClose();
+                  onOpenSessionId?.(sid);
+                }}
+              >
+                <span className={styles.rowLabel}>{labelOf(sid)}</span>
+                <ChevronRight size={15} className={styles.chev} />
+              </button>
+            ))}
 
             {/* Scope switching. The list from the old ☰ menu moved here as-is —
                 it already belongs to "who's active in this session family right now,"

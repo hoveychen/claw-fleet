@@ -688,13 +688,27 @@ pub(crate) enum LoopCommands {
 
 #[derive(Subcommand)]
 pub(crate) enum WatchCommands {
-    /// Wait until <until> succeeds, then resume this session with the result.
+    /// Wait until <until> succeeds — or until other sessions finish
+    /// (--sessions) — then resume this session with the result.
     Create {
         /// Shell command polled each interval; exit status 0 ⇒ the condition is
         /// met and the watch fires. E.g. `gh run view 123 --json status -q .status
-        /// | grep -qx completed`.
+        /// | grep -qx completed`. Pass exactly one of --until / --sessions.
         #[arg(long)]
-        until: String,
+        until: Option<String>,
+        /// Session ids (full or a >=6-char prefix, comma separated) to wait on
+        /// instead of a shell condition — any engine (claude / codex / dsh).
+        /// A target that handed off is followed to the live end of its chain;
+        /// one parked on a decision card is not done until its turn really
+        /// ends; a real failure (403, process died mid-turn, retries exhausted)
+        /// wakes this session at once. Not to be confused with the global
+        /// --session, which names the waiting session itself.
+        #[arg(long, value_delimiter = ',', num_args = 1.., visible_alias = "targets")]
+        sessions: Vec<String>,
+        /// With --sessions: fire when `all` targets are done (default) or as
+        /// soon as `any` one is. A failed target always fires immediately.
+        #[arg(long)]
+        mode: Option<String>,
         /// Shell command whose stdout is handed to the resumed session as the
         /// event text. Omit to just say the watch fired. E.g. `gh run view 123
         /// --json conclusion -q .conclusion`.
@@ -735,6 +749,24 @@ pub(crate) enum WatchCommands {
     Stop {
         /// The watch id.
         id: String,
+    },
+    /// Add sessions to a session watch (created with --sessions).
+    Add {
+        /// The watch id.
+        id: String,
+        /// Session ids (full or a >=6-char prefix) to start waiting on.
+        #[arg(required = true, value_delimiter = ',')]
+        sessions: Vec<String>,
+    },
+    /// Stop waiting on some of a session watch's targets.
+    #[command(alias = "rm")]
+    Remove {
+        /// The watch id.
+        id: String,
+        /// Session ids (or prefixes) to drop; dropping all of them is refused —
+        /// use `fleet watch stop` instead.
+        #[arg(required = true, value_delimiter = ',')]
+        sessions: Vec<String>,
     },
     /// Internal: the detached timer body. Polls the condition, fires once, exits.
     /// Spawned by `create` and the Stop-hook reconcile; not meant to be run by hand.

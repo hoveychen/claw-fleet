@@ -68,6 +68,8 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
     switch (action) {
       case "create": return t("创建守望");
       case "stop": return t("停止守望 {0}", id);
+      case "add": return t("守望 {0} 追加等待会话", id);
+      case "remove": return t("守望 {0} 移除等待会话", id);
       case "list": return t("列出守望");
     }
   } else if (tool === "loop") {

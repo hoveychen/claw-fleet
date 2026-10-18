@@ -986,6 +986,7 @@ pub fn parse_session_info(
         compact_cost_usd: stats.compact_cost_usd,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        waited_by: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
         // Codex-only for now. Claude's nearest equivalent ("You're out of extra

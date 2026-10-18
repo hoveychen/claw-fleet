@@ -243,6 +243,7 @@ pub mod session_delta;
 pub mod session_explain;
 pub mod session_history;
 pub mod session_driver;
+pub mod session_probe;
 pub mod session_launch;
 pub mod fresh_spawns;
 pub mod session_mark;

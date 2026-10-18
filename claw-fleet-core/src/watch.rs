@@ -170,9 +170,129 @@ pub struct WatchRecord {
     /// moving is the real answer to "is it stuck?", more than the value itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress_changed_at: Option<u64>,
+    /// Sessions this watch waits on, in place of `until_cmd` (which is empty
+    /// for such a watch). The timer probes each one natively
+    /// ([`crate::session_probe`]) instead of running a shell command, so a
+    /// session waiting on other sessions needs no hand-written transcript
+    /// scraper — and no foreground script the user's follow-ups cannot reach.
+    /// Editable while the watch waits ([`add_targets`] / [`remove_targets`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<WatchTarget>,
+    /// When a target watch fires: every target done, or the first one. A
+    /// failed target fires it either way.
+    #[serde(default)]
+    pub wait_mode: WaitMode,
+}
+
+/// See [`WatchRecord::wait_mode`].
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum WaitMode {
+    #[default]
+    All,
+    Any,
+}
+
+impl WaitMode {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "all" => Ok(Self::All),
+            "any" => Ok(Self::Any),
+            other => Err(format!("unknown wait mode '{other}' (use all or any)")),
+        }
+    }
+}
+
+/// One session a watch waits on, with what the last probe saw.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct WatchTarget {
+    /// Full session id, as registered.
+    pub id: String,
+    /// The live end of the target's handoff chain, when it is not the target
+    /// itself — the session the verdict is actually about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_id: Option<String>,
+    /// Engine of the effective session (`claude` / `codex` / `dsh`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Last probed phase; `None` until the first probe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<crate::session_probe::Phase>,
+    /// Why, for a human (product text).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    /// Epoch ms `phase` last changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_since: Option<u64>,
+    /// Epoch ms the target was added to the watch.
+    pub added_at: u64,
+}
+
+impl WatchTarget {
+    pub fn new(id: &str, now: u64) -> Self {
+        Self {
+            id: id.to_string(),
+            effective_id: None,
+            source: None,
+            phase: None,
+            detail: String::new(),
+            phase_since: None,
+            added_at: now,
+        }
+    }
+
+    /// Fold one probe in, stamping `phase_since` only on a change.
+    pub fn apply(&mut self, p: &crate::session_probe::Probe, now: u64) {
+        if self.phase != Some(p.phase) {
+            self.phase = Some(p.phase);
+            self.phase_since = Some(now);
+        }
+        self.detail = p.detail.clone();
+        self.effective_id = (p.effective_id != self.id).then(|| p.effective_id.clone());
+        if p.source.is_some() {
+            self.source = p.source.clone();
+        }
+    }
+}
+
+/// Where a target watch stands after a round of probes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetsOutcome {
+    Waiting,
+    /// Every target is done (all mode).
+    AllDone,
+    /// At least one target is done (any mode).
+    AnyDone,
+    /// A target failed — fires in either mode, so the waiter learns now
+    /// rather than at the timeout.
+    Failed,
+}
+
+pub fn targets_outcome(targets: &[WatchTarget], mode: WaitMode) -> TargetsOutcome {
+    use crate::session_probe::Phase;
+    if targets.is_empty() {
+        return TargetsOutcome::Waiting;
+    }
+    if targets.iter().any(|t| t.phase == Some(Phase::Failed)) {
+        return TargetsOutcome::Failed;
+    }
+    let done = |t: &WatchTarget| t.phase == Some(Phase::Done);
+    match mode {
+        WaitMode::All if targets.iter().all(done) => TargetsOutcome::AllDone,
+        WaitMode::Any if targets.iter().any(done) => TargetsOutcome::AnyDone,
+        _ => TargetsOutcome::Waiting,
+    }
 }
 
 impl WatchRecord {
+    /// Waits on sessions rather than a shell condition.
+    pub fn is_target_watch(&self) -> bool {
+        !self.targets.is_empty()
+    }
+
     /// The watch hasn't passed its deadline yet.
     pub fn is_live(&self, now: u64) -> bool {
         now < self.deadline_at
@@ -273,7 +393,18 @@ fn record_path(dir: &Path, id: &str) -> PathBuf {
 fn write_record(dir: &Path, rec: &WatchRecord) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| format!("create watches dir: {e}"))?;
     let json = serde_json::to_string_pretty(rec).map_err(|e| format!("serialize watch: {e}"))?;
-    fs::write(record_path(dir, &rec.id), json).map_err(|e| format!("write watch: {e}"))
+    // Atomic: the timer, the scanner and an agent's add/remove all read these
+    // files while others write them, and a half-written record parses as
+    // "gone" — which makes a timer exit for good.
+    crate::atomic_json::write_atomic(&record_path(dir, &rec.id), json.as_bytes())
+        .map_err(|e| format!("write watch: {e}"))
+}
+
+/// Serialize a read-modify-write (or a claim / stop) on any record in `dir`.
+/// One lock for the whole store, as in `session_driver`: every critical
+/// section is tiny, and a lock file per watch would pile up forever.
+fn with_store_lock<R>(dir: &Path, f: impl FnOnce() -> R) -> R {
+    crate::atomic_json::with_file_lock(&dir.join("store"), f)
 }
 
 // ── create / read / stop ──────────────────────────────────────────────────────
@@ -458,14 +589,54 @@ fn create_in(
     id: &str,
     now: u64,
 ) -> Result<WatchRecord, String> {
+    if until_cmd.trim().is_empty() {
+        return Err("watch --until command is required".to_string());
+    }
+    insert_in(
+        dir,
+        session_id,
+        workspace_path,
+        until_cmd,
+        Vec::new(),
+        WaitMode::All,
+        capture_cmd,
+        note,
+        poll_secs,
+        timeout_secs,
+        model,
+        effort,
+        agent_source,
+        id,
+        now,
+    )
+}
+
+/// Validate and write a new record — shell-condition or target watch. The
+/// caller has already checked that exactly one of `until_cmd` / `targets`
+/// carries the condition.
+#[allow(clippy::too_many_arguments)]
+fn insert_in(
+    dir: &Path,
+    session_id: &str,
+    workspace_path: &str,
+    until_cmd: &str,
+    targets: Vec<WatchTarget>,
+    wait_mode: WaitMode,
+    capture_cmd: Option<&str>,
+    note: Option<&str>,
+    poll_secs: u64,
+    timeout_secs: u64,
+    model: Option<&str>,
+    effort: Option<&str>,
+    agent_source: Option<&str>,
+    id: &str,
+    now: u64,
+) -> Result<WatchRecord, String> {
     let session_id = session_id.trim();
     if session_id.is_empty() {
         return Err("watch session id is required".to_string());
     }
     let until_cmd = until_cmd.trim();
-    if until_cmd.is_empty() {
-        return Err("watch --until command is required".to_string());
-    }
     if timeout_secs == 0 {
         return Err("watch timeout must be greater than zero".to_string());
     }
@@ -496,9 +667,184 @@ fn create_in(
         progress_cmd: None,
         progress: None,
         progress_changed_at: None,
+        targets,
+        wait_mode,
     };
     write_record(dir, &rec)?;
     Ok(rec)
+}
+
+// ── session targets ───────────────────────────────────────────────────────────
+
+/// Register a watch that waits on other sessions. `targets` may be full ids or
+/// unambiguous prefixes ([`crate::session_probe::resolve_id`]); each is probed
+/// once here so the card shows real states from the start, and the returned
+/// note warns when the watch would fire on its first poll.
+#[allow(clippy::too_many_arguments)]
+pub fn create_for_sessions(
+    session_id: &str,
+    workspace_path: &str,
+    targets: &[String],
+    wait_mode: WaitMode,
+    capture_cmd: Option<&str>,
+    note: Option<&str>,
+    poll_secs: u64,
+    timeout_secs: u64,
+    model: Option<&str>,
+    effort: Option<&str>,
+    agent_source: Option<&str>,
+    expect_by: Option<u64>,
+) -> Result<(WatchRecord, String), String> {
+    let dir = watches_dir().ok_or("cannot determine home dir")?;
+    let now = now_ms();
+    check_expect_by(expect_by, now, timeout_secs)?;
+    let ids = resolve_targets(&dir, session_id, targets, &[])?;
+    let mut list: Vec<WatchTarget> = ids.iter().map(|id| WatchTarget::new(id, now)).collect();
+    for t in &mut list {
+        t.apply(&crate::session_probe::probe(&t.id), now);
+    }
+    let mut rec = insert_in(
+        &dir,
+        session_id,
+        workspace_path,
+        "",
+        list,
+        wait_mode,
+        capture_cmd,
+        note,
+        poll_secs,
+        timeout_secs,
+        model,
+        effort,
+        agent_source,
+        &uuid::Uuid::new_v4().to_string()[..8],
+        now,
+    )?;
+    rec.expect_by = expect_by;
+    write_record(&dir, &rec)?;
+    let warn = match targets_outcome(&rec.targets, rec.wait_mode) {
+        TargetsOutcome::Waiting => String::new(),
+        _ => "⚠️ 目标会话现在就已经满足触发条件（已完成或已失败），这个 watch 会在第一次轮询就立刻触发。".to_string(),
+    };
+    Ok((rec, warn))
+}
+
+/// Resolve and vet the ids a caller wants to wait on: every one must name a
+/// session, none may be the waiter itself (that wait can never end) or a
+/// session already waiting on the waiter (a two-session deadlock that would
+/// only end at both timeouts). Duplicates — including ids already in
+/// `existing` — are dropped.
+fn resolve_targets(
+    dir: &Path,
+    waiter: &str,
+    wanted: &[String],
+    existing: &[WatchTarget],
+) -> Result<Vec<String>, String> {
+    let waiter_end = crate::session_driver::live_end(waiter).unwrap_or_else(|| waiter.to_string());
+    let mut out: Vec<String> = Vec::new();
+    for raw in wanted.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let id = crate::session_probe::resolve_id(raw)?;
+        if id == waiter || id == waiter_end {
+            return Err(format!("不能等待自己（{raw}）"));
+        }
+        let waits_on_waiter = list_in(dir).into_iter().any(|w| {
+            (w.session_id == id || crate::session_driver::live_end(&id).as_deref() == Some(&w.session_id))
+                && w.targets.iter().any(|t| t.id == waiter || t.effective_id.as_deref() == Some(waiter))
+        });
+        if waits_on_waiter {
+            return Err(format!(
+                "会话 {raw} 正在等待你，再反过来等它会互相死等到超时；先 stop 掉其中一个 watch"
+            ));
+        }
+        if !out.contains(&id) && !existing.iter().any(|t| t.id == id) {
+            out.push(id);
+        }
+    }
+    if out.is_empty() && existing.is_empty() {
+        return Err("至少要给一个要等待的会话 id".to_string());
+    }
+    Ok(out)
+}
+
+/// Add sessions to a waiting target watch. The timer re-reads the record on
+/// its next wake, so the change takes effect within one poll.
+pub fn add_targets(id: &str, wanted: &[String]) -> Result<WatchRecord, String> {
+    let dir = watches_dir().ok_or("cannot determine home dir")?;
+    let rec = get_in(&dir, id).ok_or_else(|| format!("watch {id} 不存在（已触发或已停止）"))?;
+    if !rec.is_target_watch() {
+        return Err(format!("watch {id} 等的是 shell 条件，不是会话，不能追加会话"));
+    }
+    let ids = resolve_targets(&dir, &rec.session_id, wanted, &rec.targets)?;
+    let now = now_ms();
+    let fresh: Vec<WatchTarget> = ids
+        .iter()
+        .map(|tid| {
+            let mut t = WatchTarget::new(tid, now);
+            t.apply(&crate::session_probe::probe(tid), now);
+            t
+        })
+        .collect();
+    modify_in(&dir, id, |r| r.targets.extend(fresh.iter().cloned()))
+}
+
+/// Drop sessions from a target watch (full ids or prefixes of the registered
+/// ones). Refuses to remove the last one: a watch with nothing to wait on
+/// should be stopped instead.
+pub fn remove_targets(id: &str, unwanted: &[String]) -> Result<WatchRecord, String> {
+    let dir = watches_dir().ok_or("cannot determine home dir")?;
+    let rec = get_in(&dir, id).ok_or_else(|| format!("watch {id} 不存在（已触发或已停止）"))?;
+    let matches = |t: &WatchTarget| {
+        unwanted
+            .iter()
+            .map(|u| u.trim())
+            .any(|u| !u.is_empty() && (t.id.starts_with(u) || t.effective_id.as_deref().is_some_and(|e| e.starts_with(u))))
+    };
+    if !rec.targets.iter().any(matches) {
+        return Err(format!("watch {id} 里没有这些会话：{}", unwanted.join(", ")));
+    }
+    if rec.targets.iter().all(matches) {
+        return Err("不能移除全部目标；不想等了就直接 stop 这个 watch".to_string());
+    }
+    modify_in(&dir, id, |r| r.targets.retain(|t| !matches(t)))
+}
+
+/// Locked read-modify-write of one record, so the timer's per-poll write and
+/// an agent's add/remove cannot overwrite each other.
+fn modify_in(dir: &Path, id: &str, f: impl FnOnce(&mut WatchRecord)) -> Result<WatchRecord, String> {
+    with_store_lock(dir, || {
+        let mut rec = get_in(dir, id).ok_or_else(|| format!("watch {id} 不存在（已触发或已停止）"))?;
+        f(&mut rec);
+        write_record(dir, &rec)?;
+        Ok(rec)
+    })
+}
+
+/// Probe every target once and fold the results into the record. Returns the
+/// updated record, or `None` when it is gone or superseded.
+fn probe_targets_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    probe: &dyn Fn(&str) -> crate::session_probe::Probe,
+) -> Option<WatchRecord> {
+    let rec = get_in(dir, id)?;
+    if rec.generation != generation {
+        return None;
+    }
+    // Probe outside the lock: a probe can take a moment (a dsh roster call),
+    // and an add/remove must not wait on it.
+    let probes: Vec<(String, crate::session_probe::Probe)> =
+        rec.targets.iter().map(|t| (t.id.clone(), probe(&t.id))).collect();
+    let now = now_ms();
+    modify_in(dir, id, |r| {
+        for t in &mut r.targets {
+            if let Some((_, p)) = probes.iter().find(|(tid, _)| tid == &t.id) {
+                t.apply(p, now);
+            }
+        }
+    })
+    .ok()
+    .filter(|r| r.generation == generation)
 }
 
 /// Put a watch on disk in an explicit dir — test-only door for other modules'
@@ -613,6 +959,13 @@ pub struct WatchSummary {
     /// Epoch ms `progress` last changed; the card shows how long it has sat still.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress_changed_at: Option<u64>,
+    /// The sessions a target watch waits on, with their last probed state —
+    /// what the waiter's card lists. Empty for a shell-condition watch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<WatchTarget>,
+    /// `all` / `any` — only for a target watch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_mode: Option<WaitMode>,
 }
 
 impl From<&WatchRecord> for WatchSummary {
@@ -630,20 +983,66 @@ impl From<&WatchRecord> for WatchSummary {
             progress: r.progress.clone(),
             progress_fraction: r.progress.as_deref().and_then(parse_progress_fraction),
             progress_changed_at: r.progress_changed_at,
+            targets: r.targets.clone(),
+            wait_mode: r.is_target_watch().then_some(r.wait_mode),
         }
     }
 }
 
-/// Session-id → its active watches. Built once per scanner pass so per-session
-/// enrichment stays O(1). A session almost always has zero or one watch.
-fn session_watch_index_in(dir: &Path) -> std::collections::HashMap<String, Vec<WatchSummary>> {
-    let mut map: std::collections::HashMap<String, Vec<WatchSummary>> = Default::default();
+/// The reverse edge of a target watch, stamped on the session being waited
+/// on: which session waits for it, through which watch. The waited-on card
+/// reads "waited on by N sessions" from these.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct WaitedBy {
+    /// The waiting session — the one the watch will resume.
+    pub session_id: String,
+    pub watch_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// dsh ids are `session-<uuid>` in some registries and bare elsewhere; compare
+/// them on the uuid.
+fn id_key(id: &str) -> &str {
+    id.strip_prefix("session-").unwrap_or(id)
+}
+
+#[derive(Default)]
+struct WatchIndex {
+    /// Waiter session id → its active watches.
+    by_waiter: std::collections::HashMap<String, Vec<WatchSummary>>,
+    /// Waited-on session id (normalised by [`id_key`]) → who waits on it. A
+    /// target is indexed under both its registered id and its chain's live
+    /// end, so the waited-on mark follows a handoff to the successor's card.
+    by_target: std::collections::HashMap<String, Vec<WaitedBy>>,
+}
+
+/// Built once per scanner pass so per-session enrichment stays O(1). A session
+/// almost always has zero or one watch and is waited on by nobody.
+fn session_watch_index_in(dir: &Path) -> WatchIndex {
+    let mut idx = WatchIndex::default();
     for rec in list_in(dir) {
-        map.entry(rec.session_id.clone())
+        for t in &rec.targets {
+            let edge = WaitedBy {
+                session_id: rec.session_id.clone(),
+                watch_id: rec.id.clone(),
+                note: rec.note.clone(),
+            };
+            for id in std::iter::once(&t.id).chain(t.effective_id.as_ref()) {
+                let list = idx.by_target.entry(id_key(id).to_string()).or_default();
+                if !list.contains(&edge) {
+                    list.push(edge.clone());
+                }
+            }
+        }
+        idx.by_waiter
+            .entry(rec.session_id.clone())
             .or_default()
             .push(WatchSummary::from(&rec));
     }
-    map
+    idx
 }
 
 /// Stamp active-watch summaries onto scanned sessions. Called at scan-aggregation
@@ -669,11 +1068,14 @@ pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
 
 pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::SessionInfo]) {
     let idx = session_watch_index_in(dir);
-    if idx.is_empty() {
+    if idx.by_waiter.is_empty() {
         return;
     }
     for s in sessions.iter_mut() {
-        if let Some(w) = idx.get(&s.id) {
+        if let Some(edges) = idx.by_target.get(id_key(&s.id)) {
+            s.waited_by = edges.clone();
+        }
+        if let Some(w) = idx.by_waiter.get(&s.id) {
             s.watches = w.clone();
             if watch_status_applies(s) {
                 s.status = crate::session::SessionStatus::Watching;
@@ -775,7 +1177,7 @@ pub fn stop(id: &str) -> bool {
 }
 
 fn stop_in(dir: &Path, id: &str) -> bool {
-    fs::remove_file(record_path(dir, id)).is_ok()
+    with_store_lock(dir, || fs::remove_file(record_path(dir, id)).is_ok())
 }
 
 // ── firing ────────────────────────────────────────────────────────────────────
@@ -816,6 +1218,10 @@ pub fn claim_fire(id: &str, generation: u64) -> Result<WatchRecord, ClaimError> 
 }
 
 fn claim_fire_in(dir: &Path, id: &str, generation: u64) -> Result<WatchRecord, ClaimError> {
+    with_store_lock(dir, || claim_fire_locked(dir, id, generation))
+}
+
+fn claim_fire_locked(dir: &Path, id: &str, generation: u64) -> Result<WatchRecord, ClaimError> {
     let rec = get_in(dir, id).ok_or(ClaimError::Gone)?;
     if rec.generation != generation {
         return Err(ClaimError::StaleGeneration {
@@ -1020,7 +1426,11 @@ fn progress_line(rec: &WatchRecord) -> String {
 /// making clear this is a Fleet-driven resume, not a user message.
 pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: bool) -> String {
     let mut out = String::new();
-    if timed_out {
+    if rec.is_target_watch() {
+        out.push_str(&targets_headline(rec, timed_out));
+        out.push_str("\n\n");
+        out.push_str(&targets_table(rec));
+    } else if timed_out {
         out.push_str(&format!(
             "你注册的 Fleet watch `{}` 已超时——等待的条件在超时前没有满足。",
             rec.id
@@ -1059,10 +1469,88 @@ pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: boo
         out.push_str("\n\n---\n");
         out.push_str(event_text);
     }
+    if rec.is_target_watch() {
+        out.push_str(&targets_follow_up(rec, timed_out));
+    }
     out.push_str(
         "\n\n---\n（这是 Fleet watch 在后台轮询到条件后自动 resume 本会话的，\
          不是用户消息。请据此向老板汇报结果，别再重复注册 Monitor/后台任务。）",
     );
+    out
+}
+
+/// Short form of a session id for prompts: the 8-character prefix every Fleet
+/// surface prints (dsh's `session-` prefix dropped first).
+fn short_id(id: &str) -> &str {
+    let bare = id.strip_prefix("session-").unwrap_or(id);
+    bare.get(..8).unwrap_or(bare)
+}
+
+fn phase_label(p: Option<crate::session_probe::Phase>) -> &'static str {
+    use crate::session_probe::Phase as P;
+    match p {
+        Some(P::Running) => "运行中",
+        Some(P::Parked) => "等老板答卡",
+        Some(P::Blocked) => "受阻",
+        Some(P::Unknown) => "状态未知",
+        Some(P::Done) => "已完成",
+        Some(P::Failed) => "失败",
+        None => "未探测",
+    }
+}
+
+fn targets_headline(rec: &WatchRecord, timed_out: bool) -> String {
+    let n = rec.targets.len();
+    if timed_out {
+        return format!("你注册的 Fleet watch `{}` 已超时——等待的 {n} 个会话在超时前没有全部结束。", rec.id);
+    }
+    match targets_outcome(&rec.targets, rec.wait_mode) {
+        TargetsOutcome::Failed => format!(
+            "你注册的 Fleet watch `{}` 触发了——等待的会话里**有会话失败了**（其余会话不一定已结束）。",
+            rec.id
+        ),
+        TargetsOutcome::AnyDone => format!(
+            "你注册的 Fleet watch `{}` 触发了——等待的 {n} 个会话里已有会话完成（any 模式）。",
+            rec.id
+        ),
+        _ => format!("你注册的 Fleet watch `{}` 触发了——等待的 {n} 个会话都已完成。", rec.id),
+    }
+}
+
+/// One line per target: id (and the chain end it resolved to), engine, phase, why.
+pub fn targets_table(rec: &WatchRecord) -> String {
+    rec.targets
+        .iter()
+        .map(|t| {
+            let chain = match &t.effective_id {
+                Some(e) => format!(" → 接力链尾 `{e}`"),
+                None => String::new(),
+            };
+            let src = t.source.as_deref().map(|s| format!(" [{s}]")).unwrap_or_default();
+            let detail = if t.detail.is_empty() { String::new() } else { format!("：{}", t.detail) };
+            format!("- `{}`{chain}{src} {}{detail}", t.id, phase_label(t.phase))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// What the woken agent can do next, given which targets are still open.
+fn targets_follow_up(rec: &WatchRecord, timed_out: bool) -> String {
+    let open: Vec<&str> = rec
+        .targets
+        .iter()
+        .filter(|t| !t.phase.is_some_and(|p| p.is_terminal()))
+        .map(|t| short_id(t.effective_id.as_deref().unwrap_or(&t.id)))
+        .collect();
+    let mut out = String::from(
+        "\n\n用 `fleet__inspect` 的 get 看各会话的结果（失败的会话看它 transcript 尾部的报错），再向老板汇报或决定下一步。",
+    );
+    if !open.is_empty() && !timed_out {
+        out.push_str(&format!(
+            "\n还没结束的会话：{}。这个 watch 已经触发并消失；还要继续等它们，就用 `fleet__watch` create 并传 `sessions` 重新挂。",
+            open.join(", ")
+        ));
+    }
     out
 }
 
@@ -1089,6 +1577,17 @@ pub fn compose_check_in_prompt(rec: &WatchRecord) -> String {
     );
     if let Some(note) = &rec.note {
         out.push_str(&format!("\n\n等待的是：{note}"));
+    }
+    if rec.is_target_watch() {
+        out.push_str("\n\n各会话当前状态：\n");
+        out.push_str(&targets_table(rec));
+        out.push_str(
+            "\n\n请自查：这些会话是确实还在干活，还是卡住了（受阻/状态未知的看 detail）？\
+             需要就用 `fleet__inspect` 看它们的详情、用 `fleet__control` 给它们发消息；\
+             等的会话不对就用 `fleet__watch` 的 add / remove 调整。条件没问题就直接结束回合，watch 会继续等。\
+             \n\n---\n（这是 Fleet watch 的预期时间自查唤醒，只会发生这一次，不是用户消息。）",
+        );
+        return out;
     }
     out.push_str(&format!("\n\nuntil 命令：{}", rec.until_cmd));
     out.push_str(&format!(
@@ -1356,6 +1855,13 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
         let probed: std::cell::RefCell<Option<crate::process_util::GateOutcome>> =
             std::cell::RefCell::new(None);
         let step = decide(&rec, generation, now_ms(), || {
+            if rec.is_target_watch() {
+                // Native condition: probe the sessions, persist what each
+                // one looks like (the cards read it), fire on the outcome.
+                return watches_dir()
+                    .and_then(|d| probe_targets_in(&d, id, generation, &crate::session_probe::probe))
+                    .is_some_and(|r| targets_outcome(&r.targets, r.wait_mode) != TargetsOutcome::Waiting);
+            }
             let out = poll_probe(&rec.until_cmd);
             let met = out.met;
             *probed.borrow_mut() = Some(out);
@@ -1418,6 +1924,17 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
 /// Only writes when the record is present and at the expected generation — a
 /// stale or stopped timer must not resurrect a heartbeat.
 fn touch_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    now: u64,
+    outcome: Option<&crate::process_util::GateOutcome>,
+    progress: Option<String>,
+) {
+    with_store_lock(dir, || touch_locked(dir, id, generation, now, outcome, progress))
+}
+
+fn touch_locked(
     dir: &Path,
     id: &str,
     generation: u64,
@@ -2360,7 +2877,6 @@ mod tests {
 
     // ── P3: heartbeat + reconcile ──────────────────────────────────────────────
 
-    #[test]
     /// The core of the registration gate: a command the shell cannot run is
     /// rejected outright. Before this, `watch --until 'ghh run view 1'` armed a
     /// timer that polled 127 for two hours and then reported "condition not met",
@@ -2536,6 +3052,40 @@ mod tests {
             sessions[2].watches.is_empty(),
             "a session with no watch is left empty"
         );
+    }
+
+    /// The reverse edge: a target watch marks every session it waits on — by
+    /// registered id and by chain end, dsh ids matched with or without their
+    /// `session-` prefix — and nobody else.
+    #[test]
+    fn enrich_stamps_waited_by_onto_targets_and_their_chain_ends() {
+        let d = dir();
+        let mut chained = WatchTarget::new("hop-1", 1_000);
+        chained.effective_id = Some("hop-2".into());
+        let targets = vec![chained, WatchTarget::new("session-dsh-uuid", 1_000)];
+        insert_in(
+            d.path(), "waiter", "/ws", "", targets, WaitMode::Any, None, Some("both"), 30, 60,
+            None, None, None, "w1", 1_000,
+        )
+        .unwrap();
+
+        let mk = |id: &str| {
+            let mut s = crate::session::SessionInfo::default();
+            s.id = id.to_string();
+            s
+        };
+        let mut sessions = vec![mk("hop-1"), mk("hop-2"), mk("dsh-uuid"), mk("waiter"), mk("other")];
+        enrich_sessions_in(d.path(), &mut sessions);
+
+        for s in &sessions[..3] {
+            assert_eq!(s.waited_by.len(), 1, "{} must be marked", s.id);
+            assert_eq!(s.waited_by[0].session_id, "waiter");
+            assert_eq!(s.waited_by[0].watch_id, "w1");
+            assert_eq!(s.waited_by[0].note.as_deref(), Some("both"));
+        }
+        assert!(sessions[3].waited_by.is_empty());
+        assert_eq!(sessions[3].watches[0].targets.len(), 2);
+        assert!(sessions[4].waited_by.is_empty());
     }
 
     /// The status override: a parked session (`Idle`/`WaitingInput`, no process)
@@ -2717,5 +3267,135 @@ mod tests {
         let sum = WatchSummary::from(&r);
         assert_eq!(sum.progress_fraction, Some(2.0 / 3.0));
         assert!(compose_resume_prompt(&r, "", true).contains("最后一次进度：2/3"));
+    }
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+    use crate::session_probe::{Phase, Probe};
+
+    fn target(id: &str, phase: Option<Phase>) -> WatchTarget {
+        let mut t = WatchTarget::new(id, 1);
+        t.phase = phase;
+        t
+    }
+
+    fn target_watch(d: &Path, id: &str, ids: &[&str], mode: WaitMode) -> WatchRecord {
+        insert_in(
+            d,
+            "waiter",
+            "/ws",
+            "",
+            ids.iter().map(|i| WatchTarget::new(i, 1)).collect(),
+            mode,
+            None,
+            Some("workers"),
+            30,
+            DEFAULT_TIMEOUT_SECS,
+            None,
+            None,
+            None,
+            id,
+            1_000,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn all_mode_waits_for_every_target_and_any_for_the_first() {
+        let ts = [target("a", Some(Phase::Done)), target("b", Some(Phase::Running))];
+        assert_eq!(targets_outcome(&ts, WaitMode::All), TargetsOutcome::Waiting);
+        assert_eq!(targets_outcome(&ts, WaitMode::Any), TargetsOutcome::AnyDone);
+        let done = [target("a", Some(Phase::Done)), target("b", Some(Phase::Done))];
+        assert_eq!(targets_outcome(&done, WaitMode::All), TargetsOutcome::AllDone);
+        // Parked / unknown / unprobed never count as finished.
+        let open = [target("a", Some(Phase::Parked)), target("b", Some(Phase::Unknown)), target("c", None)];
+        assert_eq!(targets_outcome(&open, WaitMode::Any), TargetsOutcome::Waiting);
+        assert_eq!(targets_outcome(&[], WaitMode::All), TargetsOutcome::Waiting);
+    }
+
+    #[test]
+    fn a_failed_target_fires_in_either_mode() {
+        let ts = [target("a", Some(Phase::Failed)), target("b", Some(Phase::Running))];
+        assert_eq!(targets_outcome(&ts, WaitMode::All), TargetsOutcome::Failed);
+        assert_eq!(targets_outcome(&ts, WaitMode::Any), TargetsOutcome::Failed);
+    }
+
+    #[test]
+    fn probing_persists_states_and_keeps_concurrent_additions() {
+        let d = tempfile::tempdir().unwrap();
+        target_watch(d.path(), "w", &["a", "b"], WaitMode::All);
+        let probe = |id: &str| {
+            // An add lands while the round of probes is in flight.
+            if id == "b" {
+                modify_in(d.path(), "w", |r| r.targets.push(WatchTarget::new("c", 2))).unwrap();
+            }
+            Probe {
+                phase: if id == "a" { Phase::Done } else { Phase::Running },
+                detail: format!("{id} detail"),
+                effective_id: if id == "b" { "b2".into() } else { id.into() },
+                source: Some("codex".into()),
+            }
+        };
+        let rec = probe_targets_in(d.path(), "w", 0, &probe).unwrap();
+        let ids: Vec<&str> = rec.targets.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"], "the concurrent add must survive the probe write");
+        assert_eq!(rec.targets[0].phase, Some(Phase::Done));
+        assert_eq!(rec.targets[1].effective_id.as_deref(), Some("b2"));
+        assert_eq!(rec.targets[0].effective_id, None);
+        assert_eq!(rec.targets[2].phase, None, "added mid-round: probed next round");
+        assert_eq!(targets_outcome(&rec.targets, rec.wait_mode), TargetsOutcome::Waiting);
+        // A stale timer gets nothing back and writes nothing.
+        assert!(probe_targets_in(d.path(), "w", 7, &probe).is_none());
+    }
+
+    #[test]
+    fn phase_since_moves_only_on_a_change() {
+        let mut t = WatchTarget::new("a", 1);
+        let p = |phase| Probe { phase, detail: String::new(), effective_id: "a".into(), source: None };
+        t.apply(&p(Phase::Running), 10);
+        t.apply(&p(Phase::Running), 20);
+        assert_eq!(t.phase_since, Some(10));
+        t.apply(&p(Phase::Done), 30);
+        assert_eq!(t.phase_since, Some(30));
+    }
+
+    #[test]
+    fn resume_prompt_lists_every_target_and_the_open_ones() {
+        let d = tempfile::tempdir().unwrap();
+        let mut rec = target_watch(d.path(), "w", &["aaaaaaaa-1", "bbbbbbbb-2"], WaitMode::Any);
+        rec.targets[0].phase = Some(Phase::Done);
+        rec.targets[0].detail = "回合已结束".into();
+        rec.targets[1].phase = Some(Phase::Running);
+        rec.targets[1].effective_id = Some("cccccccc-3".into());
+        let p = compose_resume_prompt(&rec, "", false);
+        assert!(p.contains("any 模式"), "{p}");
+        assert!(p.contains("`aaaaaaaa-1` 已完成：回合已结束"), "{p}");
+        assert!(p.contains("接力链尾 `cccccccc-3`"), "{p}");
+        assert!(p.contains("还没结束的会话：cccccccc"), "{p}");
+        assert!(!p.contains("until 命令"), "a target watch has no until: {p}");
+        let t = compose_resume_prompt(&rec, "", true);
+        assert!(t.contains("已超时") && !t.contains("还没结束的会话"), "{t}");
+    }
+
+    #[test]
+    fn a_shell_watch_round_trips_without_target_fields() {
+        let d = tempfile::tempdir().unwrap();
+        let rec = create_in(d.path(), "s", "/ws", "true", None, None, 30, 60, None, None, None, "x", 1).unwrap();
+        let json = std::fs::read_to_string(record_path(d.path(), "x")).unwrap();
+        assert!(!json.contains("\"targets\""), "{json}");
+        assert!(!rec.is_target_watch());
+        // Records written before this field existed still parse.
+        let old = json.replace(",\n  \"waitMode\": \"all\"", "");
+        let back: WatchRecord = serde_json::from_str(&old).unwrap();
+        assert_eq!(back.wait_mode, WaitMode::All);
+    }
+
+    #[test]
+    fn wait_mode_parses() {
+        assert_eq!(WaitMode::parse("ANY").unwrap(), WaitMode::Any);
+        assert_eq!(WaitMode::parse("").unwrap(), WaitMode::All);
+        assert!(WaitMode::parse("some").is_err());
     }
 }
