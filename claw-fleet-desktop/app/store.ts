@@ -13,6 +13,7 @@ import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
 import { applySessionsFrame, type SessionsFrame } from "../../shared-ts/sessionsFrame";
+import { TASK_STATES, type TaskState } from "../../shared-ts/taskState";
 
 /** Open the in-app Settings overlay.
  *
@@ -33,14 +34,6 @@ export type Theme = "dark" | "light" | "system";
 // Re-exported here because most call sites import ViewMode from the store.
 export { ALL_VIEW_MODES } from "./viewModes";
 export type { ViewMode } from "./viewModes";
-/** Launcher rail's segmented mark filter. "all" shows every bucket. */
-export type MarkFilter = "all" | "pending" | "done";
-/** What the task rail's sections stand for: the repository a session runs in,
- *  or its run status — or "none", which drops the headings and lists every row
- *  in one activity-ordered stream. Orthogonal to {@link MarkFilter}, which
- *  narrows *which* rows are listed rather than how they are bundled. */
-export type HistoryGroupMode = "workspace" | "status" | "none";
-
 export interface MainViewState {
   audit: {
     tab: "events" | "rules";
@@ -190,43 +183,25 @@ interface UIState {
    *  involuntary hops a waiting-input alert or the mascot bubble make by calling
    *  setViewMode("list"). Component state would be thrown away each time and the
    *  segmented filter would snap back to "all", so these live in the store.
-   *  markFilter / workspaceFilter are also written to disk;
+   *  workspaceFilter is also written to disk;
    *  `historyQuery` is deliberately store-only — a search box restored on boot
    *  would fire an FTS query the user never asked for. */
-  historyMarkFilter: MarkFilter;
   historyWorkspaceFilter: string;
   historyQuery: string;
-  /** Group handoff-relay sessions (sharing a `handoff.chainId`) into one
-   *  collapsible row in the task list. Default on; lives in the store (not
-   *  component state) for the same unmount reason as the filters above, and is
-   *  written to disk so the choice survives a restart. */
-  historyGroupHandoff: boolean;
   /** Settings opt-in for the Lobster Fleet page; off by default. */
   lobsterFleetEnabled: boolean;
-  /** Workspace paths whose folder section in the task rail is folded shut.
-   *  Component state would not survive the filter segments: the sections are
-   *  rendered from the *filtered* rows, so a workspace with no match under
-   *  "in progress" unmounts and comes back expanded when the reader switches back.
-   *  Written to disk so a deliberately folded repo stays folded across a
-   *  restart, same as the filters above. */
-  historyCollapsedWorkspaces: string[];
-  /** What the task rail's sections group by. Stored (and persisted) for the same
-   *  unmount reason as the filters above; the fold state of both groupings lives
-   *  in `historyCollapsedWorkspaces`, whose status keys are namespaced so the two
-   *  modes cannot fold each other's sections. */
-  historyGroupMode: HistoryGroupMode;
+  /** Home task sections folded shut. "done" starts folded. In the store (and
+   *  on disk) so a fold survives the home unmounting and a restart. */
+  homeCollapsedSections: TaskState[];
   mainViewState: MainViewState;
   updateMainViewState: <K extends keyof MainViewState>(
     view: K,
     patch: Partial<MainViewState[K]>,
   ) => void;
-  setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryQuery: (q: string) => void;
-  setHistoryGroupHandoff: (on: boolean) => void;
   setLobsterFleetEnabled: (on: boolean) => void;
-  toggleHistoryWorkspaceCollapsed: (workspacePath: string) => void;
-  setHistoryGroupMode: (m: HistoryGroupMode) => void;
+  toggleHomeSection: (state: TaskState) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   setTheme: (t: Theme) => void;
@@ -406,32 +381,18 @@ function readSecondarySidebarCollapsed(): Record<string, boolean> {
   }
 }
 
-/** Persisted list of folded task-rail workspace sections, tolerating an absent
- *  / corrupt value. */
-function readCollapsedWorkspaces(): string[] {
+/** Persisted folded home sections, tolerating an absent / corrupt value. */
+function readHomeCollapsedSections(): TaskState[] {
   try {
-    const raw = getItem("history-collapsed-workspaces");
-    if (!raw) return [];
+    const raw = getItem("home-collapsed-sections");
+    if (raw == null) return ["done"];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? parsed.filter((p): p is string => typeof p === "string")
-      : [];
+      ? parsed.filter((p): p is TaskState => (TASK_STATES as string[]).includes(p))
+      : ["done"];
   } catch {
-    return [];
+    return ["done"];
   }
-}
-
-/** Persisted grouping mode; anything unrecognised falls back to the repository
- *  sections the rail has always shown. */
-function readGroupMode(): HistoryGroupMode {
-  const raw = getItem("history-group-mode");
-  return raw === "status" || raw === "none" ? raw : "workspace";
-}
-
-/** Persisted mark filter, tolerating an absent / corrupt value. */
-function readMarkFilter(): MarkFilter {
-  const raw = getItem("history-mark-filter");
-  return raw === "pending" || raw === "done" ? raw : "all";
 }
 
 /** The task rail's project scope: "all", or one repository root path. Stored
@@ -496,15 +457,10 @@ export const useUIStore = create<UIState>((set) => ({
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   autoCollapsed: { secondary: null },
   mascotVisible: getItem("mascot-visible") === "true",
-  historyMarkFilter: readMarkFilter(),
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
   historyQuery: "",
-  // Default on — the empty/absent case yields grouping; only an explicit
-  // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
-  historyGroupHandoff: getItem("history-group-handoff") !== "false",
   lobsterFleetEnabled: readLobsterFleetEnabled(),
-  historyCollapsedWorkspaces: readCollapsedWorkspaces(),
-  historyGroupMode: readGroupMode(),
+  homeCollapsedSections: readHomeCollapsedSections(),
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
   updateMainViewState: (view, patch) =>
     set((state) => ({
@@ -513,19 +469,11 @@ export const useUIStore = create<UIState>((set) => ({
         [view]: { ...state.mainViewState[view], ...patch },
       },
     })),
-  setHistoryMarkFilter: (f) => {
-    setItem("history-mark-filter", f);
-    set({ historyMarkFilter: f });
-  },
   setHistoryWorkspaceFilter: (p) => {
     setItem("history-project-scope", p);
     set({ historyWorkspaceFilter: p });
   },
   setHistoryQuery: (q) => set({ historyQuery: q }),
-  setHistoryGroupHandoff: (on) => {
-    setItem("history-group-handoff", on ? "true" : "false");
-    set({ historyGroupHandoff: on });
-  },
   setLobsterFleetEnabled: (on) =>
     set((s) => {
       setItem("lobster-fleet-enabled", on ? "true" : "false");
@@ -533,18 +481,14 @@ export const useUIStore = create<UIState>((set) => ({
       const next = { ...s, lobsterFleetEnabled: on };
       return { lobsterFleetEnabled: on, ...viewModePatch(next, s.viewMode) };
     }),
-  toggleHistoryWorkspaceCollapsed: (workspacePath) =>
+  toggleHomeSection: (state) =>
     set((s) => {
-      const next = s.historyCollapsedWorkspaces.includes(workspacePath)
-        ? s.historyCollapsedWorkspaces.filter((p) => p !== workspacePath)
-        : [...s.historyCollapsedWorkspaces, workspacePath];
-      setItem("history-collapsed-workspaces", JSON.stringify(next));
-      return { historyCollapsedWorkspaces: next };
+      const next = s.homeCollapsedSections.includes(state)
+        ? s.homeCollapsedSections.filter((x) => x !== state)
+        : [...s.homeCollapsedSections, state];
+      setItem("home-collapsed-sections", JSON.stringify(next));
+      return { homeCollapsedSections: next };
     }),
-  setHistoryGroupMode: (m) => {
-    setItem("history-group-mode", m);
-    set({ historyGroupMode: m });
-  },
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   setTheme: (t) => {
     setItem("theme", t);

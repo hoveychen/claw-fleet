@@ -32,34 +32,6 @@ describe("launchpad rail filters", () => {
     vi.resetModules();
   });
 
-  it("writes the mark filter through to the settings store", async () => {
-    const { useUIStore } = await import("./store");
-    const { getItem } = await import("./storage");
-
-    useUIStore.getState().setHistoryMarkFilter("done");
-
-    expect(useUIStore.getState().historyMarkFilter).toBe("done");
-    expect(getItem("history-mark-filter")).toBe("done");
-  });
-
-  it("restores a persisted mark filter on boot", async () => {
-    const { setItem } = await import("./storage");
-    setItem("history-mark-filter", "pending");
-
-    const { useUIStore } = await import("./store");
-
-    expect(useUIStore.getState().historyMarkFilter).toBe("pending");
-  });
-
-  it("falls back to 全部 when the persisted mark filter is corrupt", async () => {
-    const { setItem } = await import("./storage");
-    setItem("history-mark-filter", "not-a-segment");
-
-    const { useUIStore } = await import("./store");
-
-    expect(useUIStore.getState().historyMarkFilter).toBe("all");
-  });
-
   it("round-trips the workspace filter", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
@@ -81,47 +53,41 @@ describe("launchpad rail filters", () => {
     expect(getItem("history-query")).toBeNull();
   });
 
-  /**
-   * Workspace collapse state used to be `useState` in WorkspaceRailSection. Grouping is
-   * computed from *filtered* rows, so when switching to "in-progress", any workspace
-   * with no sessions in that bucket unmounts entirely and re-mounts with the expand state
-   * reset — a collapsed fold is now blank.
-   */
-  it("toggles a workspace fold and writes it through", async () => {
+  it("starts with the done section folded", async () => {
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done"]);
+  });
+
+  it("toggles a section fold and writes it through", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
 
-    useUIStore.getState().toggleHistoryWorkspaceCollapsed("/Users/x/w/chat");
-
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([
-      "/Users/x/w/chat",
-    ]);
-    expect(getItem("history-collapsed-workspaces")).toBe(
-      JSON.stringify(["/Users/x/w/chat"]),
-    );
+    useUIStore.getState().toggleHomeSection("review");
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done", "review"]);
+    expect(getItem("home-collapsed-sections")).toBe(JSON.stringify(["done", "review"]));
 
     // Toggling again unfolds it rather than piling up duplicates.
-    useUIStore.getState().toggleHistoryWorkspaceCollapsed("/Users/x/w/chat");
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([]);
-    expect(getItem("history-collapsed-workspaces")).toBe("[]");
+    useUIStore.getState().toggleHomeSection("review");
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done"]);
   });
 
-  it("restores persisted workspace folds on boot", async () => {
+  it("restores persisted folds and drops unknown states", async () => {
     const { setItem } = await import("./storage");
-    setItem("history-collapsed-workspaces", JSON.stringify(["/a", "/b"]));
+    setItem("home-collapsed-sections", JSON.stringify(["running", "bogus"]));
 
     const { useUIStore } = await import("./store");
 
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual(["/a", "/b"]);
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["running"]);
   });
 
-  it("ignores a corrupt persisted fold list", async () => {
+  it("falls back to the default on a corrupt fold list", async () => {
     const { setItem } = await import("./storage");
-    setItem("history-collapsed-workspaces", "{not json");
+    setItem("home-collapsed-sections", "{not json");
 
     const { useUIStore } = await import("./store");
 
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([]);
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done"]);
   });
 });
 

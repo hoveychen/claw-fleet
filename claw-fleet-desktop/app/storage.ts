@@ -60,19 +60,13 @@ const ALL_KEYS = [
   // Commands pinned to the top of the repository command runner.
   "proc-shortcuts",
   "scratchpad-tree-width",
-  // Launchpad (HistoryView) rail filters — the search box is deliberately absent,
-  // it stays in-memory only.
-  "history-mark-filter",
-  // The rail's project scope ("all" or a repo root path).
+  // Home task column (HistoryView) — the search box is deliberately absent, it
+  // stays in-memory only. The project scope ("all" or a repo root path):
   "history-project-scope",
-  "history-group-handoff",
   "lobster-fleet-enabled",
-  // Task-rail workspace sections the reader has folded shut, as a JSON array of
-  // workspace paths. Must be readable on boot, otherwise every launch reopens
-  // repos the reader deliberately folded away.
-  "history-collapsed-workspaces",
-  // Whether the task rail sections by repository or by run status.
-  "history-group-mode",
+  // Home task sections the reader has folded shut, as a JSON array of task
+  // states. Must be readable on boot, or "done" would reopen on every launch.
+  "home-collapsed-sections",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",

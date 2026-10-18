@@ -9,13 +9,9 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Activity,
-  CheckCircle2,
-  Circle,
   Copy,
   Folder,
   FolderOpen,
-  List,
   PanelRightOpen,
   Pencil,
   Plus,
@@ -24,15 +20,9 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import {
-  useDecisionStore,
-  useSessionsStore,
-  useUIStore,
-  type HistoryGroupMode,
-  type MarkFilter,
-} from "../store";
+import { useDecisionStore, useSessionsStore, useUIStore } from "../store";
 import type { PendingDecision, SessionInfo } from "../types";
-import { isFleetOwnedTask } from "../types";
+import { isFleetOwnedTask, isQuietAliveSticky } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
@@ -42,22 +32,23 @@ import {
   type NewSessionLaunch,
 } from "./NewSessionForm";
 import { ConversationSkeleton } from "./MessageList";
-import { SkeletonCard, SkeletonList, SkeletonNumber, Spinner } from "./loading";
-import { countChainUnits } from "../../../shared-ts/chainUnits";
-import { repoRootPath } from "../../../shared-ts/repoPath";
+import { SkeletonCard, SkeletonList, Spinner } from "./loading";
 import { useComposerDraftStore, type ComposerDraft } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
-import { SessionRail, WorkspaceRailSection } from "./SessionRail";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
 import { RenameSessionDialog } from "./RenameSessionDialog";
-import { buildRenderItems } from "./sessionGroups";
-import { groupSessionsByWorkspace } from "./workspaceSessionGroups";
 import {
-  groupItemsByStatus,
-  type StatusBucket,
-} from "./sessionStatusGroups";
+  buildHomeRows,
+  filterRows,
+  rowOfSession,
+  rowSessionId,
+  sectionRows,
+  type HomeRow,
+  type TaskRow,
+} from "./homeRows";
+import { TaskList, rowMenuSession } from "./TaskList";
 import styles from "./HistoryView.module.css";
 import { canRevealPath } from "../canReveal";
 import { Presence } from "./Presence";
@@ -157,53 +148,6 @@ export function matchSpawnedSession(
     .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
 }
 
-/** Segments for the pending/done filter. "all" shows everything; the other two
- *  map to the binary mark buckets (unmarked collapses to "pending").
- *
- *  The two bucket segments render the exact icons `MarkControl` puts on the row
- *  (hollow circle = pending, green check = done) so a segment reads as "show me
- *  the rows wearing this icon". "all" is spelled out in words instead — any
- *  third icon here just competes with those two for meaning.
- *
- *  The selected segment itself lives in `useUIStore` (and on disk), not in this
- *  component — see the `history*` fields there for why. */
-const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
-
-/** Segments of the grouping switcher, in the order they are drawn. */
-const GROUP_MODES: HistoryGroupMode[] = ["workspace", "status", "none"];
-
-/** The run-dot hue each status section wears in its heading, so a section and
- *  the rows under it carry the same colour (see `rowBarColor`). */
-const STATUS_BUCKET_COLOR: Record<StatusBucket, string> = {
-  running: "var(--color-success)",
-  waitingInput: "var(--color-warning)",
-  error: "var(--color-error)",
-  watching: "var(--color-info)",
-  ended: "var(--color-text-dim)",
-};
-
-/** Which bucket a session falls in — `done` is explicit, everything else is
- *  pending. */
-function markBucket(s: SessionInfo): "pending" | "done" {
-  return s.userMark === "done" ? "done" : "pending";
-}
-
-/**
- * The counting identity behind every number on this page (`countChainUnits`):
- * a relay chain counts once, a standalone session counts once. `null` = "counts
- * as itself", which is also how the handoff-grouping setting being off is
- * expressed — with chains expanded into rows, one row is one unit again.
- *
- * Scoped by repository root because the rail's primary hierarchy is the
- * repository section and chains are folded *inside* one (see `workspaceGroups`
- * below): keying on `chainId` alone would count one unit where the list draws
- * two rows in two sections.
- */
-export function chainUnitKey(s: SessionInfo, group: boolean): string | null {
-  if (!group || !s.handoff || s.handoff.chainLen <= 1) return null;
-  return `${repoRootPath(s.workspacePath)} ${s.handoff.chainId}`;
-}
-
 // timeAgo / formatRunning / renderSnippet / sessionEq and the SessionRow
 // component itself moved to ./SessionRow (the shared row atom) so every rail
 // renders the identical row without duplicating it here.
@@ -229,31 +173,25 @@ export function taskListSessions(sessions: SessionInfo[]): SessionInfo[] {
  * than spliced into the frozen block. Ids in `frozenOrder` whose row has since
  * dropped out of `rows` simply fall away. `null` = no freeze, pass through.
  */
-export function applyFrozenOrder(
-  rows: SessionInfo[],
+export function applyFrozenOrder<T extends { id: string } | { key: string }>(
+  rows: T[],
   frozenOrder: string[] | null,
-): SessionInfo[] {
+): T[] {
   if (!frozenOrder) return rows;
-  const byId = new Map(rows.map((s) => [s.id, s]));
+  const keyOf = (r: T) => ("key" in r ? r.key : r.id);
+  const byKey = new Map(rows.map((r) => [keyOf(r), r]));
   const seen = new Set<string>();
-  const ordered: SessionInfo[] = [];
-  for (const id of frozenOrder) {
-    const s = byId.get(id);
-    if (s) {
-      ordered.push(s);
-      seen.add(id);
+  const ordered: T[] = [];
+  for (const k of frozenOrder) {
+    const r = byKey.get(k);
+    if (r) {
+      ordered.push(r);
+      seen.add(k);
     }
   }
-  for (const s of rows) if (!seen.has(s.id)) ordered.push(s);
+  for (const r of rows) if (!seen.has(keyOf(r))) ordered.push(r);
   return ordered;
 }
-
-// Relay-chain grouping logic (RenderItem / buildRenderItems / chainBarColor /
-// GROUP_VISIBLE / GROUP_LOAD_STEP / chainTip) lives in
-// ./sessionGroups so any rail can reuse it without importing this file.
-
-// GroupMarkControl (relay-chain mark-all) moved to ./MarkControl alongside the
-// single-row MarkControl; SessionRail renders it inside group headers.
 
 
 /** A row-menu edit shown ahead of the scan (see `optimistic` in HistoryView). */
@@ -372,12 +310,6 @@ export function HistoryView() {
     (path: string | null) => setWorkspaceFilter(path ?? "all"),
     [setWorkspaceFilter],
   );
-  // Section heading shortcut: scope to that project, or back to all of them when
-  // it is the one already in force.
-  const toggleWorkspaceFocus = useCallback(
-    (path: string) => setScope(scopedPath === path ? null : path),
-    [scopedPath, setScope],
-  );
   // Text typed into the project menu's filter box; cleared on every open.
   const [projectDraft, setProjectDraft] = useState("");
   // Re-render on a slow tick so the relative "last updated" and the live
@@ -389,25 +321,10 @@ export function HistoryView() {
     const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, []);
-  // Segmented filter by manual review mark; "all" shows every bucket.
-  const markFilter = useUIStore((s) => s.historyMarkFilter);
-  const setMarkFilter = useUIStore((s) => s.setHistoryMarkFilter);
-  // Collapse handoff-relay chains into one row (default on; togglable in
-  // Settings). Read from the store so the choice survives HistoryView's frequent
-  // unmounts and reacts live when flipped in the settings panel.
-  const groupHandoff = useUIStore((s) => s.historyGroupHandoff);
-  // Folded workspace sections. In the store for the same reason: the sections
-  // render off the *filtered* rows, so switching the mark filter unmounts every
-  // workspace that has no row in the target bucket and would otherwise drop its
-  // fold state on the way back.
-  const collapsedWorkspaces = useUIStore((s) => s.historyCollapsedWorkspaces);
-  const toggleWorkspaceCollapsed = useUIStore(
-    (s) => s.toggleHistoryWorkspaceCollapsed,
-  );
-  // What the sections stand for: the repository, or the run status. In the store
-  // (and on disk) for the same unmount reason as the filters above.
-  const groupMode = useUIStore((s) => s.historyGroupMode);
-  const setGroupMode = useUIStore((s) => s.setHistoryGroupMode);
+  // Folded state sections ("done" starts folded). In the store, and on disk,
+  // for the same unmount reason as the filters above.
+  const collapsedSections = useUIStore((s) => s.homeCollapsedSections);
+  const toggleSection = useUIStore((s) => s.toggleHomeSection);
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   //
@@ -464,7 +381,7 @@ export function HistoryView() {
   // window without a mouseleave, same failure the per-row hover guards handle).
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
 
-  const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
+  const { searching, ftsMatchPaths } = useSessionSearch(query);
 
   const adhocSessions = useMemo(() => taskListSessions(sessions), [sessions]);
 
@@ -473,167 +390,94 @@ export function HistoryView() {
   // top (see `pinnedPath` below) so it never sinks among busier repos.
   const chatPath = useChatWorkspace();
 
-  // Every project on the task page, for the scope menu: the same sections (and
-  // order, chat pinned first) the rail draws, counted in units of work across
-  // every mark — the menu answers "which project", not "what is on screen".
-  const projectOptions = useMemo(
-    () =>
-      groupSessionsByWorkspace(adhocSessions, { pinnedPath: chatPath }).map((g) => ({
-        path: g.path,
-        name: g.name,
-        count: countChainUnits(g.sessions, (s) => chainUnitKey(s, groupHandoff)),
-      })),
-    [adhocSessions, chatPath, groupHandoff],
-  );
-  // The scoped project's display name. A scope whose project has left the task
-  // page still shows (by its folder name) so it can be seen and cleared.
+  const pendingDecisions = useDecisionStore((s) => s.decisions);
+
+  // Tasks the boss pressed "accept" on, shown as done until the scan agrees
+  // (or the write fails and they come back).
+  const [acceptingKeys, setAcceptingKeys] = useState<Set<string>>(() => new Set());
+
+  // Every task and stray card, before scope and search: the project menu counts
+  // over this, so it answers "which project" rather than "what is on screen".
+  const allRows = useMemo(() => {
+    const built = buildHomeRows(sessions, pendingDecisions, {
+      isQuiet: (s) => isQuietAliveSticky(s),
+      untitled: t("history.untitled"),
+    });
+    if (acceptingKeys.size === 0) return built;
+    return built.map((r) =>
+      acceptingKeys.has(r.key) && r.state === "review" ? { ...r, state: "done" as const } : r,
+    );
+    // nowTick: the quiet latch is time-based, so re-derive on the slow tick too.
+  }, [sessions, pendingDecisions, acceptingKeys, t, nowTick]);
+
+  // Drop optimistic accepts the scan has caught up with.
+  useEffect(() => {
+    if (acceptingKeys.size === 0) return;
+    const settled = new Set(
+      allRows
+        .filter((r) => r.kind === "task" && r.tip.taskOutcome === "completed")
+        .map((r) => r.key),
+    );
+    const live = new Set(allRows.map((r) => r.key));
+    const kept = [...acceptingKeys].filter((k) => live.has(k) && !settled.has(k));
+    if (kept.length !== acceptingKeys.size) setAcceptingKeys(new Set(kept));
+  }, [allRows, acceptingKeys]);
+
+  const acceptTasks = useCallback((targets: TaskRow[]) => {
+    if (targets.length === 0) return;
+    const keys = targets.map((r) => r.key);
+    setAcceptingKeys((prev) => new Set([...prev, ...keys]));
+    // One session per task is enough: the core resolves the whole relay chain.
+    invoke<number>("accept_tasks", { sessionIds: targets.map((r) => r.tip.id) }).catch(
+      (e) => {
+        setAcceptingKeys((prev) => {
+          const next = new Set(prev);
+          for (const k of keys) next.delete(k);
+          return next;
+        });
+        console.error("accept_tasks failed", e);
+      },
+    );
+  }, []);
+
+  // Every project on the home, for the scope menu, chat pinned first.
+  const projectOptions = useMemo(() => {
+    const by = new Map<string, { path: string; name: string; count: number }>();
+    for (const r of allRows) {
+      if (!r.projectPath) continue;
+      const e = by.get(r.projectPath);
+      if (e) e.count += 1;
+      else by.set(r.projectPath, { path: r.projectPath, name: r.projectName, count: 1 });
+    }
+    return [...by.values()].sort((a, b) =>
+      a.path === chatPath ? -1 : b.path === chatPath ? 1 : b.count - a.count,
+    );
+  }, [allRows, chatPath]);
+  // The scoped project's display name. A scope whose project has left the home
+  // still shows (by its folder name) so it can be seen and cleared.
   const scopedName = scopedPath
     ? (projectOptions.find((p) => p.path === scopedPath)?.name ??
       scopedPath.split(/[\\/]/).filter(Boolean).pop() ??
       scopedPath)
     : null;
 
-  const { rows, markCounts } = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    // Everything except the mark filter — the segment counts are taken over
-    // this set so each count reflects how many rows its segment would reveal
-    // under the current query.
-    const preMark = adhocSessions
-      .filter((s) => !scopedPath || repoRootPath(s.workspacePath) === scopedPath)
-      .filter((s) => {
-        if (!q) return true;
-        const clientMatch =
-          (s.titleOverride?.toLowerCase().includes(q) ?? false) ||
-          (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
-          (s.slug?.toLowerCase().includes(q) ?? false) ||
-          (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
-          s.workspaceName.toLowerCase().includes(q) ||
-          // The attributed TASKS.md plan — id (`scene-items`), title, and the
-          // current P-task. Sessions pulled onto a plan by `fleet handoff`
-          // inherit the attribution, so the whole relay chain is reachable by
-          // searching the plan the way a human names it.
-          (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
-          (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
-          (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
-        return clientMatch || ftsMatchPaths.has(s.jsonlPath);
-      });
-    // Counted in *units of work*, not sessions: a relay chain is one thing being
-    // worked on however many hops it has spawned (see `chainUnitKey`). A chain
-    // whose hops straddle both buckets counts in both — matching the list, which
-    // draws that chain in whichever bucket is on screen.
-    const keyOf = (s: SessionInfo) => chainUnitKey(s, groupHandoff);
-    const byBucket: Record<"pending" | "done", SessionInfo[]> = { pending: [], done: [] };
-    for (const s of preMark) byBucket[markBucket(s)].push(s);
-    const counts: Record<MarkFilter, number> = {
-      all: countChainUnits(preMark, keyOf),
-      pending: countChainUnits(byBucket.pending, keyOf),
-      done: countChainUnits(byBucket.done, keyOf),
-    };
-    const rows = preMark
-      .filter((s) => markFilter === "all" || markBucket(s) === markFilter)
-      // Most recently *active* first, matching the row's displayed time. Uses
-      // the aggregate activity (own ∪ subagents) so a session that is quietly
-      // driving a subagent swarm doesn't sink below idle rows — its own
-      // `lastActivityMs` would be stale, but the tree is very much alive.
-      .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
-    return { rows, markCounts: counts };
-  }, [adhocSessions, scopedPath, query, ftsMatchPaths, markFilter, groupHandoff]);
-
-  // Whether the task page currently mixes agent sources (Claude + Codex + …).
-  // Only then does the per-row source glyph earn its place; a uniform list gets
-  // no badge. Scoped to the launchpad's own sessions, not the global scan, so
-  // the badge tracks what this page actually shows.
-  const multiSource = useMemo(
-    () => new Set(adhocSessions.map((s) => s.agentSource)).size > 1,
-    [adhocSessions],
+  const rows = useMemo(
+    () => filterRows(allRows, { scopedPath, query, ftsMatchPaths }),
+    [allRows, scopedPath, query, ftsMatchPaths],
   );
 
-  // The order shown, honouring the sort freeze. `rows` stays the live
-  // filtered+sorted list (its length still drives the header count); this only
+  // The order shown, honouring the sort freeze: `rows` stays live; this only
   // reshuffles it back into the frozen order while the pointer is parked.
+  // Sectioning keeps input order, so the freeze holds inside each section.
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
-  const displayRows = useMemo(
-    () => applyFrozenOrder(rows, frozenOrder),
+  const sections = useMemo(
+    () => sectionRows(applyFrozenOrder(rows, frozenOrder)),
     [rows, frozenOrder],
   );
 
-  // Repository sections are the rail's primary hierarchy. Relay chains stay a
-  // secondary grouping inside each repository instead of joining sessions from
-  // separate directories into one flat stream.
-  // While the sort freeze holds, the grouping must take `displayRows` as-is —
-  // it re-sorts by activity otherwise, which would put the row back under the
-  // cursor's feet even though `displayRows` itself was frozen.
-  // In "status" mode the same rows are bundled by what each session is doing
-  // instead. Both modes produce the identical section shape so the list below
-  // renders one way; only the heading's glyph, label and tooltip differ. "none"
-  // yields no sections at all — the list renders `flatItems` instead.
-  // Note the order of folding: status sections are cut from *folded* items, so
-  // a relay chain stays one row under its liveliest hop instead of being split
-  // between "running" (its tip) and "ended" (every hop that has handed off).
-  const sections = useMemo(() => {
-    const preserveOrder = frozenOrder != null;
-    const fold = (rows: SessionInfo[]) => buildRenderItems(rows, groupHandoff);
-    if (groupMode === "none") return [];
-    if (groupMode === "status") {
-      return groupItemsByStatus(fold(displayRows), { preserveOrder }).map(
-        (group) => ({
-          key: group.path,
-          name: t(`history.status_g_${group.bucket}`, group.bucket),
-          // No path to show, and the label already says everything the heading
-          // knows — so no tooltip rather than a misleading one.
-          tooltip: "",
-          icon: (
-            <Circle
-              size={10}
-              strokeWidth={0}
-              fill={STATUS_BUCKET_COLOR[group.bucket]}
-            />
-          ),
-          items: group.items,
-        }),
-      );
-    }
-    return groupSessionsByWorkspace(displayRows, {
-      preserveOrder,
-      pinnedPath: chatPath,
-    }).map((group) => ({
-      key: group.path,
-      name: group.name,
-      tooltip: group.path,
-      icon: undefined,
-      items: fold(group.sessions),
-    }));
-  }, [displayRows, groupHandoff, frozenOrder, chatPath, groupMode, t]);
-
-  // "none" mode's single stream: the same rows, relay chains still folded, in
-  // the activity order `displayRows` already carries. Computed unconditionally
-  // (it is one cheap pass) so the two branches stay symmetrical.
-  const flatItems = useMemo(
-    () => buildRenderItems(displayRows, groupHandoff),
-    [displayRows, groupHandoff],
-  );
-
-  // Full membership of every relay chain, keyed by chainId — taken over ALL
-  // launchpad sessions (not the filtered rows) so a group's mark-all covers the
-  // whole chain even when the mark filter is hiding some hops, and the header's
-  // aggregate done-state reflects the entire chain.
-  const chainMembersAll = useMemo(() => {
-    const m = new Map<string, SessionInfo[]>();
-    for (const s of adhocSessions) {
-      if (s.handoff && s.handoff.chainLen > 1) {
-        const arr = m.get(s.handoff.chainId);
-        if (arr) arr.push(s);
-        else m.set(s.handoff.chainId, [s]);
-      }
-    }
-    return m;
-  }, [adhocSessions]);
-
-  // Chain expand / page-in state now lives inside <SessionRail>.
-
   const freezeSort = useCallback(() => {
-    setFrozenOrder((prev) => prev ?? rowsRef.current.map((s) => s.id));
+    setFrozenOrder((prev) => prev ?? rowsRef.current.map((r) => r.key));
   }, []);
   const thawSort = useCallback(() => setFrozenOrder(null), []);
   // A pointer yanked out of the window (drag onto another app, alt-tab) fires no
@@ -685,7 +529,7 @@ export function HistoryView() {
     setQueryById({ [s.id]: highlight });
   }, []);
 
-  // Stable identity: SessionRow is memoised, and a fresh closure each render
+  // Stable identity: task rows are memoised, and a fresh closure each render
   // would defeat it for every row.
   const handleRowClick = useCallback(
     (s: SessionInfo) => {
@@ -694,17 +538,27 @@ export function HistoryView() {
     },
     [query, ftsMatchPaths, openTab],
   );
+  const openRow = useCallback(
+    (row: HomeRow) => {
+      const s = rowMenuSession(row);
+      if (s) handleRowClick(s);
+      else setOpenId(rowSessionId(row));
+    },
+    [handleRowClick],
+  );
 
   // Row context menu. Anchor + subject are held here (not via useContextMenu) so
-  // the open handler stays referentially stable — SessionRow is memoised and a
-  // fresh onContextMenu each render would re-render every row on every scan.
+  // the open handler stays referentially stable — rows are memoised and a fresh
+  // onContextMenu each render would re-render every row on every scan.
   const [menuAnchor, setMenuAnchor] = useState<ContextMenuAnchor | null>(null);
   const [menuSession, setMenuSession] = useState<SessionInfo | null>(null);
-  const openRowMenu = useCallback((e: React.MouseEvent, s: SessionInfo) => {
+  const openRowMenu = useCallback((e: React.MouseEvent, row: HomeRow) => {
     // Suppress the app-wide (Settings/About/Quit) menu, same as ContextMenu's
     // own callers do.
     e.preventDefault();
     e.stopPropagation();
+    const s = rowMenuSession(row);
+    if (!s) return;
     setMenuSession(s);
     setMenuAnchor({ x: e.clientX, y: e.clientY });
   }, []);
@@ -726,7 +580,6 @@ export function HistoryView() {
 
   const rowMenuItems = useCallback(
     (s: SessionInfo): ContextMenuItem[] => {
-      const isDone = s.userMark === "done";
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
@@ -739,28 +592,6 @@ export function HistoryView() {
           onSelect: () => handleRowClick(s),
         },
       ];
-      items.push({
-        id: "toggle-mark",
-        label: isDone
-          ? t("history.menu_mark_pending", "标为进行中")
-          : t("history.menu_mark_done", "标为已完成"),
-        icon: isDone ? <Circle size={13} /> : <CheckCircle2 size={13} />,
-        onSelect: () => {
-          // Same backend call the row's MarkControl fires; the store converges
-          // via the `sessions-updated` it emits. Shown at once, reverted if the
-          // write fails.
-          const mark = isDone ? null : "done";
-          patchOptimistic(
-            s.id,
-            { userMark: mark },
-            invoke("set_session_mark", {
-              sessionId: s.id,
-              workspacePath: s.workspacePath,
-              mark,
-            }),
-          );
-        },
-      });
       items.push({
         id: "rename",
         label: t("history.menu_rename", "重命名"),
@@ -937,7 +768,6 @@ export function HistoryView() {
     [openId, sessionById],
   );
 
-  const pendingDecisions = useDecisionStore((s) => s.decisions);
   const pane = useMemo(
     () =>
       panePlan({
@@ -967,19 +797,35 @@ export function HistoryView() {
     }
   }, [launching, formPane]);
 
-  // One session row — shared by standalone rows and the members inside an
-  // expanded handoff group, so both stay pixel-identical and pick up the same
-  // memoisation.
-  // Fold this page's query threshold and open-tab set into the shape
-  // <SessionRail> takes, so the shared rail stays agnostic of the stores.
-  const railSnippetFor = (jsonlPath: string) =>
-    query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined;
-  // The rail highlights the one session the column is showing.
-  const openTabIds = useMemo(
-    () => new Set(activeSession ? [activeSession.id] : []),
-    [activeSession],
+  // The row the detail column is showing: the task (or stray card) that owns
+  // the open session, so opening a sub-task still lights its task.
+  const activeRowKey = useMemo(
+    () => (openId && openId !== DRAFT_ID ? rowOfSession(allRows, openId)?.key ?? null : null),
+    [openId, allRows],
   );
-  const railActiveId = activeSession?.id ?? null;
+
+  // "What should get done?" — Enter carries the words into the new-task
+  // composer, which asks for the project and sends.
+  const [launchText, setLaunchText] = useState("");
+  const launchInputRef = useRef<HTMLInputElement>(null);
+  const submitLaunch = () => {
+    const prompt = launchText.trim();
+    if (prompt) useComposerDraftStore.getState().patchDraft("new", { prompt });
+    setLaunchText("");
+    handleNewSession();
+  };
+  // ⌘N / Ctrl+N from anywhere on the page focuses it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        launchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const isMac = document.documentElement.getAttribute("data-platform") !== "windows";
 
   return (
     <PageShell
@@ -992,10 +838,9 @@ export function HistoryView() {
             : pane.kind
       }
       title={t("history.title", "任务")}
-      // Units, not sessions — `rows` is `preMark` narrowed by the mark filter,
-      // so the active segment's count is that same set already folded by chain.
-      // Nothing before the first scan: a 0 there reads as "you have no tasks".
-      count={scanReady ? markCounts[markFilter] : null}
+      // Tasks on screen, not sessions. Nothing before the first scan: a 0 there
+      // reads as "you have no tasks".
+      count={scanReady ? rows.length : null}
       countLoading={!scanReady}
       search={{
         value: query,
@@ -1005,95 +850,33 @@ export function HistoryView() {
       }}
       secondary={
         <>
-        <div className={styles.rail_launch}>
-          <button
-            type="button"
-            data-wizard="new-session-btn"
-            className={`${styles.new_btn} ${openId === DRAFT_ID ? styles.new_btn_active : ""}`}
-            onClick={handleNewSession}
-            title={t("new_session.title")}
+        <div className={styles.rail_launch} data-wizard="new-session-btn">
+          <div
+            className={`${styles.launch} ${openId === DRAFT_ID ? styles.launch_active : ""}`}
           >
-            <Plus size={15} strokeWidth={2} />
-            <span>{t("new_session.button")}</span>
-          </button>
+            <Plus size={14} strokeWidth={2} className={styles.launch_icon} />
+            <input
+              ref={launchInputRef}
+              type="text"
+              className={styles.launch_input}
+              value={launchText}
+              onChange={(e) => setLaunchText(e.target.value)}
+              onKeyDown={(e) => {
+                // An IME's Enter commits the composition, not the task.
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  submitLaunch();
+                }
+              }}
+              placeholder={t("home.launch_placeholder")}
+              title={t("home.launch_hint")}
+              aria-label={t("home.launch_placeholder")}
+              spellCheck={false}
+            />
+            <kbd className={styles.launch_kbd}>{isMac ? "⌘N" : "Ctrl N"}</kbd>
+          </div>
         </div>
         <div className={styles.controls}>
-          <div className={styles.mark_row}>
-            <div
-              className={styles.mark_filter}
-              role="group"
-              aria-label={t("history.mark_filter_label", "按标记状态筛选")}
-            >
-            {MARK_SEGMENTS.map((key) => {
-              const label =
-                key === "all"
-                  ? t("history.mark_f_all", "全部")
-                  : key === "pending"
-                    ? t("history.mark_f_pending", "进行中")
-                    : t("history.mark_f_done", "已完成");
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  className={`${styles.mark_seg} ${markFilter === key ? styles.mark_seg_on : ""}`}
-                  data-seg={key}
-                  aria-pressed={markFilter === key}
-                  onClick={() => setMarkFilter(key)}
-                  title={label}
-                  aria-label={scanReady ? `${label} (${markCounts[key]})` : label}
-                >
-                  {key === "all" && (
-                    <span className={styles.mark_seg_label}>{label}</span>
-                  )}
-                  {key === "pending" && <Circle size={13} strokeWidth={1.8} />}
-                  {key === "done" && <CheckCircle2 size={14} strokeWidth={1.8} />}
-                  {scanReady ? (
-                    <span className={styles.mark_seg_count}>{markCounts[key]}</span>
-                  ) : (
-                    <SkeletonNumber width={12} height={10} className={styles.mark_seg_count} />
-                  )}
-                </button>
-              );
-            })}
-            </div>
-            {/* What the sections below stand for. Sits beside the mark filter
-                rather than in Settings: it changes what the reader is looking at
-                right now, and the answer differs per sitting (by repository when
-                picking work up, by status when sweeping for what needs a reply). */}
-            <div
-              className={styles.group_mode}
-              role="group"
-              aria-label={t("history.group_mode_label", "分组方式")}
-            >
-              {GROUP_MODES.map((mode) => {
-                const label =
-                  mode === "workspace"
-                    ? t("history.group_by_workspace", "按仓库分组")
-                    : mode === "status"
-                      ? t("history.group_by_status", "按状态分组")
-                      : t("history.group_by_none", "不分组");
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`${styles.mark_seg} ${groupMode === mode ? styles.mark_seg_on : ""}`}
-                    aria-pressed={groupMode === mode}
-                    onClick={() => setGroupMode(mode)}
-                    title={label}
-                    aria-label={label}
-                  >
-                    {mode === "workspace" ? (
-                      <Folder size={13} strokeWidth={1.8} />
-                    ) : mode === "status" ? (
-                      <Activity size={13} strokeWidth={1.8} />
-                    ) : (
-                      <List size={13} strokeWidth={1.8} />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
           <div className={styles.scope_row}>
             <PillMenu
               placement="below"
@@ -1163,56 +946,21 @@ export function HistoryView() {
             <SkeletonList rows={8} avatar rowHeight={48} className={styles.rail_skeleton} />
           ) : rows.length === 0 ? (
             <div className={styles.empty}>
-              {adhocSessions.length === 0
-                ? t("history.empty", "还没有会话，点上方“新会话”发起一个")
-                : t("history.no_match", "没有匹配的会话")}
+              {allRows.length === 0 ? t("home.empty") : t("home.no_match")}
             </div>
-          ) : groupMode === "none" ? (
-            <SessionRail
-              items={flatItems}
-              chainMembersAll={chainMembersAll}
-              activeId={railActiveId}
-              openIds={openTabIds}
-              snippetFor={railSnippetFor}
-              nowTick={nowTick}
-              showSource={multiSource}
-              showWorkspace
-              onRowClick={handleRowClick}
-              onContextMenu={openRowMenu}
-            />
           ) : (
-            sections.map((section) => (
-              <WorkspaceRailSection
-                key={section.key}
-                path={section.key}
-                name={section.name}
-                icon={section.icon}
-                tooltip={section.tooltip}
-                // Collapsed row count: one relay chain folded into one group counts as 1, matching what we see.
-                count={section.items.length}
-                // A scoped list is one project the user asked to see; a fold
-                // left over from browsing would hide exactly that.
-                collapsed={!scopedPath && collapsedWorkspaces.includes(section.key)}
-                onToggle={toggleWorkspaceCollapsed}
-                onFocus={groupMode === "workspace" ? toggleWorkspaceFocus : undefined}
-                focused={scopedPath === section.key}
-              >
-                <SessionRail
-                  items={section.items}
-                  chainMembersAll={chainMembersAll}
-                  activeId={railActiveId}
-                  openIds={openTabIds}
-                  snippetFor={railSnippetFor}
-                  nowTick={nowTick}
-                  showSource={multiSource}
-                  // A status heading says nothing about where a session runs, so
-                  // the row has to carry its own workspace label there.
-                  showWorkspace={groupMode === "status"}
-                  onRowClick={handleRowClick}
-                  onContextMenu={openRowMenu}
-                />
-              </WorkspaceRailSection>
-            ))
+            <TaskList
+              sections={sections}
+              activeKey={activeRowKey}
+              collapsed={collapsedSections}
+              onToggleSection={toggleSection}
+              nowTick={nowTick}
+              acceptingKeys={acceptingKeys}
+              onOpen={openRow}
+              onContextMenu={openRowMenu}
+              onScopeProject={setScope}
+              onAccept={acceptTasks}
+            />
           )}
           <Presence when={Boolean(menuAnchor && menuSession)}>{menuAnchor && menuSession && (
             <ContextMenu

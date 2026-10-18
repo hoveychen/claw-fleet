@@ -1125,11 +1125,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setFeatureState(REPORT_AUTO_POPUP_KEY, state);
   }, []);
 
-  // ── Group handoff-relay sessions ───────────────────────────────────────────
-  // Lives in the UI store (which persists it) so the task list reacts live when
-  // this is flipped, rather than only after a restart.
-  const groupHandoff = useUIStore((s) => s.historyGroupHandoff);
-  const setGroupHandoff = useUIStore((s) => s.setHistoryGroupHandoff);
   const lobsterFleet = useUIStore((s) => s.lobsterFleetEnabled);
   const setLobsterFleet = useUIStore((s) => s.setLobsterFleetEnabled);
 
@@ -1407,23 +1402,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     defaultOn={featureDefault(REPORT_AUTO_POPUP_KEY)}
                     onChange={handleToggleReportAutoPopup}
                   />
-                </div>
-
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.group_handoff")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.group_handoff_desc")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={groupHandoff}
-                      onChange={(e) => setGroupHandoff(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
                 </div>
 
                 <ToggleRow
