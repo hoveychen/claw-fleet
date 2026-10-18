@@ -1,7 +1,7 @@
 {
   "en": [
     {
-      "title": "Start and continue",
+      "title": "Hand over an idea",
       "items": [
         [
           "Three agent tools",
@@ -20,42 +20,72 @@
           "Add another instruction without waiting for the task to finish."
         ],
         [
-          "Task tabs",
-          "Move between tasks while keeping each conversation in place."
+          "Every project on one page",
+          "Tasks from all projects, grouped into needs you, running, waiting, to accept and done."
         ],
         [
-          "Cross-session search",
-          "Find previous work by title, plan or conversation text."
+          "Search and project filter",
+          "Find earlier tasks by title, plan or full text, or narrow the page to one project."
         ]
       ],
       "evidence": "claw-fleet-desktop/app/components/NewSessionForm.tsx"
     },
     {
-      "title": "More than one agent",
+      "title": "One coordinator per task",
+      "items": [
+        [
+          "Proposal before fan-out",
+          "The coordinator lists the sub-tasks it wants to start and waits for your go-ahead."
+        ],
+        [
+          "Sub-tasks in parallel",
+          "Split work runs side by side, each folded under the task it belongs to."
+        ],
+        [
+          "One report",
+          "Sub-tasks report to the coordinator; you get a single summary."
+        ],
+        [
+          "Steps",
+          "Each task and sub-task keeps a progress list with the current step marked."
+        ],
+        [
+          "Waiting without a session",
+          "Waiting on sub-tasks or a build shows as Waiting, with what it waits for."
+        ],
+        [
+          "Past the context window",
+          "A full conversation continues in a fresh one and stays the same task."
+        ]
+      ],
+      "evidence": "claw-fleet-core/src/task_roles_guidance.rs"
+    },
+    {
+      "title": "More than one agent tool",
       "items": [
         [
           "A tool per task",
-          "Pick Claude Code, Codex or DeepSeek Harness when you brief a task, then a model from that tool."
+          "Pick Claude Code, Codex or DeepSeek Harness for a task, then a model from that tool."
         ],
         [
-          "Handoff across tools",
-          "Name another tool's model in a handoff and the next session runs there."
+          "Switch tools mid-task",
+          "Name another tool’s model when the work continues and it runs there."
         ],
         [
-          "The plan travels",
-          "A handoff can carry the plan and the step it stopped on."
+          "Steps travel",
+          "The step list and where it stands carry over to the next tool."
         ],
         [
-          "Notes along the chain",
-          "A successor session can read the notes its predecessors left behind."
+          "Notes travel",
+          "A continuation reads the notes the earlier conversation left behind."
         ],
         [
-          "Shared wiki and deliverables",
+          "Shared library",
           "A report one tool publishes is what the next tool reads back."
         ],
         [
-          "Mixed sessions stay legible",
-          "When several tools are running, the session list marks which one each task is on."
+          "Mixed tasks stay legible",
+          "A task’s page names the tool and model it runs on."
         ]
       ]
     },
@@ -63,38 +93,38 @@
       "title": "See the work as it happens",
       "items": [
         [
-          "List and gallery views",
-          "See multiple sessions and their current states together."
-        ],
-        [
           "Live activity",
-          "Distinguish thinking, tool execution, output and waiting for input."
+          "Tell thinking, running a tool, writing and waiting apart."
         ],
         [
           "Full conversation timeline",
           "Inspect thinking, tool calls and code changes."
         ],
         [
-          "Subagents and workflows",
-          "Follow parent sessions, subagent work and workflow relationships."
+          "Sub-tasks and steps beside it",
+          "Open any sub-task from the side rail to read or steer it."
+        ],
+        [
+          "Developer view",
+          "Session facts, the relay chain, token use, notes, background commands and workflows."
         ],
         [
           "Interrupt and stop",
-          "Take control of a stuck or no-longer-needed session."
+          "Take control of a stuck or no-longer-needed task."
         ],
         [
-          "Session organization",
-          "Rename, mark and filter sessions to keep useful work easy to find."
+          "Rename and mark",
+          "Keep useful work easy to find."
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/SessionDetail.tsx"
+      "evidence": "claw-fleet-desktop/app/components/TaskRail.tsx"
     },
     {
       "title": "Keep a person in the loop",
       "items": [
         [
-          "One decision queue",
-          "Handle questions, permissions and plan approvals together."
+          "One needs-you queue",
+          "Questions from every task and sub-task, pinned where you work and labelled with their source."
         ],
         [
           "Materials beside the decision",
@@ -113,45 +143,19 @@
           "Read and edit a proposed plan before approving it."
         ],
         [
-          "Decision history",
-          "Keep questions, choices and feedback for later review."
+          "Accept the result",
+          "Delivered tasks wait in To accept until you accept them."
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/DecisionPanel.tsx"
-    },
-    {
-      "title": "Keep longer work moving",
-      "items": [
-        [
-          "Durable plans and task trees",
-          "Track phases and keep the plan with the work."
-        ],
-        [
-          "Context handoffs",
-          "Start a successor session with a handoff brief."
-        ],
-        [
-          "Visible handoff chains",
-          "Trace the sessions that carried a piece of work forward."
-        ],
-        [
-          "One-time schedules",
-          "Start a task at a specified time."
-        ],
-        [
-          "Recurring tasks",
-          "Repeat checks or routine work on a schedule."
-        ],
-        [
-          "Condition-based runs",
-          "Wait for an event and run the agent only when the condition is met."
-        ]
-      ],
-      "evidence": "claw-fleet-desktop/app/components/PlansView.tsx"
+      "evidence": "claw-fleet-desktop/app/components/DecisionDock.tsx"
     },
     {
       "title": "Keep the output and the knowledge",
       "items": [
+        [
+          "One library",
+          "Docs and deliverables in one list, filtered by type and project, with search."
+        ],
         [
           "Multi-format previews",
           "Preview PDFs, Office files, images, video and web documents."
@@ -161,56 +165,52 @@
           "Download finished files or hand them to someone else."
         ],
         [
-          "Favorites, notes and project filters",
+          "Favorites and notes",
           "Organize deliverables without relying on filenames alone."
         ],
         [
-          "Project wiki publishing",
-          "Keep reusable HTML reports and Markdown documents."
-        ],
-        [
-          "Wiki search and cross-links",
-          "Search full text and reference conclusions across documents and sessions."
-        ],
-        [
-          "Document version history",
+          "Versioned documents",
           "Update a document while keeping earlier versions available."
+        ],
+        [
+          "Search and cross-links",
+          "Search full text and cite conclusions across documents and tasks."
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/ArtifactsView.tsx"
+      "evidence": "claw-fleet-desktop/app/components/LibraryView.tsx"
     },
     {
-      "title": "Connect projects and devices",
+      "title": "Projects",
       "items": [
         [
-          "File explorer",
-          "Browse project files, images and source code."
+          "Routines",
+          "Start a task once at a set time, or on a repeating interval; each run is an ordinary task."
         ],
         [
-          "Git status, pull and push",
-          "See the branch, ahead/behind counts and changed files, then pull or push from the interface."
+          "Project memory",
+          "See what agents noted down while working in a project, with revision history."
         ],
         [
-          "Terminal and processes",
-          "Run commands and inspect terminal output and process state."
+          "Code and Git",
+          "Browse files, see branch, ahead/behind and changes, then pull or push."
+        ],
+        [
+          "Running commands",
+          "See the commands running in a project; an optional built-in terminal."
         ],
         [
           "SSH workspaces",
-          "Connect projects and agent environments on another machine."
+          "Point a project at a directory on another machine."
         ],
         [
           "Browser access and self-hosting",
           "Run Fleet Web UI on your own always-on machine."
-        ],
-        [
-          "QR pairing and multiple devices",
-          "Pair a phone with desktop Fleet and switch between devices."
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/FilesView.tsx"
+      "evidence": "claw-fleet-desktop/app/components/ProjectsView.tsx"
     },
     {
-      "title": "Understand usage and execution",
+      "title": "Usage and review",
       "items": [
         [
           "Account quota windows",
@@ -218,45 +218,45 @@
         ],
         [
           "Tokens and estimated cost",
-          "Review per-session consumption and estimated totals."
+          "Per task, including its sub-tasks, plus a running total for today."
         ],
         [
-          "Live speed and spend trends",
-          "Watch output speed and changes in spend."
+          "Usage history",
+          "See how usage moved over days and weeks."
         ],
         [
-          "Daily work reports",
-          "Summarize sessions, output and work that needs attention."
+          "Daily review",
+          "Each day’s progress, grouped by project."
         ],
         [
-          "Command auditing",
-          "Review executed commands by risk category."
+          "Drift and lessons",
+          "Tasks drifting from their goal, and lessons that recur across tasks."
         ],
         [
-          "Environment setup and diagnostics",
-          "Check installation, versions, sign-in and tool availability."
+          "Security records",
+          "Every command agents ran, by risk category, with your allow rules."
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/UsagePanel.tsx"
+      "evidence": "claw-fleet-desktop/app/components/report/ReportView.tsx"
     },
     {
       "title": "Make it work your way",
       "items": [
         [
-          "Skill browsing and sync",
-          "Inspect skills and synchronize them across supported tools."
+          "Plugins and skills",
+          "Inspect skills, sync them across supported tools, manage plugin sources."
         ],
         [
-          "Plugins and marketplaces",
-          "Browse, install and manage plugin sources."
+          "Global memory",
+          "Rules that apply to every project, with their scope and history."
         ],
         [
-          "Memory rules and history",
-          "Inspect project memory, revision history and rule scope."
+          "A phone that opens on needs-you",
+          "Answer decisions, accept results and start tasks from a phone."
         ],
         [
-          "Start and review from a phone",
-          "Start tasks, add instructions and answer decisions from a phone."
+          "QR pairing and multiple devices",
+          "Pair a phone with desktop Fleet and switch between machines."
         ],
         [
           "Voice transcription and image input",
@@ -265,6 +265,10 @@
         [
           "Notifications, sounds and speech",
           "Choose how Fleet gets your attention."
+        ],
+        [
+          "Environment setup and diagnostics",
+          "Check installation, versions, sign-in and tool availability."
         ]
       ],
       "evidence": "claw-fleet-desktop/app/components/SkillsView.tsx"
@@ -272,7 +276,7 @@
   ],
   "zh": [
     {
-      "title": "开始与继续工作",
+      "title": "交出一个想法",
       "items": [
         [
           "三种 Agent 入口",
@@ -291,42 +295,72 @@
           "不必等任务结束，再补充一条要求。"
         ],
         [
-          "多标签工作区",
-          "在多个任务间切换，保留各自的上下文。"
+          "所有项目一页看",
+          "全部项目的任务按待你处理、进行中、等待中、待验收、已完成分组。"
         ],
         [
-          "跨会话搜索",
-          "按标题、计划与会话全文找回以前的工作。"
+          "搜索与项目筛选",
+          "按标题、计划与全文找回以前的任务，或一键只看某个项目。"
         ]
       ],
       "evidence": "claw-fleet-desktop/app/components/NewSessionForm.tsx"
+    },
+    {
+      "title": "一个任务一个统筹",
+      "items": [
+        [
+          "先列方案再拆开",
+          "统筹先列出要派的子任务，等你确认才动手。"
+        ],
+        [
+          "子任务并行",
+          "拆出去的活同时跑，各自收在所属任务下面。"
+        ],
+        [
+          "只有一份汇报",
+          "子任务向统筹回报，你只收到一份汇总。"
+        ],
+        [
+          "步骤",
+          "每个任务和子任务都有进度清单，标出当前这一步。"
+        ],
+        [
+          "等待不占会话",
+          "等子任务、等构建时显示为「等待中」，写明在等什么。"
+        ],
+        [
+          "不怕上下文写满",
+          "对话写满后在新的上下文里接着做，还是同一个任务。"
+        ]
+      ],
+      "evidence": "claw-fleet-core/src/task_roles_guidance.rs"
     },
     {
       "title": "多个 AI 工具协同",
       "items": [
         [
           "每个任务各选工具",
-          "交代任务时选定 Claude Code、Codex 或 DeepSeek Harness，再挑它自己的模型。"
+          "交出任务时选定 Claude Code、Codex 或 DeepSeek Harness，再挑它自己的模型。"
         ],
         [
-          "跨工具接力",
-          "交接时指定另一个工具的模型，下一棒就在那个工具里继续。"
+          "做到一半换工具",
+          "接着做时指定另一个工具的模型，就换到那个工具里继续。"
         ],
         [
-          "计划跟着交接走",
-          "交接可以带上计划，以及停在哪一步。"
+          "步骤跟着走",
+          "步骤清单和进度一起带到下一个工具。"
         ],
         [
-          "笔记沿接力链可读",
-          "后一棒读得到前几棒留下的笔记。"
+          "笔记跟着走",
+          "接着做的一方读得到之前留下的笔记。"
         ],
         [
-          "共用知识库与产出",
-          "一个工具发布的报告和产出，另一个工具读得回来。"
+          "共用资料",
+          "一个工具发布的报告，另一个工具读得回来。"
         ],
         [
           "混跑时看得清",
-          "几个工具同时在跑时，会话列表标出每个任务用的是哪一个。"
+          "任务页上标着它用的工具和模型。"
         ]
       ]
     },
@@ -334,38 +368,38 @@
       "title": "看清 Agent 在做什么",
       "items": [
         [
-          "列表与画廊视图",
-          "同时查看多个会话及其当前状态。"
-        ],
-        [
           "实时执行状态",
           "区分思考、执行、输出与等待输入。"
         ],
         [
-          "完整会话时间线",
+          "完整对话时间线",
           "展开思考、工具调用和代码差异。"
         ],
         [
-          "子 Agent 与工作流",
-          "查看父子会话、分工与工作流关系。"
+          "子任务与步骤在旁边",
+          "从右栏点开任意子任务，看它做什么、给它插话。"
+        ],
+        [
+          "开发者视图",
+          "会话信息、接力链、Token、笔记、后台命令与工作流。"
         ],
         [
           "中断与停止",
-          "直接接管卡住或不再需要的会话。"
+          "直接接管卡住或不再需要的任务。"
         ],
         [
-          "标记与会话整理",
-          "重命名、标记和筛选，留下值得回看的工作。"
+          "重命名与标记",
+          "留下值得回看的工作。"
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/SessionDetail.tsx"
+      "evidence": "claw-fleet-desktop/app/components/TaskRail.tsx"
     },
     {
       "title": "人来做决定",
       "items": [
         [
-          "统一决策队列",
-          "问题、权限与计划审批集中处理。"
+          "统一的待你处理",
+          "所有任务和子任务的问题钉在手边，标明来自哪里。"
         ],
         [
           "材料与决定并排",
@@ -384,45 +418,19 @@
           "先看计划，必要时修改，再批准执行。"
         ],
         [
-          "完整决策记录",
-          "保留问题、选择和反馈，回看来龙去脉。"
+          "验收成果",
+          "交付了的任务停在「待验收」，你验收后才算完成。"
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/DecisionPanel.tsx"
-    },
-    {
-      "title": "让长任务接着做",
-      "items": [
-        [
-          "持久计划与任务树",
-          "按阶段追踪进度，计划随任务保留。"
-        ],
-        [
-          "上下文交接",
-          "带着交接简报启动后继会话。"
-        ],
-        [
-          "可追溯的接力链",
-          "回看一项工作经过了哪些会话。"
-        ],
-        [
-          "一次性定时任务",
-          "让任务在指定时间启动。"
-        ],
-        [
-          "周期性任务",
-          "按计划重复执行检查或整理工作。"
-        ],
-        [
-          "条件触发与便宜探测",
-          "等待外部事件，满足条件后再唤起 Agent。"
-        ]
-      ],
-      "evidence": "claw-fleet-desktop/app/components/PlansView.tsx"
+      "evidence": "claw-fleet-desktop/app/components/DecisionDock.tsx"
     },
     {
       "title": "留下成果与知识",
       "items": [
+        [
+          "统一的资料",
+          "文档和交付物在一个列表里，可按类型、项目筛选和搜索。"
+        ],
         [
           "多格式文件预览",
           "查看 PDF、Office、图片、视频及网页文档。"
@@ -432,56 +440,52 @@
           "把完成的文件下载或交给其他人。"
         ],
         [
-          "收藏、备注与项目筛选",
+          "收藏与备注",
           "按用途整理交付物，不用靠文件名猜。"
-        ],
-        [
-          "发布到项目知识库",
-          "保存可复用的 HTML 报告和 Markdown 文档。"
-        ],
-        [
-          "知识库搜索与互链",
-          "全文搜索，并在文档和会话里引用结论。"
         ],
         [
           "文档版本历史",
           "更新同一篇文档，保留旧版本可回看。"
+        ],
+        [
+          "搜索与互链",
+          "全文搜索，并在文档和任务里引用结论。"
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/ArtifactsView.tsx"
+      "evidence": "claw-fleet-desktop/app/components/LibraryView.tsx"
     },
     {
-      "title": "连接项目与设备",
+      "title": "项目",
       "items": [
         [
-          "文件树与内容预览",
-          "浏览项目文件、图片与代码内容。"
+          "例行",
+          "在指定时间跑一次，或按间隔重复；每跑一次就是一个普通任务。"
         ],
         [
-          "Git 状态与拉取推送",
-          "查看分支、领先落后数与改动文件，并在界面中执行拉取与推送。"
+          "项目记忆",
+          "查看 agent 在这个项目里记下的东西和历史版本。"
         ],
         [
-          "内置终端与进程",
-          "运行命令，查看终端输出和进程状态。"
+          "代码与 Git",
+          "浏览文件，查看分支、领先落后数与改动，在界面中拉取与推送。"
+        ],
+        [
+          "正在跑的命令",
+          "查看项目里正在运行的命令；可选内置终端。"
         ],
         [
           "SSH 远端工作区",
-          "连接其他机器上的项目与 Agent 环境。"
+          "让项目指向另一台机器上的目录。"
         ],
         [
           "浏览器与自托管",
           "在自己的常在线机器上运行 Fleet Web UI。"
-        ],
-        [
-          "扫码配对与多设备",
-          "手机连接桌面，在多台设备之间切换。"
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/FilesView.tsx"
+      "evidence": "claw-fleet-desktop/app/components/ProjectsView.tsx"
     },
     {
-      "title": "观察用量与运行质量",
+      "title": "用量与回顾",
       "items": [
         [
           "账号额度窗口",
@@ -489,45 +493,45 @@
         ],
         [
           "Token 与费用估算",
-          "查看会话消耗与汇总费用。"
+          "按任务统计（含子任务），另有今日合计。"
         ],
         [
-          "实时速度与花费趋势",
-          "留意输出速度及费用增长。"
+          "用量历史",
+          "按天、按周看用量的变化。"
         ],
         [
-          "每日工作报告",
-          "汇总会话、产出和需要关注的工作。"
+          "每日回顾",
+          "每天的进展，按项目汇总。"
         ],
         [
-          "命令审计",
-          "按风险类别回看执行过的命令。"
+          "偏离与经验",
+          "偏离目标的任务，以及在多个任务里反复出现的教训。"
         ],
         [
-          "环境安装与诊断",
-          "检查安装、版本、登录与工具可用性。"
+          "安全记录",
+          "按风险类别回看 agent 执行过的命令，以及你的放行规则。"
         ]
       ],
-      "evidence": "claw-fleet-desktop/app/components/UsagePanel.tsx"
+      "evidence": "claw-fleet-desktop/app/components/report/ReportView.tsx"
     },
     {
       "title": "按自己的习惯使用",
       "items": [
         [
-          "技能浏览与同步",
-          "查看技能内容，并同步到支持的工具。"
+          "插件与技能",
+          "查看技能并同步到支持的工具，管理插件来源。"
         ],
         [
-          "插件与市场管理",
-          "浏览、安装和管理插件来源。"
+          "全局记忆",
+          "对所有项目生效的规则，看得到归属与历史。"
         ],
         [
-          "记忆规则与历史",
-          "查看项目记忆、历史版本与规则归属。"
+          "手机先看待你处理",
+          "在手机上拍板、验收、发起新任务。"
         ],
         [
-          "手机发起与接手",
-          "在手机上发任务、补充要求和回答决定。"
+          "扫码配对与多设备",
+          "手机连接桌面，在多台机器之间切换。"
         ],
         [
           "语音转写与图片输入",
@@ -536,6 +540,10 @@
         [
           "通知、提示音与播报",
           "按自己的节奏选择提醒方式。"
+        ],
+        [
+          "环境安装与诊断",
+          "检查安装、版本、登录与工具可用性。"
         ]
       ],
       "evidence": "claw-fleet-desktop/app/components/SkillsView.tsx"

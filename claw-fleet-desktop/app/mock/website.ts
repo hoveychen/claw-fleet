@@ -4,7 +4,7 @@ import assets from '../../../scripts/site/fixtures/assets.json';
 import reviewEn from '../../../scripts/site/fixtures/en/review.html?raw';
 import reviewZh from '../../../scripts/site/fixtures/zh/review.html?raw';
 import scenes from '../../../scripts/site/fixtures/scenes.json';
-import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE, MOCK_HANDOFF_CHAINS } from './data';
+import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE, MOCK_TASK_PLANS } from './data';
 export const websiteLang = new URLSearchParams(location.search).get('website');
 export const websiteScene = websiteLang === 'en' || websiteLang === 'zh' ? scenes[websiteLang] : null;
 export const websiteReview = websiteLang === "zh" ? reviewZh : reviewEn;
@@ -13,21 +13,58 @@ export function installWebsiteFixtures() {
   const c = websiteScene;
   if (!c) return;
   const seed = MOCK_SESSIONS[0];
-  MOCK_SESSIONS.splice(0, MOCK_SESSIONS.length, ...c.tasks.map(([title, preview], i) => ({
-    ...structuredClone(seed), id: `website-${i}`, aiTitle: title, slug: null,
+  const now = Date.now();
+  const co = c.coordinator;
+  const sources = ['claude-code', 'codex', 'dsh'] as const;
+  const models = ['claude-opus-5-5', 'gpt-5.6-sol', 'deepseek-official/deepseek-flash'];
+  // Every home section gets rows: task 0 (Ember) needs you through a sub-task's
+  // card, then running, waiting, to-accept and done tasks across the projects.
+  type Shape = { status: string; alive: boolean; outcome?: 'completed'; plan?: [number, number]; watch?: boolean };
+  const shapeOf = (i: number): Shape =>
+    i === 0 ? { status: 'watching', alive: false, plan: [co.stepsDone, co.steps.length] }
+    : i <= 2 ? { status: i === 1 ? 'thinking' : 'executing', alive: true, plan: [i + 1, 5] }
+    : i === 3 ? { status: 'watching', alive: false, watch: true }
+    : i <= 5 ? { status: 'idle', alive: false, plan: [4, 4] }
+    : { status: 'idle', alive: false, outcome: 'completed' };
+  const session = (id: string, i: number, title: string, preview: string, extra: Record<string, unknown>) => ({
+    ...structuredClone(seed), id, aiTitle: title, slug: null,
     workspaceName: c.projects[i % 6], workspacePath: `/Users/demo/workspace/${projects[i % 6]}`,
-    status: (['waitingInput', 'thinking', 'executing', 'idle'] as const)[i % 4],
     isSubagent: false, parentSessionId: null, runningSubagentCount: 0, watches: [],
-    agentSource: (['claude-code', 'codex', 'dsh'] as const)[i % 3], model: ['claude-opus-4-8', 'gpt-5.6-sol', 'deepseek/deepseek-v4-pro'][i % 3],
-    entrypoint: 'fleet', fleetSpawned: true, procAlive: i % 4 !== 3,
-    lastMessagePreview: preview, lastActivityMs: Date.now() - (i + 1) * 60000,
-    jsonlPath: `/Users/demo/website-${i}.jsonl`, tokenSpeed: 24 + i * 3, agentTokenSpeed: 0,
+    agentSource: sources[i % 3], model: models[i % 3],
+    entrypoint: 'fleet', fleetSpawned: true,
+    lastMessagePreview: preview, lastActivityMs: now - (i + 1) * 60000, createdAtMs: now - (i + 2) * 47 * 60000,
+    jsonlPath: `/Users/demo/${id}.jsonl`, tokenSpeed: 24 + i * 3, agentTokenSpeed: 0,
     totalOutputTokens: 12800 + i * 7350, totalCostUsd: 0.62 + i * 0.37, agentTotalCostUsd: 0, contextPercent: 0.18 + (i % 5) * 0.13,
-  })));
+    handoff: null, taskId: id, parentTaskId: null, taskOutcome: null, taskPlan: null,
+    ...extra,
+  });
+  MOCK_SESSIONS.splice(0, MOCK_SESSIONS.length, ...c.tasks.map(([title, preview], i) => {
+    const sh = shapeOf(i);
+    return session(`website-${i}`, i, title, preview, {
+      status: sh.status, procAlive: sh.alive, taskOutcome: sh.outcome ?? null,
+      taskPlan: sh.plan ? { done: sh.plan[0], total: sh.plan[1], currentPlan: null, planId: 'ember-launch', currentTask: null } : null,
+      watches: sh.watch ? [{ id: `w-${i}`, note: co.waitNote, created: now - 20 * 60000, pollSecs: 60, deadlineAt: now + 3600000, pollCount: 20, structuralFailStreak: 0 }] : [],
+      ...(i === 0 ? { agentSource: 'claude-code', model: models[0] } : {}),
+    });
+  }));
+  // Ember's three sub-tasks, one per agent tool: packaging (its card is the
+  // pinned decision), the website still building, the deck delivered.
+  const subStatus = [['waitingInput', true], ['executing', true], ['idle', false]] as const;
+  MOCK_SESSIONS.push(...co.subtasks.map(([title, preview]: string[], k: number) =>
+    session(`website-sub-${k}`, 0, title, preview, {
+      agentSource: (['dsh', 'codex', 'claude-code'] as const)[k], model: [models[2], models[1], models[0]][k],
+      status: subStatus[k][0], procAlive: subStatus[k][1], taskId: `website-sub-${k}`, parentTaskId: 'website-0',
+      fleetSpawned: true, lastActivityMs: now - (k + 1) * 4 * 60000,
+    })));
+  MOCK_TASK_PLANS.splice(0, MOCK_TASK_PLANS.length, {
+    id: 'ember-launch', title: c.tasks[0][0], source: null, kind: 'exec',
+    items: co.steps.map((text: string, k: number) => ({ text, done: k < co.stepsDone })),
+  });
   for (const [i, session] of MOCK_SESSIONS.entries()) {
+    const [ask, answer] = i === 0 ? [c.brief, c.reply] : [session.aiTitle, session.lastMessagePreview];
     MOCK_MESSAGES[session.id] = [
-      {type: 'user', uuid: `site-user-${i}`, timestamp: new Date().toISOString(), message: {role: 'user', content: i === 0 ? c.brief : c.tasks[i][0]}},
-      {type: 'assistant', uuid: `site-answer-${i}`, timestamp: new Date().toISOString(), message: {role: 'assistant', content: [{type: 'text', text: i === 0 ? c.reply : c.tasks[i][1]}]}},
+      {type: 'user', uuid: `site-user-${i}`, timestamp: new Date().toISOString(), message: {role: 'user', content: ask}},
+      {type: 'assistant', uuid: `site-answer-${i}`, timestamp: new Date().toISOString(), message: {role: 'assistant', content: [{type: 'text', text: answer}]}},
     ];
   }
   const artifactSeed = MOCK_ARTIFACTS[0];
@@ -37,36 +74,9 @@ export function installWebsiteFixtures() {
     workspaceName: c.projects[[0,0,0,4,0,3,0,5][i]], workspacePath: `/Users/demo/workspace/${projects[[0,0,0,4,0,3,0,5][i]]}`,
     starred: i < 2, drifted: false, createdMs: Date.now() - i * 3600000,
   })));
-  // One piece of work relayed across three harnesses — the landing page's
-  // "hand it to the next one" step needs a chain where the legs visibly ran on
-  // Claude Code, dsh and Codex rather than three copies of the same agent.
-  const relaySources = ['claude-code', 'dsh', 'codex'] as const;
-  const relayModels = ['claude-opus-4-8', 'deepseek/deepseek-v4-pro', 'gpt-5.6-sol'];
-  const relayNow = Date.now();
-  MOCK_SESSIONS.push(...c.relay.legs.map(([title, preview]: string[], i: number) => ({
-    ...structuredClone(seed), id: `relay-${i}`, aiTitle: title, slug: null,
-    workspaceName: c.relay.workspace, workspacePath: '/Users/demo/workspace/ember-coffee',
-    status: (i === 2 ? 'executing' : 'idle') as 'executing' | 'idle',
-    isSubagent: false, parentSessionId: null, runningSubagentCount: 0, watches: [],
-    agentSource: relaySources[i], model: relayModels[i],
-    entrypoint: 'fleet', fleetSpawned: true, procAlive: i === 2,
-    lastMessagePreview: preview, lastActivityMs: relayNow - (3 - i) * 45 * 60000,
-    jsonlPath: `/Users/demo/relay-${i}.jsonl`, tokenSpeed: i === 2 ? 31 : 0, agentTokenSpeed: 0,
-    totalOutputTokens: [38400, 52100, 17300][i], totalCostUsd: [2.14, 1.88, 0.71][i],
-    agentTotalCostUsd: 0, contextPercent: [0.82, 0.64, 0.21][i],
-    handoff: {chainId: 'chain-website-relay', hop: i + 1, chainLen: 3},
-  })));
-  MOCK_HANDOFF_CHAINS['chain-website-relay'] = {
-    chainId: 'chain-website-relay', workspacePath: '/Users/demo/workspace/ember-coffee', planId: c.relay.plan,
-    links: [0, 1].map(i => ({
-      fromSessionId: `relay-${i}`, toSessionId: `relay-${i + 1}`,
-      note: c.relay.notes[i], planId: c.relay.plan, nextTask: c.relay.nextTasks[i],
-      handedAt: relayNow - (2 - i) * 50 * 60000,
-    })),
-  };
   useComposerDraftStore.getState().patchDraft('new', {
     workspace: '/Users/demo/workspace/ember-coffee', prompt: c.brief,
-    tool: 'claude', model: 'claude-opus-4-8', effort: 'high', permissionMode: 'acceptEdits',
+    tool: 'claude', model: 'claude-opus-5-5', effort: 'high', permissionMode: 'acceptEdits',
     attachments: [
       {path:'/Users/demo/workspace/ember-coffee/brand-brief.pdf',name:websiteLang==='zh'?'品牌简报.pdf':'Brand brief.pdf'},
       {path:'/Users/demo/workspace/ember-coffee/budget.xlsx',name:websiteLang==='zh'?'开店预算.xlsx':'Launch budget.xlsx'},

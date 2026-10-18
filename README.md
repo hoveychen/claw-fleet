@@ -51,19 +51,19 @@ To open it from your phone on the same network, run `fleet webui --lan`: it bind
 
 ### Phone
 
-Nothing to install. Open **Settings → Mobile** in the desktop app and scan the QR code — the mobile web app connects through a relay (no port forwarding, no VPN). It opens on **Needs you**, with Tasks, Library and Me beside it, and you can start a task from it too. Add it to your home screen for push notifications.
+Nothing to install. Open **Settings → Devices** in the desktop app and scan the QR code — the mobile web app connects through a relay (no port forwarding, no VPN). It opens on **Needs you**, with Tasks, Library and Me beside it, and you can start a task from it too. Add it to your home screen for push notifications.
 
 ---
 
 ## 2. Use it
 
-You do three things: say what you want, make the calls only you can make, and accept the result. The left nav has four entries — **Tasks**, **Library**, **Projects**, **Settings**.
+You do three things: say what you want, make the calls only you can make, and accept the result. The left nav has four entries — **Tasks**, **Library**, **Projects**, **Settings** — plus **Review** beside Settings.
 
 A **project** is a code directory. A **task** is one idea: one main conversation, the coordinator, which is the only thing you talk to. Bigger work it splits into **sub-tasks** that run in parallel; each task and sub-task keeps a list of **steps**.
 
 ### Tasks: every project on one page
 
-The home page is every task across every project, grouped by what it needs from you: **Needs you → To accept → Running → Waiting → Done**. A task counts as *needs you* if its main conversation *or any of its sub-tasks* has a question open; *waiting* says what it is waiting on (for example its sub-tasks). Each row carries its project, step and sub-task progress, and spend. Filtering to one project is a click on its name — there is no project to "enter", so nothing makes you switch back and forth.
+The home page is every task across every project, grouped by what it needs from you: **Needs you**, **Running**, **Waiting**, **To accept**, **Done**. A task counts as *needs you* if its main conversation *or any of its sub-tasks* has a question open; *waiting* says what it is waiting on (for example its sub-tasks). Each row carries its project, step and sub-task progress, and spend. Filtering to one project is a click on its name — there is no project to "enter", so nothing makes you switch back and forth.
 
 Write what you want done in the box at the top, pick a project, send. Model, reasoning effort and permission mode are picked there too; files can be attached.
 
@@ -88,11 +88,12 @@ Answering on the desktop or the phone unblocks the same waiting agent. When the 
 
 Open a task for the full main conversation — thinking, tool calls, diffs. The side rail lists its sub-tasks (open one to read or steer it), the steps with the current one marked, and the material it has filed. Running time and spend sit in the header next to **Stop**. The **developer view** in the rail keeps the raw machinery — session facts, the relay chain, token use, notes, background commands, the workflow graph — for when you want it.
 
-### Library, Projects, Settings
+### Library, Projects, Review, Settings
 
-- **Library** — the documents your agents publish (versioned, full-text searchable, cross-linked with `[[slug]]`) and the deliverables they hand you (PDFs, slides, spreadsheets, renders), in one place.
-- **Projects** — per directory: browse the code with git status and push/pull, routines (scheduled and recurring runs), and memory (`CLAUDE.md`, what agents have learned, adopted lessons).
-- **Settings** — models and permissions, plus security audit (every shell command agents ran, classified by risk), the daily review (relay chains drifting from their goal, lessons that recur across sessions — one click adds them to `CLAUDE.md`), skills and plugins, and phone pairing.
+- **Library** — the documents your agents publish (versioned, full-text searchable, cross-linked with `[[slug]]`) and the deliverables they hand you (PDFs, slides, spreadsheets, renders), in one list you can filter by type and project, and search.
+- **Projects** — one entry per directory, with its routines (a task that starts on its own at a set time or interval), its memory (what agents noted down while working there) and its code (file tree, git status with push/pull, running commands).
+- **Review** — each day's progress grouped by project, and a short list of what needs your judgment: tasks an outsider read flags as drifting from their goal, lessons that recur across sessions (one click adds them to your `CLAUDE.md`), and adopted lessons that got broken again.
+- **Settings** — models, permissions and usage, plus security (the guard, allow rules and a record of every shell command agents ran, classified by risk), plugins and skills, devices and phone pairing, and global memory.
 
 ### Optional: the built-in terminal
 

@@ -105,31 +105,31 @@
       "Ember · product film",
       "v1.2 release checklist"
     ],
-    "relay": {
-      "workspace": "Ember Coffee",
-      "plan": "ember-launch",
-      "legs": [
+    "coordinator": {
+      "subtasks": [
         [
-          "Break the launch into a plan",
-          "Split website, packaging, launch deck and budget into seven steps, each with its own acceptance note."
+          "Packaging and visual direction",
+          "Two directions are ready; waiting for your pick before the full set."
         ],
         [
-          "Build the website and three packages",
-          "Work through it from P3: a previewable site and three packaging designs."
+          "Bilingual website",
+          "Hero, menu and opening-week pages are building."
         ],
         [
-          "Check the copy and the budget figures",
-          "Align the bilingual copy and reconcile the budget table with the numbers in the deck."
+          "Launch deck and budget",
+          "Deck and cash-flow sheet delivered; reconciled with the packaging quotes."
         ]
       ],
-      "notes": [
-        "Plan is broken down, all seven steps have acceptance notes. Pick it up at P3 — the site skeleton is already in the worktree.",
-        "P3 through P5 are done and all three packaging versions are in deliverables. Copy alignment and the budget figures still need a check."
+      "steps": [
+        "Agree on the launch scope",
+        "Brand brief and moodboard",
+        "Packaging and visual direction",
+        "Bilingual website",
+        "Launch deck and budget",
+        "Final check and handover"
       ],
-      "nextTasks": [
-        "P3",
-        "P6"
-      ]
+      "stepsDone": 3,
+      "waitNote": "Waiting for the CI preview build"
     }
   },
   "zh": {
@@ -238,31 +238,31 @@
       "Ember · 产品短片",
       "v1.2 发布检查清单"
     ],
-    "relay": {
-      "workspace": "Ember 咖啡",
-      "plan": "ember-launch",
-      "legs": [
+    "coordinator": {
+      "subtasks": [
         [
-          "拆出开店发布的执行计划",
-          "把官网、包装、发布提案和预算拆成七步，每步写清验收标准。"
+          "包装与视觉方向",
+          "两个方向做好了，等你选定再出全套。"
         ],
         [
-          "按计划做出官网与三款包装",
-          "从 P3 开始逐步实现，产出可预览的页面和三版包装设计。"
+          "中英双语官网",
+          "首屏、菜单和开业周页面正在搭。"
         ],
         [
-          "复核文案与预算口径",
-          "统一中英文案，核对预算表和提案里的数字对得上。"
+          "发布提案与预算",
+          "提案和现金流表已交付，已按包装报价对齐。"
         ]
       ],
-      "notes": [
-        "计划拆完了，七步都写了验收标准。你从 P3 接着做，官网骨架已经在 worktree 里。",
-        "P3 到 P5 做完，三版包装都在产出里。剩下文案统一和预算口径需要复核。"
+      "steps": [
+        "确认开店发布范围",
+        "品牌简报与情绪板",
+        "包装与视觉方向",
+        "中英双语官网",
+        "发布提案与预算",
+        "总检与交付"
       ],
-      "nextTasks": [
-        "P3",
-        "P6"
-      ]
+      "stepsDone": 3,
+      "waitNote": "等预览构建通过"
     }
   }
 }

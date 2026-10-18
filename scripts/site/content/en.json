@@ -28,7 +28,7 @@
     "One summary. You accept it."
   ],
   "panelCopy": [
-    "Write what you want done and pick a project. Tasks group by what they need from you — needs you, to accept, running, waiting, done — so you never switch project to find out what moved.",
+    "Write what you want done and pick a project. Tasks group by what they need from you — needs you, running, waiting, to accept, done — so you never switch project to find out what moved.",
     "When work is worth splitting, the coordinator proposes the sub-tasks, what each does and what done means, and starts them only after you confirm. The material for the call sits on the card.",
     "Open a task to read the whole main conversation. Its sub-tasks, steps and filed material sit beside it, and any sub-task can be opened and steered.",
     "Sub-tasks report to the coordinator, not to you. When it is done you get one summary, the task moves to To accept, and what it produced lands in the Library."
@@ -147,7 +147,7 @@
   "linuxHelp": "On Linux, download the binary for your processor, then run:",
   "linuxAfter": "Open http://127.0.0.1:4571 in your browser. For ARM64, replace x64 with arm64 in both commands.",
   "androidHelp": "On Android, the APK installs directly — Claw Fleet is not distributed through an app store.",
-  "androidAfter": "Allow “install unknown apps” for whatever opens the file, then pair the phone by scanning the QR in the desktop app under Settings → Mobile. The phone is a companion to a desktop workspace, not a standalone app.",
+  "androidAfter": "Allow “install unknown apps” for whatever opens the file, then pair the phone by scanning the QR in the desktop app under Settings → Devices. The phone is a companion to a desktop workspace, not a standalone app.",
   "startHeading": "Get your workspace ready.",
   "steps": [
     [
@@ -160,7 +160,7 @@
     ],
     [
       "Take it with you",
-      "Pair your phone under Settings → Mobile. As long as the machine running Fleet stays online, decisions reach you anywhere."
+      "Pair your phone under Settings → Devices. As long as the machine running Fleet stays online, decisions reach you anywhere."
     ]
   ],
   "faqHeading": "A few things to know.",
@@ -215,7 +215,7 @@
   "sourceCode": "Source code",
   "license": "License",
   "privacy": "Privacy",
-  "screenshotAlt": "Fleet home: every task across projects, grouped into needs you, to accept, running, waiting and done",
+  "screenshotAlt": "Fleet home: every task across projects, grouped into needs you, running, waiting, to accept and done",
   "mobileAlt": "Fleet on a phone: the needs-you list with a decision card from a sub-task",
   "guide": "Project guide",
   "notFound": {

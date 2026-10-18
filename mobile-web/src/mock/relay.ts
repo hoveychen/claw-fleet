@@ -55,14 +55,29 @@ const websiteLang = new URLSearchParams(location.search).get("website");
 const websiteScene = websiteLang === "zh" || websiteLang === "en" ? scenes[websiteLang] : null;
 if (websiteScene) {
   const seed = MOCK_SESSIONS[0];
+  const paths = ['ember-coffee','customer-research','home-studio','balcony-garden','city-walks','app-workshop'];
+  // Same task shapes as the desktop website fixture (app/mock/website.ts):
+  // Ember waits on its sub-tasks, one of which raised the pinned card.
+  const statusOf = (i: number): (typeof MOCK_SESSIONS)[number]["status"] =>
+    i === 0 || i === 3 ? "watching" : i <= 2 ? (i === 1 ? "thinking" : "executing") : "idle";
   MOCK_SESSIONS.splice(0, MOCK_SESSIONS.length, ...websiteScene.tasks.map(([title, preview], i) => ({
     ...structuredClone(seed), id: `website-${i}`, aiTitle: title, slug: null, isSubagent: false,
-    workspaceName: websiteScene.projects[i % 6], workspacePath: `/Users/demo/workspace/${['ember-coffee','customer-research','home-studio','balcony-garden','city-walks','app-workshop'][i % 6]}`,
-    lastMessagePreview: preview, status: (["waitingInput", "thinking", "executing", "idle"] as const)[i % 4],
+    workspaceName: websiteScene.projects[i % 6], workspacePath: `/Users/demo/workspace/${paths[i % 6]}`,
+    lastMessagePreview: preview, status: statusOf(i), procAlive: i === 1 || i === 2,
+    entrypoint: "fleet", fleetSpawned: true, taskId: `website-${i}`, parentTaskId: null,
+    taskOutcome: i >= 6 ? ("completed" as const) : null, handoff: null,
     agentSource: (["claude-code", "codex", "dsh"] as const)[i % 3], lastActivityMs: Date.now() - (i + 1) * 60000,
+  })), ...websiteScene.coordinator.subtasks.map(([title, preview], k) => ({
+    ...structuredClone(seed), id: `website-sub-${k}`, aiTitle: title, slug: null, isSubagent: false,
+    workspaceName: websiteScene.projects[0], workspacePath: `/Users/demo/workspace/${paths[0]}`,
+    lastMessagePreview: preview, status: (["waitingInput", "executing", "idle"] as const)[k], procAlive: k < 2,
+    entrypoint: "fleet", fleetSpawned: true, taskId: `website-sub-${k}`, parentTaskId: "website-0",
+    taskOutcome: null, handoff: null,
+    agentSource: (["dsh", "codex", "claude-code"] as const)[k], lastActivityMs: Date.now() - (k + 1) * 4 * 60000,
   })));
   Object.assign(MOCK_FLEET_ASK, {
-    sessionId: "website-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
+    sessionId: "website-sub-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
+    task: {taskId: "website-0", taskTitle: websiteScene.tasks[0][0], subtaskId: "website-sub-0", subtaskTitle: websiteScene.coordinator.subtasks[0][0]},
     questions: [{question: websiteScene.decision + "\n\n" + websiteScene.context, header: websiteScene.projects[0], multiSelect: false,
       options: websiteScene.options.map((label, i) => ({label, description: websiteScene.descriptions[i]}))}],
   });

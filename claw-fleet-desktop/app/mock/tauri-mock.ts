@@ -1722,7 +1722,8 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
   (window as any).__mock_fleet_ask = (overrides: Record<string, unknown> = {}) => {
     const id = `mock-ask-${Date.now()}`;
     if (websiteScene) overrides = {
-      sessionId: "website-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
+      sessionId: "website-sub-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
+      task: {taskId: "website-0", taskTitle: websiteScene.tasks[0][0], subtaskId: "website-sub-0", subtaskTitle: websiteScene.coordinator.subtasks[0][0]},
       reviewDocs: [{kind: "file", ref: "/Users/demo/launch/creative-brief.md", title: websiteScene.reviewTitle}],
       questions: [{question: websiteScene.decision + "\n\n" + websiteScene.context, header: websiteScene.projects[0], multiSelect: false,
         options: websiteScene.options.map((label, i) => ({label, description: websiteScene!.descriptions[i]}))}],
