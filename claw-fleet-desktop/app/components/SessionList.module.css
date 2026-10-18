@@ -99,6 +99,21 @@
   line-height: 1.5;
 }
 
+.nav_badge_pending {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-radius: var(--radius-md);
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 1.5;
+}
+
 .nav_dot {
   position: absolute;
   top: 7px;

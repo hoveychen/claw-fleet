@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -32,9 +30,10 @@ import {
   type NewSessionLaunch,
 } from "./NewSessionForm";
 import { ConversationSkeleton } from "./MessageList";
-import { SkeletonCard, SkeletonList, Spinner } from "./loading";
+import { SkeletonList, Spinner } from "./loading";
 import { useComposerDraftStore, type ComposerDraft } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
+import { DecisionDock } from "./DecisionDock";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
@@ -42,6 +41,9 @@ import { RenameSessionDialog } from "./RenameSessionDialog";
 import {
   buildHomeRows,
   filterRows,
+  firstNeedsYou,
+  nextNeedsYou,
+  rowDecisions,
   rowOfSession,
   rowSessionId,
   sectionRows,
@@ -74,12 +76,6 @@ const START_TIMEOUT_MS = 30_000;
 /** Sentinel `openId` for the new-session composer. A real session id is a UUID,
  *  so it can never collide with this. */
 const DRAFT_ID = "new:draft";
-
-/** Same lazy hop `SessionDetail` uses, for the same reason: `DecisionPanel`
- *  imports `SessionDetail`, so a static import here would close the cycle. */
-const OrphanDecisionCard = lazy(() =>
-  import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
-);
 
 /** What the detail column shows. Split out of the component because the one
  *  thing that went wrong here is unreachable from a render test: the pane used
@@ -799,10 +795,42 @@ export function HistoryView() {
 
   // The row the detail column is showing: the task (or stray card) that owns
   // the open session, so opening a sub-task still lights its task.
-  const activeRowKey = useMemo(
-    () => (openId && openId !== DRAFT_ID ? rowOfSession(allRows, openId)?.key ?? null : null),
+  const activeRow = useMemo(
+    () => (openId && openId !== DRAFT_ID ? rowOfSession(allRows, openId) : null),
     [openId, allRows],
   );
+  const activeRowKey = activeRow?.key ?? null;
+  // The task's other cards — its sub-tasks' — answered from the same dock as
+  // the open conversation's own.
+  const taskCards = useMemo(
+    () => (activeRow ? rowDecisions(activeRow, pendingDecisions, openId) : null),
+    [activeRow, pendingDecisions, openId],
+  );
+
+  // A fresh window lands on the first task waiting on you, once the first scan
+  // has placed the tasks. Restoring last run's pane only wins when nothing is.
+  const landedRef = useRef(false);
+  useEffect(() => {
+    if (!scanReady || landedRef.current) return;
+    landedRef.current = true;
+    const first = firstNeedsYou(sections.flatMap((sec) => sec.rows));
+    if (first) openRow(first);
+  }, [scanReady, sections, openRow]);
+
+  // Answering the open task's last card moves on to the next task waiting on
+  // you — the inbox is worked through, not clicked through.
+  const openCardCount = activeRow ? rowDecisions(activeRow, pendingDecisions).length : 0;
+  const prevCardCountRef = useRef(openCardCount);
+  const prevRowKeyRef = useRef(activeRowKey);
+  useEffect(() => {
+    const sameRow = prevRowKeyRef.current === activeRowKey;
+    const drained = sameRow && prevCardCountRef.current > 0 && openCardCount === 0;
+    prevCardCountRef.current = openCardCount;
+    prevRowKeyRef.current = activeRowKey;
+    if (!drained) return;
+    const next = nextNeedsYou(sections.flatMap((sec) => sec.rows), activeRowKey);
+    if (next) openRow(next);
+  }, [openCardCount, activeRowKey, sections, openRow]);
 
   // "What should get done?" — Enter carries the words into the new-task
   // composer, which asks for the project and sends.
@@ -1053,6 +1081,8 @@ export function HistoryView() {
                 launchPrompt={
                   launchPrompt?.id === activeSession.id ? launchPrompt.prompt : null
                 }
+                taskCards={taskCards}
+                projectName={activeRow?.projectName ?? null}
               />
             </div>
           ) : pane.kind === "loading" ? (
@@ -1074,11 +1104,7 @@ export function HistoryView() {
                     "这个会话不在扫描范围内（记录可能已删除、已过期，或当前用户读不到），但它的卡还等着回复：",
                   )}
                 </p>
-                {pane.decisions.map((decision) => (
-                  <Suspense key={decision.id} fallback={<SkeletonCard height={160} />}>
-                    <OrphanDecisionCard decision={decision} compact />
-                  </Suspense>
-                ))}
+                <DecisionDock cards={pane.decisions} />
               </div>
             </div>
           ) : pane.kind === "orphan-note" ? (

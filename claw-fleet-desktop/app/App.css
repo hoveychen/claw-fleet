@@ -71,7 +71,7 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   /* Width of the centred reading column in a session transcript, in `rem` so it
      resolves identically wherever it is read. Two elements share it and must
      not drift: MessageList `.list` (the transcript itself) and SessionDetail
-     `.inline_fleet_ask` (a sibling of the list, so it can't inherit a token
+     `.resume_dock` (the floating composer and decision dock, a sibling of the list, so it can't inherit a token
      scoped to it). It lives here because that second consumer is what made the
      value get copied by hand once already.
 

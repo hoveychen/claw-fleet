@@ -2419,7 +2419,8 @@
     "options_expand": "Show options ({{n}})",
     "options_expand_plain": "Show answer box",
     "options_collapse": "Hide options",
-    "options_selected": "Selected: {{s}}"
+    "options_selected": "Selected: {{s}}",
+    "say_directly": "Or just say it…  ⌘↵ to send"
   },
   "permission_prompt": {
     "title": "Permission Request",
@@ -2464,8 +2465,6 @@
     "finish_task_tooltip": "Ending here marks this session complete and tells the agent to stop.",
     "next": "Next",
     "back": "Back",
-    "other": "Other",
-    "other_placeholder": "Type your answer…",
     "edit_option": "Edit this option (copy to Other)",
     "preview": "Preview",
     "mode_single": "Single",
@@ -2681,7 +2680,13 @@
     "span_d": "{{n}}d",
     "empty": "No tasks yet — write what you want done above",
     "no_match": "No matching tasks",
-    "project_filter_tip": "Show only this project"
+    "project_filter_tip": "Show only this project",
+    "dock_title": "Needs your decision",
+    "dock_subtask_source": "· from sub-task “{{name}}”",
+    "dock_subtask_untitled": "Sub-task",
+    "dock_from_subtask": "From a sub-task",
+    "dock_prev": "Previous card",
+    "dock_next": "Next card"
   },
   "history": {
     "title": "Tasks",

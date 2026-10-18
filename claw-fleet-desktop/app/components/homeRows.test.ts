@@ -5,6 +5,8 @@ import {
   buildHomeRows,
   filterRows,
   firstNeedsYou,
+  nextNeedsYou,
+  rowDecisions,
   rowDetail,
   rowOfSession,
   rowSessionId,
@@ -223,5 +225,30 @@ describe("navigation helpers", () => {
   it("strips the step id and markdown", () => {
     expect(stepText("**P12b** – do **it**")).toBe("do it");
     expect(stepText("")).toBeNull();
+  });
+});
+
+describe("rowDecisions", () => {
+  it("collects the cards of a task's sub-tasks and leaves out the open session's", () => {
+    const rows = build(
+      [session("main"), session("sub", { parentTaskId: "main", taskId: "sub" })],
+      [card("c-main", "main"), card("c-sub", "sub"), card("c-other", "elsewhere")],
+    );
+    const row = rowOfSession(rows, "main")!;
+    expect(rowDecisions(row, [card("c-main", "main"), card("c-sub", "sub"), card("c-other", "x")], "main").map((d) => d.id)).toEqual(["c-sub"]);
+    expect(rowDecisions(row, [card("c-main", "main"), card("c-sub", "sub")]).map((d) => d.id)).toEqual(["c-main", "c-sub"]);
+  });
+});
+
+describe("nextNeedsYou", () => {
+  it("skips the row just answered and finds the next one waiting", () => {
+    const rows = build(
+      [session("a", { lastActivityMs: 3000 }), session("b", { lastActivityMs: 2000 }), session("c")],
+      [card("ca", "a"), card("cb", "b")],
+    );
+    const a = rowOfSession(rows, "a")!;
+    const b = rowOfSession(rows, "b")!;
+    expect(nextNeedsYou(rows, a.key)?.key).toBe(b.key);
+    expect(nextNeedsYou(rows.filter((r) => r.key !== b.key), a.key)).toBeNull();
   });
 });

@@ -413,3 +413,31 @@ export function firstNeedsYou(rows: HomeRow[]): HomeRow | null {
 export function rowSessionId(row: HomeRow): string {
   return row.kind === "card" ? row.sessionId : row.tip.id;
 }
+
+/** Every session id behind a row: main hops and every sub-task hop. */
+export function rowMemberIds(row: HomeRow): Set<string> {
+  if (row.kind === "card") return new Set([row.sessionId]);
+  return new Set([
+    ...row.hops.map((h) => h.id),
+    ...row.subtasks.flatMap((st) => st.hops.map((h) => h.id)),
+  ]);
+}
+
+/** The cards the task behind `row` is waiting on, oldest first, leaving out
+ *  those of `exceptSessionId` (the open conversation reads its own). */
+export function rowDecisions(
+  row: HomeRow,
+  decisions: PendingDecision[],
+  exceptSessionId: string | null = null,
+): PendingDecision[] {
+  const members = rowMemberIds(row);
+  return decisions.filter(
+    (d) => members.has(d.request.sessionId) && d.request.sessionId !== exceptSessionId,
+  );
+}
+
+/** Where to go once the open task has nothing left to answer: the first other
+ *  row, in the order shown, that still needs you. */
+export function nextNeedsYou(rows: HomeRow[], currentKey: string | null): HomeRow | null {
+  return rows.find((r) => r.state === "needsYou" && r.key !== currentKey) ?? null;
+}

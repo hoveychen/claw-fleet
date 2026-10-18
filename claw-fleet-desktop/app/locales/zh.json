@@ -2416,7 +2416,8 @@
     "options_expand": "展开选项（{{n}}）",
     "options_expand_plain": "展开回答区",
     "options_collapse": "收起选项",
-    "options_selected": "已选：{{s}}"
+    "options_selected": "已选：{{s}}",
+    "say_directly": "或者直接说…  ⌘↵ 发送"
   },
   "permission_prompt": {
     "title": "权限请求",
@@ -2461,8 +2462,6 @@
     "finish_task_tooltip": "老板在这里收工。结束后本会话标记为「已完成」，并告诉 agent 停手。",
     "next": "下一题",
     "back": "上一题",
-    "other": "其他",
-    "other_placeholder": "输入自定义答案…",
     "edit_option": "编辑此选项（复制到「其他」）",
     "preview": "预览",
     "mode_single": "单选",
@@ -2678,7 +2677,13 @@
     "span_d": "{{n}}天",
     "empty": "还没有任务，在上面写下想做的事",
     "no_match": "没有匹配的任务",
-    "project_filter_tip": "只看这个项目"
+    "project_filter_tip": "只看这个项目",
+    "dock_title": "需要你决定",
+    "dock_subtask_source": "· 来自子任务「{{name}}」",
+    "dock_subtask_untitled": "子任务",
+    "dock_from_subtask": "来自子任务",
+    "dock_prev": "上一张卡",
+    "dock_next": "下一张卡"
   },
   "history": {
     "title": "任务",

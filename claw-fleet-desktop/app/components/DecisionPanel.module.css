@@ -1188,9 +1188,9 @@
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-start;
-  gap: 2px;
+  gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
@@ -1207,6 +1207,57 @@
 .elicitation_option_selected {
   border-color: var(--color-accent);
   background: rgba(var(--color-accent-rgb), 0.08);
+}
+
+/* Label + description column beside the digit badge. */
+.elicitation_option_text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The digit that picks this option from the keyboard. */
+.elicitation_option_num {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+/* The option the agent recommends is the primary button: solid terracotta. */
+.elicitation_option_recommended,
+.elicitation_option_recommended:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.elicitation_option_recommended:hover {
+  background: var(--color-accent-hover);
+}
+.elicitation_option_recommended .elicitation_option_label,
+.elicitation_option_recommended .elicitation_option_desc,
+.elicitation_option_recommended .elicitation_option_num {
+  color: var(--color-on-accent);
+}
+.elicitation_option_recommended .elicitation_option_desc {
+  opacity: 0.85;
+}
+.elicitation_option_recommended .elicitation_option_num {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+/* Picked: a ring on top of the solid fill, so the choice still reads. */
+.elicitation_option_recommended.elicitation_option_selected {
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+  border-color: var(--color-on-accent);
 }
 
 /* Row wraps the option button + inline pencil "copy to Other" action. */

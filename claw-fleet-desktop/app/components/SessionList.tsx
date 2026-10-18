@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, Settings, SquareCheckBig } from "lucide-react";
-import { openSettings, runningProcTotal, useAuditStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettings, runningProcTotal, useAuditStore, useDecisionStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import type { SessionsFrame } from "../../../shared-ts/sessionsFrame";
 import { MemoryView } from "./MemoryView";
@@ -79,6 +79,9 @@ export function SessionList() {
   // Running workspace commands across all repos, badged on Projects (its
   // first page is the code browser that lists them).
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
+  // Cards waiting on an answer, badged on Tasks: the card is answered in the
+  // task's conversation, so this is how it is noticed from any other page.
+  const pendingCardCount = useDecisionStore((s) => s.decisions.length);
 
   const current = navSectionOf(viewMode);
   // Re-clicking the entry of the page on screen folds that page's secondary
@@ -150,6 +153,13 @@ export function SessionList() {
             label={t("nav_section_tasks", "任务")}
             active={!settingsOpen && current === "tasks"}
             onClick={() => goSection("tasks")}
+            badge={
+              pendingCardCount > 0 && (
+                <span className={styles.nav_badge_pending} title={`${pendingCardCount}`}>
+                  {fmtBadgeCount(pendingCardCount)}
+                </span>
+              )
+            }
           />
           <NavEntry
             icon={<FileText size={18} strokeWidth={1.6} />}

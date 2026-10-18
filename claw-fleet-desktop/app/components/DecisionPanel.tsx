@@ -47,6 +47,7 @@ import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 import { Presence } from "./Presence";
 import { SkeletonCard, SkeletonText } from "./loading";
+import { fromSubtask, isRecommendedOption, stripRecommendedSuffix } from "./dockKeys";
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
@@ -735,7 +736,10 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   //
   // These cards carry no `taskComplete` claim the way fleet__ask does, so the
   // button always closes the task as complete.
-  const canTerminate = request.turnCompletion === true;
+  //
+  // A card raised by a sub-task never offers it: ending the task belongs to the
+  // task's main conversation, not to one of the sessions it spawned.
+  const canTerminate = request.turnCompletion === true && !fromSubtask(request);
   const handleTerminate = useCallback(
     () => declineElicitation(decision.id, "completed"),
     [declineElicitation, decision.id],
@@ -1016,8 +1020,9 @@ function SharedOptionsBlock({
 
   const list = (
     <div className={styles.elicitation_options}>
-      {question.options.map((opt) => {
+      {question.options.map((opt, index) => {
         const isSelected = selected.includes(opt.label);
+        const recommended = isRecommendedOption(opt.label);
         const isFocused = hasPreview && opt.label === focusedLabel;
         const handleEdit = (e: React.MouseEvent) => {
           e.stopPropagation();
@@ -1038,17 +1043,27 @@ function SharedOptionsBlock({
           >
             <button
               type="button"
-              className={`${styles.elicitation_option} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
+              className={`${styles.elicitation_option} ${recommended ? styles.elicitation_option_recommended : ""} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
               onClick={() =>
                 onToggle(decisionId, question.question, opt.label, effectiveMulti)
               }
               onMouseEnter={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
               onFocus={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
             >
-              <span className={styles.elicitation_option_label}>{opt.label}</span>
-              {opt.description && (
-                <span className={styles.elicitation_option_desc}>{opt.description}</span>
+              {/* The digit the dock's keyboard handler maps to this option. */}
+              {index < 9 && (
+                <span className={styles.elicitation_option_num} aria-hidden>
+                  {index + 1}
+                </span>
               )}
+              <span className={styles.elicitation_option_text}>
+                <span className={styles.elicitation_option_label}>
+                  {recommended ? stripRecommendedSuffix(opt.label) : opt.label}
+                </span>
+                {opt.description && (
+                  <span className={styles.elicitation_option_desc}>{opt.description}</span>
+                )}
+              </span>
             </button>
             <button
               type="button"
@@ -1066,10 +1081,9 @@ function SharedOptionsBlock({
         );
       })}
 
+      {/* Free-text answer, always open: the reader can skip the options and
+          just say what they want. ⌘↵ submits from here (see DecisionDock). */}
       <div className={styles.elicitation_other_block}>
-        <span className={styles.elicitation_option_label}>
-          {t("elicitation.other", "Other")}
-        </span>
         <ChatComposer
           ref={composerRef}
           value={customText}
@@ -1080,7 +1094,7 @@ function SharedOptionsBlock({
           }
           onRemoveAttachment={onRemoveAttachment}
           onAttachmentError={onAttachmentError}
-          placeholder={t("elicitation.other_placeholder", "Type your answer…")}
+          placeholder={t("decision.say_directly", "Or just say it…  ⌘↵ to send")}
           wikiMentions
         />
       </div>
@@ -1854,6 +1868,9 @@ export function FleetAskCard({
 
         {parked && <ParkedBanner />}
         <div className={styles.actions}>
+        {/* Sub-task cards have no terminal button: only the task's main
+            conversation can end the task. */}
+        {!fromSubtask(request) && (
         <button
           className={`${styles.btn} ${taskComplete ? styles.btn_finish : styles.btn_abandon}`}
           onClick={handleTerminate}
@@ -1867,6 +1884,7 @@ export function FleetAskCard({
             ? t("fleet_ask.finish_task", "Finish task")
             : t("fleet_ask.abandon_task", "Abandon task")}
         </button>
+        )}
         <div className={styles.actions_spacer} />
         {step > 0 && (
           <button
