@@ -33,19 +33,6 @@
   box-shadow: inset 2px 0 0 var(--color-accent), var(--shadow-card-hover);
 }
 
-/* Inside a group: the .group container owns the bg, border and active ring,
-   so the nested card must contribute no chrome of its own — otherwise we get
-   double-toned nested boxes that fight the Linear-style design language. */
-.card.group_main,
-.card.group_main:hover,
-.card.group_main.selected,
-.card.group_main.active {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-}
-
 /* Header */
 .header {
   display: flex;
@@ -53,69 +40,6 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 4px;
-}
-
-/* When workspace/badge are hidden: collapse to 0 height, stop btn floats in top-right */
-.header_compact {
-  height: 0;
-  overflow: visible;
-  margin-bottom: 0;
-}
-
-/* ── Group-main header strip ───────────────────────────────────────────────
-   Linear-style compact metadata row used when the card sits inside a
-   GalleryRow group. Status dot drives the only chromatic accent (inherited
-   via `currentColor` from the .badge_<status> class on the wrapper); every
-   other token reads as dim text, no chip backgrounds. */
-.gm_header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.gm_status_label {
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.gm_dim {
-  color: var(--color-text-dim);
-  white-space: nowrap;
-}
-
-.gm_thinking {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--thinking-label, var(--color-text-dim));
-  white-space: nowrap;
-}
-
-.gm_skill {
-  color: var(--tag-skill-fg, var(--color-text-dim));
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
-
-.gm_sub_count {
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Something is actively running under this session (subagents or a workflow) —
-   lift the count out of the dim palette so the "still working" state reads at a
-   glance. Shared by the "+N sub · M▶" and "⚙ N wf · M▶" chips. */
-.gm_sub_count[data-running="true"] {
-  color: var(--color-success);
-}
-
-.gm_spacer {
-  flex: 1 1 auto;
 }
 
 .workspace {
@@ -166,61 +90,6 @@
    rate-limit red — a different failure that needs a different action (⎋). */
 .badge_stuck       { color: #ea580c; font-weight: 600; }
 
-/* Which tool the wedged turn is waiting on, sat right after the Stuck badge.
-   Shares the badge's orange-red so the two read as one statement, and stays a
-   plain chip (no background) so it does not compete with the badge itself. */
-.stuck_tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: #ea580c;
-  white-space: nowrap;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The disconnect chip. Shares the remote-badge shape (.tag_remote / .gm_remote)
-   so it reads as "that host badge, gone wrong" rather than a new kind of thing;
-   only the colour changes. Sized between the two so one component can sit on
-   both header paths. */
-.remote_disconnect {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: 0 0 auto;
-  padding: 0 5px;
-  border: 1px solid #991b1b;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 1.5;
-  color: #991b1b;
-  white-space: nowrap;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Output on the wrong machine. Amber, not the disconnect red: the session
-   itself is fine — this is "check where your files went", not "it died". */
-.mirror_write {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: 0 0 auto;
-  padding: 0 5px;
-  border: 1px solid #b45309;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 1.5;
-  color: #b45309;
-  white-space: nowrap;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Account out of credits. Filled, for the same reason
    .remote_disconnect_unstopped is: nothing clears this on its own, so it needs
    the human. Rose rather than the rate-limit red so the two never read as the
@@ -243,23 +112,6 @@
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* The kill failed: the agent may still be running against the empty mirror.
-   Filled rather than outlined — this is the one state that needs the human. */
-.remote_disconnect_unstopped {
-  background: #991b1b;
-  color: #fff;
-  font-weight: 600;
-}
-
-.rate_limit_countdown {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #b91c1c;
-  font-variant-numeric: tabular-nums;
 }
 
 .resume_btn {
@@ -319,11 +171,7 @@
 }
 
 .tag_main,
-.tag_subagent,
-.tag_ide,
-.tag_model,
-.tag_thinking,
-.tag_source {
+.tag_subagent {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
@@ -331,31 +179,11 @@
 
 .tag_main    { background: var(--tag-main-bg); color: var(--tag-main-fg); }
 .tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; max-width: 90px; overflow: hidden; }
-.tag_subagent_label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag_ide     { background: var(--color-bg-secondary); color: var(--color-text-dim); }
-.tag_model   { background: var(--color-bg-secondary); color: var(--color-text-secondary); }
-.tag_thinking{ background: var(--thinking-toggle-bg); color: var(--thinking-label); display: inline-flex; align-items: center; }
-.tag_skill   { background: var(--tag-skill-bg); color: var(--tag-skill-fg); font-family: var(--font-mono); }
-.tag_source  { background: var(--color-bg-secondary); color: var(--color-text-dim); display: inline-flex; align-items: center; padding: 2px 5px; gap: 2px; }
 
 .slug {
   font-size: 10px;
   color: var(--color-text-dim);
   font-style: italic;
-}
-
-/* Preview text */
-.ai_title {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text);
-  margin: 0 0 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 .preview {
@@ -366,70 +194,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* TODO progress row */
-.todos_row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 6px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
-}
-
-.todos_bar {
-  position: relative;
-  flex: 0 0 54px;
-  height: 4px;
-  border-radius: var(--radius-xs);
-  background: var(--color-border);
-  overflow: hidden;
-}
-
-.todos_bar_done {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: var(--color-accent);
-  transition: width 0.2s;
-}
-
-.todos_bar_inprogress {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  background: var(--color-accent);
-  opacity: 0.45;
-  transition: width 0.2s, left 0.2s;
-}
-
-.todos_count {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-dim);
-}
-
-.todos_current {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-style: italic;
-}
-
-/* Background tasks the session is waiting on */
-.bgtask_row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--color-text-secondary);
 }
 
 .bgtask_icon {
@@ -466,88 +230,17 @@
   color: var(--color-text-dim);
 }
 
-/* Footer */
-.footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--color-text-dim);
-}
-
-.speed {
-  color: var(--color-speed);
-  font-weight: 500;
-}
-
-.speed_unit {
-  font-weight: 400;
-  opacity: 0.7;
-}
-
-.speed_total { color: var(--color-warning, #e8a838); font-weight: 500; }
-
-.tokens { margin-left: auto; }
 .cost { color: var(--color-text-dim); }
-.cost_total { color: var(--color-warning, #e8a838); font-weight: 500; }
+
 .context { color: var(--color-text-dim); }
-.context_high { color: var(--color-warning, #e8a838); }
-.compact_chip { color: var(--color-text-dim); }
+
 .time { color: var(--color-text-dim); }
 
-/* macOS vibrancy: rows stay chrome-less (Linear-style); tags/badges keep
-   their subtle bg so they read against the bare row. */
-:global([data-platform="macos"]) .tag_ide,
-:global([data-platform="macos"]) .tag_model,
-:global([data-platform="macos"]) .tag_source {
-  background: rgba(255, 255, 255, 0.08);
-}
 :global([data-platform="macos"]) .badge_idle {
   background: rgba(255, 255, 255, 0.08);
 }
-:global([data-platform="macos"][data-theme="light"]) .tag_ide,
-:global([data-platform="macos"][data-theme="light"]) .tag_model,
-:global([data-platform="macos"][data-theme="light"]) .tag_source {
-  background: rgba(0, 0, 0, 0.06);
-}
+
 :global([data-platform="macos"][data-theme="light"]) .badge_idle {
   background: rgba(0, 0, 0, 0.06);
 }
 
-/* rca remote-execution badge. Reads as a quiet property of the workspace, not
-   an alert: being remote is normal for these sessions, so it must not compete
-   with the status badge beside it. */
-.tag_remote {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 5px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 1.4;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Same badge on the compact group-main strip: smaller, same quiet weight as
-   the other gm_* chips beside it. */
-.gm_remote {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-  font-size: 9px;
-  line-height: 1.4;
-  padding: 0 4px;
-  border: 1px solid var(--color-border);
-  border-radius: 3px;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -13,7 +13,7 @@ import {
 } from "../store";
 import { CalendarClock, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, PendingDecision, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
 import { landedUserTexts, settlePending, shouldEchoSend, stillPending } from "../optimisticEcho";
@@ -21,7 +21,6 @@ import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
-  decisionAnchorTop,
   initialFollowState,
   nextFollowState,
   type FollowInput,
@@ -42,6 +41,12 @@ import { WebLinkProvider } from "../markdown/webLinks";
 import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
 import { refetchWikiDocsForMissingSlug, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
+import { DecisionDock } from "./DecisionDock";
+import { TaskRail } from "./TaskRail";
+import railStyles from "./TaskRail.module.css";
+import type { TaskRow } from "./homeRows";
+import { formatSpan } from "./TaskList";
+import { canControl, performStop, stopMode } from "./StopControl";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
@@ -89,7 +94,7 @@ import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
 import styles from "./SessionDetail.module.css";
 import { DecisionRecordsLoadedContext } from "./DecisionHistory";
-import { SkeletonCard, SkeletonNumber, Spinner } from "./loading";
+import { SkeletonNumber, Spinner } from "./loading";
 import { showLatestSync } from "../conversationPlaceholder";
 import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
 import { singleFlight } from "../singleFlight";
@@ -154,16 +159,6 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
   };
 }
 
-// DecisionPanel already embeds SessionDetail for its history sidecar. Keep the
-// reverse dependency lazy so projecting a pending card into the dialogue
-// does not create an eager ESM cycle between the two modules.
-const InlineDecisionCard = lazy(() =>
-  import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
-);
-const InlineFleetAskCard = lazy(() =>
-  import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
-);
-
 /** "Triggered by schedule X" provenance chip. Shown only for sessions
  *  a one-shot schedule fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the
  *  session id back to the schedule via list_schedules' firedSessionId to name the id.
@@ -222,8 +217,26 @@ export function SessionDetail({
   paused = false,
   chromeAdaptive = true,
   launchPrompt = null,
+  taskCards = null,
+  projectName = null,
+  task = null,
+  onOpenSession,
 }: {
   inline?: boolean;
+  /** The task the open session belongs to (its main conversation or one of
+   *  its sub-tasks). Set, the pane is a task page: the header shows project,
+   *  elapsed time and spend, and the task rail (sub-tasks, steps, material,
+   *  developer view) stands beside the conversation. */
+  task?: TaskRow | null;
+  /** Opens another session of the task — a sub-task, or back to the main
+   *  conversation — from the task rail. */
+  onOpenSession?: (sessionId: string) => void;
+  /** Cards raised by this task's sub-task sessions. They join this session's
+   *  own cards in the pinned decision dock, so the whole task is answered
+   *  from its main conversation. */
+  taskCards?: PendingDecision[] | null;
+  /** Project chip text for the dock's "project › task › sub-task" crumbs. */
+  projectName?: string | null;
   /** Standalone mode only: the prompt this session was launched with moments
    *  ago, echoed as its first bubble until the transcript records it. Read
    *  when the pane switches to the session; later changes are ignored. */
@@ -520,7 +533,6 @@ export function SessionDetail({
     return sessions.find((s) => s.id === session.id) ?? session;
   }, [session, sessions]);
   const preferredTitle = liveSession ? preferredSessionTitle(liveSession) : null;
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   // Which session `decisionRecords` was last read for. Until it matches the one
@@ -545,6 +557,26 @@ export function SessionDetail({
     () => inlinePendingFleetAsk(liveSession, pendingDecisions, decisionRecords),
     [liveSession, pendingDecisions, decisionRecords],
   );
+  // Every card this session is waiting on, answered in place. A fleet__ask the
+  // decision history already records as answered is dropped (the reply has not
+  // reached the store yet); inlinePendingFleetAsk owns that rule.
+  const sessionCards = useMemo(
+    () =>
+      pendingDecisions.filter(
+        (d) =>
+          d.request.sessionId === liveSession?.id &&
+          (d.kind !== "fleet-ask" || d.id === inlineFleetAsk?.id),
+      ),
+    [pendingDecisions, liveSession?.id, inlineFleetAsk?.id],
+  );
+  const dockCards = useMemo(() => {
+    if (!taskCards?.length) return sessionCards;
+    const own = new Set(sessionCards.map((d) => d.id));
+    return [...sessionCards, ...taskCards.filter((d) => !own.has(d.id))];
+  }, [sessionCards, taskCards]);
+  // A question card carries its own answer box; the follow-up composer would
+  // be a second place to type into, so it steps aside while one is up.
+  const dockAsks = dockCards.some((d) => d.kind === "elicitation" || d.kind === "fleet-ask");
   const reasoningPercent =
     liveSession && liveSession.totalOutputTokens > 0
       ? (liveSession.reasoningOutputTokens / liveSession.totalOutputTokens) * 100
@@ -1313,83 +1345,9 @@ export function SessionDetail({
     return () => ro.disconnect();
   }, [liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
 
-  // Read an unanswered decision card from its head. The card is the last thing
-  // in the transcript, so the bottom pin above parks the reader on its options
-  // with the question scrolled out of sight. When one appears — or the session
-  // is opened with one waiting — and it is taller than the visible area, align
-  // its top with the top of the viewport and let go of the bottom.
-  //
-  // Held, not applied once: on open the transcript above the card is still
-  // settling (and the lazy card itself starts as a skeleton), so the card's
-  // offset keeps moving for a few frames. Re-align on every height change until
-  // the reader touches the scroller; after that the position is theirs.
-  const pendingCardId = simplifiedMode
-    ? pendingDecisions.find((d) => d.request.sessionId === liveSession?.id)?.id
-    : inlineFleetAsk?.id;
-  const dockHeightRef = useRef(0);
-  dockHeightRef.current = dockHeight;
-  /** Which card the hold belongs to, and whether it still holds. Kept across
-   *  effect re-runs so a transcript that finishes loading keeps the hold, and a
-   *  reader who scrolled away is not grabbed again by the same card. */
-  const anchorRef = useRef<{ id: string | undefined; active: boolean }>({
-    id: undefined,
-    active: false,
-  });
-  const anchorPendingCard = useCallback(() => {
-    const el = scrollRef.current;
-    const card = el?.querySelector<HTMLElement>("[data-decision-anchor]");
-    if (!el || !card) return false;
-    const cardTop =
-      card.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
-    const top = decisionAnchorTop(
-      cardTop,
-      card.offsetHeight,
-      el.clientHeight - dockHeightRef.current,
-    );
-    if (top === null) return false;
-    autoScrollingRef.current = false;
-    followRef.current = { following: false, detached: true };
-    setIsFollowing(false);
-    el.scrollTop = top;
-    return true;
-  }, []);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !pendingCardId) return;
-    if (anchorRef.current.id !== pendingCardId) {
-      // A new card pulls a reader who is following the conversation; one who
-      // scrolled up to read history stays there (the follow pill leads here).
-      anchorRef.current = { id: pendingCardId, active: !followRef.current.detached };
-    }
-    const hold = () => {
-      if (anchorRef.current.active) anchorPendingCard();
-    };
-    const release = () => {
-      anchorRef.current.active = false;
-    };
-    const ro = new ResizeObserver(hold);
-    for (const child of Array.from(el.children)) ro.observe(child);
-    hold();
-    el.addEventListener("wheel", release, { passive: true });
-    el.addEventListener("pointerdown", release, { passive: true });
-    el.addEventListener("keydown", release);
-    return () => {
-      ro.disconnect();
-      el.removeEventListener("wheel", release);
-      el.removeEventListener("pointerdown", release);
-      el.removeEventListener("keydown", release);
-    };
-  }, [liveSession?.id, pendingCardId, hasMessages, anchorPendingCard]);
-
-  // With an unanswered card that does not fit, "jump to latest" first means its
-  // head; pressed again from there, the real bottom.
   const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const before = el.scrollTop;
-    if (pendingCardId && anchorPendingCard() && Math.abs(el.scrollTop - before) > 2) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [pendingCardId, anchorPendingCard]);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, []);
 
   // ── Scroll-freeze snapshot (⌥⇧S) ────────────────────────────────────────────
   // The transcript occasionally refuses to scroll until the window is resized,
@@ -1458,7 +1416,7 @@ export function SessionDetail({
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, [showsComposer, isFollowing, liveSession?.id]);
+  }, [showsComposer, dockCards.length > 0, isFollowing, liveSession?.id]);
 
   // Padding is applied by React on the next paint, which grows scrollHeight
   // under a reader who is pinned to the newest message. Re-pin in the same
@@ -1721,6 +1679,114 @@ export function SessionDetail({
     return () => window.removeEventListener("keydown", onKey);
   }, [activeFacet, aux.expanded]);
 
+  /** The session's technical facts — model, effort, context, cost, tokens,
+   *  compactions, slug. `all` shows the numbers that otherwise wait behind
+   *  the ··· toggle; the developer view always shows them. */
+  const factChips = (liveSession: SessionInfo, all: boolean) => (
+    <>
+      {liveSession.model && (
+        <span
+          className={styles.meta_chip}
+          title={t("card.tip_model", { model: liveSession.model })}
+        >
+          {formatModel(liveSession.model)}
+        </span>
+      )}
+      {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
+          their `medium` cut. On a dense board a chip on every card says
+          nothing; the detail header is the one place you come to ask
+          what this session is actually running at, so `medium` is an
+          answer there. */}
+      {effortChipLabel(liveSession) && (
+        <span
+          className={styles.meta_chip}
+          title={effortTitle(t, liveSession)}
+        >
+          <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
+            <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
+          </svg>
+          {effortChipLabel(liveSession)}
+        </span>
+      )}
+      {/* Context stays out of the fold once it crosses the warn line.
+          Below it, it is a figure; above it, it is an alarm — the
+          session is about to compact — and an alarm you have to click
+          to see is not an alarm. */}
+      {liveSession.contextPercent != null &&
+        (all || liveSession.contextPercent >= 0.8) && (
+        <span
+          className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
+          title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
+        >
+          ctx {Math.round(liveSession.contextPercent * 100)}%
+        </span>
+      )}
+      {all && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
+        <span className={styles.meta_chip} title={t("card.tip_cost")}>
+          ${liveSession.totalCostUsd.toFixed(2)}
+        </span>
+      )}
+      {all && (
+        <span className={styles.meta_chip} title={t("tokens_out")}>
+          {liveSession.totalOutputTokens.toLocaleString()} tok
+        </span>
+      )}
+      {all && liveSession.reasoningOutputTokens > 0 && (
+        <span
+          className={styles.meta_chip}
+          title={t("reasoning_tokens_tip", {
+            tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+            percent: reasoningPercent.toFixed(1),
+          })}
+        >
+          {t("reasoning_tokens_chip", {
+            tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+            percent: reasoningPercent.toFixed(1),
+          })}
+        </span>
+      )}
+      {all && (liveSession.compactCount ?? 0) > 0 && (
+        <span
+          className={styles.meta_chip}
+          title={t("card.tip_compact", {
+            count: liveSession.compactCount ?? 0,
+            pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
+            post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
+            cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
+          })}
+        >
+          ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
+        </span>
+      )}
+      {liveSession.slug && (
+        <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
+          {liveSession.slug}
+        </span>
+      )}
+    </>
+  );
+
+  /* Task page facts. Elapsed time and spend are the task's, not the open
+     session's: a sub-task is read inside its task, and the header names the
+     task's clock. A finished task's clock stops at its last activity. */
+  const taskSum = task
+    ? task.tip.taskSummary ?? task.hops.find((h) => h.taskSummary)?.taskSummary ?? null
+    : null;
+  const taskSpan = task
+    ? (task.state === "done" || task.state === "review"
+        ? task.lastActivityMs
+        : Date.now()) - (taskSum?.startedAtMs ?? task.startedAtMs)
+    : 0;
+  const taskCost = task
+    ? taskSum?.costUsd ?? task.hops.reduce((n, h) => n + (h.totalCostUsd ?? 0), 0)
+    : 0;
+  const inSubtask = !!task && !!liveSession && !task.hops.some((h) => h.id === liveSession.id);
+  const taskSteps = (() => {
+    if (!task || taskPlans.length === 0) return null;
+    const want = liveSession?.taskPlan?.planId;
+    return (taskPlans.find((p) => p.id === want) ?? taskPlans[0]).items;
+  })();
+
   return (
     // Both link capabilities cover the whole component, so the reader modal and
     // every tool-block renderer inherit them too — and both now land in the
@@ -1789,9 +1855,40 @@ export function SessionDetail({
                       title={preferredTitle || liveSession.workspacePath}
                       data-tauri-drag-region
                     >
+                      {inSubtask && task && (
+                        <span className={styles.title_parent}>{task.title} › </span>
+                      )}
                       {preferredTitle || liveSession.workspaceName}
                     </div>
                   <div className={styles.meta_row} data-tauri-drag-region>
+                    {task ? (
+                      <>
+                        <span className={styles.workspace_chip} title={task.projectPath}>
+                          {task.projectName}
+                        </span>
+                        <span className={styles.meta_chip} title={t("card.tip_cost")}>
+                          {t("home.elapsed", { span: formatSpan(taskSpan, t) })}
+                          {taskCost >= 0.005 && ` · $${taskCost.toFixed(2)}`}
+                        </span>
+                        <OutOfCreditsNotice session={liveSession} inline />
+                        {liveSession.contextPercent != null && liveSession.contextPercent >= 0.8 && (
+                          <span
+                            className={`${styles.meta_chip} ${styles.meta_chip_warn}`}
+                            title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
+                          >
+                            ctx {Math.round(liveSession.contextPercent * 100)}%
+                          </span>
+                        )}
+                        <ScheduleProvenanceChip session={liveSession} />
+                        {liveSession.watches && liveSession.watches.length > 0 && (
+                          <WatchStatusRow session={liveSession} inline />
+                        )}
+                        {liveSession.waitedBy && liveSession.waitedBy.length > 0 && (
+                          <WaitedByRow session={liveSession} inline />
+                        )}
+                      </>
+                    ) : (
+                    <>
                     {/* Only when the title line isn't already the workspace name. */}
                     {preferredTitle && preferredTitle !== liveSession.workspaceName && (
                       <span
@@ -1812,85 +1909,7 @@ export function SessionDetail({
                         when you go looking. Same chip and same one-click
                         continue as the board card. */}
                     <OutOfCreditsNotice session={liveSession} inline />
-                    {liveSession.model && (
-                      <span
-                        className={styles.meta_chip}
-                        title={t("card.tip_model", { model: liveSession.model })}
-                      >
-                        {formatModel(liveSession.model)}
-                      </span>
-                    )}
-                    {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
-                        their `medium` cut. On a dense board a chip on every card says
-                        nothing; the detail header is the one place you come to ask
-                        what this session is actually running at, so `medium` is an
-                        answer there. */}
-                    {effortChipLabel(liveSession) && (
-                      <span
-                        className={styles.meta_chip}
-                        title={effortTitle(t, liveSession)}
-                      >
-                        <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
-                          <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
-                        </svg>
-                        {effortChipLabel(liveSession)}
-                      </span>
-                    )}
-                    {/* Context stays out of the fold once it crosses the warn line.
-                        Below it, it is a figure; above it, it is an alarm — the
-                        session is about to compact — and an alarm you have to click
-                        to see is not an alarm. */}
-                    {liveSession.contextPercent != null &&
-                      (metricsOpen || liveSession.contextPercent >= 0.8) && (
-                      <span
-                        className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
-                        title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
-                      >
-                        ctx {Math.round(liveSession.contextPercent * 100)}%
-                      </span>
-                    )}
-                    {metricsOpen && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
-                      <span className={styles.meta_chip} title={t("card.tip_cost")}>
-                        ${liveSession.totalCostUsd.toFixed(2)}
-                      </span>
-                    )}
-                    {metricsOpen && (
-                      <span className={styles.meta_chip} title={t("tokens_out")}>
-                        {liveSession.totalOutputTokens.toLocaleString()} tok
-                      </span>
-                    )}
-                    {metricsOpen && liveSession.reasoningOutputTokens > 0 && (
-                      <span
-                        className={styles.meta_chip}
-                        title={t("reasoning_tokens_tip", {
-                          tokens: liveSession.reasoningOutputTokens.toLocaleString(),
-                          percent: reasoningPercent.toFixed(1),
-                        })}
-                      >
-                        {t("reasoning_tokens_chip", {
-                          tokens: liveSession.reasoningOutputTokens.toLocaleString(),
-                          percent: reasoningPercent.toFixed(1),
-                        })}
-                      </span>
-                    )}
-                    {metricsOpen && (liveSession.compactCount ?? 0) > 0 && (
-                      <span
-                        className={styles.meta_chip}
-                        title={t("card.tip_compact", {
-                          count: liveSession.compactCount ?? 0,
-                          pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
-                          post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
-                          cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
-                        })}
-                      >
-                        ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
-                      </span>
-                    )}
-                    {liveSession.slug && (
-                      <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
-                        {liveSession.slug}
-                      </span>
-                    )}
+                    {factChips(liveSession, metricsOpen)}
                     <ScheduleProvenanceChip session={liveSession} />
                     {/* Relay position and live watches are chips like any other
                         fact about this session, so they ride the identity row
@@ -1916,6 +1935,8 @@ export function SessionDetail({
                     >
                       {metricsOpen ? "×" : "···"}
                     </button>
+                    </>
+                    )}
                   </div>
                   </div>
                   {/* Toolbar. The rail's switch leads it — this is the control
@@ -1924,6 +1945,15 @@ export function SessionDetail({
                       what you want in it (the ··· menu below, or a rail card),
                       and it closes with its own ✕. */}
                   <div className={styles.hero_tools} data-tauri-drag-region>
+                    {task && canControl(liveSession) && stopMode(liveSession) !== "spent" && (
+                      <button
+                        type="button"
+                        className={styles.hero_stop}
+                        onClick={() => void performStop(liveSession, t)}
+                      >
+                        {t("home.stop", "Stop")}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={`${styles.hero_tool} ${railOpen ? styles.hero_tool_on : ""}`}
@@ -1961,7 +1991,7 @@ export function SessionDetail({
                     session cards and the data on SessionInfo; it was only missing
                     where you actually read the run. Clicking opens the Tasks tab,
                     the same destination as from a card. */}
-                {liveSession.taskPlan && (
+                {liveSession.taskPlan && !task && (
                   <PlanProgressRow
                     plan={liveSession.taskPlan}
                     variant="header"
@@ -2018,29 +2048,6 @@ export function SessionDetail({
                       // live-refreshed session the rest of this pane reads.
                       apiErrorCtx={apiErrorCtx}
                     />
-                    {simplifiedMode && pendingDecisions.filter((d) => d.request.sessionId === liveSession?.id).map((decision) => (
-                      <div
-                        key={decision.id}
-                        className={styles.inline_fleet_ask}
-                        data-testid="inline-task-decision"
-                        data-decision-anchor={decision.id === pendingCardId ? "" : undefined}
-                      >
-                        <Suspense fallback={<SkeletonCard height={140} />}>
-                          <InlineDecisionCard decision={decision} compact />
-                        </Suspense>
-                      </div>
-                    ))}
-                    {!simplifiedMode && inlineFleetAsk && (
-                      <div
-                        className={styles.inline_fleet_ask}
-                        data-testid="inline-pending-fleet-ask"
-                        data-decision-anchor=""
-                      >
-                        <Suspense fallback={<SkeletonCard height={140} />}>
-                          <InlineFleetAskCard decision={inlineFleetAsk} compact />
-                        </Suspense>
-                      </div>
-                    )}
                   </AgentNavProvider>
                 </div>
 
@@ -2053,14 +2060,24 @@ export function SessionDetail({
                     Resume/enqueue: when the turn has ended submit resumes; while
                     the turn is still running it queues a follow-up (delivered
                     when the turn ends). One of canResume / canEnqueue holds. */}
-                {(showsComposer || !isFollowing) && (
+                {(showsComposer || dockCards.length > 0 || !isFollowing) && (
                   <div ref={dockRef} className={styles.dock_layer}>
                     {!isFollowing && (
                       <button className={styles.follow_pill} onClick={scrollToBottom}>
                         ↓ {t("detail.scroll_to_latest")}
                       </button>
                     )}
-                    {showsComposer && liveSession && (
+                    {dockCards.length > 0 && (
+                      <div className={styles.resume_dock}>
+                        <DecisionDock
+                          cards={dockCards}
+                          projectName={projectName}
+                          taskTitle={preferredTitle}
+                          keyboard={!paused}
+                        />
+                      </div>
+                    )}
+                    {showsComposer && !dockAsks && liveSession && (
                       <div className={styles.resume_dock}>
                         <ResumeComposer
                           sessionId={liveSession.id}
@@ -2108,6 +2125,34 @@ export function SessionDetail({
                 />
               </div>
             </div>
+
+            {task && (
+              <TaskRail
+                row={task}
+                openSessionId={liveSession.id}
+                steps={taskSteps}
+                onOpenSession={(id) => onOpenSession?.(id)}
+                developer={
+                  <>
+                    <div className={railStyles.dev_row}>
+                      {factChips(liveSession, true)}
+                      <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
+                      {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
+                    </div>
+                    {auxFacets.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        className={`${railStyles.dev_link} ${activeFacet === f.id ? railStyles.dev_link_on : ""}`}
+                        onClick={() => openFacet(f.id)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </>
+                }
+              />
+            )}
 
             {auxOpen && (
               <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>

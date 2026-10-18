@@ -47,6 +47,7 @@ DESKTOP_GUARD_TESTS=(
   app/localeKeys.test.ts
   app/capabilityCoverage.test.ts
   app/tauriCoreProbe.wiring.test.ts
+  app/mock/liveProxy.test.ts
 )
 MOBILE_GUARD_TESTS=(
   src/i18nKeys.test.ts

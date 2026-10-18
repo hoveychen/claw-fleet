@@ -26,7 +26,6 @@ export const ALL_VIEW_MODES = [
   "terminal",
   "mobile",
   "schedule",
-  "plans",
 ] as const;
 
 export type ViewMode = (typeof ALL_VIEW_MODES)[number];

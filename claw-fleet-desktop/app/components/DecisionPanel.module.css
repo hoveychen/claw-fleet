@@ -45,353 +45,15 @@
   50%      { opacity: 1;   box-shadow: 0 0 20px rgba(var(--color-accent-rgb), 0.5); }
 }
 
-/* Guard variant: red glow */
-.panel_guard {
-  border-color: var(--color-error);
-  box-shadow:
-    0 0 0 1px rgba(229, 62, 62, 0.15),
-    0 0 20px rgba(229, 62, 62, 0.25),
-    var(--shadow-float);
-}
-
-.panel_guard::before {
-  border-color: rgba(229, 62, 62, 0.5);
-  animation: pulseGlowRed 2s ease-in-out infinite;
-}
-
 @keyframes pulseGlowRed {
   0%, 100% { opacity: 0.4; box-shadow: 0 0 8px rgba(229, 62, 62, 0.2); }
   50%      { opacity: 1;   box-shadow: 0 0 20px rgba(229, 62, 62, 0.5); }
-}
-
-/* Elicitation variant (default blue, explicit for clarity) */
-.panel_elicitation {}
-
-/* Wide variant: used when the active decision has a preview column to render. */
-.panel_wide {
-  width: 820px;
-}
-
-/* With-detail variant: panel becomes a 2-column flex row — left is the normal
- * panel body (history strip + card + tab bar), right is an inline SessionDetail
- * column. The detail column is emitted first in the DOM, so `row-reverse` puts
- * it on the right. Inline-style sets the overall width; the children divide it. */
-.panel_with_detail {
-  flex-direction: row-reverse;
-  align-items: stretch;
-  /* The embedded SessionDetail needs a definite height to hang its internal
-   * scroll off, so this variant is height-driven rather than content-driven.
-   * Fill the same envelope the content-sized panel is capped at — an earlier
-   * 80vh here made expanding the detail column visibly SHORTEN a tall card and
-   * drop its top edge, since the panel is anchored at `bottom: 12px`. */
-  height: calc(100vh - 56px);
-  max-height: calc(100vh - 56px);
-}
-
-.detail_column {
-  flex: 1 1 640px;
-  min-width: 420px;
-  display: flex;
-  overflow: hidden;
-  border-left: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  /* The embedded SessionDetail is column-flex with its own scrollable area;
-   * give it a stable height by stretching to the panel's. */
-  align-self: stretch;
-}
-
-/* The side-question column: one answer card at a time, so it gets less of the
-   panel than the docs viewer / inline transcript the column was sized for. */
-.detail_column_narrow {
-  flex: 1 1 420px;
-  min-width: 320px;
-}
-
-.main_column {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  /* Positioning context for `.collapse_btn` and `.history_handle`, which both
-   * sit as absolute children of the column. */
-  position: relative;
-}
-
-/* In row-flex (with-detail) mode, give main_column a width basis so the two
- * columns divide the panel width predictably. In the default column-flex
- * panel, this same basis would clamp the panel's HEIGHT to 460px and stop
- * it from sizing to content — which is why it's scoped to the row variant. */
-.panel_with_detail .main_column {
-  flex: 1 1 460px;
-  min-width: 380px;
-}
-
-/* Stacked with-detail variant: on windows too narrow to seat the card and the
- * detail column side by side (detail min 420 + card min 380 = 800px), the row
- * layout overflows and shoves the card off-screen. Stack them vertically
- * instead — `column-reverse` so the card (2nd DOM child) sits on top and the
- * detail column (1st child) below. Both fill the panel width and split the
- * height, each keeping its own internal scroll. Mutually exclusive with
- * `.panel_with_detail`, so the row-only `min-width` bases never apply here. */
-.panel_with_detail_stacked {
-  flex-direction: column-reverse;
-  align-items: stretch;
-  /* Same height contract as `.panel_with_detail` — see the note there. */
-  height: calc(100vh - 56px);
-  max-height: calc(100vh - 56px);
-}
-
-.panel_with_detail_stacked .detail_column,
-.panel_with_detail_stacked .main_column {
-  flex: 1 1 0;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-.panel_with_detail_stacked .detail_column {
-  border-left: none;
-  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-}
-
-/* Peek variant: user is holding Option/Alt to look at content behind the panel.
- * Fade nearly out and disable pointer events so clicks pass through. The pulse
- * glow also fades so it doesn't keep flashing through the see-through panel. */
-.panel_peeking {
-  opacity: 0.08;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-.panel_peeking::before {
-  opacity: 0;
-}
-
-/* Panel toolbar: slim top strip holding the panel-level controls (collapse on
- * the left, history on the right). Replaces the two absolutely-positioned
- * gutter buttons so they read as one aligned control group instead of orphaned
- * floaters. Collapses to zero height when it has no children. */
-.panel_toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  padding: 8px 12px 0;
-}
-.panel_toolbar_spacer {
-  flex: 1 1 auto;
-}
-
-/* Collapse toggle button: sits at the left of the panel toolbar. */
-.collapse_btn {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.collapse_btn:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
-.collapse_btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* Review-docs toggle chip in the panel toolbar. Neutral until active, then
- * accented to signal the side column is showing docs. */
-.review_docs_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-.review_docs_toggle:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
-.review_docs_toggle_active {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-
-/* Collapsed bar: replaces the full panel when the user collapses it. Same
- * bottom-center anchor as `.panel`, but only a slim pill with icon + label. */
-.panel_collapsed_bar {
-  position: fixed;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 14px;
-  border: 1.5px solid var(--color-accent);
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow:
-    0 0 0 1px rgba(var(--color-accent-rgb), 0.15),
-    var(--shadow-float);
-  transition: opacity 0.12s ease, background 0.12s ease;
-  animation: panelSlideIn 0.2s ease;
-}
-.panel_collapsed_bar:hover {
-  background: var(--color-bg-hover, rgba(255, 255, 255, 0.04));
-}
-.collapsed_bar_icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.collapsed_bar_label {
-  white-space: nowrap;
-}
-.collapsed_bar_chevron {
-  font-size: 10px;
-  color: var(--color-text-dim);
-}
-
-/* Variant colors for the collapsed bar — compound selectors beat the base
- * `.panel_collapsed_bar` rule despite coming earlier in the file. */
-.panel_collapsed_bar.panel_guard {
-  border-color: var(--color-error);
-  box-shadow:
-    0 0 0 1px rgba(229, 62, 62, 0.15),
-    var(--shadow-float);
-}
-.panel_collapsed_bar.panel_plan {
-  border-color: #8a5cf6;
-  box-shadow:
-    0 0 0 1px rgba(138, 92, 246, 0.15),
-    var(--shadow-float);
-}
-
-/* ── Card area: scrollable, shows the active decision card ───────────────── */
-
-.card_area {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  /* History + collapse now live in `.panel_toolbar` above, so the card body no
-   * longer reserves a left gutter for the floating handle. */
-  padding: 10px 14px;
-  animation: cardFadeIn 0.2s ease;
-}
-
-/* Always-visible scrollbar affordance.
- *
- * On macOS the default WKWebView scrollbar is an *overlay* that stays hidden at
- * rest — and its visibility follows the system "Show scroll bars" setting, which
- * defaults to "Automatically based on mouse or trackpad". With an external mouse
- * connected, that resolves to "When scrolling", so the bar never shows while idle.
- * Users then have no visual cue that the option list continues below the fold and
- * report "the panel won't scroll" — even though the wheel still works.
- *
- * Defining `::-webkit-scrollbar` opts this element out of overlay scrollbars and
- * into a classic, always-present (when content overflows) gutter, restoring the
- * "there's more below" affordance regardless of input device. */
-.card_area::-webkit-scrollbar {
-  width: 10px;
-  /* Without an explicit height a horizontal overflow falls back to WebKit's
-     ~15px default and draws a thick accent bar across the card. */
-  height: 6px;
-}
-.card_area::-webkit-scrollbar-track {
-  background: transparent;
-}
-.card_area::-webkit-scrollbar-thumb {
-  background: rgba(var(--color-accent-rgb), 0.35);
-  border-radius: var(--radius-sm);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-.card_area::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--color-accent-rgb), 0.6);
-  background-clip: padding-box;
 }
 
 @keyframes cardFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-
-/* ── Past-history handle: a chip on the right of the panel toolbar ──
- * Clicking toggles `historyOpen`, which (in normal mode) opens the inline
- * SessionDetail column. Neutral styling with an inline count — it's context,
- * not an alert, so no red overlapping notification badge. */
-
-.history_handle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tool);
-  color: var(--color-text-secondary, rgba(255, 255, 255, 0.55));
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.history_handle:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text, #ffffff);
-}
-
-.history_handle_open {
-  background: var(--color-accent-soft, rgba(96, 165, 250, 0.12));
-  color: var(--color-accent, #60a5fa);
-}
-
-.history_handle_icon {
-  width: 14px;
-  height: 14px;
-}
-
-.history_handle_count {
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: inherit;
-  pointer-events: none;
-}
-
-/* ── Tab bar: always at the bottom, horizontally scrollable ──────────────── */
-
-.tab_bar {
-  display: flex;
-  gap: 2px;
-  padding: 4px 10px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
-  overflow-x: auto;
-  flex-shrink: 0;
-  border-radius: 0 0 10px 10px;
-}
-
-/* Hide scrollbar on the tab bar */
-.tab_bar::-webkit-scrollbar { height: 0; }
 
 .tab {
   display: flex;
@@ -419,46 +81,6 @@
   background: var(--color-bg-card-hover);
 }
 
-.tab_active {
-  background: var(--color-bg-card);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.tab_guard .tab_icon {
-  color: var(--color-error);
-}
-
-.tab_elicitation .tab_icon {
-  color: var(--color-accent);
-}
-
-.tab_icon {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-
-.tab_label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-}
-
-.tab_workspace {
-  font-size: 10px;
-  color: var(--color-text-dim);
-  flex-shrink: 0;
-}
-
-.tab_session {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--color-text-dim);
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
 /* ── Individual decision card ───────────────────────────────────────────── */
 
 .card {
@@ -468,30 +90,6 @@
   padding: 14px 16px;
 }
 
-/* Flex layout for cards with a pinned interactive tail (elicitation / fleet-ask).
- * The card becomes a height-bounded flex column: a scrollable body region
- * (.card_scroll) takes the slack, and .card_footer is a flex-none always-visible
- * tail. This REPLACES the earlier `position: sticky` footer, which got its offset
- * stuck at a stale value in macOS WKWebView when a second decision arrived while
- * the panel was open — leaving the option list rendered but pushed out of view
- * (blank, yet still hover-clickable). A flex-none footer has no sticky offset to
- * go stale, so the controls can never be mispositioned by a dynamic re-layout. */
-.card_area_flex {
-  display: flex;
-  /* The card fills card_area and owns its own internal scroll; card_area itself
-   * no longer scrolls (the body does), so clip rather than double-scroll. */
-  overflow: hidden;
-}
-.card_area_flex > .card {
-  flex: 1 1 auto;
-  min-height: 0;
-  /* min-width:0 lets the flex item shrink to the panel width instead of being
-   * forced to its content's min-content width. Without it, a long unbreakable
-   * run (e.g. `Skill/Agent/WebSearch/.../ExitPlanMode`) makes the card wider
-   * than its `.card_area_flex { overflow:hidden }` clip box and gets hard-clipped
-   * at the right border — the missing counterpart to the min-height:0 above. */
-  min-width: 0;
-}
 .card_flex {
   display: flex;
   flex-direction: column;
@@ -606,20 +204,6 @@
   flex-shrink: 0;
 }
 
-.master_chip {
-  font-size: 11px;
-  color: var(--color-accent, #6366f1);
-  background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
-  padding: 2px 8px;
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
-  font-weight: 500;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .card_subtitle {
   font-size: 12px;
   color: var(--color-text);
@@ -627,24 +211,6 @@
   line-height: 1.4;
   margin-bottom: 8px;
   word-break: break-word;
-}
-
-.card_session {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--color-text-dim);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
-  padding: 1px 6px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
-}
-
-.card_session:hover {
-  background: var(--color-bg-tool);
-  color: var(--color-text);
 }
 
 /* Command block */
@@ -1188,9 +754,9 @@
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-start;
-  gap: 2px;
+  gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
@@ -1207,6 +773,57 @@
 .elicitation_option_selected {
   border-color: var(--color-accent);
   background: rgba(var(--color-accent-rgb), 0.08);
+}
+
+/* Label + description column beside the digit badge. */
+.elicitation_option_text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The digit that picks this option from the keyboard. */
+.elicitation_option_num {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+/* The option the agent recommends is the primary button: solid terracotta. */
+.elicitation_option_recommended,
+.elicitation_option_recommended:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.elicitation_option_recommended:hover {
+  background: var(--color-accent-hover);
+}
+.elicitation_option_recommended .elicitation_option_label,
+.elicitation_option_recommended .elicitation_option_desc,
+.elicitation_option_recommended .elicitation_option_num {
+  color: var(--color-on-accent);
+}
+.elicitation_option_recommended .elicitation_option_desc {
+  opacity: 0.85;
+}
+.elicitation_option_recommended .elicitation_option_num {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+/* Picked: a ring on top of the solid fill, so the choice still reads. */
+.elicitation_option_recommended.elicitation_option_selected {
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+  border-color: var(--color-on-accent);
 }
 
 /* Row wraps the option button + inline pencil "copy to Other" action. */
@@ -1288,174 +905,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-/* "Other" custom input row (legacy — superseded by ChatComposer; kept for now) */
-.elicitation_other {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-tool);
-  cursor: text;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.elicitation_other:hover,
-.elicitation_other:focus-within {
-  background: var(--color-bg-card-hover);
-}
-
-.elicitation_other_active {
-  border-color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.08);
-}
-
-.elicitation_other_input {
-  background: transparent;
-  border: none;
-  outline: none;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--color-text);
-  font-family: inherit;
-  padding: 0;
-  width: 100%;
-  resize: none;
-  overflow: hidden;
-  min-height: 1.5em;
-  box-sizing: border-box;
-}
-
-.elicitation_other_input::placeholder {
-  color: var(--color-text-dim);
-}
-
-/* + button + textarea row inside the "Other" block */
-.elicitation_other_row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  width: 100%;
-}
-
-.elicitation_attach_btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 2px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.elicitation_attach_btn svg {
-  width: 12px;
-  height: 12px;
-}
-
-.elicitation_attach_btn:hover {
-  background: var(--color-bg-card-hover);
-  border-color: var(--color-accent);
-  color: var(--color-text);
-}
-
-/* Attachment chips row above the input */
-.elicitation_attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.elicitation_attachment_chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 220px;
-  padding: 2px 4px 2px 8px;
-  background: var(--color-bg-card-hover);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  color: var(--color-text);
-}
-
-.elicitation_attachment_chip_image {
-  gap: 8px;
-  padding: 4px 6px 4px 4px;
-  max-width: 260px;
-}
-
-.elicitation_attachment_thumb {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg);
-  display: block;
-}
-
-.elicitation_attachment_meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-}
-
-.elicitation_attachment_name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
-}
-
-.elicitation_attachment_dims {
-  font-size: 10px;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.elicitation_attachment_badge {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: var(--radius-md);
-  background: rgba(var(--color-accent-rgb), 0.15);
-  color: var(--color-accent);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.elicitation_attachment_remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  border-radius: 50%;
-}
-
-.elicitation_attachment_remove:hover {
-  background: rgba(229, 62, 62, 0.15);
-  color: var(--color-error);
 }
 
 .elicitation_attach_error {
@@ -1581,26 +1030,9 @@
   border-color: #a078f9;
 }
 
-.panel_plan {
-  border-color: #8a5cf6;
-  box-shadow:
-    0 0 0 1px rgba(138, 92, 246, 0.15),
-    0 0 20px rgba(138, 92, 246, 0.25),
-    var(--shadow-float);
-}
-
-.panel_plan::before {
-  border-color: rgba(138, 92, 246, 0.5);
-  animation: pulseGlowPurple 2s ease-in-out infinite;
-}
-
 @keyframes pulseGlowPurple {
   0%, 100% { opacity: 0.4; box-shadow: 0 0 8px rgba(138, 92, 246, 0.2); }
   50%      { opacity: 1;   box-shadow: 0 0 20px rgba(138, 92, 246, 0.5); }
-}
-
-.tab_plan .tab_icon {
-  color: #8a5cf6;
 }
 
 /* ── The user's last input (above a question card) ─────────────────────────

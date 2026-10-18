@@ -33,7 +33,6 @@ export const RAILS: Partial<Record<ViewMode, RailConfig>> = {
   terminal: { storageKey: "terminal-rail-width", min: 200, max: 640, initial: 300 },
   plugins: { storageKey: "plugins-rail-width", min: 200, max: 640, initial: 340 },
   report: { storageKey: "report-rail-width", min: 240, max: 640, initial: 360 },
-  plans: { storageKey: "plans-rail-width", min: 200, max: 640, initial: 300 },
 };
 
 /** Views whose page carries a collapsible secondary sidebar. Re-clicking the

@@ -109,6 +109,40 @@
   margin: 0;
 }
 
+/* Section switch in the title slot (see useSectionTabs). The page on screen
+   keeps the title's weight; its siblings sit beside it dimmed. */
+.section_tabs {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  flex-wrap: wrap;
+  -webkit-app-region: no-drag;
+}
+
+.section_tab {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-dim);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+
+.section_tab:hover {
+  color: var(--color-text);
+}
+
+.section_tab_active,
+.section_tab_active:hover {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  cursor: default;
+}
+
 .count {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
@@ -234,5 +268,3 @@
   padding-top: var(--win-caption-inset-y);
 }
 
-/* The simplified navigation owns the top strip; fill the remaining space. */
-:global(.app_simplified) .page { height: 100%; }

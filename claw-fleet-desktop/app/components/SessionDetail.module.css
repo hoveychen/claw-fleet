@@ -173,6 +173,30 @@
   background: var(--color-bg-card);
 }
 
+/* A task page's "Stop": a worded button, not an icon — it ends the task's
+   current turn, and the design names it. */
+.hero_stop {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.hero_stop:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+/* "Task ›" ahead of a sub-task's title. */
+.title_parent {
+  color: var(--color-text-dim);
+  font-weight: 500;
+}
+
 .meta_row {
   display: flex;
   flex-wrap: wrap;
@@ -340,7 +364,7 @@
    reading column, the way every chat client docks its input. */
 .resume_dock {
   width: 100%;
-  /* Same column as MessageList `.list` and .inline_fleet_ask: the column plus
+  /* Same column as MessageList `.list`: the column plus
      the 24px of side padding those apply, so the composer's border lines up
      with the message text rather than the pane edge. */
   max-width: calc(var(--transcript-column) + 48px);
@@ -1015,21 +1039,6 @@
   .rail_open .scroll_area,
   .rail_open .dock_layer { transition: none; }
 }
-
-/* Codex calls fleet__ask from inside its code-mode exec tool. The pending
-   request has no top-level transcript row until it is answered, so keep the
-   live card in the conversation flow from the decision store. */
-.inline_fleet_ask {
-  /* Rides the transcript's centred reading column. This card is a sibling of
-     MessageList `.list` inside .scroll_area, not a child, so it can't inherit a
-     token scoped to it — which is why `--transcript-column` is defined in
-     App.css `:root` and read by both. */
-  width: 100%;
-  max-width: calc(var(--transcript-column) + 48px);
-  margin: 10px auto 16px;
-  padding: 0 24px;
-}
-
 
 /* The "load earlier" button moved into MessageList, which owns the render
    window it used to duplicate. Its styles live in MessageList.module.css. */

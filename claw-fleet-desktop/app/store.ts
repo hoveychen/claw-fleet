@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyAttention, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
-import { NAV_HOME } from "./components/navGroups";
+import { NAV_HOME, navSectionOf, type NavSection } from "./components/navGroups";
 import { isViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
@@ -13,6 +13,7 @@ import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
 import { applySessionsFrame, type SessionsFrame } from "../../shared-ts/sessionsFrame";
+import { TASK_STATES, type TaskState } from "../../shared-ts/taskState";
 
 /** Open the in-app Settings overlay.
  *
@@ -33,14 +34,6 @@ export type Theme = "dark" | "light" | "system";
 // Re-exported here because most call sites import ViewMode from the store.
 export { ALL_VIEW_MODES } from "./viewModes";
 export type { ViewMode } from "./viewModes";
-/** Launcher rail's segmented mark filter. "all" shows every bucket. */
-export type MarkFilter = "all" | "pending" | "done";
-/** What the task rail's sections stand for: the repository a session runs in,
- *  or its run status — or "none", which drops the headings and lists every row
- *  in one activity-ordered stream. Orthogonal to {@link MarkFilter}, which
- *  narrows *which* rows are listed rather than how they are bundled. */
-export type HistoryGroupMode = "workspace" | "status" | "none";
-
 export interface MainViewState {
   audit: {
     tab: "events" | "rules";
@@ -96,24 +89,6 @@ export interface MainViewState {
     tab: "files" | "procs";
     activeFilePath: string | null;
   };
-  plans: {
-    /** Repo whose plan forest is on screen. `null` = nothing picked yet. */
-    selectedWorkspace: string | null;
-    /** Rail filter over the repo list. Deliberately NOT persisted: a restored
-     *  query would hide most repos on boot with no visible cause. */
-    query: string;
-    /** Per-plan expand override. Absent = the default rule decides (a plan with
-     *  pending P-tasks anywhere in its subtree opens; a finished one stays
-     *  shut), so the map only ever holds the nodes the user disagreed with. */
-    expandOverrides: Record<string, boolean>;
-    /** Show the fully-finished root trees, which are otherwise folded behind a
-     *  single "N completed" row — this workspace has ~350 finished plans and
-     *  listing them all is the first thing you'd see otherwise. */
-    showCompletedRoots: boolean;
-    /** Plan ids whose completed P-tasks are unfolded. An expanded node lists
-     *  only its pending P-tasks in full; the done ones collapse to a count. */
-    doneItemsShown: string[];
-  };
   mobile: { urlDraft: string; editingUrl: boolean };
 }
 
@@ -167,60 +142,26 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     tab: "files",
     activeFilePath: null,
   },
-  plans: readPlansView(),
   mobile: { urlDraft: "", editingUrl: false },
 };
-
-/** Parse a persisted JSON blob, falling back when absent or corrupt. */
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = getItem(key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/** Plan tree's slice of the (otherwise in-memory) main-view state. Its folds are
- *  worth keeping across restarts: on a repo with hundreds of finished plans,
- *  re-collapsing the tree by hand every launch is the whole cost of the view.
- *  Every key here is also registered in storage.ts's ALL_KEYS — a key written
- *  but not registered is saved and then never read back. */
-function readPlansView(): MainViewState["plans"] {
-  return {
-    selectedWorkspace: getItem("plans-workspace") ?? null,
-    query: "",
-    expandOverrides: readJson<Record<string, boolean>>("plans-expand-overrides", {}),
-    showCompletedRoots: getItem("plans-show-completed") === "true",
-    doneItemsShown: readJson<string[]>("plans-done-items", []),
-  };
-}
-
-function persistPlansView(s: MainViewState["plans"]): void {
-  setItem("plans-workspace", s.selectedWorkspace ?? "");
-  setItem("plans-expand-overrides", JSON.stringify(s.expandOverrides));
-  setItem("plans-show-completed", s.showCompletedRoots ? "true" : "false");
-  setItem("plans-done-items", JSON.stringify(s.doneItemsShown));
-}
 
 /** Drop `view` from the auto-collapse record — the reader no longer owns a
  *  panel the user has just toggled by hand. */
 function forgetSecondary(
-  s: { autoCollapsed: { sidebar: boolean; secondary: ViewMode | null } },
+  s: { autoCollapsed: { secondary: ViewMode | null } },
   view: ViewMode,
-): { sidebar: boolean; secondary: ViewMode | null } {
+): { secondary: ViewMode | null } {
   if (s.autoCollapsed.secondary !== view) return s.autoCollapsed;
-  return { ...s.autoCollapsed, secondary: null };
+  return { secondary: null };
 }
 
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
-  simplifiedMode: boolean;
-  setSimplifiedMode: (enabled: boolean) => void;
-  sidebarCollapsed: boolean;
+  /** The page each nav entry returns to: the last page of that section the
+   *  user was on. In memory only — a fresh launch starts each section on its
+   *  first page. */
+  navLastBySection: Partial<Record<NavSection, ViewMode>>;
   /** Per-view collapse state for each view's secondary sidebar (second-level sidebar),
    *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
    *  entry. Persisted to localStorage as JSON. A missing key ⇒ expanded. */
@@ -235,59 +176,36 @@ interface UIState {
    *  collapsed sidebar the user never chose. Any manual toggle clears the
    *  matching entry — once the reader has an opinion, the layout stops
    *  pretending it owns that panel. */
-  autoCollapsed: { sidebar: boolean; secondary: ViewMode | null };
+  autoCollapsed: { secondary: ViewMode | null };
   mascotVisible: boolean;
   /** Launcher rail filters. HistoryView is mounted through SessionList's `viewMode`
    *  ternary, so it unmounts on every trip to another page — including the
    *  involuntary hops a waiting-input alert or the mascot bubble make by calling
    *  setViewMode("list"). Component state would be thrown away each time and the
    *  segmented filter would snap back to "all", so these live in the store.
-   *  markFilter / workspaceFilter are also written to disk;
+   *  workspaceFilter is also written to disk;
    *  `historyQuery` is deliberately store-only — a search box restored on boot
    *  would fire an FTS query the user never asked for. */
-  historyMarkFilter: MarkFilter;
   historyWorkspaceFilter: string;
   historyQuery: string;
-  /** Group handoff-relay sessions (sharing a `handoff.chainId`) into one
-   *  collapsible row in the task list. Default on; lives in the store (not
-   *  component state) for the same unmount reason as the filters above, and is
-   *  written to disk so the choice survives a restart. */
-  historyGroupHandoff: boolean;
   /** Settings opt-in for the Lobster Fleet page; off by default. */
   lobsterFleetEnabled: boolean;
-  /** Workspace paths whose folder section in the task rail is folded shut.
-   *  Component state would not survive the filter segments: the sections are
-   *  rendered from the *filtered* rows, so a workspace with no match under
-   *  "in progress" unmounts and comes back expanded when the reader switches back.
-   *  Written to disk so a deliberately folded repo stays folded across a
-   *  restart, same as the filters above. */
-  historyCollapsedWorkspaces: string[];
-  /** What the task rail's sections group by. Stored (and persisted) for the same
-   *  unmount reason as the filters above; the fold state of both groupings lives
-   *  in `historyCollapsedWorkspaces`, whose status keys are namespaced so the two
-   *  modes cannot fold each other's sections. */
-  historyGroupMode: HistoryGroupMode;
+  /** Home task sections folded shut. "done" starts folded. In the store (and
+   *  on disk) so a fold survives the home unmounting and a restart. */
+  homeCollapsedSections: TaskState[];
   mainViewState: MainViewState;
   updateMainViewState: <K extends keyof MainViewState>(
     view: K,
     patch: Partial<MainViewState[K]>,
   ) => void;
-  /** Plan tree's patcher. Separate from updateMainViewState because this slice is
-   *  the one that writes through to disk (see {@link persistPlansView}); going
-   *  through the generic setter would silently skip the write. */
-  updatePlansView: (patch: Partial<MainViewState["plans"]>) => void;
-  setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryQuery: (q: string) => void;
-  setHistoryGroupHandoff: (on: boolean) => void;
   setLobsterFleetEnabled: (on: boolean) => void;
-  toggleHistoryWorkspaceCollapsed: (workspacePath: string) => void;
-  setHistoryGroupMode: (m: HistoryGroupMode) => void;
+  toggleHomeSection: (state: TaskState) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
-  setSidebarCollapsed: (on: boolean) => void;
   /** Toggle the collapsed state of `view`'s secondary sidebar. */
   toggleSecondarySidebar: (view: ViewMode) => void;
   /** Explicitly set `view`'s secondary sidebar collapsed state. */
@@ -295,7 +213,7 @@ interface UIState {
   /** Collapse a panel to make room for a reader, remembering that *we* did it.
    *  In-memory only — see `autoCollapsed`. No-op if it is already collapsed,
    *  which is what keeps a user's own collapse from being "restored" open. */
-  autoCollapse: (what: "sidebar" | ViewMode) => void;
+  autoCollapse: (what: ViewMode) => void;
   /** Put back whatever `autoCollapse` took, and forget it. */
   autoRestore: () => void;
   setMascotVisible: (on: boolean) => void;
@@ -303,10 +221,6 @@ interface UIState {
    *  panel restored on boot is not a preference, it is a surprise. */
   settingsOpen: boolean;
   setSettingsOpen: (on: boolean) => void;
-  /** When true, the DecisionPanel renders as a minimized bar at the bottom
-   *  of the screen instead of the full card. Guard decisions force-expand. */
-  decisionPanelCollapsed: boolean;
-  setDecisionPanelCollapsed: (on: boolean) => void;
   /** A pending "reveal this file in the Files page" request, raised when the
    *  user clicks a path in agent prose. FilesView owns the explorer's
    *  selection state internally, so a request travels through the store
@@ -463,32 +377,18 @@ function readSecondarySidebarCollapsed(): Record<string, boolean> {
   }
 }
 
-/** Persisted list of folded task-rail workspace sections, tolerating an absent
- *  / corrupt value. */
-function readCollapsedWorkspaces(): string[] {
+/** Persisted folded home sections, tolerating an absent / corrupt value. */
+function readHomeCollapsedSections(): TaskState[] {
   try {
-    const raw = getItem("history-collapsed-workspaces");
-    if (!raw) return [];
+    const raw = getItem("home-collapsed-sections");
+    if (raw == null) return ["done"];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? parsed.filter((p): p is string => typeof p === "string")
-      : [];
+      ? parsed.filter((p): p is TaskState => (TASK_STATES as string[]).includes(p))
+      : ["done"];
   } catch {
-    return [];
+    return ["done"];
   }
-}
-
-/** Persisted grouping mode; anything unrecognised falls back to the repository
- *  sections the rail has always shown. */
-function readGroupMode(): HistoryGroupMode {
-  const raw = getItem("history-group-mode");
-  return raw === "status" || raw === "none" ? raw : "workspace";
-}
-
-/** Persisted mark filter, tolerating an absent / corrupt value. */
-function readMarkFilter(): MarkFilter {
-  const raw = getItem("history-mark-filter");
-  return raw === "pending" || raw === "done" ? raw : "all";
 }
 
 /** The task rail's project scope: "all", or one repository root path. Stored
@@ -509,43 +409,23 @@ function readViewMode(): ViewMode {
   return isViewMode(stored) ? stored : "history";
 }
 
-/** The shared body of every page change: persists `viewMode` and applies the
- *  simplified-mode page clamp. Every path that moves the main area goes through
- *  this (setViewMode and the nav requests below). */
+/** The shared body of every page change: persists `viewMode` and records it as
+ *  its nav section's last page. Every path that moves the main area goes
+ *  through this (setViewMode and the nav requests below). */
 function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
-  if (s.simplifiedMode && m !== "history" && m !== "artifacts") m = "history";
   if (m === "lobsters" && !s.lobsterFleetEnabled) m = "history";
   setItem("viewMode", m);
-  return { viewMode: m };
+  return {
+    viewMode: m,
+    navLastBySection: { ...s.navLastBySection, [navSectionOf(m)]: m },
+  };
 }
 
 /** Read once: the call rewrites the retired pseudo-values on disk, so the two
  *  initial values below must come from the same read. */
 const initialHistoryWorkspaceFilter = readHistoryWorkspaceFilter();
 
-/**
- * Initial value for simplified mode. Three-level precedence: explicit choice
- * persisted by this client is highest, then the host's last default
- * (`FLEET_SIMPLIFIED_MODE`, see core's feature_flags), then fallback to false.
- *
- * Why cache the host's answer: `host_features` is an async request after boot,
- * but `simplifiedMode` must resolve synchronously. Without caching, every page
- * load would render the full UI first, then jump to simplified. Caching makes
- * subsequent loads land directly; the host's answer refreshes on every startup,
- * so changing the env var in muvee takes effect on the next load.
- *
- * Read once, because both `simplifiedMode` and `viewMode` below must see the
- * same answer — inconsistency would leave the simplified-mode page stuck on a
- * nav item that doesn't exist there.
- */
-function readSimplifiedMode(): boolean {
-  const stored = getItem("simplified-mode");
-  if (stored === "true") return true;
-  if (stored === "false") return false;
-  return getItem("simplified-mode-host-default") === "true";
-}
-
-const initialSimplifiedMode = readSimplifiedMode();
+const initialViewMode = readViewMode();
 
 /**
  * Record the host's opinion on UI language (`FLEET_LOCALE`) and apply it when
@@ -568,30 +448,15 @@ function applyHostLocale(hostLang: string | null): void {
 
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
-  simplifiedMode: initialSimplifiedMode,
-  setSimplifiedMode: (enabled) => set((s) => {
-    setItem("simplified-mode", String(enabled));
-    return { simplifiedMode: enabled, ...viewModePatch(
-      { ...s, simplifiedMode: enabled },
-      enabled ? "history" : s.viewMode,
-    ) };
-  }),
-  viewMode: initialSimplifiedMode
-    ? (getItem("viewMode") === "artifacts" ? "artifacts" : "history")
-    : readViewMode(),
-  sidebarCollapsed: getItem("sidebar-collapsed") === "true",
+  viewMode: initialViewMode,
+  navLastBySection: { [navSectionOf(initialViewMode)]: initialViewMode },
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
-  autoCollapsed: { sidebar: false, secondary: null },
+  autoCollapsed: { secondary: null },
   mascotVisible: getItem("mascot-visible") === "true",
-  historyMarkFilter: readMarkFilter(),
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
   historyQuery: "",
-  // Default on — the empty/absent case yields grouping; only an explicit
-  // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
-  historyGroupHandoff: getItem("history-group-handoff") !== "false",
   lobsterFleetEnabled: readLobsterFleetEnabled(),
-  historyCollapsedWorkspaces: readCollapsedWorkspaces(),
-  historyGroupMode: readGroupMode(),
+  homeCollapsedSections: readHomeCollapsedSections(),
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
   updateMainViewState: (view, patch) =>
     set((state) => ({
@@ -600,25 +465,11 @@ export const useUIStore = create<UIState>((set) => ({
         [view]: { ...state.mainViewState[view], ...patch },
       },
     })),
-  updatePlansView: (patch) =>
-    set((state) => {
-      const plans = { ...state.mainViewState.plans, ...patch };
-      persistPlansView(plans);
-      return { mainViewState: { ...state.mainViewState, plans } };
-    }),
-  setHistoryMarkFilter: (f) => {
-    setItem("history-mark-filter", f);
-    set({ historyMarkFilter: f });
-  },
   setHistoryWorkspaceFilter: (p) => {
     setItem("history-project-scope", p);
     set({ historyWorkspaceFilter: p });
   },
   setHistoryQuery: (q) => set({ historyQuery: q }),
-  setHistoryGroupHandoff: (on) => {
-    setItem("history-group-handoff", on ? "true" : "false");
-    set({ historyGroupHandoff: on });
-  },
   setLobsterFleetEnabled: (on) =>
     set((s) => {
       setItem("lobster-fleet-enabled", on ? "true" : "false");
@@ -626,19 +477,14 @@ export const useUIStore = create<UIState>((set) => ({
       const next = { ...s, lobsterFleetEnabled: on };
       return { lobsterFleetEnabled: on, ...viewModePatch(next, s.viewMode) };
     }),
-  toggleHistoryWorkspaceCollapsed: (workspacePath) =>
+  toggleHomeSection: (state) =>
     set((s) => {
-      const next = s.historyCollapsedWorkspaces.includes(workspacePath)
-        ? s.historyCollapsedWorkspaces.filter((p) => p !== workspacePath)
-        : [...s.historyCollapsedWorkspaces, workspacePath];
-      setItem("history-collapsed-workspaces", JSON.stringify(next));
-      return { historyCollapsedWorkspaces: next };
+      const next = s.homeCollapsedSections.includes(state)
+        ? s.homeCollapsedSections.filter((x) => x !== state)
+        : [...s.homeCollapsedSections, state];
+      setItem("home-collapsed-sections", JSON.stringify(next));
+      return { homeCollapsedSections: next };
     }),
-  setHistoryGroupMode: (m) => {
-    setItem("history-group-mode", m);
-    set({ historyGroupMode: m });
-  },
-  decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -687,13 +533,6 @@ export const useUIStore = create<UIState>((set) => ({
     } catch {
       // Fail closed — see the field's doc comment.
     }
-    // Host's opinion on simplified mode (`FLEET_SIMPLIFIED_MODE`). Cache it for
-    // sync read on next load; when the host changes its mind (or stops opining),
-    // the cache updates with it, so it never becomes a sticky switch nobody can
-    // undo.
-    const hostDefault = features.simplifiedDefault ?? null;
-    if (hostDefault === null) removeItem("simplified-mode-host-default");
-    else setItem("simplified-mode-host-default", String(hostDefault));
     applyHostLocale(features.localeDefault ?? null);
     set((s) => ({
       hostFeatures: features,
@@ -703,21 +542,6 @@ export const useUIStore = create<UIState>((set) => ({
       // instead of rendering an empty main area with no nav item to leave by.
       ...(!features.terminal && s.viewMode === "terminal"
         ? viewModePatch(s, NAV_HOME)
-        : {}),
-      // On first browser open the cache is empty, so the host's opinion takes
-      // effect immediately rather than on reload. Only when this client has no
-      // explicit choice — if the user toggled it in settings, the host must not
-      // override it.
-      ...(hostDefault !== null &&
-      getItem("simplified-mode") === null &&
-      hostDefault !== s.simplifiedMode
-        ? {
-            simplifiedMode: hostDefault,
-            ...viewModePatch(
-              { ...s, simplifiedMode: hostDefault },
-              hostDefault ? "history" : s.viewMode,
-            ),
-          }
         : {}),
     }));
   },
@@ -748,12 +572,6 @@ export const useUIStore = create<UIState>((set) => ({
       openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
     })),
   clearOpenTaskNav: () => set({ openTaskNav: null }),
-  setSidebarCollapsed: (on) => {
-    setItem("sidebar-collapsed", on ? "true" : "false");
-    // A hand toggle takes the panel back: whatever the reader does next, it is
-    // not this panel's business any more.
-    set((s) => ({ sidebarCollapsed: on, autoCollapsed: { ...s.autoCollapsed, sidebar: false } }));
-  },
   toggleSecondarySidebar: (view) =>
     set((s) => {
       const next = {
@@ -771,22 +589,17 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   autoCollapse: (what) =>
     set((s) => {
-      if (what === "sidebar") {
-        if (s.sidebarCollapsed) return {};
-        return { sidebarCollapsed: true, autoCollapsed: { ...s.autoCollapsed, sidebar: true } };
-      }
       if (s.secondarySidebarCollapsed[what]) return {};
       return {
         secondarySidebarCollapsed: { ...s.secondarySidebarCollapsed, [what]: true },
-        autoCollapsed: { ...s.autoCollapsed, secondary: what },
+        autoCollapsed: { secondary: what },
       };
     }),
   autoRestore: () =>
     set((s) => {
-      const { sidebar, secondary } = s.autoCollapsed;
-      if (!sidebar && secondary == null) return {};
-      const patch: Partial<UIState> = { autoCollapsed: { sidebar: false, secondary: null } };
-      if (sidebar) patch.sidebarCollapsed = false;
+      const { secondary } = s.autoCollapsed;
+      if (secondary == null) return {};
+      const patch: Partial<UIState> = { autoCollapsed: { secondary: null } };
       if (secondary != null) {
         patch.secondarySidebarCollapsed = { ...s.secondarySidebarCollapsed, [secondary]: false };
       }
@@ -798,10 +611,6 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
     set({ mascotVisible: on });
-  },
-  setDecisionPanelCollapsed: (on) => {
-    setItem("decision-panel-collapsed", on ? "true" : "false");
-    set({ decisionPanelCollapsed: on });
   },
 }));
 
@@ -1527,8 +1336,6 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
 interface DecisionState {
   decisions: PendingDecision[];
-  /** ID of the decision currently shown in the card area. */
-  activeDecisionId: string | null;
   /** Add a guard request to the queue and kick off LLM analysis. */
   addGuardRequest: (req: GuardRequest) => void;
   /** Add an elicitation request to the queue. */
@@ -1644,8 +1451,6 @@ interface DecisionState {
   markParked: (id: string) => void;
   /** Update analysis state for a specific decision. */
   setAnalysis: (id: string, analysis: string | null, analyzing: boolean) => void;
-  /** Switch the active decision shown in the card area. */
-  setActiveDecision: (id: string) => void;
 }
 
 /**
@@ -1667,7 +1472,6 @@ interface DecisionState {
  */
 export const useDecisionStore = create<DecisionState>((set, get) => ({
   decisions: [],
-  activeDecisionId: null,
 
   addGuardRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
@@ -1683,8 +1487,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      // Auto-select new decision when it's the first one
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
 
     // Kick off LLM analysis if enabled
@@ -1728,7 +1530,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
   },
 
@@ -1759,7 +1560,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       if (s.decisions.some((d) => d.id === decision.id)) return s;
       return {
         decisions: [...s.decisions, decision],
-        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
       };
     });
   },
@@ -1777,7 +1577,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       if (s.decisions.some((d) => d.id === decision.id)) return s;
       return {
         decisions: [...s.decisions, decision],
-        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
       };
     });
   },
@@ -1806,7 +1605,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
   },
 
@@ -1823,7 +1621,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
   },
 
@@ -2309,7 +2106,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       ),
     })),
 
-  setActiveDecision: (id) => set({ activeDecisionId: id }),
 }));
 
 /**
@@ -2326,7 +2122,7 @@ function fireDecisionResponse(label: string, run: () => Promise<unknown>): void 
   run().catch((e) => console.error(`${label} failed:`, e));
 }
 
-/** When a decision is removed, pick the next active: prefer the one after it, else before, else null. */
+/** Drop a decision from the queue. */
 function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
   // Every removal path funnels through here — answered, declined, dismissed,
   // reconciled away — which makes it the one place that can tell the reconcile
@@ -2335,19 +2131,7 @@ function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
   // posted in the background, so the request file is still on disk for the
   // fraction of a second it takes the blocked producer to notice.
   noteRemovedLocally(id);
-  const idx = s.decisions.findIndex((d) => d.id === id);
-  const next = s.decisions.filter((d) => d.id !== id);
-  let activeDecisionId = s.activeDecisionId;
-  if (activeDecisionId === id) {
-    if (next.length === 0) {
-      activeDecisionId = null;
-    } else {
-      // prefer the item that was after the removed one; clamp to last
-      const nextIdx = Math.min(idx, next.length - 1);
-      activeDecisionId = next[nextIdx].id;
-    }
-  }
-  return { decisions: next, activeDecisionId };
+  return { decisions: s.decisions.filter((d) => d.id !== id) };
 }
 
 // ── Workspace command runner ─────────────────────────────────────────────────

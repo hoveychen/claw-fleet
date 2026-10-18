@@ -7,7 +7,6 @@ import "./App.css";
 import { Onboarding } from "./components/Onboarding";
 import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { DecisionPanel } from "./components/DecisionPanel";
 import { DailyReportPopup } from "./components/report/DailyReportPopup";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
@@ -65,8 +64,6 @@ function App() {
   // In-app Cmd/Ctrl+F find bar. The controller's key listener is global, so the
   // bar can be summoned from any view; we render it in the searchable returns.
   const find = useFindController();
-
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
 
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
@@ -272,7 +269,7 @@ function App() {
   }, []);
 
   return (
-    <div className={simplifiedMode ? "app app_simplified" : "app"}>
+    <div className="app">
       <WindowsFrameOverlay />
       {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
@@ -283,9 +280,8 @@ function App() {
       <div className="app_main" data-find-content>
         <SessionList />
       </div>
-      {!simplifiedMode && <DecisionPanel />}
       <Presence when={settingsOpen}>{settingsOpen && <SettingsPanel onClose={closeSettings} />}</Presence>
-      {!simplifiedMode && <DailyReportPopup />}
+      <DailyReportPopup />
       <UpdateNotice />
       <Presence when={!!updateCheck}>
         {updateCheck && (

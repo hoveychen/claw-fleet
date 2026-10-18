@@ -588,12 +588,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/mobile-relay/config",
   }),
 
-  get_plan_forest: (a) => ({
-    method: "GET",
-    path: "/plan_forest",
-    query: { path: q(a.workspacePath) },
-  }),
-
   get_skill_content: (a) => ({
     method: "GET",
     path: "/skill_content",
@@ -1290,11 +1284,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { plugin_id: a.pluginId, enabled: a.enabled },
   }),
 
-  set_session_mark: (a) => ({
+  accept_tasks: (a) => ({
     method: "POST",
-    path: "/session_mark",
-    empty: true,
-    body: { sessionId: a.sessionId, workspacePath: a.workspacePath, mark: a.mark },
+    path: "/tasks/accept",
+    body: { sessionIds: a.sessionIds },
+    pick: "accepted",
   }),
 
   set_session_title: (a) => ({

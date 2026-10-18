@@ -1,0 +1,187 @@
+/* ── Home task column ─────────────────────────────────────────────────────────
+   Five state sections of two-line task rows. Tokens only (App.css): the dot
+   hues come from STATE_DOT in TaskList.tsx. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.section_head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 4px;
+}
+
+.section_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.section_toggle:hover {
+  background: var(--color-bg-row-hover);
+}
+
+.section_toggle svg {
+  color: var(--color-text-dim);
+}
+
+.section_count {
+  color: var(--color-text-dim);
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+}
+
+.accept_all {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.accept_all:hover {
+  background: var(--color-accent-soft);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.12s;
+}
+
+.row:hover {
+  background: var(--color-bg-row-hover);
+}
+
+.row:focus-visible {
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.row_active,
+.row_active:hover {
+  background: var(--color-bg-row-selected);
+}
+
+.line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 16px;
+}
+
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* Under the title, past the dot. */
+  padding-left: 16px;
+}
+
+.detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.accept {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.accept:hover {
+  background: var(--color-accent-soft);
+}
+
+.accept:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

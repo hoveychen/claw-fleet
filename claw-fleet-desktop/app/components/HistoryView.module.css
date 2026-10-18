@@ -3,43 +3,63 @@
    rail's *content* (launcher + filters + session list), the banner action,
    and the detail column that fills the main container. */
 
-.new_btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 100%;
-  height: 38px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-field);
-  color: var(--color-text);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: background 0.14s, border-color 0.14s, color 0.14s;
-}
-
-.new_btn:hover {
-  border-color: var(--color-accent);
-  background: var(--color-bg-card-hover);
-  color: var(--color-accent);
-}
-
-.new_btn_active {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-/* ── Rail: filters over the session list ─────────────────────────────────── */
+/* ── Rail: "what should get done?" launcher, project scope, task list ─────── */
 
 .rail_launch {
   padding: 12px 12px 5px;
   flex: 0 0 auto;
+}
+
+/* The new-task box: Enter carries the words into the composer. */
+.launch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-field);
+  transition: border-color 0.14s, background 0.14s;
+}
+
+.launch:focus-within,
+.launch_active {
+  border-color: var(--color-accent);
+}
+
+.launch_icon {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+}
+
+.launch:focus-within .launch_icon,
+.launch_active .launch_icon {
+  color: var(--color-accent);
+}
+
+.launch_input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+}
+
+.launch_input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.launch_kbd {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-dim);
+  font-family: inherit;
+  font-size: var(--font-size-2xs);
 }
 
 .controls {
@@ -88,112 +108,14 @@
   color: var(--color-text);
 }
 
-/* Non-directory filters (mark segments) sit in their own compact row. */
-.mark_row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-/* Segmented filter by manual review mark — one row can be active at a time;
-   each segment shows how many sessions fall in its bucket under the current
-   workspace / query / active filters. */
-.mark_filter {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-/* Grouping switcher. Same chrome as .mark_filter so the two read as one
-   toolbar, but icon-only and sized to its content — the mark segments carry the
-   counts and earn the width. */
-.group_mode {
-  display: flex;
-  flex: 0 0 auto;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.group_mode .mark_seg {
-  flex: 0 0 auto;
-  padding: 6px 9px;
-}
-
-.mark_seg {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 6px 8px;
-  color: var(--color-text-dim);
-  background: var(--color-bg);
-  border: none;
-  border-right: 1px solid var(--color-border);
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-
-.mark_seg:last-child {
-  border-right: none;
-}
-
-.mark_seg:hover {
-  background: var(--color-bg-row-hover);
-}
-
-/* These segments sit on the canvas, so they take the canvas-plane tokens — the
-   card-plane hover is within a luminance unit of the canvas in light, which
-   left both the hover and the ACTIVE filter invisible. */
-.mark_seg_on {
-  color: var(--color-text);
-  background: var(--color-bg-row-selected);
-  font-weight: 500;
-}
-
-/* The bucket segments wear the same icons as the rows' MarkControl — hollow
-   circle for pending, check for done — so "filter by this icon" is literal.
-   "all" spells itself out instead of competing for a third icon. */
-.mark_seg_label {
-  font-size: 12px;
-}
-
-/* Done reads green only once it's the active filter: an always-green check in
-   the toolbar would out-shout the actual done rows, which is where the colour
-   carries meaning. */
-.mark_seg_on[data-seg="done"] {
-  color: var(--color-success);
-}
-
-.mark_seg_count {
-  font-size: 12px;
-  color: var(--color-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.mark_seg_on .mark_seg_count {
-  color: var(--color-text);
-}
-
-/* ── Session rows ────────────────────────────────────────────────────────── */
+/* ── Task list ────────────────────────────────────────────────────────── */
 
 .list {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 8px 12px;
+  padding: 2px 8px 12px;
   display: flex;
   flex-direction: column;
-  /* Match the family's `.card_list` row rhythm (gap 4) so the list breathes
-     the same as 记忆/插件 rather than packing tighter. */
-  gap: 8px;
 }
 
 /* First-scan placeholder rows in the rail. */
@@ -207,15 +129,6 @@
   color: var(--color-text-dim);
   text-align: center;
 }
-
-/* Row-atom styling (.row_wrap / .row / .row_* / .group_expand / .group_chevron)
-   moved to SessionRow.module.css, the shared row atom. This file keeps
-   only .mark_toggle (also used by MarkControl) and the relay-group wrappers
-   (.group_wrap / .group_children / .group_more) rendered by SessionRail. */
-
-/* Relay-group wrappers (.group_wrap / .group_children / .group_more) and
-   .mark_toggle moved to SessionRail.module.css / SessionRow.module.css, which
-   own the grouped rail. */
 
 /* ── Inline detail column ────────────────────────────────────────────────── */
 

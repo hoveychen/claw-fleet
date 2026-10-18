@@ -32,34 +32,6 @@ describe("launchpad rail filters", () => {
     vi.resetModules();
   });
 
-  it("writes the mark filter through to the settings store", async () => {
-    const { useUIStore } = await import("./store");
-    const { getItem } = await import("./storage");
-
-    useUIStore.getState().setHistoryMarkFilter("done");
-
-    expect(useUIStore.getState().historyMarkFilter).toBe("done");
-    expect(getItem("history-mark-filter")).toBe("done");
-  });
-
-  it("restores a persisted mark filter on boot", async () => {
-    const { setItem } = await import("./storage");
-    setItem("history-mark-filter", "pending");
-
-    const { useUIStore } = await import("./store");
-
-    expect(useUIStore.getState().historyMarkFilter).toBe("pending");
-  });
-
-  it("falls back to 全部 when the persisted mark filter is corrupt", async () => {
-    const { setItem } = await import("./storage");
-    setItem("history-mark-filter", "not-a-segment");
-
-    const { useUIStore } = await import("./store");
-
-    expect(useUIStore.getState().historyMarkFilter).toBe("all");
-  });
-
   it("round-trips the workspace filter", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
@@ -81,47 +53,41 @@ describe("launchpad rail filters", () => {
     expect(getItem("history-query")).toBeNull();
   });
 
-  /**
-   * Workspace collapse state used to be `useState` in WorkspaceRailSection. Grouping is
-   * computed from *filtered* rows, so when switching to "in-progress", any workspace
-   * with no sessions in that bucket unmounts entirely and re-mounts with the expand state
-   * reset — a collapsed fold is now blank.
-   */
-  it("toggles a workspace fold and writes it through", async () => {
+  it("starts with the done section folded", async () => {
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done"]);
+  });
+
+  it("toggles a section fold and writes it through", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
 
-    useUIStore.getState().toggleHistoryWorkspaceCollapsed("/Users/x/w/chat");
-
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([
-      "/Users/x/w/chat",
-    ]);
-    expect(getItem("history-collapsed-workspaces")).toBe(
-      JSON.stringify(["/Users/x/w/chat"]),
-    );
+    useUIStore.getState().toggleHomeSection("review");
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done", "review"]);
+    expect(getItem("home-collapsed-sections")).toBe(JSON.stringify(["done", "review"]));
 
     // Toggling again unfolds it rather than piling up duplicates.
-    useUIStore.getState().toggleHistoryWorkspaceCollapsed("/Users/x/w/chat");
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([]);
-    expect(getItem("history-collapsed-workspaces")).toBe("[]");
+    useUIStore.getState().toggleHomeSection("review");
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done"]);
   });
 
-  it("restores persisted workspace folds on boot", async () => {
+  it("restores persisted folds and drops unknown states", async () => {
     const { setItem } = await import("./storage");
-    setItem("history-collapsed-workspaces", JSON.stringify(["/a", "/b"]));
+    setItem("home-collapsed-sections", JSON.stringify(["running", "bogus"]));
 
     const { useUIStore } = await import("./store");
 
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual(["/a", "/b"]);
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["running"]);
   });
 
-  it("ignores a corrupt persisted fold list", async () => {
+  it("falls back to the default on a corrupt fold list", async () => {
     const { setItem } = await import("./storage");
-    setItem("history-collapsed-workspaces", "{not json");
+    setItem("home-collapsed-sections", "{not json");
 
     const { useUIStore } = await import("./store");
 
-    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([]);
+    expect(useUIStore.getState().homeCollapsedSections).toEqual(["done"]);
   });
 });
 
@@ -583,157 +549,64 @@ describe("auto-collapse for a wide reader", () => {
     const { useUIStore } = await import("./store");
     const s = () => useUIStore.getState();
 
-    s().autoCollapse("sidebar");
-    s().autoCollapse("list");
-    expect(s().sidebarCollapsed).toBe(true);
-    expect(s().secondarySidebarCollapsed.list).toBe(true);
+    s().autoCollapse("history");
+    expect(s().secondarySidebarCollapsed.history).toBe(true);
 
     s().autoRestore();
-    expect(s().sidebarCollapsed).toBe(false);
-    expect(s().secondarySidebarCollapsed.list).toBe(false);
+    expect(s().secondarySidebarCollapsed.history).toBe(false);
   });
 
   it("leaves a panel the user collapsed by hand alone", async () => {
     const { useUIStore } = await import("./store");
     const s = () => useUIStore.getState();
 
-    s().setSidebarCollapsed(true);
-    s().autoCollapse("sidebar");
+    s().setSecondarySidebar("history", true);
+    s().autoCollapse("history");
     s().autoRestore();
 
-    expect(s().sidebarCollapsed).toBe(true);
+    expect(s().secondarySidebarCollapsed.history).toBe(true);
   });
 
   it("stops owning a panel the user toggles mid-read", async () => {
     const { useUIStore } = await import("./store");
     const s = () => useUIStore.getState();
 
-    s().autoCollapse("sidebar");
-    s().setSidebarCollapsed(false);
-    s().autoCollapse("list");
-    s().setSecondarySidebar("list", false);
+    s().autoCollapse("history");
+    s().setSecondarySidebar("history", false);
     s().autoRestore();
 
-    expect(s().sidebarCollapsed).toBe(false);
-    expect(s().secondarySidebarCollapsed.list).toBe(false);
-    expect(s().autoCollapsed).toEqual({ sidebar: false, secondary: null });
+    expect(s().secondarySidebarCollapsed.history).toBe(false);
+    expect(s().autoCollapsed).toEqual({ secondary: null });
   });
 
   it("never writes an auto-collapse to the settings store", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
 
-    useUIStore.getState().autoCollapse("sidebar");
-    expect(getItem("sidebar-collapsed")).not.toBe("true");
+    useUIStore.getState().autoCollapse("history");
+    expect(getItem("secondary-sidebar-collapsed") ?? "").not.toContain("history");
   });
 });
 
-describe("simplified mode", () => {
+/**
+ * Each nav entry returns to the page of its section that was open last, so
+ * flipping Library -> Tasks -> Library lands back on Deliverables rather than
+ * on Docs every time.
+ */
+describe("nav section memory", () => {
   beforeEach(() => vi.resetModules());
 
-  it("persists the switch, enters Tasks, and restricts navigation until disabled", async () => {
+  it("records the last page of each section", async () => {
     const { useUIStore } = await import("./store");
-    const { getItem } = await import("./storage");
-    useUIStore.getState().setViewMode("wiki");
-    useUIStore.getState().setSimplifiedMode(true);
-    expect(getItem("simplified-mode")).toBe("true");
-    expect(useUIStore.getState().viewMode).toBe("history");
-    useUIStore.getState().setViewMode("artifacts");
-    expect(useUIStore.getState().viewMode).toBe("artifacts");
-    useUIStore.getState().setViewMode("report");
-    expect(useUIStore.getState().viewMode).toBe("history");
-    useUIStore.getState().setSimplifiedMode(false);
-    useUIStore.getState().setViewMode("wiki");
-    expect(useUIStore.getState().viewMode).toBe("wiki");
-    expect(getItem("simplified-mode")).toBe("false");
-  });
-
-  /**
-   * Host-provided default (backend's FLEET_SIMPLIFIED_MODE, sent via host_features).
-   * It exists because browser builds store settings in localStorage each — a toggle
-   * opened in one browser doesn't reach the next, only the host can speak for all clients.
-   * Three invariants:
-   *
-   *   1. Host says on, client hasn't signaled ⇒ turn it on here, and land initial page
-   *      on task page (mismatch leaves page stuck in a nav that doesn't have it);
-   *   2. User explicitly turned off ⇒ host cannot override back to on;
-   *   3. Cache host's answer for next sync read, update cache when host changes —
-   *      otherwise it becomes an irreversible sticky toggle.
-   */
-  it("adopts the host default and caches it for the next load", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
-
-    const { useUIStore } = await import("./store");
-    const { getItem } = await import("./storage");
-    expect(useUIStore.getState().simplifiedMode).toBe(false);
-
-    await useUIStore.getState().loadHostFeatures();
-    expect(useUIStore.getState().simplifiedMode).toBe(true);
-    expect(useUIStore.getState().viewMode).toBe("history");
-    // Cached, not user choice: the latter must still be "hasn't signaled".
-    expect(getItem("simplified-mode-host-default")).toBe("true");
-    expect(getItem("simplified-mode")).toBe(null);
-  });
-
-  it("boots straight into simplified mode from cached host default", async () => {
-    const { setItem } = await import("./storage");
-    setItem("simplified-mode-host-default", "true");
-    const { useUIStore } = await import("./store");
-    expect(useUIStore.getState().simplifiedMode).toBe(true);
-    expect(useUIStore.getState().viewMode).toBe("history");
-  });
-
-  it("lets explicit opt-out beat the host default", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
-
-    const { setItem } = await import("./storage");
-    setItem("simplified-mode", "false");
-    setItem("viewMode", "wiki");
-    const { useUIStore } = await import("./store");
-
-    await useUIStore.getState().loadHostFeatures();
-    expect(useUIStore.getState().simplifiedMode).toBe(false);
-    expect(useUIStore.getState().viewMode).toBe("wiki");
-  });
-
-  it("drops the cache when the host stops asking for it", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false });
-
-    const { setItem, getItem } = await import("./storage");
-    setItem("simplified-mode-host-default", "true");
-    const { useUIStore } = await import("./store");
-    expect(useUIStore.getState().simplifiedMode).toBe(true);
-
-    await useUIStore.getState().loadHostFeatures();
-    expect(getItem("simplified-mode-host-default")).toBe(null);
-    // Already on this time, don't change (user is looking at this screen); starting next load, won't default to on.
-    expect(useUIStore.getState().simplifiedMode).toBe(true);
-  });
-
-  it("turns off simplified mode when host says off", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: false });
-
-    const { setItem, getItem } = await import("./storage");
-    setItem("simplified-mode-host-default", "true");
-    const { useUIStore } = await import("./store");
-    expect(useUIStore.getState().simplifiedMode).toBe(true);
-
-    await useUIStore.getState().loadHostFeatures();
-    expect(useUIStore.getState().simplifiedMode).toBe(false);
-    expect(getItem("simplified-mode-host-default")).toBe("false");
-  });
-
-  it.each(["wiki", "artifacts"])("restores simplified mode on boot from %s", async (view) => {
-    const { setItem } = await import("./storage");
-    setItem("simplified-mode", "true");
-    setItem("viewMode", view);
-    const { useUIStore } = await import("./store");
-    expect(useUIStore.getState().simplifiedMode).toBe(true);
-    expect(useUIStore.getState().viewMode).toBe(view === "artifacts" ? "artifacts" : "history");
+    const s = () => useUIStore.getState();
+    s().setViewMode("artifacts");
+    s().setViewMode("schedule");
+    s().setViewMode("history");
+    expect(s().navLastBySection).toMatchObject({
+      library: "artifacts",
+      projects: "schedule",
+      tasks: "history",
+    });
   });
 });
 

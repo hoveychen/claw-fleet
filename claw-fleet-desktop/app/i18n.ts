@@ -19,7 +19,7 @@ export function isSupportedLanguage(code: string | null | undefined): code is Su
 }
 
 /**
- * Detect the initial interface language. Three-tier precedence (same as simplified mode):
+ * Detect the initial interface language. Three-tier precedence:
  * explicit choice stored on this client is highest; second is the host default from last boot
  * (backend's `FLEET_LOCALE`, delivered via `host_features`); if neither, fall back to the
  * browser's own language.

@@ -1,0 +1,231 @@
+/* The task's right column: sub-tasks, steps, material, developer view. Sits in
+   SessionDetail's body row beside the conversation slab, on the sunken gutter
+   rather than a slab of its own — it is reference, not a second pane. */
+.rail {
+  flex: 0 0 clamp(240px, 22%, 320px);
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 16px;
+  /* The task page hosts the conversation flat (inline), so the rail draws its
+     own seam rather than relying on a slab gutter. */
+  border-left: 1px solid var(--color-border);
+}
+
+.block {
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+.block:last-child {
+  border-bottom: none;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.count {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.item:first-child {
+  border-top: none;
+}
+.item:hover {
+  background: var(--color-bg-card-hover);
+}
+.item_open {
+  background: var(--color-accent-soft);
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.item_icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--color-accent);
+}
+
+.item_title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item_meta {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Steps: a vertical track of rings, done ones filled, the current one solid. */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 0 9px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 22px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--color-border);
+}
+
+.step_mark {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-text-dim);
+  box-sizing: border-box;
+}
+
+.step_done {
+  color: var(--color-text);
+}
+.step_done .step_mark {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+.step_done:not(:last-child)::after {
+  background: var(--color-accent);
+}
+
+.step_current {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.step_current .step_mark {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.step_text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.step_now {
+  margin-left: 4px;
+  color: var(--color-accent);
+  font-weight: 400;
+}
+
+.empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.dev_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.dev_toggle:hover {
+  color: var(--color-text);
+}
+
+.dev_chevron {
+  transition: transform 0.15s;
+}
+.dev_chevron_open {
+  transform: rotate(90deg);
+}
+
+.dev {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Facet links and fact chips inside the developer view. */
+.dev_row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.dev_link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.dev_link:hover {
+  background: var(--color-bg-card-hover);
+}
+.dev_link_on {
+  border-color: var(--color-accent);
+}

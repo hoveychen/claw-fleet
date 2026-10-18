@@ -3,8 +3,8 @@
 // the answer to the question body, which shares its scroller with the prose
 // while the footer takes the height it wants — on a long card the answer was a
 // clipped sliver below the fold and the ask looked like it had done nothing.
-// In the panel the answer belongs to the side column; only a card rendered
-// outside the panel keeps it under the question.
+// Cards now live in the task page's decision dock, which has no side column,
+// so the answer renders under the question.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -21,7 +21,7 @@ vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 await import("../i18n");
-const { DecisionPanel, DecisionCard } = await import("./DecisionPanel");
+const { DecisionCard } = await import("./DecisionPanel");
 const { useDecisionStore, useSessionsStore, useUIStore } = await import("../store");
 
 const running: ExplainRecord = {
@@ -98,8 +98,7 @@ beforeEach(() => {
       tokenSpeed: 0,
     } as unknown as SessionInfo],
   });
-  useDecisionStore.setState({ decisions: [decision()], activeDecisionId: "card-1" });
-  useUIStore.getState().setDecisionPanelCollapsed(false);
+  useDecisionStore.setState({ decisions: [decision()] });
 });
 
 afterEach(() => {
@@ -109,7 +108,7 @@ afterEach(() => {
   container = null;
   window.getSelection()?.removeAllRanges();
   invoke.mockClear();
-  useDecisionStore.setState({ decisions: [], activeDecisionId: null });
+  useDecisionStore.setState({ decisions: [] });
 });
 
 function mount(ui: React.ReactElement) {
@@ -139,25 +138,6 @@ async function askAboutTheMark(el: HTMLElement) {
 }
 
 describe("side questions asked from a decision card", () => {
-  it("answers in the panel's side column, not at the tail of the question", async () => {
-    const el = mount(createElement(DecisionPanel));
-    expect(el.querySelector("[data-testid='decision-explain-column']")).toBeNull();
-
-    await askAboutTheMark(el);
-
-    expect(invoke).toHaveBeenCalledWith("explain_selection", {
-      request: expect.objectContaining({ quote: "灰度到 5%", preset: "explain", sessionId: "sess-1" }),
-    });
-    const column = el.querySelector("[data-testid='decision-explain-column']");
-    expect(column, "the column should open itself on the first answer").not.toBeNull();
-    // The answer lives in the column and nowhere else — in particular not
-    // inside the card's own scroller, where it used to be clipped.
-    const answers = el.querySelectorAll("[data-testid='decision-explain-answers']");
-    expect(answers).toHaveLength(1);
-    expect(column!.contains(answers[0])).toBe(true);
-    expect(answers[0].textContent).toContain("灰度到 5%");
-  });
-
   it("keeps the answer under the question on a card rendered outside the panel", async () => {
     const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
 

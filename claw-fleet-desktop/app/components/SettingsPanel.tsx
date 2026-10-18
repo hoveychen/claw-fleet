@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { REPORT_AUTO_POPUP_KEY, useUIStore } from "../store";
+import { REPORT_AUTO_POPUP_KEY, useAuditStore, useReportStore, useUIStore, type ViewMode } from "../store";
+import { ChevronRight } from "lucide-react";
+import { useNavAvailability } from "../hooks/useNavAvailability";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { isWebBuild } from "../hostEnv";
 import {
@@ -171,8 +173,41 @@ function TriStateSkeleton() {
   return <SkeletonNumber width={132} height={24} />;
 }
 
+/** Pages that live under the Settings nav entry rather than on the rail:
+ *  each row closes the overlay and opens its page. */
+function MorePagesSection({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const setViewMode = useUIStore((s) => s.setViewMode);
+  const unreadCritical = useAuditStore((s) => s.unreadCriticalCount);
+  const hasNewReport = useReportStore((s) => s.hasNewReport);
+  const avail = useNavAvailability();
+  const open = (view: ViewMode) => {
+    onClose();
+    setViewMode(view);
+  };
+  const rows: { view: ViewMode; label: string; dot?: boolean }[] = [
+    { view: "audit", label: t("nav_tab_audit", "审计"), dot: unreadCritical > 0 },
+    { view: "report", label: t("nav_tab_report", "日报"), dot: hasNewReport },
+    { view: "skills", label: t("settings.more_pages_skills", "技能与插件") },
+    ...(avail.mobile ? [{ view: "mobile" as const, label: t("settings.more_pages_mobile", "移动端配对") }] : []),
+  ];
+  return (
+    <div className={styles.section}>
+      <div className={styles.section_title}>{t("settings.more_pages", "更多页面")}</div>
+      {rows.map((r) => (
+        <button key={r.view} type="button" className={`${styles.row} ${styles.page_link}`} onClick={() => open(r.view)}>
+          <span className={styles.row_label}>
+            {r.label}
+            {r.dot && <span className={styles.page_link_dot} />}
+          </span>
+          <ChevronRight size={14} strokeWidth={1.75} className={styles.page_link_chevron} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   // Advanced group starts expanded only when an advanced tab is somehow the
@@ -1090,11 +1125,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setFeatureState(REPORT_AUTO_POPUP_KEY, state);
   }, []);
 
-  // ── Group handoff-relay sessions ───────────────────────────────────────────
-  // Lives in the UI store (which persists it) so the task list reacts live when
-  // this is flipped, rather than only after a restart.
-  const groupHandoff = useUIStore((s) => s.historyGroupHandoff);
-  const setGroupHandoff = useUIStore((s) => s.setHistoryGroupHandoff);
   const lobsterFleet = useUIStore((s) => s.lobsterFleetEnabled);
   const setLobsterFleet = useUIStore((s) => s.setLobsterFleetEnabled);
 
@@ -1374,29 +1404,27 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   />
                 </div>
 
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.group_handoff")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.group_handoff_desc")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={groupHandoff}
-                      onChange={(e) => setGroupHandoff(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
-
                 <ToggleRow
                   label={t("settings.lobster_fleet")}
                   desc={t("settings.lobster_fleet_desc")}
                   checked={lobsterFleet}
                   onChange={setLobsterFleet}
                 />
+                {/* The lobster fleet is an easter egg: no nav entry, its only
+                    door is here, under its own switch. */}
+                {lobsterFleet && (
+                  <button
+                    type="button"
+                    className={`${styles.row} ${styles.page_link}`}
+                    onClick={() => {
+                      onClose();
+                      useUIStore.getState().setViewMode("lobsters");
+                    }}
+                  >
+                    <span className={styles.row_label}>{t("settings.lobster_fleet_open", "打开龙虾舰队")}</span>
+                    <ChevronRight size={14} strokeWidth={1.75} className={styles.page_link_chevron} />
+                  </button>
+                )}
 
                 {keepAwakeSupported && (
                   <div className={styles.row}>
@@ -1616,23 +1644,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </div>
             )}
 
+            {activeTab === "general" && <MorePagesSection onClose={onClose} />}
+
             {/* ── Appearance (merged into General) ── */}
             {activeTab === "general" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.appearance")}</div>
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.simplified_mode")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.simplified_mode_desc")}
-                    </span>
-                  </div>
-                  <input type="checkbox" role="switch"
-                    aria-label={t("settings.simplified_mode")}
-                    checked={simplifiedMode}
-                    onChange={(e) => useUIStore.getState().setSimplifiedMode(e.target.checked)}
-                  />
-                </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.theme")}</span>
                   <ThemeToggle />

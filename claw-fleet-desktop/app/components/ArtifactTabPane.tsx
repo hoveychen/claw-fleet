@@ -16,7 +16,7 @@ import { usePending } from "../hooks/usePending";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import { Skeleton, SkeletonCard, TopProgress } from "./loading";
 import { ArtifactStage, type Artifact } from "./ArtifactsView";
-import { timeAgo } from "./SessionRow";
+import { timeAgo } from "./timeAgo";
 import styles from "./TabPanes.module.css";
 
 /**

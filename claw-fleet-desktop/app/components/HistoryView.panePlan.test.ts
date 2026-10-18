@@ -4,8 +4,8 @@
 // "New Session". The pill sets `openId` to the card's session id unconditionally;
 // when that id is nowhere in the scan the pane used to fall past every branch
 // into its resting state, which *is* the new-session composer. Nothing on
-// screen said why, and in simplified mode — which mounts no `DecisionPanel` —
-// the card had no surface anywhere at all.
+// screen said why, and the card had no surface anywhere at all — the pane is
+// where a card of a session the task list cannot show gets answered.
 //
 // A session can be missing from the scan for three unrelated reasons: the
 // transcript was deleted, it aged past the scanner's mtime cap, or it is
@@ -39,7 +39,6 @@ function plan(over: Partial<Parameters<typeof panePlan>[0]> = {}) {
     openId: null,
     activeSession: null,
     scanReady: true,
-    simplifiedMode: true,
     decisions: [],
     ...over,
   });
@@ -66,7 +65,7 @@ describe("panePlan", () => {
     expect(p.kind).not.toBe("draft");
   });
 
-  it("renders the card in the pane in simplified mode — its only surface there", () => {
+  it("renders the card in the pane — its only surface", () => {
     const c = card("c1", "gone");
     expect(plan({ openId: "gone", decisions: [c] })).toEqual({
       kind: "orphan-card",
@@ -82,19 +81,10 @@ describe("panePlan", () => {
     expect(p).toEqual({ kind: "orphan-card", sessionId: "gone", decisions: [mine] });
   });
 
-  // Full mode mounts `DecisionPanel`, which already draws this card as an
-  // overlay. Drawing it here too would be a duplicate card — its own bug.
-  it("only explains the empty pane in full mode, leaving the card to the overlay", () => {
-    expect(
-      plan({ openId: "gone", simplifiedMode: false, decisions: [card("c1", "gone")] }),
-    ).toEqual({ kind: "orphan-note", sessionId: "gone", hasCard: true });
-  });
-
   it("says the session is missing when no card belongs to it", () => {
     expect(plan({ openId: "gone", decisions: [card("c1", "other")] })).toEqual({
       kind: "orphan-note",
       sessionId: "gone",
-      hasCard: false,
     });
   });
 

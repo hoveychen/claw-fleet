@@ -37,7 +37,7 @@
   --prose-measure: 78ch;
 
   /* The column itself is `--transcript-column`, defined in App.css `:root` —
-     SessionDetail `.inline_fleet_ask` needs the same number and is a sibling of
+     SessionDetail `.resume_dock` needs the same number and is a sibling of
      this element, so it can't inherit a token scoped here. Code, diffs, tables
      and tool cards share the column rather than keeping the whole pane: one
      aligned edge on each side is worth more than the extra width, and those
