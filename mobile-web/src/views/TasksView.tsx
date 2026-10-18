@@ -11,6 +11,7 @@ import {
   Activity,
   CheckCheck,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Circle,
   Clock,
@@ -47,11 +48,6 @@ import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
-import {
-  filterByWorkspaceScope,
-  parseWorkspaceScope,
-  withWorkspaceScope,
-} from "../../../shared-ts/workspaceScope";
 import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
 import { WatchRing } from "./WatchRing";
 import { countChainUnits } from "../../../shared-ts/chainUnits";
@@ -523,19 +519,15 @@ export function TasksView({
   // so tab switches unmount/remount, iOS PWA background/foreground, all preserve search terms,
   // directories, and segments—no reset on every return to the task page. busyOp and
   // markOverride are transient, using plain useState.
-  const [rawSearch, setSearch] = useDraft<string>("tasks:search", "");
-  // A `ws:<name>` token scopes the list to one workspace by name; everything
-  // below searches only the remaining text (see shared-ts/workspaceScope). The
-  // token is the whole scope state, so the persisted draft carries it.
-  const scope = useMemo(() => parseWorkspaceScope(rawSearch), [rawSearch]);
-  const search = scope.text;
-  const scopedWorkspace = scope.workspace;
+  const [search, setSearch] = useDraft<string>("tasks:search", "");
+  // Project scope: one section key (`workspaceFilterValue`), or "" for every
+  // project. Kept apart from the search text on purpose — the full-text search
+  // would otherwise also pull in every session elsewhere that merely mentions
+  // the project's name. Persisted for the same tab-switch unmount reason.
+  const [projectScope, setProjectScope] = useDraft<string>("tasks:projectScope", "");
   const toggleWorkspaceFocus = useCallback(
-    (name: string) => {
-      const on = scopedWorkspace?.toLowerCase() === name.toLowerCase();
-      setSearch(withWorkspaceScope(rawSearch, on ? null : name));
-    },
-    [rawSearch, scopedWorkspace, setSearch],
+    (key: string) => setProjectScope((cur) => (cur === key ? "" : key)),
+    [setProjectScope],
   );
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
@@ -597,17 +589,40 @@ export function TasksView({
     [chatPaths],
   );
 
-  // List displays partitioned by folder (Chat pinned to top), so the task page
-  // has no directory dropdown: to see a directory, collapse others. The "Terminal"
-  // button thus carries no initial directory; that page's own picker takes over.
+  // List displays partitioned by folder (Chat pinned to top); the project menu
+  // above narrows it to one. The "Terminal" button carries no initial directory;
+  // that page's own picker takes over.
   const multiDevice = deviceLabelOf !== undefined;
+  const sectionKeyOf = useCallback(
+    (s: WithDevice<SessionInfo>) =>
+      workspaceFilterValue(s.deviceId, repoRootPath(s.workspacePath), multiDevice),
+    [multiDevice],
+  );
+
+  // Every project on the task page, for the scope menu: the same sections (and
+  // order, chat first) the list draws, counted in units of work across every
+  // mark — the menu answers "which project", not "what is on screen".
+  const projectOptions = useMemo(
+    () =>
+      groupTaskSections(all, { chatPathOf, multiDevice, deviceLabelOf }).map((sec) => ({
+        key: sec.key,
+        name: sec.name,
+        count: countChainUnits(sec.sessions, (s) =>
+          groupHandoff && s.handoff && s.handoff.chainLen > 1
+            ? `${sec.key}::${s.handoff.chainId}`
+            : null,
+        ),
+      })),
+    [all, chatPathOf, multiDevice, deviceLabelOf, groupHandoff],
+  );
 
   // Everything except the mark filter — the segment counts are taken over this
   // set so each count reflects how many rows its segment would reveal under the
   // current query (mirrors the desktop `preMark`).
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return filterByWorkspaceScope(all, scopedWorkspace).filter((s) => {
+    return all.filter((s) => {
+      if (projectScope && sectionKeyOf(s) !== projectScope) return false;
       if (q) {
         const clientMatch =
           `${s.titleOverride ?? ""} ${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`
@@ -622,7 +637,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, scopedWorkspace, search, ftsMatchKeys]);
+  }, [all, projectScope, sectionKeyOf, search, ftsMatchKeys]);
 
   // 计数单位是「一件在做的事」，不是会话：一条接力链无论跑了多少棒都只算 1
   // （桌面端 `chainUnitKey` 同款）。链的归属范围要跟列表的分区口径一致 ——
@@ -736,7 +751,7 @@ export function TasksView({
         tooltip: "",
         tone: BUCKET_HEADER_TONE[sec.bucket],
         // A run-status bucket is not a scope.
-        wsName: null as string | null,
+        scopeKey: null as string | null,
         items: sec.items,
       }));
     }
@@ -746,8 +761,7 @@ export function TasksView({
         name: sec.name,
         tooltip: sec.path,
         tone: null as string | null,
-        // The bare workspace name — `name` carries a device prefix on multi-device.
-        wsName: sec.sessions[0].workspaceName as string | null,
+        scopeKey: sec.key as string | null,
         items: buildRenderItems(sec.sessions, groupHandoff),
       }),
     );
@@ -1210,8 +1224,8 @@ export function TasksView({
           <input
             className={styles.search}
             type="search"
-            placeholder={t("搜索标题、全文，ws:项目名 限定项目…")}
-            value={rawSearch}
+            placeholder={t("搜索标题、计划、全文…")}
+            value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           {searching && (
@@ -1266,21 +1280,42 @@ export function TasksView({
           })}
         </div>
         </div>
-        {scopedWorkspace && (
-          <div className={styles.scopeRow}>
-            <span className={styles.scopeChip}>
-              <Crosshair size={12} strokeWidth={2} aria-hidden="true" />
-              <span className={styles.scopeName}>{t("只看 {0}", scopedWorkspace)}</span>
-              <button
-                className={styles.scopeClear}
-                onClick={() => setSearch(withWorkspaceScope(rawSearch, null))}
-                aria-label={t("显示全部项目")}
-              >
-                <X size={13} strokeWidth={2.2} />
-              </button>
-            </span>
-          </div>
-        )}
+        <div className={styles.scopeRow}>
+          {/* A native select: the phone's own picker handles a long project list
+              (scrolling, large targets) better than any custom popover. */}
+          <label className={styles.scopeSelectWrap} data-on={!!projectScope}>
+            <Folder size={13} aria-hidden="true" />
+            <select
+              className={styles.scopeSelect}
+              value={projectScope}
+              onChange={(e) => setProjectScope(e.target.value)}
+              aria-label={t("全部项目")}
+            >
+              <option value="">{t("全部项目")}</option>
+              {projectOptions.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {`${p.name} (${p.count})`}
+                </option>
+              ))}
+              {/* A scope whose project has left the list still shows, so it can be cleared. */}
+              {projectScope && !projectOptions.some((p) => p.key === projectScope) && (
+                <option value={projectScope}>
+                  {projectScope.split(/[\\/]/).filter(Boolean).pop() ?? projectScope}
+                </option>
+              )}
+            </select>
+            <ChevronDown size={13} aria-hidden="true" />
+          </label>
+          {projectScope && (
+            <button
+              className={styles.scopeClear}
+              onClick={() => setProjectScope("")}
+              aria-label={t("显示全部项目")}
+            >
+              <X size={13} strokeWidth={2.2} />
+            </button>
+          )}
+        </div>
       </div>
 
       {!sessionsLoaded && all.length > 0 && (
@@ -1303,10 +1338,8 @@ export function TasksView({
       <div className={styles.list}>
         {sections.map((section) => {
           // A scoped list is the one project asked for; a leftover fold would hide it.
-          const collapsed = !scopedWorkspace && collapsedSections.has(section.key);
-          const focused =
-            section.wsName != null &&
-            scopedWorkspace?.toLowerCase() === section.wsName.toLowerCase();
+          const collapsed = !projectScope && collapsedSections.has(section.key);
+          const focused = section.scopeKey != null && section.scopeKey === projectScope;
           return (
             <section key={section.key} className={styles.workspaceSection}>
               <div className={styles.workspaceHead}>
@@ -1331,7 +1364,7 @@ export function TasksView({
                     data-open={!collapsed}
                   />
                 </button>
-                {section.wsName != null && (
+                {section.scopeKey != null && (
                   // A sibling of the toggle (a button cannot nest a button). Always
                   // shown — a phone has no hover to reveal it.
                   <button
@@ -1339,7 +1372,7 @@ export function TasksView({
                     data-on={focused}
                     aria-pressed={focused}
                     aria-label={focused ? t("显示全部项目") : t("只看此项目")}
-                    onClick={() => toggleWorkspaceFocus(section.wsName!)}
+                    onClick={() => toggleWorkspaceFocus(section.scopeKey!)}
                   >
                     <Crosshair size={14} strokeWidth={1.9} />
                   </button>
