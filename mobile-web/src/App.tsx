@@ -100,8 +100,7 @@ import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
 import { DeviceSwitcher } from "./views/DeviceSwitcher";
-import { PlansView } from "./views/PlansView";
-import { ArtifactsView } from "./views/ArtifactsView";
+import { LibraryView } from "./views/LibraryView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { TerminalView, type TerminalWorkspace } from "./views/TerminalView";
@@ -110,7 +109,6 @@ import { SessionDetailView } from "./views/SessionDetailView";
 import { sessionDetailKey } from "./sessionDetailKey";
 import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
-import { WikiView } from "./views/WikiView";
 import { AttentionView } from "./views/AttentionView";
 import { WikiDocView } from "./views/WikiDocView";
 import { listWikiDocs } from "./wiki";
@@ -745,8 +743,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // not opened.
 
   const [terminal, setTerminal] = useState<{ workspace: TerminalWorkspace | null } | null>(null);
-  const [showPlans, setShowPlans] = useState(false);
-  const [showWiki, setShowWiki] = useState(false);
   const [showAttention, setShowAttention] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   // Which device the new session opens on. null = follow the current scoped device
@@ -980,15 +976,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [states, deviceOrder],
   );
 
-  /** Sessions on the current scoped device. Used by device-scoped pages (new session,
-   *  plans, subagent resolution in session detail) — those pages ask "what's on this
-   *  device?", so mixing in others would make them see IDs they can't fetch. */
-
-  const scopedSessions = useMemo(
-    () => mergedSessions.filter((s) => s.deviceId === activeDeviceId),
-    [mergedSessions, activeDeviceId],
-  );
-
   /** Which directories the terminal can open in — every workspace seen in tasks,
    *  de-duped by device. Kept cross-device: terminal processes run on their owning host,
    *  so "which device" and "which directory" are a single unit. */
@@ -1137,8 +1124,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     showRepo ||
     repoDetail !== null ||
     showUsage ||
-    showPlans ||
-    showWiki ||
     showAttention ||
     showNewSession;
   // Float the decision drawer over everything the user is looking at — EXCEPT the
@@ -1155,12 +1140,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const overlayKey = [
     detailSession ? `detail:${detailSession.deviceId}:${detailSession.id}` : "",
-    showWiki ? "wiki" : "",
     showAttention ? "attention" : "",
     wikiStack.length ? `wiki:${wikiStack.length}:${wikiStack[wikiStack.length - 1].doc.slug}` : "",
     showRepo ? "repo" : "",
     repoDetail ? `repoDetail:${repoDetail.repo.root}` : "",
-    showPlans ? "plans" : "",
     showUsage ? "usage" : "",
     showNewSession ? `newSession:${newSessionTargetId}` : "",
     showDecisionDrawer ? "drawer" : "",
@@ -1178,12 +1161,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const closeAllOverlays = useCallback(() => {
     setDetailStack([]);
-    setShowWiki(false);
     setShowAttention(false);
     setWikiStack([]);
     setShowRepo(false);
     setRepoDetail(null);
-    setShowPlans(false);
     setShowUsage(false);
     setTerminal(null);
     setShowNewSession(false);
@@ -1473,7 +1454,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
           />
         ) : tab === "library" ? (
-          <ArtifactsView client={client} />
+          <LibraryView
+            client={client}
+            onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
+          />
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
@@ -1506,8 +1490,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onDisablePush={handleDisablePush}
             agentPending={agentPending}
             onOpenRepo={() => setShowRepo(true)}
-            onOpenPlans={() => setShowPlans(true)}
-            onOpenWiki={() => setShowWiki(true)}
             onOpenAttention={() => setShowAttention(true)}
             onOpenUsage={() => setShowUsage(true)}
           />
@@ -1586,18 +1568,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       )}
       </Presence>
 
-      {/* The wiki list itself is an overlay (entering from "More"), with document details
-          stacked on top — so render it before wikiStack. */}
-
-      {showWiki && <HistoryLayer onBack={() => setShowWiki(false)} />}
-      <Presence when={showWiki}>
-        <WikiView
-          client={client}
-          onBack={() => setShowWiki(false)}
-          onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
-        />
-      </Presence>
-
       {/* Each document gets a layer, but only render the top one — lower docs don't need
           to stay around refetching content/rendering diagrams. */}
 
@@ -1651,15 +1621,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onBack={() => setTerminal(null)}
           />
         )}
-      </Presence>
-
-      {showPlans && <HistoryLayer onBack={() => setShowPlans(false)} />}
-      <Presence when={showPlans}>
-        <PlansView
-          sessions={scopedSessions}
-          client={client}
-          onBack={() => setShowPlans(false)}
-        />
       </Presence>
 
       {showUsage && <HistoryLayer onBack={() => setShowUsage(false)} />}

@@ -4,39 +4,16 @@
 // artifact opens the existing ArtifactDetail overlay, owned here.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Archive,
-  BookOpen,
-  ChevronRight,
-  FileSpreadsheet,
-  FileText,
-  FileType,
-  Film,
-  Image as ImageIcon,
-  Music,
-  Presentation,
-} from "lucide-react";
+import { BookOpen, ChevronRight, FileText } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { Artifact, WikiDoc } from "../types";
 import { formatBytes, listArtifacts } from "../artifacts";
 import { listWikiDocs } from "../wiki";
 import { mergeLibrary, type LibraryItem } from "../library";
-import { ArtifactDetail } from "./ArtifactsView";
+import { ArtifactDetail, KIND_ICON } from "./ArtifactsView";
 import { Presence } from "../Presence";
 import styles from "./LibraryList.module.css";
-
-const KIND_ICON: Record<string, typeof FileText> = {
-  image: ImageIcon,
-  video: Film,
-  audio: Music,
-  pdf: FileType,
-  doc: FileText,
-  sheet: FileSpreadsheet,
-  slides: Presentation,
-  archive: Archive,
-  text: FileText,
-};
 
 export interface LibraryState {
   items: LibraryItem[] | null;

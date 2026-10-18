@@ -1204,4 +1204,9 @@ const DICT: Record<string, string> = {
   "这个任务派出的会话会列在这里。": "Sessions this task spawns are listed here.",
   "这个任务还没有存进产出库的文件。": "This task hasn't saved anything to the output library yet.",
   "这个项目还没有归档的文档。": "This project has no archived docs yet.",
+  // ── Task model: library and me ──
+  开发者: "Developer",
+  还没有资料: "Nothing in the library yet",
+  没有匹配的资料: "Nothing matches",
+  "Agent 发布的文档和存进产出库的文件会出现在这里。": "Docs agents publish and files they save to the output library show up here.",
 };

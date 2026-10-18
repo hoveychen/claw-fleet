@@ -1,5 +1,5 @@
-// "More" tab: consolidates settings items scattered in header gear / top banner—
-// language/theme, desktop connection status, notification toggle, re-pair, about/version.
+// 我的 (Me) tab: devices, notifications, usage, settings, then a developer
+// corner (repo, attention, terminal), pairing and about.
 
 import { useState } from "react";
 import {
@@ -8,14 +8,11 @@ import {
   Check,
   ChevronRight,
   FolderGit2,
-  BookOpen,
   Scale,
   Gauge,
-  ListTree,
   QrCode,
   SquareTerminal,
 } from "lucide-react";
-import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
@@ -74,8 +71,6 @@ interface Props {
    *  deviceRuntime.awaitingAgentReport): still connecting, not "desktop offline". */
   agentPending?: boolean;
   onOpenRepo: () => void;
-  onOpenPlans: () => void;
-  onOpenWiki: () => void;
   onOpenAttention: () => void;
   onOpenUsage: () => void;
   onOpenTerminal: () => void;
@@ -125,8 +120,6 @@ export function MoreView({
   onDisablePush,
   agentPending = false,
   onOpenRepo,
-  onOpenPlans,
-  onOpenWiki,
   onOpenAttention,
   onOpenUsage,
   onOpenTerminal,
@@ -176,9 +169,6 @@ export function MoreView({
   const scan = scanAvailability();
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
-  // Task-list handoff grouping—same "tasks:groupHandoff" draft that task page reads
-  // on remount. On by default.
-  const [groupHandoff, setGroupHandoff] = useDraft<boolean>("tasks:groupHandoff", true);
 
   const themeChoices: Array<[ThemeSetting, string]> = [
     ["system", t("跟随系统")],
@@ -232,167 +222,138 @@ export function MoreView({
           onClose={() => setScanning(false)}
         />
       </Presence>
-      {/* ── Tools ── */}
-      <div className={styles.section}>
-        <div className={styles.sectionLabel}>{t("工具")}</div>
-        <div className={styles.card}>
-          <button className={styles.navRow} onClick={onOpenRepo}>
-            <span className={styles.navIcon}>
-              <FolderGit2 size={18} />
-            </span>
-            <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("仓库")}</span>
-              <span className={styles.navSub}>{t("查看未合并 worktree 与未推提交")}</span>
-            </span>
-            <ChevronRight size={18} className={styles.navChevron} />
-          </button>
-          <div className={styles.divider} />
-          <button className={styles.navRow} onClick={onOpenPlans}>
-            <span className={styles.navIcon}>
-              <ListTree size={18} />
-            </span>
-            <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("计划")}</span>
-              <span className={styles.navSub}>{t("整仓 TASKS.md 计划的进度矩阵")}</span>
-            </span>
-            <ChevronRight size={18} className={styles.navChevron} />
-          </button>
-          <div className={styles.divider} />
-          <button className={styles.navRow} onClick={onOpenWiki}>
-            <span className={styles.navIcon}>
-              <BookOpen size={18} />
-            </span>
-            <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("知识库")}</span>
-              <span className={styles.navSub}>{t("agent 沉淀下来的调研与文档")}</span>
-            </span>
-            <ChevronRight size={18} className={styles.navChevron} />
-          </button>
-          <div className={styles.divider} />
-          <button className={styles.navRow} onClick={onOpenAttention}>
-            <span className={styles.navIcon}>
-              <Scale size={18} />
-            </span>
-            <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("需要你判断的事")}</span>
-              <span className={styles.navSub}>{t("跑偏的接力链、反复出现的教训")}</span>
-            </span>
-            <ChevronRight size={18} className={styles.navChevron} />
-          </button>
-          {terminalEnabled && (
-            <>
-              <div className={styles.divider} />
-              <button className={styles.navRow} onClick={onOpenTerminal}>
+      {/* ── Devices ── */}
+      {devices.length > 0 && (
+        <div className={styles.section}>
+          <div className={styles.sectionLabel}>{t("设备")}</div>
+          <div className={styles.card}>
+            {devices.map((d, i) => (
+              <div key={d.id}>
+                {i > 0 && <div className={styles.divider} />}
+                {editingId === d.id ? (
+                  <div className={styles.deviceRow}>
+                    <input
+                      className={styles.deviceInput}
+                      value={labelDraft}
+                      autoFocus
+                      onChange={(e) => setLabelDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onRenameDevice(d.id, labelDraft);
+                          setEditingId(null);
+                        }
+                      }}
+                    />
+                    <button
+                      className={styles.deviceBtn}
+                      onClick={() => {
+                        onRenameDevice(d.id, labelDraft);
+                        setEditingId(null);
+                      }}
+                    >
+                      {t("保存")}
+                    </button>
+                    <button className={styles.deviceBtn} onClick={() => setEditingId(null)}>
+                      {t("取消")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className={styles.deviceRow}>
+                    {/* Whole row tappable = switch to this device. Current device not tappable
+                    to avoid pointless reconnection. */}
+                    <button
+                      className={styles.deviceMain}
+                      disabled={d.id === activeDeviceId}
+                      onClick={() => onSwitchDevice(d.id)}
+                    >
+                      <span className={styles.deviceCheck}>
+                        {d.id === activeDeviceId && <Check size={16} />}
+                      </span>
+                      <span className={styles.deviceLabel}>{d.label}</span>
+                    </button>
+                    {/* Toggle just this device's notifications. Home machine has long tasks,
+                        work machine sends cards at midnight—handle separately, not one all-off. */}
+                    {/* Direct HTTP transport has no push channels; switch would be misleading. */}
+                    {supportsPush && d.kind === "relay" && (
+                      <button
+                        className={styles.deviceBtn}
+                        onClick={() => onMuteDevice(d, !deviceMuted(d.id))}
+                        aria-label={deviceMuted(d.id) ? t("开启通知") : t("静音")}
+                      >
+                        {deviceMuted(d.id) ? <BellOff size={15} /> : <Bell size={15} />}
+                      </button>
+                    )}
+                    <button
+                      className={styles.deviceBtn}
+                      onClick={() => {
+                        setLabelDraft(d.label);
+                        setEditingId(d.id);
+                      }}
+                    >
+                      {t("改名")}
+                    </button>
+                    <button
+                      className={styles.deviceBtnDanger}
+                      onClick={async () => {
+                        if (
+                          await confirm(
+                            t("移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。", d.label),
+                          )
+                        ) {
+                          onRemoveDevice(d);
+                        }
+                      }}
+                    >
+                      {t("移除")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* "Add second device" is either open a #k=-bearing URL or scan in app. Former
+              doesn't work on any form: native shell from rawfile has no address bar; iOS
+              home screen web app also has no address bar, and storage partitions from
+              Safari separately—link scanned back to Safari doesn't exist to it. So both
+              lines must be on **every** form.
+
+              QR scan prefers shell's own (HarmonyOS shell reloads WebView and injects
+              #k=, system manages camera, not bound by https below); without that bridge
+              use page viewfinder needing getUserMedia—browsers refuse non-https addresses
+              entirely, so line won't render, explanation follows. Paste is fallback when
+              camera is rejected/unavailable and sole entry for self-hosted relay
+              (system can't hand QR-scanned URLs to app). */}
+          {(shellScan || scan === "ok") && (
+            <div className={styles.card} style={{ marginTop: 8 }}>
+              <button
+                className={styles.navRow}
+                onClick={() => (shellScan ? scanPairing() : setScanning(true))}
+              >
                 <span className={styles.navIcon}>
-                  <SquareTerminal size={18} />
+                  <QrCode size={18} />
                 </span>
                 <span className={styles.navText}>
-                  <span className={styles.navLabel}>{t("终端")}</span>
+                  <span className={styles.navLabel}>{t("扫码添加设备")}</span>
                   <span className={styles.navSub}>
-                    {t("在桌面端主机的某个目录里开一个 shell")}
+                    {t("扫另一台桌面端「移动端」面板里的二维码")}
                   </span>
                 </span>
-                <ChevronRight size={18} className={styles.navChevron} />
+                <ChevronRight size={16} className={styles.navChevron} />
               </button>
-            </>
+            </div>
           )}
-          <div className={styles.divider} />
-          <button className={styles.navRow} onClick={onOpenUsage}>
-            <span className={styles.navIcon}>
-              <Gauge size={18} />
-            </span>
-            <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("账号与用量")}</span>
-              <span className={styles.navSub}>{t("今日花费、账号档案与限流占用")}</span>
-            </span>
-            <ChevronRight size={18} className={styles.navChevron} />
-          </button>
+          <div className={styles.rowNote}>
+            {shellScan || scan === "ok"
+              ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
+              : scan === "insecure-origin"
+                ? t("这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。")
+                : t("这台设备用不了摄像头，扫不了码。请用下面的粘贴。")}
+          </div>
+          <div className={styles.pasteRow}>
+            <PairPasteForm onPaired={onAddDevice} />
+          </div>
         </div>
-      </div>
-
-      {/* ── Settings ── */}
-      <div className={styles.section}>
-        <div className={styles.sectionLabel}>{t("设置")}</div>
-        <div className={styles.card}>
-          <div className={styles.row}>
-            <span className={styles.rowLabel}>{t("语言")}</span>
-            <div className={styles.segment}>
-              {LANG_CHOICES.map(([value, label]) => (
-                <button
-                  key={value}
-                  className={styles.segmentButton}
-                  data-active={lang === value}
-                  onClick={() => setLang(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className={styles.divider} />
-          <div className={styles.row}>
-            <span className={styles.rowLabel}>{t("主题")}</span>
-            <div className={styles.segment}>
-              {themeChoices.map(([value, label]) => (
-                <button
-                  key={value}
-                  className={styles.segmentButton}
-                  data-active={setting === value}
-                  onClick={() => setTheme(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className={styles.divider} />
-          <div className={styles.row}>
-            <span className={styles.rowLabel}>{t("接力会话分组")}</span>
-            <div className={styles.segment}>
-              <button
-                className={styles.segmentButton}
-                data-active={!groupHandoff}
-                onClick={() => setGroupHandoff(false)}
-              >
-                {t("关")}
-              </button>
-              <button
-                className={styles.segmentButton}
-                data-active={groupHandoff}
-                onClick={() => setGroupHandoff(true)}
-              >
-                {t("开")}
-              </button>
-            </div>
-          </div>
-          {wakeLock.supported && (
-            <>
-              <div className={styles.divider} />
-              <div className={styles.row}>
-                <span className={styles.rowLabel}>{t("屏幕常亮")}</span>
-                <div className={styles.segment}>
-                  <button
-                    className={styles.segmentButton}
-                    data-active={!wakeLock.enabled}
-                    onClick={() => wakeLock.setEnabled(false)}
-                  >
-                    {t("关")}
-                  </button>
-                  <button
-                    className={styles.segmentButton}
-                    data-active={wakeLock.enabled}
-                    onClick={() => wakeLock.setEnabled(true)}
-                  >
-                    {t("开")}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      <ResumeSettingsSection client={client} />
+      )}
 
       {/* ── Connection & Notifications ── */}
       <div className={styles.section}>
@@ -682,138 +643,132 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── Devices ── */}
-      {devices.length > 0 && (
-        <div className={styles.section}>
-          <div className={styles.sectionLabel}>{t("设备")}</div>
-          <div className={styles.card}>
-            {devices.map((d, i) => (
-              <div key={d.id}>
-                {i > 0 && <div className={styles.divider} />}
-                {editingId === d.id ? (
-                  <div className={styles.deviceRow}>
-                    <input
-                      className={styles.deviceInput}
-                      value={labelDraft}
-                      autoFocus
-                      onChange={(e) => setLabelDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          onRenameDevice(d.id, labelDraft);
-                          setEditingId(null);
-                        }
-                      }}
-                    />
-                    <button
-                      className={styles.deviceBtn}
-                      onClick={() => {
-                        onRenameDevice(d.id, labelDraft);
-                        setEditingId(null);
-                      }}
-                    >
-                      {t("保存")}
-                    </button>
-                    <button className={styles.deviceBtn} onClick={() => setEditingId(null)}>
-                      {t("取消")}
-                    </button>
-                  </div>
-                ) : (
-                  <div className={styles.deviceRow}>
-                    {/* Whole row tappable = switch to this device. Current device not tappable
-                    to avoid pointless reconnection. */}
-                    <button
-                      className={styles.deviceMain}
-                      disabled={d.id === activeDeviceId}
-                      onClick={() => onSwitchDevice(d.id)}
-                    >
-                      <span className={styles.deviceCheck}>
-                        {d.id === activeDeviceId && <Check size={16} />}
-                      </span>
-                      <span className={styles.deviceLabel}>{d.label}</span>
-                    </button>
-                    {/* Toggle just this device's notifications. Home machine has long tasks,
-                        work machine sends cards at midnight—handle separately, not one all-off. */}
-                    {/* Direct HTTP transport has no push channels; switch would be misleading. */}
-                    {supportsPush && d.kind === "relay" && (
-                      <button
-                        className={styles.deviceBtn}
-                        onClick={() => onMuteDevice(d, !deviceMuted(d.id))}
-                        aria-label={deviceMuted(d.id) ? t("开启通知") : t("静音")}
-                      >
-                        {deviceMuted(d.id) ? <BellOff size={15} /> : <Bell size={15} />}
-                      </button>
-                    )}
-                    <button
-                      className={styles.deviceBtn}
-                      onClick={() => {
-                        setLabelDraft(d.label);
-                        setEditingId(d.id);
-                      }}
-                    >
-                      {t("改名")}
-                    </button>
-                    <button
-                      className={styles.deviceBtnDanger}
-                      onClick={async () => {
-                        if (
-                          await confirm(
-                            t("移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。", d.label),
-                          )
-                        ) {
-                          onRemoveDevice(d);
-                        }
-                      }}
-                    >
-                      {t("移除")}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          {/* "Add second device" is either open a #k=-bearing URL or scan in app. Former
-              doesn't work on any form: native shell from rawfile has no address bar; iOS
-              home screen web app also has no address bar, and storage partitions from
-              Safari separately—link scanned back to Safari doesn't exist to it. So both
-              lines must be on **every** form.
+      {/* ── Usage ── */}
+      <div className={styles.section}>
+        <div className={styles.sectionLabel}>{t("用量")}</div>
+        <div className={styles.card}>
+          <button className={styles.navRow} onClick={onOpenUsage}>
+            <span className={styles.navIcon}>
+              <Gauge size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("账号与用量")}</span>
+              <span className={styles.navSub}>{t("今日花费、账号档案与限流占用")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+        </div>
+      </div>
 
-              QR scan prefers shell's own (HarmonyOS shell reloads WebView and injects
-              #k=, system manages camera, not bound by https below); without that bridge
-              use page viewfinder needing getUserMedia—browsers refuse non-https addresses
-              entirely, so line won't render, explanation follows. Paste is fallback when
-              camera is rejected/unavailable and sole entry for self-hosted relay
-              (system can't hand QR-scanned URLs to app). */}
-          {(shellScan || scan === "ok") && (
-            <div className={styles.card} style={{ marginTop: 8 }}>
-              <button
-                className={styles.navRow}
-                onClick={() => (shellScan ? scanPairing() : setScanning(true))}
-              >
+      {/* ── Settings ── */}
+      <div className={styles.section}>
+        <div className={styles.sectionLabel}>{t("设置")}</div>
+        <div className={styles.card}>
+          <div className={styles.row}>
+            <span className={styles.rowLabel}>{t("语言")}</span>
+            <div className={styles.segment}>
+              {LANG_CHOICES.map(([value, label]) => (
+                <button
+                  key={value}
+                  className={styles.segmentButton}
+                  data-active={lang === value}
+                  onClick={() => setLang(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={styles.divider} />
+          <div className={styles.row}>
+            <span className={styles.rowLabel}>{t("主题")}</span>
+            <div className={styles.segment}>
+              {themeChoices.map(([value, label]) => (
+                <button
+                  key={value}
+                  className={styles.segmentButton}
+                  data-active={setting === value}
+                  onClick={() => setTheme(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {wakeLock.supported && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.row}>
+                <span className={styles.rowLabel}>{t("屏幕常亮")}</span>
+                <div className={styles.segment}>
+                  <button
+                    className={styles.segmentButton}
+                    data-active={!wakeLock.enabled}
+                    onClick={() => wakeLock.setEnabled(false)}
+                  >
+                    {t("关")}
+                  </button>
+                  <button
+                    className={styles.segmentButton}
+                    data-active={wakeLock.enabled}
+                    onClick={() => wakeLock.setEnabled(true)}
+                  >
+                    {t("开")}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <ResumeSettingsSection client={client} />
+
+      {/* ── Developer ── plumbing views the task model does not need, kept for
+          whoever is debugging a machine. */}
+      <div className={styles.section}>
+        <div className={styles.sectionLabel}>{t("开发者")}</div>
+        <div className={styles.card}>
+          <button className={styles.navRow} onClick={onOpenRepo}>
+            <span className={styles.navIcon}>
+              <FolderGit2 size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("仓库")}</span>
+              <span className={styles.navSub}>{t("查看未合并 worktree 与未推提交")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+          <div className={styles.divider} />
+          <button className={styles.navRow} onClick={onOpenAttention}>
+            <span className={styles.navIcon}>
+              <Scale size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("需要你判断的事")}</span>
+              <span className={styles.navSub}>{t("跑偏的接力链、反复出现的教训")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+          {terminalEnabled && (
+            <>
+              <div className={styles.divider} />
+              <button className={styles.navRow} onClick={onOpenTerminal}>
                 <span className={styles.navIcon}>
-                  <QrCode size={18} />
+                  <SquareTerminal size={18} />
                 </span>
                 <span className={styles.navText}>
-                  <span className={styles.navLabel}>{t("扫码添加设备")}</span>
+                  <span className={styles.navLabel}>{t("终端")}</span>
                   <span className={styles.navSub}>
-                    {t("扫另一台桌面端「移动端」面板里的二维码")}
+                    {t("在桌面端主机的某个目录里开一个 shell")}
                   </span>
                 </span>
-                <ChevronRight size={16} className={styles.navChevron} />
+                <ChevronRight size={18} className={styles.navChevron} />
               </button>
-            </div>
+            </>
           )}
-          <div className={styles.rowNote}>
-            {shellScan || scan === "ok"
-              ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
-              : scan === "insecure-origin"
-                ? t("这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。")
-                : t("这台设备用不了摄像头，扫不了码。请用下面的粘贴。")}
-          </div>
-          <div className={styles.pasteRow}>
-            <PairPasteForm onPaired={onAddDevice} />
-          </div>
         </div>
-      )}
+      </div>
 
       {/* ── Pairing ── */}
       <div className={styles.section}>
