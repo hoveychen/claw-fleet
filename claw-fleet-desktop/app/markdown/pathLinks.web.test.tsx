@@ -64,8 +64,8 @@ function openMenu(): string[] {
 }
 
 describe("PathChip context menu — browser build", () => {
-  it("still offers the 仓库 page, which works in a tab", () => {
-    expect(openMenu().join("|")).toMatch(/Open in Repos|在仓库中打开/);
+  it("still offers the project page, which works in a tab", () => {
+    expect(openMenu().join("|")).toMatch(/Open in Projects|在项目页中打开/);
   });
 
   it("does not offer reveal-in-Finder, which would silently do nothing", () => {
