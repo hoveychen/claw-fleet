@@ -86,6 +86,23 @@ describe("buildTaskRows", () => {
     expect(rows[0].subtasks).toHaveLength(0);
   });
 
+  it("ignores an error on a hop a later hop already took over", () => {
+    const rows = build([
+      s({ id: "h13", taskId: "h1", status: "serverErrored", handoff: { chainId: "c", hop: 13, chainLen: 14 } as never }),
+      s({ id: "h14", taskId: "h1", status: "executing", procAlive: true, handoff: { chainId: "c", hop: 14, chainLen: 14 } as never }),
+    ]);
+    expect(rows[0].state).toBe("running");
+  });
+
+  it("still flags an error on the latest hop", () => {
+    const rows = build([
+      s({ id: "h1", taskId: "h1", handoff: { chainId: "c", hop: 1, chainLen: 2 } as never }),
+      s({ id: "h2", taskId: "h1", status: "stuck", handoff: { chainId: "c", hop: 2, chainLen: 2 } as never }),
+    ]);
+    expect(rows[0].state).toBe("needsYou");
+    expect(rowDetail(rows[0], "untitled")).toMatchObject({ kind: "error", status: "stuck" });
+  });
+
   it("reads a closed task as done", () => {
     const rows = build([s({ id: "t", taskId: "t", taskOutcome: "completed" })]);
     expect(rows[0].state).toBe("done");

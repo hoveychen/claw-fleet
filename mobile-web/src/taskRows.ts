@@ -116,11 +116,12 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
     else mains.set(k, [s]);
   }
 
-  const view = (s: T): TaskMemberView => ({
+  const view = (s: T, superseded: boolean): TaskMemberView => ({
     status: s.status,
     procAlive: !!s.procAlive,
     quiet: opts.isQuiet(s),
     hasPendingDecision: opts.isPending(s.deviceId, s.id),
+    superseded,
   });
 
   const rows: Array<TaskRow<T>> = [];
@@ -135,8 +136,8 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
     );
     const allSubHops = subtasks.flatMap((st) => st.hops);
     const state = taskStateOf({
-      main: hops.map(view),
-      subtasks: allSubHops.map(view),
+      main: hops.map((h) => view(h, h !== tip)),
+      subtasks: subtasks.flatMap((st) => st.hops.map((h) => view(h, h !== st.tip))),
       outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
     });
     const path = repoRootPath(tip.workspacePath);
@@ -166,17 +167,18 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
 function foldSubtasks<T extends SessionInfo>(
   keyPrefix: string,
   lines: Map<string, T[]>,
-  view: (s: T) => TaskMemberView,
+  view: (s: T, superseded: boolean) => TaskMemberView,
   isPending: (s: T) => boolean,
 ): Array<SubtaskRow<T>> {
   const out: Array<SubtaskRow<T>> = [];
   for (const [sk, hops] of lines) {
+    const tip = tipOf(hops);
     out.push({
       key: `${keyPrefix}::${sk}`,
-      tip: tipOf(hops),
+      tip,
       hops,
       state: taskStateOf({
-        main: hops.map(view),
+        main: hops.map((h) => view(h, h !== tip)),
         subtasks: [],
         outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
       }),
@@ -204,11 +206,12 @@ export function subtaskRowsOf<T extends SessionInfo>(
     if (arr) arr.push(s);
     else lines.set(k, [s]);
   }
-  const view = (s: T): TaskMemberView => ({
+  const view = (s: T, superseded: boolean): TaskMemberView => ({
     status: s.status,
     procAlive: !!s.procAlive,
     quiet: opts.isQuiet(s),
     hasPendingDecision: opts.isPending(s),
+    superseded,
   });
   return foldSubtasks(taskId, lines, view, opts.isPending);
 }
@@ -278,9 +281,11 @@ export function rowDetail(row: TaskRow, untitled: string): RowDetail {
     if (row.mainPending) return { kind: "needsYou" };
     const sub = row.subtasks.find((st) => st.pending);
     if (sub) return { kind: "subtaskNeedsYou", subtaskTitle: taskTitle(sub.tip, untitled) };
-    const errored =
-      row.hops.find((h) => ERROR_STATUSES.has(h.status)) ??
-      row.subtasks.flatMap((st) => st.hops).find((h) => ERROR_STATUSES.has(h.status));
+    // Only a line's latest hop speaks for it: an earlier hop's error was
+    // answered by the hop that took over.
+    const errored = [row.tip, ...row.subtasks.map((st) => st.tip)].find((h) =>
+      ERROR_STATUSES.has(h.status),
+    );
     if (errored) {
       return { kind: "error", status: errored.status, tool: errored.stuckTool?.name };
     }

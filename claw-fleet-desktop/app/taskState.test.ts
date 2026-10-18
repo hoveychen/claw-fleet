@@ -23,6 +23,14 @@ describe("taskStateOf", () => {
     expect(taskStateOf({ main: [m("executing")], subtasks: [m("stuck")], outcome: null })).toBe("needsYou");
   });
 
+  it("an error on a superseded hop is history, a card on one is not", () => {
+    const old = m("serverErrored", { superseded: true });
+    expect(taskStateOf({ main: [old, m("executing")], subtasks: [], outcome: null })).toBe("running");
+    expect(
+      taskStateOf({ main: [{ ...old, hasPendingDecision: true }, m("idle")], subtasks: [], outcome: null }),
+    ).toBe("needsYou");
+  });
+
   it("a closed task is done", () => {
     expect(taskStateOf({ main: [m("idle")], subtasks: [], outcome: "abandoned" })).toBe("done");
   });
