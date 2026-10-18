@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="docs/hero.png" width="640" alt="Claw Fleet — Mission control for your Claude Code agents" />
+<img src="docs/hero.png" width="640" alt="Claw Fleet — hand each idea to a coordinator; every project moves at once" />
 
 # Claw Fleet
 
-**Your agents write the code. The task never dies on your watch.**
-One dashboard for every **Claude Code**, **Codex** and **DeepSeek Harness** session you run — live status, real cost, and every question they need answered, in a single inbox you can reach from your phone.
+**Hand each idea to one coordinator. Every project moves at once. You're only called when you're needed.**
+Each task is one conversation with a coordinating agent — **Claude Code**, **Codex** or **DeepSeek Harness** — that does small things itself, proposes a split before fanning out sub-tasks, and reports back to you alone. Everything runs on your own machine, every step stays visible, and the calls that need you land in one queue you can answer from your phone.
 
 **[Explore the workspace](https://hoveychen.github.io/claw-fleet/)** · **[中文介绍](https://hoveychen.github.io/claw-fleet/zh/)**
 
@@ -51,43 +51,48 @@ To open it from your phone on the same network, run `fleet webui --lan`: it bind
 
 ### Phone
 
-Nothing to install. Enable **Mobile** in the desktop app and scan the QR code — the mobile web app connects through a relay (no port forwarding, no VPN). Add it to your home screen for push notifications.
+Nothing to install. Open **Settings → Mobile** in the desktop app and scan the QR code — the mobile web app connects through a relay (no port forwarding, no VPN). It opens on **Needs you**, with Tasks, Library and Me beside it, and you can start a task from it too. Add it to your home screen for push notifications.
 
 ---
 
 ## 2. Use it
 
-Once it's open, everything is in the left nav.
+You do three things: say what you want, make the calls only you can make, and accept the result. The left nav has four entries — **Tasks**, **Library**, **Projects**, **Settings**.
 
-### See what your agents are doing
+A **project** is a code directory. A **task** is one idea: one main conversation, the coordinator, which is the only thing you talk to. Bigger work it splits into **sub-tasks** that run in parallel; each task and sub-task keeps a list of **steps**.
 
-**Sessions** lists every agent with a live status (thinking, executing, streaming, delegating, waiting on you), grouped into parent–child hierarchies. Each card shows **USD spend** for that session — plus the aggregate across every subagent it spawned. The nav bar keeps a today-total, and a fleet-wide **$/min chart** catches runaway loops.
+### Tasks: every project on one page
 
-Click any session for the full timeline: thinking blocks, tool calls, diffs, the workflow DAG for multi-agent runs, handoff chains, skill history, TODO progress. Stuck agent? **Stop** or **Interrupt** it right there.
+The home page is every task across every project, grouped by what it needs from you: **Needs you → To accept → Running → Waiting → Done**. A task counts as *needs you* if its main conversation *or any of its sub-tasks* has a question open; *waiting* says what it is waiting on (for example its sub-tasks). Each row carries its project, step and sub-task progress, and spend. Filtering to one project is a click on its name — there is no project to "enter", so nothing makes you switch back and forth.
 
-### Answer everything in one place
+Write what you want done in the box at the top, pick a project, send. Model, reasoning effort and permission mode are picked there too; files can be attached.
 
-The **Decision Panel** is one queue for everything that needs a human:
+### One coordinator per idea
 
-- **Guard** — risky Bash commands held before they run, with on-demand LLM risk analysis and "always allow this prefix".
+The coordinator does small things itself. When the work is worth splitting, it **proposes the split first** — which sub-tasks, what each does, what done means — and only spawns them after you confirm. It waits for them, checks what they report, and sends you one summary. Sub-tasks never report to you directly; they only interrupt you for a call that is yours to make, labelled with the task and sub-task it came from.
+
+When a conversation outgrows its context window, Fleet continues it in a fresh one by itself, with the brief and the step list carried over. To you it stays the same task.
+
+### Decisions pinned where you'll see them
+
+Everything that needs a human sits in one queue, pinned at the bottom of the task page and on the phone's landing tab:
+
+- **Agent questions** — options, forms, attachments, free text.
+- **Plan and split approval** — review a plan or a proposed set of sub-tasks before they start.
+- **Guard** — risky shell commands held before they run, with on-demand LLM risk analysis and "always allow this prefix".
 - **Permission prompts** — Claude Code's native requests, bridged out of headless sessions.
-- **Agent questions** — answered through a wizard: options, forms, attachments, free text.
-- **Plan approval** — review and edit an agent's plan before it starts.
 
-Every answer is kept in history. Answering on the desktop or on your phone unblocks the same waiting agent.
+Answering on the desktop or the phone unblocks the same waiting agent. When the task is delivered it moves to **To accept**; accept it and it's done.
 
-### Launch and relay tasks
+### Nothing hidden
 
-**Launch** a session from the app: pick a workspace, write the prompt, choose model / reasoning effort / permission mode, attach files. Fleet spawns a detached session and manages them in tabs. Works from the phone too.
+Open a task for the full main conversation — thinking, tool calls, diffs. The side rail lists its sub-tasks (open one to read or steer it), the steps with the current one marked, and the material it has filed. Running time and spend sit in the header next to **Stop**. The **developer view** in the rail keeps the raw machinery — session facts, the relay chain, token use, notes, background commands, the workflow graph — for when you want it.
 
-When a task outgrows one context window, the agent registers a handoff and **Fleet spawns the successor itself** — same workspace, the note as its opening brief, the `TASKS.md` plan re-injected. One task survives any number of context windows; the relay chain stays visible on every card.
+### Library, Projects, Settings
 
-### The rest
-
-- **Reports** — a short list of what needs your judgment, pushed only on days that have any: relay chains an outsider read flags as drifting from their goal, lessons that recur across sessions (one click adds them to your `CLAUDE.md`), and adopted lessons that got broken again. Day metrics sit below.
-- **Wiki** — versioned, full-text-searchable archive of everything your agents publish (HTML reports, demos, docs), cross-linked with `[[slug]]`.
-- **Repos** — file trees, git status with push/pull, and run a command in a workspace.
-- **Audit** — every Bash command your agents ran, classified by risk.
+- **Library** — the documents your agents publish (versioned, full-text searchable, cross-linked with `[[slug]]`) and the deliverables they hand you (PDFs, slides, spreadsheets, renders), in one place.
+- **Projects** — per directory: browse the code with git status and push/pull, routines (scheduled and recurring runs), and memory (`CLAUDE.md`, what agents have learned, adopted lessons).
+- **Settings** — models and permissions, plus security audit (every shell command agents ran, classified by risk), the daily review (relay chains drifting from their goal, lessons that recur across sessions — one click adds them to `CLAUDE.md`), skills and plugins, and phone pairing.
 
 ### Optional: the built-in terminal
 
@@ -161,7 +166,9 @@ The feature is off by default: the same crate produces the `fleet` sidecar that 
 
 ## How it works
 
-**Monitoring** reads each agent's local data directory (for Claude Code, `~/.claude/`) — append-only JSONL logs and lock files. OS-native file events (FSEvents / inotify) pick up new lines the moment they're written; status, speed, and cost are derived in-process. No network calls.
+**Visibility** reads each agent's local data directory (for Claude Code, `~/.claude/`) — append-only JSONL logs and lock files. OS-native file events (FSEvents / inotify) pick up new lines the moment they're written; status, speed, and cost are derived in-process. No network calls.
+
+**Coordination** is the agents' own work: Fleet injects guidance into the sessions it starts (who coordinates, when to propose a split, who reports), and the agents use Fleet's tools to spawn sub-tasks, wait on them, keep their step list in `TASKS.md` and hand off to a fresh context. Fleet records which task spawned which sub-task and derives each task's state from all of them.
 
 **Decisions** ride on Claude Code's extension points — hooks (guard, questions, plan approval) and MCP tools (`fleet__ask`, `fleet__render_a2ui`, `fleet__permission_prompt`) — routed into a local hooks server. Desktop, web UI, and mobile are surfaces over the same queue.
 
