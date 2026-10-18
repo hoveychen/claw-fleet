@@ -129,8 +129,17 @@
         "Final check and handover"
       ],
       "stepsDone": 3,
-      "waitNote": "Waiting for the CI preview build"
-    }
+      "waitNote": "Waiting for the CI preview build",
+      "briefs": [
+        "Draft two packaging and visual directions for Ember, each with a website hero and a social cover. Bring them back for a pick before the full set.",
+        "Build the bilingual website: hero, menu and an opening-week page, in whichever direction gets picked.",
+        "Make the launch deck and a cash-flow budget; reconcile the budget with the packaging quotes."
+      ]
+    },
+    "docs": [
+      "Ember · neighbourhood café scan",
+      "Interview coding guide"
+    ]
   },
   "zh": {
     "projects": [
@@ -262,7 +271,16 @@
         "总检与交付"
       ],
       "stepsDone": 3,
-      "waitNote": "等预览构建通过"
-    }
+      "waitNote": "等预览构建通过",
+      "briefs": [
+        "为 Ember 做两个包装与视觉方向，各带官网首屏和社媒封面。拿回来让我选，再出全套。",
+        "搭中英双语官网：首屏、菜单和开业周页面，视觉按选定的方向走。",
+        "做发布提案和现金流预算；预算要和包装报价对上。"
+      ]
+    },
+    "docs": [
+      "Ember · 周边咖啡店调研",
+      "访谈编码指南"
+    ]
   }
 }

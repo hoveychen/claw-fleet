@@ -75,6 +75,17 @@ if (websiteScene) {
     taskOutcome: null, handoff: null,
     agentSource: (["dsh", "codex", "claude-code"] as const)[k], lastActivityMs: Date.now() - (k + 1) * 4 * 60000,
   })));
+  // Each session gets its own transcript, so a card's "your last message" is
+  // what was actually asked of that sub-task, not the seed's.
+  for (const s of MOCK_SESSIONS) {
+    const k = s.id.startsWith("website-sub-") ? Number(s.id.slice(12)) : -1;
+    s.jsonlPath = `/Users/demo/${s.id}.jsonl`;
+    const ask = s.id === "website-0" ? websiteScene.brief : k >= 0 ? websiteScene.coordinator.briefs[k] : s.aiTitle ?? "";
+    MOCK_MESSAGES[s.jsonlPath] = [
+      {type: "user", uuid: `site-user-${s.id}`, timestamp: new Date().toISOString(), message: {role: "user", content: ask}},
+      {type: "assistant", uuid: `site-answer-${s.id}`, timestamp: new Date().toISOString(), message: {role: "assistant", content: [{type: "text", text: s.lastMessagePreview ?? ""}]}},
+    ];
+  }
   Object.assign(MOCK_FLEET_ASK, {
     sessionId: "website-sub-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
     task: {taskId: "website-0", taskTitle: websiteScene.tasks[0][0], subtaskId: "website-sub-0", subtaskTitle: websiteScene.coordinator.subtasks[0][0]},

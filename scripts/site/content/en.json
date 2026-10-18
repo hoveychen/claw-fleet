@@ -23,13 +23,13 @@
   "sample": "Current interface · Illustrative data",
   "panelTitles": [
     "Every task in every project, on one page.",
-    "Before it fans out, it asks.",
+    "Only your calls reach you.",
     "Sub-tasks run side by side. Nothing hidden.",
     "One summary. You accept it."
   ],
   "panelCopy": [
     "Write what you want done and pick a project. Tasks group by what they need from you — needs you, running, waiting, to accept, done — so you never switch project to find out what moved.",
-    "When work is worth splitting, the coordinator proposes the sub-tasks, what each does and what done means, and starts them only after you confirm. The material for the call sits on the card.",
+    "Only the decisions that need you come up — as a card naming the sub-task that asked, with the material for the call on it. Before the coordinator splits work, it asks the same way.",
     "Open a task to read the whole main conversation. Its sub-tasks, steps and filed material sit beside it, and any sub-task can be opened and steered.",
     "Sub-tasks report to the coordinator, not to you. When it is done you get one summary, the task moves to To accept, and what it produced lands in the Library."
   ],
@@ -71,7 +71,7 @@
   "harnessPoints": [
     [
       "A tool per task.",
-      "Choose the agent tool when you hand over the idea, then a model from that tool’s own catalogue. A task’s page shows which tool and model it is on."
+      "Choose the agent tool when you hand over the idea, then a model from that tool’s own catalogue. The developer view on a task’s page names the model it runs on."
     ],
     [
       "Switching tools keeps the thread.",
@@ -82,7 +82,7 @@
       "Steps, the library and the project’s memory live in Fleet, not inside one tool. What Claude Code writes down, Codex and DeepSeek Harness can read back."
     ]
   ],
-  "agentsAlt": "Fleet task page: a coordinator conversation in the middle, its sub-tasks, steps and material in the side rail",
+  "agentsAlt": "Fleet task page with a sub-task open: its conversation, the task’s sub-tasks, steps and material in the side rail, and the developer view naming the model it runs on",
   "mobileHeading": "Away from your desk.<br>Still the one who decides.",
   "mobileCopy": "The phone opens on what needs you, across every project. Answer a call, accept a result, or hand over a new idea — the work keeps running on your own computer.",
   "mobilePoints": [
@@ -229,7 +229,7 @@
   "pages": {
     "claude-code-gui": {
       "title": "A desktop workspace for Claude Code — Claw Fleet",
-      "description": "You already run the Claude Code CLI. Claw Fleet is the desktop workspace around it: several sessions on one board, decisions with the material attached, plans that survive a handoff, and the results kept where you can find them.",
+      "description": "You already run the Claude Code CLI. Claw Fleet is the desktop workspace around it: every task in one list, decisions with the material attached, plans that survive a handoff, and the results kept where you can find them.",
       "skip": "Skip to content",
       "backHome": "Home",
       "navDownload": "Download",
@@ -241,11 +241,11 @@
           "h2": "When three of them are running",
           "body": [
             "Two terminals is fine. Four, and looking after them becomes the job — you are tabbing between panes to see which one finished, which one is stuck, and which one is waiting on you.",
-            "Fleet puts them on one board. Each task sits under the project it belongs to, with its tool and model on the card, and you can tell at a glance which sessions are thinking, which are running a command, and which stopped to ask something. Start a task from one place, add a follow-up instruction while it is still running, and keep talking to it after it stops.",
-            "The board is a view of your real sessions, not a copy of them: Fleet reads the transcripts Claude Code already writes, so a session you started in a terminal shows up too."
+            "Fleet puts them in one task list. Every task sits under its project and is grouped by what it needs from you — needs you, running, waiting, to accept, done — so you can tell at a glance which one finished, which is still working and which stopped to ask something. Start a task from one place, add a follow-up instruction while it is still running, and keep talking to it after it stops.",
+            "The list is a view of your real sessions, not a copy of them: Fleet reads the transcripts Claude Code already writes, and every task it starts is an ordinary Claude Code session you can resume from a terminal."
           ],
           "shot": "screenshots/current/agents-en.png",
-          "shotAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
+          "shotAlt": "Fleet task page with a sub-task open: its conversation, the task’s sub-tasks, steps and material in the side rail, and the developer view naming the model it runs on",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
@@ -256,7 +256,7 @@
             "Every question, the choice you made and anything you typed stays with the work, so a decision from last week is still readable next to what came out of it."
           ],
           "shot": "screenshots/current/review-en.png",
-          "shotAlt": "A Fleet decision card with a proposal preview on the left and two concrete options on the right",
+          "shotAlt": "A Fleet decision card pinned under a task: which sub-task asked, the material for the call, and two concrete options",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
@@ -275,7 +275,7 @@
             "What lands there is what an agent added or what the artifact command captured, not a sweep of everything you touched."
           ],
           "shot": "screenshots/current/results-en.png",
-          "shotAlt": "Fleet deliverables view with documents and media previewed in place, filtered by project",
+          "shotAlt": "The Fleet Library: deliverables and docs from every project in one list, an image open in the reader",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
@@ -299,7 +299,7 @@
       "faqs": [
         [
           "Does this replace the Claude Code CLI?",
-          "No. Fleet starts the same CLI you have installed and reads the session data it writes. Sessions you start in a terminal show up in Fleet, and anything Fleet starts is an ordinary Claude Code session you can also resume from the terminal."
+          "No. Fleet starts the same CLI you have installed and reads the session data it writes. Anything Fleet starts is an ordinary Claude Code session you can also resume from the terminal."
         ],
         [
           "Do I need an API key, or a separate subscription?",
@@ -353,7 +353,7 @@
             "You get the same queue as every other tool's questions, so a Codex run waiting on you looks like everything else waiting on you."
           ],
           "shot": "screenshots/current/review-en.png",
-          "shotAlt": "A Fleet decision card showing a proposal preview beside two concrete options",
+          "shotAlt": "A Fleet decision card pinned under a task: which sub-task asked, the material for the call, and two concrete options",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
@@ -371,13 +371,13 @@
             "Scheduled and condition-based runs work the same way: a nightly check or a job waiting on a build can be a Codex task without becoming a Codex-only setup."
           ],
           "shot": "screenshots/current/agents-en.png",
-          "shotAlt": "Fleet session board with Codex, Claude Code and DeepSeek Harness tasks side by side, each card labelled with its tool and model",
+          "shotAlt": "Fleet task page with a sub-task open: its conversation, the task’s sub-tasks, steps and material in the side rail, and the developer view naming the model it runs on",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
           "h2": "Where it runs, and what it costs",
           "body": [
-            "Fleet starts the Codex CLI on your own machine and reads the session files it writes, so a run you started in a terminal appears in Fleet too, and a run Fleet started stays an ordinary Codex session. The machine has to be online for its tasks to move; that is also what the phone connects back to.",
+            "Fleet starts the Codex CLI on your own machine and reads the session files it writes, so a run Fleet started stays an ordinary Codex session. The machine has to be online for its tasks to move; that is also what the phone connects back to.",
             "Fleet is free and open source under AGPL-3.0. It carries no model account and no hosted subscription of its own — Codex usage stays on the ChatGPT plan you already pay for."
           ]
         }
@@ -440,14 +440,14 @@
           ]
         },
         {
-          "h2": "Same board, same decisions, same deliverables",
+          "h2": "Same task list, same decisions, same deliverables",
           "body": [
-            "Everything the workspace does around a session applies here unchanged. dsh tasks sit on the same board with their provider and model on the card, take follow-up instructions while running, raise decision cards with the material attached, and drop their finished files into the project's deliverables.",
+            "Everything the workspace does around a session applies here unchanged. dsh tasks sit in the same task list, take follow-up instructions while running, raise decision cards with the material attached, and drop their finished files into the Library; a task’s developer view names the provider’s model it runs on.",
             "Images work in both directions: attach reference pictures to a brief and they reach the session as real files.",
             "A plan written in a dsh session is the same plan another tool picks up, and a handoff can name a Claude Code or Codex model to continue in. The point of a bring-your-own-key harness is not having to commit — keeping the plan, the wiki and the results outside the CLI is what makes that true in practice."
           ],
           "shot": "screenshots/current/agents-en.png",
-          "shotAlt": "Fleet session board with DeepSeek Harness, Claude Code and Codex tasks side by side, each card labelled with its tool and model",
+          "shotAlt": "Fleet task page with a sub-task open: its conversation, the task’s sub-tasks, steps and material in the side rail, and the developer view naming the model it runs on",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
@@ -527,10 +527,10 @@
           "h2": "Mixing them on purpose",
           "body": [
             "Because the plan, the project wiki and the deliverables belong to the work rather than to a CLI, a single piece of work can move between the three. One tool drafts a plan, another implements the steps, a third reviews the diff — and a handoff carries the plan, the current step and the notes the previous session left behind.",
-            "When several are running, each card on the board says which tool and model it is on, so a mixed board stays readable. Which tool takes which step is a per-task choice, not a setting you commit to once."
+            "When several are running, each task’s developer view says which model it is on, so a mixed set stays readable. Which tool takes which step is a per-task choice, not a setting you commit to once."
           ],
           "shot": "screenshots/current/agents-en.png",
-          "shotAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
+          "shotAlt": "Fleet task page with a sub-task open: its conversation, the task’s sub-tasks, steps and material in the side rail, and the developer view naming the model it runs on",
           "shotCaption": "Current interface · Illustrative data"
         }
       ],

@@ -4,7 +4,7 @@ import assets from '../../../scripts/site/fixtures/assets.json';
 import reviewEn from '../../../scripts/site/fixtures/en/review.html?raw';
 import reviewZh from '../../../scripts/site/fixtures/zh/review.html?raw';
 import scenes from '../../../scripts/site/fixtures/scenes.json';
-import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE, MOCK_TASK_PLANS } from './data';
+import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE, MOCK_TASK_PLANS, MOCK_WIKI_DOCS } from './data';
 export const websiteLang = new URLSearchParams(location.search).get('website');
 export const websiteScene = websiteLang === 'en' || websiteLang === 'zh' ? scenes[websiteLang] : null;
 export const websiteReview = websiteLang === "zh" ? reviewZh : reviewEn;
@@ -61,9 +61,12 @@ export function installWebsiteFixtures() {
     items: co.steps.map((text: string, k: number) => ({ text, done: k < co.stepsDone })),
   });
   for (const [i, session] of MOCK_SESSIONS.entries()) {
-    const [ask, answer] = i === 0 ? [c.brief, c.reply] : [session.aiTitle, session.lastMessagePreview];
+    const sub = session.id.startsWith('website-sub-') ? Number(session.id.slice(12)) : -1;
+    const [ask, answer] = i === 0 ? [c.brief, c.reply]
+      : sub >= 0 ? [co.briefs[sub], session.lastMessagePreview]
+      : [session.aiTitle, session.lastMessagePreview];
     MOCK_MESSAGES[session.id] = [
-      {type: 'user', uuid: `site-user-${i}`, timestamp: new Date().toISOString(), message: {role: 'user', content: ask}},
+      {type: 'user', uuid: `site-user-${i}`, timestamp: new Date().toISOString(), message: {role: 'user', content: ask ?? ''}},
       {type: 'assistant', uuid: `site-answer-${i}`, timestamp: new Date().toISOString(), message: {role: 'assistant', content: [{type: 'text', text: answer}]}},
     ];
   }
@@ -72,7 +75,16 @@ export function installWebsiteFixtures() {
   MOCK_ARTIFACTS.splice(0, MOCK_ARTIFACTS.length, ...c.artifacts.map((title, i) => ({
     ...artifactSeed, ...files[i], title, note: '',
     workspaceName: c.projects[[0,0,0,4,0,3,0,5][i]], workspacePath: `/Users/demo/workspace/${projects[[0,0,0,4,0,3,0,5][i]]}`,
+    // Filed by the task that made it, so Ember's rail lists its own material.
+    sessionId: ['website-0','website-sub-2','website-sub-2','website-4','website-sub-0','website-3','website-0','website-5'][i],
     starred: i < 2, drifted: false, createdMs: Date.now() - i * 3600000,
+  })));
+  // The library's docs side, in the same projects as the deliverables.
+  const docSeed = MOCK_WIKI_DOCS[0];
+  MOCK_WIKI_DOCS.splice(0, MOCK_WIKI_DOCS.length, ...c.docs.map((title: string, i: number) => ({
+    ...docSeed, slug: `site/doc-${i}`, title, entry: `doc-${i}.md`,
+    workspaceName: c.projects[i], workspacePath: `/Users/demo/workspace/${projects[i]}`,
+    createdMs: now - (i + 2) * 86400000, updatedMs: now - (i * 2 + 1.5) * 3600000,
   })));
   useComposerDraftStore.getState().patchDraft('new', {
     workspace: '/Users/demo/workspace/ember-coffee', prompt: c.brief,
