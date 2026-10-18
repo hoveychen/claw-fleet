@@ -253,13 +253,10 @@ describe("live proxy route table", () => {
   });
 
   it("keeps camelCase bodies camelCase", () => {
-    // `SpawnSessionRequest` / `SetSessionMarkRequest` are `rename_all = "camelCase"`.
+    // `SpawnSessionRequest` is `rename_all = "camelCase"`.
     expect(LIVE_ROUTES.spawn_new_claude_session({ workspacePath: "/w" }).body).toMatchObject({
       workspacePath: "/w",
     });
-    expect(
-      LIVE_ROUTES.set_session_mark({ sessionId: "s", workspacePath: "/w", mark: "star" }).body,
-    ).toMatchObject({ sessionId: "s", workspacePath: "/w" });
   });
 
   /**

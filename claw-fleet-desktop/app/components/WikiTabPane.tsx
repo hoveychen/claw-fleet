@@ -14,7 +14,7 @@ import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildWikiMenu, type AuxCardTail } from "./auxDocMenu";
 import { exportWikiDoc, WikiDocBody } from "./WikiView";
 import { printWikiDoc } from "./wikiPrint";
-import { timeAgo } from "./SessionRow";
+import { timeAgo } from "./timeAgo";
 import styles from "./TabPanes.module.css";
 import { Skeleton, SkeletonText } from "./loading";
 

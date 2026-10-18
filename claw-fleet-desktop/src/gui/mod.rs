@@ -1730,7 +1730,6 @@ pub fn run() {
             get_memory_content,
             read_live_thinking,
             get_task_plans,
-            get_plan_forest,
             get_memory_history,
             get_claude_md_content,
             promote_memory,

@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { TaskState } from "../../../shared-ts/taskState";
 import type { SessionInfo } from "../types";
-import { timeAgo } from "./SessionRow";
+import { timeAgo } from "./timeAgo";
 import {
   rowDetail,
   type HomeRow,

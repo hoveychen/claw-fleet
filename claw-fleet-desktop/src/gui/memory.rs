@@ -49,16 +49,6 @@ pub(crate) fn get_task_plans(
         .get_task_plans(&workspace_path, session_id.as_deref())
 }
 
-/// The workspace's whole execution chain — plan forest with handoff chains
-/// folded onto their plan nodes. Backs the top-level plan-tree view.
-#[tauri::command(async)]
-pub(crate) fn get_plan_forest(
-    workspace_path: String,
-    state: tauri::State<'_, AppState>,
-) -> claw_fleet_core::plan_forest::PlanForest {
-    state.backend.get_plan_forest(&workspace_path)
-}
-
 /// `(async)`: reading a workspace's CLAUDE.md is disk work of unbounded size
 /// (these files run to tens of KB and the read happens on every Memory-view
 /// open), and a read has nothing the event loop needs to serialize.

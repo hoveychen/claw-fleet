@@ -95,8 +95,6 @@ const ALL_KEYS = [
   "plan-approval-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
-  // DecisionPanel presentation.
-  "decision-panel-collapsed",
   // Read-state for audit entries, stored as a JSON blob.
   "audit-read-keys",
   // The most recent daily-report date the user has viewed (YYYY-MM-DD). Drives

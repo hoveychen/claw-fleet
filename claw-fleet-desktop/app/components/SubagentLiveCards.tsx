@@ -18,7 +18,7 @@ import { agentCardId } from "../detailAux";
 import type { SessionInfo } from "../types";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { formatModel, StatusBadge } from "./SessionCard";
-import { timeAgo } from "./SessionRow";
+import { timeAgo } from "./timeAgo";
 import styles from "./SessionDetail.module.css";
 import { Presence } from "./Presence";
 

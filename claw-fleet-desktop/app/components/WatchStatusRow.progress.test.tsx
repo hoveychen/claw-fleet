@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import "../i18n";
 import { WatchStatusRow } from "./WatchStatusRow";
-import { SessionRow } from "./SessionRow";
 import { MOCK_SESSIONS } from "../mock/data";
 import type { SessionInfo, WatchSummary } from "../types";
 import { WATCH_STALL_MS, watchProgressView } from "../../../shared-ts/watchProgress";
@@ -98,38 +97,6 @@ describe("WatchStatusRow progress", () => {
     render(watch({ expectBy: Date.now() + 30 * MIN }));
     expect(container.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("50");
     expect(container.textContent).toMatch(/30m\d\ds of ~1h00m/);
-  });
-
-  function renderRow(w: WatchSummary) {
-    const session = { ...MOCK_SESSIONS[0], watches: [w] } as SessionInfo;
-    act(() =>
-      root.render(
-        <SessionRow
-          session={session}
-          snippet={undefined}
-          isSelected={false}
-          isOpen={false}
-          nowTick={0}
-          showSource={false}
-          onClick={() => {}}
-          onContextMenu={() => {}}
-        />,
-      ),
-    );
-    // The ring stands in for the radar icon whenever there is a fraction.
-    return container.querySelector('svg.lucide-radar, svg[role="progressbar"]')?.parentElement;
-  }
-
-  it("squeezes progress into one token on the compact rail row", () => {
-    expect(renderRow(watch({ progress: "3/8", progressFraction: 0.375 }))?.textContent).toBe("38%");
-    expect(container.querySelector("svg.lucide-radar")).toBeNull();
-    expect(container.querySelector('svg[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("38");
-    // The status line goes in whole: CSS ellipsizes it only once the row runs
-    // out of width (d5df26c3), so its tail ("已读 124 篇") survives on a wide row.
-    expect(renderRow(watch({ progress: "building the frontend bundle" }))?.textContent).toBe(
-      "building the frontend bundle",
-    );
-    expect(renderRow(watch({ expectBy: Date.now() + 30 * MIN }))?.textContent).toBe("30m/1h");
   });
 
   it("keeps the poll-count chip for a watch with no progress source", () => {

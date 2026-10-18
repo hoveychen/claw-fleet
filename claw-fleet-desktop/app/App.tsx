@@ -7,7 +7,6 @@ import "./App.css";
 import { Onboarding } from "./components/Onboarding";
 import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { DecisionPanel } from "./components/DecisionPanel";
 import { DailyReportPopup } from "./components/report/DailyReportPopup";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
@@ -281,7 +280,6 @@ function App() {
       <div className="app_main" data-find-content>
         <SessionList />
       </div>
-      <DecisionPanel />
       <Presence when={settingsOpen}>{settingsOpen && <SettingsPanel onClose={closeSettings} />}</Presence>
       <DailyReportPopup />
       <UpdateNotice />

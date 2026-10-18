@@ -221,10 +221,6 @@ interface UIState {
    *  panel restored on boot is not a preference, it is a surprise. */
   settingsOpen: boolean;
   setSettingsOpen: (on: boolean) => void;
-  /** When true, the DecisionPanel renders as a minimized bar at the bottom
-   *  of the screen instead of the full card. Guard decisions force-expand. */
-  decisionPanelCollapsed: boolean;
-  setDecisionPanelCollapsed: (on: boolean) => void;
   /** A pending "reveal this file in the Files page" request, raised when the
    *  user clicks a path in agent prose. FilesView owns the explorer's
    *  selection state internally, so a request travels through the store
@@ -489,7 +485,6 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("home-collapsed-sections", JSON.stringify(next));
       return { homeCollapsedSections: next };
     }),
-  decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -616,10 +611,6 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
     set({ mascotVisible: on });
-  },
-  setDecisionPanelCollapsed: (on) => {
-    setItem("decision-panel-collapsed", on ? "true" : "false");
-    set({ decisionPanelCollapsed: on });
   },
 }));
 
@@ -1345,8 +1336,6 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
 interface DecisionState {
   decisions: PendingDecision[];
-  /** ID of the decision currently shown in the card area. */
-  activeDecisionId: string | null;
   /** Add a guard request to the queue and kick off LLM analysis. */
   addGuardRequest: (req: GuardRequest) => void;
   /** Add an elicitation request to the queue. */
@@ -1462,8 +1451,6 @@ interface DecisionState {
   markParked: (id: string) => void;
   /** Update analysis state for a specific decision. */
   setAnalysis: (id: string, analysis: string | null, analyzing: boolean) => void;
-  /** Switch the active decision shown in the card area. */
-  setActiveDecision: (id: string) => void;
 }
 
 /**
@@ -1485,7 +1472,6 @@ interface DecisionState {
  */
 export const useDecisionStore = create<DecisionState>((set, get) => ({
   decisions: [],
-  activeDecisionId: null,
 
   addGuardRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
@@ -1501,8 +1487,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      // Auto-select new decision when it's the first one
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
 
     // Kick off LLM analysis if enabled
@@ -1546,7 +1530,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
   },
 
@@ -1577,7 +1560,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       if (s.decisions.some((d) => d.id === decision.id)) return s;
       return {
         decisions: [...s.decisions, decision],
-        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
       };
     });
   },
@@ -1595,7 +1577,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       if (s.decisions.some((d) => d.id === decision.id)) return s;
       return {
         decisions: [...s.decisions, decision],
-        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
       };
     });
   },
@@ -1624,7 +1605,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
   },
 
@@ -1641,7 +1621,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     };
     set((s) => ({
       decisions: [...s.decisions, decision],
-      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
   },
 
@@ -2127,7 +2106,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       ),
     })),
 
-  setActiveDecision: (id) => set({ activeDecisionId: id }),
 }));
 
 /**
@@ -2144,7 +2122,7 @@ function fireDecisionResponse(label: string, run: () => Promise<unknown>): void 
   run().catch((e) => console.error(`${label} failed:`, e));
 }
 
-/** When a decision is removed, pick the next active: prefer the one after it, else before, else null. */
+/** Drop a decision from the queue. */
 function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
   // Every removal path funnels through here — answered, declined, dismissed,
   // reconciled away — which makes it the one place that can tell the reconcile
@@ -2153,19 +2131,7 @@ function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
   // posted in the background, so the request file is still on disk for the
   // fraction of a second it takes the blocked producer to notice.
   noteRemovedLocally(id);
-  const idx = s.decisions.findIndex((d) => d.id === id);
-  const next = s.decisions.filter((d) => d.id !== id);
-  let activeDecisionId = s.activeDecisionId;
-  if (activeDecisionId === id) {
-    if (next.length === 0) {
-      activeDecisionId = null;
-    } else {
-      // prefer the item that was after the removed one; clamp to last
-      const nextIdx = Math.min(idx, next.length - 1);
-      activeDecisionId = next[nextIdx].id;
-    }
-  }
-  return { decisions: next, activeDecisionId };
+  return { decisions: s.decisions.filter((d) => d.id !== id) };
 }
 
 // ── Workspace command runner ─────────────────────────────────────────────────

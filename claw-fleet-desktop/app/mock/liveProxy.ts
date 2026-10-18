@@ -1284,13 +1284,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { plugin_id: a.pluginId, enabled: a.enabled },
   }),
 
-  set_session_mark: (a) => ({
-    method: "POST",
-    path: "/session_mark",
-    empty: true,
-    body: { sessionId: a.sessionId, workspacePath: a.workspacePath, mark: a.mark },
-  }),
-
   accept_tasks: (a) => ({
     method: "POST",
     path: "/tasks/accept",
