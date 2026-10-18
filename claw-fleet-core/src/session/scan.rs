@@ -1343,7 +1343,7 @@ mod agent_listing_tests {
         assert_eq!(sorted_names(again), vec!["agent-a.jsonl", "agent-b.jsonl"]);
 
         // New files at each level bump only their own dir's mtime.
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(50));
         fs::write(run.join("agent-c.jsonl"), "").unwrap();
         let run2 = sub.join("workflows").join("wf_2");
         fs::create_dir_all(&run2).unwrap();
@@ -1361,6 +1361,10 @@ mod agent_listing_tests {
             ]
         );
 
+        // Linux stamps dir mtimes from the coarse (jiffy) clock, so a delete
+        // right after the writes above can land on the same mtime and be
+        // served from the cache.
+        std::thread::sleep(Duration::from_millis(50));
         fs::remove_file(run.join("agent-b.jsonl")).unwrap();
         let removed = list_agent_transcripts(&sub, &cache).unwrap();
         assert!(!sorted_names(removed).contains(&"agent-b.jsonl".to_string()));

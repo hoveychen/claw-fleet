@@ -93,7 +93,9 @@
         "note": "Briefing"
       },
       "watch": {
-        "note": "Waiting for"
+        "note": "Waiting for",
+        "sessions": "Sessions",
+        "mode": "Fire when"
       },
       "artifact": {
         "note": "Note"
@@ -124,7 +126,9 @@
       "watch": {
         "create": "Create watch",
         "stop": "Stop watch {{id}}",
-        "list": "List watches"
+        "list": "List watches",
+        "add": "Add sessions to watch {{id}}",
+        "remove": "Remove sessions from watch {{id}}"
       },
       "loop": {
         "create": "Create loop",

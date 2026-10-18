@@ -93,7 +93,9 @@
         "note": "交接便条"
       },
       "watch": {
-        "note": "在等什么"
+        "note": "在等什么",
+        "sessions": "等待的会话",
+        "mode": "触发条件"
       },
       "artifact": {
         "note": "说明"
@@ -124,7 +126,9 @@
       "watch": {
         "create": "创建守望",
         "stop": "停止守望 {{id}}",
-        "list": "列出守望"
+        "list": "列出守望",
+        "add": "守望 {{id}} 加入会话",
+        "remove": "守望 {{id}} 移除会话"
       },
       "loop": {
         "create": "创建循环",
