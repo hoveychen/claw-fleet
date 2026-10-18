@@ -140,11 +140,12 @@ export function buildHomeRows(
     push(mains, lineKey(s), s);
   }
 
-  const view = (s: SessionInfo): TaskMemberView => ({
+  const view = (s: SessionInfo, superseded: boolean): TaskMemberView => ({
     status: s.status,
     procAlive: !!s.procAlive,
     quiet: opts.isQuiet(s),
     hasPendingDecision: isPending(s),
+    superseded,
   });
 
   const covered = new Set<string>();
@@ -167,8 +168,8 @@ export function buildHomeRows(
       hops,
       subtasks,
       state: taskStateOf({
-        main: hops.map(view),
-        subtasks: allSubHops.map(view),
+        main: hops.map((h) => view(h, h !== tip)),
+        subtasks: subtasks.flatMap((st) => st.hops.map((h) => view(h, h !== st.tip))),
         outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
       }),
       title: sessionTitle(tip, opts.untitled),
@@ -226,17 +227,18 @@ function push<K, V>(m: Map<K, V[]>, k: K, v: V) {
 function foldSubtasks(
   keyPrefix: string,
   lines: Map<string, SessionInfo[]>,
-  view: (s: SessionInfo) => TaskMemberView,
+  view: (s: SessionInfo, superseded: boolean) => TaskMemberView,
   isPending: (s: SessionInfo) => boolean,
 ): SubtaskRow[] {
   const out: SubtaskRow[] = [];
   for (const [sk, hops] of lines) {
+    const tip = tipOf(hops);
     out.push({
       key: `${keyPrefix}::${sk}`,
-      tip: tipOf(hops),
+      tip,
       hops,
       state: taskStateOf({
-        main: hops.map(view),
+        main: hops.map((h) => view(h, h !== tip)),
         subtasks: [],
         outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
       }),

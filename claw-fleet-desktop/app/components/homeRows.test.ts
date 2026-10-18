@@ -108,6 +108,24 @@ describe("buildHomeRows", () => {
     const rows = build([session("main", { taskOutcome: "completed" })]);
     expect(rows[0].state).toBe("done");
   });
+
+  it("ignores an error on a relay hop a later hop took over from", () => {
+    // Seen on real data: hop 13 of a finished 14-hop chain ended serverErrored,
+    // and the whole task sat in needs-you on the desktop but not the phone.
+    const rows = build([
+      session("root", {
+        status: "serverErrored",
+        taskOutcome: "completed",
+        handoff: { chainId: "c", chainLen: 2, hop: 1 },
+      }),
+      session("hop2", {
+        taskId: "root",
+        taskOutcome: "completed",
+        handoff: { chainId: "c", chainLen: 2, hop: 2 },
+      }),
+    ]);
+    expect(rows[0].state).toBe("done");
+  });
 });
 
 describe("sectionRows", () => {
