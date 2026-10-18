@@ -2683,7 +2683,16 @@
     "dock_subtask_untitled": "子任务",
     "dock_from_subtask": "来自子任务",
     "dock_prev": "上一张卡",
-    "dock_next": "下一张卡"
+    "dock_next": "下一张卡",
+    "rail_subtasks": "子任务",
+    "rail_steps": "步骤",
+    "rail_step_now": "（当前）",
+    "rail_material": "本任务资料",
+    "rail_material_empty": "还没有产出",
+    "rail_developer": "开发者视图",
+    "rail_main": "主对话",
+    "elapsed": "已运行 {{span}}",
+    "stop": "停止"
   },
   "history": {
     "title": "任务",

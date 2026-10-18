@@ -1083,6 +1083,12 @@ export function HistoryView() {
                 }
                 taskCards={taskCards}
                 projectName={activeRow?.projectName ?? null}
+                task={activeRow?.kind === "task" ? activeRow : null}
+                onOpenSession={(id) => {
+                  const s = sessionById.get(id);
+                  if (s) openTab(s, null);
+                  else setOpenId(id);
+                }}
               />
             </div>
           ) : pane.kind === "loading" ? (

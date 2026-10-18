@@ -2686,7 +2686,16 @@
     "dock_subtask_untitled": "Sub-task",
     "dock_from_subtask": "From a sub-task",
     "dock_prev": "Previous card",
-    "dock_next": "Next card"
+    "dock_next": "Next card",
+    "rail_subtasks": "Sub-tasks",
+    "rail_steps": "Steps",
+    "rail_step_now": " (now)",
+    "rail_material": "Material",
+    "rail_material_empty": "Nothing filed yet",
+    "rail_developer": "Developer view",
+    "rail_main": "Main conversation",
+    "elapsed": "Running {{span}}",
+    "stop": "Stop"
   },
   "history": {
     "title": "Tasks",

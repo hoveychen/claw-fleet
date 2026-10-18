@@ -42,6 +42,11 @@ import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenC
 import { refetchWikiDocsForMissingSlug, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import { DecisionDock } from "./DecisionDock";
+import { TaskRail } from "./TaskRail";
+import railStyles from "./TaskRail.module.css";
+import type { TaskRow } from "./homeRows";
+import { formatSpan } from "./TaskList";
+import { canControl, performStop, stopMode } from "./StopControl";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
@@ -214,8 +219,18 @@ export function SessionDetail({
   launchPrompt = null,
   taskCards = null,
   projectName = null,
+  task = null,
+  onOpenSession,
 }: {
   inline?: boolean;
+  /** The task the open session belongs to (its main conversation or one of
+   *  its sub-tasks). Set, the pane is a task page: the header shows project,
+   *  elapsed time and spend, and the task rail (sub-tasks, steps, material,
+   *  developer view) stands beside the conversation. */
+  task?: TaskRow | null;
+  /** Opens another session of the task — a sub-task, or back to the main
+   *  conversation — from the task rail. */
+  onOpenSession?: (sessionId: string) => void;
   /** Cards raised by this task's sub-task sessions. They join this session's
    *  own cards in the pinned decision dock, so the whole task is answered
    *  from its main conversation. */
@@ -1751,6 +1766,27 @@ export function SessionDetail({
     </>
   );
 
+  /* Task page facts. Elapsed time and spend are the task's, not the open
+     session's: a sub-task is read inside its task, and the header names the
+     task's clock. A finished task's clock stops at its last activity. */
+  const taskSum = task
+    ? task.tip.taskSummary ?? task.hops.find((h) => h.taskSummary)?.taskSummary ?? null
+    : null;
+  const taskSpan = task
+    ? (task.state === "done" || task.state === "review"
+        ? task.lastActivityMs
+        : Date.now()) - (taskSum?.startedAtMs ?? task.startedAtMs)
+    : 0;
+  const taskCost = task
+    ? taskSum?.costUsd ?? task.hops.reduce((n, h) => n + (h.totalCostUsd ?? 0), 0)
+    : 0;
+  const inSubtask = !!task && !!liveSession && !task.hops.some((h) => h.id === liveSession.id);
+  const taskSteps = (() => {
+    if (!task || taskPlans.length === 0) return null;
+    const want = liveSession?.taskPlan?.planId;
+    return (taskPlans.find((p) => p.id === want) ?? taskPlans[0]).items;
+  })();
+
   return (
     // Both link capabilities cover the whole component, so the reader modal and
     // every tool-block renderer inherit them too — and both now land in the
@@ -1819,9 +1855,40 @@ export function SessionDetail({
                       title={preferredTitle || liveSession.workspacePath}
                       data-tauri-drag-region
                     >
+                      {inSubtask && task && (
+                        <span className={styles.title_parent}>{task.title} › </span>
+                      )}
                       {preferredTitle || liveSession.workspaceName}
                     </div>
                   <div className={styles.meta_row} data-tauri-drag-region>
+                    {task ? (
+                      <>
+                        <span className={styles.workspace_chip} title={task.projectPath}>
+                          {task.projectName}
+                        </span>
+                        <span className={styles.meta_chip} title={t("card.tip_cost")}>
+                          {t("home.elapsed", { span: formatSpan(taskSpan, t) })}
+                          {taskCost >= 0.005 && ` · $${taskCost.toFixed(2)}`}
+                        </span>
+                        <OutOfCreditsNotice session={liveSession} inline />
+                        {liveSession.contextPercent != null && liveSession.contextPercent >= 0.8 && (
+                          <span
+                            className={`${styles.meta_chip} ${styles.meta_chip_warn}`}
+                            title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
+                          >
+                            ctx {Math.round(liveSession.contextPercent * 100)}%
+                          </span>
+                        )}
+                        <ScheduleProvenanceChip session={liveSession} />
+                        {liveSession.watches && liveSession.watches.length > 0 && (
+                          <WatchStatusRow session={liveSession} inline />
+                        )}
+                        {liveSession.waitedBy && liveSession.waitedBy.length > 0 && (
+                          <WaitedByRow session={liveSession} inline />
+                        )}
+                      </>
+                    ) : (
+                    <>
                     {/* Only when the title line isn't already the workspace name. */}
                     {preferredTitle && preferredTitle !== liveSession.workspaceName && (
                       <span
@@ -1868,6 +1935,8 @@ export function SessionDetail({
                     >
                       {metricsOpen ? "×" : "···"}
                     </button>
+                    </>
+                    )}
                   </div>
                   </div>
                   {/* Toolbar. The rail's switch leads it — this is the control
@@ -1876,6 +1945,15 @@ export function SessionDetail({
                       what you want in it (the ··· menu below, or a rail card),
                       and it closes with its own ✕. */}
                   <div className={styles.hero_tools} data-tauri-drag-region>
+                    {task && canControl(liveSession) && stopMode(liveSession) !== "spent" && (
+                      <button
+                        type="button"
+                        className={styles.hero_stop}
+                        onClick={() => void performStop(liveSession, t)}
+                      >
+                        {t("home.stop", "Stop")}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={`${styles.hero_tool} ${railOpen ? styles.hero_tool_on : ""}`}
@@ -1913,7 +1991,7 @@ export function SessionDetail({
                     session cards and the data on SessionInfo; it was only missing
                     where you actually read the run. Clicking opens the Tasks tab,
                     the same destination as from a card. */}
-                {liveSession.taskPlan && (
+                {liveSession.taskPlan && !task && (
                   <PlanProgressRow
                     plan={liveSession.taskPlan}
                     variant="header"
@@ -2047,6 +2125,34 @@ export function SessionDetail({
                 />
               </div>
             </div>
+
+            {task && (
+              <TaskRail
+                row={task}
+                openSessionId={liveSession.id}
+                steps={taskSteps}
+                onOpenSession={(id) => onOpenSession?.(id)}
+                developer={
+                  <>
+                    <div className={railStyles.dev_row}>
+                      {factChips(liveSession, true)}
+                      <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
+                      {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
+                    </div>
+                    {auxFacets.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        className={`${railStyles.dev_link} ${activeFacet === f.id ? railStyles.dev_link_on : ""}`}
+                        onClick={() => openFacet(f.id)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </>
+                }
+              />
+            )}
 
             {auxOpen && (
               <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>
