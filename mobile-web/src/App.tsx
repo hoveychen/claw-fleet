@@ -1052,6 +1052,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     () => new Set(decisions.map((d) => itemKey(d.deviceId, d.request.sessionId))),
     [decisions],
   );
+  const detailDeviceId = detailSession?.deviceId ?? null;
+  const detailPendingIds = useMemo(
+    () =>
+      new Set(
+        decisions.filter((d) => d.deviceId === detailDeviceId).map((d) => d.request.sessionId),
+      ),
+    [decisions, detailDeviceId],
+  );
   // A task is opened at its latest main-conversation hop: the hop that is
   // talking now, not the first one the task id is named after.
   const resolveTaskTip = useCallback(
@@ -1558,6 +1566,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
           onOpenWikiSlug={(slug: string) => openWikiSlug(detailSession.deviceId, slug)}
+          onOpenWikiDoc={(doc) =>
+            setWikiStack((s) => [...s, { deviceId: detailSession.deviceId, doc }])
+          }
+          pendingSessionIds={detailPendingIds}
           // The "N pending decisions" count in the header timeline uses this. Decision cards
           // are a merged cross-device inbox, not attached to SessionInfo, so we count by
           // (device, session) here — only this device's cards, so a same-numbered session

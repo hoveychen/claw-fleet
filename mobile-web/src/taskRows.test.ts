@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildTaskRows, rowDetail, sectionRows, stepText, subtaskTally } from "./taskRows";
+import {
+  buildTaskRows,
+  rowDetail,
+  sectionRows,
+  stepText,
+  subtaskRowsOf,
+  subtaskTally,
+  taskSessionIds,
+} from "./taskRows";
 import type { SessionInfo } from "./types";
 
 type Row = SessionInfo & { deviceId: string };
@@ -146,5 +154,56 @@ describe("subtaskTally", () => {
       s({ id: "b", taskId: "b", parentTaskId: "t", status: "executing", procAlive: true }),
     ]);
     expect(subtaskTally(rows[0])).toEqual({ done: 1, total: 2 });
+  });
+});
+
+describe("subtaskRowsOf", () => {
+  const opts = (pending: string[] = []) => ({
+    isPending: (x: Row) => pending.includes(x.id),
+    isQuiet: () => false,
+  });
+
+  it("lists only the given task's sub-tasks, relay hops folded", () => {
+    const rows = subtaskRowsOf(
+      [
+        s({ id: "t", taskId: "t" }),
+        s({ id: "a1", taskId: "a1", parentTaskId: "t", handoff: { chainId: "ca", hop: 1, chainLen: 2 } as never }),
+        s({ id: "a2", taskId: "a1", parentTaskId: "t", handoff: { chainId: "ca", hop: 2, chainLen: 2 } as never }),
+        s({ id: "other", taskId: "other", parentTaskId: "x" }),
+        s({ id: "agent", parentTaskId: "t", isSubagent: true }),
+      ],
+      "t",
+      opts(),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tip.id).toBe("a2");
+    expect(rows[0].hops).toHaveLength(2);
+  });
+
+  it("files a sub-task with a waiting card under needsYou", () => {
+    const rows = subtaskRowsOf(
+      [s({ id: "b", taskId: "b", parentTaskId: "t", procAlive: true, status: "waitingInput" })],
+      "t",
+      opts(["b"]),
+    );
+    expect(rows[0].pending).toBe(true);
+    expect(rows[0].state).toBe("needsYou");
+  });
+});
+
+describe("taskSessionIds", () => {
+  it("collects main hops and sub-task hops of the task", () => {
+    const all = [
+      s({ id: "t", taskId: "t" }),
+      s({ id: "t2", taskId: "t" }),
+      s({ id: "sub", taskId: "sub", parentTaskId: "t" }),
+      s({ id: "x", taskId: "x" }),
+    ];
+    expect([...taskSessionIds(all, all[1])].sort()).toEqual(["sub", "t", "t2"]);
+  });
+
+  it("is just the session itself without a task id", () => {
+    const one = s({ id: "lone" });
+    expect([...taskSessionIds([one], one)]).toEqual(["lone"]);
   });
 });

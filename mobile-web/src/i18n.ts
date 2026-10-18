@@ -1190,4 +1190,18 @@ const DICT: Record<string, string> = {
   "没有匹配的任务": "No matching tasks",
   "全部验收": "Accept all",
   "展开": "Expand",
+  // ── Task model: task detail segments ──
+  对话: "Conversation",
+  子任务: "Sub-tasks",
+  步骤: "Steps",
+  文档: "Doc",
+  本项目: "this project",
+  "{0} 的文档": "{0} docs",
+  本任务产出: "This task's outputs",
+  等你回答: "Waiting for you",
+  "资料加载失败：{0}": "Library failed to load: {0}",
+  还没有子任务: "No sub-tasks yet",
+  "这个任务派出的会话会列在这里。": "Sessions this task spawns are listed here.",
+  "这个任务还没有存进产出库的文件。": "This task hasn't saved anything to the output library yet.",
+  "这个项目还没有归档的文档。": "This project has no archived docs yet.",
 };

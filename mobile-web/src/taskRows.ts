@@ -17,7 +17,7 @@ import { isFleetOwnedTask, type SessionInfo } from "./types";
 
 type Row = SessionInfo & { deviceId: string };
 
-export interface SubtaskRow<T extends Row = Row> {
+export interface SubtaskRow<T extends SessionInfo = Row> {
   key: string;
   /** The hop to open: the sub-task's latest. */
   tip: T;
@@ -47,21 +47,21 @@ export interface TaskRow<T extends Row = Row> {
 
 /** Hop order inside one conversation line: the relay hop number when there
  *  is one, then recency. */
-function laterHop(a: Row, b: Row): boolean {
+function laterHop(a: SessionInfo, b: SessionInfo): boolean {
   const ha = a.handoff?.hop ?? 0;
   const hb = b.handoff?.hop ?? 0;
   if (ha !== hb) return ha > hb;
   return a.lastActivityMs > b.lastActivityMs;
 }
 
-function tipOf<T extends Row>(hops: T[]): T {
+function tipOf<T extends SessionInfo>(hops: T[]): T {
   return hops.reduce((a, b) => (laterHop(b, a) ? b : a));
 }
 
 /** Which conversation line a session belongs to. `taskId` is the core's
  *  answer; payloads from an older desktop lack it, and then a relay chain is
  *  the best stand-in for "one line". */
-function lineKey(s: Row): string {
+function lineKey(s: SessionInfo): string {
   if (s.taskId) return s.taskId;
   if (s.handoff && s.handoff.chainLen > 1) return `chain:${s.handoff.chainId}`;
   return s.id;
@@ -130,22 +130,9 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
     // — not necessarily the line key used above when the payload is old.
     const taskId = tip.taskId ?? null;
     const lines = taskId ? subs.get(`${tip.deviceId}::${taskId}`) : undefined;
-    const subtasks: Array<SubtaskRow<T>> = [];
-    for (const [sk, shops] of lines ?? []) {
-      const stip = tipOf(shops);
-      subtasks.push({
-        key: `${key}::${sk}`,
-        tip: stip,
-        hops: shops,
-        state: taskStateOf({
-          main: shops.map(view),
-          subtasks: [],
-          outcome: shops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
-        }),
-        pending: shops.some((h) => opts.isPending(h.deviceId, h.id)),
-      });
-    }
-    subtasks.sort((a, b) => b.tip.lastActivityMs - a.tip.lastActivityMs);
+    const subtasks = foldSubtasks(key, lines ?? new Map<string, T[]>(), view, (h) =>
+      opts.isPending(h.deviceId, h.id),
+    );
     const allSubHops = subtasks.flatMap((st) => st.hops);
     const state = taskStateOf({
       main: hops.map(view),
@@ -173,6 +160,70 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
   }
   rows.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   return rows;
+}
+
+/** Turn sub-task conversation lines into rows, newest activity first. */
+function foldSubtasks<T extends SessionInfo>(
+  keyPrefix: string,
+  lines: Map<string, T[]>,
+  view: (s: T) => TaskMemberView,
+  isPending: (s: T) => boolean,
+): Array<SubtaskRow<T>> {
+  const out: Array<SubtaskRow<T>> = [];
+  for (const [sk, hops] of lines) {
+    out.push({
+      key: `${keyPrefix}::${sk}`,
+      tip: tipOf(hops),
+      hops,
+      state: taskStateOf({
+        main: hops.map(view),
+        subtasks: [],
+        outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+      }),
+      pending: hops.some(isPending),
+    });
+  }
+  out.sort((a, b) => b.tip.lastActivityMs - a.tip.lastActivityMs);
+  return out;
+}
+
+/**
+ * The sub-tasks of one task, from a single device's snapshot — what the
+ * detail page's 子任务 segment lists. Same folding as the task list's rows.
+ */
+export function subtaskRowsOf<T extends SessionInfo>(
+  sessions: T[],
+  taskId: string,
+  opts: { isPending: (s: T) => boolean; isQuiet: (s: T) => boolean },
+): Array<SubtaskRow<T>> {
+  const lines = new Map<string, T[]>();
+  for (const s of sessions) {
+    if (s.isSubagent || s.parentTaskId !== taskId) continue;
+    const k = lineKey(s);
+    const arr = lines.get(k);
+    if (arr) arr.push(s);
+    else lines.set(k, [s]);
+  }
+  const view = (s: T): TaskMemberView => ({
+    status: s.status,
+    procAlive: !!s.procAlive,
+    quiet: opts.isQuiet(s),
+    hasPendingDecision: opts.isPending(s),
+  });
+  return foldSubtasks(taskId, lines, view, opts.isPending);
+}
+
+/** Every session id that makes up a task: its main hops (same `taskId`) and
+ *  the hops of the sub-tasks it spawned. Artifacts carry a session id, so
+ *  this is how a task's deliverables are found. */
+export function taskSessionIds(sessions: SessionInfo[], session: SessionInfo): Set<string> {
+  const ids = new Set<string>([session.id]);
+  const taskId = session.taskId;
+  if (!taskId) return ids;
+  for (const s of sessions) {
+    if (s.taskId === taskId || s.parentTaskId === taskId) ids.add(s.id);
+  }
+  return ids;
 }
 
 export interface TaskSectionRows<T extends Row = Row> {
