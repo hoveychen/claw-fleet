@@ -431,6 +431,7 @@ function DecisionCard({
         <QuestionsCard
           request={req as FleetAskRequest}
           isFleetAsk={decision.kind === "fleet-ask"}
+          fromSubtask={!!taskRef?.subtaskId}
           client={client}
           session={session}
           submit={submit}
@@ -1156,12 +1157,16 @@ function LastUserInputBlock({
 function QuestionsCard({
   request,
   isFleetAsk,
+  fromSubtask,
   client,
   session,
   submit,
 }: {
   request: FleetAskRequest;
   isFleetAsk: boolean;
+  /** The card comes from a sub-task: finishing the task belongs to the main
+   *  conversation alone, so the terminal finish/abandon button is not drawn. */
+  fromSubtask: boolean;
   client: FleetTransport | null;
   session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
@@ -1590,22 +1595,26 @@ function QuestionsCard({
       ))}
       {error && <div className={styles.error}>{error}</div>}
       <div className={styles.actions}>
-        {!isFleetAsk && (request as ElicitationRequest).turnCompletion === true && (
+        {!fromSubtask &&
+          !isFleetAsk &&
+          (request as ElicitationRequest).turnCompletion === true && (
+            <button
+              className={`${styles.ghostButton} ${styles.finishButton}`}
+              onClick={() => doSubmit(true, true)}
+            >
+              {t("结束任务")}
+            </button>
+          )}
+        {!(fromSubtask && isFleetAsk) && (
           <button
-            className={`${styles.ghostButton} ${styles.finishButton}`}
-            onClick={() => doSubmit(true, true)}
+            className={`${styles.ghostButton} ${
+              isFleetAsk ? (taskComplete ? styles.finishButton : styles.abandonButton) : ""
+            }`}
+            onClick={() => doSubmit(true)}
           >
-            {t("结束任务")}
+            {isFleetAsk ? (taskComplete ? t("结束任务") : t("放弃任务")) : t("拒绝回答")}
           </button>
         )}
-        <button
-          className={`${styles.ghostButton} ${
-            isFleetAsk ? (taskComplete ? styles.finishButton : styles.abandonButton) : ""
-          }`}
-          onClick={() => doSubmit(true)}
-        >
-          {isFleetAsk ? (taskComplete ? t("结束任务") : t("放弃任务")) : t("拒绝回答")}
-        </button>
         {multiQ && qi > 0 && (
           <button className={styles.ghostButton} onClick={() => setStep(qi - 1)}>
             {t("上一题")}
