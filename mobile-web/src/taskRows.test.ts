@@ -1,0 +1,150 @@
+import { describe, expect, it } from "vitest";
+import { buildTaskRows, rowDetail, sectionRows, stepText, subtaskTally } from "./taskRows";
+import type { SessionInfo } from "./types";
+
+type Row = SessionInfo & { deviceId: string };
+
+let clock = 1_000;
+function s(over: Partial<Row>): Row {
+  clock += 1;
+  return {
+    id: over.id ?? `s${clock}`,
+    deviceId: "d",
+    workspacePath: "/work/fleet",
+    workspaceName: "fleet",
+    status: "idle",
+    isSubagent: false,
+    entrypoint: "claw-fleet-newsession",
+    lastActivityMs: clock,
+    createdAtMs: clock,
+    jsonlPath: `/p/${over.id ?? clock}.jsonl`,
+    ...over,
+  } as Row;
+}
+
+function build(sessions: Row[], pending: string[] = []) {
+  return buildTaskRows(sessions, {
+    isPending: (_d, id) => pending.includes(id),
+    isQuiet: () => false,
+    multiDevice: false,
+    untitled: "untitled",
+  });
+}
+
+describe("buildTaskRows", () => {
+  it("folds relay hops into one task opened at the latest hop", () => {
+    const rows = build([
+      s({ id: "h1", taskId: "h1", handoff: { chainId: "c", hop: 1, chainLen: 2 } as never }),
+      s({ id: "h2", taskId: "h1", handoff: { chainId: "c", hop: 2, chainLen: 2 } as never }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tip.id).toBe("h2");
+    expect(rows[0].hops.map((h) => h.id).sort()).toEqual(["h1", "h2"]);
+  });
+
+  it("puts sub-tasks under their task instead of on the list", () => {
+    const rows = build([
+      s({ id: "t", taskId: "t" }),
+      s({ id: "sub", taskId: "sub", parentTaskId: "t", status: "executing", procAlive: true }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].subtasks.map((st) => st.tip.id)).toEqual(["sub"]);
+    // The main hop is idle but a sub-task works: the task is waiting, not done.
+    expect(rows[0].state).toBe("waiting");
+  });
+
+  it("files a task under needs-you when a sub-task has a card waiting", () => {
+    const rows = build(
+      [s({ id: "t", taskId: "t" }), s({ id: "sub", taskId: "sub", parentTaskId: "t", aiTitle: "web" })],
+      ["sub"],
+    );
+    expect(rows[0].state).toBe("needsYou");
+    expect(rowDetail(rows[0], "untitled")).toEqual({ kind: "subtaskNeedsYou", subtaskTitle: "web" });
+  });
+
+  it("leaves out sessions Fleet did not start, and subagents", () => {
+    const rows = build([
+      s({ id: "cli", entrypoint: "cli" }),
+      s({ id: "agent-x", isSubagent: true }),
+    ]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("does not join a sub-task to a same-id task on another device", () => {
+    const rows = build([
+      s({ id: "t", taskId: "t", deviceId: "a" }),
+      s({ id: "sub", taskId: "sub", parentTaskId: "t", deviceId: "b" }),
+    ]);
+    expect(rows[0].subtasks).toHaveLength(0);
+  });
+
+  it("reads a closed task as done", () => {
+    const rows = build([s({ id: "t", taskId: "t", taskOutcome: "completed" })]);
+    expect(rows[0].state).toBe("done");
+  });
+});
+
+describe("sectionRows", () => {
+  it("orders sections the way the boss reads them and drops empty ones", () => {
+    const rows = build(
+      [
+        s({ id: "run", taskId: "run", status: "executing", procAlive: true }),
+        s({ id: "rev", taskId: "rev" }),
+        s({ id: "ask", taskId: "ask" }),
+      ],
+      ["ask"],
+    );
+    expect(sectionRows(rows).map((sec) => sec.state)).toEqual(["needsYou", "review", "running"]);
+  });
+});
+
+describe("rowDetail", () => {
+  it("names the step a running task is on", () => {
+    const rows = build([
+      s({
+        id: "t",
+        taskId: "t",
+        status: "executing",
+        procAlive: true,
+        taskPlan: { done: 2, total: 4, currentPlan: null, planId: "p", currentTask: "**P3** — run tests" },
+      }),
+    ]);
+    expect(rowDetail(rows[0], "untitled")).toEqual({
+      kind: "step",
+      done: 2,
+      total: 4,
+      text: "run tests",
+    });
+  });
+
+  it("says what a waiting task waits for", () => {
+    const rows = build([
+      s({
+        id: "t",
+        taskId: "t",
+        status: "watching",
+        taskSummary: { waitReason: "CI 通过" } as never,
+      }),
+    ]);
+    expect(rowDetail(rows[0], "untitled")).toEqual({ kind: "wait", reason: "CI 通过" });
+  });
+});
+
+describe("stepText", () => {
+  it("drops the step id and markdown", () => {
+    expect(stepText("**P2** — x")).toBe("x");
+    expect(stepText("P10 - do it")).toBe("do it");
+    expect(stepText(null)).toBe(null);
+  });
+});
+
+describe("subtaskTally", () => {
+  it("counts finished sub-tasks out of all", () => {
+    const rows = build([
+      s({ id: "t", taskId: "t" }),
+      s({ id: "a", taskId: "a", parentTaskId: "t" }),
+      s({ id: "b", taskId: "b", parentTaskId: "t", status: "executing", procAlive: true }),
+    ]);
+    expect(subtaskTally(rows[0])).toEqual({ done: 1, total: 2 });
+  });
+});

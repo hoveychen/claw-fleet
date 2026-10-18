@@ -2,249 +2,46 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  font-family: var(--font-sans);
 }
 
-.filterBar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.searchWrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.searchIcon {
-  position: absolute;
-  left: 11px;
-  display: inline-flex;
-  color: var(--color-text-dim);
-  pointer-events: none;
-}
-
-.search {
-  width: 100%;
-  background: var(--color-bg-input);
-  border: none;
-  box-shadow: var(--shadow-1);
-  border-radius: var(--r-sm, 10px);
-  padding: 8px 12px 8px 32px;
-  color: var(--color-text);
-  font-size: var(--t-ui, 14px);
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-border-strong);
-}
-
-.searchSpinner {
-  position: absolute;
-  right: 11px;
-  display: inline-flex;
-}
-
-/* Centered wait while full-text search results are still in flight. */
-.searchPending {
-  display: flex;
-  justify-content: center;
-  padding: 24px 0;
-}
-
-/* Mark filter + grouping switcher share one line: the mark segments take the
-   width (they carry counts), the icon-only grouping switcher just its content. */
-.segmentRow {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.segmentRow > .segment:first-child {
-  flex: 1;
-  min-width: 0;
-}
-
-.segmentRow > .segment:last-child .segmentButton {
-  flex: 0 0 auto;
-  padding: 6px 10px;
-}
-
-.segment {
-  display: flex;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 3px;
-  gap: 3px;
-}
-
-.segmentButton {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: none;
-  background: none;
-  color: var(--color-text-dim);
-  border-radius: 8px;
-  padding: 6px 0;
-  font-size: var(--t-aux, 12px);
-}
-
-.segmentButton[data-active="true"] {
-  background: var(--color-bg-card);
-  color: var(--color-text);
-}
-
-/* The active segment is already marked by its raised card background; the
-   icon stays neutral so colour on this screen means status, not selection. */
-.segmentButton[data-active="true"] svg {
-  color: var(--color-text);
-}
-
-.segmentCount {
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.segmentButton[data-active="true"] .segmentCount {
-  color: var(--color-text);
-}
-
-.opsRow {
+.pageHead {
   display: flex;
   align-items: center;
   gap: 6px;
-  /* No divider: the done circle and stop button are the card's own controls,
-     not a separate section. The negative inset lines the circle's glyph (not
-     its 30px tap target) up with the text column above. */
-  margin: 4px 0 0 -7px;
+  padding: 2px 2px 0;
 }
 
-/* Single circle→check toggle, mirroring the desktop launchpad MarkControl.
-   Unmarked reads as pending (hollow circle); done is the filled check. */
-.markToggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: none;
-  color: var(--color-text-dim);
-  border-radius: 50%;
-}
-
-.markToggle[data-done="true"] {
-  color: var(--color-success);
-}
-
-.opsSpacer {
+.pageTitle {
   flex: 1;
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
-.stopButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  background: none;
-  color: var(--color-error);
-  border-radius: 999px;
-  padding: 3px 12px;
-  font-size: var(--t-aux, 12px);
-}
-
-/* Interrupt only ends the current turn, so it stays neutral; red is kept for
-   stop, which kills the process. */
-.stopButton[data-mode="interrupt"] {
-  border-color: var(--color-border-strong);
-  color: var(--color-text-secondary);
-}
-
-.stopButton:disabled {
-  opacity: 0.5;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* 文件夹分区 —— 与桌面端启动台的仓库分组同构：表头写目录名与会话数，点一下折叠。
-   聊天目录恒定排在最前(见 groupTaskSections)。 */
-.workspaceSection {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Header row: the fold toggle plus the "only this project" button beside it. */
-.workspaceHead {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.workspaceHead .workspaceHeader {
-  flex: 1;
-  min-width: 0;
-}
-
-.workspaceFocus {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--color-text-dim);
-  opacity: 0.7;
-}
-
-.workspaceFocus[data-on="true"] {
-  color: var(--color-accent);
-  opacity: 1;
-}
-
-/* Project scope: a native select styled as a quiet pill, plus an × once set. */
-.scopeRow {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
+/* Project filter pill — "全部项目 ▾". The select carries the label itself so
+   the native picker opens on a tap anywhere on the pill; its chrome is stripped. */
 .scopeSelectWrap {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 100%;
-  padding: 4px 8px;
-  border-radius: 8px;
+  max-width: 60%;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-card);
   color: var(--color-text-secondary);
-  font-size: var(--t-aux, 12px);
-  font-weight: 600;
+  font-size: var(--t-ui, 14px);
 }
 
 .scopeSelectWrap[data-on="true"] {
-  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
   color: var(--color-accent);
 }
 
-/* The select carries the label itself so the native picker opens on a tap
-   anywhere on the pill; its own chrome is stripped. */
 .scopeSelect {
   appearance: none;
   -webkit-appearance: none;
@@ -264,277 +61,219 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: none;
-  color: inherit;
-}
-
-.workspaceHeader {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 2px 2px 0;
-  border: none;
-  background: none;
   color: var(--color-text-secondary);
-  text-align: left;
 }
 
-/* A status heading borrows the row dot for its colour, but not its pulse — a
-   throbbing heading competes with the live cards it labels. */
-.workspaceHeader .statusDot {
-  animation: none;
-}
-
-.workspaceFolder {
-  color: var(--color-text-dim);
-  flex-shrink: 0;
-}
-
-.workspaceName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--t-aux, 12px);
-  font-weight: 600;
-}
-
-.workspaceCount {
-  color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
-  font-variant-numeric: tabular-nums;
-}
-
-.workspaceChevron {
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-  transition: transform 0.15s;
-}
-
-.workspaceChevron[data-open="true"] {
-  transform: rotate(90deg);
-}
-
-.empty {
-  text-align: center;
-  color: var(--color-text-dim);
-  padding: 48px 16px;
-  font-size: var(--t-ui, 14px);
-}
-
-/* 纸感派：卡片靠影子从纸面浮起来，不再画一圈线。边框在暖纸上会显得像表格，
-   而这一屏本来是一叠卡片。 */
-.card {
-  background: var(--color-bg-card);
-  border: none;
-  border-radius: var(--r-md, 14px);
-  box-shadow: var(--shadow-1);
-  padding: 12px 14px;
-}
-
-/* ── Handoff-relay group ─────────────────────────────────────────────────────
-   A collapsed relay chain: the tip session rendered as a normal card (tap to
-   open its detail; chevron to expand) over an indented list of the chain's
-   other hops. The wrapper is a plain container — the tip card carries its own
-   card frame, so styling the wrapper too would double-box it. */
-.group {
+.searchWrap {
+  position: relative;
   display: flex;
-  flex-direction: column;
-}
-
-/* Expand/collapse toggle on the tip card — a borderless icon button; the chevron
-   inside rotates to point down when open. */
-.groupToggle {
-  display: inline-flex;
   align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 11px;
+  display: inline-flex;
+  color: var(--color-text-dim);
+  pointer-events: none;
+}
+
+.search {
+  width: 100%;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm, 10px);
+  padding: 8px 12px 8px 32px;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.searchSpinner {
+  position: absolute;
+  right: 11px;
+  display: inline-flex;
+}
+
+.searchPending {
+  display: flex;
   justify-content: center;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: 50%;
+  padding: 24px 0;
+}
+
+.syncingHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
 }
 
-.groupChevron {
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-  transition: transform 0.15s;
-}
-
-.groupChevron[data-open="true"] {
-  transform: rotate(90deg);
-}
-
-/* Children hang off a faint rail so the chain reads as one unit. */
-.groupChildren {
+.list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin: 10px 0 2px 8px;
-  padding-left: 10px;
-  border-left: 2px solid var(--color-border);
+  gap: 12px;
 }
 
-.groupMore {
-  align-self: flex-start;
-  border: none;
-  background: none;
-  color: var(--color-accent);
-  font-size: var(--t-aux, 12px);
-  padding: 4px 6px;
+/* One state section: a card holding a heading and its rows. */
+.section {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md, 14px);
+  overflow: hidden;
 }
 
-.cardHead {
+.sectionHead {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 0 6px 0 14px;
+  min-height: 48px;
 }
 
-.statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* Provider mark (Claude / Codex) — dim so it reads as a badge, not a focal point. */
-.sourceIcon {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-}
-
-.statusDot[data-tone="working"] {
-  background: var(--color-accent);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.statusDot[data-tone="waiting"] {
-  background: var(--color-warning);
-}
-
-.statusDot[data-tone="active"] {
-  background: var(--color-success);
-}
-
-/* Quiet-alive: the process runs on while the transcript has gone quiet (one
-   long tool call). Same green as a live row but faded, so it reads as "still
-   going, just silent" rather than as another working session. */
-.statusDot[data-tone="quiet"] {
-  background: var(--color-success);
-  opacity: 0.45;
-}
-
-/* Parked on a `fleet watch`: the process is gone and the transcript has stopped,
-   but a Fleet timer resumes this session the moment its condition fires. Neither
-   "running" nor "ended", so it gets a third colour. */
-.statusDot[data-tone="watching"] {
-  background: var(--color-info);
-}
-
-.statusDot[data-tone="idle"] {
-  background: var(--color-text-dim);
-}
-
-.statusDot[data-tone="error"] {
-  background: var(--color-error);
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.title {
-  font-weight: 600;
-  font-size: var(--t-ui, 14px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sectionToggle {
   flex: 1;
-  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 48px;
+  text-align: left;
 }
 
-.time {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-  font-size: var(--t-aux, 12px);
-}
-
-/* Meta line under the title — project (folder), handoff chip, live runtime.
-   Mirrors the desktop launchpad row's meta line. */
-.handoff,
-.runtime {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-dim);
-  min-width: 0;
-}
-
-/* A watch whose progress stopped moving or that is past its expected time. */
-.handoff[data-tone="warning"] {
-  color: var(--color-warning);
-}
-
-/* One line of a watch's note inside its .handoff chip. */
-.watchNote {
-  min-width: 0;
-  max-width: 60vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sectionName {
+  font-size: var(--t-ctl, 15px);
+  font-weight: 600;
   color: var(--color-text);
 }
 
-/* 断线提示走和 .handoff 一样的 chip 形状,只把颜色换掉 —— 它是同一行里
-   「这条会话出事了」的那一枚,不该长成另一种东西。 */
-.remoteLost {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--t-aux, 12px);
-  color: #b91c1c;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sectionCount {
+  font-size: var(--t-ui, 14px);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
-/* 额度耗尽。实心而不是描边,理由和桌面端同一枚徽标一样:限流会按时钟自己恢复,
-   这个不会——它等的是有人去充值,所以它得比一个红字更硬。 */
-.outOfCredits {
+.acceptAll {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  color: var(--color-accent);
+  padding: 6px 8px;
+}
+
+.acceptAll:disabled {
+  opacity: 0.5;
+}
+
+.sectionChevron {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-secondary);
+  rotate: -90deg;
+  transition: rotate var(--motion-fast) var(--ease-out);
+}
+
+.sectionChevron[data-open="true"] {
+  rotate: 0deg;
+}
+
+/* A task row: dot · two lines · time or accept · chevron. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 8px 11px 14px;
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.row:active {
+  background: var(--color-bg-card-hover);
+}
+
+.dot {
+  align-self: flex-start;
+  margin-top: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-dim);
+}
+
+.dot[data-state="needsYou"] {
+  background: var(--color-error);
+}
+
+.dot[data-state="running"] {
+  background: var(--color-running);
+}
+
+.dot[data-state="waiting"] {
+  background: var(--color-warning);
+}
+
+.dot[data-state="review"] {
+  background: var(--color-success);
+}
+
+.rowBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 3px;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: #9f1239;
-  color: #fff;
-  font-size: var(--t-aux, 12px);
-  font-weight: 600;
+}
+
+.line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--t-ctl, 15px);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Project tag: a label, not a place — there is no "enter project". */
+.project {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-input);
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+}
+
+.line2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
 }
 
 .snippet {
-  margin-top: 6px;
   font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   display: -webkit-box;
@@ -550,148 +289,30 @@
   padding: 0 1px;
 }
 
-.preview {
-  margin-top: 6px;
+.time {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
   font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  font-variant-numeric: tabular-nums;
 }
 
-.metaRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-
-.statusLabel {
+.acceptButton {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
   font-size: var(--t-aux, 12px);
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-}
-
-.statusLabel[data-tone="working"] {
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-
-.statusLabel[data-tone="waiting"] {
-  color: var(--color-warning);
-  background: rgba(251, 191, 36, 0.14);
-}
-
-.planChip,
-.todoChip {
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-secondary);
-  background: var(--color-bg-secondary);
-  padding: 2px 8px;
-  border-radius: 999px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.progress {
-  margin-top: 8px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--color-bg-secondary);
-  overflow: hidden;
-}
-
-.progressFill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--color-accent);
-  transition: width 0.4s ease;
-}
-
-.detail {
-  margin-top: 10px;
-  border-top: 1px solid var(--color-border);
-  padding-top: 10px;
-}
-
-.detailHint {
-  color: var(--color-text-dim);
-  font-size: var(--t-ui, 14px);
-}
-
-.plan + .plan {
-  margin-top: 10px;
-}
-
-.planTitle {
   font-weight: 600;
-  font-size: var(--t-ui, 14px);
-  margin-bottom: 6px;
-}
-
-.planItem {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: var(--t-ui, 14px);
-  padding: 3px 0;
   color: var(--color-text);
 }
 
-.planItem[data-done="true"] {
-  color: var(--color-text-dim);
-  text-decoration: line-through;
+.acceptButton:disabled {
+  opacity: 0.5;
 }
 
-.checkbox {
+.chevron {
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 4px;
-  font-size: var(--t-meta, 11px);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-success);
-}
-
-.planItem[data-done="true"] .checkbox {
-  border-color: var(--color-success);
-}
-
-/* Shown while the cold-start cached task list is on screen but the first live
- * snapshot hasn't landed yet — tells 老板 the rows are last-seen, not stale-forever. */
-.syncingHint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 6px;
-  padding: 5px 10px;
-  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-}
-
-/* 合并列表里的归属设备。与 .handoff 同一档次的次要信息，用同样的字号与颜色，
-   只是换一个图标——它回答的是「哪台机器」。目录名已经写在分区表头上了。 */
-.device {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-secondary);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

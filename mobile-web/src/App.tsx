@@ -1047,6 +1047,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     (deviceId: string, id: string) => setDetailStack([{ deviceId, id }]),
     [],
   );
+  // Sessions with a card waiting, for the task list's needs-you section.
+  const pendingKeys = useMemo(
+    () => new Set(decisions.map((d) => itemKey(d.deviceId, d.request.sessionId))),
+    [decisions],
+  );
   // A task is opened at its latest main-conversation hop: the hop that is
   // talking now, not the first one the task id is named after.
   const resolveTaskTip = useCallback(
@@ -1450,6 +1455,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : tab === "tasks" ? (
           <TasksView
             sessions={mergedSessions}
+            pendingKeys={pendingKeys}
             deviceLabelOf={runtimeDevices.length > 1 ? deviceLabelOf : undefined}
             clientFor={transportFor}
             connected={connected}
