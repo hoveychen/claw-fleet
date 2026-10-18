@@ -1113,6 +1113,14 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // the entrypoint check so a `claude -p` child that only inherited a Fleet
     // CLAUDE_CODE_ENTRYPOINT stops showing up as a task (mirrors desktop).
     "fleetSpawned",
+    // Task model: the line root and, on a sub-task, the task it rolls up to.
+    // The task list keeps only rows without a parent; the task view gathers
+    // the rest under it.
+    "taskId",
+    "parentTaskId",
+    // Task row data (current step, wait reason, sub-task counts, spend), on
+    // main-conversation hops of a top-level task only.
+    "taskSummary",
     "lastMessagePreview",
     "lastActivityMs",
     "createdAtMs",
@@ -2208,6 +2216,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "interrupt"
             | "stop"
             | "session_mark"
+            | "accept_tasks"
             | "set_resume_settings"
             | "session_explain_ask"
             | "upload_attachment"
@@ -2569,6 +2578,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "interrupt" => serve_interrupt(params),
         "stop" => serve_stop(params),
         "session_mark" => serve_session_mark(params),
+        "accept_tasks" => serve_accept_tasks(params),
         "set_resume_settings" => serve_set_resume_settings(params),
         // Forks a session and spends money; a lost reply must not fork twice.
         "session_explain_ask" => {
@@ -3785,6 +3795,7 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
         session_id: req.session_id.clone(),
         entrypoint: String::new(),
         images: Vec::new(),
+        spawned_by: None,
     };
     let resp = crate::session_refs::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
     record_if_dedupable(preassigned.as_deref(), resp.session_id.as_deref(), resp.pid);
@@ -3901,6 +3912,13 @@ fn serve_stop(params: &Value) -> Result<Value, String> {
         let _ = force;
         Err("stop is not supported on this platform".into())
     }
+}
+
+fn serve_accept_tasks(params: &Value) -> Result<Value, String> {
+    let req: crate::task_model::AcceptTasksRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad accept_tasks params: {e}"))?;
+    let accepted = crate::task_model::accept_tasks(&req.session_ids);
+    Ok(json!({ "ok": true, "accepted": accepted }))
 }
 
 fn serve_session_mark(params: &Value) -> Result<Value, String> {
@@ -4971,6 +4989,7 @@ mod tests {
             "interrupt",
             "stop",
             "session_mark",
+            "accept_tasks",
             "set_resume_settings",
             "session_explain_ask",
             "upload_attachment",
@@ -5213,6 +5232,7 @@ mod tests {
             session_id: "sess-mob".into(),
             workspace_name: "ws".into(),
             ai_title: None,
+            task: None,
             timestamp: "2026-07-14T00:00:00Z".into(),
             parked: false,
             review_docs: vec![],
@@ -6303,6 +6323,22 @@ mod tests {
                 json!({"sessionId": "s1", "workspacePath": "/ws"}),
             );
             assert_eq!(crate::session_mark::read("s1"), None);
+        });
+    }
+
+    #[test]
+    fn request_accept_tasks_marks_each_task_completed() {
+        with_temp_home(|| {
+            let data = request_ok("accept_tasks", json!({"sessionIds": ["s1", "s2", "s1", ""]}));
+            assert_eq!(data["ok"], true);
+            assert_eq!(data["accepted"], 2);
+            for id in ["s1", "s2"] {
+                assert_eq!(
+                    crate::task_outcome::read(id).map(|r| r.outcome),
+                    Some(crate::task_outcome::TaskOutcome::Completed),
+                    "{id}"
+                );
+            }
         });
     }
 

@@ -35,6 +35,9 @@ pub struct PermissionPromptRequest {
     pub workspace_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
+    /// The task this card belongs to — stamped by `pending_decisions::decorate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<crate::task_model::DecisionTaskRef>,
     #[serde(default)]
     pub timestamp: String,
     /// The tool Claude Code wants to run (e.g. `Write`, `Bash`,

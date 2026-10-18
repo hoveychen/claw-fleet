@@ -397,6 +397,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                 session_id,
                 workspace_name,
                 ai_title,
+                task: None,
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 tool_name,
                 tool_input: json!({
@@ -435,6 +436,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                 session_id,
                 workspace_name,
                 ai_title,
+                task: None,
                 questions: cards,
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 parked: false,

@@ -15,7 +15,66 @@
 
 use crate::parked::{self, ParkedKind};
 use crate::session::SessionInfo;
+use crate::task_model::DecisionTaskRef;
 use crate::ui_types::PendingDecisions;
+
+/// The display fields every decision request carries, so one function can
+/// fill them for all six kinds — the live-emit paths and the pending snapshot
+/// used to each hand-copy the same block.
+pub trait DecisionCard {
+    fn session_id(&self) -> &str;
+    fn display_fields(&mut self) -> (&mut String, &mut Option<String>, &mut Option<DecisionTaskRef>);
+}
+
+macro_rules! impl_decision_card {
+    ($($t:ty),* $(,)?) => {$(
+        impl DecisionCard for $t {
+            fn session_id(&self) -> &str {
+                &self.session_id
+            }
+            fn display_fields(
+                &mut self,
+            ) -> (&mut String, &mut Option<String>, &mut Option<DecisionTaskRef>) {
+                (&mut self.workspace_name, &mut self.ai_title, &mut self.task)
+            }
+        }
+    )*};
+}
+
+impl_decision_card!(
+    crate::guard::GuardRequest,
+    crate::elicitation::ElicitationRequest,
+    crate::mcp_ipc::FleetAskRequest,
+    crate::mcp_a2ui_ipc::A2uiRenderRequest,
+    crate::plan_approval::PlanApprovalRequest,
+    crate::permission_prompt_ipc::PermissionPromptRequest,
+);
+
+/// Fill a request's workspace name, session title and task attribution from
+/// the scanned `sessions`. Workspace and title are only filled when empty, so
+/// a request that already carries them keeps its own; the task reference is
+/// always re-derived (it is computed state, never authored by the producer).
+/// No-op when the session is not in `sessions` (a cold tick).
+pub fn decorate<T: DecisionCard + ?Sized>(req: &mut T, sessions: &[SessionInfo]) {
+    let Some(s) = sessions.iter().find(|s| s.id == req.session_id()) else {
+        return;
+    };
+    let ws = s.workspace_name.clone();
+    // Prefer the human/agent title override — for Codex sessions it's the
+    // only real title (ai_title is the raw first prompt).
+    let title = s.title_override.clone().or_else(|| s.ai_title.clone());
+    let task = crate::task_model::decision_task_ref(sessions, &s.id);
+    let (w, a, t) = req.display_fields();
+    if w.is_empty() {
+        *w = ws;
+    }
+    if a.is_none() {
+        *a = title;
+    }
+    if task.is_some() {
+        *t = task;
+    }
+}
 
 /// Every request awaiting an answer, display fields resolved against
 /// `sessions`.

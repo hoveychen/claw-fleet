@@ -153,6 +153,7 @@ pub(crate) fn cmd_guard() {
                 workspace_name: String::new(), // Desktop app resolves from session_id
                 ai_title: None,                // Desktop app resolves from session_id
                 tool_name: "Bash".to_string(),
+                task: None,
                 command: command.clone(),
                 command_summary: guard::truncate_command(&command, 120),
                 risk_tags,
@@ -336,6 +337,7 @@ pub(crate) fn cmd_elicitation() {
         session_id,
         workspace_name: String::new(),
         ai_title: None,
+        task: None,
         questions,
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
@@ -626,6 +628,7 @@ pub(crate) fn cmd_plan_approval() {
         session_id,
         workspace_name: String::new(),
         ai_title: None,
+        task: None,
         plan_content,
         plan_file_path,
         timestamp: chrono::Utc::now().to_rfc3339(),

@@ -995,6 +995,9 @@ pub fn parse_session_info(
         // it travels the RateLimited path instead (see
         // `SessionInfo::out_of_credits`).
         out_of_credits: None,
+        task_id: None,
+        parent_task_id: None,
+        task_summary: None,
     })
     .map(|info| (info, state))
 }

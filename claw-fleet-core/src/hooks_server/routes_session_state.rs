@@ -8,6 +8,28 @@
 #![allow(unused_variables, unused_mut, clippy::all)]
 use super::*;
 
+pub(crate) fn route_tasks_accept(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) =
+        match serde_json::from_slice::<crate::task_model::AcceptTasksRequest>(&body_bytes) {
+            Ok(req) => {
+                let accepted = crate::task_model::accept_tasks(&req.session_ids);
+                (200, serde_json::json!({ "ok": true, "accepted": accepted }))
+            }
+            Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),
+        };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
 pub(crate) fn route_session_mark(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

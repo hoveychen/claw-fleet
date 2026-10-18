@@ -2114,6 +2114,9 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
         remote_disconnect: None,
         mirror_write: None,
         out_of_credits,
+        task_id: None,
+        parent_task_id: None,
+        task_summary: None,
     })
 }
 
@@ -5866,6 +5869,9 @@ fn parse_codex_session(rollout_path: &Path) -> Option<SessionInfo> {
         remote_disconnect: None,
         mirror_write: None,
         out_of_credits,
+        task_id: None,
+        parent_task_id: None,
+        task_summary: None,
     })
 }
 

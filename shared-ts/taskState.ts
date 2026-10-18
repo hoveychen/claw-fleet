@@ -1,0 +1,103 @@
+/**
+ * The five states a task is shown in, shared by the desktop home and the phone
+ * so both cut the task list into the same sections in the same order.
+ *
+ * A task is judged as a whole: its main conversation (every relay hop of it)
+ * plus every sub-task it spawned. Per-session run status is an input, not the
+ * answer — a task whose main hop has gone quiet while two sub-tasks work is
+ * "waiting", not "ended".
+ *
+ * Order is the order the boss reads in: what needs them, what is ready to
+ * accept, what is moving, what is parked, what is closed.
+ */
+export type TaskState = "needsYou" | "review" | "running" | "waiting" | "done";
+
+export const TASK_STATES: TaskState[] = [
+  "needsYou",
+  "review",
+  "running",
+  "waiting",
+  "done",
+];
+
+/** One session of a task, as the state derivation needs to see it. */
+export interface TaskMemberView {
+  /** `SessionInfo.status`. */
+  status: string;
+  procAlive: boolean;
+  /** The caller's latched "process alive but transcript gone quiet" verdict
+   *  (see `statusBuckets.statusBucketOf` for why it is passed in). */
+  quiet: boolean;
+  /** A decision card from this session is waiting for an answer. */
+  hasPendingDecision: boolean;
+}
+
+export interface TaskView {
+  /** Hops of the main conversation. */
+  main: TaskMemberView[];
+  /** Sessions of every sub-task, all hops. */
+  subtasks: TaskMemberView[];
+  /** `SessionInfo.taskOutcome` of the task (any hop): the boss closed it. */
+  outcome: "completed" | "abandoned" | null | undefined;
+}
+
+/** Statuses that mean the agent is wedged or cut off and needs a human. */
+const ERROR_STATUSES = new Set([
+  "rateLimited",
+  "serverErrored",
+  "remoteDisconnected",
+  "stuck",
+]);
+
+/** Statuses that mean a turn is genuinely in flight. */
+const WORKING_STATUSES = new Set([
+  "thinking",
+  "executing",
+  "streaming",
+  "processing",
+  "active",
+  "delegating",
+]);
+
+function needsHuman(m: TaskMemberView): boolean {
+  return m.hasPendingDecision || ERROR_STATUSES.has(m.status);
+}
+
+/** A turn is in flight. A parked process with a pending card is not "working";
+ *  that case is caught earlier as needsYou. */
+function isWorking(m: TaskMemberView): boolean {
+  return WORKING_STATUSES.has(m.status) || m.quiet || (m.procAlive && m.status !== "waitingInput");
+}
+
+function isWatching(m: TaskMemberView): boolean {
+  return m.status === "watching";
+}
+
+/**
+ * Which section a task belongs to.
+ *
+ * 1. needsYou — any session of the task (main or sub-task) has a card waiting
+ *    or is in an error state. Checked first so a card is never hidden under a
+ *    closed task.
+ * 2. done — the boss pressed finish / abandon.
+ * 3. running — the main conversation has a turn in flight.
+ * 4. waiting — the main conversation is parked on a `fleet watch`, or its
+ *    sub-tasks are still working / watching.
+ * 5. review — nothing is moving and the task is not closed: the chain stopped
+ *    and the result is waiting to be accepted.
+ */
+export function taskStateOf(task: TaskView): TaskState {
+  const all = [...task.main, ...task.subtasks];
+  if (all.some(needsHuman)) return "needsYou";
+  if (task.outcome === "completed" || task.outcome === "abandoned") return "done";
+  if (task.main.some(isWorking)) return "running";
+  if (task.main.some(isWatching) || task.subtasks.some((m) => isWorking(m) || isWatching(m))) {
+    return "waiting";
+  }
+  return "review";
+}
+
+/** Rank for sorting by state, in `TASK_STATES` order. */
+export function taskStateRank(state: TaskState): number {
+  return TASK_STATES.indexOf(state);
+}

@@ -39,6 +39,11 @@ pub struct SpawnSpec {
     /// sees an image. Claude ignores this field — it reads images off disk with
     /// its own file tools, so the caller lists the paths in the prompt instead.
     pub images: Vec<String>,
+    /// The session that asked for this one (`fleet__spawn` / `fleet spawn`
+    /// from inside an agent). Recorded in the launch note so the new session
+    /// is grouped under the caller's task as a sub-task. `None` for sessions
+    /// the user starts directly, routines and relays.
+    pub spawned_by: Option<String>,
 }
 
 /// Parameters for resuming an existing session, source-agnostic.
@@ -539,7 +544,21 @@ pub fn spawn_session(
     let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
-    source.spawn(spec)
+    let resp = source.spawn(spec)?;
+    // Every source has written its launch note by the time `spawn` returns
+    // (Codex does it before handing back the thread id), so this merge does
+    // not race the source's own read-modify-write.
+    if let (Some(parent), Some(sid)) = (spec.spawned_by.as_deref(), resp.session_id.as_deref()) {
+        crate::launch_spec::note_spawned_by(sid, parent);
+    }
+    // Keep the project list current; a unit test's fake workspace must not
+    // land in the developer's own registry.
+    if !cfg!(test) {
+        if let Err(e) = crate::project_registry::ensure(&spec.workspace_path) {
+            crate::log_debug(&format!("project registry: {e}"));
+        }
+    }
+    Ok(resp)
 }
 
 /// Launch a new session that *replaces* `replaced_session` (plan revive,

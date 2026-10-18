@@ -1423,6 +1423,10 @@ pub fn run() {
             // Take back whatever an older Fleet wrote into the global agent
             // config — Fleet sessions get it as launch arguments now.
             claw_fleet_core::scope_migration::run_and_log("desktop");
+            // Directories become projects and Done marks become task outcomes,
+            // once (`task_migration`). Thousands of small writes on a first
+            // run, so off the setup thread.
+            std::thread::spawn(|| claw_fleet_core::task_migration::run_and_log("desktop"));
 
             // The idle hooks (Stop → `fleet session idle`, UserPromptSubmit →
             // `fleet session resume`) have no UI switch: the Stop hook is what
@@ -1673,6 +1677,7 @@ pub fn run() {
             get_resume_triggers_config,
             set_resume_triggers_config,
             set_session_mark,
+            accept_tasks,
             set_session_title,
             host_features,
             list_workspace_procs,

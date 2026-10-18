@@ -346,6 +346,22 @@ pub struct SessionInfo {
     /// transcript, and the session looks merely idle from the outside.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub out_of_credits: Option<String>,
+    /// Root of the conversation line this session belongs to: the first hop of
+    /// its handoff chain, or its own id when it was never relayed. Every hop of
+    /// one task (or of one sub-task) shares it. Stamped by
+    /// `task_model::enrich_sessions` at scan time.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub task_id: Option<String>,
+    /// Set when this line is a sub-task: the `task_id` of the top-level task
+    /// it rolls up to (nested spawns flatten to the outermost task). `None`
+    /// means this session's line *is* a top-level task.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parent_task_id: Option<String>,
+    /// Row data of the top-level task this hop belongs to (current step, wait
+    /// reason, sub-task counts, spend). Set only on main-conversation hops of
+    /// a top-level task. Stamped by `task_model::enrich_summaries`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub task_summary: Option<crate::task_model::TaskSummary>,
 }
 
 pub(crate) mod detect;
@@ -810,6 +826,9 @@ mod tests {
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
+            task_id: None,
+            parent_task_id: None,
+            task_summary: None,
         }
     }
 

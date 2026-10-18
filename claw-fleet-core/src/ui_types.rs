@@ -88,45 +88,19 @@ pub struct PendingDecisions {
     pub permission_prompt: Vec<crate::permission_prompt_ipc::PermissionPromptRequest>,
 }
 
-/// Fill in each pending request's `workspace_name` / `ai_title` from the
-/// session cache, mirroring `local_backend::resolve_session_display` so
-/// mount-catch-up cards show the same workspace/title labels the live watcher
-/// would have stamped. Only fills empty `workspace_name` and `None` `ai_title`
-/// so a request that already carries display info is left untouched.
+/// Fill in each pending request's `workspace_name` / `ai_title` / `task` from
+/// the session cache through the same [`crate::pending_decisions::decorate`]
+/// the live watchers use, so mount-catch-up cards show the same labels. Only
+/// fills empty `workspace_name` and `None` `ai_title`, so a request that already
+/// carries display info is left untouched.
 pub fn resolve_pending_display(pending: &mut PendingDecisions, sessions: &[SessionInfo]) {
-    let lookup = |session_id: &str| -> Option<(String, Option<String>)> {
-        sessions
-            .iter()
-            .find(|s| s.id == session_id)
-            // Prefer the human/agent title override — for Codex sessions it's the
-            // only real title (ai_title is the raw first prompt).
-            .map(|s| {
-                (
-                    s.workspace_name.clone(),
-                    s.title_override.clone().or_else(|| s.ai_title.clone()),
-                )
-            })
-    };
-    macro_rules! resolve_vec {
-        ($v:expr) => {
-            for req in $v.iter_mut() {
-                if let Some((ws, ai)) = lookup(&req.session_id) {
-                    if req.workspace_name.is_empty() {
-                        req.workspace_name = ws;
-                    }
-                    if req.ai_title.is_none() {
-                        req.ai_title = ai;
-                    }
-                }
-            }
-        };
-    }
-    resolve_vec!(pending.guard);
-    resolve_vec!(pending.elicitation);
-    resolve_vec!(pending.fleet_ask);
-    resolve_vec!(pending.a2ui_render);
-    resolve_vec!(pending.plan_approval);
-    resolve_vec!(pending.permission_prompt);
+    use crate::pending_decisions::decorate;
+    pending.guard.iter_mut().for_each(|r| decorate(r, sessions));
+    pending.elicitation.iter_mut().for_each(|r| decorate(r, sessions));
+    pending.fleet_ask.iter_mut().for_each(|r| decorate(r, sessions));
+    pending.a2ui_render.iter_mut().for_each(|r| decorate(r, sessions));
+    pending.plan_approval.iter_mut().for_each(|r| decorate(r, sessions));
+    pending.permission_prompt.iter_mut().for_each(|r| decorate(r, sessions));
 }
 
 // ── Unified usage summary for tray / overview ───────────────────────────────
@@ -422,6 +396,9 @@ mod tests {
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
+            task_id: None,
+            parent_task_id: None,
+            task_summary: None,
         }
     }
 
@@ -436,6 +413,7 @@ mod tests {
             session_id: "s1".into(),
             workspace_name: String::new(),
             ai_title: None,
+            task: None,
             questions: vec![ElicitationQuestion {
                 question: "q?".into(),
                 header: "h".into(),
@@ -464,6 +442,7 @@ mod tests {
             session_id: "s1".into(),
             workspace_name: String::new(),
             ai_title: None,
+            task: None,
             questions: vec![],
             timestamp: "t".into(),
         });
@@ -491,6 +470,7 @@ mod tests {
             session_id: "s1".into(),
             workspace_name: "preset-ws".into(),
             ai_title: Some("preset-title".into()),
+            task: None,
             questions: vec![],
             timestamp: "t".into(),
         });
@@ -502,6 +482,7 @@ mod tests {
             session_id: "missing".into(),
             workspace_name: String::new(),
             ai_title: None,
+            task: None,
             questions: vec![],
             timestamp: "t".into(),
         });

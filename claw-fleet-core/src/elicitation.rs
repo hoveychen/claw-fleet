@@ -52,6 +52,9 @@ pub struct ElicitationRequest {
     /// AI-generated session title (distinct from workspace_name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
+    /// The task this card belongs to — stamped by `pending_decisions::decorate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<crate::task_model::DecisionTaskRef>,
     pub questions: Vec<ElicitationQuestion>,
     pub timestamp: String,
     /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
@@ -323,6 +326,7 @@ mod tests {
             session_id: session_id.to_string(),
             workspace_name: String::new(),
             ai_title: None,
+            task: None,
             questions: Vec::new(),
             timestamp: "2026-07-16T00:00:00Z".to_string(),
             parked: false,

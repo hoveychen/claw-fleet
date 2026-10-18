@@ -85,9 +85,13 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
  *  is the core-computed ground truth (a per-session spawn marker, or a
  *  grandfather for sessions predating the marker) that filters those leaked
  *  `claude -p` children back out. Resume / enqueue / SIGINT still key off the
- *  entrypoint alone — this stricter gate is only for the task list. */
+ *  entrypoint alone — this stricter gate is only for the task list. A sub-task
+ *  (`parentTaskId` set: another task spawned it) is listed under its task, not
+ *  as a task of its own. */
 export function isFleetOwnedTask(s: SessionInfo): boolean {
-  return !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint) && s.fleetSpawned;
+  return (
+    !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint) && s.fleetSpawned && !s.parentTaskId
+  );
 }
 
 /** Statuses that mean "this session still has something going on" — the agent

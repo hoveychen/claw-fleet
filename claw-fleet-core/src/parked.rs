@@ -1033,6 +1033,7 @@ mod tests {
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),
             ai_title: None,
+            task: None,
             timestamp: "2026-07-13T00:00:00Z".into(),
             review_docs: vec![],
             task_complete: false,

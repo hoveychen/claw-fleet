@@ -63,6 +63,7 @@ pub(crate) fn cmd_spawn(
             session_id: None,
             entrypoint: claw_fleet_core::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
             images: Vec::new(),
+            spawned_by: sid.clone(),
         },
     ) {
         Ok(r) => r,
