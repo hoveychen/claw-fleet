@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Inbox, ListChecks, MoreHorizontal, Package, Plus, X } from "lucide-react";
+import { FolderOpen, Inbox, ListChecks, Plus, UserRound, X } from "lucide-react";
 import styles from "./App.module.css";
 import {
   disablePush,
@@ -128,16 +128,16 @@ function fmtTokens(n: number): string {
   return `${n}`;
 }
 
-type Tab = "decisions" | "tasks" | "artifacts" | "more";
+type Tab = "decisions" | "tasks" | "library" | "me";
 
 /** Display name of each tab. Used only for error boundary fallback titles and console
  *  logs (bottom navigation text is still inlined in each button). Having "decisions page
  *  failed to display" is more useful than "decisions page failed to display". */
 const TAB_LABEL: Record<Tab, string> = {
-  decisions: "决策",
+  decisions: "待你处理",
   tasks: "任务",
-  artifacts: "产出",
-  more: "更多",
+  library: "资料",
+  me: "我的",
 };
 
 /** Default fields for a newly paired device. The default name goes through i18n, so this
@@ -1295,7 +1295,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           open={deviceMenuOpen}
           onOpenChange={setDeviceMenuOpen}
           onSwitch={switchDevice}
-          onManage={() => setTab("more")}
+          onManage={() => setTab("me")}
         />
         {/* First `today_usage` reply not in yet: hold the pill's place instead
             of popping it in and shifting the header. */}
@@ -1444,7 +1444,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             agentPending={agentPending}
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
           />
-        ) : tab === "artifacts" ? (
+        ) : tab === "library" ? (
           <ArtifactsView client={client} />
         ) : (
           <MoreView
@@ -1715,7 +1715,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <span className={styles.tabIcon}>
             <Inbox size={20} />
           </span>
-          {t("决策")}
+          {t("待你处理")}
           {decisions.length > 0 && <span className={styles.badge}>{decisions.length}</span>}
         </button>
         <button
@@ -1730,33 +1730,32 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </button>
         <button
           className={styles.centerTab}
-          aria-label={t("新会话")}
+          aria-label={t("新任务")}
           onClick={() => setShowNewSession(true)}
         >
           <span className={styles.centerFab}>
             <Plus size={24} />
           </span>
-          <span className={styles.centerLabel}>{t("新会话")}</span>
         </button>
         <button
           className={styles.tabButton}
-          data-active={tab === "artifacts"}
-          onClick={() => setTab("artifacts")}
+          data-active={tab === "library"}
+          onClick={() => setTab("library")}
         >
           <span className={styles.tabIcon}>
-            <Package size={20} />
+            <FolderOpen size={20} />
           </span>
-          {t("产出")}
+          {t("资料")}
         </button>
         <button
           className={styles.tabButton}
-          data-active={tab === "more"}
-          onClick={() => setTab("more")}
+          data-active={tab === "me"}
+          onClick={() => setTab("me")}
         >
           <span className={styles.tabIcon}>
-            <MoreHorizontal size={20} />
+            <UserRound size={20} />
           </span>
-          {t("更多")}
+          {t("我的")}
         </button>
       </nav>
     </div>

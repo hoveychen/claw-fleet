@@ -1155,4 +1155,9 @@ const DICT: Record<string, string> = {
   "搜索会话标题、项目…": "Search session titles, projects…",
   "搜索知识库文档…": "Search wiki docs…",
   没有匹配的结果: "No matches",
+  // ── Task model: bottom bar ──
+  待你处理: "Needs you",
+  资料: "Library",
+  我的: "Me",
+  新任务: "New task",
 };

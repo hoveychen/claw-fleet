@@ -229,27 +229,22 @@
   scale: 0.92;
 }
 
-/* 中间「新会话」：iPhone 风格凸起圆形动作按钮，浮在导航栏之上。 */
+/* The centre "new task" action: a raised round button that sits on the bar
+   with no label of its own — the plus is the label. */
 .centerTab {
   position: relative;
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
-  padding: 0 0 6px;
-  font-size: var(--t-meta, 11px);
-  /* The FAB carries the accent; the label matches the other tab labels so it
-     does not compete with the active tab's highlight. */
-  color: var(--color-text-dim);
+  justify-content: center;
+  min-height: 52px;
 }
 
 .centerFab {
   position: absolute;
-  top: -18px;
-  width: 46px;
-  height: 46px;
+  top: -10px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   background: var(--color-accent);
   color: #fff;
@@ -270,16 +265,14 @@
   scale: 0.94;
 }
 
-.centerLabel {
-  margin-top: 30px;
-}
-
 .badge {
   position: absolute;
   top: 3px;
   left: 50%;
   margin-left: 4px;
-  background: var(--color-accent);
+  /* Red, not the accent: the count is "things waiting on you", the same red
+     the needs-you status dot wears. */
+  background: var(--color-error);
   color: #fff;
   font-size: var(--t-meta, 11px);
   font-weight: 700;
