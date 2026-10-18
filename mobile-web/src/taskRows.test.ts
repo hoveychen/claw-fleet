@@ -107,6 +107,16 @@ describe("buildTaskRows", () => {
     const rows = build([s({ id: "t", taskId: "t", taskOutcome: "completed" })]);
     expect(rows[0].state).toBe("done");
   });
+
+  it("closes a stopped sub-task along with its accepted parent, not a moving one", () => {
+    const rows = build([
+      s({ id: "t", taskId: "t", taskOutcome: "completed" }),
+      s({ id: "stopped", taskId: "stopped", parentTaskId: "t" }),
+      s({ id: "moving", taskId: "moving", parentTaskId: "t", status: "executing", procAlive: true }),
+    ]);
+    const byId = Object.fromEntries(rows[0].subtasks.map((st) => [st.tip.id, st.state]));
+    expect(byId).toEqual({ stopped: "done", moving: "running" });
+  });
 });
 
 describe("sectionRows", () => {
@@ -205,6 +215,15 @@ describe("subtaskRowsOf", () => {
     );
     expect(rows[0].pending).toBe(true);
     expect(rows[0].state).toBe("needsYou");
+  });
+
+  it("files a stopped sub-task of an accepted task under done", () => {
+    const sessions = [
+      s({ id: "t", taskId: "t", taskOutcome: "completed" }),
+      s({ id: "b", taskId: "b", parentTaskId: "t" }),
+    ];
+    expect(subtaskRowsOf(sessions, "t", opts())[0].state).toBe("done");
+    expect(subtaskRowsOf(sessions.slice(1), "t", opts())[0].state).toBe("review");
   });
 });
 

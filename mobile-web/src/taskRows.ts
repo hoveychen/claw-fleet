@@ -9,9 +9,11 @@
 import { repoRootPath } from "../../shared-ts/repoPath";
 import {
   TASK_STATES,
+  subtaskStateOf,
   taskStateOf,
   type TaskMemberView,
   type TaskState,
+  type TaskView,
 } from "../../shared-ts/taskState";
 import { isFleetOwnedTask, type SessionInfo } from "./types";
 
@@ -131,14 +133,19 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
     // — not necessarily the line key used above when the payload is old.
     const taskId = tip.taskId ?? null;
     const lines = taskId ? subs.get(`${tip.deviceId}::${taskId}`) : undefined;
-    const subtasks = foldSubtasks(key, lines ?? new Map<string, T[]>(), view, (h) =>
-      opts.isPending(h.deviceId, h.id),
+    const outcome = hops.find((h) => h.taskOutcome)?.taskOutcome ?? null;
+    const subtasks = foldSubtasks(
+      key,
+      lines ?? new Map<string, T[]>(),
+      view,
+      (h) => opts.isPending(h.deviceId, h.id),
+      outcome,
     );
     const allSubHops = subtasks.flatMap((st) => st.hops);
     const state = taskStateOf({
       main: hops.map((h) => view(h, h !== tip)),
       subtasks: subtasks.flatMap((st) => st.hops.map((h) => view(h, h !== st.tip))),
-      outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+      outcome,
     });
     const path = repoRootPath(tip.workspacePath);
     const device = opts.multiDevice ? opts.deviceLabelOf?.(tip.deviceId) : null;
@@ -169,6 +176,7 @@ function foldSubtasks<T extends SessionInfo>(
   lines: Map<string, T[]>,
   view: (s: T, superseded: boolean) => TaskMemberView,
   isPending: (s: T) => boolean,
+  parentOutcome: TaskView["outcome"],
 ): Array<SubtaskRow<T>> {
   const out: Array<SubtaskRow<T>> = [];
   for (const [sk, hops] of lines) {
@@ -177,11 +185,14 @@ function foldSubtasks<T extends SessionInfo>(
       key: `${keyPrefix}::${sk}`,
       tip,
       hops,
-      state: taskStateOf({
-        main: hops.map((h) => view(h, h !== tip)),
-        subtasks: [],
-        outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
-      }),
+      state: subtaskStateOf(
+        {
+          main: hops.map((h) => view(h, h !== tip)),
+          subtasks: [],
+          outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+        },
+        parentOutcome,
+      ),
       pending: hops.some(isPending),
     });
   }
@@ -199,7 +210,9 @@ export function subtaskRowsOf<T extends SessionInfo>(
   opts: { isPending: (s: T) => boolean; isQuiet: (s: T) => boolean },
 ): Array<SubtaskRow<T>> {
   const lines = new Map<string, T[]>();
+  let parentOutcome: TaskView["outcome"] = null;
   for (const s of sessions) {
+    if (!s.isSubagent && !s.parentTaskId && s.taskId === taskId && s.taskOutcome) parentOutcome = s.taskOutcome;
     if (s.isSubagent || s.parentTaskId !== taskId) continue;
     const k = lineKey(s);
     const arr = lines.get(k);
@@ -213,7 +226,7 @@ export function subtaskRowsOf<T extends SessionInfo>(
     hasPendingDecision: opts.isPending(s),
     superseded,
   });
-  return foldSubtasks(taskId, lines, view, opts.isPending);
+  return foldSubtasks(taskId, lines, view, opts.isPending, parentOutcome);
 }
 
 /** Every session id that makes up a task: its main hops (same `taskId`) and

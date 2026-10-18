@@ -103,6 +103,22 @@ export function taskStateOf(task: TaskView): TaskState {
   return "review";
 }
 
+/**
+ * The state of one sub-task line. Same rules as `taskStateOf`, plus one: a
+ * sub-task that stopped and is waiting to be accepted follows its parent once
+ * the boss closes the parent. Accepting or abandoning a task stamps only the
+ * main conversation, so without this every finished sub-task under a closed
+ * task stays in "review" forever. A sub-task that is still moving or holds a
+ * card keeps its own state.
+ */
+export function subtaskStateOf(task: TaskView, parentOutcome: TaskView["outcome"]): TaskState {
+  const state = taskStateOf(task);
+  if (state === "review" && (parentOutcome === "completed" || parentOutcome === "abandoned")) {
+    return "done";
+  }
+  return state;
+}
+
 /** Rank for sorting by state, in `TASK_STATES` order. */
 export function taskStateRank(state: TaskState): number {
   return TASK_STATES.indexOf(state);

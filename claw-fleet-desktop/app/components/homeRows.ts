@@ -13,9 +13,11 @@
 
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import {
+  subtaskStateOf,
   taskStateOf,
   type TaskMemberView,
   type TaskState,
+  type TaskView,
 } from "../../../shared-ts/taskState";
 import { isFleetOwnedTask, type PendingDecision, type SessionInfo } from "../types";
 
@@ -140,11 +142,12 @@ export function buildHomeRows(
     push(mains, lineKey(s), s);
   }
 
-  const view = (s: SessionInfo): TaskMemberView => ({
+  const view = (s: SessionInfo, superseded: boolean): TaskMemberView => ({
     status: s.status,
     procAlive: !!s.procAlive,
     quiet: opts.isQuiet(s),
     hasPendingDecision: isPending(s),
+    superseded,
   });
 
   const covered = new Set<string>();
@@ -155,7 +158,8 @@ export function buildHomeRows(
     // not necessarily the line key when the session predates the task model.
     const taskId = tip.taskId ?? null;
     const lines = taskId ? subs.get(taskId) : undefined;
-    const subtasks = foldSubtasks(key, lines ?? new Map(), view, isPending);
+    const outcome = hops.find((h) => h.taskOutcome)?.taskOutcome ?? null;
+    const subtasks = foldSubtasks(key, lines ?? new Map(), view, isPending, outcome);
     const allSubHops = subtasks.flatMap((st) => st.hops);
     for (const h of hops) covered.add(h.id);
     for (const h of allSubHops) covered.add(h.id);
@@ -167,9 +171,9 @@ export function buildHomeRows(
       hops,
       subtasks,
       state: taskStateOf({
-        main: hops.map(view),
-        subtasks: allSubHops.map(view),
-        outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+        main: hops.map((h) => view(h, h !== tip)),
+        subtasks: subtasks.flatMap((st) => st.hops.map((h) => view(h, h !== st.tip))),
+        outcome,
       }),
       title: sessionTitle(tip, opts.untitled),
       projectPath: repoRootPath(tip.workspacePath),
@@ -226,20 +230,25 @@ function push<K, V>(m: Map<K, V[]>, k: K, v: V) {
 function foldSubtasks(
   keyPrefix: string,
   lines: Map<string, SessionInfo[]>,
-  view: (s: SessionInfo) => TaskMemberView,
+  view: (s: SessionInfo, superseded: boolean) => TaskMemberView,
   isPending: (s: SessionInfo) => boolean,
+  parentOutcome: TaskView["outcome"],
 ): SubtaskRow[] {
   const out: SubtaskRow[] = [];
   for (const [sk, hops] of lines) {
+    const tip = tipOf(hops);
     out.push({
       key: `${keyPrefix}::${sk}`,
-      tip: tipOf(hops),
+      tip,
       hops,
-      state: taskStateOf({
-        main: hops.map(view),
-        subtasks: [],
-        outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
-      }),
+      state: subtaskStateOf(
+        {
+          main: hops.map((h) => view(h, h !== tip)),
+          subtasks: [],
+          outcome: hops.find((h) => h.taskOutcome)?.taskOutcome ?? null,
+        },
+        parentOutcome,
+      ),
       pending: hops.some(isPending),
     });
   }
