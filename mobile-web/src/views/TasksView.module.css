@@ -141,7 +141,7 @@
 .sectionToggle {
   flex: 1;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-height: 48px;
   text-align: left;
@@ -260,7 +260,8 @@
   white-space: nowrap;
   padding: 1px 8px;
   border-radius: 6px;
-  background: var(--color-bg-input);
+  /* Not bg-input: in light it equals the card, and the chip vanishes. */
+  background: var(--color-bg-selected);
   color: var(--color-text-secondary);
   font-size: var(--t-aux, 12px);
 }

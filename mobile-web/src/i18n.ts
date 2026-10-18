@@ -651,7 +651,6 @@ const DICT: Record<string, string> = {
   "[当时展示过 HTML 预览]": "[an HTML preview was shown]",
   "其他：{0}": "Other: {0}",
   "加载计划中…": "Loading plans…",
-  "该会话没有 TASKS.md 计划": "No TASKS.md plan for this session",
   "分析 token 用量…": "Analyzing token usage…",
   "分析失败（桌面端可能离线）": "Analysis failed (desktop may be offline)",
   "输入 tokens": "Input tokens",
@@ -1185,6 +1184,8 @@ const DICT: Record<string, string> = {
   "资料加载失败：{0}": "Library failed to load: {0}",
   还没有子任务: "No sub-tasks yet",
   "这个任务派出的会话会列在这里。": "Sessions this task spawns are listed here.",
+  还没有步骤: "No steps yet",
+  "任务拆成几步来做时，每一步会列在这里。": "When the task is split into steps, each one is listed here.",
   "这个任务还没有存进产出库的文件。": "This task hasn't saved anything to the output library yet.",
   "这个项目还没有归档的文档。": "This project has no archived docs yet.",
   // ── Task model: library and me ──
