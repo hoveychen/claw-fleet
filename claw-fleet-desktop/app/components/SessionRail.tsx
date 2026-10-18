@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, Crosshair, Folder, FolderOpen } from "lucide-react";
 import type { SessionInfo } from "../types";
 import { SessionRow } from "./SessionRow";
 import { GroupMarkControl } from "./MarkControl";
@@ -57,6 +57,11 @@ type WorkspaceRailSectionProps = {
   /** Native tooltip on the heading. Defaults to `path`, which is the right
    *  thing for a repository section and meaningless for a synthetic one. */
   tooltip?: string;
+  /** "Show only this project". Given only for repository sections — a status
+   *  bucket is not a scope. Hover reveals the button; while `focused` it stays
+   *  visible and clicking it again leaves the scope. */
+  onFocus?: (name: string) => void;
+  focused?: boolean;
   children: ReactNode;
 };
 
@@ -71,36 +76,57 @@ export function WorkspaceRailSection({
   onToggle,
   icon,
   tooltip,
+  onFocus,
+  focused = false,
   children,
 }: WorkspaceRailSectionProps) {
   const { t } = useTranslation();
+  const focusLabel = focused
+    ? t("history.unfocus_workspace", "显示全部项目")
+    : t("history.focus_workspace", "只看此项目");
 
   return (
     <section className={styles.workspace_section}>
-      <button
-        type="button"
-        className={styles.workspace_header}
-        aria-expanded={!collapsed}
-        title={tooltip ?? path}
-        onClick={() => onToggle(path)}
-      >
-        <span className={styles.workspace_folder} aria-hidden="true">
-          {icon ?? (collapsed ? <Folder size={14} /> : <FolderOpen size={14} />)}
-        </span>
-        <span className={styles.workspace_name}>{name}</span>
-        <span
-          className={styles.workspace_count}
-          aria-label={t("history.workspace_session_count", "{{count}} 组会话", { count })}
+      <div className={styles.workspace_head}>
+        <button
+          type="button"
+          className={styles.workspace_header}
+          aria-expanded={!collapsed}
+          title={tooltip ?? path}
+          onClick={() => onToggle(path)}
         >
-          {count}
-        </span>
-        <ChevronRight
-          className={styles.workspace_chevron}
-          size={13}
-          data-open={!collapsed}
-          aria-hidden="true"
-        />
-      </button>
+          <span className={styles.workspace_folder} aria-hidden="true">
+            {icon ?? (collapsed ? <Folder size={14} /> : <FolderOpen size={14} />)}
+          </span>
+          <span className={styles.workspace_name}>{name}</span>
+          <span
+            className={styles.workspace_count}
+            aria-label={t("history.workspace_session_count", "{{count}} 组会话", { count })}
+          >
+            {count}
+          </span>
+          <ChevronRight
+            className={styles.workspace_chevron}
+            size={13}
+            data-open={!collapsed}
+            aria-hidden="true"
+          />
+        </button>
+        {onFocus && (
+          // A sibling, not a child, of the toggle: a button cannot nest a button.
+          <button
+            type="button"
+            className={styles.workspace_focus}
+            data-on={focused}
+            aria-pressed={focused}
+            aria-label={focusLabel}
+            title={focusLabel}
+            onClick={() => onFocus(name)}
+          >
+            <Crosshair size={12} strokeWidth={1.9} />
+          </button>
+        )}
+      </div>
       {!collapsed && <div className={styles.workspace_sessions}>{children}</div>}
     </section>
   );

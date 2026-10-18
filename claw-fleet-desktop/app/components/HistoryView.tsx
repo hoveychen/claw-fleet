@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Circle,
   Copy,
+  Crosshair,
   Folder,
   FolderOpen,
   List,
@@ -20,6 +21,7 @@ import {
   Pencil,
   Plus,
   Square,
+  X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -53,6 +55,11 @@ import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./Con
 import { RenameSessionDialog } from "./RenameSessionDialog";
 import { buildRenderItems } from "./sessionGroups";
 import { groupSessionsByWorkspace } from "./workspaceSessionGroups";
+import {
+  filterByWorkspaceScope,
+  parseWorkspaceScope,
+  withWorkspaceScope,
+} from "../../../shared-ts/workspaceScope";
 import {
   groupItemsByStatus,
   type StatusBucket,
@@ -359,8 +366,24 @@ export function HistoryView() {
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
   // the user's back (a waiting-input alert forcing setViewMode("list") is enough).
-  const query = useUIStore((s) => s.historyQuery);
+  const rawQuery = useUIStore((s) => s.historyQuery);
   const setQuery = useUIStore((s) => s.setHistoryQuery);
+  // A `ws:<name>` token in the box scopes the list to one workspace by name;
+  // everything below searches only the remaining text, so the full-text search
+  // never sees the token (and never drags in sessions that merely mention the
+  // project). The token is the whole scope state — see shared-ts/workspaceScope.
+  const scope = useMemo(() => parseWorkspaceScope(rawQuery), [rawQuery]);
+  const query = scope.text;
+  const scopedWorkspace = scope.workspace;
+  // Section heading action: scope to that project, or leave the scope when it is
+  // the one already in force. The user's search text survives both ways.
+  const toggleWorkspaceFocus = useCallback(
+    (name: string) => {
+      const on = scopedWorkspace?.toLowerCase() === name.toLowerCase();
+      setQuery(withWorkspaceScope(rawQuery, on ? null : name));
+    },
+    [rawQuery, scopedWorkspace, setQuery],
+  );
   // Re-render on a slow tick so the relative "last updated" and the live
   // Elapsed-runtime durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
@@ -459,7 +482,7 @@ export function HistoryView() {
     // Everything except the mark filter — the segment counts are taken over
     // this set so each count reflects how many rows its segment would reveal
     // under the current query.
-    const preMark = adhocSessions
+    const preMark = filterByWorkspaceScope(adhocSessions, scopedWorkspace)
       .filter((s) => {
         if (!q) return true;
         const clientMatch =
@@ -497,7 +520,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, query, ftsMatchPaths, markFilter, groupHandoff]);
+  }, [adhocSessions, scopedWorkspace, query, ftsMatchPaths, markFilter, groupHandoff]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -960,7 +983,7 @@ export function HistoryView() {
       count={scanReady ? markCounts[markFilter] : null}
       countLoading={!scanReady}
       search={{
-        value: query,
+        value: rawQuery,
         onChange: setQuery,
         placeholder: t("history.search_placeholder", "搜索标题、计划、全文…"),
         busy: searching,
@@ -1056,6 +1079,25 @@ export function HistoryView() {
               })}
             </div>
           </div>
+          {scopedWorkspace && (
+            <div className={styles.scope_row}>
+              <span className={styles.scope_chip}>
+                <Crosshair size={11} strokeWidth={2} aria-hidden="true" />
+                <span className={styles.scope_name}>
+                  {t("history.scope_only", "只看 {{name}}", { name: scopedWorkspace })}
+                </span>
+                <button
+                  type="button"
+                  className={styles.scope_clear}
+                  onClick={() => setQuery(withWorkspaceScope(rawQuery, null))}
+                  aria-label={t("history.unfocus_workspace", "显示全部项目")}
+                  title={t("history.unfocus_workspace", "显示全部项目")}
+                >
+                  <X size={11} strokeWidth={2.2} />
+                </button>
+              </span>
+            </div>
+          )}
         </div>
 
         <div
@@ -1094,8 +1136,15 @@ export function HistoryView() {
                 tooltip={section.tooltip}
                 // Collapsed row count: one relay chain folded into one group counts as 1, matching what we see.
                 count={section.items.length}
-                collapsed={collapsedWorkspaces.includes(section.key)}
+                // A scoped list is one project the user asked to see; a fold
+                // left over from browsing would hide exactly that.
+                collapsed={!scopedWorkspace && collapsedWorkspaces.includes(section.key)}
                 onToggle={toggleWorkspaceCollapsed}
+                onFocus={groupMode === "workspace" ? toggleWorkspaceFocus : undefined}
+                focused={
+                  scopedWorkspace != null &&
+                  scopedWorkspace.toLowerCase() === section.name.toLowerCase()
+                }
               >
                 <SessionRail
                   items={section.items}
