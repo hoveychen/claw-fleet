@@ -417,7 +417,7 @@ fn verdict(f: &Facts, phase: Phase, detail: impl Into<String>) -> Probe {
 /// override everything (a pending relay, a lost remote) down to the transcript.
 pub fn classify(f: &Facts, now: u64) -> Probe {
     if f.relaying {
-        return verdict(f, Phase::Running, "已登记接力，等后继会话起来");
+        return verdict(f, Phase::Running, "上下文正在续接");
     }
     if let Some(d) = &f.remote_disconnect {
         return verdict(f, Phase::Failed, format!("远端工作区断开：{d}"));

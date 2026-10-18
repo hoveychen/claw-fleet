@@ -175,7 +175,7 @@ const REMINDER_ACTION: &str = "现在只需做一件事：把上一轮的结论�
 pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationRequest {
     let body = last_text.trim();
     let question = if body.is_empty() {
-        "任务已结束，但会话没有留下可展示的结论。".to_string()
+        "任务已结束，但没有留下可展示的结论。".to_string()
     } else {
         format!("任务已完成：\n\n{body}")
     };
@@ -191,12 +191,12 @@ pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationReq
             options: vec![
                 ElicitationOption {
                     label: "收到".into(),
-                    description: "确认收到，并提醒会话下次用决策卡汇报".into(),
+                    description: "确认收到，并提醒它下次用决策卡汇报".into(),
                     preview: None,
                 },
                 ElicitationOption {
                     label: "继续".into(),
-                    description: "收到并让会话继续推进".into(),
+                    description: "收到并让它继续推进".into(),
                     preview: None,
                 },
             ],
