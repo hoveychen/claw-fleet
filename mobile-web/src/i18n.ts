@@ -233,7 +233,6 @@ const DICT: Record<string, string> = {
     "This browser (HarmonyOS ArkWeb) doesn't support web notifications — use desktop Fleet to receive decision-card alerts.",
   "当前浏览器不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。":
     "This browser doesn't support web notifications — use desktop Fleet to receive decision-card alerts.",
-  "开启通知，第一时间收到新决策卡。": "Enable notifications to get new decision cards instantly.",
   开启: "Enable",
   停用: "Off",
   再按一次返回退出: "Press back again to exit",
@@ -248,7 +247,6 @@ const DICT: Record<string, string> = {
   "Agent 正在等待你的决定": "The agent is waiting for your decision",
   "托管工作区": "Hosted workspace",
   "云任务": "Cloud tasks",
-  "待处理决策": "Pending decisions",
   "正在读取控制面…": "Loading the control plane…",
   "还没有云任务": "No cloud tasks yet",
   "通过公开 Task API 创建的工作会出现在这里。": "Work created through the public Task API shows up here.",
@@ -281,7 +279,6 @@ const DICT: Record<string, string> = {
   "查看计划 {0}": "View plan {0}",
   "静默计划 {0}": "Snooze plan {0}",
   "取消静默 {0}": "Unsnooze plan {0}",
-  "新会话 {0}": "New session {0}",
   起会话: "Spawn session",
   查看接力链: "View handoff chain",
   "查看 {0} 的版本": "Versions of {0}",
@@ -459,7 +456,6 @@ const DICT: Record<string, string> = {
   "确定停止「{0}」的这个会话吗？": "Stop this session in \"{0}\"?",
   操作失败: "Operation failed",
   中断当前回合: "Interrupt this turn",
-  停止这个会话: "Stop this session",
   "只掐掉手上这一轮，会话还在，可以接着发下一条":
     "Cuts the current turn only — the session stays alive and takes the next message",
   "结束这个进程，之后要用恢复命令才能继续":
@@ -528,14 +524,12 @@ const DICT: Record<string, string> = {
   // ── Active status trail below header (sessionStatusPills.ts). "out of credits" / "running" already
   //    registered elsewhere in this dict — reuse them here. Duplicate keys silently override, so don't repeat.
   远端断开: "Remote lost",
-  "{0} 张待决策": "{0} awaiting you",
   "{0} 条排队": "{0} queued",
   会话状态: "Session status",
   // ── Session details half-sheet (SessionSheet.tsx) ──
   会话详情: "Session info",
   此刻: "NOW",
   进度: "PROGRESS",
-  待决策: "Awaiting you",
   "{0} 张": "{0} card(s)",
   未说明在等什么: "No note on what it waits for",
   "轮询 {0} 次 · 每 {1}s": "polled {0}× · every {1}s",
@@ -716,13 +710,12 @@ const DICT: Record<string, string> = {
   上一题: "Previous",
   下一题: "Next",
   放弃编辑: "Discard edits",
-  "没有待处理的决策": "No pending decisions",
-  "所有决策卡都已作答，收工。有新决策时会自动出现在这里。":
-    "Every decision card is answered — you're all caught up. New ones will appear here automatically.",
+  "都处理完了。有事需要你决定时会自动出现在这里。":
+    "All caught up. Anything that needs your call shows up here.",
   "在线设备的决策卡都已作答。另有 {0} 台设备离线，它们的卡暂时同步不过来。":
     "Every card from the online devices is answered. {0} device(s) are offline — their cards can't sync over yet.",
-  "暂时收不到新决策，等桌面端重新上线就会同步过来。":
-    "No new decisions for now — they'll sync over once the desktop reconnects.",
+  "暂时收不到新的待处理事项，等桌面端重新上线就会同步过来。":
+    "Nothing new can arrive for now — it syncs over once the desktop reconnects.",
   "AI 风险分析": "AI risk analysis",
   "分析中…": "Analyzing…",
   "拒绝理由（可选，会转告给 AI）": "Reason for denying (optional, relayed to the AI)",
@@ -736,7 +729,6 @@ const DICT: Record<string, string> = {
   "拒绝理由（可选）": "Reason for denying (optional)",
   收起: "Collapse",
   "共 {0} 张": "{0} pending",
-  查看待处理决策: "View pending decisions",
   展开完整计划: "Show full plan",
   退出编辑: "Exit editing",
   编辑计划: "Edit plan",
@@ -777,7 +769,6 @@ const DICT: Record<string, string> = {
   "排队中…": "Queuing…",
   已排队: "Queued",
   "[当时展示过图片预览]": "[an image preview was shown at the time]",
-  "正在加载决策…": "Loading decisions…",
   "已超时 · 会话已暂停": "Timed out · session paused",
   "等待超时，Fleet 已经掐掉那一轮并把问题留了下来。回复后会带着你的答复唤醒会话继续。": "The wait timed out, so Fleet cut that turn short and kept the question. Answering wakes the session up and continues with your reply.",
   "发送中…等待桌面端确认收到": "Sending… waiting for the desktop to confirm receipt",
@@ -823,7 +814,6 @@ const DICT: Record<string, string> = {
   // ── Voice input ──
   语音输入: "Voice input",
   "要让 agent 做什么？也可点麦克风说": "What should the agent do? Or tap the mic to talk",
-  "继续这个会话…": "Continue this session…",
   "直接插一句…": "Cut in…",
   停止录音: "Stop recording",
   取消录音: "Discard recording",
@@ -862,7 +852,6 @@ const DICT: Record<string, string> = {
   跳过权限: "Bypass permissions",
   "「{0}」超过 10 MB 上限，已跳过": "\"{0}\" exceeds the 10 MB limit — skipped",
   附件上传失败: "Attachment upload failed",
-  新会话: "New session",
   运行位置: "Run on",
   运行配置: "Run configuration",
   第一条指令: "First instruction",
@@ -876,7 +865,6 @@ const DICT: Record<string, string> = {
   思考强度: "Reasoning effort",
   权限: "Permissions",
   自定义路径: "Custom path",
-  启动会话: "Start session",
   已启动: "Started",
   "正在发往 {0}…": "Sending to {0}…",
   目标设备已确认收到: "The target device confirmed receipt",
@@ -905,7 +893,6 @@ const DICT: Record<string, string> = {
   创建: "Create",
   新建目录失败: "Could not create that directory",
   "要让 agent 做什么？": "Task for the agent?",
-  创建会话失败: "Failed to create session",
   // ── Render fallback (ErrorBoundary) ──
   这一块没能显示出来: "This part could not be displayed",
   "其余部分仍然可用。{0}": "The rest still works. {0}",
@@ -923,13 +910,11 @@ const DICT: Record<string, string> = {
   创建会话: "Create session",
   默认权限: "Default permissions",
   沿用权限: "Inherit permissions",
-  恢复会话失败: "Failed to resume session",
   "这个会话已被 {0} 接替。继续它会让两个会话同时做同一份工作。仍要继续？":
     "Taken over by {0}. Resuming it would put two sessions on the same work. Resume anyway?",
   "未继续：已被 {0} 接替": "Not resumed: taken over by {0}",
   "发送中…": "Sending…",
   已发送: "Sent",
-  继续会话: "Resume session",
 
   // ── Generic / CopyButton ──
   复制: "Copy",
@@ -1142,7 +1127,6 @@ const DICT: Record<string, string> = {
   目标偏移: "Goal shifted",
   看不清: "Unclear",
   目标: "Goal",
-  打开会话: "Open session",
   "{0} 个会话出现": "Seen in {0} sessions",
   "添加到 CLAUDE.md": "Add to CLAUDE.md",
   // ── `@` session mentions (composer picker / user bubble) ──
@@ -1152,7 +1136,6 @@ const DICT: Record<string, string> = {
   引用知识库: "Reference a wiki doc",
   "打开文档 {0}": "Open doc {0}",
   移除引用: "Remove reference",
-  "搜索会话标题、项目…": "Search session titles, projects…",
   "搜索知识库文档…": "Search wiki docs…",
   没有匹配的结果: "No matches",
   // ── Task model: bottom bar ──
@@ -1209,4 +1192,18 @@ const DICT: Record<string, string> = {
   还没有资料: "Nothing in the library yet",
   没有匹配的资料: "Nothing matches",
   "Agent 发布的文档和存进产出库的文件会出现在这里。": "Docs agents publish and files they save to the output library show up here.",
+  "没有待你处理的事": "Nothing needs you",
+  "正在加载待你处理的事…": "Loading what needs you…",
+  "开启通知，有事需要你决定时第一时间知道。": "Turn on notifications to hear the moment something needs your call.",
+  "{0} 件待你处理": "{0} need you",
+  "查看待你处理的事": "See what needs you",
+  "新任务 {0}": "New task {0}",
+  "创建任务失败": "Failed to create task",
+  "启动任务": "Start task",
+  "继续任务失败": "Failed to continue task",
+  "继续这个任务…": "Continue this task…",
+  "继续任务": "Continue task",
+  "打开任务": "Open task",
+  "搜索任务标题、项目…": "Search task titles, projects…",
+  "停止这个任务": "Stop this task",
 };

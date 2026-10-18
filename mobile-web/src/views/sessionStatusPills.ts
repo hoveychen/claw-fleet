@@ -110,7 +110,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
   if (pending > 0) {
     pills.push({
       key: "decisions",
-      label: t("{0} 张待决策", pending),
+      label: t("{0} 件待你处理", pending),
       tone: "alert",
       target: "decisions",
     });

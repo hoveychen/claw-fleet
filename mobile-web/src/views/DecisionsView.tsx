@@ -57,7 +57,7 @@ import { stripTtsDivider } from "./decisionCall";
 export const KIND_LABEL: Record<string, string> = {
   guard: "命令审批",
   elicitation: "问题请示",
-  "fleet-ask": "决策卡",
+  "fleet-ask": "需要你决定",
   "plan-approval": "计划审批",
   "permission-prompt": "权限请求",
   "a2ui-render": "Agent 界面",
@@ -165,7 +165,7 @@ export function DecisionsView({
       // Two placeholders at a decision card's height (chip row, title, two
       // body lines, action row).
       return (
-        <div className={styles.list} aria-busy="true" aria-label={t("正在加载决策…")}>
+        <div className={styles.list} aria-busy="true" aria-label={t("正在加载待你处理的事…")}>
           <SkeletonCard height={172} />
           <SkeletonCard height={172} />
         </div>
@@ -174,7 +174,7 @@ export function DecisionsView({
     return agentOnline ? (
       <EmptyState
         icon={CheckCircle2}
-        title={t("没有待处理的决策")}
+        title={t("没有待你处理的事")}
         description={
           // "All answered" only applies to the online devices. Without saying it clearly when a device is offline, this sentence reads as
           // "all machines are fine" — when in fact the offline device's cards just aren't syncing.
@@ -183,14 +183,14 @@ export function DecisionsView({
                 "在线设备的决策卡都已作答。另有 {0} 台设备离线，它们的卡暂时同步不过来。",
                 offlineDevices,
               )
-            : t("所有决策卡都已作答，收工。有新决策时会自动出现在这里。")
+            : t("都处理完了。有事需要你决定时会自动出现在这里。")
         }
       />
     ) : (
       <EmptyState
         icon={CloudOff}
         title={t("桌面端离线")}
-        description={t("暂时收不到新决策，等桌面端重新上线就会同步过来。")}
+        description={t("暂时收不到新的待处理事项，等桌面端重新上线就会同步过来。")}
       />
     );
   }

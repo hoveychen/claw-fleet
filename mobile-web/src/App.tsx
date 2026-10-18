@@ -1395,7 +1395,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             <span>{t("通知权限已被拒绝，请在系统设置中为本站点重新开启。")}</span>
           ) : (
             <>
-              <span>{t("开启通知，第一时间收到新决策卡。")}</span>
+              <span>{t("开启通知，有事需要你决定时第一时间知道。")}</span>
               <button
                 className={styles.pushButton}
                 onClick={() => void enablePushFromBanner()}

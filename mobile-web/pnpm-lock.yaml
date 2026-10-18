@@ -29,6 +29,9 @@ importers:
       '@capgo/capacitor-speech-recognition':
         specifier: ^8.2.0
         version: 8.2.0(@capacitor/core@8.5.0)
+      '@fontsource/inter':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -408,6 +411,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@fontsource/inter@5.3.0':
+    resolution: {integrity: sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -2405,6 +2411,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
+
+  '@fontsource/inter@5.3.0': {}
 
   '@iconify/types@2.0.0': {}
 

@@ -1945,7 +1945,7 @@ export function SessionDetailView({
               onClick={() => setSheetOpen(true)}
             >
               <span className={styles.headerTitleText}>
-                {session.titleOverride || session.aiTitle || session.slug || t("会话")}
+                {session.titleOverride || session.aiTitle || session.slug || t("未命名任务")}
               </span>
             </button>
           </div>
