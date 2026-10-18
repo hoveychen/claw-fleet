@@ -843,3 +843,90 @@
   border-color: color-mix(in srgb, var(--color-on-accent) 35%, transparent);
   border-top-color: var(--color-on-accent);
 }
+
+/* ── First-run "What should get done?" card ─────────────────────────────── */
+.card_launch {
+  border-color: var(--color-accent);
+}
+
+.launch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-field);
+  transition: border-color 0.14s;
+}
+
+.launch:focus-within {
+  border-color: var(--color-accent);
+}
+
+.launch_input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+}
+
+.launch_input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.launch .btn_primary {
+  padding: 7px 16px;
+}
+
+.project_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project_chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  max-width: 200px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.14s, background 0.14s;
+}
+
+.project_chip:hover {
+  background: var(--color-bg-hover);
+}
+
+.project_chip_active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.project_chip_name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project_chip_path {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

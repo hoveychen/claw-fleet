@@ -1230,6 +1230,15 @@
       "title": "New: the nav is down to four entries",
       "description": "The icon rail on the left is now Tasks / Library / Projects / Review / Settings. Library holds docs and deliverables; Projects holds each project's routines, memory and code; Review sums up each day's progress by project; security, plugins & skills and devices live under Settings.",
       "hint": "Home is every task across all projects. A new review puts a red dot on Review; an unread critical audit event puts one on Settings."
+    },
+    "launch": {
+      "title": "What should get done?",
+      "description": "Write down an idea and pick the project it belongs to; Fleet opens a task and gets on with it. Whenever it needs your call, the card shows up at the top of the home page.",
+      "start": "Start",
+      "projects_label": "Project (recently active directories)",
+      "projects_loading": "Looking for directories you've worked in…",
+      "projects_empty": "No recent directories yet. Press Enter and pick one in the new task.",
+      "choose_later": "Choose later"
     }
   },
   "mascot": {
