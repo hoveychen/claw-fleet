@@ -1,10 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { isWebBuild } from "../hostEnv";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSessionsStore } from "../store";
+import { useSessionsStore, useUIStore } from "../store";
 import {
   getItem,
   setItem,
@@ -30,6 +29,7 @@ import { EnvironmentPanel } from "./EnvironmentPanel";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { SkeletonCard, Spinner } from "./loading";
 import { usePending } from "../hooks/usePending";
+import { OnboardingLaunch } from "./OnboardingLaunch";
 import styles from "./Onboarding.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -146,40 +146,6 @@ function playCelebrationSound() {
 
 // ── Shared sub-components ────────────────────────────────────────────────────
 
-function CopyableCommand({ cmd }: { cmd: string }) {
-  const { t } = useTranslation();
-  const [copied, setCopied] = useState(false);
-
-  // Only flag "copied" once the write actually lands — a rejected clipboard
-  // write must not leave the user thinking the command is on their clipboard.
-  const copy = async () => {
-    try {
-      await writeText(cmd);
-    } catch (e) {
-      console.error("clipboard write failed:", e);
-      return;
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <button
-      type="button"
-      className={styles.code_block}
-      onClick={copy}
-      title={t("onboarding.copy_hint")}
-    >
-      <span className={styles.code_text}>{cmd}</span>
-      {copied ? (
-        <span className={styles.copied}>{t("common.copied", "已复制")}</span>
-      ) : (
-        <span className={styles.copy_icon}>&#x2398;</span>
-      )}
-    </button>
-  );
-}
-
 function CelebrationView({
   onDismiss,
   dismissing,
@@ -210,29 +176,6 @@ function CelebrationView({
         </button>
       </div>
     </>
-  );
-}
-
-// ── Header feature highlights ─────────────────────────────────────────────
-// Compressed from the old full-width FeaturesCard: three pills under the
-// welcome subtitle instead of a scroll-eating card.
-
-const HIGHLIGHTS = [
-  { icon: "\u{1F4CA}", titleKey: "onboarding.features.attention_title" },
-  { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title" },
-  { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title" },
-];
-
-function HeaderHighlights() {
-  const { t } = useTranslation();
-  return (
-    <div className={styles.highlights}>
-      {HIGHLIGHTS.map((h) => (
-        <span key={h.titleKey} className={styles.highlight}>
-          <span aria-hidden>{h.icon}</span> {t(h.titleKey)}
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -630,22 +573,28 @@ function PrdModeCard({
   );
 }
 
-/** Purely informational—where the pages are. Unlike every other card here it
- *  has no toggle: the layout isn't optional, and an upgrading user who knew the
- *  old sidebar needs to be told where its pages went rather than discovering it
- *  by clicking around. That's also why "nav_sections" is in
+/** Purely informational: what the new form looks like. Unlike every other card
+ *  here it has no toggle: the layout isn't optional, and an upgrading user who
+ *  knew the old sidebar needs to be shown where things went rather than
+ *  discovering it by clicking around. That's also why "new_form" is in
  *  ONBOARDING_FEATURES—it makes this card surface once in What's New for
- *  existing installs. */
-function NavSectionsCard() {
-  const { t } = useTranslation();
+ *  existing installs. The screenshot is a mock-mode capture of the real UI. */
+function NewFormCard() {
+  const { t, i18n } = useTranslation();
+  const shot = i18n.language?.startsWith("zh") ? "/onboarding/home-zh.png" : "/onboarding/home-en.png";
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
       <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x1F9ED;</span>
-        <span className={styles.card_title}>{t("onboarding.nav_sections.title")}</span>
+        <span className={styles.card_title}>{t("onboarding.new_form.title")}</span>
       </div>
-      <p className={styles.card_description}>{t("onboarding.nav_sections.description")}</p>
-      <p className={styles.card_description}>{t("onboarding.nav_sections.hint")}</p>
+      <p className={styles.card_description}>{t("onboarding.new_form.description")}</p>
+      <img
+        className={styles.screenshot}
+        src={shot}
+        alt={t("onboarding.new_form.screenshot_alt")}
+        loading="lazy"
+      />
+      <p className={styles.card_description}>{t("onboarding.new_form.hint")}</p>
     </div>
   );
 }
@@ -906,7 +855,14 @@ function HooksSetupCard({
 
 export type OnboardingMode = "full" | "whats_new";
 
-export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismiss: () => void }) {
+export function Onboarding({
+  mode,
+  onDismiss,
+}: {
+  mode: OnboardingMode;
+  /** `launched`: the user left by handing Fleet a first task. */
+  onDismiss: (launched?: boolean) => void;
+}) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -1217,7 +1173,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, [sources]);
 
   // Wrap onDismiss: mark all features as seen, apply default-on hooks, + restart if sources changed
-  const dismissImpl = useCallback(async () => {
+  const finishImpl = useCallback(async (launch?: { prompt: string; workspace: string | null }) => {
     // Apply hooks/guidance that are checked by default but were never toggled
     // by the user. These are all default-ON, so dismissing onboarding without
     // touching them still writes the corresponding sentinel/hook to ~/.claude.
@@ -1262,7 +1218,17 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       console.error("reconcile codex guidance on dismiss:", e),
     );
     markFeaturesSeen([...ONBOARDING_FEATURES]);
-    onDismiss();
+    onDismiss(!!launch);
+    if (launch) {
+      // Hop to the Tasks page with the new-task composer seeded. No restart on
+      // this path even if the source selection changed: it would throw the
+      // draft away, and the new selection applies on the next launch anyway.
+      useUIStore.getState().requestNewSession({
+        prompt: launch.prompt,
+        workspace: launch.workspace ?? undefined,
+      });
+      return;
+    }
     if (sourcesChanged.current) {
       invoke("restart_app");
     }
@@ -1277,8 +1243,12 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     modelGuidanceEnabled,
   ]);
   // Up to ~8 sequential invokes: the button spins and drops re-clicks meanwhile.
-  const [dismissing, runDismiss] = usePending(dismissImpl);
-  const handleDismiss = useCallback(() => void runDismiss(), [runDismiss]);
+  const [dismissing, runFinish] = usePending(finishImpl);
+  const handleDismiss = useCallback(() => void runFinish(), [runFinish]);
+  const handleLaunch = useCallback(
+    (prompt: string, workspace: string | null) => void runFinish({ prompt, workspace }),
+    [runFinish],
+  );
 
   // Environment detection runs in the background and streams into the
   // diagnostics area — it must never block the first paint. Credential
@@ -1373,11 +1343,11 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             <p className={styles.subtitle}>{t("onboarding.whats_new.subtitle")}</p>
           </div>
 
-          {/* First card in What's New: it explains where the pages moved, so it
-              has to come before any of the toggles. */}
-          {unseenFeatures.has("nav_sections") && (
+          {/* First card in What's New: it explains the new layout, so it has
+              to come before any of the toggles. */}
+          {unseenFeatures.has("new_form") && (
             <div className={styles.cards}>
-              <NavSectionsCard />
+              <NewFormCard />
             </div>
           )}
 
@@ -1514,7 +1484,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
               <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
               <h1 className={styles.title}>{t("onboarding.welcome")}</h1>
               <p className={styles.subtitle}>{t("onboarding.subtitle")}</p>
-              <HeaderHighlights />
             </div>
 
             {/* Diagnostics area: a local spinner while detection runs, issue
@@ -1561,27 +1530,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 </div>
               </div>
             ) : (
-              // Environment is fine. Without a session yet the green card
-              // doubles as the "go run your first session" nudge — the main
-              // UI's SessionEmptyState takes over after dismiss.
+              // Environment is fine: go straight to "What should get done?"
+              // with the recently active directories as project candidates.
               <div className={styles.cards}>
-                <div className={`${styles.card} ${styles.card_ok}`}>
-                  <div className={styles.card_header}>
-                    <span className={styles.card_icon}>&#x2705;</span>
-                    <span className={styles.card_title}>
-                      {t(status.has_sessions ? "onboarding.all_good.title" : "onboarding.ready.title")}
-                    </span>
-                  </div>
-                  <p className={styles.card_description}>
-                    {t(status.has_sessions ? "onboarding.all_good.description" : "onboarding.ready.description")}
-                  </p>
-                  {!status.has_sessions && <CopyableCommand cmd="claude" />}
-                </div>
+                <OnboardingLaunch onLaunch={handleLaunch} launching={dismissing} />
               </div>
             )}
 
             <div className={styles.cards}>
-              <NavSectionsCard />
+              <NewFormCard />
             </div>
 
             <div className={styles.cards}>
