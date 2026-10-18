@@ -1160,4 +1160,11 @@ const DICT: Record<string, string> = {
   资料: "Library",
   我的: "Me",
   新任务: "New task",
+  // ── Task model: needs-you cards ──
+  上一张: "Previous card",
+  下一张: "Next card",
+  答完自动到下一张: "Answering moves to the next card",
+  来源: "Source",
+  "子任务 {0}": "Sub-task {0}",
+  "或者直接说……": "Or just say it…",
 };

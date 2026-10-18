@@ -1047,6 +1047,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     (deviceId: string, id: string) => setDetailStack([{ deviceId, id }]),
     [],
   );
+  // A task is opened at its latest main-conversation hop: the hop that is
+  // talking now, not the first one the task id is named after.
+  const resolveTaskTip = useCallback(
+    (deviceId: string, taskId: string) => {
+      let tip: SessionInfo | null = null;
+      for (const s of mergedSessions) {
+        if (s.deviceId !== deviceId || s.taskId !== taskId || s.parentTaskId) continue;
+        if (!tip || s.lastActivityMs > tip.lastActivityMs) tip = s;
+      }
+      return tip?.id ?? null;
+    },
+    [mergedSessions],
+  );
   // Drill into a subagent from within a detail view — push another layer so the
   // back button returns to the opener. `AgentNav.open` prefixes `agent-`.
   const openSessionById = useCallback(
@@ -1429,6 +1442,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             workspaceOf={workspaceOf}
             onAnswered={markAnswered}
             onOpenSession={openSessionRoot}
+            resolveTaskTip={resolveTaskTip}
             deviceLabelOf={deviceLabelOf}
             offlineDevices={offlineDevices}
             focusDecision={focusDecision}
@@ -1697,6 +1711,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           workspaceOf={workspaceOf}
           onAnswered={markAnswered}
           onOpenSession={openSessionRoot}
+          resolveTaskTip={resolveTaskTip}
           deviceLabelOf={deviceLabelOf}
           clearFab={!overlayOpen}
         />

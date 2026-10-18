@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   Check,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CloudOff,
   Eye,
@@ -77,6 +78,10 @@ interface Props {
   workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
   onAnswered: (deviceId: string, id: string) => void;
   onOpenSession: (deviceId: string, sessionId: string) => void;
+  /** The session to open for a card's task: its latest main-conversation hop.
+   *  Returns null when the task is not in the snapshot; the card then opens the
+   *  asking session. */
+  resolveTaskTip?: (deviceId: string, taskId: string) => string | null;
   /** The device's display label; returns null when only one device is configured, so the badge doesn't appear —
    *  single-device users shouldn't pay a line of visual noise for multi-device support. */
   deviceLabelOf: (deviceId: string) => string | null;
@@ -98,6 +103,7 @@ export function DecisionsView({
   workspaceOf,
   onAnswered,
   onOpenSession,
+  resolveTaskTip,
   deviceLabelOf,
   offlineDevices = 0,
   focusDecision,
@@ -192,25 +198,34 @@ export function DecisionsView({
   return (
     <div className={styles.list}>
       {sorted.length > 1 && (
-        <div className={styles.queueBar}>
-          {sorted.map((d, i) => {
-            const s = workspaceOf(d.deviceId, d.request.sessionId);
-            const ws = d.request.workspaceName || s?.workspaceName || "Fleet";
-            const device = deviceLabelOf(d.deviceId);
-            return (
-              <button
-                key={itemKey(d.deviceId, d.id)}
-                className={styles.queueChip}
-                data-active={i === activeIndex}
-                data-kind={d.kind}
-                onClick={() => setActiveId(itemKey(d.deviceId, d.id))}
-              >
-                <span className={styles.queueKind}>{t(KIND_LABEL[d.kind] ?? d.kind)}</span>
-                <span className={styles.queueWs}>{ws}</span>
-                {device && <span className={styles.queueDevice}>{device}</span>}
-              </button>
-            );
-          })}
+        // One card at a time; the counter is the whole queue UI. The arrows
+        // flip without answering, for a card that has to wait.
+        <div className={styles.queueCounter}>
+          <button
+            className={styles.queueArrow}
+            disabled={activeIndex === 0}
+            aria-label={t("上一张")}
+            onClick={() => {
+              const d = sorted[activeIndex - 1];
+              if (d) setActiveId(itemKey(d.deviceId, d.id));
+            }}
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className={styles.queueCount}>
+            {activeIndex + 1} / {sorted.length}
+          </span>
+          <button
+            className={styles.queueArrow}
+            disabled={activeIndex >= sorted.length - 1}
+            aria-label={t("下一张")}
+            onClick={() => {
+              const d = sorted[activeIndex + 1];
+              if (d) setActiveId(itemKey(d.deviceId, d.id));
+            }}
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
       )}
       {active && (
@@ -230,12 +245,18 @@ export function DecisionsView({
             workspaceOf={(sessionId) => workspaceOf(active.deviceId, sessionId)}
             onAnswered={(id) => onAnswered(active.deviceId, id)}
             onOpenSession={(sessionId) => onOpenSession(active.deviceId, sessionId)}
+            onOpenTask={(taskId, fallback) =>
+              onOpenSession(
+                active.deviceId,
+                resolveTaskTip?.(active.deviceId, taskId) ?? fallback,
+              )
+            }
           />
         </ErrorBoundary>
       )}
       {sorted.length > 1 && (
         <div className={styles.queueHint}>
-          {t("第 {0} / {1} 张 · 处理完自动跳到下一张", activeIndex + 1, sorted.length)}
+          {t("答完自动到下一张")}
         </div>
       )}
     </div>
@@ -250,7 +271,12 @@ interface CardProps {
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
+  onOpenTask?: (taskId: string, fallbackSessionId: string) => void;
 }
+
+/** Question kinds carry their own header; every other kind keeps a chip naming
+ *  what is being asked (command approval, permission, plan…). */
+const QUESTION_KINDS = new Set(["fleet-ask", "elicitation"]);
 
 function DecisionCard({
   decision,
@@ -259,6 +285,7 @@ function DecisionCard({
   workspaceOf,
   onAnswered,
   onOpenSession,
+  onOpenTask,
 }: CardProps) {
   const req = decision.request;
   const session = workspaceOf(req.sessionId);
@@ -267,6 +294,8 @@ function DecisionCard({
   // session fallback must too, else a Codex card with no resolved req title
   // drops back to the raw first-prompt ai_title.
   const aiTitle = req.aiTitle || session?.titleOverride || session?.aiTitle;
+  const taskRef = req.task ?? null;
+  const taskTitle = taskRef?.taskTitle || aiTitle;
 
   // Answering over the robust req/reply path: the card is removed only once the
   // answer can no longer be lost (answerViaReq resolves) — either the desktop
@@ -323,26 +352,45 @@ function DecisionCard({
           </span>,
           sendingFrom,
         )}
+      {/* 项目 › 任务 › 来自子任务: where the question comes from, in the
+          vocabulary of the task list. Each crumb past the project opens what
+          it names. */}
       <div className={styles.cardHead}>
-        <span className={styles.kindChip} data-kind={decision.kind}>
-          {t(KIND_LABEL[decision.kind] ?? decision.kind)}
-        </span>
-        <span className={styles.workspace}>{workspace}</span>
+        <nav className={styles.crumbs} aria-label={t("来源")}>
+          <span className={styles.crumbProject}>{workspace}</span>
+          {taskTitle && (
+            <>
+              <ChevronRight size={12} className={styles.crumbSep} aria-hidden="true" />
+              <button
+                className={styles.crumbLink}
+                onClick={() =>
+                  taskRef && onOpenTask
+                    ? onOpenTask(taskRef.taskId, req.sessionId)
+                    : session && onOpenSession(session.id)
+                }
+              >
+                {taskTitle}
+              </button>
+            </>
+          )}
+          {taskRef?.subtaskId && (
+            <>
+              <ChevronRight size={12} className={styles.crumbSep} aria-hidden="true" />
+              <button className={styles.crumbLink} onClick={() => onOpenSession(req.sessionId)}>
+                {t("子任务 {0}", taskRef.subtaskTitle || t("（无标题）"))}
+              </button>
+            </>
+          )}
+        </nav>
         {/* In a merged inbox, you must see at once which device this card is from — the answer goes back to that device,
             and "which device the command was approved on" is itself part of the decision to approve. */}
         {deviceLabel && <span className={styles.deviceChip}>{deviceLabel}</span>}
-        {session && (
-          <button
-            className={styles.sessionLink}
-            onClick={() => onOpenSession(session.id)}
-            aria-label={t("查看会话详情")}
-          >
-            {t("会话")}
-            <ChevronRight size={13} />
-          </button>
-        )}
       </div>
-      {aiTitle && <div className={styles.aiTitle}>{aiTitle}</div>}
+      {!QUESTION_KINDS.has(decision.kind) && (
+        <span className={styles.kindChip} data-kind={decision.kind}>
+          {t(KIND_LABEL[decision.kind] ?? decision.kind)}
+        </span>
+      )}
       {/* `in` rather than a field on the union: guard and permission prompts are
           not parkable (their timeout is a deny, not a pause), so they genuinely
           have no `parked` — the type says so, and it should keep saying so. */}
@@ -906,6 +954,31 @@ export function stripPromptEnvelope(text: string): string {
 /** Shorten an answer key into a one-line question label. `fleet__ask` keys are
  *  the question's whole body — a TTS summary line, a `---` separator, then the
  *  report — so the first line is the closest thing to a title. */
+/** Marks an agent puts on the option it recommends. */
+const RECOMMENDED_MARK = /[(（]\s*(recommended|推荐)\s*[)）]/i;
+
+/** Which option is the recommended one: the first carrying a recommended mark,
+ *  else the first option — agents list their pick first, and that is the one
+ *  answered about half the time. */
+export function recommendedIndex(options: ReadonlyArray<{ label: string }>): number {
+  const marked = options.findIndex((o) => RECOMMENDED_MARK.test(o.label));
+  return marked >= 0 ? marked : 0;
+}
+
+/** A one-tap card: a single single-select question with options and no form.
+ *  Tapping an option is the whole answer. */
+export function isQuickAnswer(
+  questions: ReadonlyArray<{
+    multiSelect?: boolean | null;
+    options?: ReadonlyArray<unknown> | null;
+    formFields?: ReadonlyArray<unknown> | null;
+  }>,
+): boolean {
+  if (questions.length !== 1) return false;
+  const q = questions[0];
+  return !q.multiSelect && (q.options?.length ?? 0) > 0 && (q.formFields?.length ?? 0) === 0;
+}
+
 export function answerLabel(key: string): string {
   const head = key.split(/\n---\n/)[0].split("\n")[0];
   const plain = head.replace(/[*`#>]/g, "").replace(/\s+/g, " ").trim();
@@ -1280,6 +1353,17 @@ function QuestionsCard({
   const multiQ = total > 1;
   const qi = Math.min(step, total - 1);
   const allAnswered = request.questions.every(answeredQuestion);
+  const quick =
+    isQuickAnswer(request.questions) && multiOverride[request.questions[0].question] !== true;
+
+  /** Quick mode: the tapped option is the answer, sent at once. Attachments
+   *  already picked ride along, as they would with 提交. */
+  const answerWith = (q: ElicitationQuestion | FleetAskQuestion, label: string) => {
+    const atts = attachments[q.question] ?? [];
+    const mentions = atts.map((a) => `@${a.path}`).join(" ");
+    const answers = { [q.question]: mentions ? `${label} ${mentions}` : label };
+    submit(isFleetAsk ? { cancelled: false, answers } : { declined: false, answers });
+  };
 
   return (
     <div>
@@ -1345,7 +1429,52 @@ function QuestionsCard({
               client={client}
             />
           ) : null}
-          {(q.options ?? []).map((o) => {
+          {quick &&
+            (() => {
+              const opts = q.options ?? [];
+              const rec = recommendedIndex(opts);
+              // The recommended option leads, as a filled button; the rest follow
+              // in the agent's order as outlined ones.
+              const ordered = [opts[rec], ...opts.filter((_, i) => i !== rec)];
+              return ordered.map((o, i) => (
+                <div key={o.label}>
+                  <button
+                    className={styles.quickOption}
+                    data-primary={i === 0}
+                    onClick={() => answerWith(q, o.label)}
+                  >
+                    <span className={styles.optionLabel}>{o.label}</span>
+                    {o.description && <span className={styles.optionDesc}>{o.description}</span>}
+                  </button>
+                  {o.preview && (
+                    <button
+                      className={styles.quickPreviewToggle}
+                      onClick={() =>
+                        setPreviewOpen((p) => ({
+                          ...p,
+                          [`${q.question} ${o.label}`]: !p[`${q.question} ${o.label}`],
+                        }))
+                      }
+                    >
+                      <Eye size={13} />
+                      {t("预览此选项")}
+                    </button>
+                  )}
+                  {o.preview && previewOpen[`${q.question} ${o.label}`] && (
+                    <div className={styles.optionPreview}>
+                      <ReactMarkdown
+                        remarkPlugins={mdRemarkPlugins}
+                        rehypePlugins={mdRehypePlugins}
+                        components={mdComponents}
+                      >
+                        {normalizeSvgBlankLines(o.preview)}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              ));
+            })()}
+          {!quick && (q.options ?? []).map((o) => {
             const selected = (selections[q.question] ?? []).includes(o.label);
             const previewKey = `${q.question} ${o.label}`;
             // Desktop shows a focused option's preview BEFORE selection (the
@@ -1410,8 +1539,14 @@ function QuestionsCard({
               no explicit "其他…" toggle is needed. Option-less questions drop
               the label and let the box stand as the primary answer surface. */}
           <OtherComposer
-            label={(q.options?.length ?? 0) > 0 ? t("其他") : undefined}
-            placeholder={(q.options?.length ?? 0) > 0 ? t("自定义回答") : t("自由回答…")}
+            label={!quick && (q.options?.length ?? 0) > 0 ? t("其他") : undefined}
+            placeholder={
+              quick
+                ? t("或者直接说……")
+                : (q.options?.length ?? 0) > 0
+                  ? t("自定义回答")
+                  : t("自由回答…")
+            }
             value={custom[q.question] ?? ""}
             onChange={(v) => setCustom((p) => ({ ...p, [q.question]: v }))}
             question={q.question}
@@ -1484,13 +1619,15 @@ function QuestionsCard({
           >
             {t("下一题")}
           </button>
-        ) : (
+        ) : quick && !allAnswered ? null : (
+          // Quick mode answers by tapping an option; this button only appears
+          // once something has been typed or attached instead.
           <button
             className={styles.primaryButton}
             disabled={!allAnswered}
             onClick={() => doSubmit(false)}
           >
-            {t("提交")}
+            {quick ? t("发送") : t("提交")}
           </button>
         )}
       </div>

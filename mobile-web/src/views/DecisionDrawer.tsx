@@ -18,6 +18,7 @@ interface Props {
   workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
   onAnswered: (deviceId: string, id: string) => void;
   onOpenSession: (deviceId: string, sessionId: string) => void;
+  resolveTaskTip?: (deviceId: string, taskId: string) => string | null;
   deviceLabelOf: (deviceId: string) => string | null;
   /** The tab bar (and its raised centre FAB) is showing under the peek, so the
    *  peek must sit above the FAB instead of just above the bar. */
