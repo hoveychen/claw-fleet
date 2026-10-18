@@ -930,3 +930,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Mock-mode capture of the real UI, scaled into the card. */
+.screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}

@@ -12,6 +12,7 @@ export function primePromoStorage(storage: Storage): void {
   storage.setItem(
     "mock-store:onboarding-seen-features",
     JSON.stringify([
+      "new_form",
       "appearance",
       "notifications",
       "hooks_guard_elicitation",

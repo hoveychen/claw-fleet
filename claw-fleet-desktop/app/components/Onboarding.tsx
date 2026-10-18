@@ -573,22 +573,28 @@ function PrdModeCard({
   );
 }
 
-/** Purely informational—where the pages are. Unlike every other card here it
- *  has no toggle: the layout isn't optional, and an upgrading user who knew the
- *  old sidebar needs to be told where its pages went rather than discovering it
- *  by clicking around. That's also why "nav_sections" is in
+/** Purely informational: what the new form looks like. Unlike every other card
+ *  here it has no toggle: the layout isn't optional, and an upgrading user who
+ *  knew the old sidebar needs to be shown where things went rather than
+ *  discovering it by clicking around. That's also why "new_form" is in
  *  ONBOARDING_FEATURES—it makes this card surface once in What's New for
- *  existing installs. */
-function NavSectionsCard() {
-  const { t } = useTranslation();
+ *  existing installs. The screenshot is a mock-mode capture of the real UI. */
+function NewFormCard() {
+  const { t, i18n } = useTranslation();
+  const shot = i18n.language?.startsWith("zh") ? "/onboarding/home-zh.png" : "/onboarding/home-en.png";
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
       <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x1F9ED;</span>
-        <span className={styles.card_title}>{t("onboarding.nav_sections.title")}</span>
+        <span className={styles.card_title}>{t("onboarding.new_form.title")}</span>
       </div>
-      <p className={styles.card_description}>{t("onboarding.nav_sections.description")}</p>
-      <p className={styles.card_description}>{t("onboarding.nav_sections.hint")}</p>
+      <p className={styles.card_description}>{t("onboarding.new_form.description")}</p>
+      <img
+        className={styles.screenshot}
+        src={shot}
+        alt={t("onboarding.new_form.screenshot_alt")}
+        loading="lazy"
+      />
+      <p className={styles.card_description}>{t("onboarding.new_form.hint")}</p>
     </div>
   );
 }
@@ -1337,11 +1343,11 @@ export function Onboarding({
             <p className={styles.subtitle}>{t("onboarding.whats_new.subtitle")}</p>
           </div>
 
-          {/* First card in What's New: it explains where the pages moved, so it
-              has to come before any of the toggles. */}
-          {unseenFeatures.has("nav_sections") && (
+          {/* First card in What's New: it explains the new layout, so it has
+              to come before any of the toggles. */}
+          {unseenFeatures.has("new_form") && (
             <div className={styles.cards}>
-              <NavSectionsCard />
+              <NewFormCard />
             </div>
           )}
 
@@ -1532,7 +1538,7 @@ export function Onboarding({
             )}
 
             <div className={styles.cards}>
-              <NavSectionsCard />
+              <NewFormCard />
             </div>
 
             <div className={styles.cards}>

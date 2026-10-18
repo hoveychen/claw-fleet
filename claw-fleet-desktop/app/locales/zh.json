@@ -1083,88 +1083,27 @@
   },
   "onboarding": {
     "welcome": "欢迎使用 Claw Fleet",
-    "subtitle": "监控你的 AI 编程 Agent，获取每日 AI 摘要，将失误转化为知识",
+    "subtitle": "一个想法交给一个任务。它去做，需要你拍板时再来找你。",
     "checking": "正在检查环境...",
     "check_timeout": {
       "title": "环境检测超时",
       "description": "检测还没返回，但不影响使用——你可以直接开始，或点击重试。"
     },
-    "dismiss": "好的，开始使用",
+    "dismiss": "先逛逛",
     "recheck": "重新检查",
-    "no_claude_at_all": {
-      "title": "未检测到 Claude Code",
-      "description": "Claw Fleet 用于监控 AI Agent 任务。未在本机发现 Claude Code CLI、IDE 扩展或历史任务。",
-      "install_vscode": "安装 VS Code 扩展",
-      "install_vscode_hint": "在 VS Code 扩展市场搜索「Claude Code」，或从 Anthropic 官网安装。"
-    },
-    "cli_not_installed": {
-      "install_npm": "通过 npm 安装 CLI",
-      "install_npm_cmd": "npm install -g @anthropic-ai/claude-code",
-      "install_brew": "通过 Homebrew 安装 CLI（macOS）",
-      "install_brew_cmd": "brew install claude-code",
-      "after_install": "安装完成后，重启 Claw Fleet 或点击「重新检查」。"
-    },
-    "cli_not_in_path": {
-      "title": "CLI 未在 PATH 中（可选）",
-      "description": "Claude Code 已通过 IDE 扩展正常工作。未在 PATH 中找到独立 CLI，但这完全没有问题。",
-      "optional_hint": "安装独立 CLI 是可选的 —— 它可以让你在终端中使用 Claude Code，但不影响任务监控。"
-    },
-    "not_logged_in": {
-      "title": "尚未登录 Claude",
-      "description": "Claw Fleet 需要 Claude 凭据来显示账户信息和用量。选择你使用的工具查看登录指引。",
-      "api_key": "使用 API Key？",
-      "api_key_hint": "如果你使用 API Key 而非 OAuth，账户信息将不可用，但任务监控仍然正常工作。"
-    },
-    "login_tabs": {
-      "detected": "已检测",
-      "cli": {
-        "label": "CLI",
-        "hint": "在终端中运行以下命令进行身份验证：",
-        "browser": "这将打开浏览器窗口，使用你的 Anthropic 账户登录。"
-      },
-      "vscode": {
-        "label": "VS Code",
-        "step1": "1. 打开已安装 Claude Code 扩展的 VS Code。",
-        "step2": "2. 打开 Claude Code 侧边栏面板（或 Cmd+Shift+P > \"Claude Code: Open\"）。",
-        "step3": "3. 按照登录提示操作 —— 将打开浏览器进行身份验证。"
-      },
-      "jetbrains": {
-        "label": "JetBrains",
-        "step1": "1. 打开已安装 Claude Code 插件的 JetBrains IDE。",
-        "step2": "2. 打开 Claude Code 工具窗口，按照登录提示操作。"
-      },
-      "desktop": {
-        "label": "桌面端",
-        "step1": "1. 打开 Claude Desktop 应用。",
-        "step2": "2. 按照提示使用你的 Anthropic 账户登录。"
-      }
-    },
     "celebration": {
-      "title": "首个任务已检测到！",
-      "description": "恭喜！Claw Fleet 已开始监控你的任务。尽情享受仪表盘吧！"
+      "title": "第一个任务出现了！",
+      "description": "它已经在首页的任务列里。需要你拍板时，卡片会钉在它对话的底部；做完了会移到「待验收」。"
     },
     "sources": {
       "title": "Agent 源",
-      "description": "检测到多个 AI Agent 工具，选择要监控的源。",
+      "description": "本机装了不止一种 Agent 工具。选择 Fleet 要读取、也能用来开任务的那几种。",
       "detected": "已检测",
       "not_detected": "未检测到"
     },
     "whats_new": {
-      "title": "新功能",
-      "subtitle": "Claw Fleet 自你上次使用以来新增了一些功能，花一点时间来配置它们吧。"
-    },
-    "all_good": {
-      "title": "一切就绪！",
-      "description": "Claude Code 已安装，你已登录，任务正在被监控。"
-    },
-    "ready": {
-      "title": "一切就绪！",
-      "description": "环境检查通过。在任意项目目录里启动一次 Claude Code，Fleet 就会自动发现并展示它。"
-    },
-    "features": {
-      "attention_title": "每日「需要你判断的事」",
-      "live_status_title": "实时状态仪表盘",
-      "audit_title": "安全审计"
+      "title": "Fleet 换了新样子",
+      "subtitle": "首页就是全部项目的全部任务，需要你决定的排在最上面。下面是这次的变化，以及几项可以顺手设置的开关。"
     },
     "advanced": {
       "title": "高级设置",
@@ -1176,7 +1115,7 @@
     },
     "settings_notif": {
       "title": "通知与小助手",
-      "description": "设置 Agent 等待时的通知方式，以及悬浮小助手偏好。你可以稍后在设置中修改。",
+      "description": "设置任务需要你处理时怎么提醒你，以及悬浮小助手偏好。你可以稍后在设置中修改。",
       "mascot_title": "小助手",
       "sound_title": "提示音"
     },
@@ -1211,22 +1150,22 @@
     },
     "wiki_guidance": {
       "title": "新功能：Wiki 文档",
-      "description": "Agent 产出的 HTML 报告、demo、markdown 文档可以用 `fleet wiki publish` 归档进统一的文档库（~/.fleet/wiki），在「文档」板块浏览并保留版本历史。打开此开关会向 ~/.claude/CLAUDE.md 注入一段指引，让 Agent 完成成品后自动归档。"
+      "description": "Agent 产出的 HTML 报告、demo、markdown 文档可以用 `fleet wiki publish` 归档进统一的文档库（~/.fleet/wiki），在「资料」里浏览并保留版本历史。打开此开关会向 ~/.claude/CLAUDE.md 注入一段指引，让 Agent 完成成品后自动归档。"
     },
     "skill_interop": {
       "title": "新功能：Skill 自动互通",
       "description": "检测到你同时装了 Claude Code 与 Codex。打开后两个 skill 目录会自动保持同步：往一端丢新 skill 会自动收编并镜像到另一端，从一端删除会两端一起移除。因为删除会传播，默认关闭。",
       "toggle_hint": "监听 ~/.claude/skills 与 ~/.agents/skills。从任一端删除某个 skill 会两端同时移除。"
     },
-    "copy_hint": "点击复制",
     "env_setup": {
       "title": "环境还差几步",
       "description": "Fleet 可以替你把缺的装好、登好——点下面的按钮即可,不用开终端。"
     },
-    "nav_sections": {
-      "title": "新变化：导航只剩四个入口",
-      "description": "左侧图标栏现在是 任务 / 资料 / 项目 / 回顾 / 设置。资料里是文档和产出；项目里是每个项目的例行、记忆和代码；回顾按项目汇总每天的进展；安全、插件与技能、设备在 设置 里。",
-      "hint": "首页就是全部项目的全部任务；有新回顾时「回顾」上会亮一个红点，有未读的严重审计事件时「设置」上会亮。"
+    "new_form": {
+      "title": "新形态：一个想法，一个任务",
+      "description": "首页左边是所有项目的所有任务，按「待你处理 / 进行中 / 等待中 / 待验收」分组，每行写着它正在干什么。选中一个任务，中间是和它的对话；它要你拍板时，卡片钉在对话底部，数字键选、⌘↵ 提交，答完自动跳到下一个。右栏是它的子任务、步骤和本任务资料。",
+      "hint": "顶部「想做什么？」随时开新任务（⌘N）。左侧导航是 任务 / 资料 / 项目 / 回顾 / 设置：资料里是文档和产出，项目里是每个项目的例行、记忆和代码，回顾按项目汇总每天的进展。",
+      "screenshot_alt": "新首页：左边任务列，中间对话，右边步骤与本任务资料"
     },
     "launch": {
       "title": "想做什么？",
@@ -1740,8 +1679,8 @@
     "next": "下一步",
     "done": "知道了",
     "new_session": {
-      "title": "在这里发起新任务",
-      "desc": "这里是「任务」页——点任务栏顶部的「新任务」，选好项目、模型和第一条指令，就能派一个 Claude 帮你干活。所有你发起的任务都会按项目汇总在这一页。"
+      "title": "想做什么，从这里开始",
+      "desc": "首页顶部这个框就是起点：写下想做的事，回车，选好项目就开工。⌘N 随时回到这里。所有任务都在下面这一列，需要你处理的排在最上面。"
     }
   },
   "sidebar": {

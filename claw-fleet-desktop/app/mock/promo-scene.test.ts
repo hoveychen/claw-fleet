@@ -29,5 +29,9 @@ describe("promo scene bootstrap", () => {
     expect(
       JSON.parse(storage.getItem("mock-store:onboarding-seen-features") ?? "[]"),
     ).toContain("global_ask");
+    // Without it What's New covers the board the recording opens on.
+    expect(
+      JSON.parse(storage.getItem("mock-store:onboarding-seen-features") ?? "[]"),
+    ).toContain("new_form");
   });
 });
