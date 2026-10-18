@@ -1673,6 +1673,7 @@ pub fn run() {
             get_resume_triggers_config,
             set_resume_triggers_config,
             set_session_mark,
+            accept_tasks,
             set_session_title,
             host_features,
             list_workspace_procs,

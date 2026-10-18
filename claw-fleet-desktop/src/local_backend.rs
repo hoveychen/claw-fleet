@@ -1074,14 +1074,7 @@ impl LocalBackend {
                         if known.insert(id.clone()) {
                             // New request — read it and emit a Tauri event.
                             if let Some(mut req) = crate::guard::read_request(id) {
-                                let (ws, ai) =
-                                    resolve_session_display(&sess_guard, &req.session_id);
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = ws;
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = ai;
-                                }
+                                claw_fleet_core::pending_decisions::decorate(&mut req, &sess_guard.lock().unwrap());
                                 crate::log_debug(&format!(
                                     "[guard] new request: {} cmd={}",
                                     id, req.command_summary
@@ -1161,14 +1154,7 @@ impl LocalBackend {
                                     >(id)
                                 })
                             {
-                                let (ws, ai) =
-                                    resolve_session_display(&sess_elicit, &req.session_id);
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = ws;
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = ai;
-                                }
+                                claw_fleet_core::pending_decisions::decorate(&mut req, &sess_elicit.lock().unwrap());
                                 crate::log_debug(&format!(
                                     "[elicitation] new request: {} questions={}",
                                     id,
@@ -1256,13 +1242,7 @@ impl LocalBackend {
                                     >(id)
                                 })
                             {
-                                let (ws, ai) = resolve_session_display(&sess_ask, &req.session_id);
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = ws;
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = ai;
-                                }
+                                claw_fleet_core::pending_decisions::decorate(&mut req, &sess_ask.lock().unwrap());
                                 crate::log_debug(&format!(
                                     "[fleet-ask] new request: {} questions={}",
                                     id,
@@ -1349,13 +1329,7 @@ impl LocalBackend {
                                     >(id)
                                 })
                             {
-                                let (ws, ai) = resolve_session_display(&sess_a2ui, &req.session_id);
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = ws;
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = ai;
-                                }
+                                claw_fleet_core::pending_decisions::decorate(&mut req, &sess_a2ui.lock().unwrap());
                                 crate::log_debug(&format!("[a2ui-render] new request: {}", id));
                                 let _ = app_a2ui.emit("a2ui-render-request", &req);
                                 publish_mobile_decision(
@@ -1413,13 +1387,7 @@ impl LocalBackend {
                             if let Some(mut req) =
                                 claw_fleet_core::permission_prompt_ipc::read_request(id)
                             {
-                                let (ws, ai) = resolve_session_display(&sess_pp, &req.session_id);
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = ws;
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = ai;
-                                }
+                                claw_fleet_core::pending_decisions::decorate(&mut req, &sess_pp.lock().unwrap());
                                 crate::log_debug(&format!(
                                     "[permission-prompt] new request: {} tool={}",
                                     id, req.tool_name
@@ -1496,13 +1464,7 @@ impl LocalBackend {
                                     >(id)
                                 })
                             {
-                                let (ws, ai) = resolve_session_display(&sess_plan, &req.session_id);
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = ws;
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = ai;
-                                }
+                                claw_fleet_core::pending_decisions::decorate(&mut req, &sess_plan.lock().unwrap());
                                 crate::log_debug(&format!(
                                     "[plan-approval] new request: {} plan_len={}",
                                     id,
@@ -1683,29 +1645,6 @@ fn indexer_thread(
             }
         }
     }
-}
-
-/// Resolve a display name (AI title preferred, falling back to workspace name)
-/// for a given session id. Returns an empty string if the session is unknown.
-/// Look up a session by id and return `(workspace_name, ai_title)` so decision
-/// cards can display the real workspace name alongside the AI-generated title
-/// without conflating them.
-fn resolve_session_display(
-    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
-    session_id: &str,
-) -> (String, Option<String>) {
-    let list = sessions.lock().unwrap();
-    list.iter()
-        .find(|s| s.id == session_id)
-        // Prefer the human/agent title override — for Codex sessions it's the
-        // only real title (ai_title is the raw first prompt).
-        .map(|s| {
-            (
-                s.workspace_name.clone(),
-                s.title_override.clone().or_else(|| s.ai_title.clone()),
-            )
-        })
-        .unwrap_or_default()
 }
 
 /// Rescan all sources and emit updated sessions (with outcome tags injected).
@@ -2540,6 +2479,7 @@ impl LocalBackend {
             session_id: None,
             entrypoint: String::new(),
             images: Vec::new(),
+            spawned_by: None,
         };
         let resp = claw_fleet_core::session_refs::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
@@ -2597,6 +2537,12 @@ impl LocalBackend {
         claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)?;
         self.restamp_marks_and_emit();
         Ok(())
+    }
+
+    pub fn accept_tasks(&self, session_ids: &[String]) -> usize {
+        let n = claw_fleet_core::task_model::accept_tasks(session_ids);
+        self.restamp_marks_and_emit();
+        n
     }
 
     pub fn set_session_title(
@@ -3723,14 +3669,7 @@ impl LocalBackend {
         ids.iter()
             .filter_map(|id| {
                 let mut req = crate::plan_approval::read_request(id)?;
-                if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                    if req.workspace_name.is_empty() {
-                        req.workspace_name = s.workspace_name.clone();
-                    }
-                    if req.ai_title.is_none() {
-                        req.ai_title = s.ai_title.clone();
-                    }
-                }
+                claw_fleet_core::pending_decisions::decorate(&mut req, &sessions);
                 Some(req)
             })
             .collect()
@@ -4789,6 +4728,9 @@ mod tests {
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
+            task_id: None,
+            parent_task_id: None,
+            task_summary: None,
             task_plan: None,
             handoff: None,
             user_mark: None,

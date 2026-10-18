@@ -586,14 +586,7 @@ pub fn serve(opts: ServeOptions) {
                 for id in &guard_ids {
                     if prev_guard_ids.insert(id.clone()) {
                         if let Some(mut req) = guard::read_request(id) {
-                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = s.workspace_name.clone();
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = s.ai_title.clone();
-                                }
-                            }
+                            crate::pending_decisions::decorate(&mut req, sessions);
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("guard-request", &json);
                             }
@@ -637,14 +630,7 @@ pub fn serve(opts: ServeOptions) {
                         if let Some(mut req) = elicitation::read_request(id).or_else(|| {
                             crate::parked::request_of::<elicitation::ElicitationRequest>(id)
                         }) {
-                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = s.workspace_name.clone();
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = s.ai_title.clone();
-                                }
-                            }
+                            crate::pending_decisions::decorate(&mut req, sessions);
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("elicitation-request", &json);
                             }
@@ -694,14 +680,7 @@ pub fn serve(opts: ServeOptions) {
                         if let Some(mut req) = plan_approval::read_request(id).or_else(|| {
                             crate::parked::request_of::<plan_approval::PlanApprovalRequest>(id)
                         }) {
-                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = s.workspace_name.clone();
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = s.ai_title.clone();
-                                }
-                            }
+                            crate::pending_decisions::decorate(&mut req, sessions);
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("plan-approval-request", &json);
                             }
@@ -750,14 +729,7 @@ pub fn serve(opts: ServeOptions) {
                         if let Some(mut req) = crate::mcp_ipc::read_request(id).or_else(|| {
                             crate::parked::request_of::<crate::mcp_ipc::FleetAskRequest>(id)
                         }) {
-                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = s.workspace_name.clone();
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = s.ai_title.clone();
-                                }
-                            }
+                            crate::pending_decisions::decorate(&mut req, sessions);
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("fleet-ask-request", &json);
                             }
@@ -810,14 +782,7 @@ pub fn serve(opts: ServeOptions) {
                         if let Some(mut req) = crate::mcp_a2ui_ipc::read_request(id).or_else(|| {
                             crate::parked::request_of::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(id)
                         }) {
-                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = s.workspace_name.clone();
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = s.ai_title.clone();
-                                }
-                            }
+                            crate::pending_decisions::decorate(&mut req, sessions);
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("a2ui-render-request", &json);
                             }
@@ -841,14 +806,7 @@ pub fn serve(opts: ServeOptions) {
                 for id in &permission_prompt_ids {
                     if prev_permission_prompt_ids.insert(id.clone()) {
                         if let Some(mut req) = crate::permission_prompt_ipc::read_request(id) {
-                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                                if req.workspace_name.is_empty() {
-                                    req.workspace_name = s.workspace_name.clone();
-                                }
-                                if req.ai_title.is_none() {
-                                    req.ai_title = s.ai_title.clone();
-                                }
-                            }
+                            crate::pending_decisions::decorate(&mut req, sessions);
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("permission-prompt-request", &json);
                             }
@@ -1781,6 +1739,9 @@ fn handle_request(
             crate::routes::ELICITATION_PENDING => {
                 route_elicitation_pending(ctx, request, &query, json_header, path)
             }
+
+            // ── Accept tasks from the task list (验收 / 全部验收) ─────────────
+            crate::routes::TASKS_ACCEPT => route_tasks_accept(ctx, request, json_header),
 
             // ── Session mark (manual done/pending review state) ──────────────
             crate::routes::SESSION_MARK => {

@@ -40,14 +40,7 @@ pub(crate) fn route_fleet_ask_pending(
     let mut requests = Vec::new();
     for id in &ids {
         if let Some(mut req) = crate::mcp_ipc::read_request(id) {
-            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                if req.workspace_name.is_empty() {
-                    req.workspace_name = s.workspace_name.clone();
-                }
-                if req.ai_title.is_none() {
-                    req.ai_title = s.ai_title.clone();
-                }
-            }
+            crate::pending_decisions::decorate(&mut req, &sessions);
             requests.push(req);
         }
     }
@@ -57,14 +50,7 @@ pub(crate) fn route_fleet_ask_pending(
     for mut req in crate::parked::list_requests::<crate::mcp_ipc::FleetAskRequest>(
         crate::parked::ParkedKind::FleetAsk,
     ) {
-        if let Some(sess) = sessions.iter().find(|s| s.id == req.session_id) {
-            if req.workspace_name.is_empty() {
-                req.workspace_name = sess.workspace_name.clone();
-            }
-            if req.ai_title.is_none() {
-                req.ai_title = sess.ai_title.clone();
-            }
-        }
+        crate::pending_decisions::decorate(&mut req, &sessions);
         requests.push(req);
     }
     let body = serde_json::to_string(&requests).unwrap_or_default();
@@ -133,14 +119,7 @@ pub(crate) fn route_permission_prompt_pending(
     let mut requests = Vec::new();
     for id in &ids {
         if let Some(mut req) = crate::permission_prompt_ipc::read_request(id) {
-            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                if req.workspace_name.is_empty() {
-                    req.workspace_name = s.workspace_name.clone();
-                }
-                if req.ai_title.is_none() {
-                    req.ai_title = s.ai_title.clone();
-                }
-            }
+            crate::pending_decisions::decorate(&mut req, &sessions);
             requests.push(req);
         }
     }
@@ -208,14 +187,7 @@ pub(crate) fn route_a2ui_render_pending(
     let mut requests = Vec::new();
     for id in &ids {
         if let Some(mut req) = crate::mcp_a2ui_ipc::read_request(id) {
-            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                if req.workspace_name.is_empty() {
-                    req.workspace_name = s.workspace_name.clone();
-                }
-                if req.ai_title.is_none() {
-                    req.ai_title = s.ai_title.clone();
-                }
-            }
+            crate::pending_decisions::decorate(&mut req, &sessions);
             requests.push(req);
         }
     }
@@ -225,14 +197,7 @@ pub(crate) fn route_a2ui_render_pending(
     for mut req in crate::parked::list_requests::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(
         crate::parked::ParkedKind::A2uiRender,
     ) {
-        if let Some(sess) = sessions.iter().find(|s| s.id == req.session_id) {
-            if req.workspace_name.is_empty() {
-                req.workspace_name = sess.workspace_name.clone();
-            }
-            if req.ai_title.is_none() {
-                req.ai_title = sess.ai_title.clone();
-            }
-        }
+        crate::pending_decisions::decorate(&mut req, &sessions);
         requests.push(req);
     }
     let body = serde_json::to_string(&requests).unwrap_or_default();

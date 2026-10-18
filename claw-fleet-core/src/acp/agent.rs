@@ -349,6 +349,7 @@ impl AcpAgent {
                     session_id: Some(req.session_id.clone()),
                     entrypoint: String::new(),
                     images,
+                    spawned_by: None,
                 };
                 let resp =
                     crate::agent_source::spawn_session(tool, &spec).map_err(RpcError::internal)?;

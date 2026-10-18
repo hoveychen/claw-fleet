@@ -994,6 +994,7 @@ fn spawn_for_plan(
         session_id: Some(sid.clone()),
         entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
         images: Vec::new(),
+        spawned_by: None,
     };
     let resp = match replaces {
         Some(old) => crate::agent_source::spawn_takeover(
@@ -1209,6 +1210,7 @@ fn build_pause_card(pause: &RevivePause) -> ElicitationRequest {
         session_id: pause.session_id.clone(),
         workspace_name: "Fleet".to_string(),
         ai_title: Some("计划自动唤醒已暂停".to_string()),
+        task: None,
         questions: vec![ElicitationQuestion {
             question,
             header: "唤醒已暂停".to_string(),
@@ -1363,6 +1365,7 @@ fn build_card(view: &PlanView, kind: AskKind) -> ElicitationRequest {
         session_id: view.newest_owner.clone(),
         workspace_name: workspace_label(&view.workspace_path),
         ai_title: view.title.clone(),
+        task: None,
         questions: vec![ElicitationQuestion {
             question,
             header: header.to_string(),

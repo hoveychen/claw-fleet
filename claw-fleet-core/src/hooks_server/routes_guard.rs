@@ -70,14 +70,7 @@ pub(crate) fn route_guard_pending(
     let mut requests = Vec::new();
     for id in &ids {
         if let Some(mut req) = guard::read_request(id) {
-            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
-                if req.workspace_name.is_empty() {
-                    req.workspace_name = s.workspace_name.clone();
-                }
-                if req.ai_title.is_none() {
-                    req.ai_title = s.ai_title.clone();
-                }
-            }
+            crate::pending_decisions::decorate(&mut req, &sessions);
             requests.push(req);
         }
     }

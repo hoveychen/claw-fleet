@@ -151,6 +151,8 @@ fn build_bundle() -> String {
         claw_fleet_core::handoff::GoalRevision,
         claw_fleet_core::handoff::HandoffChain,
         claw_fleet_core::handoff::SessionHandoffInfo,
+        claw_fleet_core::task_model::TaskSummary,
+        claw_fleet_core::task_model::DecisionTaskRef,
         claw_fleet_core::prd_tasks::PlanKind,
         claw_fleet_core::plan_snooze::PlanSnooze,
         claw_fleet_core::plan_revive::PlanReviveConfig,

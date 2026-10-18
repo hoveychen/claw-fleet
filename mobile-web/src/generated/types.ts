@@ -74,7 +74,10 @@ watches?: Array<WatchSummary>,
 waitedBy?: Array<WaitedBy>, 
 remoteDisconnect?: RemoteDisconnect | null, 
 mirrorWrite?: MirrorWrite | null, 
-outOfCredits?: string | null, };
+outOfCredits?: string | null, 
+taskId?: string | null, 
+parentTaskId?: string | null, 
+taskSummary?: TaskSummary | null, };
 
 export type StuckTool = { name: string, sinceMs?: number | null, };
 
@@ -335,6 +338,21 @@ export type SessionHandoffInfo = { chainId: string,
 hop: number, 
 chainLen: number, };
 
+export type TaskSummary = { 
+hopCount: number, 
+planId?: string | null, 
+currentStep?: string | null, 
+waitReason?: string | null, 
+subtaskCount: number, 
+subtasksActive: number, 
+startedAtMs: number, 
+lastActivityMs: number, 
+costUsd: number, };
+
+export type DecisionTaskRef = { 
+taskId: string, taskTitle?: string | null, 
+subtaskId?: string | null, subtaskTitle?: string | null, };
+
 export type PlanKind = "exec" | "explore";
 
 export type PlanSnooze = { workspacePath: string, planId: string, 
@@ -424,7 +442,8 @@ export type AuditRuleInfo = { id: string, level: AuditRiskLevel, tag: string, ma
 export type SuggestedRule = { id: string, level: AuditRiskLevel, tag: string, matchMode: MatchMode, patterns: Array<string>, descriptionEn: string, descriptionZh: string, category: string, reasoning: string, };
 
 export type GuardRequest = { id: string, sessionId: string, workspaceName: string, 
-aiTitle?: string | null, toolName: string, command: string, commandSummary: string, riskTags: Array<string>, timestamp: string, 
+aiTitle?: string | null, 
+task?: DecisionTaskRef | null, toolName: string, command: string, commandSummary: string, riskTags: Array<string>, timestamp: string, 
 structuredCommand?: CommandView | null, };
 
 export type ElicitationOption = { label: string, description: string, 
@@ -433,12 +452,14 @@ preview?: string | null, };
 export type ElicitationQuestion = { question: string, header: string, options: Array<ElicitationOption>, multiSelect: boolean, };
 
 export type ElicitationRequest = { id: string, sessionId: string, workspaceName: string, 
-aiTitle?: string | null, questions: Array<ElicitationQuestion>, timestamp: string, 
+aiTitle?: string | null, 
+task?: DecisionTaskRef | null, questions: Array<ElicitationQuestion>, timestamp: string, 
 parked?: boolean, 
 turnCompletion?: boolean, };
 
 export type FleetAskRequest = { id: string, 
-sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
+sessionId: string, workspaceName: string, aiTitle?: string | null, 
+task?: DecisionTaskRef | null, timestamp: string, 
 parked?: boolean, 
 taskComplete?: boolean, questions: Array<FleetAskQuestion>, 
 reviewDocs?: Array<ReviewDoc>, };
@@ -472,17 +493,20 @@ export type ReviewDocFormat = "markdown" | "html";
 
 export type PlanApprovalRequest = { id: string, sessionId: string, workspaceName: string, 
 aiTitle?: string | null, 
+task?: DecisionTaskRef | null, 
 planContent: string, 
 planFilePath?: string | null, timestamp: string, 
 parked?: boolean, };
 
 export type A2uiRenderRequest = { id: string, 
-sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
+sessionId: string, workspaceName: string, aiTitle?: string | null, 
+task?: DecisionTaskRef | null, timestamp: string, 
 parked?: boolean, 
 messageTree: unknown, };
 
 export type PermissionPromptRequest = { id: string, 
-sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
+sessionId: string, workspaceName: string, aiTitle?: string | null, 
+task?: DecisionTaskRef | null, timestamp: string, 
 toolName: string, 
 toolInput: unknown, 
 toolUseId?: string | null, };

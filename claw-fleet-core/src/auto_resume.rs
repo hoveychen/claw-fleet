@@ -600,6 +600,9 @@ mod tests {
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
+            task_id: None,
+            parent_task_id: None,
+            task_summary: None,
         }
     }
 

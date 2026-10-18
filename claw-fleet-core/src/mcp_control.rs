@@ -773,6 +773,7 @@ fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
             session_id: None,
             entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
             images: Vec::new(),
+            spawned_by: sid.map(str::to_string),
         },
     )?;
     if let (Some(title), Some(new_sid)) = (

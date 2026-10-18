@@ -29,6 +29,9 @@ pub struct A2uiRenderRequest {
     pub workspace_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
+    /// The task this card belongs to — stamped by `pending_decisions::decorate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<crate::task_model::DecisionTaskRef>,
     #[serde(default)]
     pub timestamp: String,
     /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
@@ -200,6 +203,7 @@ mod tests {
             session_id: "sess-1".into(),
             workspace_name: "claude-fleet".into(),
             ai_title: Some("Implement P3".into()),
+            task: None,
             timestamp: "2026-05-26T12:00:00Z".into(),
             message_tree: json!({
                 "surfaceUpdate": {

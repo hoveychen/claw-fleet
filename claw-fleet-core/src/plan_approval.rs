@@ -26,6 +26,9 @@ pub struct PlanApprovalRequest {
     /// AI-generated session title (distinct from workspace_name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
+    /// The task this card belongs to — stamped by `pending_decisions::decorate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<crate::task_model::DecisionTaskRef>,
     /// The plan markdown content (already extracted from tool_input.plan).
     pub plan_content: String,
     /// Absolute path where the plan is persisted (from tool_input.planFilePath).
@@ -171,6 +174,7 @@ mod tests {
             session_id: "s1".into(),
             workspace_name: "claude-fleet".into(),
             ai_title: Some("Intercept ExitPlanMode".into()),
+            task: None,
             plan_content: "# plan\n- step".into(),
             plan_file_path: Some("/tmp/plan.md".into()),
             timestamp: "2026-04-20T00:00:00Z".into(),

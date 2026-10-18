@@ -78,6 +78,12 @@ pub struct LaunchSpec {
     /// The session a fork was taken from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    /// The session whose agent spawned this one (`fleet__spawn` / `fleet
+    /// spawn`). This is the sub-task edge of the task model; it is distinct
+    /// from [`Self::parent_session_id`] (fork origin) and from
+    /// `SessionInfo::parent_session_id` (Claude Code sub-agent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawned_by_session_id: Option<String>,
     /// When Fleet first spawned the session (epoch ms).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
@@ -259,6 +265,27 @@ pub fn note_workspace(session_id: &str, workspace: &str) {
     }
     spec.workspace = Some(workspace.to_string());
     write(session_id, &spec);
+}
+
+/// Record that `parent` spawned `session_id` (the sub-task edge). The first
+/// recorded parent wins; a self-edge is ignored. Creates the note when the
+/// spawn path did not write one.
+pub fn note_spawned_by(session_id: &str, parent: &str) {
+    let parent = parent.trim();
+    if parent.is_empty() || parent == session_id {
+        return;
+    }
+    let mut spec = get(session_id).unwrap_or_default();
+    if spec.spawned_by_session_id.is_some() {
+        return;
+    }
+    spec.spawned_by_session_id = Some(parent.to_string());
+    write(session_id, &spec);
+}
+
+/// The session that spawned `session_id`, when one was recorded.
+pub fn spawned_by_of(session_id: &str) -> Option<String> {
+    get(session_id)?.spawned_by_session_id
 }
 
 /// Every note on disk, keyed by session id, in no particular order.
@@ -1116,6 +1143,32 @@ mod tests {
         assert_eq!(reg["n1"].transcript, None);
         note_transcript("n1", "/w/n1.jsonl");
         assert_eq!(registry()["n1"].transcript.as_deref(), Some("/w/n1.jsonl"));
+    }
+
+    #[test]
+    fn spawned_by_edge_is_first_writer_wins_and_survives_respawn() {
+        let _home = TmpHome::new("spawnedby");
+        record("child", Some("opus"), None);
+        note_spawned_by("child", "child");
+        assert_eq!(spawned_by_of("child"), None, "self-edge ignored");
+        note_spawned_by("child", "root");
+        note_spawned_by("child", "other");
+        assert_eq!(spawned_by_of("child").as_deref(), Some("root"));
+        // A resume / re-record merges into the note and keeps the edge.
+        note_spawn(
+            "child",
+            Spawn {
+                source: "claude",
+                kind: SpawnKind::Resume,
+                workspace: "/w",
+                pid: None,
+                parent: None,
+                transcript: None,
+            },
+        );
+        record("child", Some("sonnet"), None);
+        assert_eq!(spawned_by_of("child").as_deref(), Some("root"));
+        assert_eq!(model_of("child").as_deref(), Some("sonnet"));
     }
 
     #[test]

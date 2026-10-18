@@ -184,6 +184,7 @@ pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationReq
         session_id: session.id.clone(),
         workspace_name: session.workspace_name.clone(),
         ai_title: session.ai_title.clone(),
+        task: None,
         questions: vec![ElicitationQuestion {
             question,
             header: "任务完成".to_string(),

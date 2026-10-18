@@ -357,6 +357,7 @@ pub(crate) fn route_spawn_session(
                 session_id: req.session_id.clone(),
                 entrypoint: String::new(),
                 images: Vec::new(),
+                spawned_by: None,
             };
             match crate::session_refs::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)
             {

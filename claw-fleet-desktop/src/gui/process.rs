@@ -267,6 +267,17 @@ pub(crate) fn set_resume_triggers_config(
     state.backend.set_resume_triggers_config(config)
 }
 
+/// Accept tasks from the task list (验收 / 全部验收): each named session's task
+/// is marked completed across its relay chain. Returns how many tasks were
+/// stamped. `(async)`: it re-enriches and re-emits the whole session list.
+#[tauri::command(async)]
+pub(crate) fn accept_tasks(
+    session_ids: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    Ok(state.backend.accept_tasks(&session_ids))
+}
+
 /// Set (or clear, when `mark` is null) the human's manual review mark for a
 /// session. Written to the local side-channel file.
 #[tauri::command(async)]

@@ -22,6 +22,7 @@ import type {
   TodoSummary,
   TaskPlanSummary,
   SessionHandoffInfo,
+  TaskSummary,
   WatchSummary,
   WaitedBy,
   RemoteDisconnect,
@@ -115,6 +116,13 @@ export interface SessionInfo {
    *  relay that predates the field — treated as "not a leak" so those don't
    *  vanish (see isFleetOwnedTask). */
   fleetSpawned?: boolean;
+  /** Task model: root of this session's conversation line (first relay hop). */
+  taskId?: string | null;
+  /** Set on a sub-task (a session another task spawned): the top-level task it
+   *  rolls up to. Only rows without it are tasks of their own. */
+  parentTaskId?: string | null;
+  /** Task row data, on main-conversation hops of a top-level task only. */
+  taskSummary?: TaskSummary | null;
   lastMessagePreview?: string | null;
   lastActivityMs: number;
   createdAtMs: number;
@@ -195,12 +203,14 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): b
  *  inside a Fleet session inherits `CLAUDE_CODE_ENTRYPOINT` from its parent and
  *  looks Fleet-owned—so it's ANDed with `fleetSpawned`. Only explicit `false`
  *  (core's verdict for leaked child) excludes; absent field (older relay) treated
- *  as not-a-leak so real tasks persist. Mirrors claw-fleet-desktop isFleetOwnedTask. */
+ *  as not-a-leak so real tasks persist. Sub-tasks (`parentTaskId` set) belong under
+ *  their task, not on the list. Mirrors claw-fleet-desktop isFleetOwnedTask. */
 export function isFleetOwnedTask(s: SessionInfo): boolean {
   return (
     !s.isSubagent &&
     isFleetOwnedEntrypoint(s.entrypoint) &&
-    s.fleetSpawned !== false
+    s.fleetSpawned !== false &&
+    !s.parentTaskId
   );
 }
 

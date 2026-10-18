@@ -975,6 +975,7 @@ fn spawn_successor_by_source(
             session_id: session_id.map(str::to_string),
             entrypoint: entrypoint.to_string(),
             images: Vec::new(),
+            spawned_by: None,
         },
     )
 }

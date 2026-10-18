@@ -2086,6 +2086,9 @@ fn make_session_info_for_date(
         remote_disconnect: None,
         mirror_write: None,
         out_of_credits: None,
+        task_id: None,
+        parent_task_id: None,
+        task_summary: None,
     })
 }
 
@@ -2934,6 +2937,9 @@ mod tests {
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
+            task_id: None,
+            parent_task_id: None,
+            task_summary: None,
         };
 
         let s2 = crate::session::SessionInfo {
@@ -2994,6 +3000,9 @@ mod tests {
             remote_disconnect: None,
             mirror_write: None,
             out_of_credits: None,
+            task_id: None,
+            parent_task_id: None,
+            task_summary: None,
         };
 
         let codex_path = dir.join("codex-rollout.jsonl");

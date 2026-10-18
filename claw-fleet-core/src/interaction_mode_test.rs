@@ -50,6 +50,7 @@ pub fn build_test_request() -> ElicitationRequest {
         session_id: format!("qa-diagnostic-{id}"),
         workspace_name: TEST_WORKSPACE_MARKER.to_string(),
         ai_title: Some("QA Diagnostic Test".into()),
+        task: None,
         questions: vec![ElicitationQuestion {
             question: "QA 诊断 — 看到这条卡片说明 Decision Panel 通路正常。\n\n---\n\n这是 Fleet 自动发出的测试卡片，回答任一选项或忽略都行（10 秒后自动清理）。".into(),
             header: "诊断测试".into(),
@@ -86,6 +87,7 @@ pub fn build_test_fleet_ask_request() -> crate::mcp_ipc::FleetAskRequest {
         session_id: format!("qa-diagnostic-{id}"),
         workspace_name: TEST_WORKSPACE_MARKER.to_string(),
         ai_title: Some("QA Diagnostic — fleet__ask".into()),
+        task: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
         review_docs: vec![],

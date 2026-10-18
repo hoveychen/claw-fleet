@@ -31,6 +31,9 @@ pub struct FleetAskRequest {
     pub workspace_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
+    /// The task this card belongs to — stamped by `pending_decisions::decorate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<crate::task_model::DecisionTaskRef>,
     #[serde(default)]
     pub timestamp: String,
     /// True once the card has been through [`crate::parked`]: the wait timed
@@ -1121,6 +1124,7 @@ mod tests {
             session_id: String::new(),
             workspace_name: String::new(),
             ai_title: None,
+            task: None,
             timestamp: String::new(),
             review_docs: vec![],
             task_complete: false,
@@ -1269,6 +1273,7 @@ mod tests {
             session_id: String::new(),
             workspace_name: String::new(),
             ai_title: None,
+            task: None,
             timestamp: String::new(),
             review_docs: vec![],
             task_complete: false,

@@ -332,6 +332,22 @@ async function handleIPC(
     case "get_keep_awake":
       return false;
 
+    case "accept_tasks": {
+      // Mirror core `task_model::accept_tasks`: every hop of each named task
+      // (same taskId, or the session itself) is marked completed.
+      const ids = new Set((args.sessionIds as string[]) ?? []);
+      const tasks = new Set(
+        currentSessions.filter((s) => ids.has(s.id)).map((s) => s.taskId ?? s.id),
+      );
+      currentSessions = currentSessions.map((s) =>
+        tasks.has(s.taskId ?? s.id) && !s.parentTaskId
+          ? { ...s, taskOutcome: "completed", userMark: "done" }
+          : s,
+      );
+      emit("sessions-updated", currentSessions);
+      return tasks.size;
+    }
+
     case "set_session_title": {
       // Mirror the desktop restamp: set/clear titleOverride, re-emit so the row
       // re-renders with the new (or reverted) title.

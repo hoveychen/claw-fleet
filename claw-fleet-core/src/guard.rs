@@ -36,6 +36,9 @@ pub struct GuardRequest {
     /// AI-generated session title (distinct from workspace_name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
+    /// The task this card belongs to — stamped by `pending_decisions::decorate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<crate::task_model::DecisionTaskRef>,
     pub tool_name: String,
     pub command: String,
     pub command_summary: String,

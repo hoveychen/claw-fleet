@@ -1053,6 +1053,9 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         remote_disconnect: None,
         mirror_write: None,
         out_of_credits: None,
+        task_id: None,
+        parent_task_id: None,
+        task_summary: None,
     }
 }
 
@@ -1063,6 +1066,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
 /// clears whatever the human had set.
 pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::handoff::enrich_sessions(sessions);
+    crate::task_model::enrich_sessions(sessions);
     crate::watch::enrich_sessions(sessions);
     crate::session_mark::enrich_sessions(sessions);
     crate::task_outcome::enrich_sessions(sessions);
@@ -1075,6 +1079,8 @@ pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::mirror_guard::enrich_sessions(sessions);
     // After every status override above.
     settle_current_tool(sessions);
+    // Last: it rolls up statuses, watches and outcomes stamped above.
+    crate::task_model::enrich_summaries(sessions);
 }
 
 /// Drop `current_tool` from sessions whose final status says no tool is in
