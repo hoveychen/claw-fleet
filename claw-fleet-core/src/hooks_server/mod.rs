@@ -1326,6 +1326,10 @@ fn handle_request(
 
             crate::routes::SCHEDULES => route_schedules(ctx, request, &query, json_header, path),
 
+            crate::routes::ROUTINES => route_routine_create(ctx, request, &query, json_header, path),
+
+            crate::routes::PROJECTS => route_projects(ctx, request, &query, json_header, path),
+
             crate::routes::LOOP_CANCEL => {
                 route_loop_cancel(ctx, request, &query, json_header, path)
             }

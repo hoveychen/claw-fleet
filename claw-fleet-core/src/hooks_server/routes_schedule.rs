@@ -1,5 +1,6 @@
 //! Route handlers for `fleet serve`'s future-task endpoints — agent loops
-//! (`fleet loop`) and one-shot schedules (`fleet schedule`). These read the
+//! (`fleet loop`), one-shot schedules (`fleet schedule`), creating either as a
+//! routine (`crate::routines`), and the project list routines are filed under. These read the
 //! host's global `~/.fleet/loops` / `~/.fleet/schedules`, so unlike the
 //! session-scoped handlers they don't touch `ctx.sources`.
 #![allow(unused_variables, unused_mut, clippy::all)]
@@ -91,4 +92,41 @@ pub(crate) fn route_schedule_update(
             );
         }
     }
+}
+
+/// `POST /routines` — body is a [`crate::routines::RoutineSpec`]; answers the
+/// [`crate::routines::CreatedRoutine`].
+pub(crate) fn route_routine_create(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) = match serde_json::from_slice::<crate::routines::RoutineSpec>(&body_bytes) {
+        Ok(spec) => match crate::routines::create(&spec) {
+            Ok(created) => (200, serde_json::to_string(&created).unwrap_or_default()),
+            Err(e) => (500, serde_json::json!({ "error": e }).to_string()),
+        },
+        Err(e) => (400, serde_json::json!({ "error": e.to_string() }).to_string()),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
+/// `GET /projects` — the project registry (`~/.fleet/projects.json`).
+pub(crate) fn route_projects(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let body = serde_json::to_string(&crate::project_registry::list()).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }

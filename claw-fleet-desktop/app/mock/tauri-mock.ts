@@ -829,7 +829,7 @@ async function handleIPC(
       return [
         {
           id: "9f8e7d6c",
-          workspacePath: "/Users/dev/workspace/claude-fleet",
+          workspacePath: "/Users/demo/workspace/claw-fleet",
           prompt: "5 天后回来检查 fleet schedule 上线后的真实使用情况，看有没有 stranded 的计时器需要处理。",
           title: "复查 schedule 上线后的计时器",
           fireAt: Date.now() + 3 * 86400 * 1000 + 4 * 3600 * 1000,
@@ -839,7 +839,7 @@ async function handleIPC(
         },
         {
           id: "1a2b3c4d",
-          workspacePath: "/Users/dev/workspace/talk-cli",
+          workspacePath: "/Users/demo/workspace/claw-fleet",
           // Deliberately untitled: exercises the pre-title fallback where the
           // clamped prompt is the row headline.
           prompt: "发布后巡检：确认 npm 包已可安装并跑通 smoke。",
@@ -850,6 +850,17 @@ async function handleIPC(
           agentSource: "codex",
         },
       ];
+    case "list_projects":
+      return [
+        { path: "/Users/demo/workspace/claw-fleet", name: "claw-fleet", createdAtMs: Date.now() - 30 * 86400 * 1000 },
+        { path: "/Users/demo/workspace/api-server", name: "api-server", createdAtMs: Date.now() - 20 * 86400 * 1000 },
+      ];
+    case "create_routine": {
+      const spec = (args?.spec ?? {}) as Record<string, unknown>;
+      return spec.interval
+        ? { kind: "loop", record: { id: "mock-loop", ...spec, intervalSecs: 3600, nextFireAt: Date.now() + 3600 * 1000, iterationsDone: 0 } }
+        : { kind: "schedule", record: { id: "mock-sched", ...spec, status: "pending" } };
+    }
     case "cancel_loop":
     case "cancel_schedule":
       return null;
@@ -859,7 +870,7 @@ async function handleIPC(
       const u = (args?.update ?? {}) as Record<string, unknown>;
       return {
         id: u.id ?? "9f8e7d6c",
-        workspacePath: "/Users/dev/workspace/claude-fleet",
+        workspacePath: "/Users/demo/workspace/claw-fleet",
         prompt: u.prompt ?? "",
         title: u.title || undefined,
         fireAt: u.fireAt ?? Date.now() + 3600 * 1000,
@@ -1070,6 +1081,11 @@ async function handleIPC(
       return MOCK_AUDIT_SUMMARY;
     case "get_audit_rules":
       return MOCK_AUDIT_RULES;
+    case "list_guard_allow_rules":
+      return [
+        { id: "allow-1", prefix: "git push origin", sourceTag: "git_push", createdAt: "2026-10-12T09:14:00Z", approvedBy: "desktop" },
+        { id: "allow-2", prefix: "pnpm publish --dry-run", sourceTag: null, createdAt: "2026-10-15T21:02:00Z", approvedBy: "mobile" },
+      ];
     case "detect_ai_tools":
       return MOCK_DETECTED_TOOLS;
     case "get_log_path":

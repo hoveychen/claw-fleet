@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_NAV_SECTIONS,
   NAV_HOME,
   NAV_SECTIONS,
   NAV_SECTION_VIEWS,
@@ -21,18 +22,20 @@ describe("nav sections", () => {
   });
 
   it("assigns every view mode to exactly one section", () => {
-    const listed = NAV_SECTIONS.flatMap((s) => NAV_SECTION_VIEWS[s]);
+    const listed = ALL_NAV_SECTIONS.flatMap((s) => NAV_SECTION_VIEWS[s]);
     expect(new Set(listed).size).toBe(listed.length);
     expect([...listed].sort()).toEqual([...ALL_VIEW_MODES].sort());
   });
 
-  it("files documents and deliverables under Library, code and routines under Projects", () => {
+  it("files documents and deliverables under Library, code and memory under Projects", () => {
     expect(navSectionOf("wiki")).toBe("library");
     expect(navSectionOf("artifacts")).toBe("library");
-    for (const v of ["files", "terminal", "schedule", "memory"] as const) {
+    for (const v of ["projects", "files", "terminal", "memory"] as const) {
       expect(navSectionOf(v)).toBe("projects");
     }
     expect(navSectionOf("lobsters")).toBe("settings");
+    // The daily review is its own secondary entry beside Settings.
+    expect(navSectionOf("report")).toBe("review");
   });
 
   it("lands home on the task page", () => {
@@ -41,21 +44,21 @@ describe("nav sections", () => {
   });
 
   it("returns to the last page of a section, else its first", () => {
-    expect(navSectionTarget("library", {})).toBe("wiki");
+    expect(navSectionTarget("library", {})).toBe("library");
     expect(navSectionTarget("library", { library: "artifacts" })).toBe("artifacts");
     // A stale entry naming a page of another section is ignored.
-    expect(navSectionTarget("projects", { projects: "wiki" })).toBe("files");
+    expect(navSectionTarget("projects", { projects: "wiki" })).toBe("projects");
   });
 
   it("skips pages this host does not have", () => {
     const avail = { terminal: false, mobile: false, lobsters: false };
-    expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("files");
-    expect(navSectionTabs("projects", avail)).toEqual(["files", "schedule", "memory"]);
+    expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("projects");
+    expect(navSectionTabs("projects", avail)).toEqual(["projects", "files", "memory"]);
   });
 
   it("folds plugins into the Skills segment and never offers the lobster fleet", () => {
     const avail = { terminal: true, mobile: true, lobsters: true };
-    expect(navSectionTabs("settings", avail)).toEqual(["audit", "report", "skills", "mobile"]);
+    expect(navSectionTabs("settings", avail)).toEqual(["audit", "skills", "mobile"]);
     expect(navTabOf("plugins")).toBe("skills");
     expect(navTabOf("audit")).toBe("audit");
   });

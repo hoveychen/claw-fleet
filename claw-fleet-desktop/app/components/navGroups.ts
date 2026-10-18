@@ -1,12 +1,18 @@
 import type { ViewMode } from "../viewModes";
 
-/** The sidebar has exactly four entries: Tasks (home), Library, Projects and
- *  Settings. Every page belongs to one of them; a section that holds more than
- *  one page shows the others as a segmented switch in the page banner (see
- *  `useSectionTabs` in PageShell). */
-export type NavSection = "tasks" | "library" | "projects" | "settings";
+/** The sidebar has four main entries: Tasks (home), Library, Projects and
+ *  Settings, plus one secondary entry beside Settings: Review (回顾, the
+ *  per-project daily progress that replaced the daily report). Every page
+ *  belongs to one of them; a section that holds more than one page shows the
+ *  others as a segmented switch in the page banner (see `useSectionTabs` in
+ *  PageShell). */
+export type NavSection = "tasks" | "library" | "projects" | "review" | "settings";
 
+/** The main entries, top to bottom. */
 export const NAV_SECTIONS: readonly NavSection[] = ["tasks", "library", "projects", "settings"];
+
+/** Main entries plus the secondary one — every section a page can belong to. */
+export const ALL_NAV_SECTIONS: readonly NavSection[] = [...NAV_SECTIONS, "review"];
 
 /** Pages of each section, in the order the section switch draws them. The
  *  first page is where a click on the section's nav entry lands the first time;
@@ -14,19 +20,20 @@ export const NAV_SECTIONS: readonly NavSection[] = ["tasks", "library", "project
  *  navGroups.test.ts asserts every {@link ViewMode} is listed exactly once. */
 export const NAV_SECTION_VIEWS: Record<NavSection, readonly ViewMode[]> = {
   tasks: ["history"],
-  library: ["wiki", "artifacts"],
-  projects: ["files", "terminal", "schedule", "memory"],
+  library: ["library", "wiki", "artifacts"],
+  projects: ["projects", "files", "terminal", "memory"],
+  review: ["report"],
   // Reached from the Settings overlay ("more pages"); the nav entry itself
   // opens the overlay. The lobster fleet is an opt-in easter egg launched from
   // its own Settings toggle, never from the nav.
-  settings: ["audit", "report", "skills", "plugins", "mobile", "lobsters"],
+  settings: ["audit", "skills", "plugins", "mobile", "lobsters"],
 };
 
 /** Where the app lands when nothing else picks a page. */
 export const NAV_HOME: ViewMode = "history";
 
 const SECTION_OF = new Map<ViewMode, NavSection>(
-  NAV_SECTIONS.flatMap((section) => NAV_SECTION_VIEWS[section].map((v) => [v, section] as const)),
+  ALL_NAV_SECTIONS.flatMap((section) => NAV_SECTION_VIEWS[section].map((v) => [v, section] as const)),
 );
 
 /** Which nav entry a page lights up. */

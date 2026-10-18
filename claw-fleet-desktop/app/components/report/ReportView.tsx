@@ -9,6 +9,7 @@ import { HourlyActivityChart } from "./HourlyActivityChart";
 import { MetricsCards } from "./MetricsCards";
 import { DecisionCardsPanel } from "./DecisionCardsPanel";
 import { TaskReviewsCard } from "./TaskReviewsCard";
+import { ProjectProgress } from "./ProjectProgress";
 import { AttentionCard } from "./AttentionCard";
 import { ToolCallChart } from "./ToolCallChart";
 import { ReportShareMenu } from "./ReportShareMenu";
@@ -328,6 +329,9 @@ export function ReportDetail() {
             {/* First on purpose: the only part of the day that asks the
                 user for a decision. Everything below is reference numbers. */}
             <AttentionCard date={shown.date} />
+            {/* The review proper: what moved in each project. The numbers
+                below it are the day's reference figures. */}
+            <ProjectProgress projects={shown.metrics.projects} />
             <MetricsCards metrics={shown.metrics} />
             <div className={styles.charts_row}>
               <ToolCallChart breakdown={shown.metrics.toolCallBreakdown} />

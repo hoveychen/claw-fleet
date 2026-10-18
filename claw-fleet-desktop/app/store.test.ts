@@ -600,11 +600,11 @@ describe("nav section memory", () => {
     const { useUIStore } = await import("./store");
     const s = () => useUIStore.getState();
     s().setViewMode("artifacts");
-    s().setViewMode("schedule");
+    s().setViewMode("memory");
     s().setViewMode("history");
     expect(s().navLastBySection).toMatchObject({
       library: "artifacts",
-      projects: "schedule",
+      projects: "memory",
       tasks: "history",
     });
   });

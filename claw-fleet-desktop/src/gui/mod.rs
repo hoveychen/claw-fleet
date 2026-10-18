@@ -1727,6 +1727,8 @@ pub fn run() {
             cancel_loop,
             cancel_schedule,
             update_schedule,
+            create_routine,
+            list_projects,
             get_memory_content,
             read_live_thinking,
             get_task_plans,

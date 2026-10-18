@@ -2,7 +2,8 @@ use super::*;
 
 // ── Future-task commands (agent loops + one-shot schedules) ───────────────────
 // Display + cancel for both; schedules additionally support edit (the desktop
-// "编辑" (Edit) form). Creation stays agent-driven on the CLI (`fleet loop|schedule`).
+// "编辑" (Edit) form). The project page creates either directly as a routine
+// (`create_routine`); agents still create theirs with `fleet loop|schedule`.
 
 #[tauri::command(async)]
 pub(crate) fn list_loops(
@@ -34,4 +35,19 @@ pub(crate) fn update_schedule(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::schedule::ScheduleRecord, String> {
     state.backend.update_schedule(update)
+}
+
+#[tauri::command(async)]
+pub(crate) fn create_routine(
+    spec: claw_fleet_core::routines::RoutineSpec,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::routines::CreatedRoutine, String> {
+    state.backend.create_routine(&spec)
+}
+
+#[tauri::command(async)]
+pub(crate) fn list_projects(
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::project_registry::Project> {
+    state.backend.list_projects()
 }
