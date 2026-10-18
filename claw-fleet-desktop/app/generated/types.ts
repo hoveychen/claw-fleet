@@ -380,7 +380,21 @@ lastStderr?: string,
 expectBy?: number | null, 
 progress?: string | null, 
 progressFraction?: number | null, 
-progressChangedAt?: number | null, };
+progressChangedAt?: number | null, 
+targets?: Array<WatchTarget>, waitMode: WaitMode, };
+
+export type WatchTarget = { 
+id: string, 
+effectiveId?: string | null, 
+source?: string | null, 
+phase?: Phase | null, 
+detail?: string, 
+phaseSince?: number | null, 
+addedAt: number, };
+
+export type WaitMode = "all" | "any";
+
+export type Phase = "running" | "parked" | "blocked" | "unknown" | "done" | "failed";
 
 export type LiveThinking = { sessionId: string, 
 thinking: string, 

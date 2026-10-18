@@ -145,6 +145,59 @@ pub fn probe(target_id: &str) -> Probe {
     classify(&gather(target_id), now_ms())
 }
 
+/// Shortest prefix [`resolve_id`] accepts — the 8-character short ids every
+/// Fleet surface prints.
+pub const MIN_PREFIX: usize = 6;
+
+/// Turn a full id or a short-id prefix into a full session id.
+///
+/// A full id is accepted when any engine's store knows it. A prefix is matched
+/// against the launch-note registry (every session Fleet started, any engine)
+/// — a directory listing, not a scan; a session Fleet did not start has to be
+/// given in full.
+pub fn resolve_id(needle: &str) -> Result<String, String> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Err("会话 id 为空".to_string());
+    }
+    let known = |id: &str| {
+        crate::launch_spec::get(id).is_some()
+            || crate::session::find_session_jsonl(id).is_some()
+            || crate::codex_source::find_codex_rollout(id).is_some()
+    };
+    if known(needle) {
+        return Ok(needle.to_string());
+    }
+    if needle.len() < MIN_PREFIX {
+        return Err(format!("会话 id「{needle}」太短，至少给 {MIN_PREFIX} 位（短 id 是 8 位）"));
+    }
+    let ids = crate::launch_spec::registry();
+    let hits: Vec<&String> = ids.keys().filter(|id| id.starts_with(needle)).collect();
+    match hits.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => {
+            // dsh ids are `session-<uuid>`; let a bare uuid prefix find them.
+            let dsh: Vec<&String> = ids
+                .keys()
+                .filter(|id| id.strip_prefix("session-").is_some_and(|u| u.starts_with(needle)))
+                .collect();
+            match dsh.as_slice() {
+                [one] => Ok((*one).clone()),
+                [] => Err(format!(
+                    "找不到会话「{needle}」：Fleet 启动的会话里没有这个前缀；不是 Fleet 启动的会话要给完整 id"
+                )),
+                many => Err(ambiguous(needle, many)),
+            }
+        }
+        many => Err(ambiguous(needle, many)),
+    }
+}
+
+fn ambiguous(needle: &str, hits: &[&String]) -> String {
+    let shown: Vec<&str> = hits.iter().take(5).map(|s| s.as_str()).collect();
+    format!("会话前缀「{needle}」匹配到 {} 个会话（{}），请给更长的前缀", hits.len(), shown.join(", "))
+}
+
 /// Collect the facts for `target_id`, following its succession first.
 pub fn gather(target_id: &str) -> Facts {
     let effective = crate::session_driver::live_end(target_id).unwrap_or_else(|| target_id.to_string());
