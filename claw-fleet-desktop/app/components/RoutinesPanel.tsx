@@ -3,45 +3,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CalendarClock, ChevronRight, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight, Play } from "lucide-react";
 import { EmptyState } from "./EmptyState";
-import { PageShell } from "./PageShell";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { agentToolsForSources, toolForAgentSource, type SourceInfo } from "../modelChoices";
 import { useUIStore, useSessionsStore } from "../store";
-import styles from "./ScheduleView.module.css";
+import styles from "./RoutinesPanel.module.css";
 import { SkeletonList, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
-
-// ── Create shortcut helpers ──────────────────────────────────────────────────
-// The "Create" button is a shortcut, not a form: the user only picks a time, then
-// we open a NEW session seeded with a scheduling-assistant template so the agent
-// (not the user) authors the schedule content via `fleet schedule create`.
+import { repoRootPath } from "../../../shared-ts/repoPath";
 
 /** A Date → `YYYY-MM-DDTHH:MM` local string, the shape a datetime-local input
  *  wants and the exact form `schedule::parse_at` accepts. */
 function toLocalInput(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-/** The seed prompt: tells the agent to confirm the task then schedule it. The
- *  title, when the user typed one, is passed through verbatim so the scheduled
- *  task lands in the list under the name they chose rather than one the agent
- *  invented. */
-function scheduleTemplate(fireLocal: string, title: string): string {
-  const human = fireLocal.replace("T", " ");
-  const named = title.trim();
-  const titleFlag = named ? ` --title "${named.replace(/"/g, '\\"')}"` : ` --title "<几个字说清这是干什么的>"`;
-  return [
-    named
-      ? `请协助我安排一个定时任务「${named}」,预定在 ${human} 触发。`
-      : `请协助我安排一个定时任务,预定在 ${human} 触发。`,
-    ``,
-    `先跟我确认清楚要做的事,理解需求后用下面的命令把它排程(需要时可加 --model / --effort 指定模型和推理档位):`,
-    ``,
-    `    fleet schedule create --at "${fireLocal}"${titleFlag} --prompt "<把要做的事写清楚>"`,
-    ``,
-    `事情是:`,
-  ].join("\n");
 }
 
 // ── Types (mirror the Rust serde camelCase records) ──────────────────────────
@@ -102,11 +76,6 @@ interface ScheduleUpdate {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function baseName(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || path;
-}
-
 function fmtInterval(secs: number): string {
   if (secs % 86400 === 0) return `${secs / 86400}d`;
   if (secs % 3600 === 0) return `${secs / 3600}h`;
@@ -156,7 +125,13 @@ function nextFireOf(task: FutureTask): number {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function ScheduleView() {
+/**
+ * 例行 (routines) of one project: its one-shot schedules and recurring loops,
+ * with run history, edit, cancel and "run now" — and a form that creates a
+ * routine directly (`create_routine`), instead of opening a session for an
+ * agent to do it. Lives in the project page's detail column.
+ */
+export function RoutinesPanel({ projectPath }: { projectPath: string }) {
   const { t } = useTranslation();
   const [loops, setLoops] = useState<LoopRecord[]>([]);
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
@@ -174,14 +149,15 @@ export function ScheduleView() {
         invoke<LoopRecord[]>("list_loops"),
         invoke<ScheduleRecord[]>("list_schedules"),
       ]);
-      setLoops(ls);
-      setSchedules(ss);
+      const mine = (w: string) => repoRootPath(w) === projectPath;
+      setLoops(ls.filter((r) => mine(r.workspacePath)));
+      setSchedules(ss.filter((r) => mine(r.workspacePath)));
     } catch {
       /* leave last-known state */
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [projectPath]);
 
   useEffect(() => {
     load();
@@ -267,22 +243,7 @@ export function ScheduleView() {
     [tasks],
   );
 
-  // "Create" shortcut: pick a time → open a new session seeded with the template.
   const [creating, setCreating] = useState(false);
-  const [fireLocal, setFireLocal] = useState("");
-  const [newTitle, setNewTitle] = useState("");
-
-  const openCreate = useCallback(() => {
-    setFireLocal(toLocalInput(new Date(Date.now() + 60 * 60 * 1000))); // default +1h
-    setNewTitle("");
-    setCreating(true);
-  }, []);
-
-  const confirmCreate = useCallback(() => {
-    if (!fireLocal) return;
-    requestNewSession({ prompt: scheduleTemplate(fireLocal, newTitle) });
-    setCreating(false);
-  }, [fireLocal, newTitle, requestNewSession]);
 
   // Edit an existing pending schedule (prompt / time / model / effort / source).
   const [editing, setEditing] = useState<ScheduleRecord | null>(null);
@@ -312,34 +273,33 @@ export function ScheduleView() {
   );
 
   return (
-    <PageShell
-      view="schedule"
-      title={t("schedule.title", "计划任务")}
-      count={loaded && pendingCount > 0 ? pendingCount : null}
-      bannerCenter={
-        <div className={styles.banner_actions}>
-          <button className={styles.create_btn} onClick={openCreate} title={t("schedule.create", "新建计划")}>
-            <Plus size={14} strokeWidth={2.4} />
-            {t("schedule.create", "新建")}
-          </button>
-          <button
-            className={styles.refresh}
-            onClick={refresh}
-            disabled={refreshing}
-            title={t("schedule.refresh", "刷新")}
-          >
-            {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={14} strokeWidth={2} />}
-          </button>
-        </div>
-      }
-    >
+    <div className={styles.panel}>
+      <div className={styles.toolbar}>
+        <span className={styles.toolbar_title}>
+          {t("routines.title", "例行")}
+          {loaded && pendingCount > 0 && <span className={styles.toolbar_count}>{pendingCount}</span>}
+        </span>
+        <button className={styles.create_btn} onClick={() => setCreating(true)}>
+          <Plus size={14} strokeWidth={2.4} />
+          {t("routines.create", "新建例行")}
+        </button>
+        <button
+          className={styles.refresh}
+          onClick={refresh}
+          disabled={refreshing}
+          title={t("schedule.refresh", "刷新")}
+        >
+          {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={14} strokeWidth={2} />}
+        </button>
+      </div>
       {creating && (
         <CreateModal
-          fireLocal={fireLocal}
-          setFireLocal={setFireLocal}
-          title={newTitle}
-          setTitle={setNewTitle}
-          onConfirm={confirmCreate}
+          projectPath={projectPath}
+          toolChoices={agentToolsForSources(sources)}
+          onCreated={() => {
+            setCreating(false);
+            load();
+          }}
           onCancel={() => setCreating(false)}
         />
       )}
@@ -359,11 +319,8 @@ export function ScheduleView() {
         {loaded && tasks.length === 0 && (
           <EmptyState
             icon={<CalendarClock size={28} strokeWidth={1.5} />}
-            title={t("schedule.empty_title", "还没有计划任务")}
-            subtitle={t(
-              "schedule.empty_sub",
-              "用 `fleet schedule create --in 5d` 或 `fleet loop create` 安排一个未来任务",
-            )}
+            title={t("routines.empty_title", "这个项目还没有例行")}
+            subtitle={t("routines.empty_sub", "定个时间或周期，到点自动开一个任务去做。")}
           />
         )}
         {tasks.map((task) => (
@@ -387,31 +344,40 @@ export function ScheduleView() {
           />
         ))}
       </div>
-    </PageShell>
+    </div>
   );
 }
 
 // ── Create modal ─────────────────────────────────────────────────────────────
-// Just a time picker. Confirming hands off to a new session; the agent writes
-// the actual schedule. Deliberately no prompt/model fields here — that content
-// is the agent's job, per the principle that content should be authored by the agent.
+// A routine is created right here: title, what to do, when (once at a time, or
+// every N), and the same run options the edit form has. `create_routine`
+// registers it and arms its timer; nothing goes through an agent session.
+
+const INTERVAL_PRESETS = ["1h", "6h", "1d", "7d"] as const;
 
 function CreateModal({
-  fireLocal,
-  setFireLocal,
-  title,
-  setTitle,
-  onConfirm,
+  projectPath,
+  toolChoices,
+  onCreated,
   onCancel,
 }: {
-  fireLocal: string;
-  setFireLocal: (v: string) => void;
-  title: string;
-  setTitle: (v: string) => void;
-  onConfirm: () => void;
+  projectPath: string;
+  toolChoices: { value: string; label: string }[];
+  onCreated: () => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [repeat, setRepeat] = useState(false);
+  const [fireLocal, setFireLocal] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
+  const [interval, setIntervalText] = useState("1d");
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  const [tool, setTool] = useState("claude");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const preset = (fn: (d: Date) => Date) => setFireLocal(toLocalInput(fn(new Date())));
   const presets: Array<{ label: string; fn: (d: Date) => Date }> = [
     { label: t("schedule.preset_1h", "+1 小时"), fn: (d) => new Date(d.getTime() + 3600_000) },
@@ -436,16 +402,35 @@ function CreateModal({
     { label: t("schedule.preset_1d", "+1 天"), fn: (d) => new Date(d.getTime() + 86_400_000) },
   ];
 
+  const ready = !!prompt.trim() && (repeat ? !!interval.trim() : !!fireLocal);
+  const save = async () => {
+    if (saving || !ready) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await invoke("create_routine", {
+        spec: {
+          workspacePath: projectPath,
+          prompt: prompt.trim(),
+          title: title.trim() || null,
+          fireAt: repeat ? null : new Date(fireLocal).getTime(),
+          interval: repeat ? interval.trim() : null,
+          model: model || null,
+          effort: effort || null,
+          agentSource: tool,
+        },
+      });
+      onCreated();
+    } catch (e) {
+      setError(String(e));
+      setSaving(false);
+    }
+  };
+
   return (
     <div className={styles.modal_overlay} onClick={onCancel}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modal_title}>{t("schedule.create_title", "新建计划任务")}</div>
-        <div className={styles.modal_hint}>
-          {t(
-            "schedule.create_hint",
-            "选个触发时间,然后去新会话把事情讲给 agent —— 由它替你把计划创建好。",
-          )}
-        </div>
+      <div className={`${styles.modal} ${styles.modal_wide}`} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modal_title}>{t("routines.create_title", "新建例行")}</div>
         <label className={styles.field_label}>
           {t("schedule.task_title", "标题")}
           <span className={styles.field_optional}>{t("schedule.optional", "可选")}</span>
@@ -454,29 +439,103 @@ function CreateModal({
           className={styles.time_input}
           type="text"
           value={title}
-          placeholder={t("schedule.title_placeholder", "几个字说清这是干什么的,留空则由 agent 起名")}
+          placeholder={t("routines.title_placeholder", "几个字说清这是干什么的")}
           onChange={(e) => setTitle(e.target.value)}
         />
-        <label className={styles.field_label}>{t("schedule.fire_at", "触发时间")}</label>
-        <input
-          className={styles.time_input}
-          type="datetime-local"
-          value={fireLocal}
-          onChange={(e) => setFireLocal(e.target.value)}
+        <label className={styles.field_label}>{t("routines.prompt", "到点要做的事")}</label>
+        <textarea
+          className={styles.edit_textarea}
+          value={prompt}
+          placeholder={t("routines.prompt_placeholder", "像交代一个新任务那样写清楚")}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={5}
         />
-        <div className={styles.presets}>
-          {presets.map((p) => (
-            <button key={p.label} className={styles.preset} onClick={() => preset(p.fn)}>
-              {p.label}
-            </button>
-          ))}
+        <div className={styles.mode_row} role="radiogroup">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!repeat}
+            className={`${styles.preset} ${!repeat ? styles.preset_on : ""}`}
+            onClick={() => setRepeat(false)}
+          >
+            <CalendarClock size={12} strokeWidth={2.2} />
+            {t("routines.once", "单次")}
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={repeat}
+            className={`${styles.preset} ${repeat ? styles.preset_on : ""}`}
+            onClick={() => setRepeat(true)}
+          >
+            <Repeat size={12} strokeWidth={2.2} />
+            {t("routines.repeat", "重复")}
+          </button>
         </div>
+        {repeat ? (
+          <>
+            <label className={styles.field_label}>{t("routines.every", "每隔")}</label>
+            <input
+              className={styles.time_input}
+              type="text"
+              value={interval}
+              placeholder="30m / 6h / 1d"
+              onChange={(e) => setIntervalText(e.target.value)}
+            />
+            <div className={styles.presets}>
+              {INTERVAL_PRESETS.map((p) => (
+                <button key={p} className={styles.preset} onClick={() => setIntervalText(p)}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <label className={styles.field_label}>{t("schedule.fire_at", "触发时间")}</label>
+            <input
+              className={styles.time_input}
+              type="datetime-local"
+              value={fireLocal}
+              onChange={(e) => setFireLocal(e.target.value)}
+            />
+            <div className={styles.presets}>
+              {presets.map((p) => (
+                <button key={p.label} className={styles.preset} onClick={() => preset(p.fn)}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <label className={styles.field_label}>{t("schedule.run_options", "运行选项")}</label>
+        <div className={styles.pills_row}>
+          <SessionOptionPills
+            model={model}
+            effort={effort}
+            permissionMode=""
+            onModelChange={setModel}
+            onEffortChange={setEffort}
+            onPermissionModeChange={() => {}}
+            showPermission={false}
+            placement="above"
+            tool={tool}
+            toolChoices={toolChoices}
+            onToolChange={(v) => {
+              setTool(v);
+              setModel("");
+              setEffort("");
+            }}
+          />
+        </div>
+        {error && <div className={styles.error}>{error}</div>}
         <div className={styles.modal_actions}>
-          <button className={styles.btn_ghost} onClick={onCancel}>
+          <button className={styles.btn_ghost} onClick={onCancel} disabled={saving}>
             {t("schedule.cancel", "取消")}
           </button>
-          <button className={styles.btn_primary} onClick={onConfirm} disabled={!fireLocal}>
-            {t("schedule.go_new_session", "去新会话")}
+          <button className={styles.btn_primary} onClick={save} disabled={saving || !ready}>
+            {saving && <Spinner size={12} className={styles.btn_spinner} />}
+            {t("routines.create_confirm", "创建")}
           </button>
         </div>
       </div>
@@ -737,8 +796,6 @@ function TaskRow({
           </span>
           <span className={styles.dot}>·</span>
           <span>{timing}</span>
-          <span className={styles.dot}>·</span>
-          <span title={rec.workspacePath}>{baseName(rec.workspacePath)}</span>
           {rec.agentSource === "codex" && (
             <>
               <span className={styles.dot}>·</span>

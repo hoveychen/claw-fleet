@@ -2186,6 +2186,20 @@ impl LocalBackend {
         Ok(rec)
     }
 
+    /// Create a routine — a one-shot schedule or a recurring loop — and arm
+    /// its timer. See [`claw_fleet_core::routines`].
+    pub fn create_routine(
+        &self,
+        spec: &claw_fleet_core::routines::RoutineSpec,
+    ) -> Result<claw_fleet_core::routines::CreatedRoutine, String> {
+        claw_fleet_core::routines::create(spec)
+    }
+
+    /// The project registry (`~/.fleet/projects.json`).
+    pub fn list_projects(&self) -> Vec<claw_fleet_core::project_registry::Project> {
+        claw_fleet_core::project_registry::list()
+    }
+
     /// fleet__ask depth-2 test: write a fake `FleetAskRequest` so the
     /// MCP-side watcher emits `fleet-ask-request` and the frontend renders
     /// a composite (html + form + options) test card. Cleanup auto-runs.

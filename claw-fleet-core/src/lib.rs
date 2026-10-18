@@ -235,6 +235,7 @@ pub mod recent_sessions;
 pub mod remote_disconnect;
 pub mod remote_host;
 pub mod remote_workspace;
+pub mod routines;
 pub mod scan_cache_disk;
 pub mod scope_migration;
 pub mod schedule;
