@@ -59,14 +59,12 @@
   min-width: 0;
 }
 
-/* Let the pill shrink and ellipsize inside the rail instead of overflowing. */
-.scope_menu {
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
+/* Pull the ghost pill's padding back so its folder lines up with the headings
+   below, and cap it under the rail's width (leaving room for the ×) — a
+   percentage cap would resolve against the content-sized wrapper and squeeze
+   even short names into an ellipsis. */
 .scope_menu > button {
-  max-width: 100%;
+  max-width: 230px;
   margin-left: -7px;
 }
 
