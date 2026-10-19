@@ -759,7 +759,7 @@
   gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  /* Secondary button: outlined. The primary one (below) is filled. */
+  /* Outlined until picked; only the picked option is filled (below). */
   border: 1px solid var(--color-border-strong);
   background: transparent;
   cursor: pointer;
@@ -771,10 +771,6 @@
   background: var(--color-bg-card-hover);
 }
 
-.elicitation_option_selected {
-  border-color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.08);
-}
 
 /* Label + description column beside the digit badge. */
 .elicitation_option_text {
@@ -801,30 +797,45 @@
   color: var(--color-text-secondary);
 }
 
-/* The primary button (the recommended option, else the first): solid terracotta. */
-.elicitation_option_primary,
-.elicitation_option_primary:hover {
+/* Picked: solid terracotta with a check in the digit badge — the one state on
+   the card that is filled, so what Submit will send is never in doubt. */
+.elicitation_option_selected,
+.elicitation_option_selected:hover {
   background: var(--color-accent);
   border-color: var(--color-accent);
 }
-.elicitation_option_primary:hover {
+.elicitation_option_selected:hover {
   background: var(--color-accent-hover);
 }
-.elicitation_option_primary .elicitation_option_label,
-.elicitation_option_primary .elicitation_option_desc,
-.elicitation_option_primary .elicitation_option_num {
+.elicitation_option_selected .elicitation_option_label,
+.elicitation_option_selected .elicitation_option_desc,
+.elicitation_option_selected .elicitation_option_num {
   color: var(--color-on-accent);
 }
-.elicitation_option_primary .elicitation_option_desc {
+.elicitation_option_selected .elicitation_option_desc {
   opacity: 0.85;
 }
-.elicitation_option_primary .elicitation_option_num {
+.elicitation_option_selected .elicitation_option_num {
   border-color: rgba(255, 255, 255, 0.5);
+  font-weight: 700;
 }
-/* Picked: a ring on top of the solid fill, so the choice still reads. */
-.elicitation_option_primary.elicitation_option_selected {
-  box-shadow: 0 0 0 2px var(--color-accent-soft);
-  border-color: var(--color-on-accent);
+
+/* The agent's recommended option: a tag after the label, not a fill. */
+.elicitation_option_rec {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid rgba(var(--color-accent-rgb), 0.5);
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 15px;
+  vertical-align: 1px;
+  color: var(--color-accent);
+}
+.elicitation_option_selected .elicitation_option_rec {
+  border-color: rgba(255, 255, 255, 0.6);
+  color: var(--color-on-accent);
 }
 
 /* Row wraps the option button + inline pencil "copy to Other" action. */

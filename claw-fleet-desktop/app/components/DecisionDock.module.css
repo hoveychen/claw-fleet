@@ -1,13 +1,15 @@
 /* The pinned decision card. The dock is the frame — card surface, border and
    the terracotta bar on the left that marks "waiting on you" — so the card
-   rendered inside drops its own border and background. Bounded to a share of
-   the window so the conversation above stays readable; the card scrolls its
-   body inside that bound and keeps its answer controls in view. */
+   rendered inside drops its own border and background. While a card waits it
+   is what the reader is here for, so it may cover most of the conversation:
+   at the old 58vh the options and composer left a long question about three
+   visible lines. Past this bound the body scrolls and the answer controls stay
+   in view. */
 .dock {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: 58vh;
+  max-height: 85vh;
   min-height: 0;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
