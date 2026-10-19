@@ -830,7 +830,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
         {explainInline && (
-          <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} />
+          <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} onFollowUp={explainMarks.followUp} />
         )}
       </div>
       </div>
@@ -1747,7 +1747,7 @@ export function FleetAskCard({
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
         {explainInline && (
-          <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} />
+          <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} onFollowUp={explainMarks.followUp} />
         )}
 
         {q.images && q.images.length > 0 ? (

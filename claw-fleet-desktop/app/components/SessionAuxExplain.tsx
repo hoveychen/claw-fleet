@@ -90,13 +90,6 @@ export function SessionAuxExplain({
 }) {
   const { t } = useTranslation();
   const [menu, setMenu] = useState<ContextMenuAnchor | null>(null);
-  const [followUp, setFollowUp] = useState("");
-  // Starting the fork takes a moment before the new running turn lands and
-  // replaces this form; until then the button spins and refuses a second send.
-  const [sending, sendFollowUp] = usePending(async (q: string) => {
-    await onFollowUp(q);
-    setFollowUp("");
-  });
   // The chip and the head summarise the chain: its opening question and quote,
   // but the latest turn's state — a chain whose follow-up is still forking
   // reads as running, not as the first answer's cost.
@@ -266,39 +259,61 @@ export function SessionAuxExplain({
         {records.map((rec) => (
           <ExplainTurn key={rec.id} rec={rec} withQuestion={records.length > 1} />
         ))}
-        {last.status === "done" && (
-          <form
-            className={styles.explain_follow}
-            onSubmit={(e) => {
-              e.preventDefault();
-              const q = followUp.trim();
-              if (!q || sending) return;
-              // A failed send keeps the question in the box to retry.
-              sendFollowUp(q).catch(() => {});
-            }}
-          >
-            <input
-              className={styles.explain_follow_input}
-              value={followUp}
-              onChange={(e) => setFollowUp(e.target.value)}
-              placeholder={t("detail.explain_follow_up_placeholder", "继续追问这段话…")}
-              aria-label={t("detail.explain_follow_up", "继续追问")}
-              readOnly={sending}
-            />
-            <button
-              type="submit"
-              className={styles.explain_follow_send}
-              disabled={!followUp.trim() || sending}
-              aria-busy={sending || undefined}
-            >
-              {sending && <Spinner size={12} />}
-              {t("detail.explain_send", "发送")}
-            </button>
-          </form>
-        )}
+        {last.status === "done" && <ExplainFollowUp onFollowUp={onFollowUp} />}
       </div>
       <Presence when={Boolean(menu)}>{menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}</Presence>
     </div>
+  );
+}
+
+/**
+ * The box at the foot of a settled chain that asks a follow-up about the same
+ * passage. Shared by the session rail's chain card and the decision card's
+ * inline answers.
+ */
+export function ExplainFollowUp({
+  onFollowUp,
+}: {
+  onFollowUp: (question: string) => void | Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const [followUp, setFollowUp] = useState("");
+  // Starting the fork takes a moment before the new running turn lands and
+  // replaces this form; until then the button spins and refuses a second send.
+  const [sending, sendFollowUp] = usePending(async (q: string) => {
+    await onFollowUp(q);
+    setFollowUp("");
+  });
+  return (
+    <form
+      className={styles.explain_follow}
+      data-testid="explain-follow-up"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const q = followUp.trim();
+        if (!q || sending) return;
+        // A failed send keeps the question in the box to retry.
+        sendFollowUp(q).catch(() => {});
+      }}
+    >
+      <input
+        className={styles.explain_follow_input}
+        value={followUp}
+        onChange={(e) => setFollowUp(e.target.value)}
+        placeholder={t("detail.explain_follow_up_placeholder", "继续追问这段话…")}
+        aria-label={t("detail.explain_follow_up", "继续追问")}
+        readOnly={sending}
+      />
+      <button
+        type="submit"
+        className={styles.explain_follow_send}
+        disabled={!followUp.trim() || sending}
+        aria-busy={sending || undefined}
+      >
+        {sending && <Spinner size={12} />}
+        {t("detail.explain_send", "发送")}
+      </button>
+    </form>
   );
 }
 
