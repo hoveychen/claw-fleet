@@ -163,30 +163,37 @@
   text-align: center;
 }
 
-/* First run: no task exists yet, so the column explains the loop instead. */
-.empty_intro {
-  padding: 16px 12px;
+/* First run: no task yet. One line and the one action that unblocks it. */
+.empty_hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 12px;
+  text-align: center;
+}
+
+.empty_hint_text {
+  margin: 0;
   font-size: 12px;
   color: var(--color-text-dim);
 }
 
-.empty_intro_title {
-  margin: 0 0 10px;
-  color: var(--color-text);
-}
-
-.empty_steps {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  line-height: 1.5;
-}
-
-.empty_steps li::marker {
+.empty_hint_action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--color-accent);
-  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.empty_hint_action:hover {
+  background: var(--color-bg-row-hover);
 }
 
 /* ── Inline detail column ────────────────────────────────────────────────── */

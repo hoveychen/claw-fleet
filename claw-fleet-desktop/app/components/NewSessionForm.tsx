@@ -4,7 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
-import { openSettings, useSessionsStore } from "../store";
+import { openSettings, useSessionsStore, useUIStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
   ChatComposer,
@@ -69,19 +69,7 @@ export interface NewSessionFormProps {
    *  the user opened — an empty editor group — since there is nothing to back
    *  out to. The close button is then hidden along with it. */
   onCancel?: () => void;
-  /** Offer a few example prompts under the composer. The task page sets it
-   *  while no task exists yet, for someone who does not know what to ask. */
-  showExamples?: boolean;
 }
-
-/** Example prompts for a first task. `chat` ones also switch chat mode on;
- *  the rest switch it off, since they are about a project directory. */
-const EXAMPLE_PROMPTS: readonly { label: string; prompt: string; chat: boolean }[] = [
-  { label: "new_session.example_explain", prompt: "new_session.example_explain", chat: false },
-  { label: "new_session.example_bugs", prompt: "new_session.example_bugs", chat: false },
-  { label: "new_session.example_readme", prompt: "new_session.example_readme", chat: false },
-  { label: "new_session.example_chat", prompt: "new_session.example_chat_prompt", chat: true },
-];
 
 function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/");
@@ -224,8 +212,8 @@ export function defaultAgentTool(
  *  last-used one (chat included) when it's still a valid option, else the first
  *  recent. A fresh install has neither and gets undefined: it used to fall back
  *  to chat, which quietly turned a first user's "fix this repo" into a chat with
- *  no directory. The form instead shows a prominent "pick a directory" button
- *  next to the hint saying why submit is disabled. Mobile-web's
+ *  no directory. The form's hint says why submit is disabled, and the empty
+ *  task column offers a "pick a project directory" button. Mobile-web's
  *  `defaultWorkspace` still falls back to chat. */
 export function defaultWorkspace(
   recents: WorkspaceOption[],
@@ -252,7 +240,6 @@ export function NewSessionForm({
   onCancel,
   onLaunching,
   onLaunchFailed,
-  showExamples,
 }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
@@ -567,6 +554,17 @@ export function NewSessionForm({
     if (typeof picked === "string") setWorkspace(picked);
   };
 
+  // The empty task column's "pick a project directory" button. Skips the
+  // value present at mount so remounting the form never reopens the picker.
+  const pickNonce = useUIStore((s) => s.workspacePickNonce);
+  const seenPickNonce = useRef(pickNonce);
+  useEffect(() => {
+    if (pickNonce === seenPickNonce.current) return;
+    seenPickNonce.current = pickNonce;
+    void browseWorkspace().then(() => composerRef.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickNonce]);
+
   const handleSubmit = async () => {
     const ws = workspace.trim();
     if (!ws) {
@@ -821,27 +819,6 @@ export function NewSessionForm({
         ]}
       />
 
-      {showExamples && (
-        <div className={styles.examples} data-testid="new-session-examples">
-          <span className={styles.examples_label}>{t("new_session.examples_label")}</span>
-          {EXAMPLE_PROMPTS.map((ex) => (
-            <button
-              key={ex.label}
-              type="button"
-              className={styles.example_chip}
-              disabled={submitting || (ex.chat && !chatPath)}
-              onClick={() => {
-                setPrompt(t(ex.prompt));
-                if (ex.chat !== (isChat && !seedPending)) setChatMode(ex.chat);
-                setTimeout(() => composerRef.current?.focus(), 0);
-              }}
-            >
-              {t(ex.label)}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* With chat pulled out of the picker, turning the toggle off on a host
           with no recents at all leaves nothing selected — say so, instead of
           leaving a disabled submit button to be puzzled over. */}
@@ -856,20 +833,6 @@ export function NewSessionForm({
           t("new_session.hint_pick_workspace")
         )}
       </p>
-      {/* No directory and no chat: the pill alone is easy to miss, and a fresh
-          install lands here, so give the one thing left to do its own button. */}
-      {!seedPending && !workspace && (
-        <button
-          type="button"
-          className={styles.pick_dir_btn}
-          onClick={browseWorkspace}
-          disabled={submitting}
-          data-testid="pick-workspace-btn"
-        >
-          <FolderOpen size={14} strokeWidth={1.7} />
-          {t("new_session.pick_workspace")}
-        </button>
-      )}
 
       {error &&
         (() => {
