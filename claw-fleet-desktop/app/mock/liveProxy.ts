@@ -814,6 +814,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/projects",
   }),
 
+  set_project_archived: (a) => ({
+    method: "POST",
+    path: "/projects/archive",
+    body: { path: a.path, archived: a.archived },
+  }),
+
   list_schedules: () => ({
     method: "GET",
     path: "/schedules",

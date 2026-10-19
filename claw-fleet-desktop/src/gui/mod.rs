@@ -1732,6 +1732,7 @@ pub fn run() {
             update_schedule,
             create_routine,
             list_projects,
+            set_project_archived,
             get_memory_content,
             read_live_thinking,
             get_task_plans,

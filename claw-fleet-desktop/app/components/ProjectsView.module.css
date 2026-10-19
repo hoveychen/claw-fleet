@@ -44,6 +44,37 @@
   background: var(--color-bg-row-selected);
 }
 
+.row_archived .title {
+  color: var(--color-text-secondary);
+}
+
+.archived_toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--space-3);
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.archived_toggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.archived_chevron {
+  transition: transform 0.12s;
+}
+
+.archived_chevron_open {
+  transform: rotate(90deg);
+}
+
 .icon {
   flex: 0 0 auto;
   display: grid;
@@ -181,16 +212,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.pane_list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--space-3) var(--space-5);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
 }
 
 .action {

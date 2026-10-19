@@ -51,3 +51,12 @@ pub(crate) fn list_projects(
 ) -> Vec<claw_fleet_core::project_registry::Project> {
     state.backend.list_projects()
 }
+
+#[tauri::command(async)]
+pub(crate) fn set_project_archived(
+    path: String,
+    archived: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::project_registry::Project>, String> {
+    state.backend.set_project_archived(&path, archived)
+}

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { ArrowUpToLine, Brain, Copy, FolderOpen, GraduationCap, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
@@ -12,6 +13,7 @@ import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./Con
 import { useReportStore, useUIStore } from "../store";
 import { canRevealPath } from "../canReveal";
 import type { ManagedLesson } from "../types";
+import { repoRootPath } from "../../../shared-ts/repoPath";
 import styles from "./MemoryView.module.css";
 import { Presence } from "./Presence";
 import {
@@ -77,11 +79,11 @@ interface MemoryHistoryEntry {
   detail: MemoryEditDetail;
 }
 
-type Selection =
+type StoreSelection =
   | { kind: "file"; workspace: WorkspaceMemory; file: MemoryFile }
-  | { kind: "claudeMd"; workspace: WorkspaceMemory }
-  | { kind: "lessons" }
-  | null;
+  | { kind: "claudeMd"; workspace: WorkspaceMemory };
+
+type Selection = StoreSelection | { kind: "lessons" } | null;
 
 function memorySelectionKey(selection: Exclude<Selection, null>): string {
   if (selection.kind === "lessons") return "lessons";
@@ -143,116 +145,117 @@ function formatTime(iso: string): string {
   }
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Shared pieces ────────────────────────────────────────────────────────────
+// The global memory page (Settings) and a project's memory tab (Projects) are
+// the two places memory is shown; both are built from these.
 
-export function MemoryView() {
-  const { t } = useTranslation();
+const GLOBAL_KEY = "__global__";
+const CODEX_KEY = "__codex__";
+
+/** Stores that belong to no project: ~/.claude's own memory and CLAUDE.md, and
+ *  Codex's machine-wide memory. The global memory page shows exactly these; a
+ *  project's memory tab shows the stores whose workspace folds to its root. */
+export function isMachineWideStore(ws: WorkspaceMemory): boolean {
+  return ws.projectKey === GLOBAL_KEY || ws.projectKey === CODEX_KEY;
+}
+
+function storeLabel(t: TFunction, ws: WorkspaceMemory): string {
+  return ws.projectKey === GLOBAL_KEY ? t("memory.global_label") : ws.workspaceName;
+}
+
+type PromoteTarget = "project" | "global";
+
+/** Every memory store, refetched on `memories-updated`. A refetch while the
+ *  list is already on screen keeps the old list and raises `refreshing`. */
+function useMemoryStores() {
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const {
-    query,
-    filterType,
-    sourceFilter,
-    workspaceFilter,
-    expandedKeys,
-    selectedKey,
-  } = useUIStore((s) => s.mainViewState.memory);
-  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
-  const setQuery = (value: string) => updateMainViewState("memory", { query: value });
-  const setFilterType = (value: string) =>
-    updateMainViewState("memory", { filterType: value });
-  const setWorkspaceFilter = (value: string) =>
-    updateMainViewState("memory", { workspaceFilter: value });
-  const setSourceFilter = (value: "all" | "claude-code" | "codex") =>
-    updateMainViewState("memory", { sourceFilter: value });
-  const setSelection = (next: Selection) =>
-    updateMainViewState("memory", {
-      selectedKey: next ? memorySelectionKey(next) : null,
-    });
-  const expandedUnindexed = useMemo(() => new Set(expandedKeys), [expandedKeys]);
-
-  // Lessons the user added to global guidance from the daily-report card
-  // (~/.claude/fleet-lessons.md), shown as a pinned entry with per-row removal.
-  const { managedLessons, loadManagedLessons, removeManagedLesson } = useReportStore();
-  // The report store has no loaded flag for lessons (and swallows errors), so
-  // track the first fetch here: until it settles the pinned group is a skeleton.
-  const [lessonsLoaded, setLessonsLoaded] = useState(false);
-  useEffect(() => {
-    void loadManagedLessons().finally(() => setLessonsLoaded(true));
-  }, [loadManagedLessons]);
-
-  // Refetches while the list is already on screen (memories-updated, a
-  // promotion): the old list stays and a top progress bar runs instead.
-  const [refreshing, setRefreshing] = useState(0);
-  const showRefreshing = useDelayedFlag(refreshing > 0);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const refreshing = useDelayedFlag(refreshCount > 0);
   const trackRefresh = useCallback(async (work: () => Promise<void>) => {
-    setRefreshing((n) => n + 1);
+    setRefreshCount((n) => n + 1);
     try {
       await work();
     } finally {
-      setRefreshing((n) => n - 1);
+      setRefreshCount((n) => n - 1);
     }
   }, []);
 
   const load = useCallback(async () => {
     try {
-      const data = await invoke<WorkspaceMemory[]>("list_memories");
-      setMemories(data);
-      setLoaded(true);
+      setMemories(await invoke<WorkspaceMemory[]>("list_memories"));
     } catch {
+      // Keep whatever is on screen; an empty first load shows the empty state.
+    } finally {
       setLoaded(true);
     }
   }, []);
   const reload = useCallback(() => trackRefresh(load), [trackRefresh, load]);
 
-  // Row context menu — anchor + subject held together, mirroring WikiView.
-  const [ctxMenu, setCtxMenu] = useState<{
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const unlisten = listen("memories-updated", () => void reload());
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, [reload]);
+
+  // Same call the detail pane's promote button fires; refetches so the file
+  // surfaces under its new store.
+  const promote = useCallback(
+    (ws: WorkspaceMemory, file: MemoryFile, target: PromoteTarget) =>
+      trackRefresh(async () => {
+        try {
+          await invoke("promote_memory", {
+            memoryPath: file.path,
+            target,
+            workspacePath: ws.workspacePath,
+          });
+          await load();
+        } catch (e) {
+          console.error("promote_memory failed:", e);
+        }
+      }),
+    [trackRefresh, load],
+  );
+
+  return { memories, loaded, refreshing, reload, promote };
+}
+
+/** A memory card's right-click menu. `node` has to be rendered somewhere in the
+ *  list for the menu to show. */
+function useMemoryCardMenu(
+  promote: (ws: WorkspaceMemory, file: MemoryFile, target: PromoteTarget) => Promise<void>,
+) {
+  const { t } = useTranslation();
+  const [menu, setMenu] = useState<{
     ws: WorkspaceMemory;
     file: MemoryFile;
     anchor: ContextMenuAnchor;
   } | null>(null);
 
-  // Same call the detail pane's promote button fires; clears selection and
-  // reloads so the file surfaces under its new scope.
-  const promoteMemory = async (
-    ws: WorkspaceMemory,
-    file: MemoryFile,
-    target: "project" | "global",
-  ) => {
-    await trackRefresh(async () => {
-      try {
-        await invoke("promote_memory", {
-          memoryPath: file.path,
-          target,
-          workspacePath: ws.workspacePath,
-        });
-        setSelection(null);
-        await load();
-      } catch (e) {
-        console.error("promote_memory failed:", e);
-      }
-    });
-  };
-
-  const cardMenuItems = (ws: WorkspaceMemory, file: MemoryFile): ContextMenuItem[] => {
-    const items: ContextMenuItem[] = [];
+  const items = (ws: WorkspaceMemory, file: MemoryFile): ContextMenuItem[] => {
+    const out: ContextMenuItem[] = [];
     // Promotion mirrors the detail pane: only real Claude-Code entries, never
     // the MEMORY.md index.
     if (file.name !== "MEMORY.md" && ws.source === "claude-code") {
-      items.push({
+      out.push({
         id: "promote-project",
         label: t("memory.promote_project"),
         icon: <ArrowUpToLine size={13} strokeWidth={1.7} />,
-        onSelect: () => void promoteMemory(ws, file, "project"),
+        onSelect: () => void promote(ws, file, "project"),
       });
-      items.push({
+      out.push({
         id: "promote-global",
         label: t("memory.promote_global"),
         icon: <ArrowUpToLine size={13} strokeWidth={1.7} />,
-        onSelect: () => void promoteMemory(ws, file, "global"),
+        onSelect: () => void promote(ws, file, "global"),
       });
     }
-    items.push({
+    out.push({
       id: "copy-content",
       label: t("memory.copy_content", "复制内容"),
       icon: <Copy size={13} strokeWidth={1.7} />,
@@ -261,7 +264,7 @@ export function MemoryView() {
           .then((c) => writeText(c))
           .catch(() => {}),
     });
-    items.push({
+    out.push({
       id: "copy-path",
       label: t("paths.copy_path", "复制路径"),
       icon: <Copy size={13} strokeWidth={1.7} />,
@@ -276,28 +279,177 @@ export function MemoryView() {
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
           : "paths.reveal_in_finder";
-      items.push({
+      out.push({
         id: "reveal",
         label: t(revealKey),
         icon: <FolderOpen size={13} strokeWidth={1.7} />,
         onSelect: () => void invoke("reveal_path", { path: file.path }).catch(() => {}),
       });
     }
-    return items;
+    return out;
   };
 
-  useEffect(() => {
-    if (!loaded) load();
-  }, [loaded, load]);
+  const open = (ws: WorkspaceMemory, file: MemoryFile, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ ws, file, anchor: { x: e.clientX, y: e.clientY } });
+  };
 
-  useEffect(() => {
-    const unlisten = listen("memories-updated", () => void reload());
-    return () => {
-      unlisten.then((f) => f());
-    };
-  }, [reload]);
+  const node = (
+    <Presence when={Boolean(menu)}>{menu && (
+      <ContextMenu
+        anchor={menu.anchor}
+        items={items(menu.ws, menu.file)}
+        onClose={() => setMenu(null)}
+      />
+    )}</Presence>
+  );
 
-  // Type counts across all workspaces (excludes MEMORY.md itself).
+  return { open, node };
+}
+
+/** Which stores have their "not in MEMORY.md" fold open. UI state shared by
+ *  both places memory is listed. */
+function useUnindexedFolds() {
+  const expandedKeys = useUIStore((s) => s.mainViewState.memory.expandedKeys);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const expanded = useMemo(() => new Set(expandedKeys), [expandedKeys]);
+  const toggle = (key: string) => {
+    const next = new Set(expanded);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    updateMainViewState("memory", { expandedKeys: [...next] });
+  };
+  return { expanded, toggle };
+}
+
+/** One store's cards: header (name, count, source, CLAUDE.md), the entries
+ *  MEMORY.md indexes, then a fold of the ones it does not. */
+function MemoryStoreGroup({
+  ws,
+  selection,
+  onSelect,
+  onCardMenu,
+  expanded,
+  onToggleUnindexed,
+}: {
+  ws: WorkspaceMemory;
+  selection: Selection;
+  onSelect: (next: StoreSelection) => void;
+  onCardMenu: (ws: WorkspaceMemory, file: MemoryFile, e: React.MouseEvent) => void;
+  expanded: boolean;
+  onToggleUnindexed: () => void;
+}) {
+  const { t } = useTranslation();
+  const indexed = ws.files.filter((f) => f.inIndex || f.name === "MEMORY.md");
+  const unindexed = ws.files.filter((f) => !f.inIndex && f.name !== "MEMORY.md");
+  const card = (f: MemoryFile) => (
+    <MemoryCard
+      key={f.path}
+      file={f}
+      source={ws.source}
+      active={selection?.kind === "file" && selection.file.path === f.path}
+      onClick={() => onSelect({ kind: "file", workspace: ws, file: f })}
+      onContextMenu={(e) => onCardMenu(ws, f, e)}
+    />
+  );
+  return (
+    <div className={styles.workspace_group}>
+      <div className={styles.workspace_header}>
+        <span className={styles.workspace_name}>{storeLabel(t, ws)}</span>
+        <span className={styles.workspace_count}>{ws.files.length}</span>
+        <span className={styles.source_badge}>
+          {ws.source === "codex" ? "Codex" : "Claude"}
+        </span>
+        {ws.hasClaudeMd && (
+          <button
+            className={`${styles.badge} ${styles.badge_claude} ${
+              selection?.kind === "claudeMd" &&
+              selection.workspace.projectKey === ws.projectKey
+                ? styles.badge_active
+                : ""
+            }`}
+            onClick={() => onSelect({ kind: "claudeMd", workspace: ws })}
+          >
+            CLAUDE.md
+          </button>
+        )}
+      </div>
+      <div className={styles.card_list}>{indexed.map(card)}</div>
+      {unindexed.length > 0 && (
+        <div className={styles.unindexed_section}>
+          <button className={styles.unindexed_header} onClick={onToggleUnindexed}>
+            <span className={styles.unindexed_caret}>{expanded ? "▼" : "▶"}</span>
+            <span className={styles.unindexed_label}>{t("memory.unindexed_section")}</span>
+            <span className={styles.unindexed_count}>{unindexed.length}</span>
+          </button>
+          {expanded && <div className={styles.card_list}>{unindexed.map(card)}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The detail pane of a selected file or CLAUDE.md. */
+function StoreDetail({
+  t,
+  selection,
+  onPromoted,
+}: {
+  t: TFunction;
+  selection: StoreSelection;
+  onPromoted: () => Promise<void>;
+}) {
+  return selection.kind === "claudeMd" ? (
+    <ClaudeMdDetail
+      workspaceName={storeLabel(t, selection.workspace)}
+      workspacePath={selection.workspace.workspacePath}
+    />
+  ) : (
+    <FileDetail workspace={selection.workspace} file={selection.file} onPromoted={onPromoted} />
+  );
+}
+
+// ── Global memory page ───────────────────────────────────────────────────────
+
+/** 全局记忆: the machine-wide stores plus the Fleet lessons, opened from
+ *  Settings. Project memory lives in each project's memory tab
+ *  ({@link ProjectMemory}). */
+export function MemoryView() {
+  const { t } = useTranslation();
+  const { memories, loaded, refreshing, reload, promote } = useMemoryStores();
+  const { query, filterType, sourceFilter, selectedKey } = useUIStore(
+    (s) => s.mainViewState.memory,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setQuery = (value: string) => updateMainViewState("memory", { query: value });
+  const setFilterType = (value: string) =>
+    updateMainViewState("memory", { filterType: value });
+  const setSourceFilter = (value: "all" | "claude-code" | "codex") =>
+    updateMainViewState("memory", { sourceFilter: value });
+  const setSelection = (next: Selection) =>
+    updateMainViewState("memory", {
+      selectedKey: next ? memorySelectionKey(next) : null,
+    });
+  const folds = useUnindexedFolds();
+  const cardMenu = useMemoryCardMenu(async (ws, file, target) => {
+    await promote(ws, file, target);
+    setSelection(null);
+  });
+
+  // Lessons the user added to global guidance from the daily-report card
+  // (~/.claude/fleet-lessons.md), shown as a pinned entry with per-row removal.
+  const { managedLessons, loadManagedLessons, removeManagedLesson } = useReportStore();
+  // The report store has no loaded flag for lessons (and swallows errors), so
+  // track the first fetch here: until it settles the pinned group is a skeleton.
+  const [lessonsLoaded, setLessonsLoaded] = useState(false);
+  useEffect(() => {
+    void loadManagedLessons().finally(() => setLessonsLoaded(true));
+  }, [loadManagedLessons]);
+
+  const stores = useMemo(() => memories.filter(isMachineWideStore), [memories]);
+
+  // Type counts across the shown stores (excludes MEMORY.md itself).
   const typeCounts = useMemo(() => {
     const counts: Record<MemType | "all", number> = {
       all: 0,
@@ -306,7 +458,7 @@ export function MemoryView() {
       project: 0,
       reference: 0,
     };
-    for (const ws of memories) {
+    for (const ws of stores) {
       for (const f of ws.files) {
         if (f.name === "MEMORY.md") continue;
         counts.all++;
@@ -314,67 +466,38 @@ export function MemoryView() {
       }
     }
     return counts;
-  }, [memories]);
-
-  // Distinct workspaces for the filter dropdown, stable order. Keyed by
-  // projectKey (not path) so the global bucket "__global__" is a clean,
-  // collision-free option; the label falls back to the localized global name.
-  const workspaces = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const ws of memories) {
-      if (!seen.has(ws.projectKey)) {
-        seen.set(
-          ws.projectKey,
-          ws.projectKey === "__global__"
-            ? t("memory.global_label")
-            : ws.workspaceName,
-        );
-      }
-    }
-    return [...seen.entries()].map(([key, name]) => ({ key, name }));
-  }, [memories, t]);
+  }, [stores]);
 
   const sourceCounts = useMemo(() => ({
-    "claude-code": memories
+    "claude-code": stores
       .filter((ws) => ws.source === "claude-code")
       .reduce((sum, ws) => sum + ws.files.length, 0),
-    codex: memories
+    codex: stores
       .filter((ws) => ws.source === "codex")
       .reduce((sum, ws) => sum + ws.files.length, 0),
-  }), [memories]);
+  }), [stores]);
 
-  // Filter by query (name/title/hook/description) + by selected type +
-  // by selected workspace.
-  // MEMORY.md is always kept (it's the index).
+  // Filter by query (name/title/hook/description) + by selected type + by
+  // source. MEMORY.md is always kept (it's the index).
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return memories
+    return stores
       .map((ws) => {
         if (sourceFilter !== "all" && ws.source !== sourceFilter) return null;
-        if (workspaceFilter !== "all" && ws.projectKey !== workspaceFilter) {
-          return null;
-        }
-        const wsMatch = q && ws.workspaceName.toLowerCase().includes(q);
         const files = ws.files.filter((f) => {
           if (f.name === "MEMORY.md") return filterType === "all" && !q;
           if (filterType !== "all" && f.memType !== filterType) return false;
           if (!q) return true;
-          if (wsMatch) return true;
-          const hay = [
-            f.name,
-            f.title ?? "",
-            f.hook ?? "",
-            f.description ?? "",
-          ]
+          const hay = [f.name, f.title ?? "", f.hook ?? "", f.description ?? ""]
             .join(" ")
             .toLowerCase();
           return hay.includes(q);
         });
-        if (files.length === 0 && !wsMatch) return null;
+        if (files.length === 0 && !(ws.hasClaudeMd && !q)) return null;
         return { ...ws, files } satisfies WorkspaceMemory;
       })
       .filter((x): x is WorkspaceMemory => x !== null);
-  }, [memories, query, filterType, workspaceFilter, sourceFilter]);
+  }, [stores, query, filterType, sourceFilter]);
 
   const selection = useMemo(
     () => resolveMemorySelection(selectedKey, filtered),
@@ -388,39 +511,18 @@ export function MemoryView() {
 
   const totalFiles = typeCounts.all;
 
-  const toggleUnindexed = (key: string) => {
-    const next = new Set(expandedUnindexed);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    updateMainViewState("memory", { expandedKeys: [...next] });
-  };
-
   return (
     <PageShell
       view="memory"
       detailKey={selectedKey}
       className={styles.mem_scope}
-      title={t("memory.panel_title")}
+      title={t("settings.page_global_memory", "全局记忆")}
       count={loaded && totalFiles > 0 ? totalFiles : null}
       search={{
         value: query,
         onChange: setQuery,
         placeholder: t("memory.search_placeholder"),
       }}
-      bannerCenter={
-        <select
-          className={styles.ws_select}
-          value={workspaceFilter}
-          onChange={(e) => setWorkspaceFilter(e.target.value)}
-        >
-          <option value="all">{t("memory.all_workspaces")}</option>
-          {workspaces.map((ws) => (
-            <option key={ws.key} value={ws.key}>
-              {ws.name}
-            </option>
-          ))}
-        </select>
-      }
       subBar={
         <>
           <FilterChip
@@ -455,7 +557,7 @@ export function MemoryView() {
       }
       secondary={
         <div className={`${styles.list_pane} ${styles.list_pane_positioned}`}>
-          <TopProgress active={showRefreshing} />
+          <TopProgress active={refreshing} />
           {!loaded && <SkeletonList rows={10} avatar />}
           {loaded && !lessonsLoaded && <SkeletonList rows={1} avatar />}
           {loaded && lessonsLoaded && filtered.length === 0 && managedLessons.length === 0 && (
@@ -497,110 +599,18 @@ export function MemoryView() {
               </div>
             </div>
           )}
-          {filtered.map((ws) => {
-            const indexed = ws.files.filter(
-              (f) => f.inIndex || f.name === "MEMORY.md",
-            );
-            const unindexed = ws.files.filter(
-              (f) => !f.inIndex && f.name !== "MEMORY.md",
-            );
-            const expanded = expandedUnindexed.has(ws.projectKey);
-            return (
-              <div key={ws.projectKey} className={styles.workspace_group}>
-                <div className={styles.workspace_header}>
-                  <span className={styles.workspace_name}>
-                    {ws.projectKey === "__global__"
-                      ? t("memory.global_label")
-                      : ws.workspaceName}
-                  </span>
-                  <span className={styles.workspace_count}>
-                    {ws.files.length}
-                  </span>
-                  <span className={styles.source_badge}>
-                    {ws.source === "codex" ? "Codex" : "Claude"}
-                  </span>
-                  {ws.hasClaudeMd && (
-                    <button
-                      className={`${styles.badge} ${styles.badge_claude} ${
-                        selection?.kind === "claudeMd" &&
-                        selection.workspace.projectKey === ws.projectKey
-                          ? styles.badge_active
-                          : ""
-                      }`}
-                      onClick={() => setSelection({ kind: "claudeMd", workspace: ws })}
-                    >
-                      CLAUDE.md
-                    </button>
-                  )}
-                </div>
-                <div className={styles.card_list}>
-                  {indexed.map((f) => (
-                    <MemoryCard
-                      key={f.path}
-                      file={f}
-                      source={ws.source}
-                      active={
-                        selection?.kind === "file" &&
-                        selection.file.path === f.path
-                      }
-                      onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setCtxMenu({ ws, file: f, anchor: { x: e.clientX, y: e.clientY } });
-                      }}
-                    />
-                  ))}
-                </div>
-                {unindexed.length > 0 && (
-                  <div className={styles.unindexed_section}>
-                    <button
-                      className={styles.unindexed_header}
-                      onClick={() => toggleUnindexed(ws.projectKey)}
-                    >
-                      <span className={styles.unindexed_caret}>
-                        {expanded ? "▼" : "▶"}
-                      </span>
-                      <span className={styles.unindexed_label}>
-                        {t("memory.unindexed_section")}
-                      </span>
-                      <span className={styles.unindexed_count}>
-                        {unindexed.length}
-                      </span>
-                    </button>
-                    {expanded && (
-                      <div className={styles.card_list}>
-                        {unindexed.map((f) => (
-                          <MemoryCard
-                            key={f.path}
-                            file={f}
-                            source={ws.source}
-                            active={
-                              selection?.kind === "file" &&
-                              selection.file.path === f.path
-                            }
-                            onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCtxMenu({ ws, file: f, anchor: { x: e.clientX, y: e.clientY } });
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
-            <ContextMenu
-              anchor={ctxMenu.anchor}
-              items={cardMenuItems(ctxMenu.ws, ctxMenu.file)}
-              onClose={() => setCtxMenu(null)}
+          {filtered.map((ws) => (
+            <MemoryStoreGroup
+              key={ws.projectKey}
+              ws={ws}
+              selection={selection}
+              onSelect={setSelection}
+              onCardMenu={cardMenu.open}
+              expanded={folds.expanded.has(ws.projectKey)}
+              onToggleUnindexed={() => folds.toggle(ws.projectKey)}
             />
-          )}</Presence>
+          ))}
+          {cardMenu.node}
         </div>
       }
     >
@@ -611,7 +621,7 @@ export function MemoryView() {
       ) : selection === null ? (
         <div className={styles.placeholder}>
           {totalFiles > 0
-            ? t("memory.panel_title")
+            ? t("settings.page_global_memory", "全局记忆")
             : t("memory.no_memories")}
         </div>
       ) : selection.kind === "lessons" ? (
@@ -619,15 +629,10 @@ export function MemoryView() {
           lessons={managedLessons}
           onRemove={removeManagedLesson}
         />
-      ) : selection.kind === "claudeMd" ? (
-        <ClaudeMdDetail
-          workspaceName={selection.workspace.workspaceName}
-          workspacePath={selection.workspace.workspacePath}
-        />
       ) : (
-        <FileDetail
-          workspace={selection.workspace}
-          file={selection.file}
+        <StoreDetail
+          t={t}
+          selection={selection}
           onPromoted={async () => {
             setSelection(null);
             await reload();
@@ -635,6 +640,85 @@ export function MemoryView() {
         />
       )}
     </PageShell>
+  );
+}
+
+// ── A project's memory tab ───────────────────────────────────────────────────
+
+/** The memory of one project, read and managed in place: every store whose
+ *  workspace folds to `projectPath` (a repo's subdirectories each get their own
+ *  Claude store) on the left, the picked entry on the right. */
+export function ProjectMemory({ projectPath }: { projectPath: string }) {
+  const { t } = useTranslation();
+  const { memories, loaded, refreshing, reload, promote } = useMemoryStores();
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const setSelection = (next: Selection) =>
+    setSelectedKey(next ? memorySelectionKey(next) : null);
+  const folds = useUnindexedFolds();
+  const cardMenu = useMemoryCardMenu(async (ws, file, target) => {
+    await promote(ws, file, target);
+    setSelection(null);
+  });
+
+  const stores = useMemo(
+    () =>
+      memories.filter(
+        (ws) => !isMachineWideStore(ws) && repoRootPath(ws.workspacePath) === projectPath,
+      ),
+    [memories, projectPath],
+  );
+
+  // Open on the first entry, in list order, rather than an empty right half.
+  const firstKey = useMemo(() => {
+    const ws = stores[0];
+    if (!ws) return null;
+    if (ws.hasClaudeMd) return memorySelectionKey({ kind: "claudeMd", workspace: ws });
+    const file = ws.files.find((f) => f.inIndex || f.name === "MEMORY.md") ?? ws.files[0];
+    return file ? memorySelectionKey({ kind: "file", workspace: ws, file }) : null;
+  }, [stores]);
+  const selection =
+    resolveMemorySelection(selectedKey, stores) ?? resolveMemorySelection(firstKey, stores);
+
+  if (!loaded) return <SkeletonList rows={5} />;
+  if (stores.length === 0) {
+    return (
+      <EmptyState
+        icon={<Brain size={28} strokeWidth={1.5} />}
+        title={t("projects.memory_empty", "这个项目还没有记忆")}
+        subtitle={t("projects.memory_empty_sub", "agent 在这里干活时记下的要点会出现在这里。")}
+      />
+    );
+  }
+  return (
+    <div className={`${styles.mem_scope} ${styles.project_split}`}>
+      <div className={`${styles.list_pane} ${styles.list_pane_positioned} ${styles.project_list}`}>
+        <TopProgress active={refreshing} />
+        {stores.map((ws) => (
+          <MemoryStoreGroup
+            key={ws.projectKey}
+            ws={ws}
+            selection={selection}
+            onSelect={setSelection}
+            onCardMenu={cardMenu.open}
+            expanded={folds.expanded.has(ws.projectKey)}
+            onToggleUnindexed={() => folds.toggle(ws.projectKey)}
+          />
+        ))}
+        {cardMenu.node}
+      </div>
+      <div className={styles.project_detail}>
+        {selection && selection.kind !== "lessons" && (
+          <StoreDetail
+            t={t}
+            selection={selection}
+            onPromoted={async () => {
+              setSelection(null);
+              await reload();
+            }}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 

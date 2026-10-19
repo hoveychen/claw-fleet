@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { REPORT_AUTO_POPUP_KEY, useAuditStore, useUIStore, type ViewMode } from "../store";
 import { ChevronRight } from "lucide-react";
-import { GLOBAL_MEMORY_FILTER } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { isWebBuild } from "../hostEnv";
@@ -185,9 +184,8 @@ function TriStateSkeleton() {
 function MenuPageLinks({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const avail = useNavAvailability();
-  const open = (view: ViewMode, prep?: () => void) => {
+  const open = (view: ViewMode) => {
     onClose();
-    prep?.();
     useUIStore.getState().setViewMode(view);
   };
   const rows: { key: string; label: string; dot?: boolean; onClick: () => void }[] = [
@@ -198,10 +196,7 @@ function MenuPageLinks({ onClose }: { onClose: () => void }) {
     {
       key: "memory",
       label: t("settings.page_global_memory", "全局记忆"),
-      onClick: () =>
-        open("memory", () =>
-          useUIStore.getState().updateMainViewState("memory", { workspaceFilter: GLOBAL_MEMORY_FILTER, selectedKey: null }),
-        ),
+      onClick: () => open("memory"),
     },
   ];
   return (

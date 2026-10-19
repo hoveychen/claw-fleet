@@ -3084,7 +3084,11 @@
     "pick_sub": "See its routines, memory and code.",
     "memory_empty": "No memory in this project yet",
     "memory_empty_sub": "What agents note down while working here shows up here.",
-    "open_terminal": "Open terminal"
+    "open_terminal": "Open terminal",
+    "archive": "Archive",
+    "archive_sub": "Hide from the list; memory and routines are kept",
+    "unarchive": "Unarchive",
+    "archived": "Archived {{count}}"
   },
   "nav_section_review": "Review",
   "review": {

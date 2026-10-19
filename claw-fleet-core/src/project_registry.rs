@@ -1,11 +1,16 @@
-//! The persistent list of projects: one entry per code directory Fleet has
-//! started a task in.
+//! The persistent list of projects: one entry per code directory an agent has
+//! worked in.
 //!
 //! A project is a code directory. Deriving the list from the session scan
 //! alone is not enough: the scan drops transcripts older than seven days, so a
-//! project nobody touched for a week would vanish from the project page. The
-//! registry is seeded once from the launch notes by [`crate::task_migration`]
-//! and kept current by [`ensure`] on every spawn.
+//! project nobody touched for a week would vanish from the project page. So
+//! every directory the scan reports is written here ([`discover`], called
+//! whenever a client lists projects), whether Fleet started the session or the
+//! user ran an agent by hand; Fleet's own spawns register theirs on the spot
+//! ([`ensure`]). History from before this existed comes in once: the launch
+//! notes via [`crate::task_migration`], and every Claude Code project directory
+//! via [`discover`]'s first run. Projects never expire; the user archives the
+//! ones they no longer want listed ([`set_archived`]).
 //!
 //! Stored at `~/.fleet/projects.json` as a JSON array of [`Project`].
 
@@ -22,9 +27,18 @@ pub struct Project {
     pub name: String,
     /// When Fleet first registered it (epoch ms).
     pub created_at_ms: u64,
+    /// When the user archived it (epoch ms). Archived projects stay registered,
+    /// so the scan does not bring them back, but the project page hides them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at_ms: Option<u64>,
 }
 
 const FILE_NAME: &str = "projects.json";
+
+/// Present once [`discover`] has registered every Claude Code project
+/// directory. Without it, the first list after an upgrade would only know the
+/// last seven days of hand-run sessions.
+const BACKFILL_MARKER: &str = "projects-backfill-v1";
 
 fn registry_path() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join(FILE_NAME))
@@ -37,7 +51,7 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Every registered project, in registration order.
+/// Every registered project, archived ones included, in registration order.
 pub fn list() -> Vec<Project> {
     registry_path().map(|p| load(&p)).unwrap_or_default()
 }
@@ -47,6 +61,24 @@ fn load(path: &Path) -> Vec<Project> {
         crate::atomic_json::JsonLoad::Loaded(v) => v,
         _ => Vec::new(),
     }
+}
+
+/// The registry for a read-modify-write. Missing and corrupt files start over;
+/// an unreadable one is an error, since writing now would drop every entry.
+fn load_for_write(path: &Path) -> Result<Vec<Project>, String> {
+    match crate::atomic_json::load_preserving::<Vec<Project>>(path) {
+        crate::atomic_json::JsonLoad::Loaded(v) => Ok(v),
+        crate::atomic_json::JsonLoad::Missing | crate::atomic_json::JsonLoad::Corrupt => Ok(Vec::new()),
+        crate::atomic_json::JsonLoad::Unreadable => Err(format!("read {}: unreadable", path.display())),
+    }
+}
+
+fn save(path: &Path, projects: &[Project]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    let json = serde_json::to_vec_pretty(projects).map_err(|e| format!("serialize: {e}"))?;
+    crate::atomic_json::write_atomic(path, &json).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
 /// The project a workspace path belongs to: its repo root, when that is a
@@ -61,6 +93,12 @@ fn project_path_with(workspace: &str, is_temp: impl Fn(&str) -> bool) -> Option<
     let root = root.trim_end_matches('/');
     if root.is_empty() || crate::chat_workspace::is_chat_workspace(root) || is_temp(root) {
         return None;
+    }
+    // Stat-ing a path under a TCC-protected folder (~/Documents, ~/Desktop, …)
+    // is what raises macOS's permission dialog. An agent worked there, so take
+    // its word that the directory exists rather than prompt from a list call.
+    if crate::tcc::is_tcc_protected(Path::new(root)) {
+        return Some(root.to_string());
     }
     Path::new(root).is_dir().then(|| root.to_string())
 }
@@ -79,56 +117,96 @@ fn is_temp(path: &str) -> bool {
 
 /// Register the project of each workspace that is not registered yet. Returns
 /// how many were added. Workspaces with no project ([`project_path_of`]) are
-/// skipped.
+/// skipped; archived projects stay archived.
 pub fn ensure_many<'a>(workspaces: impl IntoIterator<Item = &'a str>) -> Result<usize, String> {
     let path = registry_path().ok_or("cannot determine fleet dir")?;
-    ensure_many_in(&path, workspaces, is_temp)
+    ensure_many_in(&path, workspaces, is_temp, false)
 }
 
-/// [`ensure_many`] for one workspace. Called on every spawn; one file read
-/// when the project is already known.
+/// Register a workspace Fleet is starting a task in. Called on every spawn; one
+/// file read when the project is already known. Starting new work in an
+/// archived project un-archives it: the user just picked it.
 pub fn ensure(workspace: &str) -> Result<bool, String> {
-    ensure_many([workspace]).map(|n| n > 0)
+    let path = registry_path().ok_or("cannot determine fleet dir")?;
+    ensure_many_in(&path, [workspace], is_temp, true).map(|n| n > 0)
+}
+
+/// Register every directory the session scan saw an agent in (`workspaces`),
+/// and on the first run every Claude Code project directory under
+/// `~/.claude/projects`, so history older than the scan's seven days is not
+/// lost. Returns how many projects were added.
+pub fn discover<'a>(workspaces: impl IntoIterator<Item = &'a str>) -> Result<usize, String> {
+    let path = registry_path().ok_or("cannot determine fleet dir")?;
+    let mut added = 0;
+    let marker = path.with_file_name(BACKFILL_MARKER);
+    if !marker.exists() {
+        let history = crate::memory::claude_project_workspaces();
+        added += ensure_many_in(&path, history.iter().map(String::as_str), is_temp, false)?;
+        std::fs::write(&marker, b"").map_err(|e| format!("write {}: {e}", marker.display()))?;
+    }
+    added += ensure_many_in(&path, workspaces, is_temp, false)?;
+    Ok(added)
+}
+
+/// Archive or un-archive a project, registering it first if the list only had
+/// it from the scan. Returns the updated registry.
+pub fn set_archived(project: &str, archived: bool) -> Result<Vec<Project>, String> {
+    let path = registry_path().ok_or("cannot determine fleet dir")?;
+    set_archived_in(&path, project, archived, now_ms())
+}
+
+fn set_archived_in(path: &Path, project: &str, archived: bool, now: u64) -> Result<Vec<Project>, String> {
+    let root = project.trim().trim_end_matches('/');
+    if root.is_empty() {
+        return Err("empty project path".into());
+    }
+    let mut projects = load_for_write(path)?;
+    let at = archived.then_some(now);
+    match projects.iter_mut().find(|p| p.path == root) {
+        Some(p) => p.archived_at_ms = at,
+        None => projects.push(Project {
+            name: crate::session::workspace_name(root),
+            path: root.to_string(),
+            created_at_ms: now,
+            archived_at_ms: at,
+        }),
+    }
+    save(path, &projects)?;
+    Ok(projects)
 }
 
 fn ensure_many_in<'a>(
     path: &Path,
     workspaces: impl IntoIterator<Item = &'a str>,
     is_temp: impl Fn(&str) -> bool,
+    unarchive: bool,
 ) -> Result<usize, String> {
-    let mut projects = match crate::atomic_json::load_preserving::<Vec<Project>>(path) {
-        crate::atomic_json::JsonLoad::Loaded(v) => v,
-        crate::atomic_json::JsonLoad::Missing | crate::atomic_json::JsonLoad::Corrupt => Vec::new(),
-        // The file may be intact; writing now would drop every entry in it.
-        crate::atomic_json::JsonLoad::Unreadable => {
-            return Err(format!("read {}: unreadable", path.display()))
-        }
-    };
+    let mut projects = load_for_write(path)?;
     let now = now_ms();
     let mut added = 0;
+    let mut changed = false;
     for ws in workspaces {
         let Some(root) = project_path_with(ws, &is_temp) else {
             continue;
         };
-        if projects.iter().any(|p| p.path == root) {
+        if let Some(p) = projects.iter_mut().find(|p| p.path == root) {
+            if unarchive && p.archived_at_ms.take().is_some() {
+                changed = true;
+            }
             continue;
         }
         projects.push(Project {
             name: crate::session::workspace_name(&root),
             path: root,
             created_at_ms: now,
+            archived_at_ms: None,
         });
         added += 1;
+        changed = true;
     }
-    if added == 0 {
-        return Ok(0);
+    if changed {
+        save(path, &projects)?;
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
-    }
-    let json = serde_json::to_vec_pretty(&projects).map_err(|e| format!("serialize: {e}"))?;
-    crate::atomic_json::write_atomic(path, &json)
-        .map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(added)
 }
 
@@ -161,6 +239,7 @@ mod tests {
                 "/scratch-not-a-project/x",
             ],
             fake_temp,
+            false,
         )
         .unwrap();
         assert_eq!(added, 1);
@@ -170,7 +249,7 @@ mod tests {
         assert_eq!(list[0].name, "repo");
 
         // Idempotent: a second pass adds nothing.
-        assert_eq!(ensure_many_in(&file, [repo_s.as_str()], fake_temp).unwrap(), 0);
+        assert_eq!(ensure_many_in(&file, [repo_s.as_str()], fake_temp, false).unwrap(), 0);
     }
 
     #[test]
@@ -180,9 +259,44 @@ mod tests {
         let p = base.path().to_str().unwrap().to_string();
         let with_slash = format!("{p}/");
         assert_eq!(
-            ensure_many_in(&file, [p.as_str(), with_slash.as_str()], fake_temp).unwrap(),
+            ensure_many_in(&file, [p.as_str(), with_slash.as_str()], fake_temp, false).unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn archive_survives_rediscovery_and_a_spawn_unarchives() {
+        let base = tempfile::tempdir().unwrap();
+        let file = base.path().join("projects.json");
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_str().unwrap().to_string();
+        ensure_many_in(&file, [repo_s.as_str()], fake_temp, false).unwrap();
+
+        let list = set_archived_in(&file, &format!("{repo_s}/"), true, 42).unwrap();
+        assert_eq!(list[0].archived_at_ms, Some(42));
+
+        // The scan seeing it again changes nothing.
+        assert_eq!(ensure_many_in(&file, [repo_s.as_str()], fake_temp, false).unwrap(), 0);
+        assert_eq!(load(&file)[0].archived_at_ms, Some(42));
+
+        // A Fleet spawn into it brings it back.
+        ensure_many_in(&file, [repo_s.as_str()], fake_temp, true).unwrap();
+        assert_eq!(load(&file)[0].archived_at_ms, None);
+    }
+
+    #[test]
+    fn archiving_an_unregistered_project_registers_it_archived() {
+        let base = tempfile::tempdir().unwrap();
+        let file = base.path().join("projects.json");
+        let list = set_archived_in(&file, "/Users/me/workspace/old", true, 7).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].path, "/Users/me/workspace/old");
+        assert_eq!(list[0].name, "old");
+        assert_eq!(list[0].archived_at_ms, Some(7));
+        // Pre-archive files have no field and still load.
+        std::fs::write(&file, r#"[{"path":"/a","name":"a","createdAtMs":1}]"#).unwrap();
+        assert_eq!(load(&file)[0].archived_at_ms, None);
     }
 
     #[test]

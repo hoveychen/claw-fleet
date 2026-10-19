@@ -4,10 +4,11 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Brain,
+  Archive,
+  ArchiveRestore,
   CalendarClock,
+  ChevronRight,
   Copy,
-  FileText,
   FolderGit2,
   FolderOpen,
   FolderPlus,
@@ -21,6 +22,8 @@ import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { isWebBuild } from "../hostEnv";
 import { canRevealPath } from "../canReveal";
 import {
+  archivedPaths,
+  archivedProjects,
   mergeProjects,
   pathTail,
   withBrowsePaths,
@@ -32,6 +35,7 @@ import { CloneRepoDialog } from "./CloneRepoDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { DirPickerDialog } from "./DirPickerDialog";
 import { EmptyState } from "./EmptyState";
+import { ProjectMemory } from "./MemoryView";
 import { WorkspaceExplorer } from "./FilesView";
 import { PageShell } from "./PageShell";
 import { ProcPanel } from "./ProcPanel";
@@ -61,9 +65,7 @@ function parentDir(p: string): string {
 
 /**
  * 项目 (Projects): one row per code directory, and for the picked one its
- * routines, memory and code. Routines and code are shown in place; memory
- * hands over to its full page (记忆, another segment of this section)
- * pre-filtered to the project, since that page owns the editor.
+ * routines, memory and code, all shown in place.
  */
 export function ProjectsView() {
   const { t } = useTranslation();
@@ -98,7 +100,13 @@ export function ProjectsView() {
   const [removingPath, setRemovingPath] = useState<string | null>(null);
   const [cloning, setCloning] = useState(false);
   const [pickingDir, setPickingDir] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<{ row: ProjectRow; anchor: ContextMenuAnchor } | null>(null);
+  const [archivingPath, setArchivingPath] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{
+    row: ProjectRow;
+    archived?: boolean;
+    anchor: ContextMenuAnchor;
+  } | null>(null);
 
   // Workspace commands: the row badges and the code tab's commands list.
   // SessionList keeps this list polled app-wide.
@@ -115,9 +123,19 @@ export function ProjectsView() {
   const projects = useMemo<ProjectRow[] | null>(
     () =>
       registered && browsePaths
-        ? withBrowsePaths(mergeProjects(registered, sessions, chatWorkspace), browsePaths)
+        ? withBrowsePaths(mergeProjects(registered, sessions, chatWorkspace), browsePaths, archivedPaths(registered))
         : null,
     [registered, browsePaths, sessions, chatWorkspace],
+  );
+  const archived = useMemo<ProjectRow[]>(
+    () =>
+      archivedProjects(registered ?? []).map((p) => ({
+        path: p.path,
+        name: p.name,
+        lastActiveMs: p.archivedAtMs ?? 0,
+        runningTasks: 0,
+      })),
+    [registered],
   );
 
   // Select a hand-added directory only once the backend has accepted it, or
@@ -146,6 +164,21 @@ export function ProjectsView() {
     if (selectedPath === path) set({ selectedPath: null });
   };
 
+  // Archived projects stay registered, so neither the session scan nor a new
+  // hand-run session lists them again; only un-archiving (or Fleet starting a
+  // task there) does.
+  const setArchived = async (path: string, archive: boolean) => {
+    setArchivingPath(path);
+    try {
+      setRegistered(await invoke<RegisteredProject[]>("set_project_archived", { path, archived: archive }));
+    } catch {
+      return;
+    } finally {
+      setArchivingPath(null);
+    }
+    if (archive && selectedPath === path) set({ selectedPath: null });
+  };
+
   // The native dialog browses the machine the desktop runs on; the browser
   // build has none, so it lists the backend host through DirPickerDialog.
   const needsBackendDirPicker = isWebBuild();
@@ -158,7 +191,7 @@ export function ProjectsView() {
     if (typeof picked === "string") await addPath(picked);
   };
 
-  const rowMenu = (row: ProjectRow): ContextMenuItem[] => {
+  const rowMenu = (row: ProjectRow, isArchived: boolean): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
     // The browser build has no host shell to reveal into (canReveal.ts).
     if (canRevealPath()) {
@@ -180,6 +213,22 @@ export function ProjectsView() {
       sub: row.path,
       onSelect: () => void writeText(row.path).catch(() => {}),
     });
+    if (isArchived) {
+      items.push({
+        id: "unarchive",
+        label: t("projects.unarchive", "取消归档"),
+        icon: <ArchiveRestore size={13} strokeWidth={1.7} />,
+        onSelect: () => void setArchived(row.path, false),
+      });
+    } else if (!row.handAdded) {
+      items.push({
+        id: "archive",
+        label: t("projects.archive", "归档"),
+        icon: <Archive size={13} strokeWidth={1.7} />,
+        sub: t("projects.archive_sub", "从列表收起，记忆和例行都保留"),
+        onSelect: () => void setArchived(row.path, true),
+      });
+    }
     // Rows backed by sessions or the registry would come straight back.
     if (row.handAdded) {
       items.push({
@@ -192,25 +241,30 @@ export function ProjectsView() {
     }
     return items;
   };
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return projects ?? [];
-    return (projects ?? []).filter((p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
-  }, [projects, query]);
+  const matches = useCallback(
+    (p: ProjectRow) => {
+      const q = query.trim().toLowerCase();
+      return !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
+    },
+    [query],
+  );
+  const shown = useMemo(() => (projects ?? []).filter(matches), [projects, matches]);
+  const shownArchived = useMemo(() => archived.filter(matches), [archived, matches]);
   // A path clicked in agent prose can point into a directory that is not a
   // project (a temp dir, the chat workspace). It still opens, as a bare row
   // the list does not show.
   const selected = useMemo<ProjectRow | null>(() => {
     if (!projects || !selectedPath || selectedPath === ALL_ROUTINES) return null;
     return (
-      projects.find((p) => p.path === selectedPath) ?? {
+      projects.find((p) => p.path === selectedPath) ??
+      archived.find((p) => p.path === selectedPath) ?? {
         path: selectedPath,
         name: selectedPath.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || selectedPath,
         lastActiveMs: 0,
         runningTasks: 0,
       }
     );
-  }, [projects, selectedPath]);
+  }, [projects, archived, selectedPath]);
 
   // Same set the commands tab lists: this exact directory, exited ones included.
   const commandCount = useMemo(
@@ -253,7 +307,7 @@ export function ProjectsView() {
             key={p.path}
             type="button"
             className={`${styles.row}${p.path === selectedPath ? ` ${styles.row_active}` : ""}${
-              removingPath === p.path ? ` ${loadingStyles.stale}` : ""
+              removingPath === p.path || archivingPath === p.path ? ` ${loadingStyles.stale}` : ""
             }`}
             onClick={() => set({ selectedPath: p.path })}
             onContextMenu={(e) => {
@@ -262,7 +316,7 @@ export function ProjectsView() {
               setCtxMenu({ row: p, anchor: { x: e.clientX, y: e.clientY } });
             }}
             aria-current={p.path === selectedPath ? "true" : undefined}
-            aria-busy={removingPath === p.path || undefined}
+            aria-busy={removingPath === p.path || archivingPath === p.path || undefined}
             title={p.path}
           >
             <span className={styles.icon}>
@@ -280,7 +334,7 @@ export function ProjectsView() {
                 {p.lastActiveMs > 0 && <span className={styles.time}>{timeAgo(p.lastActiveMs, t)}</span>}
               </span>
             </span>
-            {removingPath === p.path ? (
+            {removingPath === p.path || archivingPath === p.path ? (
               <Spinner size={12} label={t("loading")} />
             ) : (
               (procCounts.get(p.path) ?? 0) > 0 && (
@@ -303,9 +357,60 @@ export function ProjectsView() {
           <Spinner size={12} label={t("loading")} />
         </div>
       )}
+      {projects !== null && shownArchived.length > 0 && (
+        <>
+          <button
+            type="button"
+            className={styles.archived_toggle}
+            onClick={() => setShowArchived((v) => !v)}
+            aria-expanded={showArchived}
+          >
+            <ChevronRight
+              size={13}
+              strokeWidth={1.8}
+              className={`${styles.archived_chevron}${showArchived ? ` ${styles.archived_chevron_open}` : ""}`}
+            />
+            {t("projects.archived", "已归档 {{count}}", { count: shownArchived.length })}
+          </button>
+          {showArchived &&
+            shownArchived.map((p) => (
+              <button
+                key={p.path}
+                type="button"
+                className={`${styles.row} ${styles.row_archived}${
+                  p.path === selectedPath ? ` ${styles.row_active}` : ""
+                }${archivingPath === p.path ? ` ${loadingStyles.stale}` : ""}`}
+                onClick={() => set({ selectedPath: p.path })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCtxMenu({ row: p, archived: true, anchor: { x: e.clientX, y: e.clientY } });
+                }}
+                aria-current={p.path === selectedPath ? "true" : undefined}
+                aria-busy={archivingPath === p.path || undefined}
+                title={p.path}
+              >
+                <span className={styles.icon}>
+                  <Archive size={14} strokeWidth={1.6} />
+                </span>
+                <span className={styles.body}>
+                  <span className={styles.title}>{p.name}</span>
+                  <span className={styles.meta}>
+                    <span className={styles.path}>{pathTail(p.path)}</span>
+                  </span>
+                </span>
+                {archivingPath === p.path && <Spinner size={12} label={t("loading")} />}
+              </button>
+            ))}
+        </>
+      )}
       <Presence when={Boolean(ctxMenu)}>
         {ctxMenu && (
-          <ContextMenu anchor={ctxMenu.anchor} items={rowMenu(ctxMenu.row)} onClose={() => setCtxMenu(null)} />
+          <ContextMenu
+            anchor={ctxMenu.anchor}
+            items={rowMenu(ctxMenu.row, Boolean(ctxMenu.archived))}
+            onClose={() => setCtxMenu(null)}
+          />
         )}
       </Presence>
     </div>
@@ -433,88 +538,6 @@ export function ProjectsView() {
         )}
       </Presence>
     </PageShell>
-  );
-}
-
-interface MemoryFile {
-  name: string;
-  title?: string;
-  description?: string;
-  modifiedMs: number;
-}
-
-interface WorkspaceMemory {
-  workspacePath: string;
-  projectKey: string;
-  hasClaudeMd: boolean;
-  files: MemoryFile[];
-}
-
-/** The project's memory files (every harness's store whose workspace folds to
- *  this repo root). A click opens the Memory page on that file. */
-function ProjectMemory({ projectPath }: { projectPath: string }) {
-  const { t } = useTranslation();
-  const [stores, setStores] = useState<WorkspaceMemory[] | null>(null);
-  useEffect(() => {
-    let alive = true;
-    invoke<WorkspaceMemory[]>("list_memories")
-      .then((all) => {
-        if (alive) setStores((all ?? []).filter((ws) => repoRootPath(ws.workspacePath) === projectPath));
-      })
-      .catch(() => alive && setStores([]));
-    return () => {
-      alive = false;
-    };
-  }, [projectPath]);
-
-  const open = (projectKey: string, selectedKey: string) => {
-    const s = useUIStore.getState();
-    s.updateMainViewState("memory", { workspaceFilter: projectKey, selectedKey });
-    s.setViewMode("memory");
-  };
-
-  if (stores === null) return <SkeletonList rows={5} />;
-  const rows = stores.flatMap((ws) => [
-    ...(ws.hasClaudeMd
-      ? [{ key: `claudeMd:${ws.projectKey}`, projectKey: ws.projectKey, title: "CLAUDE.md", sub: "", ms: 0, md: true }]
-      : []),
-    ...ws.files.map((f) => ({
-      key: `file:${ws.projectKey}:${f.name}`,
-      projectKey: ws.projectKey,
-      title: f.title || f.name,
-      sub: f.description ?? "",
-      ms: f.modifiedMs,
-      md: false,
-    })),
-  ]);
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<Brain size={28} strokeWidth={1.5} />}
-        title={t("projects.memory_empty", "这个项目还没有记忆")}
-        subtitle={t("projects.memory_empty_sub", "agent 在这里干活时记下的要点会出现在这里。")}
-      />
-    );
-  }
-  return (
-    <div className={styles.pane_list}>
-      {rows.map((r) => (
-        <button key={r.key} type="button" className={styles.row} onClick={() => open(r.projectKey, r.key)}>
-          <span className={styles.icon}>
-            {r.md ? <FileText size={15} strokeWidth={1.6} /> : <Brain size={15} strokeWidth={1.6} />}
-          </span>
-          <span className={styles.body}>
-            <span className={styles.title}>{r.title}</span>
-            {(r.sub || r.ms > 0) && (
-              <span className={styles.meta}>
-                {r.sub && <span className={styles.path}>{r.sub}</span>}
-                {r.ms > 0 && <span className={styles.time}>{timeAgo(r.ms, t)}</span>}
-              </span>
-            )}
-          </span>
-        </button>
-      ))}
-    </div>
   );
 }
 

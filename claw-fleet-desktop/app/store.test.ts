@@ -179,7 +179,6 @@ describe("primary nav page browsing context", () => {
       query: "lesson",
       filterType: "feedback",
       sourceFilter: "codex",
-      workspaceFilter: "repo",
       expandedKeys: ["repo"],
       selectedKey: "file:repo:MEMORY.md",
       detailTab: "history",
@@ -229,7 +228,6 @@ describe("primary nav page browsing context", () => {
       query: "lesson",
       filterType: "feedback",
       sourceFilter: "codex",
-      workspaceFilter: "repo",
       expandedKeys: ["repo"],
       selectedKey: "file:repo:MEMORY.md",
       detailTab: "history",
@@ -680,7 +678,7 @@ describe("nav section memory", () => {
     s().setViewMode("history");
     expect(s().navLastBySection).toMatchObject({
       library: "artifacts",
-      projects: "memory",
+      settings: "memory",
       tasks: "history",
     });
   });

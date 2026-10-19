@@ -52,7 +52,6 @@ export interface MainViewState {
     query: string;
     filterType: string;
     sourceFilter: "all" | "claude-code" | "codex";
-    workspaceFilter: string;
     expandedKeys: string[];
     selectedKey: string | null;
     detailTab: "content" | "history";
@@ -121,7 +120,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     query: "",
     filterType: "all",
     sourceFilter: "all",
-    workspaceFilter: "all",
     expandedKeys: [],
     selectedKey: null,
     detailTab: "content",
@@ -470,7 +468,7 @@ function readViewMode(): ViewMode {
   if (view === "lobsters" && !readLobsterFleetEnabled()) return "history";
   if (!isViewMode(view)) return "history";
   // A page whose nav entry simplified mode hides is not where launch lands.
-  if (readSimplifiedMode() && isHiddenWhenSimplified(view, DEFAULT_MAIN_VIEW_STATE.memory.workspaceFilter)) {
+  if (readSimplifiedMode() && isHiddenWhenSimplified(view)) {
     return NAV_HOME;
   }
   return view;
@@ -559,7 +557,7 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("simplified-mode", on ? "true" : "false");
       // Turning it on while on a page whose entry it hides drops back to the
       // Tasks page, so the sidebar never shows nothing lit.
-      if (on && isHiddenWhenSimplified(s.viewMode, s.mainViewState.memory.workspaceFilter)) {
+      if (on && isHiddenWhenSimplified(s.viewMode)) {
         return { simplifiedMode: on, ...viewModePatch(s, NAV_HOME) };
       }
       return { simplifiedMode: on };

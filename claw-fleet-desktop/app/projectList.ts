@@ -5,6 +5,8 @@ export interface RegisteredProject {
   path: string;
   name: string;
   createdAtMs: number;
+  /** Set once the user archived it: still registered, but listed apart. */
+  archivedAtMs?: number;
 }
 
 /** One row of the project page's list. */
@@ -47,9 +49,10 @@ function nameOf(path: string): string {
 
 /**
  * The project list: every registered project plus the repo root of every
- * scanned session (the registry only learns a project when Fleet spawns into
- * it or migrates, so a repo worked in by hand would otherwise be missing).
- * Most recently active first.
+ * scanned session (the registry learns a hand-run session's directory only
+ * when a client lists projects, so a session newer than that list would
+ * otherwise be missing). Archived projects are left out, sessions in them
+ * included. Most recently active first.
  */
 export function mergeProjects(
   registered: readonly RegisteredProject[],
@@ -57,14 +60,15 @@ export function mergeProjects(
   chatWorkspace: string | null,
 ): ProjectRow[] {
   const rows = new Map<string, ProjectRow>();
+  const archived = archivedPaths(registered);
   for (const p of registered) {
     const path = p.path.replace(/\/+$/, "");
-    if (!isProjectPath(path, chatWorkspace)) continue;
+    if (archived.has(path) || !isProjectPath(path, chatWorkspace)) continue;
     rows.set(path, { path, name: p.name || nameOf(path), lastActiveMs: p.createdAtMs, runningTasks: 0 });
   }
   for (const s of sessions) {
     const path = repoRootPath(s.workspacePath).replace(/\/+$/, "");
-    if (!isProjectPath(path, chatWorkspace)) continue;
+    if (archived.has(path) || !isProjectPath(path, chatWorkspace)) continue;
     let row = rows.get(path);
     if (!row) {
       // A worktree session's workspaceName is the worktree leaf; the root's
@@ -85,8 +89,12 @@ export function mergeProjects(
  * go first, newest first, as they come back from the backend: a directory the
  * user just added has no activity yet and would otherwise land at the bottom.
  */
-export function withBrowsePaths(rows: readonly ProjectRow[], browsePaths: readonly string[]): ProjectRow[] {
-  const known = new Set(rows.map((r) => r.path));
+export function withBrowsePaths(
+  rows: readonly ProjectRow[],
+  browsePaths: readonly string[],
+  archived: ReadonlySet<string> = new Set(),
+): ProjectRow[] {
+  const known = new Set([...rows.map((r) => r.path), ...archived]);
   const extras: ProjectRow[] = [];
   for (const raw of browsePaths) {
     const path = raw.replace(/\/+$/, "");
@@ -95,6 +103,19 @@ export function withBrowsePaths(rows: readonly ProjectRow[], browsePaths: readon
     extras.push({ path, name: nameOf(path), lastActiveMs: 0, runningTasks: 0, handAdded: true });
   }
   return [...extras, ...rows];
+}
+
+/** The paths of the archived projects. */
+export function archivedPaths(registered: readonly RegisteredProject[]): Set<string> {
+  return new Set(registered.filter((p) => p.archivedAtMs).map((p) => p.path.replace(/\/+$/, "")));
+}
+
+/** The archived projects, most recently archived first. */
+export function archivedProjects(registered: readonly RegisteredProject[]): RegisteredProject[] {
+  return registered
+    .filter((p) => p.archivedAtMs)
+    .map((p) => ({ ...p, path: p.path.replace(/\/+$/, ""), name: p.name || nameOf(p.path) }))
+    .sort((a, b) => (b.archivedAtMs ?? 0) - (a.archivedAtMs ?? 0));
 }
 
 /** The last two segments of a path, for a row's subtitle. */
