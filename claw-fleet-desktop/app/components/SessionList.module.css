@@ -276,6 +276,26 @@
   padding: 6px 6px 10px;
 }
 
+/* Wrappers that let tiles drop out on a short window without disturbing the
+   column's gap. The nav entries matter more than the numbers, so the live
+   tiles go first, then today's spend; usage % and the unfold button stay. */
+.rail_tile_today,
+.rail_tile_live {
+  display: contents;
+}
+
+@media (max-height: 620px) {
+  .rail_tile_live {
+    display: none;
+  }
+}
+
+@media (max-height: 520px) {
+  .rail_tile_today {
+    display: none;
+  }
+}
+
 /* Main area held while the host-features probe decides whether the restored
    terminal page exists; carries the TopProgress bar. */
 .main_pending {

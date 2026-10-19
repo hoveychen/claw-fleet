@@ -269,8 +269,14 @@ export function SessionList() {
             <div className={styles.sidebar_content} />
             {/* Global usage tiles stay on every page. */}
             <div className={styles.rail_tiles} data-wizard="settings-footer">
-              <TodayUsageBadge collapsed />
-              <LiveStats collapsed />
+              {/* On a short window the nav keeps its room and these tiles give
+                  way first; see .rail_tile_live / .rail_tile_today. */}
+              <div className={styles.rail_tile_today}>
+                <TodayUsageBadge collapsed />
+              </div>
+              <div className={styles.rail_tile_live}>
+                <LiveStats collapsed />
+              </div>
               <UsagePanel collapsed />
               <button
                 type="button"

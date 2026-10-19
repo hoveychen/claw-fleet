@@ -164,11 +164,11 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
 /** Drop `view` from the auto-collapse record — the reader no longer owns a
  *  panel the user has just toggled by hand. */
 function forgetSecondary(
-  s: { autoCollapsed: { secondary: ViewMode | null } },
+  s: { autoCollapsed: { sidebar: boolean; secondary: ViewMode | null } },
   view: ViewMode,
-): { secondary: ViewMode | null } {
+): { sidebar: boolean; secondary: ViewMode | null } {
   if (s.autoCollapsed.secondary !== view) return s.autoCollapsed;
-  return { secondary: null };
+  return { ...s.autoCollapsed, secondary: null };
 }
 
 interface UIState {
@@ -192,7 +192,7 @@ interface UIState {
    *  collapsed sidebar the user never chose. Any manual toggle clears the
    *  matching entry — once the reader has an opinion, the layout stops
    *  pretending it owns that panel. */
-  autoCollapsed: { secondary: ViewMode | null };
+  autoCollapsed: { sidebar: boolean; secondary: ViewMode | null };
   /** The main nav rail is the 64px icon column (true, the default) or the
    *  wide, drag-resizable sidebar with live stats and the footer toggles.
    *  Persisted as "sidebar-collapsed"; only an explicit "false" means wide. */
@@ -241,7 +241,7 @@ interface UIState {
   /** Collapse a panel to make room for a reader, remembering that *we* did it.
    *  In-memory only — see `autoCollapsed`. No-op if it is already collapsed,
    *  which is what keeps a user's own collapse from being "restored" open. */
-  autoCollapse: (what: ViewMode) => void;
+  autoCollapse: (what: "sidebar" | ViewMode) => void;
   /** Put back whatever `autoCollapse` took, and forget it. */
   autoRestore: () => void;
   setMascotVisible: (on: boolean) => void;
@@ -493,11 +493,13 @@ export const useUIStore = create<UIState>((set) => ({
   viewMode: initialViewMode,
   navLastBySection: { [navSectionOf(initialViewMode)]: initialViewMode },
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
-  autoCollapsed: { secondary: null },
+  autoCollapsed: { sidebar: false, secondary: null },
   sidebarCollapsed: getItem("sidebar-collapsed") !== "false",
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
-    set({ sidebarCollapsed: on });
+    // A hand toggle takes the panel back: whatever the reader does next, it is
+    // not this panel's business any more.
+    set((s) => ({ sidebarCollapsed: on, autoCollapsed: { ...s.autoCollapsed, sidebar: false } }));
   },
   mascotVisible: getItem("mascot-visible") === "true",
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
@@ -666,17 +668,24 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   autoCollapse: (what) =>
     set((s) => {
+      // The nav sidebar folds in memory only: the reader borrows the room, it
+      // does not change the user's saved preference.
+      if (what === "sidebar") {
+        if (s.sidebarCollapsed) return {};
+        return { sidebarCollapsed: true, autoCollapsed: { ...s.autoCollapsed, sidebar: true } };
+      }
       if (s.secondarySidebarCollapsed[what]) return {};
       return {
         secondarySidebarCollapsed: { ...s.secondarySidebarCollapsed, [what]: true },
-        autoCollapsed: { secondary: what },
+        autoCollapsed: { ...s.autoCollapsed, secondary: what },
       };
     }),
   autoRestore: () =>
     set((s) => {
-      const { secondary } = s.autoCollapsed;
-      if (secondary == null) return {};
-      const patch: Partial<UIState> = { autoCollapsed: { secondary: null } };
+      const { sidebar, secondary } = s.autoCollapsed;
+      if (!sidebar && secondary == null) return {};
+      const patch: Partial<UIState> = { autoCollapsed: { sidebar: false, secondary: null } };
+      if (sidebar) patch.sidebarCollapsed = false;
       if (secondary != null) {
         patch.secondarySidebarCollapsed = { ...s.secondarySidebarCollapsed, [secondary]: false };
       }
