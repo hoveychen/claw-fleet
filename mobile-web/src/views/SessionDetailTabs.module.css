@@ -333,7 +333,7 @@
 
 .wfStatus[data-status="running"] {
   color: var(--color-accent);
-  border-color: rgba(217, 119, 87, 0.4);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 .wfStatus[data-status="error"] {

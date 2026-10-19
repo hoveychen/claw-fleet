@@ -206,12 +206,12 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2);
 
-  --color-accent: #d97757;
-  --color-accent-bright: #f0a070;
+  --color-accent: #7178e8;
+  --color-accent-bright: #9aa0f0;
   --color-accent-tool: #7dd3fc;
-  --color-accent-hover: #c96040;
-  --color-accent-rgb: 217, 119, 87;
-  --color-accent-soft: rgba(217, 119, 87, 0.18);
+  --color-accent-hover: #5e6ad2;
+  --color-accent-rgb: 113, 120, 232;
+  --color-accent-soft: rgba(113, 120, 232, 0.18);
   /* Foreground on an accent-filled surface. Replaces the bare `color: #fff`
      (and `#ffffff`) copied into 15+ component files. */
   --color-on-accent: #ffffff;
@@ -401,13 +401,13 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --shadow-modal: 0 24px 60px rgba(32, 28, 18, 0.18), 0 2px 8px rgba(32, 28, 18, 0.1);
   --shadow-float: 0 8px 24px rgba(32, 28, 18, 0.12), 0 1px 3px rgba(32, 28, 18, 0.07);
 
-  --color-accent: #c25232;
-  --color-accent-bright: #b3442a;
+  --color-accent: #5e6ad2;
+  --color-accent-bright: #4f5bc4;
   --color-accent-tool: #1d4ed8;
-  --color-accent-hover: #a94527;
-  --color-accent-rgb: 194, 82, 50;
-  --color-accent-soft: rgba(194, 82, 50, 0.13);
-  /* White on the light accent #c25232 measures 4.9:1 — passes WCAG AA. */
+  --color-accent-hover: #4f5bc4;
+  --color-accent-rgb: 94, 106, 210;
+  --color-accent-soft: rgba(94, 106, 210, 0.13);
+  /* White on the light accent #5e6ad2 measures 4.7:1 — passes WCAG AA. */
   --color-on-accent: #ffffff;
 
   /* Status badge colors — light (fg darkened one shade for contrast on the pale bgs) */
