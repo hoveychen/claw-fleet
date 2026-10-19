@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Bot, Check, ChevronDown, ChevronRight, Folder, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { TaskState } from "../../../shared-ts/taskState";
+import { speedTier } from "../../../shared-ts/taskSpeed";
 import type { SessionInfo } from "../types";
 import { timeAgo } from "./timeAgo";
 import {
@@ -11,6 +12,7 @@ import {
   rowPreview,
   rowActiveSubtasks,
   rowRunningSubagents,
+  rowTokenSpeed,
   type HomeRow,
   type HomeSection,
   type ProjectGroup,
@@ -100,6 +102,22 @@ function rowTime(row: HomeRow, t: TFunction, now: number): string {
   }
 }
 
+/** The state dot. Its colour is the state; it pulses at the task's speed tier
+ *  (`shared-ts/taskSpeed.ts`), so a row generating hard reads apart from one
+ *  waiting on a tool without opening it. */
+function StateDot({ row }: { row: HomeRow }) {
+  const speed = rowTokenSpeed(row);
+  return (
+    <span
+      className={styles.dot}
+      style={{ color: STATE_DOT[row.state] }}
+      data-speed={speedTier(speed)}
+      data-testid="task-dot"
+      title={speed >= 1 ? `${Math.round(speed)} tok/s` : undefined}
+    />
+  );
+}
+
 /** The row's leading mark. A task row's is a toggle — the state dot that, on
  *  hover, offers to mark the task done; a closed task shows how it was closed
  *  (a tick for completed, a cross for abandoned) and clicking reopens it. A
@@ -113,7 +131,7 @@ function RowMark({
 }) {
   const { t } = useTranslation();
   if (row.kind !== "task") {
-    return <span className={styles.dot} style={{ background: STATE_DOT[row.state] }} />;
+    return <StateDot row={row} />;
   }
   const closed = row.state === "done";
   const tip = !closed
@@ -142,7 +160,7 @@ function RowMark({
         )
       ) : (
         <>
-          <span className={styles.dot} style={{ background: STATE_DOT[row.state] }} />
+          <StateDot row={row} />
           <Check className={styles.mark_hover} size={12} strokeWidth={2.5} />
         </>
       )}

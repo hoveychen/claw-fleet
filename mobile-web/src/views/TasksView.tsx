@@ -42,6 +42,7 @@ import { compactDuration } from "../../../shared-ts/watchProgress";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import { createWakeLatch, isParkedForWake, stickyWaking } from "../../../shared-ts/wakeLatch";
 import type { TaskState } from "../../../shared-ts/taskState";
+import { speedTier } from "../../../shared-ts/taskSpeed";
 import {
   buildTaskRows,
   projectScopeKey,
@@ -49,6 +50,7 @@ import {
   rowDetail,
   activeSubtasks,
   runningSubagents,
+  taskTokenSpeed,
   sectionRows,
   subtaskTally,
   type RowDetail,
@@ -629,6 +631,7 @@ export function TasksView({
           className={styles.markToggle}
           data-state={r.state}
           data-outcome={r.state === "done" ? (r.outcome ?? "completed") : undefined}
+          data-speed={r.state === "done" ? undefined : speedTier(taskTokenSpeed(r))}
           aria-pressed={r.state === "done"}
           aria-label={
             r.state !== "done"

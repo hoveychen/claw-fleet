@@ -12,6 +12,7 @@
 // a card with no row would have no way in.
 
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { sumAgentSpeed } from "../../../shared-ts/taskSpeed";
 import {
   subtaskStateOf,
   taskStateOf,
@@ -561,6 +562,14 @@ export function rowRunningSubagents(row: HomeRow): number {
     (row.tip.runningSubagentCount ?? 0) +
     row.subtasks.reduce((n, st) => n + (st.tip.runningSubagentCount ?? 0), 0)
   );
+}
+
+/** The task's total output speed (tok/s): the open main hop plus every
+ *  sub-task's open hop, each already including its own subagents. Earlier
+ *  hops have handed over and generate nothing. */
+export function rowTokenSpeed(row: HomeRow): number {
+  if (row.kind === "card") return row.session?.agentTokenSpeed ?? 0;
+  return sumAgentSpeed([row.tip, ...row.subtasks.map((st) => st.tip)]);
 }
 
 /** Sub-tasks still at it — running, or parked on a wait — the ones the

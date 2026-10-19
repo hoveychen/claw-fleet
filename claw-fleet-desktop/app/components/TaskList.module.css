@@ -95,10 +95,65 @@
 }
 
 .dot {
+  position: relative;
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  background: currentColor;
+}
+
+/* Speed tiers (shared-ts/taskSpeed.ts): colour stays the state, motion is the
+   task's output speed. 0 holds still; 1 breathes slowly, 2 quickly; 3 holds
+   the dot solid inside a spinning arc of the same colour (breathing would fade
+   and shrink the arc with it). */
+.dot[data-speed="1"] {
+  animation: dot-breathe 2.4s ease-in-out infinite;
+}
+
+.dot[data-speed="2"] {
+  animation: dot-breathe 1s ease-in-out infinite;
+}
+
+.dot[data-speed="3"]::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  animation: dot-spin 0.9s linear infinite;
+}
+
+@keyframes dot-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.75);
+  }
+}
+
+@keyframes dot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reduced motion: no breathing, but the top tier keeps its arc (held still)
+   so "very fast" still reads. */
+@media (prefers-reduced-motion: reduce) {
+  .dot[data-speed] {
+    animation: none;
+  }
+
+  .dot[data-speed="3"]::after {
+    animation: none;
+  }
 }
 
 /* The leading toggle: a 16px hit target around the state dot. Hovering an

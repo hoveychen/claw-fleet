@@ -7,6 +7,7 @@
 // desktop home uses, so both clients file a task under the same heading.
 
 import { repoRootPath } from "../../shared-ts/repoPath";
+import { sumAgentSpeed } from "../../shared-ts/taskSpeed";
 import {
   TASK_STATES,
   subtaskStateOf,
@@ -349,6 +350,13 @@ export function projectSectionRows<T extends Row>(
 export function runningSubagents(row: TaskRow): number {
   const hops = [...row.hops, ...row.subtasks.flatMap((st) => st.hops)];
   return hops.reduce((n, h) => n + (h.runningSubagentCount ?? 0), 0);
+}
+
+/** The task's total output speed (tok/s): the open main hop plus every
+ *  sub-task's open hop, each already including its own subagents. Same sum as
+ *  the desktop's `rowTokenSpeed`. */
+export function taskTokenSpeed(row: TaskRow): number {
+  return sumAgentSpeed([row.tip, ...row.subtasks.map((st) => st.tip)]);
 }
 
 /** Sub-tasks still at it — running, or parked on a wait — the ones the
