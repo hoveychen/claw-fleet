@@ -106,9 +106,10 @@ pub enum MemoryEditDetail {
 // ── Claude Code project directories ─────────────────────────────────────────
 
 /// The workspace of every Claude Code project directory under
-/// `~/.claude/projects`, with memory or without. The project registry reads
-/// this once to take in directories worked in before it existed.
-pub fn claude_project_workspaces() -> Vec<String> {
+/// `~/.claude/projects`, with memory or without, and when an agent last wrote
+/// a transcript there (epoch ms; 0 when it holds none). The project registry
+/// reads this once to take in directories worked in before it existed.
+pub fn claude_project_workspaces() -> Vec<(String, u64)> {
     let Some(claude_dir) = get_claude_dir() else {
         return vec![];
     };
@@ -123,9 +124,28 @@ pub fn claude_project_workspaces() -> Vec<String> {
             let key = dir.file_name()?.to_str()?.to_string();
             let ws = crate::session::heal_workspace_path(&dir, decode_project_key(&key));
             // Degenerate keys decode to "/", which is no project.
-            (!ws.split('/').all(|s| s.is_empty())).then_some(ws)
+            if ws.split('/').all(|s| s.is_empty()) {
+                return None;
+            }
+            Some((ws, newest_transcript_ms(&dir)))
         })
         .collect()
+}
+
+/// The latest mtime (epoch ms) of the `.jsonl` transcripts directly in a
+/// Claude Code project directory; 0 when there are none.
+fn newest_transcript_ms(dir: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
+        .filter_map(|e| e.metadata().ok()?.modified().ok())
+        .filter_map(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .max()
+        .unwrap_or(0)
 }
 
 // ── Scan all workspace memories ──────────────────────────────────────────────
