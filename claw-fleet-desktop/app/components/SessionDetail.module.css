@@ -358,6 +358,12 @@
   box-sizing: border-box;
 }
 
+/* The decision dock as the transcript's last item (in the scroller, not the
+   floating layer): centred on the reading column like the messages above it. */
+.inline_dock {
+  margin: 8px auto 16px;
+}
+
 /* ── Conversation + overlay drawer ─────────────────────────────────────────
    The conversation keeps the full row for good; the auxiliary panel floats
    over it from the right (see SessionAuxPanel). Positioned so the drawer has

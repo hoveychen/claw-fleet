@@ -634,10 +634,13 @@ function ElicitationCard({
   decision,
   compact = false,
   docked = false,
+  natural = false,
 }: {
   decision: ElicitationDecision;
   compact?: boolean;
   docked?: boolean;
+  /** Natural height inside a scroller: no inner scroll, no footer cap. */
+  natural?: boolean;
 }) {
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
@@ -746,7 +749,7 @@ function ElicitationCard({
   );
 
   return (
-    <div className={`${styles.card} ${styles.card_flex}`}>
+    <div className={`${styles.card} ${styles.card_flex} ${natural ? styles.card_natural : ""}`}>
       <div className={styles.card_scroll}>
       <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
       {!docked && (
@@ -1536,12 +1539,15 @@ export function FleetAskCard({
   decision,
   compact = false,
   docked = false,
+  natural = false,
 }: {
   decision: FleetAskDecision;
   compact?: boolean;
   /** Pinned in DecisionDock: the dock's header line carries the label, step and
    *  single/multi switch, and the page already shows project and task title. */
   docked?: boolean;
+  /** Natural height inside a scroller: no inner scroll, no footer cap. */
+  natural?: boolean;
 }) {
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
@@ -1675,7 +1681,7 @@ export function FleetAskCard({
   );
 
   return (
-    <div className={`${styles.card} ${styles.card_flex}`}>
+    <div className={`${styles.card} ${styles.card_flex} ${natural ? styles.card_natural : ""}`}>
       <div className={styles.card_scroll}>
       <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
       {!docked && (
@@ -1944,16 +1950,18 @@ export function DecisionCard({
   decision,
   compact = false,
   docked = false,
+  natural = false,
 }: {
   decision: PendingDecision;
   compact?: boolean;
   docked?: boolean;
+  natural?: boolean;
 }) {
   switch (decision.kind) {
     case "guard":
       return <GuardCard decision={decision} />;
     case "elicitation":
-      return <ElicitationCard decision={decision} compact={compact} docked={docked} />;
+      return <ElicitationCard decision={decision} compact={compact} docked={docked} natural={natural} />;
     case "fleet-ask":
       return <>
         {compact && !!decision.request.reviewDocs?.length && (
@@ -1961,7 +1969,7 @@ export function DecisionCard({
             <ReviewDocsColumn docs={decision.request.reviewDocs} sessionId={decision.request.sessionId} />
           </div>
         )}
-        <FleetAskCard decision={decision} compact={compact} docked={docked} />
+        <FleetAskCard decision={decision} compact={compact} docked={docked} natural={natural} />
       </>;
     case "a2ui-render":
       return <A2uiRenderCard decision={decision} />;

@@ -18,6 +18,16 @@
   overflow: hidden;
 }
 
+/* In a transcript the dock is a message in the flow, not an overlay: natural
+   height, and the transcript scroller is the only scrollbar. */
+.dock_inline {
+  max-height: none;
+  overflow: visible;
+}
+.dock_inline .body {
+  overflow: visible;
+}
+
 .head {
   display: flex;
   align-items: center;
