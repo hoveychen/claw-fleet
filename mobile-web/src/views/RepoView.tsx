@@ -75,7 +75,7 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
           <EmptyState
             icon={FolderGit2}
             title={t("没有发现 git 仓库")}
-            description={t("仓库来自桌面端各会话的工作目录，有会话在 git 仓库里工作时会出现在这里。")}
+            description={t("仓库来自桌面端各任务的项目目录，有任务在 git 仓库里工作时会出现在这里。")}
           />
         )}
 

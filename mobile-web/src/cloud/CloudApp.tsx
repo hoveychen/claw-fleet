@@ -397,11 +397,11 @@ function CloudDetail({ client, state, refetching, replaying, error, syncState, o
 
             <div className={styles.detailGrid}>
               <section className={styles.transcript}>
-                <h2>{t("会话记录")}</h2>
+                <h2>{t("对话记录")}</h2>
                 {state.messages.length === 0 && replaying ? (
                   <SkeletonList rows={4} />
                 ) : state.messages.length === 0 ? (
-                  <div className={styles.muted}>{t("还没有会话消息。")}</div>
+                  <div className={styles.muted}>{t("还没有对话消息。")}</div>
                 ) : state.messages.map((message) => (
                   <article key={message.id} data-role={message.role}>
                     <div><Bot size={14} />{message.role}<time>{new Date(message.occurredAt).toLocaleTimeString()}</time></div>

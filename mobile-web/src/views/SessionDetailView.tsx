@@ -492,11 +492,11 @@ function deriveMetaLabel(body: string): string {
  *  not here because it is no longer a tab, it is this page itself. */
 const PANE_TITLE: Record<DetailPane, string> = {
   decisions: "决策记录",
-  plans: "计划",
+  plans: "步骤清单",
   token: "Token 与花费",
   workflow: "Workflow",
   notes: "笔记",
-  handoff: "接力链",
+  handoff: "续接记录",
   explains: "追问",
 };
 
@@ -1312,7 +1312,7 @@ const MessageRow = memo(function MessageRow({
           {msg.fleetPending && (
             <span className={styles.pendingUnread}>
               {msg.fleetPendingStale
-                ? t("会话在读到这条之前就结束了")
+                ? t("任务在读到这条之前就结束了")
                 : t("已送达 · 等当前工具跑完才会被读到")}
             </span>
           )}
@@ -1959,7 +1959,7 @@ export function SessionDetailView({
           <button
             type="button"
             className={styles.moreButton}
-            aria-label={t("会话详情")}
+            aria-label={t("任务详情")}
             aria-haspopup="dialog"
             aria-expanded={sheetOpen}
             onClick={() => setSheetOpen(true)}
@@ -2008,8 +2008,8 @@ export function SessionDetailView({
             ? parentSession.titleOverride ||
               parentSession.aiTitle ||
               parentSession.slug ||
-              t("父会话")
-            : t("父会话")}
+              t("所属任务")
+            : t("所属任务")}
         </button>
       )}
 

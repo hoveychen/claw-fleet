@@ -126,7 +126,7 @@ function fmtDateTime(ts?: string | null): string {
 
 const KIND_LABEL: Record<string, string> = {
   elicitation: "问题请示",
-  "plan-approval": "计划审批",
+  "plan-approval": "方案审批",
   "user-prompt": "用户输入",
   "fleet-ask": "决策卡",
 };
@@ -166,7 +166,7 @@ function recordSummary(r: DecisionHistoryRecord): string {
   if (r.kind === "elicitation" || r.kind === "fleet-ask")
     return (r.questions[0]?.question ?? "").replace(/\s+/g, " ").trim();
   if (r.kind === "user-prompt") return r.text.replace(/\s+/g, " ").trim();
-  return r.aiTitle ?? r.workspaceName ?? t("计划审批");
+  return r.aiTitle ?? r.workspaceName ?? t("方案审批");
 }
 
 // Markdown for decision bodies (the shared plugin chain plus mermaid, links
@@ -189,7 +189,7 @@ export function DecisionHistoryTab({
 
   if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={5} />} />;
   if (data.length === 0)
-    return <EmptyState compact icon={CheckCircle2} title={t("该会话没有决策记录")} />;
+    return <EmptyState compact icon={CheckCircle2} title={t("这个任务没有决策记录")} />;
 
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -247,7 +247,7 @@ export function DecisionHistoryTab({
                 </div>
                 {r.editedPlan && (
                   <div className={styles.section}>
-                    <div className={styles.sectionLabel}>{t("用户编辑后的计划")}</div>
+                    <div className={styles.sectionLabel}>{t("你编辑后的方案")}</div>
                     <div className={styles.planBody}>
                       <Md text={r.editedPlan} />
                     </div>
@@ -544,7 +544,7 @@ export function WorkflowTab({
 
   if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={4} />} />;
   if (data.length === 0)
-    return <EmptyState compact icon={Workflow} title={t("该会话没有 workflow 运行")} />;
+    return <EmptyState compact icon={Workflow} title={t("这个任务没有 workflow 运行")} />;
 
   return (
     <div className={styles.stack}>
@@ -600,7 +600,7 @@ export function NotesTab({
 
   if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={5} />} />;
   if (data.length === 0)
-    return <EmptyState compact icon={NotebookPen} title={t("该会话没有留下笔记")} />;
+    return <EmptyState compact icon={NotebookPen} title={t("这个任务没有留下笔记")} />;
 
   const search = (
     <div className={styles.searchWrap}>
@@ -705,7 +705,7 @@ function NoteHits({
               />
               <span className={styles.hopBadge}>
                 {m.sessionId === session.id
-                  ? t("本会话")
+                  ? t("本任务")
                   : t("前任 {0}", m.sessionId.slice(0, 8))}
               </span>
               <span className={styles.recordTime}>
@@ -768,7 +768,7 @@ function NoteCard({
           style={{ transform: open ? "rotate(90deg)" : "none" }}
         />
         <span className={styles.hopBadge}>
-          {isOwn ? t("本会话") : t("前任 {0}", file.sessionId.slice(0, 8))}
+          {isOwn ? t("本任务") : t("前任 {0}", file.sessionId.slice(0, 8))}
         </span>
         <span className={styles.recordTime}>
           {new Date(file.updatedMs).toLocaleString(dateLocale(), {
@@ -827,7 +827,7 @@ export function HandoffTab({
   if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={4} />} />;
   // The relay resolves a null reply to an empty placeholder object, so a real
   // chain is only present when it carries a chainId.
-  if (!data || !data.chainId) return <EmptyState compact icon={Waypoints} title={t("该会话不在任何接力链上")} />;
+  if (!data || !data.chainId) return <EmptyState compact icon={Waypoints} title={t("这个任务没有续接过")} />;
 
   const hops: string[] = [];
   for (const l of data.links) {
@@ -838,8 +838,8 @@ export function HandoffTab({
   return (
     <div className={styles.stack}>
       <div className={styles.dimNote}>
-        {t("接力 {0} 棒", hops.length)}
-        {hops.includes(session.id) && ` · ${t("当前第 {0} 棒", hops.indexOf(session.id) + 1)}`}
+        {t("续接 {0} 段", hops.length)}
+        {hops.includes(session.id) && ` · ${t("当前第 {0} 段", hops.indexOf(session.id) + 1)}`}
       </div>
       <ChainGoal chain={data} />
       {data.links.map((l, i) => (
@@ -876,7 +876,7 @@ function ChainGoal({ chain }: { chain: HandoffChain }) {
       <div className={styles.goalText}>{goal}</div>
       {revisions.map((r, i) => (
         <div className={styles.goalRevision} key={`${r.hop}-${i}`}>
-          {t("改于第 {0} 棒：「{1}」→「{2}」", r.hop, r.from ?? "", r.to)}
+          {t("改于第 {0} 段：「{1}」→「{2}」", r.hop, r.from ?? "", r.to)}
           {t("，理由：{0}", r.reason?.trim() || t("（未说明）"))}
         </div>
       ))}
@@ -920,7 +920,7 @@ function HandoffLinkCard({
           className={styles.hopChevron}
           style={{ transform: open ? "rotate(90deg)" : "none" }}
         />
-        <span className={styles.hopBadge}>{t("第 {0} → {1} 棒", index + 1, index + 2)}</span>
+        <span className={styles.hopBadge}>{t("第 {0} → {1} 段", index + 1, index + 2)}</span>
         {/* The note is the chain's living brief: link i carries version i+1. */}
         <span className={styles.dimNote}>{t("交接文档第 {0} 版", index + 1)}</span>
         <span className={styles.recordTime}>
@@ -934,7 +934,7 @@ function HandoffLinkCard({
       </div>
       {(link.planId || link.nextTask) && (
         <div className={styles.dimNote}>
-          {link.planId && t("计划 {0}", link.planId)}
+          {link.planId && t("步骤清单 {0}", link.planId)}
           {link.nextTask && ` · ${t("下一步 {0}", link.nextTask)}`}
         </div>
       )}

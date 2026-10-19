@@ -30,7 +30,7 @@ export function FleetEventBlock({ event, text }: { event: FleetEvent; text: stri
     defaultValue: {
       fired: "已触发",
       timeout: "已超时",
-      successor: "接力已启动",
+      successor: "已续接",
       manual: "手动运行",
       answered: "老板已回复",
     }[event.status],

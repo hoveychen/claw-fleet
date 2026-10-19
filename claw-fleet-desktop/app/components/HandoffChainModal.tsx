@@ -114,7 +114,7 @@ export function HandoffChainModal({
           {loading && <SkeletonList rows={Math.min(Math.max(len, 2), 6)} />}
           {!loading && failed && !chain && (
             <div className={styles.handoff_note}>
-              {t("card.handoff_load_failed", "接力链加载失败")}
+              {t("card.handoff_load_failed", "续接记录加载失败")}
             </div>
           )}
           {!loading && chain && <ChainGoal chain={chain} />}

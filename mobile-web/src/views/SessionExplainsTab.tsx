@@ -91,7 +91,7 @@ export function SessionExplainsTab({
       <EmptyState
         compact
         icon={MessageCircleQuestion}
-        title={t("该会话还没有追问")}
+        title={t("这个任务还没有追问")}
         description={t("长按选中回复里的一段文字，就能对它追问")}
       />
     );
@@ -272,7 +272,7 @@ function ExplainTurn({ rec, withQuestion }: { rec: ExplainRecord; withQuestion: 
       ) : running ? (
         <div className={styles.waiting}>
           <LoaderCircle size={13} className={styles.spin} aria-hidden="true" />
-          {t("正在 fork 会话作答…")}
+          {t("正在分出一个对话作答…")}
         </div>
       ) : null}
       {rec.status === "error" && <div className={styles.error}>{rec.error || t("失败")}</div>}

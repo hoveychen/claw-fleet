@@ -58,7 +58,7 @@ export const KIND_LABEL: Record<string, string> = {
   guard: "命令审批",
   elicitation: "问题请示",
   "fleet-ask": "需要你决定",
-  "plan-approval": "计划审批",
+  "plan-approval": "方案审批",
   "permission-prompt": "权限请求",
   "a2ui-render": "Agent 界面",
 };
@@ -396,10 +396,10 @@ function DecisionCard({
           have no `parked` — the type says so, and it should keep saying so. */}
       {"parked" in req && req.parked === true && (
         <div className={styles.parkedBanner} role="status">
-          <span className={styles.parkedBadge}>{t("已超时 · 会话已暂停")}</span>
+          <span className={styles.parkedBadge}>{t("已超时 · 任务已暂停")}</span>
           <span className={styles.parkedHint}>
             {t(
-              "等待超时，Fleet 已经掐掉那一轮并把问题留了下来。回复后会带着你的答复唤醒会话继续。",
+              "等待超时，Fleet 已经掐掉那一轮并把问题留了下来。回复后会带着你的答复唤醒任务继续。",
             )}
           </span>
         </div>
@@ -785,7 +785,7 @@ function PlanCard({
           </ReactMarkdown>
           {long && (
             <button className={styles.expandButton} onClick={() => setExpanded((v) => !v)}>
-              {expanded ? t("收起") : t("展开完整计划")}
+              {expanded ? t("收起") : t("展开完整方案")}
             </button>
           )}
         </div>
@@ -806,14 +806,14 @@ function PlanCard({
         ) : (
           <>
             <Pencil size={13} />
-            {t("编辑计划")}
+            {t("编辑方案")}
           </>
         )}
       </button>
       {rejecting && (
         <VoiceTextarea
           className={styles.reasonInput}
-          placeholder={t("驳回意见（会转告给 AI 修改计划）")}
+          placeholder={t("驳回意见（会转告给 AI 修改方案）")}
           value={feedback}
           onChange={setFeedback}
           rows={3}

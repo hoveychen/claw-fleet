@@ -80,10 +80,10 @@ export function ResumeSettingsSection({ client }: { client: FleetTransport | nul
   const rows: Array<[string, boolean, (v: boolean) => void]> = [
     [t("限流后自动恢复"), settings.autoResume.enabled, (v) => flip("autoResume", { enabled: v })],
     [t("服务端报错后自动重试"), settings.autoResume.retryServerErrors, (v) => flip("autoResume", { retryServerErrors: v })],
-    [t("自动唤醒无人负责的计划"), settings.planRevive.enabled, (v) => flip("planRevive", { enabled: v })],
-    [t("结束任务后接着做下一个计划"), settings.triggers.finishContinue, (v) => flip("triggers", { finishContinue: v })],
-    [t("计划没做完时拦住收工"), settings.triggers.planGate, (v) => flip("triggers", { planGate: v })],
-    [t("接力时自动起下一棒"), settings.triggers.handoffSuccessor, (v) => flip("triggers", { handoffSuccessor: v })],
+    [t("自动唤醒无人负责的步骤清单"), settings.planRevive.enabled, (v) => flip("planRevive", { enabled: v })],
+    [t("结束任务后接着做下一份步骤清单"), settings.triggers.finishContinue, (v) => flip("triggers", { finishContinue: v })],
+    [t("步骤没做完时拦住收工"), settings.triggers.planGate, (v) => flip("triggers", { planGate: v })],
+    [t("上下文快满时自动续接"), settings.triggers.handoffSuccessor, (v) => flip("triggers", { handoffSuccessor: v })],
     [t("打断卡死的 Codex 回合"), settings.triggers.codexStallWatchdog, (v) => flip("triggers", { codexStallWatchdog: v })],
   ];
 
@@ -107,7 +107,7 @@ export function ResumeSettingsSection({ client }: { client: FleetTransport | nul
             </div>
           </Fragment>
         ))}
-        <div className={styles.rowNote}>{t("作用于桌面端主机上的所有会话")}</div>
+        <div className={styles.rowNote}>{t("作用于桌面端主机上的所有任务")}</div>
       </div>
     </div>
   );

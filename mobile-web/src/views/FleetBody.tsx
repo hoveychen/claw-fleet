@@ -48,29 +48,29 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
     switch (action) {
       case "check": return t("勾选 {0} · {1}", task, plan);
       case "uncheck": return t("取消勾选 {0} · {1}", task, plan);
-      case "create": return t("新建计划 {0}", plan);
+      case "create": return t("新建步骤清单 {0}", plan);
       case "add": return t("添加任务 {0} · {1}", task, plan);
-      case "resume": return t("接手计划 {0}", plan);
+      case "resume": return t("接手步骤清单 {0}", plan);
       case "migrate": return t("迁移 TASKS.md");
-      case "list": return t("列出计划");
-      case "get": return t("查看计划 {0}", plan);
-      case "snooze": return t("静默计划 {0}", plan);
+      case "list": return t("列出步骤清单");
+      case "get": return t("查看步骤清单 {0}", plan);
+      case "snooze": return t("静默步骤清单 {0}", plan);
       case "unsnooze": return t("取消静默 {0}", plan);
     }
   } else if (tool === "handoff") {
     switch (action) {
-      case "register": return t("登记接力");
-      case "cancel": return t("取消待定接力");
-      case "list": return t("列出接力链");
-      case "show": return t("查看接力链");
+      case "register": return t("登记续接");
+      case "cancel": return t("取消待定的续接");
+      case "list": return t("列出续接记录");
+      case "show": return t("查看续接记录");
     }
   } else if (tool === "watch") {
     switch (action) {
-      case "create": return t("创建守望");
-      case "stop": return t("停止守望 {0}", id);
-      case "add": return t("守望 {0} 追加等待会话", id);
-      case "remove": return t("守望 {0} 移除等待会话", id);
-      case "list": return t("列出守望");
+      case "create": return t("开始等待");
+      case "stop": return t("停止等待 {0}", id);
+      case "add": return t("等待 {0} 加入任务", id);
+      case "remove": return t("等待 {0} 移除任务", id);
+      case "list": return t("列出等待");
     }
   } else if (tool === "loop") {
     switch (action) {
@@ -112,7 +112,7 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "get": return t("查看 agent {0}", id);
       case "speed": return t("查看 token 速度");
       case "account": return t("查看账号用量");
-      case "search": return t("搜索会话记录 {0}", str(input, "query"));
+      case "search": return t("搜索对话记录 {0}", str(input, "query"));
       case "audit": return t("审计风险命令");
     }
   } else if (tool === "control") {
@@ -285,7 +285,7 @@ function HandoffRecords({ records }: { records: Record<string, unknown>[] }) {
         const lastNote = links.length ? recStr(links[links.length - 1], "note") : undefined;
         return (
           <RecordCard key={i} title={planId ?? chainId ?? "chain"}>
-            <Field label={t("接力")}>{t("{0} 棒", links.length + 1)}</Field>
+            <Field label={t("续接")}>{t("{0} 段", links.length + 1)}</Field>
             {lastNote && <Field label={t("交接")}>{lastNote}</Field>}
           </RecordCard>
         );

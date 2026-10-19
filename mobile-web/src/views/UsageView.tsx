@@ -246,8 +246,8 @@ export function UsageView({
                 </div>
                 <div className={styles.divider} />
                 <Row
-                  label={t("Fleet 会话花费")}
-                  value={`$${todayUsage.agentCostUsd.toFixed(2)} · ${t("{0} 个会话", todayUsage.sessionCount)}`}
+                  label={t("Fleet 任务花费")}
+                  value={`$${todayUsage.agentCostUsd.toFixed(2)} · ${t("{0} 个任务", todayUsage.sessionCount)}`}
                 />
                 <Row label={t("Fleet 自身花费")} value={`$${todayUsage.fleetCostUsd.toFixed(2)}`} />
                 {/* The total is **all** devices combined (deviceRuntime's totalUsage), but

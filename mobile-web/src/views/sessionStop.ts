@@ -55,7 +55,7 @@ export async function runStop(
     await transport.request("interrupt", { pid: s.pid });
     return true;
   }
-  if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return false;
+  if (!(await confirm(t("确定停止「{0}」这个任务吗？", s.workspaceName)))) return false;
   await transport.request("stop", { pid: s.pid });
   return true;
 }

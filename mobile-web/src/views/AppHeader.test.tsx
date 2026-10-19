@@ -33,10 +33,10 @@ describe("AppHeader", () => {
   });
 
   it("seamless 才打 data-seamless，缺省不打（底线由 CSS 按属性开关）", () => {
-    expect(renderToStaticMarkup(<AppHeader onBack={noop} title="会话" seamless />)).toContain(
+    expect(renderToStaticMarkup(<AppHeader onBack={noop} title="对话" seamless />)).toContain(
       'data-seamless="true"',
     );
-    expect(renderToStaticMarkup(<AppHeader onBack={noop} title="会话" />)).not.toContain(
+    expect(renderToStaticMarkup(<AppHeader onBack={noop} title="对话" />)).not.toContain(
       "data-seamless",
     );
   });

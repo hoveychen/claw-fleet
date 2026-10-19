@@ -132,13 +132,13 @@ export function AttentionView({ client, onOpenSession, onBack }: Props) {
           <EmptyState
             icon={CheckCircle2}
             title={t("今天没有需要你判断的事。")}
-            description={t("接力链跑偏、教训在多个会话里反复出现时，会出现在这里。")}
+            description={t("任务跑偏、教训在多个任务里反复出现时，会出现在这里。")}
           />
         )}
 
         {items && items.drift.length > 0 && (
           <section className={styles.group}>
-            <div className={styles.groupLabel}>{t("可能跑偏的接力链")}</div>
+            <div className={styles.groupLabel}>{t("可能跑偏的任务")}</div>
             {items.drift.map((d) => (
               <div key={d.chainId} className={styles.card}>
                 <div className={styles.head}>
@@ -146,7 +146,7 @@ export function AttentionView({ client, onOpenSession, onBack }: Props) {
                     {VERDICT_LABEL[d.verdict]()}
                   </span>
                   <span className={styles.workspace}>{d.workspaceName}</span>
-                  <span className={styles.meta}>{t("{0} 棒", d.sessionCount)}</span>
+                  <span className={styles.meta}>{t("{0} 段", d.sessionCount)}</span>
                 </div>
                 <div className={styles.goal}>
                   {t("目标")}: {d.goal}
@@ -173,7 +173,7 @@ export function AttentionView({ client, onOpenSession, onBack }: Props) {
                 <div className={styles.text}>{l.content}</div>
                 <div className={styles.reason}>{l.reason}</div>
                 <div className={styles.meta}>
-                  {l.workspaceName} · {t("{0} 个会话出现", l.evidenceSessionIds.length)}
+                  {l.workspaceName} · {t("{0} 个任务出现", l.evidenceSessionIds.length)}
                 </div>
                 <div className={styles.actions}>
                   <AdoptButton onAdopt={() => adopt(l)} />
@@ -190,7 +190,7 @@ export function AttentionView({ client, onOpenSession, onBack }: Props) {
               <div key={v.lessonId} className={styles.card}>
                 <div className={styles.text}>{v.lessonContent}</div>
                 {v.note && <div className={styles.reason}>{v.note}</div>}
-                <div className={styles.meta}>{t("{0} 个会话出现", v.sessionIds.length)}</div>
+                <div className={styles.meta}>{t("{0} 个任务出现", v.sessionIds.length)}</div>
                 {v.sessionIds[0] && (
                   <div className={styles.actions}>
                     <button className={styles.btn} onClick={() => onOpenSession(v.sessionIds[0])}>

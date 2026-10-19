@@ -85,7 +85,7 @@ export async function resumeOverRelay(
 
 /** The question asked before resuming a session `id` has taken over. */
 export function retiredResumeQuestion(id: string): string {
-  return t("这个会话已被 {0} 接替。继续它会让两个会话同时做同一份工作。仍要继续？", id);
+  return t("这段对话已由 {0} 续接。继续它会让两处同时做同一份工作。仍要继续？", id);
 }
 
 /**

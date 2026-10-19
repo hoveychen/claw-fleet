@@ -100,7 +100,7 @@ export function SubtasksPane({
         compact
         icon={GitFork}
         title={t("还没有子任务")}
-        description={t("这个任务派出的会话会列在这里。")}
+        description={t("这个任务派出的子任务会列在这里。")}
       />
     );
   }
@@ -118,7 +118,7 @@ export function SubtasksPane({
             <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
             <span className={styles.rowMeta}>
               {r.pending ? t("等你回答") : taskStateLabel(r.state)}
-              {r.hops.length > 1 && ` · ${t("{0} 棒", r.hops.length)}`}
+              {r.hops.length > 1 && ` · ${t("{0} 段", r.hops.length)}`}
             </span>
           </span>
           <span className={styles.rowTime}>{timeAgo(r.tip.lastActivityMs)}</span>

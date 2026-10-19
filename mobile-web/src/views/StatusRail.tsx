@@ -25,7 +25,7 @@ export function StatusRail({
     // role=list not nav: these are first and foremost readouts, some of which
     // happen to be clickable. Using nav would make screen readers treat
     // "Context 40%" as a navigation landmark.
-    <div className={styles.rail} role="list" aria-label={t("会话状态")}>
+    <div className={styles.rail} role="list" aria-label={t("任务状态")}>
       {pills.map((p) =>
         p.target ? (
           <button

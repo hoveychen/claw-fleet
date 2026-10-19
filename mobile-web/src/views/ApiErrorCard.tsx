@@ -63,7 +63,7 @@ export function ApiErrorCard({
     if (!outcome) return;
     setNote(
       outcome.kind === "resumed"
-        ? t("已重新拉起，等会话接上…")
+        ? t("已重新拉起，等任务接上…")
         : outcome.kind === "loginStarted"
           ? t("登录已在终端页启动，去那边粘贴授权码")
           : t("没能执行：") + outcome.detail,

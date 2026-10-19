@@ -170,7 +170,7 @@ export function WorkspaceUsageCard({ client }: { client: FleetTransport | null }
                       ))}
                       {detail.lines.some((l) => l.source === REPORT_SOURCE) && (
                         <div className={styles.wsNote}>
-                          {t("7 天前的会话记录已清理，这些日子只有该 workspace 的总额，没有按模型的明细")}
+                          {t("7 天前的对话记录已清理，这些日子只有该项目的总额，没有按模型的明细")}
                         </div>
                       )}
                     </>
