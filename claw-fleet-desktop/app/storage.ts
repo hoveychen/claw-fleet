@@ -130,6 +130,9 @@ const ALL_KEYS = [
   "artifacts-layout",
   "artifacts-sort-key",
   "artifacts-sort-dir",
+  // Session detail's developer view (··· menu): the model, tokens, cost, agent
+  // scope and relay chip row under the title. "1" on, anything else off.
+  "detail-dev-view",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────

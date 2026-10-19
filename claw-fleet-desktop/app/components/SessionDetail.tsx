@@ -49,6 +49,7 @@ import type { TaskRow } from "./homeRows";
 import { formatSpan } from "./TaskList";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
+import { getItem, setItem } from "../storage";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel, OutOfCreditsNotice } from "./SessionCard";
 import { inlinePendingFleetAsk, withCodexDecisionHistory } from "./codexDecision";
@@ -668,7 +669,15 @@ export function SessionDetail({
      of them in a row turned the title area into a status bar, so they collapse
      behind one toggle and the row keeps only what names the session. Context %
      is the exception: see the render for why the warn state stays out. */
-  const [metricsOpen, setMetricsOpen] = useState(false);
+  // Also the ··· menu's developer view. Remembered across sessions and
+  // launches: someone who wants the internals wants them on every task.
+  const [metricsOpen, setMetricsOpenState] = useState(() => getItem("detail-dev-view") === "1");
+  const setMetricsOpen = (next: (v: boolean) => boolean) =>
+    setMetricsOpenState((v) => {
+      const n = next(v);
+      setItem("detail-dev-view", n ? "1" : "0");
+      return n;
+    });
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
   // Which `workspace\0session` key `taskPlans` was last read (or failed to
   // read) for. Until it matches the one on screen, an empty list means "not
