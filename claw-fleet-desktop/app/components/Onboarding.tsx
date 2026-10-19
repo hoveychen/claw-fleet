@@ -264,8 +264,6 @@ function NotificationSettingsCard({
   onTtsModeChange,
   chimeSelection,
   onChimeChange,
-  personalizedMascotValue,
-  onPersonalizedMascotChange,
   userTitle,
   onUserTitleChange,
 }: {
@@ -275,8 +273,6 @@ function NotificationSettingsCard({
   onTtsModeChange: (sel: TtsMode | "default") => void;
   chimeSelection: ChimePreset | "default";
   onChimeChange: (sel: ChimePreset | "default") => void;
-  personalizedMascotValue: FeatureState;
-  onPersonalizedMascotChange: (state: FeatureState) => void;
   userTitle: string;
   onUserTitleChange: (title: string) => void;
 }) {
@@ -419,20 +415,6 @@ function NotificationSettingsCard({
             width: 160,
           }}
         />
-      </div>
-
-      {/* Mascot */}
-      <div className={styles.settings_group}>
-        <span className={styles.settings_label}>{t("onboarding.settings_notif.mascot_title")}</span>
-        <div className={styles.toggle_item}>
-          <span>{t("settings.personalized_mascot")}</span>
-          <TriStateToggle
-            value={personalizedMascotValue}
-            defaultOn={featureDefault("personalized-mascot")}
-            onChange={onPersonalizedMascotChange}
-          />
-        </div>
-        <span className={styles.hint}>{t("settings.personalized_mascot_desc")}</span>
       </div>
     </div>
   );
@@ -1157,16 +1139,6 @@ export function Onboarding({
     invoke("set_user_title", { title }).catch(() => {});
   }, []);
 
-  // ── Mascot state ────────────────────────────────────────────────────────
-  const [personalizedMascotState, setPersonalizedMascotState] = useState<FeatureState>(
-    () => getFeatureState("personalized-mascot"),
-  );
-
-  const handleTogglePersonalizedMascot = useCallback((state: FeatureState) => {
-    setPersonalizedMascotState(state);
-    setFeatureState("personalized-mascot", state);
-  }, []);
-
   // Show source selection only when there are multiple source types detected
   const hasMultipleSources = useMemo(() => {
     return sources.filter((s) => s.available).length > 1;
@@ -1366,8 +1338,6 @@ export function Onboarding({
                 onTtsModeChange={handleTtsModeChange}
                 chimeSelection={chimeSelection}
                 onChimeChange={handleChimeChange}
-                personalizedMascotValue={personalizedMascotState}
-                onPersonalizedMascotChange={handleTogglePersonalizedMascot}
                 userTitle={userTitle}
                 onUserTitleChange={handleUserTitleChange}
               />
@@ -1577,8 +1547,6 @@ export function Onboarding({
                     onTtsModeChange={handleTtsModeChange}
                     chimeSelection={chimeSelection}
                     onChimeChange={handleChimeChange}
-                    personalizedMascotValue={personalizedMascotState}
-                    onPersonalizedMascotChange={handleTogglePersonalizedMascot}
                     userTitle={userTitle}
                     onUserTitleChange={handleUserTitleChange}
                   />

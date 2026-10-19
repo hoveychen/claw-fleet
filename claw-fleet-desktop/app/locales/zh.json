@@ -1117,7 +1117,6 @@
     "settings_notif": {
       "title": "通知与小助手",
       "description": "设置任务需要你处理时怎么提醒你，以及悬浮小助手偏好。你可以稍后在设置中修改。",
-      "mascot_title": "小助手",
       "sound_title": "提示音"
     },
     "hooks_setup": {

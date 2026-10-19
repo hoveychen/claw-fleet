@@ -1120,7 +1120,6 @@
     "settings_notif": {
       "title": "Notifications & Assistant",
       "description": "Configure how you get notified when a task needs you, and set your floating assistant preferences. You can change these later in Settings.",
-      "mascot_title": "Assistant",
       "sound_title": "Alert Sound"
     },
     "hooks_setup": {
