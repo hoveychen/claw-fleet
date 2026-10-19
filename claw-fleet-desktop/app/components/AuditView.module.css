@@ -798,7 +798,7 @@
 .custom_badge {
   font-size: 9px;
   color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.12);
+  background: rgba(217, 119, 87, 0.12);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   flex-shrink: 0;
@@ -928,7 +928,7 @@
 
 .suggest_card_selected {
   border-color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.06);
+  background: rgba(217, 119, 87, 0.06);
 }
 
 .suggest_card_header {

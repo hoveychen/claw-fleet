@@ -35,24 +35,24 @@ const FONT_FAMILY = "var(--font-sans)";
  *  "distinguish items by color." Without these, they derive a bunch of
  *  indistinguishable grays from the nearly-neutral primaryColor. */
 const CATEGORICAL_LIGHT = [
-  "#5e6ad2", // accent
+  "#c25232", // accent
   "#1d4ed8", // accent-tool
   "#1b7f87", // teal
   "#178042", // success
   "#9a6a08", // warning
   "#8250df", // info
-  "#c25232", // terracotta
+  "#b3442a", // accent-bright
   "#5d6168", // text-secondary
 ];
 
 const CATEGORICAL_DARK = [
-  "#7178e8",
+  "#d97757",
   "#7dd3fc",
   "#39c5cf",
   "#4ade80",
   "#fbbf24",
   "#a371f7",
-  "#d97757",
+  "#f0a070",
   "#8a8f98",
 ];
 
@@ -156,14 +156,14 @@ const LIGHT: Record<string, string> = {
   taskTextDarkColor: "#1f2023",
   taskTextLightColor: "#fbfaf7",
   taskTextOutsideColor: "#5d6168",
-  activeTaskBkgColor: "#5e6ad2",
-  activeTaskBorderColor: "#4f5bc4",
+  activeTaskBkgColor: "#c25232",
+  activeTaskBorderColor: "#a94527",
   doneTaskBkgColor: "#d8d4ca",
   doneTaskBorderColor: "#b8b3a8",
   critBkgColor: "#cc3340",
   critBorderColor: "#a82733",
   gridColor: "#ddd9d0",
-  todayLineColor: "#5e6ad2",
+  todayLineColor: "#c25232",
 
   ...scaleKeys(CATEGORICAL_LIGHT, "#ffffff"),
   pieStrokeColor: "#f1efea",
@@ -253,14 +253,14 @@ const DARK: Record<string, string> = {
   taskTextDarkColor: "#0f1011",
   taskTextLightColor: "#f7f8f8",
   taskTextOutsideColor: "#8a8f98",
-  activeTaskBkgColor: "#7178e8",
-  activeTaskBorderColor: "#9aa0f0",
+  activeTaskBkgColor: "#d97757",
+  activeTaskBorderColor: "#f0a070",
   doneTaskBkgColor: "#2b2e32",
   doneTaskBorderColor: "#3a3d42",
   critBkgColor: "#f87171",
   critBorderColor: "#dc2626",
   gridColor: "#2b2e32",
-  todayLineColor: "#7178e8",
+  todayLineColor: "#d97757",
 
   ...scaleKeys(CATEGORICAL_DARK, "#0f1011"),
   pieStrokeColor: "#0f1011",
