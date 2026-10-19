@@ -159,19 +159,19 @@ export function SessionAuxRail({
     isExpanded: d.id === expandedId,
     onToggle: () => onToggleDoc(d.id),
     onClose: () => onCloseDoc(d.id),
+    onRemove: () => onCloseDoc(d.id),
     onCloseOthers: () => onCloseOtherDocs(d.id),
     onCloseAll: onCloseAllDocs,
     onHideRail,
     otherCount: docs.length - 1,
   });
 
-  /** The open reader's tail: its ✕ (and its menu's close item) only collapses
-   *  the card back into the rail. Taking a doc out of the rail is the chip's
-   *  right-click menu, and deleting a deliverable still does it (`onRemove`). */
+  /** The open reader's tail: its ✕ only collapses the card back into the rail.
+   *  Taking a doc out of the rail is the menu's "take out" item (`onRemove`),
+   *  and deleting a deliverable still does it. */
   const readerTailFor = (d: AuxDoc): AuxCardTail => ({
     ...tailFor(d),
     onClose: () => onToggleDoc(d.id),
-    onRemove: () => onCloseDoc(d.id),
   });
 
   /** Where a chip's "open in..." action sends this kind. Absent when the destination needs

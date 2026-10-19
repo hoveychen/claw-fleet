@@ -130,7 +130,7 @@ export function SessionAuxExplain({
       : []),
     {
       id: "close",
-      label: t("common.close", "关闭"),
+      label: t("detail.aux_remove_card", "从右栏移出"),
       dividerBefore: true,
       onSelect: onClose,
     },
