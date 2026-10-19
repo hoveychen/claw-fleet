@@ -309,7 +309,8 @@
   "theme": {
     "light": "浅色",
     "dark": "深色",
-    "system": "系统"
+    "system": "系统",
+    "cycle": "切换主题"
   },
   "language": "语言",
   "view_list": "列表",
@@ -869,6 +870,13 @@
     "title": "Token 速度",
     "unit": "tok/s",
     "no_data": "暂无数据"
+  },
+  "cost_chart": {
+    "title": "花费速度",
+    "unit": "$/分钟"
+  },
+  "live": {
+    "section_title": "实时"
   },
   "tray": {
     "show": "显示",
@@ -1684,6 +1692,8 @@
     }
   },
   "sidebar": {
+    "collapse": "折叠侧边栏",
+    "expand": "展开侧边栏",
     "secondary_collapse": "折叠此侧边栏",
     "secondary_expand": "展开侧边栏"
   },
@@ -3063,5 +3073,7 @@
     "subtask_count": "{{count}} 个子任务",
     "untitled": "（无标题任务）",
     "more_tasks": "还有 {{count}} 个任务"
-  }
+  },
+  "keep_awake_on_tooltip": "防休眠已开启——系统不会闲置休眠，点击关闭",
+  "keep_awake_off_tooltip": "保持系统唤醒（相当于 caffeinate -i）"
 }

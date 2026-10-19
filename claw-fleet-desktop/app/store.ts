@@ -192,6 +192,11 @@ interface UIState {
    *  matching entry — once the reader has an opinion, the layout stops
    *  pretending it owns that panel. */
   autoCollapsed: { secondary: ViewMode | null };
+  /** The main nav rail is the 64px icon column (true, the default) or the
+   *  wide, drag-resizable sidebar with live stats and the footer toggles.
+   *  Persisted as "sidebar-collapsed"; only an explicit "false" means wide. */
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (on: boolean) => void;
   mascotVisible: boolean;
   /** Launcher rail filters. HistoryView is mounted through SessionList's `viewMode`
    *  ternary, so it unmounts on every trip to another page — including the
@@ -472,6 +477,11 @@ export const useUIStore = create<UIState>((set) => ({
   navLastBySection: { [navSectionOf(initialViewMode)]: initialViewMode },
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   autoCollapsed: { secondary: null },
+  sidebarCollapsed: getItem("sidebar-collapsed") !== "false",
+  setSidebarCollapsed: (on) => {
+    setItem("sidebar-collapsed", on ? "true" : "false");
+    set({ sidebarCollapsed: on });
+  },
   mascotVisible: getItem("mascot-visible") === "true",
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
   historyQuery: "",
