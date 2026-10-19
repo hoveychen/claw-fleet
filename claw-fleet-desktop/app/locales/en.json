@@ -2207,7 +2207,7 @@
     "report_auto_popup": "Pop up what needs your judgment",
     "report_auto_popup_desc": "On days with something to decide (a drifting task, a recurring lesson), raise it in the main window once. Quiet days push nothing.",
     "simplified_mode": "Simplified mode",
-    "simplified_mode_desc": "Keep only Tasks, Library and Settings in the sidebar: hide Projects, Review, token speed and usage",
+    "simplified_mode_desc": "Keep only Tasks, Library and Settings in the sidebar: hide Projects, Review, token speed and usage, and stop the Review popup",
     "lobster_fleet": "Lobster Fleet page",
     "lobster_fleet_desc": "Show Lobster Fleet in the sidebar: one ship per project; board one to see its pixel crew on the bridge (experimental)",
     "auto_resume": "Auto-resume after rate limit",

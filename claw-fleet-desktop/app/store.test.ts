@@ -545,6 +545,22 @@ describe("auto-popup daily report", () => {
     expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
   });
 
+  it("does not pop in simplified mode, does not write popped flag", async () => {
+    const { useReportStore, useUIStore, REPORT_LAST_POPPED_KEY } = await setup({
+      date: "2026-09-05",
+      drift: [],
+      lessons: [{ content: "c", reason: "r", workspaceName: "w", sessionId: "s1", evidenceSessionIds: ["s1", "s2"] }],
+      violations: [],
+    });
+    const { getItem } = await import("./storage");
+    useUIStore.getState().setSimplifiedMode(true);
+
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+
+    expect(useReportStore.getState().reportPopupDate).toBeNull();
+    expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
+  });
+
   it("pops when something needs judgment, records the date", async () => {
     const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
       date: "2026-09-05",

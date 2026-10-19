@@ -2204,7 +2204,7 @@
     "report_auto_popup": "有需要判断的事时自动弹出",
     "report_auto_popup_desc": "当天有需要你判断的事（任务跑偏、教训反复出现）时，在主窗口弹一次；没事的日子不打扰。",
     "simplified_mode": "精简模式",
-    "simplified_mode_desc": "侧栏只留任务、资料和设置：隐藏「项目」「回顾」入口和 token 速度、用量",
+    "simplified_mode_desc": "侧栏只留任务、资料和设置：隐藏「项目」「回顾」入口和 token 速度、用量，也不再自动弹出回顾",
     "lobster_fleet": "龙虾舰队页面",
     "lobster_fleet_desc": "在侧栏显示「龙虾舰队」：每个项目一艘飞船，点进去看驾驶舱里的像素队员（实验性）",
     "auto_resume": "限流后自动恢复",
