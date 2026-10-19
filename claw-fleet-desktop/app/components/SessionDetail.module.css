@@ -172,24 +172,6 @@
   background: var(--color-bg-card);
 }
 
-/* A task page's "Stop": a worded button, not an icon — it ends the task's
-   current turn, and the design names it. */
-.hero_stop {
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
-  background: var(--color-bg-card);
-  color: var(--color-text);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-}
-.hero_stop:hover {
-  border-color: var(--color-error);
-  color: var(--color-error);
-}
-
 /* "Task ›" ahead of a sub-task's title. */
 .title_parent {
   color: var(--color-text-dim);
