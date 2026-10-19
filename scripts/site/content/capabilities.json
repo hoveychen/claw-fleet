@@ -124,7 +124,7 @@
       "items": [
         [
           "One needs-you queue",
-          "Questions from every task and sub-task, pinned where you work and labelled with their source."
+          "Questions from every task and sub-task, shown at the end of the task's conversation and labelled with their source."
         ],
         [
           "Materials beside the decision",
@@ -399,7 +399,7 @@
       "items": [
         [
           "统一的待你处理",
-          "所有任务和子任务的问题钉在手边，标明来自哪里。"
+          "所有任务和子任务的问题出现在任务对话末尾，标明来自哪里。"
         ],
         [
           "材料与决定并排",

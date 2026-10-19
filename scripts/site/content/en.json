@@ -29,7 +29,7 @@
   ],
   "panelCopy": [
     "Write what you want done and pick a project. Tasks group by what they need from you — needs you, running, waiting, to accept, done — so you never switch project to find out what moved.",
-    "Only the decisions that need you come up — as a card naming the sub-task that asked, with the material for the call on it. Before the coordinator splits work, it asks the same way.",
+    "Only the decisions that need you come up — as a card at the end of the task's conversation, naming the sub-task that asked, with the material for the call filed beside it. Before the coordinator splits work, it asks the same way.",
     "Open a task to read the whole main conversation. Its sub-tasks, steps and filed material sit beside it, and any sub-task can be opened and steered.",
     "Sub-tasks report to the coordinator, not to you. When it is done you get one summary, the task moves to To accept, and what it produced lands in the Library."
   ],
@@ -42,7 +42,7 @@
     ],
     [
       "Interrupted only for real calls.",
-      "Questions from the coordinator and every sub-task land in one queue, labelled with the task they came from, with the proposal, image or document attached."
+      "Questions from the coordinator and every sub-task land in one queue, labelled with the task they came from; a proposal or image rides on the card, a document is filed beside it."
     ],
     [
       "Long work stays one task.",
@@ -256,7 +256,7 @@
             "Every question, the choice you made and anything you typed stays with the work, so a decision from last week is still readable next to what came out of it."
           ],
           "shot": "screenshots/current/review-en.png",
-          "shotAlt": "A Fleet decision card pinned under a task: which sub-task asked, the material for the call, and two concrete options",
+          "shotAlt": "A Fleet decision card at the end of a task's conversation: which sub-task asked, the question, and two concrete options",
           "shotCaption": "Current interface · Illustrative data"
         },
         {
@@ -353,7 +353,7 @@
             "You get the same queue as every other tool's questions, so a Codex run waiting on you looks like everything else waiting on you."
           ],
           "shot": "screenshots/current/review-en.png",
-          "shotAlt": "A Fleet decision card pinned under a task: which sub-task asked, the material for the call, and two concrete options",
+          "shotAlt": "A Fleet decision card at the end of a task's conversation: which sub-task asked, the question, and two concrete options",
           "shotCaption": "Current interface · Illustrative data"
         },
         {

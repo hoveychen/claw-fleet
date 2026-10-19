@@ -78,20 +78,22 @@ try {
     await p.getByText(co.subtasks[0][0]).first().waitFor();
     await capture('work');
 
-    // review — the decision card pinned under the task's conversation: which
-    // sub-task asked, the material for the call, the options.
+    // review — the decision card inline at the end of the task's conversation:
+    // which sub-task asked, the question, the options. Its review material is
+    // filed in the rail, not inside the card.
     await p.setViewportSize({width:1280,height:1000});
     await taskRow().click();
     await p.getByText(c.options[0],{exact:true}).waitFor();
-    await p.waitForFunction(() => [...document.querySelectorAll('iframe')].some(f => f.getBoundingClientRect().height > 200));
     await p.getByText(c.artifacts[0],{exact:true}).first().waitFor();
     await settle();
     const cardClip = await p.evaluate(({option, from}) => {
       // The card's header ("from sub-task …") sits above the body holding the
-      // options, so climb until both are inside.
-      let card = document.querySelector('iframe');
+      // options, so climb from the option label until both are inside.
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let card = null;
+      while (walker.nextNode()) if (walker.currentNode.textContent.trim() === option) { card = walker.currentNode.parentElement; break; }
       while (card && !((card.textContent || '').includes(option) && (card.textContent || '').includes(from))) card = card.parentElement;
-      if (!card) throw new Error('Pinned decision card not found');
+      if (!card) throw new Error('Inline decision card not found');
       const r = card.getBoundingClientRect();
       if (r.bottom > innerHeight) throw new Error('Pinned decision card overflows the viewport');
       return {x:Math.max(0,r.x-16),y:Math.max(0,r.y-16),width:r.width+32,height:Math.min(innerHeight-Math.max(0,r.y-16),r.height+32)};
