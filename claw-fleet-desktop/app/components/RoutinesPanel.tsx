@@ -10,6 +10,8 @@ import styles from "./RoutinesPanel.module.css";
 import { SkeletonList, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { pathTail } from "../projectList";
+import { useChatWorkspace } from "../hooks/useChatWorkspace";
 
 /** A Date → `YYYY-MM-DDTHH:MM` local string, the shape a datetime-local input
  *  wants and the exact form `schedule::parse_at` accepts. */
@@ -130,8 +132,12 @@ function nextFireOf(task: FutureTask): number {
  * with run history, edit, cancel and "run now" — and a form that creates a
  * routine directly (`create_routine`), instead of opening a session for an
  * agent to do it. Lives in the project page's detail column.
+ *
+ * `projectPath === null` is the cross-project overview: every routine on the
+ * machine, including ones in temp and chat directories that never appear as a
+ * project. Creating needs a project, so the overview only lists.
  */
-export function RoutinesPanel({ projectPath }: { projectPath: string }) {
+export function RoutinesPanel({ projectPath }: { projectPath: string | null }) {
   const { t } = useTranslation();
   const [loops, setLoops] = useState<LoopRecord[]>([]);
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
@@ -149,7 +155,7 @@ export function RoutinesPanel({ projectPath }: { projectPath: string }) {
         invoke<LoopRecord[]>("list_loops"),
         invoke<ScheduleRecord[]>("list_schedules"),
       ]);
-      const mine = (w: string) => repoRootPath(w) === projectPath;
+      const mine = (w: string) => projectPath === null || repoRootPath(w) === projectPath;
       setLoops(ls.filter((r) => mine(r.workspacePath)));
       setSchedules(ss.filter((r) => mine(r.workspacePath)));
     } catch {
@@ -244,6 +250,12 @@ export function RoutinesPanel({ projectPath }: { projectPath: string }) {
   );
 
   const [creating, setCreating] = useState(false);
+  const chatWorkspace = useChatWorkspace();
+  const workspaceLabel = useCallback(
+    (path: string) =>
+      chatWorkspace && path === chatWorkspace ? t("routines.chat_dir", "聊天目录") : pathTail(path),
+    [chatWorkspace, t],
+  );
 
   // Edit an existing pending schedule (prompt / time / model / effort / source).
   const [editing, setEditing] = useState<ScheduleRecord | null>(null);
@@ -279,10 +291,12 @@ export function RoutinesPanel({ projectPath }: { projectPath: string }) {
           {t("routines.title", "例行")}
           {loaded && pendingCount > 0 && <span className={styles.toolbar_count}>{pendingCount}</span>}
         </span>
-        <button className={styles.create_btn} onClick={() => setCreating(true)}>
-          <Plus size={14} strokeWidth={2.4} />
-          {t("routines.create", "新建例行")}
-        </button>
+        {projectPath !== null && (
+          <button className={styles.create_btn} onClick={() => setCreating(true)}>
+            <Plus size={14} strokeWidth={2.4} />
+            {t("routines.create", "新建例行")}
+          </button>
+        )}
         <button
           className={styles.refresh}
           onClick={refresh}
@@ -292,7 +306,7 @@ export function RoutinesPanel({ projectPath }: { projectPath: string }) {
           {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={14} strokeWidth={2} />}
         </button>
       </div>
-      {creating && (
+      {creating && projectPath !== null && (
         <CreateModal
           projectPath={projectPath}
           toolChoices={agentToolsForSources(sources)}
@@ -319,7 +333,11 @@ export function RoutinesPanel({ projectPath }: { projectPath: string }) {
         {loaded && tasks.length === 0 && (
           <EmptyState
             icon={<CalendarClock size={28} strokeWidth={1.5} />}
-            title={t("routines.empty_title", "这个项目还没有例行")}
+            title={
+              projectPath === null
+                ? t("routines.all_empty_title", "还没有任何例行")
+                : t("routines.empty_title", "这个项目还没有例行")
+            }
             subtitle={t("routines.empty_sub", "定个时间或周期，到点自动开一个任务去做。")}
           />
         )}
@@ -341,6 +359,7 @@ export function RoutinesPanel({ projectPath }: { projectPath: string }) {
             }
             onOpenSession={openFiredSession}
             reportFor={reportFor}
+            workspaceLabel={projectPath === null ? workspaceLabel : undefined}
           />
         ))}
       </div>
@@ -669,6 +688,7 @@ function TaskRow({
   onEdit,
   onOpenSession,
   reportFor,
+  workspaceLabel,
 }: {
   task: FutureTask;
   cancelling: boolean;
@@ -682,6 +702,8 @@ function TaskRow({
   onOpenSession?: (sessionId: string) => void;
   /** One-line report for a session id (loop iterations only). */
   reportFor?: (sessionId: string) => string | null;
+  /** Set in the cross-project overview: names the directory a routine runs in. */
+  workspaceLabel?: (path: string) => string;
 }) {
   const { t } = useTranslation();
   const rec = task.rec;
@@ -796,6 +818,14 @@ function TaskRow({
           </span>
           <span className={styles.dot}>·</span>
           <span>{timing}</span>
+          {workspaceLabel && (
+            <>
+              <span className={styles.dot}>·</span>
+              <span className={styles.workspace} title={rec.workspacePath}>
+                {workspaceLabel(rec.workspacePath)}
+              </span>
+            </>
+          )}
           {rec.agentSource === "codex" && (
             <>
               <span className={styles.dot}>·</span>

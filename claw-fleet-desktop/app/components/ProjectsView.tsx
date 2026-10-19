@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Brain, FileText, FolderGit2, FolderOpen, SquareTerminal } from "lucide-react";
+import { Brain, CalendarClock, FileText, FolderGit2, FolderOpen, SquareTerminal } from "lucide-react";
 
 import { runningProcCounts, useProcStore, useSessionsStore, useUIStore } from "../store";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
@@ -17,6 +17,10 @@ import styles from "./ProjectsView.module.css";
 export type ProjectTab = "routines" | "memory" | "code";
 
 const TABS: ProjectTab[] = ["routines", "memory", "code"];
+
+/** `selectedPath` of the pinned "all routines" row. Never a real path: those
+ *  are absolute. */
+export const ALL_ROUTINES = "*routines";
 
 /**
  * 项目 (Projects): one row per code directory, and for the picked one its
@@ -57,8 +61,27 @@ export function ProjectsView() {
     [projects, selectedPath],
   );
 
+  const allSelected = selectedPath === ALL_ROUTINES;
   const list = (
     <div className={styles.list}>
+      {/* Routines also live in temp and chat directories, which are never a
+          project; this row is the one place those show up. */}
+      <button
+        type="button"
+        className={`${styles.row}${allSelected ? ` ${styles.row_active}` : ""}`}
+        onClick={() => set({ selectedPath: ALL_ROUTINES })}
+        aria-current={allSelected ? "true" : undefined}
+      >
+        <span className={styles.icon}>
+          <CalendarClock size={15} strokeWidth={1.6} />
+        </span>
+        <span className={styles.body}>
+          <span className={styles.title}>{t("projects.all_routines", "全部例行")}</span>
+          <span className={styles.meta}>
+            <span className={styles.path}>{t("projects.all_routines_meta", "跨所有项目")}</span>
+          </span>
+        </span>
+      </button>
       {projects === null ? (
         <SkeletonList rows={8} />
       ) : shown.length === 0 ? (
@@ -112,7 +135,21 @@ export function ProjectsView() {
       secondary={list}
       detailKey={selectedPath}
     >
-      {selected ? (
+      {allSelected ? (
+        <div className={styles.detail}>
+          <div className={styles.head}>
+            <div className={styles.head_text}>
+              <div className={styles.head_name}>{t("projects.all_routines", "全部例行")}</div>
+              <div className={styles.head_sub}>
+                {t("projects.all_routines_sub", "所有项目的例行，也包括临时目录和聊天目录里的。新建请进具体项目。")}
+              </div>
+            </div>
+          </div>
+          <div className={styles.pane}>
+            <RoutinesPanel projectPath={null} />
+          </div>
+        </div>
+      ) : selected ? (
         <div className={styles.detail}>
           <div className={styles.head}>
             <div className={styles.head_text}>

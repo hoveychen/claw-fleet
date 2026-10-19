@@ -363,3 +363,43 @@
 
 /* Rendered by RailStatTile (accent variant) — shared with TodayUsageBadge and
    LiveStats so the collapsed rail stack is one consistent size. */
+
+/* ── Rail tile popover ─────────────────────────────────────────────────── */
+
+.rail_anchor {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Transparent click-catcher: a click anywhere outside the panel closes it.
+   Sits under the history modals (z-index 1000) those sections open. */
+.popover_backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+}
+
+:is([data-exiting].popover_backdrop) {
+  pointer-events: none;
+}
+
+.popover {
+  composes: pop_enter from "./motion.module.css";
+  transform-origin: bottom left;
+  position: fixed;
+  width: 300px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 4px 0 4px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+}
+
+.popover_title {
+  padding: 8px 12px 6px;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  font-weight: 500;
+}
