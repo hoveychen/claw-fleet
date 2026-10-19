@@ -121,7 +121,7 @@
 }
 
 .meta_chip_accent {
-  background: rgba(var(--color-accent-rgb), 0.12);
+  background: rgba(217, 119, 87, 0.12);
   color: var(--color-accent);
 }
 

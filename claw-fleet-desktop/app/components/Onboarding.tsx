@@ -64,7 +64,7 @@ type NotificationMode = "all" | "user_action" | "none";
 
 const CONFETTI_COUNT = 60;
 const CONFETTI_COLORS = [
-  "#7178e8", "#f0a070", "#4ade80", "#60a5fa", "#c084fc",
+  "#d97757", "#f0a070", "#4ade80", "#60a5fa", "#c084fc",
   "#fbbf24", "#22d3ee", "#f87171", "#a3e635", "#fb923c",
 ];
 
