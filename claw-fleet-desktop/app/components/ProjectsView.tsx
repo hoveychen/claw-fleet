@@ -4,7 +4,10 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Archive,
+  ArchiveRestore,
   CalendarClock,
+  ChevronRight,
   Copy,
   FolderGit2,
   FolderOpen,
@@ -19,6 +22,8 @@ import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { isWebBuild } from "../hostEnv";
 import { canRevealPath } from "../canReveal";
 import {
+  archivedPaths,
+  archivedProjects,
   mergeProjects,
   pathTail,
   withBrowsePaths,
@@ -93,7 +98,13 @@ export function ProjectsView() {
   const [removingPath, setRemovingPath] = useState<string | null>(null);
   const [cloning, setCloning] = useState(false);
   const [pickingDir, setPickingDir] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<{ row: ProjectRow; anchor: ContextMenuAnchor } | null>(null);
+  const [archivingPath, setArchivingPath] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{
+    row: ProjectRow;
+    archived?: boolean;
+    anchor: ContextMenuAnchor;
+  } | null>(null);
 
   // Workspace commands: the row badges and the code tab's commands list.
   // SessionList keeps this list polled app-wide.
@@ -110,9 +121,19 @@ export function ProjectsView() {
   const projects = useMemo<ProjectRow[] | null>(
     () =>
       registered && browsePaths
-        ? withBrowsePaths(mergeProjects(registered, sessions, chatWorkspace), browsePaths)
+        ? withBrowsePaths(mergeProjects(registered, sessions, chatWorkspace), browsePaths, archivedPaths(registered))
         : null,
     [registered, browsePaths, sessions, chatWorkspace],
+  );
+  const archived = useMemo<ProjectRow[]>(
+    () =>
+      archivedProjects(registered ?? []).map((p) => ({
+        path: p.path,
+        name: p.name,
+        lastActiveMs: p.archivedAtMs ?? 0,
+        runningTasks: 0,
+      })),
+    [registered],
   );
 
   // Select a hand-added directory only once the backend has accepted it, or
@@ -141,6 +162,21 @@ export function ProjectsView() {
     if (selectedPath === path) set({ selectedPath: null });
   };
 
+  // Archived projects stay registered, so neither the session scan nor a new
+  // hand-run session lists them again; only un-archiving (or Fleet starting a
+  // task there) does.
+  const setArchived = async (path: string, archive: boolean) => {
+    setArchivingPath(path);
+    try {
+      setRegistered(await invoke<RegisteredProject[]>("set_project_archived", { path, archived: archive }));
+    } catch {
+      return;
+    } finally {
+      setArchivingPath(null);
+    }
+    if (archive && selectedPath === path) set({ selectedPath: null });
+  };
+
   // The native dialog browses the machine the desktop runs on; the browser
   // build has none, so it lists the backend host through DirPickerDialog.
   const needsBackendDirPicker = isWebBuild();
@@ -153,7 +189,7 @@ export function ProjectsView() {
     if (typeof picked === "string") await addPath(picked);
   };
 
-  const rowMenu = (row: ProjectRow): ContextMenuItem[] => {
+  const rowMenu = (row: ProjectRow, isArchived: boolean): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
     // The browser build has no host shell to reveal into (canReveal.ts).
     if (canRevealPath()) {
@@ -175,6 +211,22 @@ export function ProjectsView() {
       sub: row.path,
       onSelect: () => void writeText(row.path).catch(() => {}),
     });
+    if (isArchived) {
+      items.push({
+        id: "unarchive",
+        label: t("projects.unarchive", "取消归档"),
+        icon: <ArchiveRestore size={13} strokeWidth={1.7} />,
+        onSelect: () => void setArchived(row.path, false),
+      });
+    } else if (!row.handAdded) {
+      items.push({
+        id: "archive",
+        label: t("projects.archive", "归档"),
+        icon: <Archive size={13} strokeWidth={1.7} />,
+        sub: t("projects.archive_sub", "从列表收起，记忆和例行都保留"),
+        onSelect: () => void setArchived(row.path, true),
+      });
+    }
     // Rows backed by sessions or the registry would come straight back.
     if (row.handAdded) {
       items.push({
@@ -187,25 +239,30 @@ export function ProjectsView() {
     }
     return items;
   };
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return projects ?? [];
-    return (projects ?? []).filter((p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
-  }, [projects, query]);
+  const matches = useCallback(
+    (p: ProjectRow) => {
+      const q = query.trim().toLowerCase();
+      return !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
+    },
+    [query],
+  );
+  const shown = useMemo(() => (projects ?? []).filter(matches), [projects, matches]);
+  const shownArchived = useMemo(() => archived.filter(matches), [archived, matches]);
   // A path clicked in agent prose can point into a directory that is not a
   // project (a temp dir, the chat workspace). It still opens, as a bare row
   // the list does not show.
   const selected = useMemo<ProjectRow | null>(() => {
     if (!projects || !selectedPath || selectedPath === ALL_ROUTINES) return null;
     return (
-      projects.find((p) => p.path === selectedPath) ?? {
+      projects.find((p) => p.path === selectedPath) ??
+      archived.find((p) => p.path === selectedPath) ?? {
         path: selectedPath,
         name: selectedPath.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || selectedPath,
         lastActiveMs: 0,
         runningTasks: 0,
       }
     );
-  }, [projects, selectedPath]);
+  }, [projects, archived, selectedPath]);
 
   const allSelected = selectedPath === ALL_ROUTINES;
   const list = (
@@ -242,7 +299,7 @@ export function ProjectsView() {
             key={p.path}
             type="button"
             className={`${styles.row}${p.path === selectedPath ? ` ${styles.row_active}` : ""}${
-              removingPath === p.path ? ` ${loadingStyles.stale}` : ""
+              removingPath === p.path || archivingPath === p.path ? ` ${loadingStyles.stale}` : ""
             }`}
             onClick={() => set({ selectedPath: p.path })}
             onContextMenu={(e) => {
@@ -251,7 +308,7 @@ export function ProjectsView() {
               setCtxMenu({ row: p, anchor: { x: e.clientX, y: e.clientY } });
             }}
             aria-current={p.path === selectedPath ? "true" : undefined}
-            aria-busy={removingPath === p.path || undefined}
+            aria-busy={removingPath === p.path || archivingPath === p.path || undefined}
             title={p.path}
           >
             <span className={styles.icon}>
@@ -269,7 +326,7 @@ export function ProjectsView() {
                 {p.lastActiveMs > 0 && <span className={styles.time}>{timeAgo(p.lastActiveMs, t)}</span>}
               </span>
             </span>
-            {removingPath === p.path ? (
+            {removingPath === p.path || archivingPath === p.path ? (
               <Spinner size={12} label={t("loading")} />
             ) : (
               (procCounts.get(p.path) ?? 0) > 0 && (
@@ -292,9 +349,60 @@ export function ProjectsView() {
           <Spinner size={12} label={t("loading")} />
         </div>
       )}
+      {projects !== null && shownArchived.length > 0 && (
+        <>
+          <button
+            type="button"
+            className={styles.archived_toggle}
+            onClick={() => setShowArchived((v) => !v)}
+            aria-expanded={showArchived}
+          >
+            <ChevronRight
+              size={13}
+              strokeWidth={1.8}
+              className={`${styles.archived_chevron}${showArchived ? ` ${styles.archived_chevron_open}` : ""}`}
+            />
+            {t("projects.archived", "已归档 {{count}}", { count: shownArchived.length })}
+          </button>
+          {showArchived &&
+            shownArchived.map((p) => (
+              <button
+                key={p.path}
+                type="button"
+                className={`${styles.row} ${styles.row_archived}${
+                  p.path === selectedPath ? ` ${styles.row_active}` : ""
+                }${archivingPath === p.path ? ` ${loadingStyles.stale}` : ""}`}
+                onClick={() => set({ selectedPath: p.path })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCtxMenu({ row: p, archived: true, anchor: { x: e.clientX, y: e.clientY } });
+                }}
+                aria-current={p.path === selectedPath ? "true" : undefined}
+                aria-busy={archivingPath === p.path || undefined}
+                title={p.path}
+              >
+                <span className={styles.icon}>
+                  <Archive size={14} strokeWidth={1.6} />
+                </span>
+                <span className={styles.body}>
+                  <span className={styles.title}>{p.name}</span>
+                  <span className={styles.meta}>
+                    <span className={styles.path}>{pathTail(p.path)}</span>
+                  </span>
+                </span>
+                {archivingPath === p.path && <Spinner size={12} label={t("loading")} />}
+              </button>
+            ))}
+        </>
+      )}
       <Presence when={Boolean(ctxMenu)}>
         {ctxMenu && (
-          <ContextMenu anchor={ctxMenu.anchor} items={rowMenu(ctxMenu.row)} onClose={() => setCtxMenu(null)} />
+          <ContextMenu
+            anchor={ctxMenu.anchor}
+            items={rowMenu(ctxMenu.row, Boolean(ctxMenu.archived))}
+            onClose={() => setCtxMenu(null)}
+          />
         )}
       </Presence>
     </div>

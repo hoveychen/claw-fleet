@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mergeProjects, pathTail, withBrowsePaths, type ProjectSessionView } from "./projectList";
+import {
+  archivedPaths,
+  archivedProjects,
+  mergeProjects,
+  pathTail,
+  withBrowsePaths,
+  type ProjectSessionView,
+} from "./projectList";
 
 const session = (over: Partial<ProjectSessionView>): ProjectSessionView => ({
   workspacePath: "/u/repo",
@@ -51,6 +58,35 @@ describe("withBrowsePaths", () => {
 
   it("keeps a hand-added temp directory, which mergeProjects would drop", () => {
     expect(withBrowsePaths([], ["/tmp/scratch"]).map((r) => r.path)).toEqual(["/tmp/scratch"]);
+  });
+});
+
+describe("archived projects", () => {
+  const registered = [
+    { path: "/u/live", name: "live", createdAtMs: 1 },
+    { path: "/u/old", name: "old", createdAtMs: 1, archivedAtMs: 20 },
+    { path: "/u/older/", name: "", createdAtMs: 1, archivedAtMs: 10 },
+  ];
+
+  it("leaves archived projects out of the list, sessions in them included", () => {
+    const rows = mergeProjects(
+      registered,
+      [session({ workspacePath: "/u/old/.worktrees/t", workspaceName: "t", lastActivityMs: 99, procAlive: true })],
+      null,
+    );
+    expect(rows.map((r) => r.path)).toEqual(["/u/live"]);
+  });
+
+  it("does not bring an archived hand-added directory back", () => {
+    const rows = withBrowsePaths([], ["/u/old", "/u/new"], archivedPaths(registered));
+    expect(rows.map((r) => r.path)).toEqual(["/u/new"]);
+  });
+
+  it("lists archived projects newest first, names filled in", () => {
+    expect(archivedProjects(registered).map((p) => [p.path, p.name])).toEqual([
+      ["/u/old", "old"],
+      ["/u/older", "older"],
+    ]);
   });
 });
 
