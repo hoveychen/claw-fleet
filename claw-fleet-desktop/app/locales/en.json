@@ -1175,7 +1175,7 @@
     "new_form": {
       "title": "New: one idea, one task",
       "description": "The left column of the home page is every task in every project, grouped into Needs you / Running / Waiting / To accept, each row saying what it is doing right now. Select a task and its conversation fills the middle; when it needs your call, the card pins to the bottom of the conversation: number keys pick, ⌘↵ submits, and answering moves on to the next one. The right rail holds its subtasks, steps and material.",
-      "hint": "\"What should get done?\" at the top starts a task any time (⌘N). The nav is Tasks / Library / Projects / Review / Settings: Library holds docs and deliverables, Projects holds each project's routines, memory and code, and Review sums up each day's progress by project.",
+      "hint": "\"New Task\" at the top of the task column starts one any time (⌘N). The nav is Tasks / Library / Projects / Review / Settings: Library holds docs and deliverables, Projects holds each project's routines, memory and code, and Review sums up each day's progress by project.",
       "screenshot_alt": "The new home: task column on the left, conversation in the middle, steps and material on the right"
     },
     "launch": {
@@ -1691,7 +1691,7 @@
     "done": "Got it",
     "new_session": {
       "title": "Start here",
-      "desc": "This box at the top of the home page is where work starts: write what should get done, press Enter, pick a project and it is underway. ⌘N brings you back any time. Every task is in the column below, with whatever needs you on top."
+      "desc": "New tasks start here (⌘N): write what should get done in the middle pane, pick a project and press Enter. Every task lands in the column below, with whatever needs you on top."
     }
   },
   "sidebar": {
@@ -2572,7 +2572,10 @@
     "span_m": "{{n}}m",
     "span_hm": "{{h}}h{{m}}m",
     "span_d": "{{n}}d",
-    "empty": "No tasks yet — write what you want done above",
+    "empty": "No tasks yet. Here is how it works:",
+    "empty_step_write": "Write what should get done on the right, pick a project, press Enter",
+    "empty_step_run": "It works in the background and shows up in this column",
+    "empty_step_ask": "When it needs your call, it moves to the top and its card is pinned under the conversation",
     "no_match": "No matching tasks",
     "project_filter_tip": "Show only this project",
     "running_subagents": "{{count}} subagents running",
