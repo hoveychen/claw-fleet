@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTaskRows,
+  projectSectionRows,
   rowDetail,
+  runningSubagents,
   sectionRows,
   stepText,
   subtaskRowsOf,
@@ -142,6 +144,39 @@ describe("sectionRows", () => {
       ["ask"],
     );
     expect(sectionRows(rows).map((sec) => sec.state)).toEqual(["needsYou", "review", "running"]);
+  });
+});
+
+describe("projectSectionRows", () => {
+  it("pins the chat folder, orders projects by name and puts needs-you rows first", () => {
+    const rows = build(
+      [
+        s({ id: "z1", taskId: "z1", workspacePath: "/work/zeta", workspaceName: "zeta" }),
+        s({ id: "a1", taskId: "a1", workspacePath: "/work/alpha", workspaceName: "alpha", status: "executing", procAlive: true }),
+        s({ id: "a2", taskId: "a2", workspacePath: "/work/alpha", workspaceName: "alpha" }),
+        s({ id: "c1", taskId: "c1", workspacePath: "/home/.fleet/chat", workspaceName: "chat" }),
+      ],
+      ["a2"],
+    );
+    const secs = projectSectionRows(rows, (k) => k === "/home/.fleet/chat");
+    expect(secs.map((sec) => [sec.name, sec.chat])).toEqual([
+      ["chat", true],
+      ["alpha", false],
+      ["zeta", false],
+    ]);
+    const alpha = secs[1];
+    expect(alpha.needsYou).toBe(1);
+    expect(alpha.rows.map((r) => r.tip.id)).toEqual(["a2", "a1"]);
+  });
+});
+
+describe("runningSubagents", () => {
+  it("sums live subagents over every main hop", () => {
+    const rows = build([
+      s({ id: "h1", taskId: "h1", runningSubagentCount: 1, handoff: { chainId: "c", hop: 1, chainLen: 2 } as never }),
+      s({ id: "h2", taskId: "h1", runningSubagentCount: 2, handoff: { chainId: "c", hop: 2, chainLen: 2 } as never }),
+    ]);
+    expect(runningSubagents(rows[0])).toBe(3);
   });
 });
 

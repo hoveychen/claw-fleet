@@ -38,8 +38,33 @@
   color: var(--color-text-secondary);
 }
 
-.icon[data-type="doc"] {
-  color: var(--color-accent);
+/* Document format badge: same 34px slot as the artifact icon, tinted per kind. */
+.docBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  --kind: var(--color-text-secondary);
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 14%, transparent);
+}
+
+.docBadge[data-kind="markdown"] {
+  --kind: var(--color-accent);
+}
+
+.docBadge[data-kind="html"] {
+  --kind: var(--color-success);
+}
+
+.docBadge[data-kind="htmlDir"] {
+  --kind: var(--color-warning);
 }
 
 .body {

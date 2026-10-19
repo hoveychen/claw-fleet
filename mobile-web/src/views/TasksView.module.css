@@ -57,6 +57,36 @@
   font: inherit;
 }
 
+/* Group-by switch: two icon buttons, sized down because the head also holds
+   the title and the project pill. */
+.segment {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+}
+
+.segmentButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--color-text-dim);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.segmentButton[data-active="true"] {
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+}
+
 .scopeClear {
   display: inline-flex;
   align-items: center;
@@ -148,9 +178,30 @@
 }
 
 .sectionName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--t-ctl, 15px);
   font-weight: 600;
   color: var(--color-text);
+}
+
+.sectionIcon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Project heading's "needs you N": the needs-you red, as a soft pill. */
+.needsYouBadge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-error) 14%, transparent);
+  color: var(--color-error);
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .sectionCount {
@@ -286,14 +337,17 @@
   color: var(--color-text);
 }
 
-/* Project tag: a label, not a place — there is no "enter project". */
+/* Project tag: a label, not a place — there is no "enter project". Sits at
+   the end of the second line and gives way before the status text does. */
 .project {
-  flex-shrink: 0;
-  max-width: 40%;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 45%;
+  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 1px 8px;
+  padding: 0 7px;
   border-radius: 6px;
   /* Not bg-input: in light it equals the card, and the chip vanishes. */
   background: var(--color-bg-selected);
@@ -302,11 +356,43 @@
 }
 
 .line2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+}
+
+.line2Text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.subagents {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  color: var(--color-running);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The last thing said, one line, quieter than the status line above it. */
+.preview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--t-aux, 12px);
-  color: var(--color-text-secondary);
+  color: var(--color-text-dim);
 }
 
 .snippet {

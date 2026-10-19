@@ -1313,6 +1313,47 @@ export const MOCK_WIKI_DOCS: WikiDoc[] = [
       },
     ],
   },
+  // One of each remaining kind, so the library's MD / HTML / DIR badges all show.
+  {
+    slug: "perf/latency-report",
+    title: "Checkout latency report",
+    kind: "html",
+    entry: "report.html",
+    workspacePath: "/Users/demo/workspace/billing-service",
+    workspaceName: "billing-service",
+    createdMs: NOW - 50 * HOUR,
+    updatedMs: NOW - 26 * HOUR,
+    currentVersion: MOCK_WIKI_VERSION,
+    versions: [
+      {
+        id: MOCK_WIKI_VERSION,
+        publishedMs: NOW - 26 * HOUR,
+        sizeBytes: 18_420,
+        fileCount: 1,
+        sourcePath: "/Users/demo/workspace/billing-service/out/report.html",
+      },
+    ],
+  },
+  {
+    slug: "demo/usage-dashboard",
+    title: "Usage dashboard demo",
+    kind: "htmlDir",
+    entry: "index.html",
+    workspacePath: "/Users/demo/workspace/web-dashboard",
+    workspaceName: "web-dashboard",
+    createdMs: NOW - 80 * HOUR,
+    updatedMs: NOW - 72 * HOUR,
+    currentVersion: MOCK_WIKI_VERSION,
+    versions: [
+      {
+        id: MOCK_WIKI_VERSION,
+        publishedMs: NOW - 72 * HOUR,
+        sizeBytes: 96_200,
+        fileCount: 7,
+        sourcePath: "/Users/demo/workspace/web-dashboard/demo",
+      },
+    ],
+  },
 ];
 
 /** Body served by the mock `wiki_file` for the doc above. Base64 rather than

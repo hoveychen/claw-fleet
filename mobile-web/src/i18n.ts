@@ -476,6 +476,9 @@ const DICT: Record<string, string> = {
   分组方式: "Group by",
   按仓库分组: "Group by repository",
   按状态分组: "Group by status",
+  按项目分组: "Group by project",
+  "需要你 {0}": "Needs you · {0}",
+  "{0} 个子代理在跑": "{0} subagents running",
   不分组: "No grouping",
   // 运行中 / 等待输入 already carry these translations further down the table.
   "出错/限流": "Errored / rate-limited",
