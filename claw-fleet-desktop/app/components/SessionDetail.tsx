@@ -1650,8 +1650,11 @@ export function SessionDetail({
      (the ··· menu's facets, or a rail row). A switch that opened the drawer had
      to invent which facet to show, which is how pressing it on a fresh session
      landed on Skills — an answer to a question nobody asked. */
+  const watchCount = liveSession?.watches?.length ?? 0;
+  const waiterCount = new Set((liveSession?.waitedBy ?? []).map((e) => e.sessionId)).size;
   const railHasContent =
     railCards > 0 ||
+    watchCount + waiterCount > 0 ||
     (liveSession != null &&
       taskRailHasContent(task, liveSession.id, taskSteps, taskArtifacts, reviewDocs));
   const railOpen = railOverride ?? railHasContent;
@@ -1921,12 +1924,6 @@ export function SessionDetail({
                           </span>
                         )}
                         <ScheduleProvenanceChip session={liveSession} />
-                        {liveSession.watches && liveSession.watches.length > 0 && (
-                          <WatchStatusRow session={liveSession} inline />
-                        )}
-                        {liveSession.waitedBy && liveSession.waitedBy.length > 0 && (
-                          <WaitedByRow session={liveSession} inline />
-                        )}
                       </>
                     ) : (
                     <>
@@ -1952,19 +1949,13 @@ export function SessionDetail({
                     <OutOfCreditsNotice session={liveSession} inline />
                     {factChips(liveSession, metricsOpen)}
                     <ScheduleProvenanceChip session={liveSession} />
-                    {/* Relay position and live watches are chips like any other
-                        fact about this session, so they ride the identity row
-                        rather than each claiming a line under the header. They
-                        stay after the metrics chips: both are unconditional (not
-                        behind the ··· toggle) and would otherwise split the
-                        identity run. */}
+                    {/* Relay position is a chip like any other fact about this
+                        session, so it rides the identity row. It stays after the
+                        metrics chips: it is unconditional (not behind the ···
+                        toggle) and would otherwise split the identity run. Live
+                        watches sit in the right rail instead — a long note
+                        crowded this row off the window. */}
                     {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
-                    {liveSession.watches && liveSession.watches.length > 0 && (
-                      <WatchStatusRow session={liveSession} inline />
-                    )}
-                    {liveSession.waitedBy && liveSession.waitedBy.length > 0 && (
-                      <WaitedByRow session={liveSession} inline />
-                    )}
                     {/* Reveals the numeric chips above. Sits last so the identity run
                         reads uninterrupted and the control lands at the row's end. */}
                     <button
@@ -2155,6 +2146,15 @@ export function SessionDetail({
                 reviewDocs={reviewDocs}
                 className={styles.task_rail}
                 onOpenSession={(id) => onOpenSession?.(id)}
+                waiting={
+                  watchCount + waiterCount > 0 ? (
+                    <>
+                      {watchCount > 0 && <WatchStatusRow session={liveSession} stacked />}
+                      {waiterCount > 0 && <WaitedByRow session={liveSession} stacked />}
+                    </>
+                  ) : undefined
+                }
+                waitingCount={watchCount + waiterCount}
                 empty={!railHasContent}
                 ambient={
                     <SessionAuxRail

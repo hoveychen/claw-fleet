@@ -1,9 +1,10 @@
 import { memo, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, Check, ChevronDown, ChevronRight, Folder, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Folder, Radar, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { TaskState } from "../../../shared-ts/taskState";
 import { speedTier } from "../../../shared-ts/taskSpeed";
+import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
 import type { SessionInfo } from "../types";
 import { timeAgo } from "./timeAgo";
 import {
@@ -13,6 +14,7 @@ import {
   rowActiveSubtasks,
   rowRunningSubagents,
   rowTokenSpeed,
+  rowWatches,
   type HomeRow,
   type HomeSection,
   type ProjectGroup,
@@ -20,6 +22,7 @@ import {
   type TaskRow,
 } from "./homeRows";
 import { AgentSourceIcon } from "./SessionCard";
+import { WatchRing } from "./WatchRing";
 import styles from "./TaskList.module.css";
 
 /** The dot a state wears, in the row and its section heading. Tokens only:
@@ -168,6 +171,80 @@ function RowMark({
   );
 }
 
+/** How far along the task's first watch is, squeezed into one token: a ring
+ *  (or the radar icon when there is no fraction) and a tail — a percentage,
+ *  the reported progress line, elapsed against the expected wait, or elapsed
+ *  and the poll count. A session watch says how many targets are done. The
+ *  note is not repeated: the wait reason after it on the line already says
+ *  what is being waited on. Amber when progress stalled, the wait overran or
+ *  the `until` command cannot run. */
+export function RowWatch({ row, now }: { row: HomeRow; now: number }) {
+  const { t } = useTranslation();
+  const w = rowWatches(row)[0];
+  if (!w) return null;
+  if (w.targets && w.targets.length > 0) {
+    const done = w.targets.filter((x) => x.phase === "done").length;
+    const failed = w.targets.some((x) => x.phase === "failed");
+    return (
+      <span
+        className={failed ? styles.watch_alarming : styles.watch}
+        title={w.note ?? undefined}
+        data-testid="task-row-watch"
+      >
+        <Radar size={11} strokeWidth={1.8} />
+        <span className={styles.watch_text}>
+          {done}/{w.targets.length}
+        </span>
+      </span>
+    );
+  }
+  const pv = watchProgressView(w, now);
+  const ring = watchRing(pv);
+  const elapsed = compactDuration(now - w.created);
+  const tail =
+    pv.kind === "reported"
+      ? pv.fraction !== null
+        ? `${Math.round(pv.fraction * 100)}%`
+        : pv.text
+      : pv.kind === "time"
+        ? `${elapsed}/${compactDuration(pv.expectedMs)}`
+        : `${elapsed}·${w.pollCount}×`;
+  // A non-zero streak: the `until` command cannot run, so the wait never ends.
+  const broken = (w.structuralFailStreak ?? 0) > 0;
+  const alarming =
+    broken ||
+    (pv.kind === "reported" && pv.stalledMs !== null) ||
+    (pv.kind === "time" && pv.overdueMs !== null);
+  const title = [
+    w.note ?? undefined,
+    broken
+      ? t("card.tip_watch_broken", { count: w.structuralFailStreak, reason: w.lastStderr || "—" })
+      : t("card.tip_watch", { elapsed, count: w.pollCount, poll: w.pollSecs }),
+    pv.kind === "reported"
+      ? t("card.tip_watch_progress", {
+          progress: pv.text,
+          since: compactDuration(now - (w.progressChangedAt ?? w.created)),
+        })
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+  return (
+    <span
+      className={alarming ? styles.watch_alarming : styles.watch}
+      title={title}
+      data-testid="task-row-watch"
+    >
+      {ring ? (
+        <WatchRing size={11} fraction={ring.fraction} alarming={ring.alarming} />
+      ) : (
+        <Radar size={11} strokeWidth={1.8} />
+      )}
+      <span className={styles.watch_text}>{tail}</span>
+    </span>
+  );
+}
+
 interface RowProps {
   row: HomeRow;
   active: boolean;
@@ -215,6 +292,7 @@ const TaskListRow = memo(function TaskListRow({
     detailText(rowDetail(row, t("history.untitled")), row, t, now, preview != null) ||
     (abandoned ? t("home.detail_abandoned") : "");
   const time = rowTime(row, t, now);
+  const hasWatch = rowWatches(row).length > 0;
   return (
     <div
       role="button"
@@ -253,7 +331,7 @@ const TaskListRow = memo(function TaskListRow({
         )}
         <span className={styles.time}>{time}</span>
       </div>
-      {(showProject || detail || preview || row.state === "review") && (
+      {(showProject || hasWatch || detail || preview || row.state === "review") && (
         <div className={styles.line2}>
           {/* The project leads line 2 so the title gets line 1's full width. */}
           {!showProject ? null : row.projectPath ? (
@@ -271,6 +349,7 @@ const TaskListRow = memo(function TaskListRow({
           ) : (
             <span className={styles.chip}>{row.projectName}</span>
           )}
+          <RowWatch row={row} now={now} />
           {detail && (
             <span className={styles.detail} title={detail}>
               {detail}

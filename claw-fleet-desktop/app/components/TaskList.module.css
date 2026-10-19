@@ -309,6 +309,36 @@ button.chip:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* A live watch's progress, ahead of the wait reason: the one part of a parked
+   row that moves. The reported line is clipped by width, not characters. */
+.watch {
+  /* Holds its width; the wait reason after it truncates first. Only a long
+     reported line is cut, at the cap. */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 45%;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.watch_alarming {
+  composes: watch;
+  color: var(--color-warning);
+}
+.watch > svg,
+.watch_alarming > svg {
+  flex: 0 0 auto;
+}
+.watch_text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The last message, after the step / wait reason on the second line. It takes
    only the room the detail leaves (flex-basis 0), so the detail never gives
    way to it; alone on the line it takes the whole width. */

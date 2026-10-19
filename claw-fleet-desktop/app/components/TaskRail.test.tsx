@@ -80,6 +80,21 @@ describe("TaskRail", () => {
     expect(el.querySelectorAll("section")).toHaveLength(0);
   });
 
+  // The watch chips moved here from the header meta row, where a long note
+  // pushed everything else off the window. While set, the wait leads.
+  it("leads with the waiting section when the session has watches", () => {
+    const el = render({
+      row: row(),
+      steps: [{ text: "P1", done: false } as never],
+      waiting: <span data-testid="watch">CI run</span>,
+      waitingCount: 1,
+    });
+    const first = el.querySelector("aside > section");
+    expect(first?.getAttribute("data-testid")).toBe("rail-waiting");
+    expect(first?.textContent).toContain("Waiting on");
+    expect(first?.querySelector("[data-testid='watch']")).not.toBeNull();
+  });
+
   it("says why it is empty when the switch holds it open", () => {
     const el = render({ empty: true });
     expect(el.querySelector("aside > p")?.textContent).toBeTruthy();

@@ -11,6 +11,40 @@
   line-height: 1.4;
 }
 
+/* One chip per line in a narrow column (the session's right rail): the note
+   takes the first line and may wrap, the status drops below it. */
+.watch_stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.watch_stack + .watch_stack {
+  margin-top: 6px;
+}
+.watch_stack .watch_chip {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  white-space: normal;
+}
+.watch_stack .watch_note {
+  flex: 1 1 calc(100% - 20px);
+  max-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.watch_stack .note_sep {
+  display: none;
+}
+.watch_stack .watch_progress {
+  max-width: 100%;
+}
+
 .watch_chip {
   display: inline-flex;
   align-items: center;
