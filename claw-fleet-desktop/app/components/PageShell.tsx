@@ -175,12 +175,21 @@ export function PageShell({
   );
 
   // Where the banner lives. Inside the list column whenever there is one to put
-  // it in; back across the page top when the page is a single column, or when
-  // the rail is collapsed to its icon strip — a collapsed rail has no room for a
-  // search box, and losing the page title + search on collapse would be a worse
-  // trade than the wide header.
+  // it in; across the page top only when the page is a single column. A folded
+  // left list column takes its banner with it: everything in the banner acts on
+  // the list, and hoisting it over the detail column made the list's header read
+  // as the detail's own. A right rail is the detail pane, so the banner stays in
+  // <main> (the list) whether the rail is open or folded.
   const hasRail = secondary !== undefined;
-  const inColumn = hasRail && !collapsed;
+  const railIsList = rail?.side !== "right";
+  const headerIn: "page" | "rail" | "main" | "none" = !hasRail
+    ? "page"
+    : !railIsList
+      ? "main"
+      : collapsed
+        ? "none"
+        : "rail";
+  const inColumn = headerIn === "rail" || headerIn === "main";
   const sectionTabs = useSectionTabs(view);
 
   const header = (
@@ -226,15 +235,16 @@ export function PageShell({
     </>
   );
 
-  const railIsList = rail?.side !== "right";
-
   // The detail column is <main> beside a left rail (or alone), and the rail
   // itself when it sits on the right (Audit).
   const mainRef = useRef<HTMLElement>(null);
   const railRef = useRef<HTMLElement>(null);
   useFadeOnChange(railIsList ? mainRef : railRef, detailKey);
 
-  const railEl = !hasRail ? null : collapsed ? (
+  // A folded list column leaves nothing behind: the nav footer's fold button
+  // (lit while folded) and a re-click on the nav entry bring it back. Audit's
+  // right rail has neither, so it keeps its expand strip.
+  const railEl = !hasRail ? null : collapsed && railIsList ? null : collapsed ? (
     <CollapsedSidebarRail
       side={rail?.side}
       onExpand={() => setSecondarySidebar(view, false)}
@@ -245,7 +255,7 @@ export function PageShell({
       className={`${styles.rail}${railIsList ? "" : ` ${styles.col_last}`}`}
       style={{ width }}
     >
-      {inColumn && railIsList && header}
+      {headerIn === "rail" && header}
       {secondary}
       <ResizeHandle side={rail?.side} active={isDragging} onMouseDown={onMouseDown} />
     </aside>
@@ -253,14 +263,14 @@ export function PageShell({
 
   const main = (
     <main ref={mainRef} className={`${styles.main}${hasRail && railIsList ? ` ${styles.col_last}` : ""}`}>
-      {inColumn && !railIsList && header}
+      {headerIn === "main" && header}
       {children}
     </main>
   );
 
   return (
     <div className={className ? `${styles.page} ${className}` : styles.page}>
-      {!inColumn && header}
+      {headerIn === "page" && header}
 
       <PageBody>
         {rail?.side === "right" ? (
