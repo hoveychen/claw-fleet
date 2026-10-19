@@ -1,7 +1,12 @@
-// The decision card pinned to the bottom of a task's conversation. Every card
-// the task is waiting on — its main conversation's and its sub-tasks' — lands
-// here one at a time, so answering never means scrolling the transcript to
-// find the question. Digits pick options, ⌘↵ sends, Esc denies a guard.
+// The decision card at the end of a task's conversation. Every card the task
+// is waiting on — its main conversation's and its sub-tasks' — lands here one
+// at a time, so answering never means hunting the transcript for the question.
+// Digits pick options, ⌘↵ sends, Esc denies a guard.
+//
+// In a transcript it is `inline`: the last item of the scroller at its natural
+// height, so scrolling up reads history like any chat. It used to float over
+// the transcript's bottom edge at up to 85vh, which left a long card's history
+// a strip a few lines tall.
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -38,6 +43,7 @@ export function DecisionDock({
   projectName = null,
   taskTitle = null,
   keyboard = true,
+  inline = false,
 }: {
   cards: PendingDecision[];
   projectName?: string | null;
@@ -45,6 +51,8 @@ export function DecisionDock({
   /** Off for a pane that is mounted but hidden, so only the visible dock
    *  answers the keyboard. */
   keyboard?: boolean;
+  /** Rendered inside a scroller: natural height, no inner scroll regions. */
+  inline?: boolean;
 }) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -157,7 +165,7 @@ export function DecisionDock({
   };
 
   return (
-    <section className={styles.dock} data-testid="decision-dock" aria-label={t("home.dock_title", "Needs your decision")}>
+    <section className={`${styles.dock} ${inline ? styles.dock_inline : ""}`} data-testid="decision-dock" aria-label={t("home.dock_title", "Needs your decision")}>
       <header className={styles.head}>
         <span className={styles.dot} aria-hidden />
         <span className={styles.title}>{t("home.dock_title", "Needs your decision")}</span>
@@ -233,9 +241,9 @@ export function DecisionDock({
       {crumbs.length > 0 && (
         <div className={styles.crumbs}>{crumbs.join(" › ")}</div>
       )}
-      <div className={`${styles.body} ${questionCard ? styles.body_flex : ""}`}>
+      <div className={`${styles.body} ${questionCard && !inline ? styles.body_flex : ""}`}>
         <Suspense fallback={<SkeletonCard height={140} />}>
-          <DecisionCard key={active.id} decision={active} compact docked />
+          <DecisionCard key={active.id} decision={active} compact docked natural={inline} />
         </Suspense>
       </div>
     </section>

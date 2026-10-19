@@ -144,6 +144,16 @@
   border-bottom-right-radius: 8px;
 }
 
+/* A card laid out in a transcript's flow (DecisionDock inline): the page is the
+ * scroller, so the card takes its natural height — no inner scroll region and
+ * no footer cap that would nest a second scrollbar inside the transcript's. */
+.card_natural .card_scroll,
+.card_natural .card_footer {
+  flex: 0 0 auto;
+  max-height: none;
+  overflow: visible;
+}
+
 /* Collapse toggle for the footer's option/form region. Options start expanded;
  * the bar lets the user manually collapse them on document-style cards so the
  * body gets the vertical space, and re-expand with one click. */
