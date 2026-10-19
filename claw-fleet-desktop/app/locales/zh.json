@@ -3073,9 +3073,6 @@
     "pick_sub": "看它的例行、记忆和代码。",
     "memory_empty": "这个项目还没有记忆",
     "memory_empty_sub": "agent 在这里干活时记下的要点会出现在这里。",
-    "procs_running": "{{count}} 个命令在运行",
-    "procs_none": "没有在运行的命令",
-    "browse_code": "浏览代码",
     "open_terminal": "打开终端"
   },
   "nav_section_review": "回顾",

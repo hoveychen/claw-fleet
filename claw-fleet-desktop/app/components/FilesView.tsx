@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -452,14 +452,21 @@ export function FilesView() {
 
 // ── Explorer for one workspace ───────────────────────────────────────────────
 
-function WorkspaceExplorer({
+/** Also embedded in the Projects page's code tab, which already shows the
+ *  project's name in its own header — hence `hideName` and `extraActions`. */
+export function WorkspaceExplorer({
   workspace,
   name,
   nav,
+  hideName = false,
+  extraActions,
 }: {
   workspace: string;
   name: string;
   nav: FileNavRequest | null;
+  hideName?: boolean;
+  /** Rendered at the start of the header's action row. */
+  extraActions?: ReactNode;
 }) {
   const { t } = useTranslation();
   const clearFileNav = useUIStore((s) => s.clearFileNav);
@@ -708,15 +715,16 @@ function WorkspaceExplorer({
     <>
       <div className={styles.detail_header}>
         <div className={styles.detail_title}>
-          <span className={styles.detail_name}>{name}</span>
+          {!hideName && <span className={styles.detail_name}>{name}</span>}
           {tab === "files" && activeFile && (
             <>
-              <span className={styles.detail_sep}>·</span>
+              {!hideName && <span className={styles.detail_sep}>·</span>}
               {activeFile.relativePath}
             </>
           )}
         </div>
         <div className={styles.detail_actions}>
+          {extraActions}
           {tab === "files" && activeFile && activeRoot && (
             <CopyButton text={`${activeRoot.path}/${activeFile.relativePath}`} />
           )}

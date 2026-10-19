@@ -1,13 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Brain, CalendarClock, FileText, FolderGit2, FolderOpen, SquareTerminal } from "lucide-react";
+import { Brain, CalendarClock, FileText, FolderGit2, SquareTerminal } from "lucide-react";
 
-import { runningProcCounts, useProcStore, useSessionsStore, useUIStore } from "../store";
+import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { mergeProjects, pathTail, type ProjectRow, type RegisteredProject } from "../projectList";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { EmptyState } from "./EmptyState";
+import { WorkspaceExplorer } from "./FilesView";
 import { PageShell } from "./PageShell";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { SkeletonList } from "./loading";
@@ -24,9 +25,9 @@ export const ALL_ROUTINES = "*routines";
 
 /**
  * 项目 (Projects): one row per code directory, and for the picked one its
- * routines, memory and code. Routines are managed in place; memory and code
- * hand over to their full pages (记忆 / 代码 / 终端, the other segments of this
- * section) pre-filtered to the project, since those pages own the editors.
+ * routines, memory and code. Routines and code are shown in place; memory
+ * hands over to its full page (记忆, another segment of this section)
+ * pre-filtered to the project, since that page owns the editor.
  */
 export function ProjectsView() {
   const { t } = useTranslation();
@@ -181,7 +182,7 @@ export function ProjectsView() {
             ) : tab === "memory" ? (
               <ProjectMemory key={selected.path} projectPath={selected.path} />
             ) : (
-              <ProjectCode projectPath={selected.path} />
+              <ProjectCode projectPath={selected.path} name={selected.name} />
             )}
           </div>
         </div>
@@ -278,51 +279,48 @@ function ProjectMemory({ projectPath }: { projectPath: string }) {
   );
 }
 
-/** Entry points into the project's code: the file explorer and, where the host
- *  has one, a terminal — plus how many workspace commands are running in it. */
-function ProjectCode({ projectPath }: { projectPath: string }) {
+/** The project's code: the workspace explorer itself (tree, preview, git bar,
+ *  commands), so the tab is not just a link to the 代码 page. It drives the
+ *  same `files` view state as that page and points it at this project, so
+ *  switching between the two keeps the selected file. */
+function ProjectCode({ projectPath, name }: { projectPath: string; name: string }) {
   const { t } = useTranslation();
   const terminal = useUIStore((s) => s.hostFeatures.terminal);
-  const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
+  const selectedWorkspace = useUIStore((s) => s.mainViewState.files.selectedWorkspace);
+
+  // The commands tab lists live procs; poll like the 代码 page does.
   useEffect(() => {
     void fetchProcs();
+    const timer = setInterval(() => void fetchProcs(), 2000);
+    return () => clearInterval(timer);
   }, [fetchProcs]);
-  const running = useMemo(() => {
-    let n = 0;
-    for (const [path, count] of runningProcCounts(procs)) if (repoRootPath(path) === projectPath) n += count;
-    return n;
-  }, [procs, projectPath]);
 
-  const browse = () => {
-    const s = useUIStore.getState();
-    s.updateMainViewState("files", { selectedWorkspace: projectPath });
-    s.setViewMode("files");
-  };
+  useEffect(() => {
+    if (selectedWorkspace !== projectPath) {
+      useUIStore.getState().updateMainViewState("files", { selectedWorkspace: projectPath });
+    }
+  }, [selectedWorkspace, projectPath]);
 
   return (
-    <div className={styles.code}>
-      <div className={styles.code_stat}>
-        {running > 0
-          ? t("projects.procs_running", "{{count}} 个命令在运行", { count: running })
-          : t("projects.procs_none", "没有在运行的命令")}
-      </div>
-      <div className={styles.code_actions}>
-        <button type="button" className={styles.action} onClick={browse}>
-          <FolderOpen size={15} strokeWidth={1.8} />
-          {t("projects.browse_code", "浏览代码")}
-        </button>
-        {terminal && (
+    <WorkspaceExplorer
+      key={projectPath}
+      workspace={projectPath}
+      name={name}
+      nav={null}
+      hideName
+      extraActions={
+        terminal && (
           <button
             type="button"
             className={styles.action}
             onClick={() => useUIStore.getState().requestTerminalNav(projectPath)}
           >
-            <SquareTerminal size={15} strokeWidth={1.8} />
+            <SquareTerminal size={13} strokeWidth={1.8} />
             {t("projects.open_terminal", "打开终端")}
           </button>
-        )}
-      </div>
-    </div>
+        )
+      }
+    />
   );
 }
