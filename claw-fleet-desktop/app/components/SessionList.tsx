@@ -28,7 +28,7 @@ import { ResizeHandle } from "./ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
-import { GLOBAL_MEMORY_FILTER, navSectionOfPage, navSectionTarget, type NavSection } from "./navGroups";
+import { navSectionOf, navSectionTarget, type NavSection } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { fmtBadgeCount } from "../railNumbers";
 
@@ -118,24 +118,19 @@ export function SessionList() {
     settle.current = collapsed ? "collapsed" : "expanded";
   }
 
-  const memoryFilter = useUIStore((s) => s.mainViewState.memory.workspaceFilter);
-  const current = navSectionOfPage(viewMode, memoryFilter);
+  const current = navSectionOf(viewMode);
   // Re-clicking the entry of the page on screen folds that page's secondary
   // sidebar instead of being a no-op.
   const goSection = useCallback(
     (section: NavSection) => {
       const target = navSectionTarget(section, navLastBySection, avail);
-      // Projects' memory page is project memory; global memory is a Settings page.
-      if (target === "memory" && memoryFilter === GLOBAL_MEMORY_FILTER) {
-        useUIStore.getState().updateMainViewState("memory", { workspaceFilter: "all", selectedKey: null });
-      }
       if (viewMode === target && SECONDARY_SIDEBAR_VIEWS.has(target)) {
         toggleSecondarySidebar(target);
       } else {
         setViewMode(target);
       }
     },
-    [viewMode, navLastBySection, avail, memoryFilter, setViewMode, toggleSecondarySidebar],
+    [viewMode, navLastBySection, avail, setViewMode, toggleSecondarySidebar],
   );
 
   // ⌘N / Ctrl+N anywhere: back to the Tasks page with the new-task composer open.

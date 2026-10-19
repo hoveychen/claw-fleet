@@ -4,10 +4,8 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Brain,
   CalendarClock,
   Copy,
-  FileText,
   FolderGit2,
   FolderOpen,
   FolderPlus,
@@ -32,6 +30,7 @@ import { CloneRepoDialog } from "./CloneRepoDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { DirPickerDialog } from "./DirPickerDialog";
 import { EmptyState } from "./EmptyState";
+import { ProjectMemory } from "./MemoryView";
 import { WorkspaceExplorer } from "./FilesView";
 import { PageShell } from "./PageShell";
 import { Presence } from "./Presence";
@@ -59,9 +58,7 @@ function parentDir(p: string): string {
 
 /**
  * 项目 (Projects): one row per code directory, and for the picked one its
- * routines, memory and code. Routines and code are shown in place; memory
- * hands over to its full page (记忆, another segment of this section)
- * pre-filtered to the project, since that page owns the editor.
+ * routines, memory and code, all shown in place.
  */
 export function ProjectsView() {
   const { t } = useTranslation();
@@ -415,88 +412,6 @@ export function ProjectsView() {
         )}
       </Presence>
     </PageShell>
-  );
-}
-
-interface MemoryFile {
-  name: string;
-  title?: string;
-  description?: string;
-  modifiedMs: number;
-}
-
-interface WorkspaceMemory {
-  workspacePath: string;
-  projectKey: string;
-  hasClaudeMd: boolean;
-  files: MemoryFile[];
-}
-
-/** The project's memory files (every harness's store whose workspace folds to
- *  this repo root). A click opens the Memory page on that file. */
-function ProjectMemory({ projectPath }: { projectPath: string }) {
-  const { t } = useTranslation();
-  const [stores, setStores] = useState<WorkspaceMemory[] | null>(null);
-  useEffect(() => {
-    let alive = true;
-    invoke<WorkspaceMemory[]>("list_memories")
-      .then((all) => {
-        if (alive) setStores((all ?? []).filter((ws) => repoRootPath(ws.workspacePath) === projectPath));
-      })
-      .catch(() => alive && setStores([]));
-    return () => {
-      alive = false;
-    };
-  }, [projectPath]);
-
-  const open = (projectKey: string, selectedKey: string) => {
-    const s = useUIStore.getState();
-    s.updateMainViewState("memory", { workspaceFilter: projectKey, selectedKey });
-    s.setViewMode("memory");
-  };
-
-  if (stores === null) return <SkeletonList rows={5} />;
-  const rows = stores.flatMap((ws) => [
-    ...(ws.hasClaudeMd
-      ? [{ key: `claudeMd:${ws.projectKey}`, projectKey: ws.projectKey, title: "CLAUDE.md", sub: "", ms: 0, md: true }]
-      : []),
-    ...ws.files.map((f) => ({
-      key: `file:${ws.projectKey}:${f.name}`,
-      projectKey: ws.projectKey,
-      title: f.title || f.name,
-      sub: f.description ?? "",
-      ms: f.modifiedMs,
-      md: false,
-    })),
-  ]);
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<Brain size={28} strokeWidth={1.5} />}
-        title={t("projects.memory_empty", "这个项目还没有记忆")}
-        subtitle={t("projects.memory_empty_sub", "agent 在这里干活时记下的要点会出现在这里。")}
-      />
-    );
-  }
-  return (
-    <div className={styles.pane_list}>
-      {rows.map((r) => (
-        <button key={r.key} type="button" className={styles.row} onClick={() => open(r.projectKey, r.key)}>
-          <span className={styles.icon}>
-            {r.md ? <FileText size={15} strokeWidth={1.6} /> : <Brain size={15} strokeWidth={1.6} />}
-          </span>
-          <span className={styles.body}>
-            <span className={styles.title}>{r.title}</span>
-            {(r.sub || r.ms > 0) && (
-              <span className={styles.meta}>
-                {r.sub && <span className={styles.path}>{r.sub}</span>}
-                {r.ms > 0 && <span className={styles.time}>{timeAgo(r.ms, t)}</span>}
-              </span>
-            )}
-          </span>
-        </button>
-      ))}
-    </div>
   );
 }
 

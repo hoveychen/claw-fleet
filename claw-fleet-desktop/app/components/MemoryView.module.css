@@ -48,6 +48,27 @@
   position: relative;
 }
 
+/* A project's memory tab: the same list and detail as the global page, side by
+   side inside the project pane instead of in PageShell's rail and main. */
+.project_split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.project_list {
+  flex: 0 0 320px;
+  border-right: 1px solid var(--color-border);
+}
+
+.project_detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

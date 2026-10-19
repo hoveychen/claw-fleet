@@ -21,12 +21,12 @@ export const ALL_NAV_SECTIONS: readonly NavSection[] = [...NAV_SECTIONS, "review
 export const NAV_SECTION_VIEWS: Record<NavSection, readonly ViewMode[]> = {
   tasks: ["history"],
   library: ["library", "wiki", "artifacts"],
-  projects: ["projects", "terminal", "memory"],
+  projects: ["projects", "terminal"],
   review: ["report"],
   // Reached from the Settings overlay ("more pages"); the nav entry itself
   // opens the overlay. The lobster fleet is an opt-in easter egg launched from
   // its own Settings toggle, never from the nav.
-  settings: ["audit", "skills", "plugins", "mobile", "lobsters"],
+  settings: ["audit", "skills", "plugins", "mobile", "lobsters", "memory"],
 };
 
 /** Where the app lands when nothing else picks a page. */
@@ -39,18 +39,6 @@ const SECTION_OF = new Map<ViewMode, NavSection>(
 /** Which nav entry a page lights up. */
 export function navSectionOf(view: ViewMode): NavSection {
   return SECTION_OF.get(view) ?? "tasks";
-}
-
-/** The memory page's workspace filter for the machine-wide bucket. */
-export const GLOBAL_MEMORY_FILTER = "__global__";
-
-/** {@link navSectionOf}, refined by what the page is showing. The memory page
- *  belongs to Projects, but filtered to global memory it is Settings' "global
- *  memory" page, so Settings is what lights up (and the Projects segment
- *  switch is not drawn over it). */
-export function navSectionOfPage(view: ViewMode, memoryFilter: string): NavSection {
-  if (view === "memory" && memoryFilter === GLOBAL_MEMORY_FILTER) return "settings";
-  return navSectionOf(view);
 }
 
 /** Pages that exist only on some hosts. Terminal needs the backend's
@@ -93,10 +81,14 @@ export function navTabOf(view: ViewMode): ViewMode {
   return TAB_ALIAS[view] ?? view;
 }
 
-/** Segments of a section's switch, in order. The lobster fleet is an easter
- *  egg opened from Settings and never offered as a segment. */
+/** Pages Settings opens from its own panel and never offers as a segment: the
+ *  lobster fleet (an easter egg) and global memory (project memory is a tab of
+ *  each project, so a bare "memory" segment would read as all of it). */
+const PANEL_ONLY: ReadonlySet<ViewMode> = new Set<ViewMode>(["lobsters", "memory"]);
+
+/** Segments of a section's switch, in order. */
 export function navSectionTabs(section: NavSection, avail: NavAvailability): ViewMode[] {
   return NAV_SECTION_VIEWS[section].filter(
-    (v) => v !== "lobsters" && !TAB_ALIAS[v] && isViewAvailable(v, avail),
+    (v) => !PANEL_ONLY.has(v) && !TAB_ALIAS[v] && isViewAvailable(v, avail),
   );
 }

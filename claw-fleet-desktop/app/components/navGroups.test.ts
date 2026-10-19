@@ -4,9 +4,7 @@ import {
   NAV_HOME,
   NAV_SECTIONS,
   NAV_SECTION_VIEWS,
-  GLOBAL_MEMORY_FILTER,
   navSectionOf,
-  navSectionOfPage,
   navSectionTabs,
   navSectionTarget,
   navTabOf,
@@ -29,12 +27,14 @@ describe("nav sections", () => {
     expect([...listed].sort()).toEqual([...ALL_VIEW_MODES].sort());
   });
 
-  it("files documents and deliverables under Library, code and memory under Projects", () => {
+  it("files documents and deliverables under Library, code under Projects, global memory under Settings", () => {
     expect(navSectionOf("wiki")).toBe("library");
     expect(navSectionOf("artifacts")).toBe("library");
-    for (const v of ["projects", "terminal", "memory"] as const) {
+    for (const v of ["projects", "terminal"] as const) {
       expect(navSectionOf(v)).toBe("projects");
     }
+    // Project memory is a tab of each project; the memory page is global memory.
+    expect(navSectionOf("memory")).toBe("settings");
     expect(navSectionOf("lobsters")).toBe("settings");
     // The daily review is its own secondary entry beside Settings.
     expect(navSectionOf("report")).toBe("review");
@@ -55,20 +55,13 @@ describe("nav sections", () => {
   it("skips pages this host does not have", () => {
     const avail = { terminal: false, mobile: false, lobsters: false };
     expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("projects");
-    expect(navSectionTabs("projects", avail)).toEqual(["projects", "memory"]);
+    expect(navSectionTabs("projects", avail)).toEqual(["projects"]);
   });
 
-  it("folds plugins into the Skills segment and never offers the lobster fleet", () => {
+  it("folds plugins into the Skills segment and never offers the lobster fleet or global memory", () => {
     const avail = { terminal: true, mobile: true, lobsters: true };
     expect(navSectionTabs("settings", avail)).toEqual(["audit", "skills", "mobile"]);
     expect(navTabOf("plugins")).toBe("skills");
     expect(navTabOf("audit")).toBe("audit");
-  });
-
-  it("lights Settings for global memory and Projects for project memory", () => {
-    expect(navSectionOfPage("memory", GLOBAL_MEMORY_FILTER)).toBe("settings");
-    expect(navSectionOfPage("memory", "all")).toBe("projects");
-    expect(navSectionOfPage("memory", "-Users-me-repo")).toBe("projects");
-    expect(navSectionOfPage("terminal", GLOBAL_MEMORY_FILTER)).toBe("projects");
   });
 });

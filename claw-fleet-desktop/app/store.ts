@@ -52,7 +52,6 @@ export interface MainViewState {
     query: string;
     filterType: string;
     sourceFilter: "all" | "claude-code" | "codex";
-    workspaceFilter: string;
     expandedKeys: string[];
     selectedKey: string | null;
     detailTab: "content" | "history";
@@ -122,7 +121,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     query: "",
     filterType: "all",
     sourceFilter: "all",
-    workspaceFilter: "all",
     expandedKeys: [],
     selectedKey: null,
     detailTab: "content",

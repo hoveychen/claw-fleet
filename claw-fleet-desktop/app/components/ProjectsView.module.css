@@ -183,16 +183,6 @@
   overflow: hidden;
 }
 
-.pane_list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--space-3) var(--space-5);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
 .action {
   display: inline-flex;
   align-items: center;
