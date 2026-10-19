@@ -125,6 +125,11 @@
 .root:not(.inline).rail_open .hero {
   padding-right: 16px;
 }
+/* ...and the rail, which then holds that corner, clears the buttons from its
+   top instead. Inline hosts sit below a chrome strip that already does. */
+.root:not(.inline) .task_rail {
+  padding-top: max(10px, calc(var(--win-caption-inset-y) - var(--slab-gap, 0px)));
+}
 
 /* Identity on the left, toolbar on the right. */
 .hero_top {

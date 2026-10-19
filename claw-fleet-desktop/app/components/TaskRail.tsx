@@ -82,6 +82,7 @@ export function TaskRail({
   ambient,
   empty,
   developer,
+  className,
 }: {
   /** The task the open session belongs to; null on a session with no task,
    *  where only the ambient sections and the developer view apply. */
@@ -100,6 +101,8 @@ export function TaskRail({
   /** The developer view's content, built by the conversation pane that owns
    *  the facets it opens. */
   developer: ReactNode;
+  /** Host-specific placement, e.g. the standalone pane's caption inset. */
+  className?: string;
 }) {
   const { t } = useTranslation();
   const untitled = t("history.untitled");
@@ -115,7 +118,7 @@ export function TaskRail({
   const current = steps?.findIndex((s) => !s.done) ?? -1;
 
   return (
-    <aside className={styles.rail} data-testid="task-rail">
+    <aside className={`${styles.rail} ${className ?? ""}`} data-testid="task-rail">
       {/* Held open by the switch with nothing in it. Saying so beats a blank
           column, which reads as the rail having failed to load. */}
       {empty && <p className={styles.empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}

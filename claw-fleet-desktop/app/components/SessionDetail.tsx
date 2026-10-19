@@ -2117,6 +2117,7 @@ export function SessionDetail({
                 openSessionId={liveSession.id}
                 steps={taskSteps}
                 artifacts={taskArtifacts}
+                className={styles.task_rail}
                 onOpenSession={(id) => onOpenSession?.(id)}
                 empty={!railHasContent}
                 ambient={
