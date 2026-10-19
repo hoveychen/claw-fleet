@@ -19,7 +19,7 @@ import "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { NewSessionForm } from "./NewSessionForm";
 import { useComposerDraftStore } from "../composerDraft";
-import { useSessionsStore } from "../store";
+import { useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,14 +71,12 @@ function session(workspacePath: string): SessionInfo {
   } as unknown as SessionInfo;
 }
 
-async function mount(opts: { showExamples?: boolean } = {}) {
+async function mount() {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(
-      <NewSessionForm onCreated={() => {}} onCancel={() => {}} showExamples={opts.showExamples} />,
-    );
+    root!.render(<NewSessionForm onCreated={() => {}} onCancel={() => {}} />);
   });
   // Let the chat_workspace / sources round-trips land.
   await act(async () => {
@@ -181,31 +179,24 @@ describe("NewSessionForm chat-mode pill", () => {
   it("asks for a directory, not chat, on a host with no project workspaces yet", async () => {
     await mount();
     // A fresh install must not be dropped into chat: the form opens with no
-    // directory and a button to pick one.
+    // directory (the empty task column offers the picker).
     expect(pill().getAttribute("aria-pressed")).toBe("false");
-    expect(document.querySelector('[data-testid="pick-workspace-btn"]')).not.toBeNull();
     await click(pill());
     expect(pill().getAttribute("aria-pressed")).toBe("true");
-    expect(document.querySelector('[data-testid="pick-workspace-btn"]')).toBeNull();
     await click(pill());
     expect(pill().getAttribute("aria-pressed")).toBe("false");
   });
 });
 
-describe("NewSessionForm example prompts", () => {
-  const examples = () =>
-    Array.from(container!.querySelectorAll<HTMLButtonElement>('[data-testid="new-session-examples"] button'));
-
-  it("renders only when asked to", async () => {
+describe("NewSessionForm workspace pick request", () => {
+  it("opens the directory picker when the store asks, but not on mount", async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const openMock = vi.mocked(open);
+    openMock.mockClear();
+    useUIStore.getState().requestWorkspacePick();
     await mount();
-    expect(examples()).toHaveLength(0);
-  });
-
-  it("fills the composer and switches chat on for the chat example", async () => {
-    await mount({ showExamples: true });
-    expect(examples()).toHaveLength(4);
-    await click(examples()[3]);
-    expect(pill().getAttribute("aria-pressed")).toBe("true");
-    expect(useComposerDraftStore.getState().drafts["new"]?.prompt).toBeTruthy();
+    expect(openMock).not.toHaveBeenCalled();
+    await act(async () => useUIStore.getState().requestWorkspacePick());
+    expect(openMock).toHaveBeenCalledTimes(1);
   });
 });

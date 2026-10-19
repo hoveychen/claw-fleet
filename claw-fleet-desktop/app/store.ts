@@ -246,6 +246,11 @@ interface UIState {
    *  panel restored on boot is not a preference, it is a surprise. */
   settingsOpen: boolean;
   setSettingsOpen: (on: boolean) => void;
+  /** Bumped to ask the new-task form to open its directory picker. The empty
+   *  task column's button raises it; the form owns the picker (native dialog,
+   *  the browser build's backend picker), so it is a request, not a path. */
+  workspacePickNonce: number;
+  requestWorkspacePick: () => void;
   /** A pending "reveal this file" request, raised when the user clicks a path
    *  in agent prose. It opens the Projects page on the path's project, code
    *  tab; the explorer there owns its selection state internally, so the
@@ -699,6 +704,8 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   settingsOpen: false,
   setSettingsOpen: (on) => set({ settingsOpen: on }),
+  workspacePickNonce: 0,
+  requestWorkspacePick: () => set((s) => ({ workspacePickNonce: s.workspacePickNonce + 1 })),
   setMascotVisible: (on) => {
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});

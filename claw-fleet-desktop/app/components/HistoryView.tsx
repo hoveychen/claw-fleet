@@ -302,6 +302,7 @@ export function HistoryView() {
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
   // the user's back (a waiting-input alert forcing setViewMode("list") is enough).
+  const requestWorkspacePick = useUIStore((s) => s.requestWorkspacePick);
   const query = useUIStore((s) => s.historyQuery);
   const setQuery = useUIStore((s) => s.setHistoryQuery);
   // Project scope: one repository root, or null for every project. Kept apart
@@ -1050,15 +1051,21 @@ export function HistoryView() {
           {!scanReady ? (
             <SkeletonList rows={8} avatar rowHeight={48} className={styles.rail_skeleton} />
           ) : allRows.length === 0 ? (
-            // No task at all yet: say what happens after the first prompt, not
-            // just where to type it. Gone as soon as one task exists.
-            <div className={styles.empty_intro} data-testid="home-empty-intro">
-              <p className={styles.empty_intro_title}>{t("home.empty")}</p>
-              <ol className={styles.empty_steps}>
-                <li>{t("home.empty_step_write")}</li>
-                <li>{t("home.empty_step_run")}</li>
-                <li>{t("home.empty_step_ask")}</li>
-              </ol>
+            // No task yet, so no recent directory either: the one thing to do
+            // first is pick a project. The form owns the picker; ask it.
+            <div className={styles.empty_hint} data-testid="home-empty-hint">
+              <p className={styles.empty_hint_text}>{t("home.empty")}</p>
+              <button
+                type="button"
+                className={styles.empty_hint_action}
+                onClick={() => {
+                  if (openId != null && openId !== DRAFT_ID) setOpenId(null);
+                  requestWorkspacePick();
+                }}
+              >
+                <FolderOpen size={14} strokeWidth={1.7} />
+                {t("home.empty_pick")}
+              </button>
             </div>
           ) : rows.length === 0 ? (
             <div className={styles.empty}>{t("home.no_match")}</div>
@@ -1237,7 +1244,6 @@ export function HistoryView() {
                 onLaunching={handleLaunching}
                 onLaunchFailed={handleLaunchFailed}
                 onCreated={handleCreated}
-                showExamples={scanReady && allRows.length === 0}
               />
             </div>
           )}
