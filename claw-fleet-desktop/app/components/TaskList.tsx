@@ -1,6 +1,6 @@
 import { memo, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { TaskState } from "../../../shared-ts/taskState";
 import type { SessionInfo } from "../types";
@@ -85,6 +85,56 @@ function rowTime(row: HomeRow, t: TFunction, now: number): string {
   }
 }
 
+/** The row's leading mark. A task row's is a toggle — the state dot that, on
+ *  hover, offers to mark the task done; a closed task shows how it was closed
+ *  (a tick for completed, a cross for abandoned) and clicking reopens it. A
+ *  card row has no task to close, so its dot is just a dot. */
+function RowMark({
+  row,
+  onSetDone,
+}: {
+  row: HomeRow;
+  onSetDone: (row: TaskRow, done: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  if (row.kind !== "task") {
+    return <span className={styles.dot} style={{ background: STATE_DOT[row.state] }} />;
+  }
+  const closed = row.state === "done";
+  const tip = !closed
+    ? t("home.mark_done_tip")
+    : row.outcome === "abandoned"
+      ? t("home.mark_abandoned_tip")
+      : t("home.mark_completed_tip");
+  return (
+    <button
+      type="button"
+      className={`${styles.mark} ${closed ? styles.mark_closed : ""}`}
+      data-testid="task-mark"
+      data-outcome={closed ? (row.outcome ?? "completed") : undefined}
+      title={tip}
+      aria-label={tip}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSetDone(row, !closed);
+      }}
+    >
+      {closed ? (
+        row.outcome === "abandoned" ? (
+          <X size={12} strokeWidth={2.5} />
+        ) : (
+          <Check size={12} strokeWidth={2.5} />
+        )
+      ) : (
+        <>
+          <span className={styles.dot} style={{ background: STATE_DOT[row.state] }} />
+          <Check className={styles.mark_hover} size={12} strokeWidth={2.5} />
+        </>
+      )}
+    </button>
+  );
+}
+
 interface RowProps {
   row: HomeRow;
   active: boolean;
@@ -95,6 +145,7 @@ interface RowProps {
   onContextMenu: (e: MouseEvent, row: HomeRow) => void;
   onScopeProject: (path: string) => void;
   onAccept: (rows: TaskRow[]) => void;
+  onSetDone: (row: TaskRow, done: boolean) => void;
 }
 
 const TaskListRow = memo(function TaskListRow({
@@ -105,10 +156,14 @@ const TaskListRow = memo(function TaskListRow({
   onContextMenu,
   onScopeProject,
   onAccept,
+  onSetDone,
 }: RowProps) {
   const { t } = useTranslation();
   const now = Date.now();
-  const detail = detailText(rowDetail(row, t("history.untitled")), row, t, now);
+  const abandoned = row.kind === "task" && row.state === "done" && row.outcome === "abandoned";
+  const detail =
+    detailText(rowDetail(row, t("history.untitled")), row, t, now) ||
+    (abandoned ? t("home.detail_abandoned") : "");
   const time = rowTime(row, t, now);
   return (
     <div
@@ -127,7 +182,7 @@ const TaskListRow = memo(function TaskListRow({
       onContextMenu={(e) => onContextMenu(e, row)}
     >
       <div className={styles.line1}>
-        <span className={styles.dot} style={{ background: STATE_DOT[row.state] }} />
+        <RowMark row={row} onSetDone={onSetDone} />
         <span className={styles.title} title={row.title}>
           {row.title}
         </span>
@@ -184,6 +239,8 @@ export interface TaskListProps {
   onContextMenu: (e: MouseEvent, row: HomeRow) => void;
   onScopeProject: (path: string) => void;
   onAccept: (rows: TaskRow[]) => void;
+  /** Mark a task done (`true`, the accept path) or reopen it (`false`). */
+  onSetDone: (row: TaskRow, done: boolean) => void;
 }
 
 /** The home's task column: the five state sections, each a list of two-line
@@ -199,6 +256,7 @@ export function TaskList({
   onContextMenu,
   onScopeProject,
   onAccept,
+  onSetDone,
 }: TaskListProps) {
   const { t } = useTranslation();
   return (
@@ -247,6 +305,7 @@ export function TaskList({
                   onContextMenu={onContextMenu}
                   onScopeProject={onScopeProject}
                   onAccept={onAccept}
+                  onSetDone={onSetDone}
                 />
               ))}
           </section>

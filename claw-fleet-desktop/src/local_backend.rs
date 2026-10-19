@@ -2559,6 +2559,12 @@ impl LocalBackend {
         n
     }
 
+    pub fn reopen_tasks(&self, session_ids: &[String]) -> usize {
+        let n = claw_fleet_core::task_model::reopen_tasks(session_ids);
+        self.restamp_marks_and_emit();
+        n
+    }
+
     pub fn set_session_title(
         &self,
         session_id: String,

@@ -30,6 +30,29 @@ pub(crate) fn route_tasks_accept(
     );
 }
 
+/// Undo an acceptance / a terminal button: see `task_model::reopen_tasks`.
+pub(crate) fn route_tasks_reopen(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) =
+        match serde_json::from_slice::<crate::task_model::AcceptTasksRequest>(&body_bytes) {
+            Ok(req) => {
+                let reopened = crate::task_model::reopen_tasks(&req.session_ids);
+                (200, serde_json::json!({ "ok": true, "reopened": reopened }))
+            }
+            Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),
+        };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
 pub(crate) fn route_session_mark(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

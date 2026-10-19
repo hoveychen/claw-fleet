@@ -106,6 +106,8 @@ describe("buildTaskRows", () => {
   it("reads a closed task as done", () => {
     const rows = build([s({ id: "t", taskId: "t", taskOutcome: "completed" })]);
     expect(rows[0].state).toBe("done");
+    expect(rows[0].outcome).toBe("completed");
+    expect(build([s({ id: "a", taskId: "a", taskOutcome: "abandoned" })])[0].outcome).toBe("abandoned");
   });
 
   it("closes a stopped sub-task along with its accepted parent, not a moving one", () => {

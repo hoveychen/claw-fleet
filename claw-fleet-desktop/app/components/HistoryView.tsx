@@ -7,12 +7,14 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  CircleCheck,
   Copy,
   Folder,
   FolderOpen,
   PanelRightOpen,
   Pencil,
   Plus,
+  RotateCcw,
   Square,
   X,
 } from "lucide-react";
@@ -388,9 +390,11 @@ export function HistoryView() {
 
   const pendingDecisions = useDecisionStore((s) => s.decisions);
 
-  // Tasks the boss pressed "accept" on, shown as done until the scan agrees
-  // (or the write fails and they come back).
+  // Tasks the boss pressed "accept" / "mark done" on, shown as done until the
+  // scan agrees (or the write fails and they come back). `reopeningKeys` is the
+  // same for "mark in progress" on a closed task.
   const [acceptingKeys, setAcceptingKeys] = useState<Set<string>>(() => new Set());
+  const [reopeningKeys, setReopeningKeys] = useState<Set<string>>(() => new Set());
 
   // Every task and stray card, before scope and search: the project menu counts
   // over this, so it answers "which project" rather than "what is on screen".
@@ -400,12 +404,20 @@ export function HistoryView() {
       isWaking: (s, pending) => isWakingSticky(s, pending),
       untitled: t("history.untitled"),
     });
-    if (acceptingKeys.size === 0) return built;
-    return built.map((r) =>
-      acceptingKeys.has(r.key) && r.state === "review" ? { ...r, state: "done" as const } : r,
-    );
+    if (acceptingKeys.size === 0 && reopeningKeys.size === 0) return built;
+    return built.map((r) => {
+      if (r.kind !== "task") return r;
+      // A pending card keeps the task under "needs you" whatever its outcome.
+      if (acceptingKeys.has(r.key) && r.state !== "done" && !r.mainPending) {
+        return { ...r, state: "done" as const, outcome: "completed" as const };
+      }
+      if (reopeningKeys.has(r.key) && r.state === "done") {
+        return { ...r, state: "review" as const, outcome: null };
+      }
+      return r;
+    });
     // nowTick: the quiet latch is time-based, so re-derive on the slow tick too.
-  }, [sessions, pendingDecisions, acceptingKeys, t, nowTick]);
+  }, [sessions, pendingDecisions, acceptingKeys, reopeningKeys, t, nowTick]);
 
   // Drop optimistic accepts the scan has caught up with.
   useEffect(() => {
@@ -419,6 +431,15 @@ export function HistoryView() {
     const kept = [...acceptingKeys].filter((k) => live.has(k) && !settled.has(k));
     if (kept.length !== acceptingKeys.size) setAcceptingKeys(new Set(kept));
   }, [allRows, acceptingKeys]);
+  useEffect(() => {
+    if (reopeningKeys.size === 0) return;
+    const live = new Map(allRows.map((r) => [r.key, r]));
+    const kept = [...reopeningKeys].filter((k) => {
+      const r = live.get(k);
+      return r?.kind === "task" && r.hops.some((h) => h.taskOutcome);
+    });
+    if (kept.length !== reopeningKeys.size) setReopeningKeys(new Set(kept));
+  }, [allRows, reopeningKeys]);
 
   const acceptTasks = useCallback((targets: TaskRow[]) => {
     if (targets.length === 0) return;
@@ -436,6 +457,28 @@ export function HistoryView() {
       },
     );
   }, []);
+
+  const reopenTasks = useCallback((targets: TaskRow[]) => {
+    if (targets.length === 0) return;
+    const keys = targets.map((r) => r.key);
+    setReopeningKeys((prev) => new Set([...prev, ...keys]));
+    invoke<number>("reopen_tasks", { sessionIds: targets.map((r) => r.tip.id) }).catch((e) => {
+      setReopeningKeys((prev) => {
+        const next = new Set(prev);
+        for (const k of keys) next.delete(k);
+        return next;
+      });
+      console.error("reopen_tasks failed", e);
+    });
+  }, []);
+
+  // The row's leading toggle and its menu twin: "mark done" goes through the
+  // same accept path as the review section's button (whole relay chain,
+  // retrospective included); "mark in progress" reopens.
+  const setTaskDone = useCallback(
+    (row: TaskRow, done: boolean) => (done ? acceptTasks([row]) : reopenTasks([row])),
+    [acceptTasks, reopenTasks],
+  );
 
   // Every project on the home, for the scope menu, chat pinned first.
   const projectOptions = useMemo(() => {
@@ -549,6 +592,7 @@ export function HistoryView() {
   // onContextMenu each render would re-render every row on every scan.
   const [menuAnchor, setMenuAnchor] = useState<ContextMenuAnchor | null>(null);
   const [menuSession, setMenuSession] = useState<SessionInfo | null>(null);
+  const [menuRow, setMenuRow] = useState<HomeRow | null>(null);
   const openRowMenu = useCallback((e: React.MouseEvent, row: HomeRow) => {
     // Suppress the app-wide (Settings/About/Quit) menu, same as ContextMenu's
     // own callers do.
@@ -557,11 +601,13 @@ export function HistoryView() {
     const s = rowMenuSession(row);
     if (!s) return;
     setMenuSession(s);
+    setMenuRow(row);
     setMenuAnchor({ x: e.clientX, y: e.clientY });
   }, []);
   const closeRowMenu = useCallback(() => {
     setMenuAnchor(null);
     setMenuSession(null);
+    setMenuRow(null);
   }, []);
 
   // Manual title override ("Rename"). Held here so the dialog outlives the
@@ -576,7 +622,7 @@ export function HistoryView() {
   }, []);
 
   const rowMenuItems = useCallback(
-    (s: SessionInfo): ContextMenuItem[] => {
+    (s: SessionInfo, row: HomeRow | null): ContextMenuItem[] => {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
@@ -589,6 +635,15 @@ export function HistoryView() {
           onSelect: () => handleRowClick(s),
         },
       ];
+      if (row?.kind === "task") {
+        const closed = row.state === "done";
+        items.push({
+          id: closed ? "mark-open" : "mark-done",
+          label: closed ? t("home.mark_open") : t("home.mark_done"),
+          icon: closed ? <RotateCcw size={13} /> : <CircleCheck size={13} />,
+          onSelect: () => setTaskDone(row, !closed),
+        });
+      }
       items.push({
         id: "rename",
         label: t("history.menu_rename", "重命名"),
@@ -632,7 +687,7 @@ export function HistoryView() {
       }
       return items;
     },
-    [t, handleRowClick, copyText, patchOptimistic],
+    [t, handleRowClick, copyText, patchOptimistic, setTaskDone],
   );
 
   // Back out of the composer, abandoning any in-flight spawn correlation so a
@@ -989,12 +1044,13 @@ export function HistoryView() {
               onContextMenu={openRowMenu}
               onScopeProject={setScope}
               onAccept={acceptTasks}
+              onSetDone={setTaskDone}
             />
           )}
           <Presence when={Boolean(menuAnchor && menuSession)}>{menuAnchor && menuSession && (
             <ContextMenu
               anchor={menuAnchor}
-              items={rowMenuItems(menuSession)}
+              items={rowMenuItems(menuSession, menuRow)}
               onClose={closeRowMenu}
             />
           )}</Presence>

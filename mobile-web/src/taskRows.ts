@@ -44,6 +44,9 @@ export interface TaskRow<T extends Row = Row> {
   projectName: string;
   /** A card from the main conversation is waiting. */
   mainPending: boolean;
+  /** How the boss closed the task, if they did: tells a finished task from a
+   *  given-up one inside the "done" section. */
+  outcome: "completed" | "abandoned" | null;
   lastActivityMs: number;
 }
 
@@ -167,6 +170,7 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
       projectKey: projectScopeKey(tip.deviceId, path, opts.multiDevice),
       projectName: device ? `${device} · ${tip.workspaceName}` : tip.workspaceName,
       mainPending: hops.some((h) => opts.isPending(h.deviceId, h.id)),
+      outcome,
       lastActivityMs: Math.max(
         ...hops.map((h) => h.lastActivityMs),
         ...allSubHops.map((h) => h.lastActivityMs),

@@ -278,6 +278,16 @@ pub(crate) fn accept_tasks(
     Ok(state.backend.accept_tasks(&session_ids))
 }
 
+/// Reopen tasks (改回进行中 / 撤销验收): clear the outcome across each named
+/// task's relay chain without relaunching it. Returns how many tasks.
+#[tauri::command(async)]
+pub(crate) fn reopen_tasks(
+    session_ids: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    Ok(state.backend.reopen_tasks(&session_ids))
+}
+
 /// Set (or clear, when `mark` is null) the human's manual review mark for a
 /// session. Written to the local side-channel file.
 #[tauri::command(async)]

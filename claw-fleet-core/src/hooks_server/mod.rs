@@ -1746,6 +1746,7 @@ fn handle_request(
 
             // ── Accept tasks from the task list (验收 / 全部验收) ─────────────
             crate::routes::TASKS_ACCEPT => route_tasks_accept(ctx, request, json_header),
+            crate::routes::TASKS_REOPEN => route_tasks_reopen(ctx, request, json_header),
 
             // ── Session mark (manual done/pending review state) ──────────────
             crate::routes::SESSION_MARK => {

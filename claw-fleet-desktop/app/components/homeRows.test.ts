@@ -107,6 +107,14 @@ describe("buildHomeRows", () => {
   it("closes a task the boss finished even with nothing running", () => {
     const rows = build([session("main", { taskOutcome: "completed" })]);
     expect(rows[0].state).toBe("done");
+    expect(rows[0].kind === "task" && rows[0].outcome).toBe("completed");
+  });
+
+  it("tells an abandoned task from a completed one", () => {
+    const rows = build([session("main", { taskOutcome: "abandoned" })]);
+    expect(rows[0].state).toBe("done");
+    expect(rows[0].kind === "task" && rows[0].outcome).toBe("abandoned");
+    expect(build([session("open")])[0]).toMatchObject({ outcome: null });
   });
 
   it("closes a stopped sub-task along with its accepted parent, not a moving one", () => {

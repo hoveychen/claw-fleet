@@ -61,6 +61,9 @@ export interface TaskRow {
   projectName: string;
   /** A card from the main conversation is waiting. */
   mainPending: boolean;
+  /** How the boss closed the task, if they did: tells a finished task from a
+   *  given-up one inside the "done" section. */
+  outcome: "completed" | "abandoned" | null;
   startedAtMs: number;
   lastActivityMs: number;
 }
@@ -184,6 +187,7 @@ export function buildHomeRows(
       projectPath: repoRootPath(tip.workspacePath),
       projectName: tip.workspaceName,
       mainPending: hops.some(isPending),
+      outcome,
       startedAtMs: summary?.startedAtMs || Math.min(...hops.map((h) => h.createdAtMs)),
       lastActivityMs: Math.max(
         ...hops.map((h) => h.agentLastActivityMs || h.lastActivityMs),

@@ -497,6 +497,8 @@ const DICT: Record<string, string> = {
   "超出预计 {0}": "{0} past expected",
   "已完成 — 点击改回进行中": "Done — click to reset to in progress",
   "进行中 — 点击标为已完成": "In progress — click to mark done",
+  "已放弃 — 点击改回进行中": "Abandoned — click to reset to in progress",
+  已放弃: "Abandoned",
   "接力 {0}": "Relay {0}",
   "显示更早的 {0} 棒": "Show {0} earlier hop(s)",
   "整条接力链已完成 — 点击全部改回进行中": "Whole relay chain done — tap to reopen all",
