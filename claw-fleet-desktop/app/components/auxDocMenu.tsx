@@ -61,6 +61,9 @@ export interface AuxCardTail {
   isExpanded: boolean;
   onToggle: () => void;
   onClose: () => void;
+  /** Take the card out for good, when `onClose` only collapses it. A delete
+   *  needs this: a reader left on a deliverable that no longer exists. */
+  onRemove?: () => void;
   onCloseOthers: () => void;
   onCloseAll: () => void;
   /** Put the whole rail away — the header switch's action, offered from the

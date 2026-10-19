@@ -1617,15 +1617,12 @@ export function SessionDetail({
      mid-paragraph. The pin is dropped by the card's ✕ (and by switching
      sessions, which resets the whole aux state). */
   const railAgents = useMemo((): SessionInfo[] => {
-    const dismissed = new Set(aux.dismissedAgents);
-    const live = dismissed.size > 0
-      ? liveSubagents.filter((s) => !dismissed.has(s.id))
-      : liveSubagents;
+    const live = liveSubagents;
     const pinnedId = aux.pinnedAgent;
     if (!pinnedId || live.some((s) => s.id === pinnedId)) return live;
     const pinned = sessions.find((s) => s.id === pinnedId);
     return pinned ? [pinned, ...live].sort(byCreation) : live;
-  }, [aux.pinnedAgent, aux.dismissedAgents, liveSubagents, sessions]);
+  }, [aux.pinnedAgent, liveSubagents, sessions]);
   const railCards = railAgents.length + aux.docs.length + explains.length;
   const inSubtask = !!task && !!liveSession && !task.hops.some((h) => h.id === liveSession.id);
   const taskStepsPlan = (() => {

@@ -188,15 +188,6 @@ export function SessionAuxExplain({
         )}
         {status}
       </button>
-      <button
-        type="button"
-        className={styles.doc_card_close}
-        onClick={onClose}
-        title={t("common.close", "关闭")}
-        aria-label={t("common.close", "关闭")}
-      >
-        ✕
-      </button>
     </div>
   );
   if (!isOpen) {
@@ -252,7 +243,7 @@ export function SessionAuxExplain({
             <button
               type="button"
               className={styles.doc_card_close}
-              onClick={onClose}
+              onClick={onToggle}
               title={t("common.close", "关闭")}
               aria-label={t("common.close", "关闭")}
             >

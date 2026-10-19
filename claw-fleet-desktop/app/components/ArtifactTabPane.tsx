@@ -83,7 +83,7 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
       await invoke("delete_artifact", { id });
       // The card reading a deliverable that no longer exists is the one state
       // this must not leave behind, so dismissing it is part of the delete.
-      tail.onClose();
+      (tail.onRemove ?? tail.onClose)();
     } catch (e) {
       setError(t("artifacts.delete_failed", "删除失败：{{error}}", { error: String(e) }));
     }
