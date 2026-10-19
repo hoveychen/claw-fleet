@@ -2606,6 +2606,7 @@
     "rail_material": "Material",
     "rail_developer": "Developer view",
     "rail_main": "Main conversation",
+    "subtask_reported": "Reported back",
     "elapsed": "Running {{span}}"
   },
   "history": {

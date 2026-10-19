@@ -2600,6 +2600,7 @@
     "rail_material": "本任务资料",
     "rail_developer": "开发者视图",
     "rail_main": "主对话",
+    "subtask_reported": "已回报",
     "elapsed": "已运行 {{span}}"
   },
   "history": {
