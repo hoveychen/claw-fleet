@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -11,6 +11,7 @@ import {
   Ellipsis,
   Eye,
   EyeOff,
+  ExternalLink,
   FolderSearch,
   GitBranch,
   HardDrive,
@@ -20,14 +21,16 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { CopyButton } from "./CopyButton";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
-import { FileKindIcon, fileKind } from "./fileKind";
+import { FileKindIcon, fileKind, officeModeOf } from "./fileKind";
 import { EmptyState } from "./EmptyState";
+import { timeAgo } from "./timeAgo";
+import type { OfficeMode } from "../officePreview";
 import { canRevealPath } from "../canReveal";
 import {
   useUIStore,
   type FileNavRequest,
 } from "../store";
-import { FilePreview, FileTree } from "./ExplorerPane";
+import { FilePreview, FileTree, formatSize } from "./ExplorerPane";
 import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./ExplorerPane";
 import { planRevealFallback } from "./revealFallback";
 import { useResizableWidth } from "../hooks/useResizableWidth";
@@ -36,8 +39,12 @@ import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
 import { Presence } from "./Presence";
-import { Skeleton, SkeletonList, Spinner } from "./loading";
+import { Skeleton, SkeletonCard, SkeletonList, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
+
+// Lazy for the same reason as on the Library page: the Office renderers are
+// large and most visits to this page never open a document.
+const OfficePreview = lazy(() => import("./OfficePreview"));
 
 // ── Types (mirror claw-fleet-core/src/file_explorer.rs) ─────────────────────
 
@@ -541,7 +548,12 @@ export function WorkspaceExplorer({
                   {t("files.reveal_searching", "正在仓库里查找 {{path}}…", { path: revealSearch })}
                 </div>
               ) : activeFile && activeRoot ? (
-                <FilePreview file={activeFile} load={readFile} />
+                <WorkspaceFileView
+                  file={activeFile}
+                  workspace={workspace}
+                  root={activeRoot.path}
+                  readFile={readFile}
+                />
               ) : (
                 <RecentChanges git={git} onPick={revealFile} />
               )}
@@ -552,6 +564,170 @@ export function WorkspaceExplorer({
         {menu && <ContextMenu anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />}
       </Presence>
     </>
+  );
+}
+
+// ── One selected file: header + the right viewer for its type ────────────────
+
+interface ExplorerBytes {
+  base64: string;
+  mime: string;
+  sizeBytes: number;
+}
+
+/**
+ * A file the way a file manager shows it: what it is, how big, when it last
+ * changed, and a way to open it in the app that owns it. Office documents and
+ * PDFs render in place from their raw bytes; text, images and HTML go through
+ * the shared `FilePreview`; anything else gets an "open it" card instead of a
+ * dead-end "binary file" line.
+ */
+function WorkspaceFileView({
+  file,
+  workspace,
+  root,
+  readFile,
+}: {
+  file: ExplorerEntry;
+  workspace: string;
+  root: string;
+  readFile: (relPath: string) => Promise<ExplorerFileContent>;
+}) {
+  const { t } = useTranslation();
+  const kind = fileKind(file.name);
+  const office = officeModeOf(file.name);
+  const abs = `${root}/${file.relativePath}`;
+  const canOpen = canRevealPath();
+  const [openFailed, setOpenFailed] = useState(false);
+
+  const openDefault = async () => {
+    try {
+      await invoke("open_explorer_file", { workspace, root, relPath: file.relativePath });
+      setOpenFailed(false);
+    } catch {
+      setOpenFailed(true);
+      setTimeout(() => setOpenFailed(false), 2000);
+    }
+  };
+
+  const meta = [
+    t(`files.kind.${kind}`),
+    file.sizeBytes > 0 ? formatSize(file.sizeBytes) : null,
+    file.modifiedMs > 0 ? t("files.modified", { when: timeAgo(file.modifiedMs, t) }) : null,
+  ].filter(Boolean);
+
+  const noPreview = (
+    <EmptyState
+      icon={<FileKindIcon kind={kind} size={28} />}
+      title={t("files.no_preview_title")}
+      subtitle={canOpen ? t("files.no_preview_sub") : undefined}
+      action={canOpen ? { label: t("files.open_default"), onClick: () => void openDefault() } : undefined}
+    />
+  );
+
+  return (
+    <div className={fileStyles.file_view}>
+      <div className={fileStyles.file_head}>
+        <FileKindIcon kind={kind} size={26} className={fileStyles.kind_icon} />
+        <div className={fileStyles.file_head_text}>
+          <span className={fileStyles.file_head_name}>{file.name}</span>
+          <span className={fileStyles.file_head_meta}>{meta.join(" · ")}</span>
+        </div>
+        <div className={fileStyles.file_head_actions}>
+          {canOpen && (
+            <button type="button" className={fileStyles.head_btn} onClick={() => void openDefault()}>
+              <ExternalLink size={13} strokeWidth={1.7} />
+              {openFailed ? t("files.open_failed") : t("files.open_default")}
+            </button>
+          )}
+          {canOpen && (
+            <button
+              type="button"
+              className={fileStyles.icon_btn}
+              onClick={() => void invoke("reveal_path", { path: abs }).catch(() => {})}
+              title={t(revealKeyFor())}
+              aria-label={t(revealKeyFor())}
+            >
+              <FolderSearch size={14} strokeWidth={1.7} />
+            </button>
+          )}
+          <CopyButton text={abs} label={t("paths.copy_path")} />
+        </div>
+      </div>
+      <div className={fileStyles.file_body}>
+        {office || kind === "pdf" ? (
+          <BytesPreview
+            key={file.relativePath}
+            workspace={workspace}
+            root={root}
+            file={file}
+            mode={office ?? "pdf"}
+            fallback={noPreview}
+          />
+        ) : (
+          <FilePreview file={file} load={readFile} renderBinary={() => noPreview} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function revealKeyFor(): string {
+  return document.documentElement.getAttribute("data-platform") === "windows"
+    ? "paths.reveal_in_explorer"
+    : "paths.reveal_in_finder";
+}
+
+/** Office and PDF render from the file's bytes, handed over as a blob URL —
+ *  the same viewers the Library page uses for deliverables. */
+function BytesPreview({
+  workspace,
+  root,
+  file,
+  mode,
+  fallback,
+}: {
+  workspace: string;
+  root: string;
+  file: ExplorerEntry;
+  mode: OfficeMode | "pdf";
+  fallback: ReactNode;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    let made: string | null = null;
+    invoke<ExplorerBytes>("read_explorer_bytes", { workspace, root, relPath: file.relativePath })
+      .then((b) => {
+        if (!alive) return;
+        if (!b.base64) {
+          setFailed(true);
+          return;
+        }
+        const raw = Uint8Array.from(atob(b.base64), (c) => c.charCodeAt(0));
+        made = URL.createObjectURL(new Blob([raw], { type: b.mime }));
+        setUrl(made);
+      })
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [workspace, root, file.relativePath]);
+
+  if (failed) return <>{fallback}</>;
+  if (!url) return <SkeletonCard height="60vh" />;
+  if (mode === "pdf") {
+    return <iframe className={fileStyles.pdf_frame} src={url} title={file.name} />;
+  }
+  return (
+    <div className={fileStyles.office_stage}>
+      <Suspense fallback={<SkeletonCard height="60vh" />}>
+        <OfficePreview mode={mode} url={url} title={file.name} />
+      </Suspense>
+    </div>
   );
 }
 

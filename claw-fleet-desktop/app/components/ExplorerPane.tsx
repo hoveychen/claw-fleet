@@ -354,6 +354,7 @@ export function FilePreview({
   file,
   load,
   onLoaded,
+  renderBinary,
 }: {
   file: ExplorerEntry;
   /** Reads the active file's content. Identity change = re-read. */
@@ -364,6 +365,9 @@ export function FilePreview({
    *  directory listing behind it, which is why that header used to be fed a
    *  hard-coded `sizeBytes: 0` and printed no size at all. `null` on failure. */
   onLoaded?: (content: ExplorerFileContent | null) => void;
+  /** Replaces the bare "can't preview" line for a binary file — the Files page
+   *  puts an "open with the default app" action there. */
+  renderBinary?: (sizeBytes: number) => ReactNode;
 }) {
   const { t } = useTranslation();
   const [content, setContent] = useState<ExplorerFileContent | null>(null);
@@ -407,6 +411,7 @@ export function FilePreview({
   if (error || content === null) return <p className={styles.empty}>{t("files.read_error")}</p>;
 
   if (content.kind === "binary") {
+    if (renderBinary) return <>{renderBinary(content.sizeBytes)}</>;
     return (
       <p className={styles.empty}>
         {t("files.binary_file")} ({formatSize(content.sizeBytes)})
