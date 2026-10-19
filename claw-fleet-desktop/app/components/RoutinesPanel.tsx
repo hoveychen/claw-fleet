@@ -128,7 +128,7 @@ function nextFireOf(task: FutureTask): number {
 // ── Component ────────────────────────────────────────────────────────────────
 
 /**
- * 例行 (routines) of one project: its one-shot schedules and recurring loops,
+ * 定时 (routines) of one project: its one-shot schedules and recurring loops,
  * with run history, edit, cancel and "run now" — and a form that creates a
  * routine directly (`create_routine`), instead of opening a session for an
  * agent to do it. Lives in the project page's detail column.
@@ -288,13 +288,13 @@ export function RoutinesPanel({ projectPath }: { projectPath: string | null }) {
     <div className={styles.panel}>
       <div className={styles.toolbar}>
         <span className={styles.toolbar_title}>
-          {t("routines.title", "例行")}
+          {t("routines.title", "定时")}
           {loaded && pendingCount > 0 && <span className={styles.toolbar_count}>{pendingCount}</span>}
         </span>
         {projectPath !== null && (
           <button className={styles.create_btn} onClick={() => setCreating(true)}>
             <Plus size={14} strokeWidth={2.4} />
-            {t("routines.create", "新建例行")}
+            {t("routines.create", "新建定时")}
           </button>
         )}
         <button
@@ -335,8 +335,8 @@ export function RoutinesPanel({ projectPath }: { projectPath: string | null }) {
             icon={<CalendarClock size={28} strokeWidth={1.5} />}
             title={
               projectPath === null
-                ? t("routines.all_empty_title", "还没有任何例行")
-                : t("routines.empty_title", "这个项目还没有例行")
+                ? t("routines.all_empty_title", "还没有任何定时")
+                : t("routines.empty_title", "这个项目还没有定时")
             }
             subtitle={t("routines.empty_sub", "定个时间或周期，到点自动开一个任务去做。")}
           />
@@ -449,7 +449,7 @@ function CreateModal({
   return (
     <div className={styles.modal_overlay} onClick={onCancel}>
       <div className={`${styles.modal} ${styles.modal_wide}`} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modal_title}>{t("routines.create_title", "新建例行")}</div>
+        <div className={styles.modal_title}>{t("routines.create_title", "新建定时")}</div>
         <label className={styles.field_label}>
           {t("schedule.task_title", "标题")}
           <span className={styles.field_optional}>{t("schedule.optional", "可选")}</span>

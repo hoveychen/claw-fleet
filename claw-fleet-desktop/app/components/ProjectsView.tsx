@@ -227,7 +227,7 @@ export function ProjectsView() {
         id: "archive",
         label: t("projects.archive", "归档"),
         icon: <Archive size={13} strokeWidth={1.7} />,
-        sub: t("projects.archive_sub", "从列表收起，记忆和例行都保留"),
+        sub: t("projects.archive_sub", "从列表收起，记忆和定时都保留"),
         onSelect: () => void setArchived(row.path, true),
       });
     }
@@ -289,7 +289,7 @@ export function ProjectsView() {
           <CalendarClock size={15} strokeWidth={1.6} />
         </span>
         <span className={styles.body}>
-          <span className={styles.title}>{t("projects.all_routines", "全部例行")}</span>
+          <span className={styles.title}>{t("projects.all_routines", "全部定时")}</span>
           <span className={styles.meta}>
             <span className={styles.path}>{t("projects.all_routines_meta", "跨所有项目")}</span>
           </span>
@@ -448,9 +448,9 @@ export function ProjectsView() {
         <div className={styles.detail}>
           <div className={styles.head}>
             <div className={styles.head_text}>
-              <div className={styles.head_name}>{t("projects.all_routines", "全部例行")}</div>
+              <div className={styles.head_name}>{t("projects.all_routines", "全部定时")}</div>
               <div className={styles.head_sub}>
-                {t("projects.all_routines_sub", "所有项目的例行，也包括临时目录和聊天目录里的。新建请进具体项目。")}
+                {t("projects.all_routines_sub", "所有项目的定时，也包括临时目录和聊天目录里的。新建请进具体项目。")}
               </div>
             </div>
           </div>
@@ -487,7 +487,7 @@ export function ProjectsView() {
                   {id === "overview"
                     ? t("projects.tab_overview", "概览")
                     : id === "routines"
-                    ? t("projects.tab_routines", "例行")
+                    ? t("projects.tab_routines", "定时")
                     : id === "memory"
                       ? t("projects.tab_memory", "记忆")
                       : id === "code"

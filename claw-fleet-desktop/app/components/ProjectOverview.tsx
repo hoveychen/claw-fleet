@@ -222,10 +222,10 @@ export function ProjectOverview({
         <button type="button" className={styles.chip} onClick={() => onTab("routines")}>
           <CalendarClock size={13} strokeWidth={1.7} />
           {routineCount === 0 ? (
-            t("projects.ov_routines_none", "还没有例行")
+            t("projects.ov_routines_none", "还没有定时")
           ) : (
             <>
-              {t("projects.tab_routines", "例行")}
+              {t("projects.tab_routines", "定时")}
               <span className={styles.chip_count}>{routineCount ?? "…"}</span>
             </>
           )}
