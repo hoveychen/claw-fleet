@@ -35,24 +35,24 @@ const FONT_FAMILY = "var(--font-sans)";
  *  "distinguish items by color." Without these, they derive a bunch of
  *  indistinguishable grays from the nearly-neutral primaryColor. */
 const CATEGORICAL_LIGHT = [
-  "#c25232", // accent
+  "#5e6ad2", // accent
   "#1d4ed8", // accent-tool
   "#1b7f87", // teal
   "#178042", // success
   "#9a6a08", // warning
   "#8250df", // info
-  "#b3442a", // accent-bright
+  "#c25232", // terracotta
   "#5d6168", // text-secondary
 ];
 
 const CATEGORICAL_DARK = [
-  "#d97757",
+  "#7178e8",
   "#7dd3fc",
   "#39c5cf",
   "#4ade80",
   "#fbbf24",
   "#a371f7",
-  "#f0a070",
+  "#d97757",
   "#8a8f98",
 ];
 
@@ -74,100 +74,100 @@ const LIGHT: Record<string, string> = {
   darkMode: "false",
 
   // ── Canvas and base typography ──
-  background: "#f1efea", // --color-bg
+  background: "#edeff3", // --color-bg
   fontFamily: FONT_FAMILY,
   fontSize: "14px",
 
   // ── Nodes (flowchart / class / state share mainBkg + nodeBorder) ──
-  primaryColor: "#fbfaf7", // --color-bg-card
-  mainBkg: "#fbfaf7",
-  nodeBkg: "#fbfaf7",
-  nodeBorder: "#c9c5bb",
-  primaryBorderColor: "#c9c5bb",
+  primaryColor: "#f8fafe", // --color-bg-card
+  mainBkg: "#f8fafe",
+  nodeBkg: "#f8fafe",
+  nodeBorder: "#c4c5c9",
+  primaryBorderColor: "#c4c5c9",
   primaryTextColor: "#1f2023", // --color-text
   textColor: "#1f2023",
   nodeTextColor: "#1f2023",
   classText: "#1f2023",
 
   // ── Connectors ──
-  lineColor: "#88837a",
-  arrowheadColor: "#88837a",
-  defaultLinkColor: "#88837a",
-  edgeLabelBackground: "#f1efea",
+  lineColor: "#828487",
+  arrowheadColor: "#828487",
+  defaultLinkColor: "#828487",
+  edgeLabelBackground: "#edeff3",
 
   // ── Subgraph / cluster: one level back from body text, title uses secondary text color ──
-  clusterBkg: "#eae7e0",
-  clusterBorder: "#d8d4ca",
+  clusterBkg: "#e6e7eb",
+  clusterBorder: "#d3d4d8",
   titleColor: "#6f7078", // --color-text-dim
 
-  secondaryColor: "#efece5",
-  secondaryBorderColor: "#d8d4ca",
+  secondaryColor: "#ebecf0",
+  secondaryBorderColor: "#d3d4d8",
   secondaryTextColor: "#1f2023",
-  tertiaryColor: "#eae7e0",
-  tertiaryBorderColor: "#d8d4ca",
+  tertiaryColor: "#e6e7eb",
+  tertiaryBorderColor: "#d3d4d8",
   tertiaryTextColor: "#1f2023",
-  border2: "#d8d4ca",
+  border2: "#d3d4d8",
 
   // ── Note: the only place that keeps warm yellow, because notes should stand out ──
   noteBkgColor: "#f7f0dd", // --color-warning-bg
-  noteTextColor: "#4a4436",
+  noteTextColor: "#434547",
   noteBorderColor: "#e0d5b4",
 
   // ── Sequence diagram ──
-  actorBkg: "#fbfaf7",
-  actorBorder: "#c9c5bb",
+  actorBkg: "#f8fafe",
+  actorBorder: "#c4c5c9",
   actorTextColor: "#1f2023",
-  actorLineColor: "#c9c5bb",
+  actorLineColor: "#c4c5c9",
   signalColor: "#5d6168",
   signalTextColor: "#5d6168",
-  labelBoxBkgColor: "#eae7e0",
-  labelBoxBorderColor: "#d8d4ca",
+  labelBoxBkgColor: "#e6e7eb",
+  labelBoxBorderColor: "#d3d4d8",
   labelTextColor: "#1f2023",
   loopTextColor: "#5d6168",
-  activationBkgColor: "#e7e4dd",
-  activationBorderColor: "#c9c5bb",
-  sequenceNumberColor: "#fbfaf7",
+  activationBkgColor: "#e3e4e8",
+  activationBorderColor: "#c4c5c9",
+  sequenceNumberColor: "#f8fafe",
 
   // ── State diagram ──
-  stateBkg: "#fbfaf7",
+  stateBkg: "#f8fafe",
   stateLabelColor: "#1f2023",
-  labelBackgroundColor: "#f1efea",
-  compositeBackground: "#eae7e0",
-  compositeTitleBackground: "#e7e4dd",
-  compositeBorder: "#d8d4ca",
-  altBackground: "#eae7e0",
-  transitionColor: "#88837a",
+  labelBackgroundColor: "#edeff3",
+  compositeBackground: "#e6e7eb",
+  compositeTitleBackground: "#e3e4e8",
+  compositeBorder: "#d3d4d8",
+  altBackground: "#e6e7eb",
+  transitionColor: "#828487",
   transitionLabelColor: "#5d6168",
   specialStateColor: "#1f2023",
 
   // ── ER diagram ──
-  attributeBackgroundColorOdd: "#fbfaf7",
-  attributeBackgroundColorEven: "#f3f1ec",
-  rowOdd: "#fbfaf7",
-  rowEven: "#f3f1ec",
+  attributeBackgroundColorOdd: "#f8fafe",
+  attributeBackgroundColorEven: "#eff1f5",
+  rowOdd: "#f8fafe",
+  rowEven: "#eff1f5",
 
   // ── Gantt ──
-  sectionBkgColor: "#eae7e0",
-  sectionBkgColor2: "#f3f1ec",
-  altSectionBkgColor: "#f1efea",
-  taskBkgColor: "#e3ded3",
-  taskBorderColor: "#c9c5bb",
+  sectionBkgColor: "#e6e7eb",
+  sectionBkgColor2: "#eff1f5",
+  altSectionBkgColor: "#edeff3",
+  taskBkgColor: "#dddee2",
+  taskBorderColor: "#c4c5c9",
   taskTextColor: "#1f2023",
   taskTextDarkColor: "#1f2023",
-  taskTextLightColor: "#fbfaf7",
+  taskTextLightColor: "#f8fafe",
   taskTextOutsideColor: "#5d6168",
-  activeTaskBkgColor: "#c25232",
-  activeTaskBorderColor: "#a94527",
-  doneTaskBkgColor: "#d8d4ca",
-  doneTaskBorderColor: "#b8b3a8",
+  activeTaskBkgColor: "#5e6ad2",
+  activeTaskBorderColor: "#4f5bc4",
+  doneTaskBkgColor: "#d3d4d8",
+  doneTaskBorderColor: "#b2b3b7",
   critBkgColor: "#cc3340",
   critBorderColor: "#a82733",
-  gridColor: "#ddd9d0",
-  todayLineColor: "#c25232",
+  gridColor: "#d8d9dd",
+  todayLineColor: "#5e6ad2",
 
   ...scaleKeys(CATEGORICAL_LIGHT, "#ffffff"),
-  pieStrokeColor: "#f1efea",
-  pieOuterStrokeColor: "#d8d4ca",
+  pieStrokeColor: "#edeff3",
+  pieOuterStrokeColor: "#d3d4d8",
   pieStrokeWidth: "1px",
   pieOuterStrokeWidth: "1px",
   pieOpacity: "1",
@@ -253,14 +253,14 @@ const DARK: Record<string, string> = {
   taskTextDarkColor: "#0f1011",
   taskTextLightColor: "#f7f8f8",
   taskTextOutsideColor: "#8a8f98",
-  activeTaskBkgColor: "#d97757",
-  activeTaskBorderColor: "#f0a070",
+  activeTaskBkgColor: "#7178e8",
+  activeTaskBorderColor: "#9aa0f0",
   doneTaskBkgColor: "#2b2e32",
   doneTaskBorderColor: "#3a3d42",
   critBkgColor: "#f87171",
   critBorderColor: "#dc2626",
   gridColor: "#2b2e32",
-  todayLineColor: "#d97757",
+  todayLineColor: "#7178e8",
 
   ...scaleKeys(CATEGORICAL_DARK, "#0f1011"),
   pieStrokeColor: "#0f1011",
@@ -291,7 +291,7 @@ export const MERMAID_THEME_VARIABLES: Record<MermaidMode, Record<string, string>
 export function mermaidThemeCss(mode: MermaidMode): string {
   const shadow =
     mode === "light"
-      ? "drop-shadow(0 1px 1.5px rgba(32, 28, 18, 0.10))"
+      ? "drop-shadow(0 1px 1.5px rgba(22, 24, 32, 0.10))"
       : "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45))";
   return `
     .node rect:not([rx]) { rx: 8px; ry: 8px; }

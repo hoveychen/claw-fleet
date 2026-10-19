@@ -121,7 +121,7 @@
 }
 
 .meta_chip_accent {
-  background: rgba(217, 119, 87, 0.12);
+  background: rgba(var(--color-accent-rgb), 0.12);
   color: var(--color-accent);
 }
 
@@ -140,6 +140,7 @@
   gap: 10px;
   padding: 14px 24px 10px;
   border-bottom: 1px solid var(--color-border);
+  background: var(--surface-head);
   flex-shrink: 0;
 }
 

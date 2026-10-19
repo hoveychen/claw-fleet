@@ -182,7 +182,7 @@
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-weight: 700;
-  background: rgba(217, 119, 87, 0.15);
+  background: rgba(var(--color-accent-rgb), 0.15);
   color: var(--color-accent);
   border: 1px solid transparent;
   cursor: pointer;
@@ -192,12 +192,12 @@
 }
 
 .badge:hover {
-  background: rgba(217, 119, 87, 0.3);
+  background: rgba(var(--color-accent-rgb), 0.3);
 }
 
 .badge_active {
   border-color: var(--color-accent);
-  background: rgba(217, 119, 87, 0.35);
+  background: rgba(var(--color-accent-rgb), 0.35);
 }
 
 /* ── Memory card list ────────────────────────────────────────────────────── */

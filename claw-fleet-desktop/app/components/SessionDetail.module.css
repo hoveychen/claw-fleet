@@ -104,7 +104,7 @@
   flex-direction: column;
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
+  background: var(--surface-head);
   flex-shrink: 0;
   gap: 6px;
 }
@@ -449,7 +449,7 @@
 .root.inline .aux_head {
   padding: 5px 6px 5px 8px;
   border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
+  background: var(--surface-head);
 }
 /* ── Auxiliary drawer ───────────────────────────────────────────────────────*/
 /* A slab of its own, matching .main_col — same fill, same radius, same border.

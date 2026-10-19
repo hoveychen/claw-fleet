@@ -30,9 +30,9 @@
   --color-text-dim: #72777f;
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-strong: rgba(255, 255, 255, 0.15);
-  --color-accent: #d97757;
-  --color-accent-hover: #c96040;
-  --color-accent-soft: rgba(217, 119, 87, 0.18);
+  --color-accent: #7178e8;
+  --color-accent-hover: #5e6ad2;
+  --color-accent-soft: rgba(113, 120, 232, 0.18);
   /* 告警底色（MoreView 的第二 agent 诊断块）——与 accent-soft 同做法，
      两个主题各自调，免得写死的 rgba 在暖纸底上发脏。 */
   --color-warning-soft: rgba(251, 191, 36, 0.14);
@@ -115,9 +115,9 @@
   --color-text-dim: #6f7078;
   --color-border: rgba(32, 28, 18, 0.11);
   --color-border-strong: rgba(32, 28, 18, 0.22);
-  --color-accent: #c25232;
-  --color-accent-hover: #a94527;
-  --color-accent-soft: rgba(194, 82, 50, 0.13);
+  --color-accent: #5e6ad2;
+  --color-accent-hover: #4f5bc4;
+  --color-accent-soft: rgba(94, 106, 210, 0.13);
   --color-warning-soft: rgba(154, 106, 8, 0.12);
   --color-bg-user: #e9d7c9;
   --color-success: #178042;

@@ -40,14 +40,14 @@ const THEMES = {
   dark: {
     background: "#0f1011",
     foreground: "#f7f8f8",
-    cursor: "#d97757",
-    selectionBackground: "rgba(217, 119, 87, 0.35)",
+    cursor: "#7178e8",
+    selectionBackground: "rgba(113, 120, 232, 0.35)",
   },
   light: {
     background: "#fbfaf7",
     foreground: "#1f2023",
-    cursor: "#c25232",
-    selectionBackground: "rgba(194, 82, 50, 0.28)",
+    cursor: "#5e6ad2",
+    selectionBackground: "rgba(94, 106, 210, 0.28)",
   },
 } as const;
 
