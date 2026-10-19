@@ -26,6 +26,7 @@ import {
   remarkExplainMarks,
 } from "../../../shared-ts/explainMarks";
 import { remarkCurrencyDollar } from "../../../shared-ts/currencyDollar";
+import { remarkKeepDunder } from "../../../shared-ts/markdownIdentifiers";
 import "katex/dist/katex.min.css";
 
 /**
@@ -214,6 +215,9 @@ export const mdRemarkPlugins: PluggableList = [
   // GFM's autolink literal doesn't stop at CJK, so `见 https://example.com，然后`
   // swallows the comma and everything after it into the href.
   remarkCjkAutolinkFix,
+  // A bare `__pycache__` / `__init__` is a name, not bold
+  // (shared-ts/markdownIdentifiers.ts).
+  remarkKeepDunder,
   // `[?text]` → `<span class="explain-mark">`, the agent's own "this may need
   // explaining" annotation (shared-ts/explainMarks.ts); mirrored from the
   // desktop chain. Clickability is the `span` component's call (markdown/
