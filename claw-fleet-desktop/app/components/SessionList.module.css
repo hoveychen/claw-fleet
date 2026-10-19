@@ -184,20 +184,20 @@
   text-overflow: ellipsis;
 }
 
-/* Badges sit at the row's end instead of on the icon's corner. */
+/* Badges ride the icon's top-right corner, as on the folded rail: at 116px a
+   row-end badge would squeeze "Projects" / "Settings" down to an ellipsis. */
 .sidebar_wide .nav_badge_running,
 .sidebar_wide .nav_badge_pending {
-  position: static;
-  margin-left: auto;
-  flex-shrink: 0;
-  font-size: 10px;
+  top: 1px;
+  right: auto;
+  left: 17px;
+  font-size: 9px;
 }
 
 .sidebar_wide .nav_dot {
-  position: static;
-  margin-left: auto;
-  margin-right: 2px;
-  flex-shrink: 0;
+  top: 5px;
+  right: auto;
+  left: 22px;
 }
 
 /* The stat-card stack; card visuals live in SidebarStat.module.css. */
