@@ -1124,30 +1124,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     invoke("set_user_title", { title }).catch(() => {});
   }, []);
 
-  // ── Personalized mascot state ──────────────────────────────────────────
-  const [personalizedMascotState, setPersonalizedMascotState] = useState<FeatureState>(
-    () => getFeatureState("personalized-mascot"),
-  );
-
-  const handleTogglePersonalizedMascot = useCallback((state: FeatureState) => {
-    setPersonalizedMascotState(state);
-    setFeatureState("personalized-mascot", state);
-  }, []);
-
-  // ── Mascot visibility state ────────────────────────────────────────────
-  const [mascotVisibleState, setMascotVisibleState] = useState<FeatureState>(
-    () => getFeatureState("mascot-visible"),
-  );
-  const mascotVisible = resolveFeatureState(mascotVisibleState, "mascot-visible");
-
-  const handleToggleMascotVisible = useCallback(async (state: FeatureState) => {
-    setMascotVisibleState(state);
-    setFeatureState("mascot-visible", state);
-    const enabled = resolveFeatureState(state, "mascot-visible");
-    const { emit } = await import("@tauri-apps/api/event");
-    await emit("overlay-mascot-visible-changed", enabled).catch(() => {});
-  }, []);
-
   // ── Auto update check state ────────────────────────────────────────────
   const [autoUpdateCheckState, setAutoUpdateCheckState] = useState<FeatureState>(
     () => getFeatureState("auto-update-check"),
@@ -1735,34 +1711,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <span className={styles.row_label}>{t("settings.theme")}</span>
                   <ThemeToggle />
                 </div>
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.mascot_visible")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.mascot_visible_desc")}
-                    </span>
-                  </div>
-                  <TriStateToggle
-                    value={mascotVisibleState}
-                    defaultOn={featureDefault("mascot-visible")}
-                    onChange={handleToggleMascotVisible}
-                  />
-                </div>
-                {mascotVisible && (
-                  <div className={styles.row}>
-                    <div>
-                      <span className={styles.row_label}>{t("settings.personalized_mascot")}</span>
-                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                        {t("settings.personalized_mascot_desc")}
-                      </span>
-                    </div>
-                    <TriStateToggle
-                      value={personalizedMascotState}
-                      defaultOn={featureDefault("personalized-mascot")}
-                      onChange={handleTogglePersonalizedMascot}
-                    />
-                  </div>
-                )}
               </div>
             )}
 

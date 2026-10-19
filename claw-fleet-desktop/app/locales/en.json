@@ -1120,7 +1120,6 @@
     "settings_notif": {
       "title": "Notifications & Assistant",
       "description": "Configure how you get notified when a task needs you, and set your floating assistant preferences. You can change these later in Settings.",
-      "mascot_title": "Assistant",
       "sound_title": "Alert Sound"
     },
     "hooks_setup": {
@@ -2161,10 +2160,6 @@
     "user_title": "Your title",
     "user_title_desc": "How should the assistant address you?",
     "user_title_placeholder": "Boss",
-    "mascot_visible": "Show mascot",
-    "mascot_visible_desc": "Display the kawaii sidebar mascot. Off by default — flip on to bring it out.",
-    "personalized_mascot": "Personalized assistant",
-    "personalized_mascot_desc": "Use AI to generate context-aware quips based on your current tasks (uses Claude Haiku)",
     "tts": "Alert Sound",
     "tts_chime_and_speech": "Chime + read aloud",
     "tts_chime_and_speech_desc": "Play a chime and read the summary aloud via TTS",

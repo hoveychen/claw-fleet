@@ -1117,7 +1117,6 @@
     "settings_notif": {
       "title": "通知与小助手",
       "description": "设置任务需要你处理时怎么提醒你，以及悬浮小助手偏好。你可以稍后在设置中修改。",
-      "mascot_title": "小助手",
       "sound_title": "提示音"
     },
     "hooks_setup": {
@@ -2158,10 +2157,6 @@
     "user_title": "称呼",
     "user_title_desc": "小助手怎么称呼你？",
     "user_title_placeholder": "老板",
-    "mascot_visible": "显示小助手",
-    "mascot_visible_desc": "默认隐藏侧边栏吉祥物，打开后才会出现。",
-    "personalized_mascot": "个性化小助手",
-    "personalized_mascot_desc": "使用 AI 根据当前任务生成个性化文案（使用 Claude Haiku）",
     "tts": "提示音",
     "tts_chime_and_speech": "提示音 + 语音播报",
     "tts_chime_and_speech_desc": "播放提示音并朗读摘要内容",
