@@ -8,11 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Activity,
+  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Circle,
+  Folder,
   Inbox,
+  MessageCircle,
   Search,
   SearchX,
   Square,
@@ -30,16 +34,24 @@ import { useDraft } from "../draft";
 import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
+import { useChatWorkspaces } from "../useChatWorkspace";
+import { mentionPreview } from "../sessionMention";
+import { repoRootPath } from "../../../shared-ts/repoPath";
+import { AgentSourceIcon } from "./AgentSourceIcon";
 import { compactDuration } from "../../../shared-ts/watchProgress";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import { createWakeLatch, isParkedForWake, stickyWaking } from "../../../shared-ts/wakeLatch";
 import type { TaskState } from "../../../shared-ts/taskState";
 import {
   buildTaskRows,
+  projectScopeKey,
+  projectSectionRows,
   rowDetail,
+  runningSubagents,
   sectionRows,
   subtaskTally,
   type RowDetail,
+  type TaskGroupBy,
   type TaskRow,
 } from "../taskRows";
 import { canControl, runStop, stopMode } from "./sessionStop";
@@ -262,6 +274,12 @@ export function TasksView({
     "tasks:collapsedStates",
     DEFAULT_COLLAPSED,
   );
+  const [groupBy, setGroupBy] = useDraft<TaskGroupBy>("tasks:groupBy", "status");
+  // Project sections start expanded; folds are remembered per project.
+  const [collapsedProjects, setCollapsedProjects] = useDraft<string[]>(
+    "tasks:collapsedProjects",
+    [],
+  );
   // Accepted (marked done) rows move to the done section at once, reopened
   // rows leave it at once; the next snapshot confirms either.
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set());
@@ -282,6 +300,20 @@ export function TasksView({
   const renderedOrderRef = useRef<string[]>([]);
 
   const multiDevice = deviceLabelOf !== undefined;
+
+  // Each device's pure-chat folder, pinned above every project. A device whose
+  // path has not arrived (or an older desktop) just has no pinned chat.
+  const chatPaths = useChatWorkspaces(deviceIds, clientFor);
+  const chatKeys = useMemo(
+    () =>
+      new Set(
+        Object.entries(chatPaths).map(([deviceId, path]) =>
+          projectScopeKey(deviceId, repoRootPath(path), multiDevice),
+        ),
+      ),
+    [chatPaths, multiDevice],
+  );
+
   const rows = useMemo(() => {
     const built = buildTaskRows(sessions, {
       isPending: (deviceId, sessionId) => pendingKeys.has(itemKey(deviceId, sessionId)),
@@ -326,8 +358,10 @@ export function TasksView({
       if (o) o.count++;
       else by.set(r.projectKey, { key: r.projectKey, name: r.projectName, count: 1 });
     }
-    return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows]);
+    return [...by.values()].sort(
+      (a, b) => Number(chatKeys.has(b.key)) - Number(chatKeys.has(a.key)) || a.name.localeCompare(b.name),
+    );
+  }, [rows, chatKeys]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -348,6 +382,10 @@ export function TasksView({
   }, [rows, projectScope, search, ftsMatchKeys]);
 
   const sections = useMemo(() => sectionRows(visible), [visible]);
+  const projectSections = useMemo(
+    () => (groupBy === "project" ? projectSectionRows(visible, (k) => chatKeys.has(k)) : []),
+    [groupBy, visible, chatKeys],
+  );
 
   const toggleSection = useCallback(
     (state: TaskState) =>
@@ -355,6 +393,13 @@ export function TasksView({
         prev.includes(state) ? prev.filter((s) => s !== state) : [...prev, state],
       ),
     [setCollapsedStates],
+  );
+  const toggleProject = useCallback(
+    (key: string) =>
+      setCollapsedProjects((prev) =>
+        prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+      ),
+    [setCollapsedProjects],
   );
 
   /** Accept tasks on their own machines; rows leave the section optimistically
@@ -562,6 +607,8 @@ export function TasksView({
       live && canControl(tip) && mode !== "spent" && clientFor(tip.deviceId) !== null;
     const stopBusy = stoppingKey === itemKey(tip.deviceId, tip.id);
     const startedAt = tip.taskSummary?.startedAtMs || Math.min(...r.hops.map((h) => h.createdAtMs));
+    const subagents = runningSubagents(r);
+    const preview = tip.lastMessagePreview ? mentionPreview(tip.lastMessagePreview) : "";
     return (
       <div key={r.key} className={styles.row} onClick={() => onOpenSession(tip)}>
         <button
@@ -593,12 +640,29 @@ export function TasksView({
         <div className={styles.rowBody}>
           <div className={styles.line1}>
             <span className={styles.title}>{r.title}</span>
-            {!projectScope && <span className={styles.project}>{r.projectName}</span>}
+            {/* Under a project heading the tag would only repeat it. */}
+            {!projectScope && groupBy === "status" && (
+              <span className={styles.project}>{r.projectName}</span>
+            )}
+          </div>
+          {/* Source mark and subagent count ride on the second line, so the
+              title keeps all of the first. */}
+          <div className={styles.line2}>
+            <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
+              <AgentSourceIcon source={tip.agentSource} />
+            </span>
+            {line2 && <span className={styles.line2Text}>{line2}</span>}
+            {subagents > 0 && (
+              <span className={styles.subagents} aria-label={t("{0} 个子代理在跑", subagents)}>
+                <Bot size={11} />
+                {subagents}
+              </span>
+            )}
           </div>
           {snippet ? (
             <div className={styles.snippet}>{renderSnippet(snippet)}</div>
           ) : (
-            line2 && <div className={styles.line2}>{line2}</div>
+            preview && <div className={styles.preview}>{preview}</div>
           )}
         </div>
         {stoppable && (
@@ -641,6 +705,24 @@ export function TasksView({
     <div className={styles.wrapper}>
       <div className={styles.pageHead}>
         <h1 className={styles.pageTitle}>{t("任务")}</h1>
+        <div className={styles.segment} role="group" aria-label={t("分组方式")}>
+          {(["status", "project"] as TaskGroupBy[]).map((mode) => {
+            const label = mode === "status" ? t("按状态分组") : t("按项目分组");
+            return (
+              <button
+                key={mode}
+                className={styles.segmentButton}
+                data-active={groupBy === mode}
+                aria-pressed={groupBy === mode}
+                aria-label={label}
+                title={label}
+                onClick={() => setGroupBy(mode)}
+              >
+                {mode === "status" ? <Activity size={15} /> : <Folder size={15} />}
+              </button>
+            );
+          })}
+        </div>
         {/* A native select: the phone's own picker handles a long project list
             better than any custom popover. */}
         <label className={styles.scopeSelectWrap} data-on={!!projectScope}>
@@ -711,7 +793,41 @@ export function TasksView({
       )}
 
       <div className={styles.list}>
-        {sections.map((sec) => {
+        {projectSections.map((sec) => {
+          const collapsed = !search.trim() && !projectScope && collapsedProjects.includes(sec.key);
+          return (
+            <section key={sec.key} className={styles.section}>
+              <div className={styles.sectionHead}>
+                <button
+                  className={styles.sectionToggle}
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleProject(sec.key)}
+                >
+                  {sec.chat ? (
+                    <MessageCircle size={14} className={styles.sectionIcon} />
+                  ) : (
+                    <Folder size={14} className={styles.sectionIcon} />
+                  )}
+                  <span className={styles.sectionName}>{sec.chat ? t("纯聊天") : sec.name}</span>
+                  <span className={styles.sectionCount}>{sec.rows.length}</span>
+                  {sec.needsYou > 0 && (
+                    <span className={styles.needsYouBadge}>{t("需要你 {0}", sec.needsYou)}</span>
+                  )}
+                </button>
+                <button
+                  className={styles.sectionChevron}
+                  data-open={!collapsed}
+                  aria-label={collapsed ? t("展开") : t("收起")}
+                  onClick={() => toggleProject(sec.key)}
+                >
+                  <ChevronDown size={16} />
+                </button>
+              </div>
+              {!collapsed && sec.rows.map(renderRow)}
+            </section>
+          );
+        })}
+        {groupBy === "status" && sections.map((sec) => {
           // A search or project scope means the boss is looking for something;
           // a leftover fold would hide it.
           const collapsed =

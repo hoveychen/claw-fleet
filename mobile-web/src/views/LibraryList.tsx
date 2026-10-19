@@ -4,7 +4,7 @@
 // artifact opens the existing ArtifactDetail overlay, owned here.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronRight, FileText } from "lucide-react";
+import { ChevronRight, FileText } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { Artifact, WikiDoc } from "../types";
@@ -96,6 +96,13 @@ export function LibraryList({ items, client, onOpenDoc, snippetBySlug, hideProje
   );
 }
 
+/** A document's format, in the icon slot where an artifact shows its kind. */
+const DOC_BADGE: Record<WikiDoc["kind"], string> = {
+  markdown: "MD",
+  html: "HTML",
+  htmlDir: "DIR",
+};
+
 function LibraryRow({
   item,
   snippet,
@@ -107,16 +114,20 @@ function LibraryRow({
   hideProject?: boolean;
   onOpen: () => void;
 }) {
-  const Icon = item.type === "doc" ? BookOpen : (KIND_ICON[item.artifact.kind] ?? FileText);
+  const Icon = item.type === "doc" ? null : (KIND_ICON[item.artifact.kind] ?? FileText);
   const meta =
     item.type === "doc"
       ? [t("文档"), fmtDate(item.updatedMs)]
       : [t("产出"), formatBytes(item.artifact.sizeBytes), fmtDate(item.updatedMs)];
   return (
     <button type="button" className={styles.row} onClick={onOpen}>
-      <span className={styles.icon} data-type={item.type}>
-        <Icon size={18} strokeWidth={1.5} />
-      </span>
+      {item.type === "doc" ? (
+        <span className={styles.docBadge} data-kind={item.doc.kind}>
+          {DOC_BADGE[item.doc.kind] ?? "DOC"}
+        </span>
+      ) : (
+        <span className={styles.icon}>{Icon && <Icon size={18} strokeWidth={1.5} />}</span>
+      )}
       <span className={styles.body}>
         <span className={styles.line1}>
           <span className={styles.title}>{item.title}</span>

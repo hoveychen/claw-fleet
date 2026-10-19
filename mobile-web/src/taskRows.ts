@@ -296,6 +296,58 @@ export function sectionRows<T extends Row>(rows: Array<TaskRow<T>>): Array<TaskS
   }));
 }
 
+/** What the task list's sections stand for. */
+export type TaskGroupBy = "status" | "project";
+
+export interface TaskProjectSection<T extends Row = Row> {
+  /** The rows' `projectKey`. */
+  key: string;
+  name: string;
+  /** The device's pure-chat folder: pinned above every project. */
+  chat: boolean;
+  /** Rows filed under "needs you" — the count on the heading. */
+  needsYou: number;
+  rows: Array<TaskRow<T>>;
+}
+
+/**
+ * Cut rows into one section per project. The chat folder comes first, the
+ * rest by name. Inside a section rows follow the five states' order, so what
+ * needs the boss sits on top, and keep the input order within a state.
+ */
+export function projectSectionRows<T extends Row>(
+  rows: Array<TaskRow<T>>,
+  isChat: (projectKey: string) => boolean,
+): Array<TaskProjectSection<T>> {
+  const by = new Map<string, TaskProjectSection<T>>();
+  for (const r of rows) {
+    let sec = by.get(r.projectKey);
+    if (!sec) {
+      sec = { key: r.projectKey, name: r.projectName, chat: isChat(r.projectKey), needsYou: 0, rows: [] };
+      by.set(r.projectKey, sec);
+    }
+    sec.rows.push(r);
+    if (r.state === "needsYou") sec.needsYou++;
+  }
+  const rank = (st: TaskState) => TASK_STATES.indexOf(st);
+  const sections = [...by.values()];
+  for (const sec of sections) {
+    sec.rows = sec.rows
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => rank(a.r.state) - rank(b.r.state) || a.i - b.i)
+      .map(({ r }) => r);
+  }
+  return sections.sort(
+    (a, b) =>
+      Number(b.chat) - Number(a.chat) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
+  );
+}
+
+/** Live subagents across a task's main hops. */
+export function runningSubagents(row: TaskRow): number {
+  return row.hops.reduce((n, h) => n + (h.runningSubagentCount ?? 0), 0);
+}
+
 /** `**P2** — run the tests` → `run the tests`: a step title without its id. */
 export function stepText(raw: string | null | undefined): string | null {
   if (!raw) return null;
