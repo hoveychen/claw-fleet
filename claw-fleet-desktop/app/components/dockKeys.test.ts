@@ -5,6 +5,7 @@ import {
   dockAction,
   fromSubtask,
   isRecommendedOption,
+  primaryOptionIndex,
   stripRecommendedSuffix,
   type DockKey,
 } from "./dockKeys";
@@ -49,6 +50,14 @@ describe("recommended option", () => {
     expect(isRecommendedOption("发布 (推荐)")).toBe(true);
     expect(isRecommendedOption("Recommended reading")).toBe(false);
     expect(stripRecommendedSuffix("Ship it (Recommended)")).toBe("Ship it");
+  });
+
+  it("makes the recommended option primary, else the first single-select one", () => {
+    expect(primaryOptionIndex(["a", "b (Recommended)"], false)).toBe(1);
+    expect(primaryOptionIndex(["a", "b（推荐）"], true)).toBe(1);
+    expect(primaryOptionIndex(["a", "b"], false)).toBe(0);
+    expect(primaryOptionIndex(["a", "b"], true)).toBe(-1);
+    expect(primaryOptionIndex([], false)).toBe(-1);
   });
 });
 

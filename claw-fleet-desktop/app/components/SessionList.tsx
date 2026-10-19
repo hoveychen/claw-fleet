@@ -25,7 +25,7 @@ import styles from "./SessionList.module.css";
 import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
-import { navSectionOf, navSectionTarget, type NavSection } from "./navGroups";
+import { GLOBAL_MEMORY_FILTER, navSectionOfPage, navSectionTarget, type NavSection } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { fmtBadgeCount } from "../railNumbers";
 
@@ -84,20 +84,37 @@ export function SessionList() {
   // task's conversation, so this is how it is noticed from any other page.
   const pendingCardCount = useDecisionStore((s) => s.decisions.length);
 
-  const current = navSectionOf(viewMode);
+  const memoryFilter = useUIStore((s) => s.mainViewState.memory.workspaceFilter);
+  const current = navSectionOfPage(viewMode, memoryFilter);
   // Re-clicking the entry of the page on screen folds that page's secondary
   // sidebar instead of being a no-op.
   const goSection = useCallback(
     (section: NavSection) => {
       const target = navSectionTarget(section, navLastBySection, avail);
+      // Projects' memory page is project memory; global memory is a Settings page.
+      if (target === "memory" && memoryFilter === GLOBAL_MEMORY_FILTER) {
+        useUIStore.getState().updateMainViewState("memory", { workspaceFilter: "all", selectedKey: null });
+      }
       if (viewMode === target && SECONDARY_SIDEBAR_VIEWS.has(target)) {
         toggleSecondarySidebar(target);
       } else {
         setViewMode(target);
       }
     },
-    [viewMode, navLastBySection, avail, setViewMode, toggleSecondarySidebar],
+    [viewMode, navLastBySection, avail, memoryFilter, setViewMode, toggleSecondarySidebar],
   );
+
+  // ⌘N / Ctrl+N anywhere: back to the Tasks page, focused on its launch input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        useUIStore.getState().requestLaunchFocus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     // Load audit data for the unread critical badge
