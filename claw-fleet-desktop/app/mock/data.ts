@@ -3020,6 +3020,28 @@ export const MOCK_CODEX_USAGE = {
 
 export const MOCK_MEMORIES = [
   {
+    source: "claude-code",
+    workspaceName: "(Global)",
+    workspacePath: "/Users/demo/.claude",
+    projectKey: "__global__",
+    hasClaudeMd: true,
+    files: [
+      { name: "MEMORY.md", path: "/Users/demo/.claude/memory/MEMORY.md", sizeBytes: 520, modifiedMs: NOW - 30 * HOUR },
+      { name: "user_role.md", path: "/Users/demo/.claude/memory/user_role.md", sizeBytes: 310, modifiedMs: NOW - 30 * HOUR, memType: "user", title: "Role", hook: "Backend engineer, prefers Rust", inIndex: true },
+    ],
+  },
+  {
+    source: "codex",
+    workspaceName: "Codex",
+    workspacePath: "/Users/demo/.codex",
+    projectKey: "__codex__",
+    hasClaudeMd: false,
+    files: [
+      { name: "memory_summary.md", path: "/Users/demo/.codex/memories/memory_summary.md", sizeBytes: 740, modifiedMs: NOW - 9 * HOUR },
+    ],
+  },
+  {
+    source: "claude-code",
     workspaceName: "claw-fleet",
     workspacePath: "/Users/demo/workspace/claw-fleet",
     projectKey: "claw-fleet-key",
@@ -3030,6 +3052,7 @@ export const MOCK_MEMORIES = [
     ],
   },
   {
+    source: "claude-code",
     workspaceName: "api-server",
     workspacePath: "/Users/demo/workspace/api-server",
     projectKey: "api-server-key",
@@ -3039,6 +3062,7 @@ export const MOCK_MEMORIES = [
     ],
   },
   {
+    source: "claude-code",
     workspaceName: "web-frontend",
     workspacePath: "/Users/demo/workspace/web-frontend",
     projectKey: "web-frontend-key",
@@ -3049,6 +3073,7 @@ export const MOCK_MEMORIES = [
     ],
   },
   {
+    source: "claude-code",
     workspaceName: "data-pipeline",
     workspacePath: "/Users/demo/workspace/data-pipeline",
     projectKey: "data-pipeline-key",
