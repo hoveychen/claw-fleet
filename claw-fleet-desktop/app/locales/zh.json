@@ -86,7 +86,8 @@
       "command": "命令",
       "cwd": "目录",
       "wake": "完成后唤醒",
-      "tail": "尾部行数"
+      "tail": "尾部行数",
+      "step": "步骤"
     },
     "param_for": {
       "handoff": {
