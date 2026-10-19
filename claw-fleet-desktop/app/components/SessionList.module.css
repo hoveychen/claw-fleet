@@ -180,7 +180,7 @@
 }
 
 .footer_btn_active,
-.footer_btn_active:hover {
+.footer_btn_active:hover:not(:disabled) {
   background: var(--color-accent-soft);
   color: var(--color-accent);
 }

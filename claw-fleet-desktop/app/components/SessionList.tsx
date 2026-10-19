@@ -276,9 +276,14 @@ export function SessionList() {
             </button>
             <button
               type="button"
-              className={styles.footer_btn}
+              // Lit while the list is folded: with no strip left on the page,
+              // this button is the visible way back.
+              className={`${styles.footer_btn}${
+                hasListColumn && secondaryCollapsed ? ` ${styles.footer_btn_active}` : ""
+              }`}
               onClick={() => toggleSecondarySidebar(viewMode)}
               disabled={!hasListColumn}
+              aria-pressed={hasListColumn ? secondaryCollapsed : undefined}
               title={secondaryCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
               aria-label={secondaryCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
             >
