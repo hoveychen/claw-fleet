@@ -2600,8 +2600,7 @@
     "rail_material": "Material",
     "rail_developer": "Developer view",
     "rail_main": "Main conversation",
-    "elapsed": "Running {{span}}",
-    "stop": "Stop"
+    "elapsed": "Running {{span}}"
   },
   "history": {
     "title": "Tasks",

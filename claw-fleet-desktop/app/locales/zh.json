@@ -2595,8 +2595,7 @@
     "rail_material": "本任务资料",
     "rail_developer": "开发者视图",
     "rail_main": "主对话",
-    "elapsed": "已运行 {{span}}",
-    "stop": "停止"
+    "elapsed": "已运行 {{span}}"
   },
   "history": {
     "title": "任务",

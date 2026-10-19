@@ -48,7 +48,6 @@ import { ReaderHostContext } from "./readerHost";
 import railStyles from "./TaskRail.module.css";
 import type { TaskRow } from "./homeRows";
 import { formatSpan } from "./TaskList";
-import { canControl, performStop, stopMode } from "./StopControl";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
@@ -1958,17 +1957,10 @@ export function SessionDetail({
                       for the column beside the conversation, and nothing else.
                       The drawer has no switch on purpose: you open it by naming
                       what you want in it (the ··· menu below, or a rail card),
-                      and it closes with its own ✕. */}
+                      and it closes with its own ✕. No Stop here: the composer's
+                      StopControl already carries it while a turn runs, and the
+                      task list's context menu covers an idle process. */}
                   <div className={styles.hero_tools} data-tauri-drag-region>
-                    {task && canControl(liveSession) && stopMode(liveSession) !== "spent" && (
-                      <button
-                        type="button"
-                        className={styles.hero_stop}
-                        onClick={() => void performStop(liveSession, t)}
-                      >
-                        {t("home.stop", "Stop")}
-                      </button>
-                    )}
                     <button
                       type="button"
                       className={`${styles.hero_tool} ${railOpen ? styles.hero_tool_on : ""}`}
