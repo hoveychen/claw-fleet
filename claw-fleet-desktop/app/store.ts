@@ -451,8 +451,15 @@ function readHistoryWorkspaceFilter(): string {
 const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true";
 
 /** Simplified mode reuses the key of the retired page-clamping mode of the same
- *  name, so a user who had that on finds the new one on after the upgrade. */
-const readSimplifiedMode = () => getItem("simplified-mode") === "true";
+ *  name, so a user who had that on finds the new one on after the upgrade.
+ *  With no explicit choice it follows the host (`FLEET_SIMPLIFIED_MODE`, see
+ *  core's feature_flags), cached from the last boot so a cloud page opens lean
+ *  on reload instead of drawing the full sidebar first and then shrinking. */
+function readSimplifiedMode(): boolean {
+  const stored = getItem("simplified-mode");
+  if (stored !== null) return stored === "true";
+  return getItem("simplified-mode-host-default") === "true";
+}
 
 /** The stored page, or the Tasks page when it names one that no longer exists —
  *  the retired Sessions page ("list" / "gallery") above all. */
@@ -632,8 +639,19 @@ export const useUIStore = create<UIState>((set) => ({
       // Fail closed — see the field's doc comment.
     }
     applyHostLocale(features.localeDefault ?? null);
+    // A Settings choice wins; only a client that never made one follows the host.
+    // The cache follows the host when it changes its mind or stops saying, so
+    // it never turns into a sticky switch.
+    if (features.simplifiedDefault == null) removeItem("simplified-mode-host-default");
+    else setItem("simplified-mode-host-default", String(features.simplifiedDefault));
+    const simplifiedMode = readSimplifiedMode();
     set((s) => ({
       hostFeatures: features,
+      simplifiedMode,
+      ...(simplifiedMode && !s.simplifiedMode &&
+      isHiddenWhenSimplified(s.viewMode, s.mainViewState.memory.workspaceFilter)
+        ? viewModePatch(s, NAV_HOME)
+        : {}),
       // The last-used page is restored from storage, so a host that used to
       // have the terminal enabled (or a fresh `fleet serve` without the flag)
       // can boot straight onto a page that no longer exists. Send it home

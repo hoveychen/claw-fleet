@@ -624,7 +624,8 @@ export type ProcOutputChunk = { dataB64: string, nextOffset: number, record: Pro
 
 export type HostFeatures = { 
 terminal: boolean, 
-localeDefault?: string | null, };
+localeDefault?: string | null, 
+simplifiedDefault?: boolean, };
 
 export type HostIdentity = { 
 hostname?: string | null, 

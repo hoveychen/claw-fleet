@@ -788,6 +788,38 @@ describe("simplified mode", () => {
     expect(useUIStore.getState().viewMode).toBe("wiki");
   });
 
+  it("follows the host default until the user picks, then keeps the pick", async () => {
+    const core = await import("@tauri-apps/api/core");
+    const invoke = core.invoke as unknown as ReturnType<typeof vi.fn>;
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+    useUIStore.getState().setViewMode("projects");
+
+    invoke.mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
+    await useUIStore.getState().loadHostFeatures();
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+    expect(useUIStore.getState().viewMode).toBe("history");
+    expect(getItem("simplified-mode")).toBe(null);
+
+    // Switched off by hand: a later boot against the same host stays off.
+    useUIStore.getState().setSimplifiedMode(false);
+    invoke.mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
+    await useUIStore.getState().loadHostFeatures();
+    expect(useUIStore.getState().simplifiedMode).toBe(false);
+
+    // A host that stops saying drops the cache rather than leaving it sticky.
+    invoke.mockResolvedValueOnce({ terminal: false });
+    await useUIStore.getState().loadHostFeatures();
+    expect(getItem("simplified-mode-host-default")).toBe(null);
+  });
+
+  it("boots lean from the cached host default", async () => {
+    const { setItem } = await import("./storage");
+    setItem("simplified-mode-host-default", "true");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+  });
+
   it("does not boot into a page whose entry it hides", async () => {
     const { setItem } = await import("./storage");
     setItem("viewMode", "projects");

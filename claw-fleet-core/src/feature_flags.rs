@@ -55,43 +55,54 @@ pub struct HostFeatures {
     /// bundle for it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub locale_default: Option<String>,
+    /// Whether this host wants simplified mode (the sidebar without Projects,
+    /// Review and usage) as the *default* for a client that has never toggled
+    /// it, from [`SIMPLIFIED_ENV`]. `None` = this host has no opinion.
+    ///
+    /// A presentation default like `locale_default`, not a capability: a user
+    /// who flips the switch in Settings overrides it for that browser. It
+    /// exists because the browser build's settings live in one browser's
+    /// localStorage, so a deployment that wants the lean layout for everyone
+    /// who opens it has no per-browser click that can say so.
+    ///
+    /// Skipped when absent so an older client (and every `{ terminal: … }`
+    /// literal in the two frontends) keeps type-checking.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub simplified_default: Option<bool>,
 }
 
 /// This host's feature set, as served to every client.
 pub fn host_features() -> HostFeatures {
-    warn_removed_env_once();
     HostFeatures {
         terminal: terminal_enabled(),
         locale_default: locale_default(),
+        simplified_default: simplified_default(),
     }
 }
 
-/// Env var that used to set simplified mode's host default. That host default
-/// was removed in 2026-10 (simplified mode is now a per-client Settings switch
-/// that only trims the sidebar); a deployment that still exports it gets a
-/// warning rather than having it ignored without a word.
-pub const REMOVED_SIMPLIFIED_ENV: &str = "FLEET_SIMPLIFIED_MODE";
+/// Env var giving simplified mode's host default; see
+/// [`HostFeatures::simplified_default`].
+/// `1/true/yes/on` = on, `0/false/no/off` = off, unset = no opinion.
+pub const SIMPLIFIED_ENV: &str = "FLEET_SIMPLIFIED_MODE";
 
-/// The warning for a still-set [`REMOVED_SIMPLIFIED_ENV`], or `None` when unset.
-pub fn removed_env_warning(simplified: Option<&str>) -> Option<String> {
-    let raw = simplified?;
-    Some(format!(
-        "warning: {REMOVED_SIMPLIFIED_ENV}={raw:?} is ignored: the host default for simplified \
-         mode was removed (it is a Settings switch now); unset the variable"
-    ))
+/// Tri-state read of a boolean env var: `Some(true)` / `Some(false)` for an
+/// explicit value, `None` for unset (and for garbage, which must not be read as
+/// either answer — a typo'd value means "the deployment did not say").
+pub fn env_tristate(raw: Option<&str>) -> Option<bool> {
+    match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("1" | "true" | "yes" | "on") => Some(true),
+        Some("0" | "false" | "no" | "off") => Some(false),
+        _ => None,
+    }
 }
 
-/// Log [`removed_env_warning`] once per process — to stderr, which is what a
-/// headless `fleet serve` / container deployment watches, and to the debug log.
-fn warn_removed_env_once() {
-    static DONE: OnceLock<()> = OnceLock::new();
-    DONE.get_or_init(|| {
-        if let Some(msg) = removed_env_warning(std::env::var(REMOVED_SIMPLIFIED_ENV).ok().as_deref())
-        {
-            eprintln!("fleet: {msg}");
-            crate::log_debug(&format!("feature_flags: {msg}"));
-        }
-    });
+/// This host's simplified-mode default, from [`SIMPLIFIED_ENV`]. Cached like
+/// [`locale_default`], for the same reason; changing it means restarting the
+/// process (for the cloud container: setting the env in muvee and redeploying).
+pub fn simplified_default() -> Option<bool> {
+    static CACHED: OnceLock<Option<bool>> = OnceLock::new();
+    *CACHED.get_or_init(|| env_tristate(std::env::var(SIMPLIFIED_ENV).ok().as_deref()))
 }
 
 /// Env var that enables the terminal surface.
@@ -201,11 +212,20 @@ fn test_override() -> Option<bool> {
 mod tests {
     use super::*;
 
+    // Simplified mode is tri-state, not truthy: "the deployment said off" and
+    // "the deployment said nothing" are different answers.
     #[test]
-    fn removed_simplified_env_warns_only_when_set() {
-        assert_eq!(removed_env_warning(None), None);
-        let msg = removed_env_warning(Some("1")).expect("set var warns");
-        assert!(msg.contains("FLEET_SIMPLIFIED_MODE") && msg.contains("removed"), "{msg}");
+    fn simplified_env_distinguishes_off_from_unset() {
+        for on in ["1", "true", "TRUE", "yes", "On", " 1 "] {
+            assert_eq!(env_tristate(Some(on)), Some(true), "{on:?} should be on");
+        }
+        for off in ["0", "false", "NO", "off", " 0 "] {
+            assert_eq!(env_tristate(Some(off)), Some(false), "{off:?} should be off");
+        }
+        for silent in ["", " ", "ture", "2", "maybe"] {
+            assert_eq!(env_tristate(Some(silent)), None, "{silent:?} says nothing");
+        }
+        assert_eq!(env_tristate(None), None, "unset says nothing");
     }
 
     #[test]
