@@ -826,7 +826,7 @@ function ElicitationCard({
         )}
         {isLast ? (
           <button
-            className={`${styles.btn} ${styles.btn_allow}`}
+            className={`${styles.btn} ${styles.btn_primary}`}
             onClick={handleSubmit}
             disabled={!allAnswered}
           >
@@ -834,7 +834,7 @@ function ElicitationCard({
           </button>
         ) : (
           <button
-            className={`${styles.btn} ${styles.btn_allow}`}
+            className={`${styles.btn} ${styles.btn_primary}`}
             onClick={handleNext}
             disabled={!hasAnswer}
           >
@@ -1812,7 +1812,7 @@ export function FleetAskCard({
         )}
         {isLast ? (
           <button
-            className={`${styles.btn} ${styles.btn_allow}`}
+            className={`${styles.btn} ${styles.btn_primary}`}
             onClick={handleSubmit}
             disabled={!allAnswered}
           >
@@ -1820,7 +1820,7 @@ export function FleetAskCard({
           </button>
         ) : (
           <button
-            className={`${styles.btn} ${styles.btn_allow}`}
+            className={`${styles.btn} ${styles.btn_primary}`}
             onClick={handleNext}
             disabled={!hasAnswer}
           >
