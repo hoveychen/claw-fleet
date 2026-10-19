@@ -42,7 +42,7 @@ import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 import { Presence } from "./Presence";
 import { SkeletonCard, SkeletonText } from "./loading";
-import { fromSubtask, isRecommendedOption, primaryOptionIndex, stripRecommendedSuffix } from "./dockKeys";
+import { fromSubtask, isRecommendedOption, stripRecommendedSuffix } from "./dockKeys";
 
 
 
@@ -1010,16 +1010,13 @@ function SharedOptionsBlock({
 
   const focusedPreview = question.options.find((o) => o.label === focusedLabel)?.preview;
 
-  const primaryIndex = primaryOptionIndex(
-    question.options.map((o) => o.label),
-    effectiveMulti,
-  );
+  // Only a click fills an option. A pre-filled "primary" button read as already
+  // picked while Submit stayed disabled, so the recommendation is a tag instead.
   const list = (
     <div className={styles.elicitation_options}>
       {question.options.map((opt, index) => {
         const isSelected = selected.includes(opt.label);
         const recommended = isRecommendedOption(opt.label);
-        const primary = index === primaryIndex;
         const isFocused = hasPreview && opt.label === focusedLabel;
         const handleEdit = (e: React.MouseEvent) => {
           e.stopPropagation();
@@ -1040,22 +1037,29 @@ function SharedOptionsBlock({
           >
             <button
               type="button"
-              className={`${styles.elicitation_option} ${primary ? styles.elicitation_option_primary : ""} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
+              className={`${styles.elicitation_option} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
+              aria-pressed={isSelected}
               onClick={() =>
                 onToggle(decisionId, question.question, opt.label, effectiveMulti)
               }
               onMouseEnter={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
               onFocus={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
             >
-              {/* The digit the dock's keyboard handler maps to this option. */}
-              {index < 9 && (
+              {/* The digit the dock's keyboard handler maps to this option; a
+                  check once it is picked. */}
+              {(index < 9 || isSelected) && (
                 <span className={styles.elicitation_option_num} aria-hidden>
-                  {index + 1}
+                  {isSelected ? "✓" : index + 1}
                 </span>
               )}
               <span className={styles.elicitation_option_text}>
                 <span className={styles.elicitation_option_label}>
                   {recommended ? stripRecommendedSuffix(opt.label) : opt.label}
+                  {recommended && (
+                    <span className={styles.elicitation_option_rec}>
+                      {t("elicitation.recommended", "Recommended")}
+                    </span>
+                  )}
                 </span>
                 {opt.description && (
                   <span className={styles.elicitation_option_desc}>{opt.description}</span>

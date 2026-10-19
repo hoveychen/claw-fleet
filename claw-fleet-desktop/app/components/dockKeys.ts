@@ -16,17 +16,7 @@ export function isRecommendedOption(label: string): boolean {
   return RECOMMENDED_SUFFIX.test(label);
 }
 
-/** Which option is drawn as the card's primary button: the one marked
- *  recommended, else the first (the pick in about half of all answers). A
- *  multi-select question has no single answer to push, so without a marker it
- *  gets none (-1). The rest are secondary buttons. */
-export function primaryOptionIndex(labels: readonly string[], multiSelect: boolean): number {
-  const marked = labels.findIndex(isRecommendedOption);
-  if (marked >= 0) return marked;
-  return multiSelect || labels.length === 0 ? -1 : 0;
-}
-
-/** The label without its recommendation marker — the button already shows it. */
+/** The label without its recommendation marker — the option shows a tag instead. */
 export function stripRecommendedSuffix(label: string): string {
   return label.replace(RECOMMENDED_SUFFIX, "");
 }
