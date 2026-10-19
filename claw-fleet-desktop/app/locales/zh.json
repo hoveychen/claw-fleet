@@ -2303,8 +2303,6 @@
   },
   "decision": {
     "pending": "待处理决策",
-    "last_answer_label": "你上一轮的回答",
-    "last_prompt_label": "你上一轮说的",
     "options_expand": "展开选项（{{n}}）",
     "options_expand_plain": "展开回答区",
     "options_collapse": "收起选项",
