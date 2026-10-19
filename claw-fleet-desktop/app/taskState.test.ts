@@ -35,6 +35,13 @@ describe("taskStateOf", () => {
     expect(taskStateOf({ main: [m("idle")], subtasks: [], outcome: "abandoned" })).toBe("done");
   });
 
+  it("closing a task answers its error, but not its card", () => {
+    expect(taskStateOf({ main: [m("rateLimited")], subtasks: [], outcome: "completed" })).toBe("done");
+    expect(
+      taskStateOf({ main: [m("idle", { hasPendingDecision: true })], subtasks: [], outcome: "completed" }),
+    ).toBe("needsYou");
+  });
+
   it("a main hop in flight is running", () => {
     expect(taskStateOf({ main: [m("idle"), m("thinking")], subtasks: [], outcome: null })).toBe("running");
     expect(taskStateOf({ main: [m("idle", { quiet: true })], subtasks: [], outcome: null })).toBe("running");

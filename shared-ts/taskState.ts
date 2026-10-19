@@ -95,7 +95,9 @@ function isWatching(m: TaskMemberView): boolean {
  * 1. needsYou — any session of the task (main or sub-task) has a card waiting
  *    or is in an error state (errors only on the latest hop of each line —
  *    see `superseded`). Checked first so a card is never hidden under a
- *    closed task.
+ *    closed task. An error is not: once the boss closed the task (marked it
+ *    done from the list, say, after it hit a rate limit), the error is
+ *    answered.
  * 2. done — the boss pressed finish / abandon.
  * 3. running — the main conversation has a turn in flight.
  * 4. waiting — the main conversation is parked on a `fleet watch`, or its
@@ -105,8 +107,9 @@ function isWatching(m: TaskMemberView): boolean {
  */
 export function taskStateOf(task: TaskView): TaskState {
   const all = [...task.main, ...task.subtasks];
-  if (all.some(needsHuman)) return "needsYou";
-  if (task.outcome === "completed" || task.outcome === "abandoned") return "done";
+  const closed = task.outcome === "completed" || task.outcome === "abandoned";
+  if (all.some((m) => (closed ? m.hasPendingDecision : needsHuman(m)))) return "needsYou";
+  if (closed) return "done";
   if (task.main.some(isWorking)) return "running";
   if (task.main.some(isWatching) || task.subtasks.some((m) => isWorking(m) || isWatching(m))) {
     return "waiting";

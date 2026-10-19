@@ -226,6 +226,41 @@
   background: var(--color-success);
 }
 
+/* The row's leading toggle (mark done / reopen): a 30px target around a
+   state-coloured ring; a closed task shows a tick (completed) or a cross
+   (abandoned). */
+.markToggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: -6px -8px -6px -10px;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--color-text-dim);
+}
+
+.markToggle[data-state="needsYou"] {
+  color: var(--color-error);
+}
+
+.markToggle[data-state="running"] {
+  color: var(--color-running);
+}
+
+.markToggle[data-state="waiting"] {
+  color: var(--color-warning);
+}
+
+.markToggle[data-state="review"],
+.markToggle[data-outcome="completed"] {
+  color: var(--color-success);
+}
+
 .rowBody {
   flex: 1;
   min-width: 0;
@@ -297,6 +332,30 @@
   font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* Stop kills the process, so it is red; interrupt only ends the current
+   turn and stays neutral. */
+.stopButton {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+  background: none;
+  color: var(--color-error);
+  font-size: var(--t-aux, 12px);
+}
+
+.stopButton[data-mode="interrupt"] {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.stopButton:disabled {
+  opacity: 0.5;
 }
 
 .acceptButton {

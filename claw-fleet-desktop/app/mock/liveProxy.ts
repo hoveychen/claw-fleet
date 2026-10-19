@@ -1296,6 +1296,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     pick: "accepted",
   }),
 
+  reopen_tasks: (a) => ({
+    method: "POST",
+    path: "/tasks/reopen",
+    body: { sessionIds: a.sessionIds },
+    pick: "reopened",
+  }),
+
   set_session_title: (a) => ({
     method: "POST",
     path: "/session_title",

@@ -59,10 +59,38 @@ pub struct HostFeatures {
 
 /// This host's feature set, as served to every client.
 pub fn host_features() -> HostFeatures {
+    warn_removed_env_once();
     HostFeatures {
         terminal: terminal_enabled(),
         locale_default: locale_default(),
     }
+}
+
+/// Env var that used to set simplified mode's host default. Simplified mode was
+/// removed in 2026-10; a deployment that still exports it gets a warning rather
+/// than having it ignored without a word.
+pub const REMOVED_SIMPLIFIED_ENV: &str = "FLEET_SIMPLIFIED_MODE";
+
+/// The warning for a still-set [`REMOVED_SIMPLIFIED_ENV`], or `None` when unset.
+pub fn removed_env_warning(simplified: Option<&str>) -> Option<String> {
+    let raw = simplified?;
+    Some(format!(
+        "warning: {REMOVED_SIMPLIFIED_ENV}={raw:?} is ignored: simplified mode was removed \
+         (Tasks / Materials are now the default layout); unset the variable"
+    ))
+}
+
+/// Log [`removed_env_warning`] once per process — to stderr, which is what a
+/// headless `fleet serve` / container deployment watches, and to the debug log.
+fn warn_removed_env_once() {
+    static DONE: OnceLock<()> = OnceLock::new();
+    DONE.get_or_init(|| {
+        if let Some(msg) = removed_env_warning(std::env::var(REMOVED_SIMPLIFIED_ENV).ok().as_deref())
+        {
+            eprintln!("fleet: {msg}");
+            crate::log_debug(&format!("feature_flags: {msg}"));
+        }
+    });
 }
 
 /// Env var that enables the terminal surface.
@@ -171,6 +199,13 @@ fn test_override() -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removed_simplified_env_warns_only_when_set() {
+        assert_eq!(removed_env_warning(None), None);
+        let msg = removed_env_warning(Some("1")).expect("set var warns");
+        assert!(msg.contains("FLEET_SIMPLIFIED_MODE") && msg.contains("removed"), "{msg}");
+    }
 
     #[test]
     fn only_explicit_affirmatives_enable_a_flag() {

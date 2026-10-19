@@ -2217,6 +2217,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "stop"
             | "session_mark"
             | "accept_tasks"
+            | "reopen_tasks"
             | "set_resume_settings"
             | "session_explain_ask"
             | "upload_attachment"
@@ -2579,6 +2580,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop" => serve_stop(params),
         "session_mark" => serve_session_mark(params),
         "accept_tasks" => serve_accept_tasks(params),
+        "reopen_tasks" => serve_reopen_tasks(params),
         "set_resume_settings" => serve_set_resume_settings(params),
         // Forks a session and spends money; a lost reply must not fork twice.
         "session_explain_ask" => {
@@ -3921,6 +3923,13 @@ fn serve_accept_tasks(params: &Value) -> Result<Value, String> {
     Ok(json!({ "ok": true, "accepted": accepted }))
 }
 
+fn serve_reopen_tasks(params: &Value) -> Result<Value, String> {
+    let req: crate::task_model::AcceptTasksRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad reopen_tasks params: {e}"))?;
+    let reopened = crate::task_model::reopen_tasks(&req.session_ids);
+    Ok(json!({ "ok": true, "reopened": reopened }))
+}
+
 fn serve_session_mark(params: &Value) -> Result<Value, String> {
     let req: crate::session_mark::SetSessionMarkRequest = serde_json::from_value(params.clone())
         .map_err(|e| format!("bad session_mark params: {e}"))?;
@@ -4990,6 +4999,7 @@ mod tests {
             "stop",
             "session_mark",
             "accept_tasks",
+            "reopen_tasks",
             "set_resume_settings",
             "session_explain_ask",
             "upload_attachment",
@@ -6339,6 +6349,23 @@ mod tests {
                     "{id}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn request_reopen_tasks_clears_what_accept_stamped() {
+        with_temp_home(|| {
+            request_ok("accept_tasks", json!({"sessionIds": ["s1", "s2"]}));
+            assert_eq!(
+                crate::session_mark::read("s1"),
+                Some(crate::session_mark::SessionMark::Done)
+            );
+            let data = request_ok("reopen_tasks", json!({"sessionIds": ["s1", "s1", ""]}));
+            assert_eq!(data["ok"], true);
+            assert_eq!(data["reopened"], 1);
+            assert_eq!(crate::task_outcome::read("s1"), None);
+            assert_eq!(crate::session_mark::read("s1"), None);
+            assert!(crate::task_outcome::read("s2").is_some(), "only the named task reopens");
         });
     }
 

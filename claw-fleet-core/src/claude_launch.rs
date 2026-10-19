@@ -245,8 +245,15 @@ fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
         "attribution": { "commitTrailers": false, "sessionUrl": false },
     });
     if let Some(bin) = fleet_bin {
-        v["hooks"] =
-            crate::hooks::launch_hooks(bin, !global.plan.already_installed, |f| global.wants(f));
+        // A sub-task's per-turn role line rides the prd-context hook. With that
+        // hook switched off (and not installed globally either), keep the hook
+        // for the role line alone — the interaction rules point at that line.
+        let role_only = is_enabled(Feature::InteractionMode)
+            && !is_enabled(Feature::PrdContextHook)
+            && !global.has(Feature::PrdContextHook);
+        v["hooks"] = crate::hooks::launch_hooks(bin, !global.plan.already_installed, role_only, |f| {
+            global.wants(f)
+        });
     }
     v
 }
@@ -504,6 +511,24 @@ mod tests {
         assert!(!hooks.contains("\" guard;"), "guard must be off: {hooks}");
         assert!(!hooks.contains("session idle"), "idle must be off: {hooks}");
         assert!(hooks.contains("elicitation"), "others stay on: {hooks}");
+    }
+
+    #[test]
+    fn plan_injection_off_keeps_the_prompt_hook_for_the_role_line() {
+        let _h = Home::new("roleonly");
+        crate::control_plane_prefs::mark_disabled(Feature::PrdContextHook).unwrap();
+
+        let args = launch_args_with(&[], Some(BIN), &none());
+        let settings = read_json(value_after(&args, "--settings").unwrap());
+        let prompt_hooks = settings["hooks"]["UserPromptSubmit"].to_string();
+        assert_eq!(prompt_hooks.matches("prd-context").count(), 1, "{prompt_hooks}");
+        let hooks = subcommands(&settings);
+        assert!(!hooks.contains("notes-hint"), "companions stay off: {hooks}");
+
+        crate::control_plane_prefs::mark_disabled(Feature::InteractionMode).unwrap();
+        let args = launch_args_with(&[], Some(BIN), &none());
+        let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
+        assert!(!hooks.contains("prd-context"), "no interaction rules, no role line: {hooks}");
     }
 
     #[test]

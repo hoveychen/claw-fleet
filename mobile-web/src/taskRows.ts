@@ -44,6 +44,9 @@ export interface TaskRow<T extends Row = Row> {
   projectName: string;
   /** A card from the main conversation is waiting. */
   mainPending: boolean;
+  /** How the boss closed the task, if they did: tells a finished task from a
+   *  given-up one inside the "done" section. */
+  outcome: "completed" | "abandoned" | null;
   lastActivityMs: number;
 }
 
@@ -97,7 +100,9 @@ export interface BuildOptions {
 /**
  * Regroup a device-tagged session snapshot into task rows, newest activity
  * first. Only Fleet-started main conversations become rows; a sub-task hop
- * joins the task named by its `parentTaskId` on the same device.
+ * joins the task named by its `parentTaskId` on the same device. A sub-task
+ * whose parent has no row — started in a terminal, or aged out of the
+ * snapshot — is listed as a task of its own rather than vanishing with it.
  */
 export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions): Array<TaskRow<T>> {
   const mains = new Map<string, T[]>();
@@ -119,6 +124,19 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
     const arr = mains.get(k);
     if (arr) arr.push(s);
     else mains.set(k, [s]);
+  }
+  const listed = new Set<string>();
+  for (const hops of mains.values()) {
+    const tip = tipOf(hops);
+    if (tip.taskId) listed.add(`${tip.deviceId}::${tip.taskId}`);
+  }
+  for (const [parent, lines] of subs) {
+    if (listed.has(parent)) continue;
+    for (const [k, hops] of lines) {
+      const key = `${hops[0].deviceId}::${k}`;
+      if (!mains.has(key)) mains.set(key, hops);
+    }
+    subs.delete(parent);
   }
 
   const view = (s: T, superseded: boolean): TaskMemberView => {
@@ -167,6 +185,7 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
       projectKey: projectScopeKey(tip.deviceId, path, opts.multiDevice),
       projectName: device ? `${device} · ${tip.workspaceName}` : tip.workspaceName,
       mainPending: hops.some((h) => opts.isPending(h.deviceId, h.id)),
+      outcome,
       lastActivityMs: Math.max(
         ...hops.map((h) => h.lastActivityMs),
         ...allSubHops.map((h) => h.lastActivityMs),

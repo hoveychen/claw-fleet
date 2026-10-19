@@ -7,7 +7,19 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronDown, ChevronRight, Inbox, Search, SearchX, WifiOff, X } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Inbox,
+  Search,
+  SearchX,
+  Square,
+  WifiOff,
+  X,
+  XCircle,
+} from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { SkeletonCard, Spinner } from "./loading";
 import { useDelayedFlag } from "../useDelayedFlag";
@@ -30,6 +42,7 @@ import {
   type RowDetail,
   type TaskRow,
 } from "../taskRows";
+import { canControl, runStop, stopMode } from "./sessionStop";
 import styles from "./TasksView.module.css";
 
 /** Document-level scrollbar is shared by all tabs; the task view unmounts/remounts with
@@ -249,9 +262,13 @@ export function TasksView({
     "tasks:collapsedStates",
     DEFAULT_COLLAPSED,
   );
-  // Accepted rows leave the review section at once; the next snapshot confirms.
+  // Accepted (marked done) rows move to the done section at once, reopened
+  // rows leave it at once; the next snapshot confirms either.
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set());
+  const [reopened, setReopened] = useState<ReadonlySet<string>>(() => new Set());
   const [accepting, setAccepting] = useState(false);
+  // Row whose stop / interrupt is in flight (`itemKey` of its tip).
+  const [stoppingKey, setStoppingKey] = useState<string | null>(null);
 
   const deviceIds = useMemo(() => [...new Set(sessions.map((s) => s.deviceId))], [sessions]);
   const { searching, ftsMatchKeys, snippetByKey } = useRelaySearch(deviceIds, clientFor, search);
@@ -273,11 +290,29 @@ export function TasksView({
       multiDevice,
       deviceLabelOf,
       untitled: t("（无标题）"),
-    }).map((r) =>
-      r.state === "review" && accepted.has(r.key) ? { ...r, state: "done" as const } : r,
-    );
+    }).map((r) => {
+      // A pending card keeps the task under "needs you" whatever its outcome.
+      if (accepted.has(r.key) && r.state !== "done" && !r.mainPending) {
+        return { ...r, state: "done" as const, outcome: "completed" as const };
+      }
+      if (reopened.has(r.key) && r.state === "done") {
+        return { ...r, state: "review" as const, outcome: null };
+      }
+      return r;
+    });
     return applyFrozenOrder(built, frozenOrder, (r) => r.key);
-  }, [sessions, pendingKeys, multiDevice, deviceLabelOf, accepted, frozenOrder]);
+  }, [sessions, pendingKeys, multiDevice, deviceLabelOf, accepted, reopened, frozenOrder]);
+
+  // Drop optimistic entries the snapshot has caught up with, so a later change
+  // made elsewhere (resumed on the desktop, closed from a card) shows through.
+  useEffect(() => {
+    const byKey = new Map(rows.map((r) => [r.key, r]));
+    const closed = (k: string) => byKey.get(k)?.hops.some((h) => h.taskOutcome) ?? false;
+    const keptAccepted = [...accepted].filter((k) => byKey.has(k) && !closed(k));
+    if (keptAccepted.length !== accepted.size) setAccepted(new Set(keptAccepted));
+    const keptReopened = [...reopened].filter((k) => byKey.has(k) && closed(k));
+    if (keptReopened.length !== reopened.size) setReopened(new Set(keptReopened));
+  }, [rows, accepted, reopened]);
 
   useEffect(() => {
     renderedOrderRef.current = rows.map((r) => r.key);
@@ -351,6 +386,49 @@ export function TasksView({
         }),
       );
       setAccepting(false);
+    },
+    [clientFor],
+  );
+
+  /** Stop or interrupt a task's latest main hop, on its own machine: a pid
+   *  only means something on the host that reported it. */
+  const stop = useCallback(
+    async (s: WithDevice<SessionInfo>) => {
+      const transport = clientFor(s.deviceId);
+      if (!transport || stoppingKey) return;
+      setStoppingKey(itemKey(s.deviceId, s.id));
+      try {
+        await runStop(transport, s, confirm);
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : t("操作失败"));
+      } finally {
+        setStoppingKey(null);
+      }
+    },
+    [clientFor, stoppingKey, confirm],
+  );
+
+  /** Reopen a closed task (改回进行中 / 撤销验收) on its own machine. */
+  const reopen = useCallback(
+    async (r: TaskRow<WithDevice<SessionInfo>>) => {
+      setReopened((prev) => new Set([...prev, r.key]));
+      setAccepted((prev) => {
+        if (!prev.has(r.key)) return prev;
+        const next = new Set(prev);
+        next.delete(r.key);
+        return next;
+      });
+      const transport = clientFor(r.deviceId);
+      try {
+        if (!transport) throw new Error("offline");
+        await transport.request("reopen_tasks", { sessionIds: [r.tip.id] });
+      } catch {
+        setReopened((prev) => {
+          const next = new Set(prev);
+          next.delete(r.key);
+          return next;
+        });
+      }
     },
     [clientFor],
   );
@@ -472,16 +550,46 @@ export function TasksView({
         : undefined;
     const tally = subtaskTally(r);
     const line2 = [
-      detailText(rowDetail(r, t("（无标题）"))),
+      detailText(rowDetail(r, t("（无标题）"))) ??
+        (r.state === "done" && r.outcome === "abandoned" ? t("已放弃") : null),
       tally ? t("子任务 {0}/{1}", tally.done, tally.total) : null,
     ]
       .filter(Boolean)
       .join(" · ");
     const live = r.state === "needsYou" || r.state === "running" || r.state === "waiting";
+    const mode = stopMode(tip);
+    const stoppable =
+      live && canControl(tip) && mode !== "spent" && clientFor(tip.deviceId) !== null;
+    const stopBusy = stoppingKey === itemKey(tip.deviceId, tip.id);
     const startedAt = tip.taskSummary?.startedAtMs || Math.min(...r.hops.map((h) => h.createdAtMs));
     return (
       <div key={r.key} className={styles.row} onClick={() => onOpenSession(tip)}>
-        <span className={styles.dot} data-state={r.state} />
+        <button
+          className={styles.markToggle}
+          data-state={r.state}
+          data-outcome={r.state === "done" ? (r.outcome ?? "completed") : undefined}
+          aria-pressed={r.state === "done"}
+          aria-label={
+            r.state !== "done"
+              ? t("进行中 — 点击标为已完成")
+              : r.outcome === "abandoned"
+                ? t("已放弃 — 点击改回进行中")
+                : t("已完成 — 点击改回进行中")
+          }
+          onClick={(e) => {
+            e.stopPropagation();
+            if (r.state === "done") void reopen(r);
+            else void accept([r]);
+          }}
+        >
+          {r.state !== "done" ? (
+            <Circle size={16} />
+          ) : r.outcome === "abandoned" ? (
+            <XCircle size={16} />
+          ) : (
+            <CheckCircle2 size={16} />
+          )}
+        </button>
         <div className={styles.rowBody}>
           <div className={styles.line1}>
             <span className={styles.title}>{r.title}</span>
@@ -493,6 +601,21 @@ export function TasksView({
             line2 && <div className={styles.line2}>{line2}</div>
           )}
         </div>
+        {stoppable && (
+          <button
+            className={styles.stopButton}
+            data-mode={mode}
+            disabled={stopBusy}
+            aria-label={mode === "interrupt" ? t("中断当前回合") : t("停止")}
+            onClick={(e) => {
+              e.stopPropagation();
+              void stop(tip);
+            }}
+          >
+            {stopBusy ? <Spinner size={12} /> : <Square size={11} />}
+            {mode === "interrupt" ? t("中断") : t("停止")}
+          </button>
+        )}
         {r.state === "review" ? (
           <button
             className={styles.acceptButton}
@@ -504,7 +627,7 @@ export function TasksView({
           >
             {t("验收")}
           </button>
-        ) : (
+        ) : stoppable ? null : (
           <span className={styles.time}>
             {live ? compactDuration(Date.now() - startedAt) : timeAgo(r.lastActivityMs)}
           </span>

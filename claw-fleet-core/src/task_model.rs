@@ -333,6 +333,40 @@ fn stamp_accepted(session_ids: &[String]) -> Vec<(String, String)> {
     stamped
 }
 
+/// Reopen tasks from the task list ("改回进行中" / "撤销验收"): the inverse of
+/// [`accept_tasks`] and of a card's terminal button. Clears the outcome and the
+/// `Done` review mark on every hop of each task's relay chain, so the row falls
+/// back to whatever its sessions are doing (running, waiting, awaiting review).
+/// Relaunches nothing — reopening is a change of verdict, not a resume — and
+/// leaves an already-written retrospective in place. Returns how many tasks
+/// were reopened (tasks that had no outcome count too: the call is idempotent).
+pub fn reopen_tasks(session_ids: &[String]) -> usize {
+    let mut done: HashSet<String> = HashSet::new();
+    let mut reopened = 0;
+    for id in session_ids.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let hops = crate::task_review::task_sessions(id);
+        if hops.iter().any(|h| done.contains(h)) {
+            continue;
+        }
+        for hop in hops.iter().chain(std::iter::once(&id.to_string())) {
+            let ws = crate::task_outcome::read(hop)
+                .map(|r| r.workspace_path)
+                .unwrap_or_default();
+            if let Err(e) = crate::task_outcome::set_outcome(hop, &ws, None, "", false) {
+                crate::log_debug(&format!("reopen task: clear outcome of {hop}: {e}"));
+            }
+            if crate::session_mark::read(hop) == Some(crate::session_mark::SessionMark::Done) {
+                if let Err(e) = crate::session_mark::set_mark(hop, &ws, None) {
+                    crate::log_debug(&format!("reopen task: clear mark of {hop}: {e}"));
+                }
+            }
+        }
+        done.extend(hops);
+        reopened += 1;
+    }
+    reopened
+}
+
 /// Stamp `task_id` / `parent_task_id` onto scanned sessions. Sub-agents
 /// (Claude Code's in-process `Task` agents) are not part of the model and are
 /// left unset.

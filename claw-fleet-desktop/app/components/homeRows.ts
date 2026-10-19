@@ -61,6 +61,9 @@ export interface TaskRow {
   projectName: string;
   /** A card from the main conversation is waiting. */
   mainPending: boolean;
+  /** How the boss closed the task, if they did: tells a finished task from a
+   *  given-up one inside the "done" section. */
+  outcome: "completed" | "abandoned" | null;
   startedAtMs: number;
   lastActivityMs: number;
 }
@@ -122,7 +125,10 @@ export interface BuildOptions {
 /**
  * Regroup the scan into home rows, newest activity first. Only Fleet-started
  * main conversations become task rows; a sub-task hop joins the task named by
- * its `parentTaskId`. Cards from sessions outside every task become card rows.
+ * its `parentTaskId`. A sub-task whose parent has no row — the parent was
+ * started in a terminal, or aged out of the scan — is listed as a task of its
+ * own rather than vanishing with it. Cards from sessions outside every task
+ * become card rows.
  */
 export function buildHomeRows(
   sessions: SessionInfo[],
@@ -145,6 +151,7 @@ export function buildHomeRows(
     if (!isFleetOwnedTask(s)) continue;
     push(mains, lineKey(s), s);
   }
+  promoteOrphanSubtasks(mains, subs);
 
   const view = (s: SessionInfo, superseded: boolean): TaskMemberView => ({
     status: s.status,
@@ -184,6 +191,7 @@ export function buildHomeRows(
       projectPath: repoRootPath(tip.workspacePath),
       projectName: tip.workspaceName,
       mainPending: hops.some(isPending),
+      outcome,
       startedAtMs: summary?.startedAtMs || Math.min(...hops.map((h) => h.createdAtMs)),
       lastActivityMs: Math.max(
         ...hops.map((h) => h.agentLastActivityMs || h.lastActivityMs),
@@ -223,6 +231,28 @@ export function buildHomeRows(
 
   rows.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   return rows;
+}
+
+/** Move the sub-task lines whose parent task has no row of its own up to
+ *  `mains`, so each is listed as a task. A parent "has a row" when one of the
+ *  main lines' latest hop carries its id — the same lookup the row builder
+ *  uses to hang sub-tasks under a task. */
+function promoteOrphanSubtasks(
+  mains: Map<string, SessionInfo[]>,
+  subs: Map<string, Map<string, SessionInfo[]>>,
+): void {
+  const listed = new Set<string>();
+  for (const hops of mains.values()) {
+    const taskId = tipOf(hops).taskId;
+    if (taskId) listed.add(taskId);
+  }
+  for (const [parent, lines] of subs) {
+    if (listed.has(parent)) continue;
+    for (const [k, hops] of lines) {
+      if (!mains.has(k)) mains.set(k, hops);
+    }
+    subs.delete(parent);
+  }
 }
 
 function push<K, V>(m: Map<K, V[]>, k: K, v: V) {

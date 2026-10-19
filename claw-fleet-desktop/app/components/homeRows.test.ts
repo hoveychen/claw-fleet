@@ -79,6 +79,19 @@ describe("buildHomeRows", () => {
     expect(row.state).toBe("waiting");
   });
 
+  it("lists a sub-task as a task of its own when its parent has no row", () => {
+    // Parent started in a terminal (not a Fleet task), or absent from the scan.
+    const rows = build([
+      session("cli", { entrypoint: "cli", fleetSpawned: false }),
+      session("sub", { parentTaskId: "cli", taskId: "sub", aiTitle: "web" }),
+      session("lost", { parentTaskId: "aged-out", taskId: "lost", status: "executing", procAlive: true }),
+    ]);
+    const tasks = rows.filter((r): r is TaskRow => r.kind === "task");
+    expect(tasks.map((r) => r.tip.id).sort()).toEqual(["lost", "sub"]);
+    expect(tasks.find((r) => r.tip.id === "lost")!.state).toBe("running");
+    expect(rowOfSession(rows, "sub")?.key).toBe("sub");
+  });
+
   it("puts a task whose sub-task holds a card in needs-you and says which one", () => {
     const rows = build(
       [session("main"), session("sub", { parentTaskId: "main", taskId: "sub", aiTitle: "web" })],
@@ -107,6 +120,14 @@ describe("buildHomeRows", () => {
   it("closes a task the boss finished even with nothing running", () => {
     const rows = build([session("main", { taskOutcome: "completed" })]);
     expect(rows[0].state).toBe("done");
+    expect(rows[0].kind === "task" && rows[0].outcome).toBe("completed");
+  });
+
+  it("tells an abandoned task from a completed one", () => {
+    const rows = build([session("main", { taskOutcome: "abandoned" })]);
+    expect(rows[0].state).toBe("done");
+    expect(rows[0].kind === "task" && rows[0].outcome).toBe("abandoned");
+    expect(build([session("open")])[0]).toMatchObject({ outcome: null });
   });
 
   it("closes a stopped sub-task along with its accepted parent, not a moving one", () => {

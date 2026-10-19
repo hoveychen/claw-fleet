@@ -512,7 +512,7 @@ done, user abandoned it\" is its strongest signal.\n\
 ABANDONED` (the terminal button), or {title} says in free text that you are \
 done (\"收工\", \"done\"), end with a one-line plain-text \
 acknowledgement instead of another card.\n\
-- **Sub-task exemption:** when the per-turn injection says \"你的角色：子任务\", end the turn \
+- **Sub-task exemption:** when the per-turn injection says \"Your role: sub-task\" (or \"你的角色：子任务\"), end the turn \
 with your result as plain text and no card, unless {title} has a call to make.\n\
 - **Handoff-registered exemption:** once `fleet handoff` has returned `ok` this \
 turn, raise NO card — not even a decision-free wrap-up. The relay fires when \

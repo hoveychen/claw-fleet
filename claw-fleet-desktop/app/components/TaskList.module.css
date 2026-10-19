@@ -101,6 +101,53 @@
   border-radius: 50%;
 }
 
+/* The leading toggle: a 16px hit target around the state dot. Hovering an
+   open task swaps the dot for a ringed tick ("mark done"); a closed one shows
+   its tick or cross. */
+.mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 -4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.mark_hover {
+  display: none;
+}
+
+.mark:not(.mark_closed):hover,
+.mark:not(.mark_closed):focus-visible {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.mark:not(.mark_closed):hover .dot,
+.mark:not(.mark_closed):focus-visible .dot {
+  display: none;
+}
+
+.mark:not(.mark_closed):hover .mark_hover,
+.mark:not(.mark_closed):focus-visible .mark_hover {
+  display: block;
+}
+
+.mark_closed[data-outcome="completed"] {
+  color: var(--color-success);
+}
+
+.mark_closed:hover {
+  border-color: var(--color-border);
+}
+
 .title {
   flex: 0 1 auto;
   min-width: 0;

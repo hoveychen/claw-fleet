@@ -57,9 +57,17 @@ pub(crate) fn cmd_prd_context() {
     // Single source of truth for the injected text (shared with the codex
     // prompt-prepend path). `None` → silent no-op (no TASKS.md, or a clean file
     // with no active plan and no structural problem).
-    let Some(reminder) =
+    // With the plan injection switched off this hook is only installed for a
+    // sub-task's role line (`hooks::launch_hooks`'s `role_only`).
+    let plans_off = claw_fleet_core::control_plane_prefs::is_disabled(
+        claw_fleet_core::control_plane_prefs::Feature::PrdContextHook,
+    );
+    let reminder = if plans_off {
+        claw_fleet_core::task_roles_guidance::render_role_only_reminder(session_id.as_deref())
+    } else {
         claw_fleet_core::prd_tasks::render_active_plans_reminder(&cwd, session_id.as_deref())
-    else {
+    };
+    let Some(reminder) = reminder else {
         return;
     };
 

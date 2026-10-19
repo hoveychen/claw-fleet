@@ -288,6 +288,7 @@ pub const STOP: &str = "/stop";
 pub const TAIL: &str = "/tail";
 pub const TASK_PLANS: &str = "/task_plans";
 pub const TASKS_ACCEPT: &str = "/tasks/accept";
+pub const TASKS_REOPEN: &str = "/tasks/reopen";
 pub const TEST_DECISION_END_TO_END: &str = "/test_decision_end_to_end";
 pub const TEST_DECISION_VIA_CLAUDE_CLI: &str = "/test_decision_via_claude_cli";
 pub const TODAY_USAGE: &str = "/today_usage";

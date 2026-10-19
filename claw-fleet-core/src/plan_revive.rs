@@ -74,6 +74,27 @@ const OPT_FOREVER: &str = "别再管这件事";
 const OPT_RESUME: &str = "登录已修好，恢复";
 const OPT_TURN_OFF: &str = "关闭自动接续";
 
+/// Labels used before the 2026-10 rename, paired with the option that
+/// replaced each. A card raised by an older build and answered after the
+/// upgrade still carries these, and must not fall through to the free-text
+/// branch (which reads as "go now").
+const LEGACY_LABELS: &[(&str, &str)] = &[
+    ("起新会话继续", OPT_REVIVE),
+    ("再唤醒一次", OPT_RETRY),
+    ("静默 7 天", OPT_WEEK),
+    ("别再管这个计划", OPT_FOREVER),
+    ("登录已修好，恢复唤醒", OPT_RESUME),
+    ("关闭自动唤醒", OPT_TURN_OFF),
+];
+
+/// Map a pre-rename label onto its current option; anything else passes through.
+fn current_label(answer: &str) -> &str {
+    LEGACY_LABELS
+        .iter()
+        .find(|(old, _)| *old == answer)
+        .map_or(answer, |(_, new)| new)
+}
+
 /// Claude Code's `error` tag on the synthetic turn it writes when a request is
 /// refused for the account rather than the request: nothing a fresh session
 /// does differently gets past it. Seen on this machine (2026-09-30 tally over
@@ -837,7 +858,7 @@ pub fn apply_answer(
     let wake_now = |st: &mut PlanReviveState| {
         st.orphan_since_ms = Some(now.saturating_sub(ORPHAN_GRACE_MS));
     };
-    match answer.map(str::trim) {
+    match answer.map(|a| current_label(a.trim())) {
         Some(OPT_WEEK) => Some(Some(WEEK_MS)),
         Some(OPT_FOREVER) => Some(None),
         Some(OPT_REVIVE) | Some(OPT_RETRY) | None | Some("") => {
@@ -1257,7 +1278,12 @@ fn tick_pause(state: &mut StateFile, now: u64, transcript: &dyn Fn(&str) -> Opti
     if let Some(card) = state.pause.as_ref().and_then(|p| p.card_id.clone()) {
         if let Some(resp) = crate::elicitation::try_read_response(&card) {
             crate::elicitation::cleanup(&card);
-            let answer = resp.answers.values().map(|s| s.trim()).find(|s| !s.is_empty());
+            let answer = resp
+                .answers
+                .values()
+                .map(|s| s.trim())
+                .find(|s| !s.is_empty())
+                .map(current_label);
             match (resp.declined, answer) {
                 (true, _) => {
                     if let Some(p) = state.pause.as_mut() {
@@ -2233,6 +2259,24 @@ mod tests {
         let v2 = view(2, false);
         assert_eq!(decide(&v2, false, false, &mut st, ORPHAN_GRACE_MS, true), Step::Revive);
         assert_eq!(st.attempts, 0);
+    }
+
+    #[test]
+    fn pre_rename_labels_map_to_their_current_options() {
+        let mut st = PlanReviveState::default();
+        assert_eq!(apply_answer(&mut st, false, Some("静默 7 天"), 0), Some(Some(WEEK_MS)));
+        assert!(!st.boss_approved);
+        assert_eq!(apply_answer(&mut st, false, Some("别再管这个计划"), 0), Some(None));
+        assert!(!st.boss_approved);
+        assert_eq!(apply_answer(&mut st, false, Some(" 起新会话继续 "), 10 * ORPHAN_GRACE_MS), None);
+        assert!(st.boss_approved);
+        assert_eq!(st.boss_note, None, "an old label must not be kept as a free-text note");
+        let mut st = PlanReviveState::default();
+        assert_eq!(apply_answer(&mut st, false, Some("再唤醒一次"), 10 * ORPHAN_GRACE_MS), None);
+        assert_eq!(st.boss_note, None);
+        assert_eq!(current_label("关闭自动唤醒"), OPT_TURN_OFF);
+        assert_eq!(current_label("登录已修好，恢复唤醒"), OPT_RESUME);
+        assert_eq!(current_label("随便写点"), "随便写点");
     }
 
     #[test]
