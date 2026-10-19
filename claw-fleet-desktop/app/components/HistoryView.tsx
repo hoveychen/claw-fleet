@@ -48,6 +48,8 @@ import {
   rowDecisions,
   rowOfSession,
   rowSessionId,
+  mixedAgentSources,
+  projectGroups,
   sectionRows,
   type HomeRow,
   type TaskRow,
@@ -327,6 +329,11 @@ export function HistoryView() {
   // for the same unmount reason as the filters above.
   const collapsedSections = useUIStore((s) => s.homeCollapsedSections);
   const toggleSection = useUIStore((s) => s.toggleHomeSection);
+  // By state (default) or by project; on disk like the folds.
+  const groupBy = useUIStore((s) => s.homeGroupBy);
+  const setGroupBy = useUIStore((s) => s.setHomeGroupBy);
+  const collapsedProjects = useUIStore((s) => s.homeCollapsedProjects);
+  const toggleProject = useUIStore((s) => s.toggleHomeProject);
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   //
@@ -515,9 +522,23 @@ export function HistoryView() {
   // Sectioning keeps input order, so the freeze holds inside each section.
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
-  const sections = useMemo(
-    () => sectionRows(applyFrozenOrder(rows, frozenOrder)),
-    [rows, frozenOrder],
+  const layout = useMemo(() => {
+    const ordered = applyFrozenOrder(rows, frozenOrder);
+    return groupBy === "project"
+      ? { by: "project" as const, groups: projectGroups(ordered) }
+      : { by: "state" as const, sections: sectionRows(ordered) };
+  }, [rows, frozenOrder, groupBy]);
+  // Over every row, not the filtered ones: the glyph should not blink on and
+  // off as a search narrows the list to one agent's tasks.
+  const showSource = useMemo(() => mixedAgentSources(allRows), [allRows]);
+  // Every row in the order the column shows it, for "the next one that needs
+  // you" — top to bottom in either layout.
+  const shownRows = useMemo(
+    () =>
+      layout.by === "project"
+        ? layout.groups.flatMap((g) => [...g.rows, ...g.doneRows])
+        : layout.sections.flatMap((sec) => sec.rows),
+    [layout],
   );
 
   const freezeSort = useCallback(() => {
@@ -873,9 +894,9 @@ export function HistoryView() {
   useEffect(() => {
     if (!scanReady || landedRef.current) return;
     landedRef.current = true;
-    const first = firstNeedsYou(sections.flatMap((sec) => sec.rows));
+    const first = firstNeedsYou(shownRows);
     if (first) openRow(first);
-  }, [scanReady, sections, openRow]);
+  }, [scanReady, shownRows, openRow]);
 
   // Answering the open task's last card moves on to the next task waiting on
   // you — the inbox is worked through, not clicked through.
@@ -888,9 +909,9 @@ export function HistoryView() {
     prevCardCountRef.current = openCardCount;
     prevRowKeyRef.current = activeRowKey;
     if (!drained) return;
-    const next = nextNeedsYou(sections.flatMap((sec) => sec.rows), activeRowKey);
+    const next = nextNeedsYou(shownRows, activeRowKey);
     if (next) openRow(next);
-  }, [openCardCount, activeRowKey, sections, openRow]);
+  }, [openCardCount, activeRowKey, shownRows, openRow]);
 
   // "What should get done?" — Enter carries the words into the new-task
   // composer, which asks for the project and sends.
@@ -1021,6 +1042,27 @@ export function HistoryView() {
                 <X size={12} strokeWidth={2.2} />
               </button>
             )}
+            <div
+              className={styles.group_switch}
+              role="radiogroup"
+              aria-label={t("home.group_by")}
+              data-testid="home-group-by"
+            >
+              {(["state", "project"] as const).map((by) => (
+                <button
+                  key={by}
+                  type="button"
+                  role="radio"
+                  aria-checked={groupBy === by}
+                  className={`${styles.group_switch_btn} ${
+                    groupBy === by ? styles.group_switch_on : ""
+                  }`}
+                  onClick={() => setGroupBy(by)}
+                >
+                  {t(`home.group_by_${by}`)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1037,10 +1079,13 @@ export function HistoryView() {
             </div>
           ) : (
             <TaskList
-              sections={sections}
+              layout={layout}
               activeKey={activeRowKey}
               collapsed={collapsedSections}
               onToggleSection={toggleSection}
+              collapsedProjects={collapsedProjects}
+              onToggleProject={toggleProject}
+              showSource={showSource}
               nowTick={nowTick}
               acceptingKeys={acceptingKeys}
               onOpen={openRow}

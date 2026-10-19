@@ -69,6 +69,11 @@ const ALL_KEYS = [
   // Home task sections the reader has folded shut, as a JSON array of task
   // states. Must be readable on boot, or "done" would reopen on every launch.
   "home-collapsed-sections",
+  // How the home task column is grouped: "state" (default) or "project".
+  "home-group-by",
+  // Project groups the reader has folded shut in the by-project layout, as a
+  // JSON array of group keys (repository roots).
+  "home-collapsed-projects",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",

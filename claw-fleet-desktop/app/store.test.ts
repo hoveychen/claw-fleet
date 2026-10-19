@@ -81,6 +81,29 @@ describe("launchpad rail filters", () => {
     expect(useUIStore.getState().homeCollapsedSections).toEqual(["running"]);
   });
 
+  it("groups by state until the reader picks project, and remembers it", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+
+    expect(useUIStore.getState().homeGroupBy).toBe("state");
+    useUIStore.getState().setHomeGroupBy("project");
+    expect(useUIStore.getState().homeGroupBy).toBe("project");
+    expect(getItem("home-group-by")).toBe("project");
+  });
+
+  it("restores the group-by choice and the folded projects", async () => {
+    const { setItem } = await import("./storage");
+    setItem("home-group-by", "project");
+    setItem("home-collapsed-projects", JSON.stringify(["/work/a", 7]));
+
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().homeGroupBy).toBe("project");
+    expect(useUIStore.getState().homeCollapsedProjects).toEqual(["/work/a"]);
+    useUIStore.getState().toggleHomeProject("/work/a");
+    expect(useUIStore.getState().homeCollapsedProjects).toEqual([]);
+  });
+
   it("falls back to the default on a corrupt fold list", async () => {
     const { setItem } = await import("./storage");
     setItem("home-collapsed-sections", "{not json");

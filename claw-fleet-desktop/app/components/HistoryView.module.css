@@ -108,6 +108,39 @@
   color: var(--color-text);
 }
 
+/* Group-by switch: "by status" / "by project", pushed to the row's end. */
+.group_switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-sunken);
+}
+
+.group_switch_btn {
+  padding: 1px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.group_switch_btn:hover {
+  color: var(--color-text);
+}
+
+.group_switch_on,
+.group_switch_on:hover {
+  background: var(--color-bg-card-selected);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
 /* ── Task list ────────────────────────────────────────────────────────── */
 
 .list {
