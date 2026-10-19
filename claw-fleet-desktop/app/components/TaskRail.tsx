@@ -1,13 +1,13 @@
 // The right column of a session: its task's sub-tasks and steps, the subagents
 // running and the docs and side questions opened in it, the material the task
-// produced, and — folded away under "developer view" — the session internals
-// (tokens, notes, temp files, background commands, workflow, relay chain).
-// The one right-hand surface; the header switch shows and hides all of it.
+// produced. The session internals (model, tokens, relay chain, facets) are not
+// here: they sit behind the header's ··· menu, where the developer view toggles
+// them into the meta row. The header switch shows and hides this column.
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, ChevronRight, CornerUpLeft, FileText, Image as ImageIcon, File } from "lucide-react";
+import { BookOpen, CornerUpLeft, FileText, Image as ImageIcon, File } from "lucide-react";
 import { useUIStore } from "../store";
 import type { ReviewDoc, TaskItem } from "../types";
 import { auxDocLabel, docId } from "../detailAux";
@@ -145,11 +145,10 @@ export function TaskRail({
   onOpenSession,
   ambient,
   empty,
-  developer,
   className,
 }: {
   /** The task the open session belongs to; null on a session with no task,
-   *  where only the ambient sections and the developer view apply. */
+   *  where only the ambient sections apply. */
   row: TaskRow | null;
   /** The session the conversation column shows: the main line, or a sub-task. */
   openSessionId: string;
@@ -169,9 +168,6 @@ export function TaskRail({
   ambient: ReactNode;
   /** Nothing in any section: the header switch is holding the rail open. */
   empty: boolean;
-  /** The developer view's content, built by the conversation pane that owns
-   *  the facets it opens. */
-  developer: ReactNode;
   /** Host-specific placement, e.g. the standalone pane's caption inset. */
   className?: string;
 }) {
@@ -195,7 +191,6 @@ export function TaskRail({
     ingest.open(d.kind, d.ref, reviewDocLabel(d));
   };
   const materialCount = (artifacts?.length ?? 0) + reviewDocs.length;
-  const [devOpen, setDevOpen] = useState(false);
 
   const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
   const subtasks = row?.subtasks ?? [];
@@ -371,23 +366,6 @@ export function TaskRail({
           </div>
         </section>
       )}
-
-      <section className={styles.block}>
-        <button
-          type="button"
-          className={styles.dev_toggle}
-          onClick={() => setDevOpen((v) => !v)}
-          aria-expanded={devOpen}
-        >
-          {t("home.rail_developer", "Developer view")}
-          <ChevronRight
-            size={13}
-            strokeWidth={1.8}
-            className={`${styles.dev_chevron} ${devOpen ? styles.dev_chevron_open : ""}`}
-          />
-        </button>
-        {devOpen && <div className={styles.dev}>{developer}</div>}
-      </section>
     </aside>
   );
 }

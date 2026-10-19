@@ -106,10 +106,11 @@ try {
     await capture('relay');
 
     // agents — a sub-task opened from the rail, on a different agent tool
-    // than the coordinator; the developer view names the tool and model.
+    // than the coordinator; the developer view (··· menu) names the tool and model.
     await p.getByText(co.subtasks[1][0],{exact:true}).first().click();
     await p.getByText(co.subtasks[1][1]).first().waitFor();
-    await p.getByRole('button',{name:/^(Developer view|开发者视图)/}).click();
+    await p.getByRole('button',{name:/^(More|更多)$/}).click();
+    await p.getByText(/^(Developer view|开发者视图)$/).click();
     await p.waitForFunction(() => /gpt-5\.6|GPT-5\.6/i.test(document.body.innerText));
     await capture('agents');
 

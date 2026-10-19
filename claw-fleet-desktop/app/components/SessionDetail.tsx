@@ -45,7 +45,6 @@ import { ResumeComposer } from "./ResumeComposer";
 import { DecisionDock } from "./DecisionDock";
 import { collectReviewDocs, TaskRail, taskRailHasContent, useTaskArtifacts } from "./TaskRail";
 import { ReaderHostContext } from "./readerHost";
-import railStyles from "./TaskRail.module.css";
 import type { TaskRow } from "./homeRows";
 import { formatSpan } from "./TaskList";
 import type { ExplorerEntry } from "./ExplorerPane";
@@ -231,8 +230,8 @@ export function SessionDetail({
   inline?: boolean;
   /** The task the open session belongs to (its main conversation or one of
    *  its sub-tasks). Set, the pane is a task page: the header shows project,
-   *  elapsed time and spend, and the task rail (sub-tasks, steps, material,
-   *  developer view) stands beside the conversation. */
+   *  elapsed time and spend, and the task rail (sub-tasks, steps, material)
+   *  stands beside the conversation. */
   task?: TaskRow | null;
   /** Opens another session of the task — a sub-task, or back to the main
    *  conversation — from the task rail. */
@@ -1639,8 +1638,8 @@ export function SessionDetail({
      subagents, opened docs and side questions. It follows its content by
      default — present when any section has something in it, zero width when
      none does — until the reader says otherwise with the toolbar switch. The
-     developer view does not count as content: everything in it is also in the
-     ··· menu. The switch owns *this* layer, not the drawer: the drawer is a
+     session internals are not rail content at all: they live behind the ···
+     menu's developer view. The switch owns *this* layer, not the drawer: the drawer is a
      place you go look one thing up, and it is reached by naming that thing
      (the ··· menu's facets, or a rail row). A switch that opened the drawer had
      to invent which facet to show, which is how pressing it on a fresh session
@@ -1714,7 +1713,7 @@ export function SessionDetail({
 
   /** The session's technical facts — model, effort, context, cost, tokens,
    *  compactions, slug. `all` shows the numbers that otherwise wait behind
-   *  the ··· toggle; the developer view always shows them. */
+   *  the ··· toggle or the menu's developer view. */
   const factChips = (liveSession: SessionInfo, all: boolean) => (
     <>
       {liveSession.model && (
@@ -1898,7 +1897,16 @@ export function SessionDetail({
                           {taskCost >= 0.005 && ` · $${taskCost.toFixed(2)}`}
                         </span>
                         <OutOfCreditsNotice session={liveSession} inline />
-                        {liveSession.contextPercent != null && liveSession.contextPercent >= 0.8 && (
+                        {/* The developer view (··· menu): the open session's
+                            internals. Its chips carry ctx themselves. */}
+                        {metricsOpen && (
+                          <>
+                            {factChips(liveSession, true)}
+                            <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
+                            {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
+                          </>
+                        )}
+                        {!metricsOpen && liveSession.contextPercent != null && liveSession.contextPercent >= 0.8 && (
                           <span
                             className={`${styles.meta_chip} ${styles.meta_chip_warn}`}
                             title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
@@ -1991,6 +1999,7 @@ export function SessionDetail({
                       facets={auxFacets}
                       activeFacet={activeFacet}
                       onPickFacet={openFacet}
+                      devView={{ on: metricsOpen, onToggle: () => setMetricsOpen((v) => !v) }}
                     />
                     {!inline && (
                       <button
@@ -2164,25 +2173,6 @@ export function SessionDetail({
                       paths={pathLinks}
                       onGripDown={onGripDown}
                     />
-                }
-                developer={
-                  <>
-                    <div className={railStyles.dev_row}>
-                      {factChips(liveSession, true)}
-                      <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
-                      {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
-                    </div>
-                    {auxFacets.map((f) => (
-                      <button
-                        key={f.id}
-                        type="button"
-                        className={`${railStyles.dev_link} ${activeFacet === f.id ? railStyles.dev_link_on : ""}`}
-                        onClick={() => openFacet(f.id)}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </>
                 }
               />
               </ReaderHostContext.Provider>

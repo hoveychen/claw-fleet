@@ -46,7 +46,6 @@ function render(props: Partial<Parameters<typeof TaskRail>[0]> = {}, ingest: Ing
         onOpenSession={() => {}}
         ambient={null}
         empty={false}
-        developer={null}
         {...props}
       />
       </IngestOpenProvider>,
@@ -78,7 +77,7 @@ describe("taskRailHasContent", () => {
 describe("TaskRail", () => {
   it("omits the material section while nothing is filed", () => {
     const el = render({ row: row(), artifacts: [] });
-    expect(el.querySelectorAll("section")).toHaveLength(1); // developer view only
+    expect(el.querySelectorAll("section")).toHaveLength(0);
   });
 
   it("says why it is empty when the switch holds it open", () => {

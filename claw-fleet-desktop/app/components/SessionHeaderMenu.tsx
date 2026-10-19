@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
+  Code2,
   Coins,
   Copy,
   FileClock,
@@ -47,7 +48,8 @@ const FACET_ICONS: Record<AuxFacet, LucideIcon> = {
 /**
  * The detail header's overflow menu.
  *
- * Two families live here. First the session's facets — Skills, Decisions, Tokens,
+ * It opens with the developer view switch, which reveals the session's
+ * technical facts in the header. Then two families. First the session's facets — Skills, Decisions, Tokens,
  * Tasks, Background Tasks, Scratchpad, Notes, Workflow — each one a button that pulls that panel up
  * in the auxiliary column. They used to be a permanent tab strip above the
  * panel, which spent the strip's whole width on destinations you visit once an
@@ -65,6 +67,7 @@ export function SessionHeaderMenu({
   facets = [],
   activeFacet = null,
   onPickFacet,
+  devView,
 }: {
   sessionId: string;
   jsonlPath: string;
@@ -74,6 +77,9 @@ export function SessionHeaderMenu({
   /** The one the auxiliary panel is showing, if any. */
   activeFacet?: AuxFacet | null;
   onPickFacet?: (id: AuxFacet) => void;
+  /** The developer view switch: shows the session's technical facts (model,
+   *  effort, tokens, cost, agent scope, relay chain) in the header meta row. */
+  devView?: { on: boolean; onToggle: () => void };
 }) {
   const { t } = useTranslation();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -116,6 +122,16 @@ export function SessionHeaderMenu({
 
   const items: ContextMenuItem[] = [];
 
+  if (devView) {
+    items.push({
+      id: "dev-view",
+      label: t("home.rail_developer"),
+      icon: <Code2 size={13} />,
+      active: devView.on,
+      onSelect: devView.onToggle,
+    });
+  }
+
   // Leads the menu: these are the items that *do* something to the layout,
   // where the rest hand you a string to paste elsewhere.
   if (onPickFacet) {
@@ -123,6 +139,7 @@ export function SessionHeaderMenu({
       const Icon = FACET_ICONS[facet.id];
       items.push({
         id: `facet-${facet.id}`,
+        dividerBefore: devView != null && items.length === 1,
         label: facet.label,
         icon: Icon ? <Icon size={13} /> : undefined,
         active: activeFacet === facet.id,
