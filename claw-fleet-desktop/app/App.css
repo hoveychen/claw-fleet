@@ -63,7 +63,8 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   /* The one surface treatment that says "this strip is a head": a soft tint
      that fades from the recessed tone into the canvas. Used ONLY on page,
      pane and dialog heads (PageShell `.banner`, SessionDetail `.hero` /
-     `.aux_head`, ReportView `.detail_header`, SettingsPanel `.header`) — it
+     `.aux_head`, ReportView `.detail_header`, ProjectsView `.head`,
+     SettingsPanel `.header`) — it
      reads as premium precisely because nothing else carries it, so do not put
      it on cards or bodies. Lives in :root rather than per theme because both
      stops are theme tokens; data-theme sits on <html>, so they resolve right. */
