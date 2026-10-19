@@ -1164,6 +1164,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const lobsterFleet = useUIStore((s) => s.lobsterFleetEnabled);
   const setLobsterFleet = useUIStore((s) => s.setLobsterFleetEnabled);
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
+  const setSimplifiedMode = useUIStore((s) => s.setSimplifiedMode);
 
   // ── LLM provider state ──────────────────────────────────────────────────
   const [llmProviders, setLlmProviders] = useState<LlmProviderInfo[]>([]);
@@ -1442,6 +1444,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     onChange={handleToggleReportAutoPopup}
                   />
                 </div>
+
+                <ToggleRow
+                  label={t("settings.simplified_mode")}
+                  desc={t("settings.simplified_mode_desc")}
+                  checked={simplifiedMode}
+                  onChange={setSimplifiedMode}
+                />
 
                 <ToggleRow
                   label={t("settings.lobster_fleet")}

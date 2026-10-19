@@ -754,6 +754,34 @@ describe("terminal feature toggle (host_features)", () => {
   });
 });
 
+describe("simplified mode", () => {
+  beforeEach(() => vi.resetModules());
+
+  it("is off by default; turning it on leaves a hidden page for Tasks", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+    expect(useUIStore.getState().simplifiedMode).toBe(false);
+    useUIStore.getState().setViewMode("report");
+    useUIStore.getState().setSimplifiedMode(true);
+    expect(getItem("simplified-mode")).toBe("true");
+    expect(useUIStore.getState().viewMode).toBe("history");
+    // Pages it does not hide stay put.
+    useUIStore.getState().setViewMode("wiki");
+    useUIStore.getState().setSimplifiedMode(false);
+    useUIStore.getState().setSimplifiedMode(true);
+    expect(useUIStore.getState().viewMode).toBe("wiki");
+  });
+
+  it("does not boot into a page whose entry it hides", async () => {
+    const { setItem } = await import("./storage");
+    setItem("viewMode", "projects");
+    setItem("simplified-mode", "true");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+    expect(useUIStore.getState().viewMode).toBe("history");
+  });
+});
+
 describe("lobster fleet setting", () => {
   beforeEach(() => vi.resetModules());
 

@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyAttention, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
-import { NAV_HOME, navSectionOf, type NavSection } from "./components/navGroups";
+import { isHiddenWhenSimplified, NAV_HOME, navSectionOf, type NavSection } from "./components/navGroups";
 import { isViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
@@ -208,6 +208,9 @@ interface UIState {
   historyQuery: string;
   /** Settings opt-in for the Lobster Fleet page; off by default. */
   lobsterFleetEnabled: boolean;
+  /** Settings switch: the sidebar drops Projects, Review and the token-speed /
+   *  usage blocks (see SIMPLIFIED_HIDDEN_SECTIONS). Off by default. */
+  simplifiedMode: boolean;
   /** Home task sections folded shut. "done" starts folded. In the store (and
    *  on disk) so a fold survives the home unmounting and a restart. */
   homeCollapsedSections: TaskState[];
@@ -224,6 +227,7 @@ interface UIState {
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryQuery: (q: string) => void;
   setLobsterFleetEnabled: (on: boolean) => void;
+  setSimplifiedMode: (on: boolean) => void;
   toggleHomeSection: (state: TaskState) => void;
   setHomeGroupBy: (by: HomeGroupBy) => void;
   toggleHomeProject: (key: string) => void;
@@ -446,14 +450,23 @@ function readHistoryWorkspaceFilter(): string {
 
 const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true";
 
+/** Simplified mode reuses the key of the retired page-clamping mode of the same
+ *  name, so a user who had that on finds the new one on after the upgrade. */
+const readSimplifiedMode = () => getItem("simplified-mode") === "true";
+
 /** The stored page, or the Tasks page when it names one that no longer exists —
  *  the retired Sessions page ("list" / "gallery") above all. */
 function readViewMode(): ViewMode {
   const stored = getItem("viewMode");
   // The standalone Files page folded into the Projects page's code tab.
-  if (stored === "files") return "projects";
-  if (stored === "lobsters" && !readLobsterFleetEnabled()) return "history";
-  return isViewMode(stored) ? stored : "history";
+  const view = stored === "files" ? "projects" : stored;
+  if (view === "lobsters" && !readLobsterFleetEnabled()) return "history";
+  if (!isViewMode(view)) return "history";
+  // A page whose nav entry simplified mode hides is not where launch lands.
+  if (readSimplifiedMode() && isHiddenWhenSimplified(view, DEFAULT_MAIN_VIEW_STATE.memory.workspaceFilter)) {
+    return NAV_HOME;
+  }
+  return view;
 }
 
 /** The shared body of every page change: persists `viewMode` and records it as
@@ -532,6 +545,17 @@ export const useUIStore = create<UIState>((set) => ({
       // Switching it off while on the page drops back to the Tasks page.
       const next = { ...s, lobsterFleetEnabled: on };
       return { lobsterFleetEnabled: on, ...viewModePatch(next, s.viewMode) };
+    }),
+  simplifiedMode: readSimplifiedMode(),
+  setSimplifiedMode: (on) =>
+    set((s) => {
+      setItem("simplified-mode", on ? "true" : "false");
+      // Turning it on while on a page whose entry it hides drops back to the
+      // Tasks page, so the sidebar never shows nothing lit.
+      if (on && isHiddenWhenSimplified(s.viewMode, s.mainViewState.memory.workspaceFilter)) {
+        return { simplifiedMode: on, ...viewModePatch(s, NAV_HOME) };
+      }
+      return { simplifiedMode: on };
     }),
   toggleHomeSection: (state) =>
     set((s) => {

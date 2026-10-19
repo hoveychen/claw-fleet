@@ -86,6 +86,9 @@ export function SessionList() {
   const toggleSecondarySidebar = useUIStore((s) => s.toggleSecondarySidebar);
   const navLastBySection = useUIStore((s) => s.navLastBySection);
   const settingsOpen = useUIStore((s) => s.settingsOpen);
+  // Simplified mode (a Settings switch) drops Projects, Review and the
+  // token-speed / usage blocks from the sidebar.
+  const simplified = useUIStore((s) => s.simplifiedMode);
   const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const avail = useNavAvailability();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
@@ -228,28 +231,32 @@ export function SessionList() {
             active={!settingsOpen && current === "library"}
             onClick={() => goSection("library")}
           />
-          <NavEntry
-            icon={<Folder size={18} strokeWidth={1.6} />}
-            label={t("nav_section_projects", "项目")}
-            active={!settingsOpen && current === "projects"}
-            onClick={() => goSection("projects")}
-            badge={
-              runningProcCount > 0 && (
-                <span className={styles.nav_badge_running} title={`${runningProcCount}`}>
-                  {fmtBadgeCount(runningProcCount)}
-                </span>
-              )
-            }
-          />
+          {!simplified && (
+            <NavEntry
+              icon={<Folder size={18} strokeWidth={1.6} />}
+              label={t("nav_section_projects", "项目")}
+              active={!settingsOpen && current === "projects"}
+              onClick={() => goSection("projects")}
+              badge={
+                runningProcCount > 0 && (
+                  <span className={styles.nav_badge_running} title={`${runningProcCount}`}>
+                    {fmtBadgeCount(runningProcCount)}
+                  </span>
+                )
+              }
+            />
+          )}
           {/* Secondary entry beside Settings: the daily review. A fresh one
               dots it, as the daily report's entry used to. */}
-          <NavEntry
-            icon={<History size={18} strokeWidth={1.6} />}
-            label={t("nav_section_review", "回顾")}
-            active={!settingsOpen && current === "review"}
-            onClick={() => goSection("review")}
-            badge={hasNewReport && <span className={styles.nav_dot} />}
-          />
+          {!simplified && (
+            <NavEntry
+              icon={<History size={18} strokeWidth={1.6} />}
+              label={t("nav_section_review", "回顾")}
+              active={!settingsOpen && current === "review"}
+              onClick={() => goSection("review")}
+              badge={hasNewReport && <span className={styles.nav_dot} />}
+            />
+          )}
           <NavEntry
             icon={<Settings size={18} strokeWidth={1.6} />}
             label={t("nav_section_settings", "设置")}
@@ -266,17 +273,21 @@ export function SessionList() {
         {collapsed ? (
           <>
             <div className={styles.sidebar_content} />
-            {/* Global usage tiles stay on every page. */}
+            {/* Global usage tiles stay on every page (unless simplified). */}
             <div className={styles.rail_tiles} data-wizard="settings-footer">
               {/* On a short window the nav keeps its room and these tiles give
                   way first; see .rail_tile_live / .rail_tile_today. */}
-              <div className={styles.rail_tile_today}>
-                <TodayUsageBadge collapsed />
-              </div>
-              <div className={styles.rail_tile_live}>
-                <LiveStats collapsed />
-              </div>
-              <UsagePanel collapsed />
+              {!simplified && (
+                <>
+                  <div className={styles.rail_tile_today}>
+                    <TodayUsageBadge collapsed />
+                  </div>
+                  <div className={styles.rail_tile_live}>
+                    <LiveStats collapsed />
+                  </div>
+                  <UsagePanel collapsed />
+                </>
+              )}
               <button
                 type="button"
                 className={styles.rail_expand}
@@ -293,9 +304,13 @@ export function SessionList() {
             {/* Wide, the usage panel opens inline here instead of as the
                 popover the rail tile raises. */}
             <div className={styles.sidebar_content}>
-              <TodayUsageBadge />
-              <LiveStats />
-              <UsagePanel />
+              {!simplified && (
+                <>
+                  <TodayUsageBadge />
+                  <LiveStats />
+                  <UsagePanel />
+                </>
+              )}
             </div>
             <div className={styles.footer} data-wizard="settings-footer">
               <div className={styles.footer_toolbar} role="group">

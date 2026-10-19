@@ -69,6 +69,8 @@ const ALL_KEYS = [
   // stays in-memory only. The project scope ("all" or a repo root path):
   "history-project-scope",
   "lobster-fleet-enabled",
+  // Settings switch that hides Projects, Review and the usage blocks.
+  "simplified-mode",
   // Home task sections the reader has folded shut, as a JSON array of task
   // states. Must be readable on boot, or "done" would reopen on every launch.
   "home-collapsed-sections",
