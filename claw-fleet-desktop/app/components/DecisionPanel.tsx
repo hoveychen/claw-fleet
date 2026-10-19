@@ -520,6 +520,41 @@ function OptionsCollapseBar({
   );
 }
 
+/** The row right above a card's options: the collapse chevron and the
+ *  single/multi toggle. The toggle sits here, not in the card header, so it is
+ *  next to what it changes even when the question body runs long. */
+function OptionsTools({
+  collapse,
+  canToggleMode,
+  effectiveMulti,
+  onToggleMode,
+}: {
+  collapse: { collapsed: boolean; onToggle: () => void; count: number; summary: string | null } | null;
+  canToggleMode: boolean;
+  effectiveMulti: boolean;
+  onToggleMode: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!collapse && !canToggleMode) return null;
+  return (
+    <div className={styles.options_tools}>
+      {collapse ? <OptionsCollapseBar {...collapse} /> : <span className={styles.options_tools_spacer} />}
+      {canToggleMode && (
+        <button
+          type="button"
+          className={`${styles.mode_toggle} ${effectiveMulti ? styles.mode_toggle_multi : ""}`}
+          onClick={onToggleMode}
+          title={t("fleet_ask.mode_tooltip", "Switch between single/multi select")}
+        >
+          {effectiveMulti
+            ? t("fleet_ask.mode_multi", "Multi")
+            : t("fleet_ask.mode_single", "Single")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ElicitationCard({
   decision,
   compact = false,
@@ -579,7 +614,8 @@ function ElicitationCard({
 
   // Effective multi-select: the question's own flag OR a user-forced override.
   const effectiveMulti = q.multiSelect || multiSelectOverrides[q.question] === true;
-  const canToggleMode = !q.multiSelect; // Only allow override when question was originally single-select.
+  // Only allow override when question was originally single-select.
+  const canToggleMode = !q.multiSelect && q.options.length > 0;
 
   const selected = selections[q.question] || [];
   const customText = customAnswers[q.question] || "";
@@ -665,24 +701,6 @@ function ElicitationCard({
             {step + 1} / {total}
           </span>
         )}
-        {canToggleMode && (
-          <button
-            type="button"
-            className={`${styles.mode_toggle} ${effectiveMulti ? styles.mode_toggle_multi : ""}`}
-            onClick={() =>
-              setElicitationMultiSelectOverride(
-                decision.id,
-                q.question,
-                !effectiveMulti,
-              )
-            }
-            title={t("elicitation.mode_tooltip", "Switch between single/multi select")}
-          >
-            {effectiveMulti
-              ? t("elicitation.mode_multi", "Multi")
-              : t("elicitation.mode_single", "Single")}
-          </button>
-        )}
         {request.workspaceName && (
           <span className={styles.card_workspace}>{request.workspaceName}</span>
         )}
@@ -744,14 +762,23 @@ function ElicitationCard({
       <div className={styles.card_footer}>
         {/* Manual collapse is offered whenever there is more than one option to
             fold (default stays expanded); only a single-option card stays open. */}
-        {q.options.length > 1 && (
-          <OptionsCollapseBar
-            collapsed={optionsCollapsed}
-            onToggle={() => setOptionsCollapsed((v) => !v)}
-            count={q.options.length}
-            summary={collapsedSummary}
-          />
-        )}
+        <OptionsTools
+          collapse={
+            q.options.length > 1
+              ? {
+                  collapsed: optionsCollapsed,
+                  onToggle: () => setOptionsCollapsed((v) => !v),
+                  count: q.options.length,
+                  summary: collapsedSummary,
+                }
+              : null
+          }
+          canToggleMode={canToggleMode}
+          effectiveMulti={effectiveMulti}
+          onToggleMode={() =>
+            setElicitationMultiSelectOverride(decision.id, q.question, !effectiveMulti)
+          }
+        />
         {(q.options.length <= 1 || !optionsCollapsed) && (
         <SharedOptionsBlock
           decisionId={decision.id}
@@ -1596,24 +1623,6 @@ export function FleetAskCard({
             {step + 1} / {total}
           </span>
         )}
-        {canToggleMode && (
-          <button
-            type="button"
-            className={`${styles.mode_toggle} ${effectiveMulti ? styles.mode_toggle_multi : ""}`}
-            onClick={() =>
-              setFleetAskMultiSelectOverride(
-                decision.id,
-                q.question,
-                !effectiveMulti,
-              )
-            }
-            title={t("fleet_ask.mode_tooltip", "Switch between single/multi select")}
-          >
-            {effectiveMulti
-              ? t("fleet_ask.mode_multi", "Multi")
-              : t("fleet_ask.mode_single", "Single")}
-          </button>
-        )}
         {request.workspaceName && (
           <span className={styles.card_workspace}>{request.workspaceName}</span>
         )}
@@ -1699,14 +1708,23 @@ export function FleetAskCard({
       <div className={styles.card_footer}>
         {/* Same rule as elicitation: offer the collapse chevron whenever there is
             more than one option/form-field to fold (default stays expanded). */}
-        {opts.length + formFields.length > 1 && (
-          <OptionsCollapseBar
-            collapsed={optionsCollapsed}
-            onToggle={() => setOptionsCollapsed((v) => !v)}
-            count={opts.length + formFields.length}
-            summary={collapsedSummary}
-          />
-        )}
+        <OptionsTools
+          collapse={
+            opts.length + formFields.length > 1
+              ? {
+                  collapsed: optionsCollapsed,
+                  onToggle: () => setOptionsCollapsed((v) => !v),
+                  count: opts.length + formFields.length,
+                  summary: collapsedSummary,
+                }
+              : null
+          }
+          canToggleMode={canToggleMode}
+          effectiveMulti={effectiveMulti}
+          onToggleMode={() =>
+            setFleetAskMultiSelectOverride(decision.id, q.question, !effectiveMulti)
+          }
+        />
         {(opts.length + formFields.length <= 1 || !optionsCollapsed) && formFields.length > 0 && (
           <div className={styles.elicitation_options}>
             {formFields.map((f) => (
