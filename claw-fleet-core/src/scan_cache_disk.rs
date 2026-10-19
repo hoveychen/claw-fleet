@@ -36,7 +36,9 @@ const CACHE_FILE_NAME: &str = "session-cache.json";
 // v4: `fleet_spawned` no longer grandfathers sessions older than the spawn
 // marker's cutoff — only a launch note counts.
 // v5: `ide_name` dropped from `SessionInfo`; the IDE lock scan is gone.
-const CACHE_VERSION: u32 = 5;
+// v6: `awaiting_model` added; a v5 entry would serve `false` for a live
+// session whose transcript stopped mid-turn until it next wrote a line.
+const CACHE_VERSION: u32 = 6;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -148,6 +150,7 @@ mod tests {
             pid_precise: false,
             proc_alive: false,
             pending_tool_batch: false,
+            awaiting_model: false,
             stuck_tool: None,
             current_tool: None,
             last_skill: None,
