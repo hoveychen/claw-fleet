@@ -110,7 +110,7 @@ export function MentionItemLabel({ item }: { item: MentionItem }) {
       <span className={styles.title}>
         {item.session.workspaceName}
         {item.session.handoff
-          ? ` · ${t("wiki.mention_chain", "接力 {{n}} 棒", { n: item.session.handoff.chainLen })}`
+          ? ` · ${t("wiki.mention_chain", "续接 {{n}} 段", { n: item.session.handoff.chainLen })}`
           : ""}
       </span>
     </>

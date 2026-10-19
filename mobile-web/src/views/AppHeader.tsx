@@ -6,10 +6,10 @@ import styles from "./AppHeader.module.css";
 /** The detail-page header, in one place.
  *
  * Nine views ("产出详情" Artifact Details / "知识库列表" Wiki List / "知识库文档" Wiki Doc /
- * "仓库" Repo / "仓库详情" Repo Details / "计划" Plan / "用量" Usage / "终端" Terminal /
- * "会话详情" Session Details) each hand-copied the same `.header` + `.backButton` CSS block
+ * "仓库" Repo / "仓库详情" Repo Details / "步骤清单" Plan / "用量" Usage / "终端" Terminal /
+ * "任务详情" Session Details) each hand-copied the same `.header` + `.backButton` CSS block
  * and the same JSX shape. Eight of the nine stayed in sync by luck; the ninth drifted to
- * different padding and title size, which made "会话详情" read as belonging to a different
+ * different padding and title size, which made "任务详情" read as belonging to a different
  * app. Nothing enforced the shared shape because there was no shared shape — only a
  * convention re-typed nine times.
  *
@@ -26,7 +26,7 @@ export function AppHeader({
   seamless,
 }: {
   onBack: () => void;
-  /** A plain string gets the standard title treatment. "会话详情" (Session Details) passes a node
+  /** A plain string gets the standard title treatment. "任务详情" (Session Details) passes a node
    *  because its title row also carries a subagent badge and is itself a tap target that
    *  unfolds the info panel. */
   title: ReactNode;

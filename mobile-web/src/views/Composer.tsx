@@ -73,7 +73,7 @@ import {
 
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
-  plan: "计划模式",
+  plan: "方案模式",
   bypassPermissions: "跳过权限",
 };
 
@@ -1328,7 +1328,7 @@ export function NewSessionSheet({
                       <div
                         className={styles.modeSwitch}
                         role="group"
-                        aria-label={t("会话类型")}
+                        aria-label={t("任务类型")}
                       >
                         <button
                           data-active={!isChat}

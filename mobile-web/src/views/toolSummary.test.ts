@@ -13,8 +13,8 @@ const tr = (key: string, ...args: Array<string | number>) => {
 describe("friendlyToolName", () => {
   it("maps Fleet MCP ids to a readable label", () => {
     expect(friendlyToolName("mcp__fleet__fleet__ask", tr)).toBe("决策卡");
-    expect(friendlyToolName("mcp__fleet__fleet__plan", tr)).toBe("计划");
-    expect(friendlyToolName("fleet__watch", tr)).toBe("守望");
+    expect(friendlyToolName("mcp__fleet__fleet__plan", tr)).toBe("步骤清单");
+    expect(friendlyToolName("fleet__watch", tr)).toBe("等待");
   });
 
   it("strips the mcp__server__ prefix of non-Fleet MCP tools", () => {

@@ -220,7 +220,7 @@ export function SessionSheet({
   const progressRows: PaneRow[] = [];
   progressRows.push({
     pane: "plans",
-    label: t("计划"),
+    label: t("步骤清单"),
     value: session.taskPlan
       ? session.taskPlan.currentTask
         ? `${session.taskPlan.currentTask} · ${session.taskPlan.done}/${session.taskPlan.total}`
@@ -246,9 +246,9 @@ export function SessionSheet({
   });
   progressRows.push({
     pane: "handoff",
-    label: t("接力链"),
+    label: t("续接记录"),
     value: session.handoff
-      ? t("第 {0} 棒 / 共 {1}", session.handoff.hop, session.handoff.chainLen)
+      ? t("第 {0} 段 / 共 {1}", session.handoff.hop, session.handoff.chainLen)
       : "empty",
   });
   // Decision history must be accessible even with no pending cards — this pane
@@ -262,7 +262,7 @@ export function SessionSheet({
   const copyRows: CopyRow[] = [
     {
       id: "id",
-      label: t("会话 ID"),
+      label: t("任务 ID"),
       sub: session.id,
       icon: <Copy size={15} />,
       text: session.id,
@@ -276,7 +276,7 @@ export function SessionSheet({
     },
     {
       id: "transcript",
-      label: t("会话记录路径"),
+      label: t("对话记录路径"),
       sub: session.jsonlPath,
       icon: <FileJson2 size={15} />,
       text: session.jsonlPath,
@@ -340,7 +340,7 @@ export function SessionSheet({
           <div
             className={styles.sheet}
             role="dialog"
-            aria-label={t("会话详情")}
+            aria-label={t("任务详情")}
             onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.grabber} aria-hidden="true" />
@@ -424,7 +424,7 @@ export function SessionSheet({
                       send the next one; stop kills the process. */}
                   <span className={styles.stopSub}>
                     {mode === "interrupt"
-                      ? t("只掐掉手上这一轮，会话还在，可以接着发下一条")
+                      ? t("只掐掉手上这一轮，任务还在，可以接着发下一条")
                       : t("结束这个进程，之后要用恢复命令才能继续")}
                   </span>
                 </span>
@@ -445,7 +445,7 @@ export function SessionSheet({
                         <span className={styles.watchNote}>{w.note || t("未说明在等什么")}</span>
                         <span className={styles.watchMeta}>
                           {t(
-                            "等会话 {0}/{1} 结束 · {2}",
+                            "等任务 {0}/{1} 结束 · {2}",
                             done,
                             w.targets.length,
                             w.waitMode === "any" ? t("任一") : t("全部"),
@@ -525,8 +525,8 @@ export function SessionSheet({
               <div className={styles.watchRow}>
                 <Hourglass size={15} className={styles.watchIcon} />
                 <span className={styles.watchText}>
-                  <span className={styles.watchNote}>{t("被 {0} 个会话等待", waiters.length)}</span>
-                  <span className={styles.watchMeta}>{t("它结束后，这些会话会被自动唤醒")}</span>
+                  <span className={styles.watchNote}>{t("被 {0} 个任务等待", waiters.length)}</span>
+                  <span className={styles.watchMeta}>{t("它结束后，这些任务会被自动唤醒")}</span>
                 </span>
               </div>
             )}
@@ -577,7 +577,7 @@ export function SessionSheet({
             <div className={styles.section}>{t("进度")}</div>
             {progressRows.map(paneRow)}
 
-            <div className={styles.section}>{t("会话")}</div>
+            <div className={styles.section}>{t("对话")}</div>
             {copyRows.map((row) => {
               const r = result?.id === row.id ? result : null;
               return (

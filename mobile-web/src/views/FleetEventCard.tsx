@@ -28,7 +28,7 @@ function statusLabel(status: FleetEvent["status"]): string {
   return {
     fired: t("已触发"),
     timeout: t("已超时"),
-    successor: t("接力已启动"),
+    successor: t("已续接"),
     manual: t("手动运行"),
     answered: t("老板已回复"),
   }[status];

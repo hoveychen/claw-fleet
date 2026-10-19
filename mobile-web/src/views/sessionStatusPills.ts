@@ -146,7 +146,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     const done = targets.filter((x) => x.phase === "done").length;
     pills.push({
       key: "watch-sessions",
-      label: t("等会话 {0}/{1}", done, targets.length),
+      label: t("等任务 {0}/{1}", done, targets.length),
       tone: targets.some((x) => x.phase === "failed") ? "alert" : "live",
       target: "sheet",
     });
@@ -154,7 +154,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
   if (s.waitedBy && s.waitedBy.length > 0) {
     pills.push({
       key: "waited-by",
-      label: t("被 {0} 个会话等待", new Set(s.waitedBy.map((e) => e.sessionId)).size),
+      label: t("被 {0} 个任务等待", new Set(s.waitedBy.map((e) => e.sessionId)).size),
       tone: "neutral",
       target: "sheet",
     });
@@ -168,7 +168,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     if (broken > 0) {
       pills.push({
         key: "watch",
-        label: t("守望跑不起来 ×{0}", broken),
+        label: t("等待条件跑不起来 ×{0}", broken),
         tone: "alert",
         target: "sheet",
       });
@@ -178,8 +178,8 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
       // each one's poll count is in the half-screen.
       const label =
         shellWatches.length === 1
-          ? t("守望 ×{0}", shellWatches[0].pollCount)
-          : t("{0} 个守望", shellWatches.length);
+          ? t("等待 ×{0}", shellWatches[0].pollCount)
+          : t("{0} 个等待", shellWatches.length);
       pills.push({ key: "watch", label, tone: "live", target: "sheet" });
     }
   }
@@ -188,7 +188,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
   if (s.taskPlan && s.taskPlan.total > 0) {
     pills.push({
       key: "plan",
-      label: t("计划 {0}/{1}", s.taskPlan.done, s.taskPlan.total),
+      label: t("步骤 {0}/{1}", s.taskPlan.done, s.taskPlan.total),
       tone: "neutral",
       target: "plans",
     });
@@ -196,7 +196,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
   if (s.handoff) {
     pills.push({
       key: "handoff",
-      label: t("接力 {0}/{1}", s.handoff.hop, s.handoff.chainLen),
+      label: t("续接 {0}/{1}", s.handoff.hop, s.handoff.chainLen),
       tone: "neutral",
       target: "handoff",
     });

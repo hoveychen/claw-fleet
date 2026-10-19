@@ -44,10 +44,10 @@ export function patchToolSummary(command: string, tr: Translate = t): string | n
 const FLEET_TOOL_LABELS: Record<string, string> = {
   ask: "决策卡",
   render_a2ui: "富交互卡",
-  spawn: "起会话",
-  plan: "计划",
+  spawn: "起子任务",
+  plan: "步骤清单",
   handoff: "交接",
-  watch: "守望",
+  watch: "等待",
   loop: "循环",
   schedule: "定时",
   wiki: "知识库",
@@ -209,7 +209,7 @@ function dshToolSummary(name: string | undefined, input: Record<string, unknown>
     case "session_event_read":
     case "session_event_search":
     case "session_event_trace":
-      return t("检索会话记录");
+      return t("检索对话记录");
     default:
       return "";
   }

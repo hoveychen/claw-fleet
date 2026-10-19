@@ -507,7 +507,7 @@ export function MoreView({
           </div>
           <div className={styles.divider} />
           <div className={styles.row}>
-            <span className={styles.rowLabel}>{t("会话更新")}</span>
+            <span className={styles.rowLabel}>{t("任务更新")}</span>
             <span className={styles.connWrap}>
               <span className={styles.connLabel}>
                 {sessionsFrame.last === null
@@ -746,7 +746,7 @@ export function MoreView({
             </span>
             <span className={styles.navText}>
               <span className={styles.navLabel}>{t("需要你判断的事")}</span>
-              <span className={styles.navSub}>{t("跑偏的接力链、反复出现的教训")}</span>
+              <span className={styles.navSub}>{t("跑偏的任务、反复出现的教训")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>

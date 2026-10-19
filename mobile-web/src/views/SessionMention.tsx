@@ -192,7 +192,7 @@ function CandidateLabel({ c }: { c: MentionCandidate }) {
         {chainLen > 1 && (
           <span className={styles.chain}>
             <Link2 size={11} />
-            {t("接力 {0} 棒", chainLen)}
+            {t("续接 {0} 段", chainLen)}
           </span>
         )}
         <span className={styles.workspace}>{s.workspaceName}</span>
@@ -215,7 +215,7 @@ export function MentionSuggestions({
   onPick: (c: MentionCandidate) => void;
 }) {
   return (
-    <div className={styles.list} role="listbox" aria-label={t("引用会话")}>
+    <div className={styles.list} role="listbox" aria-label={t("引用任务")}>
       {candidates.map((c) => (
         <button
           key={candidateKey(c)}
@@ -271,9 +271,9 @@ export function RefPickerSheet({
         className={styles.sheet}
         role="dialog"
         aria-modal="true"
-        aria-label={kind === "session" ? t("引用会话") : t("引用知识库")}
+        aria-label={kind === "session" ? t("引用任务") : t("引用知识库")}
       >
-        <div className={styles.sheetTitle}>{kind === "session" ? t("引用会话") : t("引用知识库")}</div>
+        <div className={styles.sheetTitle}>{kind === "session" ? t("引用任务") : t("引用知识库")}</div>
         <input
           className={styles.search}
           value={query}
@@ -334,7 +334,7 @@ export function PlusMenu({
             onClick={() => onRef("session")}
           >
             <MessagesSquare size={15} />
-            {t("引用会话")}
+            {t("引用任务")}
           </button>
         )}
         <button type="button" role="menuitem" className={styles.menuItem} onClick={() => onRef("wiki")}>
@@ -380,7 +380,7 @@ export function RefChips({
               onClick={() =>
                 r.kind === "session" ? nav?.open(r.id) : nav?.openWiki?.(r.slug)
               }
-              aria-label={r.kind === "session" ? t("打开会话 {0}", label) : t("打开文档 {0}", label)}
+              aria-label={r.kind === "session" ? t("打开任务 {0}", label) : t("打开文档 {0}", label)}
             >
               <Icon size={13} />
               <span className={styles.refName}>{label}</span>
@@ -461,7 +461,7 @@ export function MentionText({ text }: { text: string }) {
               type="button"
               className={styles.chip}
               onClick={() => nav.open(seg.id)}
-              aria-label={t("打开会话 {0}", seg.title)}
+              aria-label={t("打开任务 {0}", seg.title)}
             >
               {label}
             </button>
@@ -480,5 +480,5 @@ export function MentionText({ text }: { text: string }) {
 /** The muted line that stands in for the `<fleet-referenced-sessions>` block. */
 export function RefsNote({ count }: { count: number }) {
   if (count <= 0) return null;
-  return <div className={styles.refsNote}>{t("已附上 {0} 个会话的摘要", count)}</div>;
+  return <div className={styles.refsNote}>{t("已附上 {0} 个任务的摘要", count)}</div>;
 }
