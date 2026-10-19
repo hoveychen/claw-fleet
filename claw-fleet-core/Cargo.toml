@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+memchr = "2"
 # Read the user's `notify` out of codex's config.toml so the injected Fleet
 # notify can chain-forward to it (see codex_launch::read_user_codex_notify).
 # Already in the lockfile transitively; promoted to a direct dep here.
@@ -96,4 +97,3 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # Already in the dependency tree transitively (v1.12.x via reqwest/sysinfo etc), so
 # this adds no new download; used only by the guard to detect fan-out drift.
 regex = "1"
-memchr = "2"
