@@ -97,6 +97,24 @@
   white-space: nowrap;
 }
 
+/* Material titles are long and often share a prefix ("Lin Chong pipeline:
+   blendshape …"), so one ellipsized line made siblings indistinguishable. */
+.item_multiline {
+  align-items: flex-start;
+}
+.item_multiline .item_icon {
+  margin-top: 2px;
+}
+.item_title_wrap {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
 .item_meta {
   flex: 0 0 auto;
   font-size: 12px;
