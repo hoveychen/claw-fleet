@@ -74,7 +74,13 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
     if (!stage) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      if (e.ctrlKey) { setScale(view.current.zoom * Math.exp(-e.deltaY * 0.01), { x: e.clientX, y: e.clientY }); return; }
+      // ⌘ + wheel zooms too, for a plain mouse. A wheel notch reports a far
+      // larger delta than a pinch frame, so cap the step.
+      if (e.ctrlKey || e.metaKey) {
+        const delta = Math.max(-25, Math.min(25, e.deltaY));
+        setScale(view.current.zoom * Math.exp(-delta * 0.01), { x: e.clientX, y: e.clientY });
+        return;
+      }
       const { zoom: cur, pan: p } = view.current;
       if (cur > 1) applyView(cur, p.x - e.deltaX, p.y - e.deltaY);
     };
