@@ -2585,6 +2585,7 @@
     "group_focus": "Only this",
     "group_done": "{{count}} done",
     "dock_title": "Needs your decision",
+    "dock_question_step": "question {{n}} of {{total}}",
     "dock_subtask_source": "· from subtask “{{name}}”",
     "dock_subtask_untitled": "Subtask",
     "dock_from_subtask": "From a subtask",

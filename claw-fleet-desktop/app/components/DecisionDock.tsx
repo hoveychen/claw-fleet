@@ -54,6 +54,8 @@ export function DecisionDock({
   const submitFleetAsk = useDecisionStore((s) => s.submitFleetAsk);
   const respond = useDecisionStore((s) => s.respond);
   const respondToPermissionPrompt = useDecisionStore((s) => s.respondToPermissionPrompt);
+  const setElicitationMultiSelectOverride = useDecisionStore((s) => s.setElicitationMultiSelectOverride);
+  const setFleetAskMultiSelectOverride = useDecisionStore((s) => s.setFleetAskMultiSelectOverride);
 
   useEffect(() => {
     if (!keyboard || !active) return;
@@ -120,6 +122,20 @@ export function DecisionDock({
   if (!active) return null;
   const questionCard = active.kind === "elicitation" || active.kind === "fleet-ask";
 
+  // A docked card drops its own header row (icon, "Agent Question", project,
+  // task title — the page already shows all of them), so the two controls that
+  // row carried live on the dock's single header line instead.
+  const asked = active.kind === "elicitation" || active.kind === "fleet-ask" ? active : null;
+  const q = asked ? asked.request.questions[asked.step] : null;
+  const stepCount = asked ? asked.request.questions.length : 0;
+  const canToggleMode = !!q && !q.multiSelect && (q.options?.length ?? 0) > 0;
+  const effectiveMulti = !!q && (q.multiSelect || asked?.multiSelectOverrides[q.question] === true);
+  const toggleMode = () => {
+    if (!q) return;
+    if (active.kind === "elicitation") setElicitationMultiSelectOverride(active.id, q.question, !effectiveMulti);
+    else if (active.kind === "fleet-ask") setFleetAskMultiSelectOverride(active.id, q.question, !effectiveMulti);
+  };
+
   return (
     <section className={styles.dock} data-testid="decision-dock" aria-label={t("home.dock_title", "Needs your decision")}>
       <header className={styles.head}>
@@ -132,6 +148,25 @@ export function DecisionDock({
               defaultValue: "· from sub-task “{{name}}”",
             })}
           </span>
+        )}
+        {stepCount > 1 && (
+          <span className={styles.meta}>
+            · {t("home.dock_question_step", {
+              n: (asked?.step ?? 0) + 1,
+              total: stepCount,
+              defaultValue: "question {{n}} of {{total}}",
+            })}
+          </span>
+        )}
+        {canToggleMode && (
+          <button
+            type="button"
+            className={styles.mode}
+            onClick={toggleMode}
+            title={t("fleet_ask.mode_tooltip", "Switch between single/multi select")}
+          >
+            · {effectiveMulti ? t("fleet_ask.mode_multi", "Multi") : t("fleet_ask.mode_single", "Single")}
+          </button>
         )}
         <span className={styles.spacer} />
         {cards.length > 1 && (
@@ -165,7 +200,7 @@ export function DecisionDock({
       )}
       <div className={`${styles.body} ${questionCard ? styles.body_flex : ""}`}>
         <Suspense fallback={<SkeletonCard height={140} />}>
-          <DecisionCard key={active.id} decision={active} compact />
+          <DecisionCard key={active.id} decision={active} compact docked />
         </Suspense>
       </div>
     </section>
