@@ -102,7 +102,15 @@ function tickSessions() {
   });
   // Push update via Tauri event system
   emit("sessions-updated", currentSessions);
+  // The store only infers scan-ready from a non-empty list; the real backend
+  // also sends this one-shot event, so an empty (`mock-no-sessions`) board
+  // would otherwise sit on its skeleton forever.
+  if (!mockScanReadySent) {
+    mockScanReadySent = true;
+    emit("scan-ready", true);
+  }
 }
+let mockScanReadySent = false;
 
 // ── IPC handler ─────────────────────────────────────────────────────────────
 
