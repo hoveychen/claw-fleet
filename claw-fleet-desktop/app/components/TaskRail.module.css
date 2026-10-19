@@ -10,9 +10,9 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  /* On Windows the column's top reaches the corner the three caption buttons
-     are drawn over (the hero yields that corner while the rail is open). */
-  padding: max(10px, var(--win-caption-inset-y, 0px)) 14px 16px;
+  /* Room for Windows' caption buttons is the host's call (SessionDetail adds
+     it in the standalone pane; inline hosts already clear that strip). */
+  padding: 10px 14px 16px;
   /* The task page hosts the conversation flat (inline), so the rail draws its
      own seam rather than relying on a slab gutter. */
   border-left: 1px solid var(--color-border);
