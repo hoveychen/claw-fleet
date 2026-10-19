@@ -2646,7 +2646,6 @@
   },
   "view_files": "Projects",
   "files": {
-    "panel_title": "Projects",
     "add_path": "Add path",
     "remove_path": "Remove from list",
     "clone": {
@@ -2665,9 +2664,6 @@
       "failed": "Clone failed."
     },
     "tab_files": "Files",
-    "no_workspaces_title": "No projects yet",
-    "no_workspaces_subtitle": "Project directories appear here once tasks are running.",
-    "select_workspace": "Select a project to browse its files.",
     "select_file": "Select a file to preview it.",
     "external_title": "File outside this project (read-only)",
     "external_close": "Close",
@@ -3028,7 +3024,6 @@
   "nav_section_settings": "Settings",
   "nav_tab_wiki": "Docs",
   "nav_tab_artifacts": "Deliverables",
-  "nav_tab_files": "Code",
   "nav_tab_terminal": "Terminal",
   "nav_tab_schedule": "Routines",
   "nav_tab_memory": "Memory",

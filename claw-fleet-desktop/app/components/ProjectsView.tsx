@@ -99,13 +99,8 @@ export function ProjectsView() {
   const [ctxMenu, setCtxMenu] = useState<{ row: ProjectRow; anchor: ContextMenuAnchor } | null>(null);
 
   // Workspace commands: the row badges and the code tab's commands list.
+  // SessionList keeps this list polled app-wide.
   const procs = useProcStore((s) => s.procs);
-  const fetchProcs = useProcStore((s) => s.fetchProcs);
-  useEffect(() => {
-    void fetchProcs();
-    const timer = setInterval(() => void fetchProcs(), 2000);
-    return () => clearInterval(timer);
-  }, [fetchProcs]);
   const procCounts = useMemo(() => {
     const byProject = new Map<string, number>();
     for (const [path, n] of runningProcCounts(procs)) {
@@ -506,20 +501,11 @@ function ProjectMemory({ projectPath }: { projectPath: string }) {
 }
 
 /** The project's code: the workspace explorer itself (tree, preview, git bar,
- *  commands), so the tab is not just a link to the 代码 page. It drives the
- *  same `files` view state as that page and points it at this project, so
- *  switching between the two keeps the selected file. */
+ *  commands). A path clicked in agent prose arrives here as `fileNav`. */
 function ProjectCode({ projectPath, name }: { projectPath: string; name: string }) {
   const { t } = useTranslation();
   const terminal = useUIStore((s) => s.hostFeatures.terminal);
-  const selectedWorkspace = useUIStore((s) => s.mainViewState.files.selectedWorkspace);
   const fileNav = useUIStore((s) => s.fileNav);
-
-  useEffect(() => {
-    if (selectedWorkspace !== projectPath) {
-      useUIStore.getState().updateMainViewState("files", { selectedWorkspace: projectPath });
-    }
-  }, [selectedWorkspace, projectPath]);
 
   return (
     <WorkspaceExplorer

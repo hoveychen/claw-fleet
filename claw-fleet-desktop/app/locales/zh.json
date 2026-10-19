@@ -2640,7 +2640,6 @@
   },
   "view_files": "项目",
   "files": {
-    "panel_title": "项目",
     "add_path": "添加路径",
     "remove_path": "从列表移除",
     "clone": {
@@ -2659,9 +2658,6 @@
       "failed": "克隆失败。"
     },
     "tab_files": "文件",
-    "no_workspaces_title": "暂无项目",
-    "no_workspaces_subtitle": "有任务跑起来之后，这里会列出它们的项目目录。",
-    "select_workspace": "选择左侧项目浏览文件。",
     "select_file": "选择左侧文件查看内容。",
     "external_title": "项目外的文件（只读预览）",
     "external_close": "关闭",
@@ -3021,7 +3017,6 @@
   "nav_section_settings": "设置",
   "nav_tab_wiki": "文档",
   "nav_tab_artifacts": "产出",
-  "nav_tab_files": "代码",
   "nav_tab_terminal": "终端",
   "nav_tab_schedule": "例行",
   "nav_tab_memory": "记忆",

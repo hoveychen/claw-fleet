@@ -207,7 +207,6 @@ describe("primary nav page browsing context", () => {
       expanded: { enabled: true, downloaded: false, catalog: true },
     });
     updateMainViewState("files", {
-      selectedWorkspace: "/repo",
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
       tab: "procs",
@@ -259,7 +258,6 @@ describe("primary nav page browsing context", () => {
       expanded: { enabled: true, downloaded: false, catalog: true },
     });
     expect(state.files).toEqual({
-      selectedWorkspace: "/repo",
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
       tab: "procs",
@@ -730,12 +728,25 @@ describe("terminal feature toggle (host_features)", () => {
     expect(useUIStore.getState().viewMode).toBe("terminal");
   });
 
+  it("opens a clicked path on its project's code tab, worktrees folded onto the repo", async () => {
+    const { useUIStore } = await import("./store");
+    useUIStore.getState().requestFileNav({
+      workspacePath: "/repo/.worktrees/feat",
+      absPath: "/repo/.worktrees/feat/src/main.rs",
+      line: null,
+    });
+    const s = useUIStore.getState();
+    expect(s.viewMode).toBe("projects");
+    expect(s.mainViewState.projects).toMatchObject({ selectedPath: "/repo", tab: "code" });
+    expect(s.fileNav?.absPath).toBe("/repo/.worktrees/feat/src/main.rs");
+  });
+
   it("ignores open-in-terminal request while flag is off, honours it when on", async () => {
     const { useUIStore } = await import("./store");
-    useUIStore.getState().setViewMode("files");
+    useUIStore.getState().setViewMode("projects");
 
     useUIStore.getState().requestTerminalNav("/repo");
-    expect(useUIStore.getState().viewMode).toBe("files");
+    expect(useUIStore.getState().viewMode).toBe("projects");
     expect(useUIStore.getState().terminalNav).toBeNull();
 
     useUIStore.setState({ hostFeatures: { terminal: true } });

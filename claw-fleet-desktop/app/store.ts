@@ -93,7 +93,6 @@ export interface MainViewState {
     expanded: Record<"enabled" | "downloaded" | "catalog", boolean>;
   };
   files: {
-    selectedWorkspace: string | null;
     // NOTE: the hand-added / cloned directories used to live here, but this
     // store is in-memory only (mainViewState is not in storage.ts ALL_KEYS), so
     // a cloned repo's card vanished on restart — and the backend, which owns
@@ -153,7 +152,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     expanded: { enabled: true, downloaded: true, catalog: false },
   },
   files: {
-    selectedWorkspace: null,
     activeRootPath: null,
     showIgnored: false,
     tab: "files",
@@ -449,6 +447,8 @@ const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true
  *  the retired Sessions page ("list" / "gallery") above all. */
 function readViewMode(): ViewMode {
   const stored = getItem("viewMode");
+  // The standalone Files page folded into the Projects page's code tab.
+  if (stored === "files") return "projects";
   if (stored === "lobsters" && !readLobsterFleetEnabled()) return "history";
   return isViewMode(stored) ? stored : "history";
 }

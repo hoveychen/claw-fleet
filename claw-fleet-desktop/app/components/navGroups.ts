@@ -21,7 +21,7 @@ export const ALL_NAV_SECTIONS: readonly NavSection[] = [...NAV_SECTIONS, "review
 export const NAV_SECTION_VIEWS: Record<NavSection, readonly ViewMode[]> = {
   tasks: ["history"],
   library: ["library", "wiki", "artifacts"],
-  projects: ["projects", "files", "terminal", "memory"],
+  projects: ["projects", "terminal", "memory"],
   review: ["report"],
   // Reached from the Settings overlay ("more pages"); the nav entry itself
   // opens the overlay. The lobster fleet is an opt-in easter egg launched from

@@ -14,7 +14,6 @@ import { AuditView } from "./AuditView";
 import { ProjectsView } from "./ProjectsView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
-import { FilesView } from "./FilesView";
 import { TerminalView } from "./TerminalView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
@@ -181,8 +180,8 @@ export function SessionList() {
     // so far; and any future events will be caught by the listeners above.
     Promise.all([unlistenFrames, unlistenPromise]).then(() => refresh());
     unlistenScanReady.then(() => refresh());
-    // Keep the running-command total fresh for the repos nav badge even when the
-    // files view isn't open (FilesView also polls, but only while mounted).
+    // Keep the workspace-command list fresh app-wide: the Projects page's row
+    // badges and code tab read it, and so does the nav badge.
     const fetchProcs = useProcStore.getState().fetchProcs;
     fetchProcs();
     const procTimer = setInterval(fetchProcs, 2000);
@@ -363,8 +362,6 @@ export function SessionList() {
         <ArtifactsView />
       ) : viewMode === "skills" ? (
         <SkillsView />
-      ) : viewMode === "files" ? (
-        <FilesView />
       ) : viewMode === "terminal" ? (
         // `loadHostFeatures` navigates a restored `terminal` viewMode back home
         // when the flag is off; this guard covers the frame before that answer

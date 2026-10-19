@@ -1,37 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   ArrowDown,
   ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
-  Copy,
   FileDiff,
-  FolderOpen,
-  FolderPlus,
   GitBranch,
   Link2,
   RefreshCw,
-  Trash2,
   Upload,
 } from "lucide-react";
-import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
-import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { DirPickerDialog } from "./DirPickerDialog";
-import { isWebBuild } from "../hostEnv";
 import { canRevealPath } from "../canReveal";
-import { CloneRepoDialog } from "./CloneRepoDialog";
-import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
 import {
-  runningProcCounts,
   useProcStore,
-  useSessionsStore,
   useUIStore,
   type FileNavRequest,
 } from "../store";
@@ -42,12 +28,11 @@ import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./Explor
 import { planRevealFallback } from "./revealFallback";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
-import { PageShell } from "./PageShell";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
 import { Presence } from "./Presence";
-import { Skeleton, SkeletonList, Spinner, loadingStyles } from "./loading";
+import { Skeleton, SkeletonList, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 // ── Types (mirror claw-fleet-core/src/file_explorer.rs) ─────────────────────
@@ -109,345 +94,6 @@ function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/").replace(/\/+$/, "");
   const slash = normalized.lastIndexOf("/");
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
-}
-
-/** Everything above `p`, separator preserved. Used to pre-fill the clone
- *  dialog: a new checkout almost always belongs beside the repo in hand. Empty
- *  when `p` has no parent, which lets the dialog fall back to the host's home. */
-function parentDir(p: string): string {
-  const trimmed = p.replace(/[/\\]+$/, "");
-  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-  return cut > 0 ? trimmed.slice(0, cut) : "";
-}
-
-
-// ── Root view: workspace picker + explorer ──────────────────────────────────
-
-export function FilesView() {
-  const { t } = useTranslation();
-  const sessions = useSessionsStore((s) => s.sessions);
-  const scanReady = useSessionsStore((s) => s.scanReady);
-  const fetchProcs = useProcStore((s) => s.fetchProcs);
-  const procs = useProcStore((s) => s.procs);
-  const fileNav = useUIStore((s) => s.fileNav);
-  const { selectedWorkspace: selected } = useUIStore((s) => s.mainViewState.files);
-  // Directories the user added by hand or cloned. Backend state, not UI state:
-  // they widen the explorer's permission gate, and a repo with no sessions is
-  // only browsable because the backend recorded it. Fetched on mount so a
-  // cloned repo's card is still here after a restart. `null` until the first
-  // fetch settles, so the list can tell "not loaded" from "none added".
-  const [extraPaths, setExtraPaths] = useState<string[] | null>(null);
-  // A path the backend is registering / dropping right now. The card list only
-  // changes once the backend answers, so these stand in for it meanwhile.
-  const [addingPath, setAddingPath] = useState<string | null>(null);
-  const [removingPath, setRemovingPath] = useState<string | null>(null);
-  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
-  const setSelected = (selectedWorkspace: string | null) =>
-    updateMainViewState("files", { selectedWorkspace });
-  // The native directory dialog browses the machine the *desktop* runs on; in
-  // the browser build there is no native dialog at all, only bytes, so that
-  // case goes through `DirPickerDialog`, which lists the host the backend runs
-  // on (mirrors NewSessionForm).
-  const needsBackendDirPicker = isWebBuild();
-  // Directories the user browsed to by hand this session. They have no sessions
-  // of their own, so they'd never surface from the session-derived list — we
-  // keep them here (most-recent first) and merge them in as zero-count cards.
-  const [pickingDir, setPickingDir] = useState(false);
-  const [cloning, setCloning] = useState(false);
-
-  // Row context menu — anchor + subject held together, mirroring WikiView.
-  const [ctxMenu, setCtxMenu] = useState<{
-    ws: { path: string; name: string; count: number };
-    anchor: ContextMenuAnchor;
-  } | null>(null);
-
-  useEffect(() => {
-    void invoke<string[]>("list_browse_paths")
-      .then(setExtraPaths)
-      .catch(() => setExtraPaths([]));
-  }, []);
-
-  // Drop a hand-added path (zero-count card) back out of the session view.
-  const removePath = async (path: string) => {
-    setRemovingPath(path);
-    try {
-      setExtraPaths(await invoke<string[]>("remove_browse_path", { path }));
-    } catch {
-      return;
-    } finally {
-      setRemovingPath(null);
-    }
-    if (selected === path) setSelected(null);
-  };
-
-  const wsMenuItems = (ws: {
-    path: string;
-    name: string;
-    count: number;
-  }): ContextMenuItem[] => {
-    const items: ContextMenuItem[] = [];
-    // Opening a file manager needs the host shell; in the browser build
-    // `reveal_path` is a no-op — a menu item that silently does nothing is
-    // worse than an absent one. (canReveal.ts)
-    if (canRevealPath()) {
-      const revealKey =
-        document.documentElement.getAttribute("data-platform") === "windows"
-          ? "paths.reveal_in_explorer"
-          : "paths.reveal_in_finder";
-      items.push({
-        id: "reveal",
-        label: t(revealKey),
-        icon: <FolderOpen size={13} strokeWidth={1.7} />,
-        onSelect: () => void invoke("reveal_path", { path: ws.path }).catch(() => {}),
-      });
-    }
-    items.push({
-      id: "copy-path",
-      label: t("paths.copy_path", "复制路径"),
-      icon: <Copy size={13} strokeWidth={1.7} />,
-      sub: ws.path,
-      onSelect: () => void writeText(ws.path).catch(() => {}),
-    });
-    // Only hand-added dirs (zero session count, tracked in extraPaths) can be
-    // removed — session-derived cards reappear on the next scan anyway.
-    if (ws.count === 0 && (extraPaths ?? []).includes(ws.path)) {
-      items.push({
-        id: "remove",
-        label: t("files.remove_path", "从列表移除"),
-        icon: <Trash2 size={13} strokeWidth={1.7} />,
-        danger: true,
-        onSelect: () => void removePath(ws.path),
-      });
-    }
-    return items;
-  };
-
-  // A path clicked in agent prose lands here: select its workspace, then hand
-  // the request down so the explorer can expand to the file itself.
-  useEffect(() => {
-    if (fileNav) setSelected(fileNav.workspacePath);
-  }, [fileNav]);
-
-  // Running workspace-command count per workspace → card badges.
-  const runningCounts = useMemo(() => runningProcCounts(procs), [procs]);
-
-  // Poll the workspace-proc registry while the "文件" (Files) page is open — drives
-  // both the per-workspace badges and the ProcPanel lists.
-  useEffect(() => {
-    void fetchProcs();
-    const timer = setInterval(() => void fetchProcs(), 2000);
-    return () => clearInterval(timer);
-  }, [fetchProcs]);
-
-  // Distinct workspaces across all known sessions, with a session count so the
-  // busiest projects surface naturally at the top. Filtering mirrors the New
-  // Session launcher (see distinctWorkspaces): in-repo worktree checkouts fold
-  // onto their durable repo root, and OS temp/scratchpad cwds (the per-session
-  // `/private/tmp/claude-501/...` dirs) are dropped rather than listed as repos.
-  const workspaces = useMemo(() => {
-    const byPath = new Map<string, { path: string; name: string; count: number }>();
-    for (const s of sessions) {
-      if (!s.workspacePath) continue;
-      const path = repoRootPath(s.workspacePath);
-      if (isTempWorkspacePath(path)) continue;
-      const existing = byPath.get(path);
-      if (existing) existing.count += 1;
-      else
-        byPath.set(path, {
-          path,
-          // Collapsed onto a repo root → the session's own name may be a
-          // worktree leaf; use the durable root's basename instead.
-          name: path === s.workspacePath ? s.workspaceName : basename(path),
-          count: 1,
-        });
-    }
-    const derived = [...byPath.values()].sort(
-      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
-    );
-    // Hand-added dirs the session list doesn't already cover, newest first.
-    const extras = (extraPaths ?? [])
-      .filter((p) => !byPath.has(p))
-      .map((p) => ({ path: p, name: basename(p), count: 0 }));
-    return [...extras, ...derived];
-  }, [sessions, extraPaths]);
-
-  // Nothing to list yet and at least one source still in flight: neither the
-  // session scan nor the hand-added paths can be read as "no workspaces".
-  const listLoading = workspaces.length === 0 && (!scanReady || extraPaths === null);
-
-  // Any selected path resolves to a browsable workspace even when it isn't a
-  // card — a raw worktree path from agent prose (the list only keeps repo
-  // roots) or a just-picked directory still opens in the explorer.
-  const active = useMemo(() => {
-    if (!selected) return null;
-    return (
-      workspaces.find((w) => w.path === selected) ?? {
-        path: selected,
-        name: basename(selected),
-        count: 0,
-      }
-    );
-  }, [workspaces, selected]);
-
-  // Registering is what makes the directory browsable at all, so select it only
-  // once the backend has accepted it — otherwise the card opens onto the very
-  // "not a known session workspace" error this replaced.
-  const addPath = async (path: string) => {
-    setAddingPath(path);
-    try {
-      setExtraPaths(await invoke<string[]>("add_browse_path", { path }));
-    } catch {
-      return;
-    } finally {
-      setAddingPath(null);
-    }
-    setSelected(path);
-  };
-
-  // Local desktop: the native dialog is the better experience and browses the
-  // right machine. Otherwise, the backend picker (DirPickerDialog).
-  const browseWorkspace = async () => {
-    if (needsBackendDirPicker) {
-      setPickingDir(true);
-      return;
-    }
-    const picked = await openDialog({ multiple: false, directory: true });
-    if (typeof picked === "string") await addPath(picked);
-  };
-
-  return (
-    <PageShell
-      view="files"
-      detailKey={selected}
-      className={styles.mem_scope}
-      title={t("files.panel_title")}
-      count={workspaces.length > 0 ? workspaces.length : null}
-      // Either source still in flight means the total is not final yet.
-      countLoading={!scanReady || extraPaths === null}
-      actions={
-        <>
-          <button
-            className={fileStyles.add_ws_btn}
-            onClick={() => setCloning(true)}
-            title={t("files.clone.title")}
-          >
-            <GitBranch size={13} strokeWidth={1.7} />
-            <span>{t("files.clone.button")}</span>
-          </button>
-          <button
-            className={fileStyles.add_ws_btn}
-            onClick={browseWorkspace}
-            title={t("files.add_path")}
-          >
-            <FolderPlus size={13} strokeWidth={1.7} />
-            <span>{t("files.add_path")}</span>
-          </button>
-        </>
-      }
-      secondary={
-        <div className={styles.list_pane}>
-          {listLoading ? (
-            <SkeletonList rows={8} />
-          ) : (
-            workspaces.length === 0 &&
-            !addingPath && (
-              <EmptyState
-                icon={<FolderOpen size={28} strokeWidth={1.5} />}
-                title={t("files.no_workspaces_title")}
-                subtitle={t("files.no_workspaces_subtitle")}
-              />
-            )
-          )}
-          <div className={styles.card_list}>
-            {addingPath && !workspaces.some((w) => w.path === addingPath) && (
-              <div className={`${styles.card} ${loadingStyles.stale}`} aria-busy="true">
-                <div className={styles.card_body}>
-                  <div className={styles.card_title}>{basename(addingPath)}</div>
-                  <div className={styles.card_hook}>{addingPath}</div>
-                </div>
-                <Spinner size={12} label={t("loading")} />
-              </div>
-            )}
-            {workspaces.map((ws) => (
-              <button
-                key={ws.path}
-                className={`${styles.card} ${selected === ws.path ? styles.card_active : ""} ${
-                  removingPath === ws.path ? loadingStyles.stale : ""
-                }`}
-                aria-busy={removingPath === ws.path || undefined}
-                onClick={() => setSelected(ws.path)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setCtxMenu({ ws, anchor: { x: e.clientX, y: e.clientY } });
-                }}
-              >
-                <div className={styles.card_body}>
-                  <div className={styles.card_title}>{ws.name}</div>
-                  <div className={styles.card_hook}>{ws.path}</div>
-                </div>
-                {removingPath === ws.path ? (
-                  <Spinner size={12} label={t("loading")} />
-                ) : (runningCounts.get(ws.path) ?? 0) > 0 && (
-                  <span
-                    className={fileStyles.ws_badge}
-                    title={t("files.proc_running")}
-                  >
-                    {runningCounts.get(ws.path)}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          <Presence when={Boolean(ctxMenu)}>{ctxMenu && (
-            <ContextMenu
-              anchor={ctxMenu.anchor}
-              items={wsMenuItems(ctxMenu.ws)}
-              onClose={() => setCtxMenu(null)}
-            />
-          )}</Presence>
-        </div>
-      }
-    >
-      {active ? (
-        <WorkspaceExplorer
-          key={active.path}
-          workspace={active.path}
-          name={active.name}
-          nav={fileNav?.workspacePath === active.path ? fileNav : null}
-        />
-      ) : (
-        <div className={styles.placeholder}>{t("files.select_workspace")}</div>
-      )}
-      <Presence when={Boolean(cloning)}>{cloning && (
-        <CloneRepoDialog
-          // Beside the repo in hand by default; the picker starts at the
-          // backend host's home when nothing is selected.
-          initialParent={selected ? parentDir(selected) : ""}
-          useBackendPicker={needsBackendDirPicker}
-          onDone={(dest) => {
-            // The backend already registered the clone destination, but re-adding
-            // is idempotent and returns the fresh list — so this both syncs the
-            // cards and opens the new repo.
-            void addPath(dest);
-            setCloning(false);
-          }}
-          onCancel={() => setCloning(false)}
-        />
-      )}</Presence>
-      <Presence when={Boolean(pickingDir)}>{pickingDir && (
-        <DirPickerDialog
-          initialPath={selected ?? ""}
-          // Awaited so the picker shows its spinner until the path is registered.
-          onPick={async (path) => {
-            await addPath(path);
-            setPickingDir(false);
-          }}
-          onCancel={() => setPickingDir(false)}
-        />
-      )}</Presence>
-    </PageShell>
-  );
 }
 
 // ── Explorer for one workspace ───────────────────────────────────────────────
