@@ -1175,7 +1175,7 @@
     "new_form": {
       "title": "New: one idea, one task",
       "description": "The left column of the home page is every task in every project, grouped into Needs you / Running / Waiting / To accept, each row saying what it is doing right now. Select a task and its conversation fills the middle; when it needs your call, the card pins to the bottom of the conversation: number keys pick, ⌘↵ submits, and answering moves on to the next one. The right rail holds its subtasks, steps and material.",
-      "hint": "\"What should get done?\" at the top starts a task any time (⌘N). The nav is Tasks / Library / Projects / Review / Settings: Library holds docs and deliverables, Projects holds each project's routines, memory and code, and Review sums up each day's progress by project.",
+      "hint": "\"New Task\" at the top of the task column starts one any time (⌘N). The nav is Tasks / Library / Projects / Review / Settings: Library holds docs and deliverables, Projects holds each project's routines, memory and code, and Review sums up each day's progress by project.",
       "screenshot_alt": "The new home: task column on the left, conversation in the middle, steps and material on the right"
     },
     "launch": {
@@ -1691,7 +1691,7 @@
     "done": "Got it",
     "new_session": {
       "title": "Start here",
-      "desc": "This box at the top of the home page is where work starts: write what should get done, press Enter, pick a project and it is underway. ⌘N brings you back any time. Every task is in the column below, with whatever needs you on top."
+      "desc": "New tasks start here (⌘N): write what should get done in the middle pane, pick a project and press Enter. Every task lands in the column below, with whatever needs you on top."
     }
   },
   "sidebar": {
@@ -2206,6 +2206,8 @@
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
     "report_auto_popup": "Pop up what needs your judgment",
     "report_auto_popup_desc": "On days with something to decide (a drifting task, a recurring lesson), raise it in the main window once. Quiet days push nothing.",
+    "simplified_mode": "Simplified mode",
+    "simplified_mode_desc": "Keep only Tasks, Library and Settings in the sidebar: hide Projects, Review, token speed and usage, and stop the Review popup",
     "lobster_fleet": "Lobster Fleet page",
     "lobster_fleet_desc": "Show Lobster Fleet in the sidebar: one ship per project; board one to see its pixel crew on the bridge (experimental)",
     "auto_resume": "Auto-resume after rate limit",
@@ -2306,8 +2308,6 @@
   },
   "decision": {
     "pending": "Pending decisions",
-    "last_answer_label": "Your last answer",
-    "last_prompt_label": "Your last message",
     "options_expand": "Show options ({{n}})",
     "options_expand_plain": "Show answer box",
     "options_collapse": "Hide options",
@@ -2572,7 +2572,8 @@
     "span_m": "{{n}}m",
     "span_hm": "{{h}}h{{m}}m",
     "span_d": "{{n}}d",
-    "empty": "No tasks yet — write what you want done above",
+    "empty": "No tasks yet",
+    "empty_pick": "Pick a project directory to start",
     "no_match": "No matching tasks",
     "project_filter_tip": "Show only this project",
     "running_subagents": "{{count}} subagents running",
@@ -2587,6 +2588,9 @@
     "group_focus": "Only this",
     "group_done": "{{count}} done",
     "dock_title": "Needs your decision",
+    "dock_first_hint": "This is the task waiting on your call. Pick and submit, and it carries on without you watching; every later card shows up here, at the end of the conversation.",
+    "dock_first_hint_keys": "Digits pick an option, {{submit}} submits.",
+    "dock_first_hint_ok": "Got it",
     "dock_question_step": "question {{n}} of {{total}}",
     "dock_subtask_source": "· from subtask “{{name}}”",
     "dock_subtask_untitled": "Subtask",
@@ -2602,6 +2606,7 @@
     "rail_material": "Material",
     "rail_developer": "Developer view",
     "rail_main": "Main conversation",
+    "subtask_reported": "Reported back",
     "elapsed": "Running {{span}}"
   },
   "history": {
@@ -3074,6 +3079,7 @@
     "tab_routines": "Routines",
     "tab_memory": "Memory",
     "tab_code": "Code",
+    "tab_commands": "Commands",
     "pick_title": "Pick a project",
     "pick_sub": "See its routines, memory and code.",
     "memory_empty": "No memory in this project yet",

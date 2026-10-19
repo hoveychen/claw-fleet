@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyAttention, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
-import { NAV_HOME, navSectionOf, type NavSection } from "./components/navGroups";
+import { isHiddenWhenSimplified, NAV_HOME, navSectionOf, type NavSection } from "./components/navGroups";
 import { isViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
@@ -76,7 +76,7 @@ export interface MainViewState {
     query: string;
     /** Repo-root path of the open project. */
     selectedPath: string | null;
-    tab: "routines" | "memory" | "code";
+    tab: "routines" | "memory" | "code" | "commands";
   };
   skills: {
     query: string;
@@ -99,7 +99,6 @@ export interface MainViewState {
     // backend state now: `list_browse_paths` / `add_browse_path`.
     activeRootPath: string | null;
     showIgnored: boolean;
-    tab: "files" | "procs";
     activeFilePath: string | null;
   };
   mobile: { urlDraft: string; editingUrl: boolean };
@@ -152,7 +151,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
   files: {
     activeRootPath: null,
     showIgnored: false,
-    tab: "files",
     activeFilePath: null,
   },
   mobile: { urlDraft: "", editingUrl: false },
@@ -208,6 +206,9 @@ interface UIState {
   historyQuery: string;
   /** Settings opt-in for the Lobster Fleet page; off by default. */
   lobsterFleetEnabled: boolean;
+  /** Settings switch: the sidebar drops Projects, Review and the token-speed /
+   *  usage blocks (see SIMPLIFIED_HIDDEN_SECTIONS). Off by default. */
+  simplifiedMode: boolean;
   /** Home task sections folded shut. "done" starts folded. In the store (and
    *  on disk) so a fold survives the home unmounting and a restart. */
   homeCollapsedSections: TaskState[];
@@ -224,6 +225,7 @@ interface UIState {
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryQuery: (q: string) => void;
   setLobsterFleetEnabled: (on: boolean) => void;
+  setSimplifiedMode: (on: boolean) => void;
   toggleHomeSection: (state: TaskState) => void;
   setHomeGroupBy: (by: HomeGroupBy) => void;
   toggleHomeProject: (key: string) => void;
@@ -246,6 +248,11 @@ interface UIState {
    *  panel restored on boot is not a preference, it is a surprise. */
   settingsOpen: boolean;
   setSettingsOpen: (on: boolean) => void;
+  /** Bumped to ask the new-task form to open its directory picker. The empty
+   *  task column's button raises it; the form owns the picker (native dialog,
+   *  the browser build's backend picker), so it is a request, not a path. */
+  workspacePickNonce: number;
+  requestWorkspacePick: () => void;
   /** A pending "reveal this file" request, raised when the user clicks a path
    *  in agent prose. It opens the Projects page on the path's project, code
    *  tab; the explorer there owns its selection state internally, so the
@@ -441,14 +448,23 @@ function readHistoryWorkspaceFilter(): string {
 
 const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true";
 
+/** Simplified mode reuses the key of the retired page-clamping mode of the same
+ *  name, so a user who had that on finds the new one on after the upgrade. */
+const readSimplifiedMode = () => getItem("simplified-mode") === "true";
+
 /** The stored page, or the Tasks page when it names one that no longer exists —
  *  the retired Sessions page ("list" / "gallery") above all. */
 function readViewMode(): ViewMode {
   const stored = getItem("viewMode");
   // The standalone Files page folded into the Projects page's code tab.
-  if (stored === "files") return "projects";
-  if (stored === "lobsters" && !readLobsterFleetEnabled()) return "history";
-  return isViewMode(stored) ? stored : "history";
+  const view = stored === "files" ? "projects" : stored;
+  if (view === "lobsters" && !readLobsterFleetEnabled()) return "history";
+  if (!isViewMode(view)) return "history";
+  // A page whose nav entry simplified mode hides is not where launch lands.
+  if (readSimplifiedMode() && isHiddenWhenSimplified(view)) {
+    return NAV_HOME;
+  }
+  return view;
 }
 
 /** The shared body of every page change: persists `viewMode` and records it as
@@ -527,6 +543,17 @@ export const useUIStore = create<UIState>((set) => ({
       // Switching it off while on the page drops back to the Tasks page.
       const next = { ...s, lobsterFleetEnabled: on };
       return { lobsterFleetEnabled: on, ...viewModePatch(next, s.viewMode) };
+    }),
+  simplifiedMode: readSimplifiedMode(),
+  setSimplifiedMode: (on) =>
+    set((s) => {
+      setItem("simplified-mode", on ? "true" : "false");
+      // Turning it on while on a page whose entry it hides drops back to the
+      // Tasks page, so the sidebar never shows nothing lit.
+      if (on && isHiddenWhenSimplified(s.viewMode)) {
+        return { simplifiedMode: on, ...viewModePatch(s, NAV_HOME) };
+      }
+      return { simplifiedMode: on };
     }),
   toggleHomeSection: (state) =>
     set((s) => {
@@ -699,6 +726,8 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   settingsOpen: false,
   setSettingsOpen: (on) => set({ settingsOpen: on }),
+  workspacePickNonce: 0,
+  requestWorkspacePick: () => set((s) => ({ workspacePickNonce: s.workspacePickNonce + 1 })),
   setMascotVisible: (on) => {
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
@@ -1299,6 +1328,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
   maybePopupReport: async (date: string) => {
     if (!date) return;
     if (!resolveFeature(REPORT_AUTO_POPUP_KEY)) return;
+    // Simplified mode hides Review, so it does not push Review's popup either.
+    // Checked before anything is recorded, so switching it off later still
+    // lets the day's popup through.
+    if (useUIStore.getState().simplifiedMode) return;
     // One popup per date, ever.
     if ((getItem(REPORT_LAST_POPPED_KEY) ?? "") >= date) return;
     if (get().reportPopupDate) return;

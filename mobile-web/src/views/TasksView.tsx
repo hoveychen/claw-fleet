@@ -181,6 +181,12 @@ export function taskStateLabel(state: TaskState): string {
   return t("已完成");
 }
 
+/** A sub-task's state in words. A stopped sub-task has reported to the main
+ *  conversation, not to the boss, so "review" reads as reported back. */
+export function subtaskStateLabel(state: TaskState): string {
+  return state === "review" ? t("已回报") : taskStateLabel(state);
+}
+
 /** The second line of a row, in words. */
 function detailText(d: RowDetail): string | null {
   switch (d.kind) {

@@ -208,7 +208,6 @@ describe("primary nav page browsing context", () => {
     updateMainViewState("files", {
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
-      tab: "procs",
       activeFilePath: "src/main.rs",
     });
     updateMainViewState("mobile", { editingUrl: true, urlDraft: "wss://relay.example" });
@@ -258,7 +257,6 @@ describe("primary nav page browsing context", () => {
     expect(state.files).toEqual({
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
-      tab: "procs",
       activeFilePath: "src/main.rs",
     });
     expect(state.mobile).toMatchObject({ editingUrl: true, urlDraft: "wss://relay.example" });
@@ -545,6 +543,22 @@ describe("auto-popup daily report", () => {
     expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
   });
 
+  it("does not pop in simplified mode, does not write popped flag", async () => {
+    const { useReportStore, useUIStore, REPORT_LAST_POPPED_KEY } = await setup({
+      date: "2026-09-05",
+      drift: [],
+      lessons: [{ content: "c", reason: "r", workspaceName: "w", sessionId: "s1", evidenceSessionIds: ["s1", "s2"] }],
+      violations: [],
+    });
+    const { getItem } = await import("./storage");
+    useUIStore.getState().setSimplifiedMode(true);
+
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+
+    expect(useReportStore.getState().reportPopupDate).toBeNull();
+    expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
+  });
+
   it("pops when something needs judgment, records the date", async () => {
     const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
       date: "2026-09-05",
@@ -751,6 +765,34 @@ describe("terminal feature toggle (host_features)", () => {
     useUIStore.getState().requestTerminalNav("/repo");
     expect(useUIStore.getState().viewMode).toBe("terminal");
     expect(useUIStore.getState().terminalNav?.workspacePath).toBe("/repo");
+  });
+});
+
+describe("simplified mode", () => {
+  beforeEach(() => vi.resetModules());
+
+  it("is off by default; turning it on leaves a hidden page for Tasks", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+    expect(useUIStore.getState().simplifiedMode).toBe(false);
+    useUIStore.getState().setViewMode("report");
+    useUIStore.getState().setSimplifiedMode(true);
+    expect(getItem("simplified-mode")).toBe("true");
+    expect(useUIStore.getState().viewMode).toBe("history");
+    // Pages it does not hide stay put.
+    useUIStore.getState().setViewMode("wiki");
+    useUIStore.getState().setSimplifiedMode(false);
+    useUIStore.getState().setSimplifiedMode(true);
+    expect(useUIStore.getState().viewMode).toBe("wiki");
+  });
+
+  it("does not boot into a page whose entry it hides", async () => {
+    const { setItem } = await import("./storage");
+    setItem("viewMode", "projects");
+    setItem("simplified-mode", "true");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+    expect(useUIStore.getState().viewMode).toBe("history");
   });
 });
 

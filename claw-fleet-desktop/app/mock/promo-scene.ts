@@ -9,6 +9,7 @@ export function promoSceneFromSearch(search: string): PromoScene | null {
 
 export function primePromoStorage(storage: Storage): void {
   storage.setItem("mock-store:onboarding-dismissed", "true");
+  storage.setItem("mock-store:decision-dock-hint-seen", "1");
   storage.setItem(
     "mock-store:onboarding-seen-features",
     JSON.stringify([

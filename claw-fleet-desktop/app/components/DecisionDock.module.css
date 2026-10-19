@@ -18,6 +18,16 @@
   overflow: hidden;
 }
 
+/* In a transcript the dock is a message in the flow, not an overlay: natural
+   height, and the transcript scroller is the only scrollbar. */
+.dock_inline {
+  max-height: none;
+  overflow: visible;
+}
+.dock_inline .body {
+  overflow: visible;
+}
+
 .head {
   display: flex;
   align-items: center;
@@ -25,6 +35,35 @@
   padding: 10px 16px 0;
   font-size: 12px;
   flex: 0 0 auto;
+}
+
+.first_hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-sunken);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.first_hint > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.first_hint_ok {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .dot {

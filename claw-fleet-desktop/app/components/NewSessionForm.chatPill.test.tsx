@@ -19,7 +19,7 @@ import "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { NewSessionForm } from "./NewSessionForm";
 import { useComposerDraftStore } from "../composerDraft";
-import { useSessionsStore } from "../store";
+import { useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -176,11 +176,27 @@ describe("NewSessionForm chat-mode pill", () => {
     expect(workspacePillLabel()).toContain("repo");
   });
 
-  it("toggles off again on a host with no project workspaces yet", async () => {
+  it("asks for a directory, not chat, on a host with no project workspaces yet", async () => {
     await mount();
-    // Nothing else to launch into, so the form opens in chat mode already.
+    // A fresh install must not be dropped into chat: the form opens with no
+    // directory (the empty task column offers the picker).
+    expect(pill().getAttribute("aria-pressed")).toBe("false");
+    await click(pill());
     expect(pill().getAttribute("aria-pressed")).toBe("true");
     await click(pill());
     expect(pill().getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("NewSessionForm workspace pick request", () => {
+  it("opens the directory picker when the store asks, but not on mount", async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const openMock = vi.mocked(open);
+    openMock.mockClear();
+    useUIStore.getState().requestWorkspacePick();
+    await mount();
+    expect(openMock).not.toHaveBeenCalled();
+    await act(async () => useUIStore.getState().requestWorkspacePick());
+    expect(openMock).toHaveBeenCalledTimes(1);
   });
 });

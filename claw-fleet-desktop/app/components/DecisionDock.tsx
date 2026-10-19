@@ -1,12 +1,18 @@
-// The decision card pinned to the bottom of a task's conversation. Every card
-// the task is waiting on — its main conversation's and its sub-tasks' — lands
-// here one at a time, so answering never means scrolling the transcript to
-// find the question. Digits pick options, ⌘↵ sends, Esc denies a guard.
+// The decision card at the end of a task's conversation. Every card the task
+// is waiting on — its main conversation's and its sub-tasks' — lands here one
+// at a time, so answering never means hunting the transcript for the question.
+// Digits pick options, ⌘↵ sends, Esc denies a guard.
+//
+// In a transcript it is `inline`: the last item of the scroller at its natural
+// height, so scrolling up reads history like any chat. It used to float over
+// the transcript's bottom edge at up to 85vh, which left a long card's history
+// a strip a few lines tall.
 
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDecisionStore, useUIStore } from "../store";
 import type { PendingDecision } from "../types";
+import { getItem, setItem } from "../storage";
 import { SkeletonCard } from "./loading";
 import { dockAction, fromSubtask } from "./dockKeys";
 import styles from "./DecisionDock.module.css";
@@ -16,6 +22,10 @@ import styles from "./DecisionDock.module.css";
 const DecisionCard = lazy(() =>
   import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
 );
+
+/** Set once the first-ever docked card's explainer has been dismissed or the
+ *  card it sat on was answered. */
+export const DOCK_HINT_SEEN_KEY = "decision-dock-hint-seen";
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -33,6 +43,7 @@ export function DecisionDock({
   projectName = null,
   taskTitle = null,
   keyboard = true,
+  inline = false,
 }: {
   cards: PendingDecision[];
   projectName?: string | null;
@@ -40,11 +51,28 @@ export function DecisionDock({
   /** Off for a pane that is mounted but hidden, so only the visible dock
    *  answers the keyboard. */
   keyboard?: boolean;
+  /** Rendered inside a scroller: natural height, no inner scroll regions. */
+  inline?: boolean;
 }) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<string | null>(null);
   const index = Math.max(0, cards.findIndex((c) => c.id === activeId));
   const active = cards[index] ?? null;
+
+  // First card ever: one line on what this is. It goes for good once dismissed,
+  // or once the card it first appeared on is gone (answered).
+  const [hintOn, setHintOn] = useState(() => !getItem(DOCK_HINT_SEEN_KEY));
+  const hintCardId = useRef<string | null>(null);
+  const dismissHint = () => {
+    setHintOn(false);
+    setItem(DOCK_HINT_SEEN_KEY, "1");
+  };
+  useEffect(() => {
+    if (!hintOn || !active) return;
+    if (hintCardId.current == null) hintCardId.current = active.id;
+    else if (!cards.some((c) => c.id === hintCardId.current)) dismissHint();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hintOn, active?.id, cards]);
 
   const toggleElicitationOption = useDecisionStore((s) => s.toggleElicitationOption);
   const toggleFleetAskOption = useDecisionStore((s) => s.toggleFleetAskOption);
@@ -137,7 +165,7 @@ export function DecisionDock({
   };
 
   return (
-    <section className={styles.dock} data-testid="decision-dock" aria-label={t("home.dock_title", "Needs your decision")}>
+    <section className={`${styles.dock} ${inline ? styles.dock_inline : ""}`} data-testid="decision-dock" aria-label={t("home.dock_title", "Needs your decision")}>
       <header className={styles.head}>
         <span className={styles.dot} aria-hidden />
         <span className={styles.title}>{t("home.dock_title", "Needs your decision")}</span>
@@ -195,12 +223,27 @@ export function DecisionDock({
           </span>
         )}
       </header>
+      {hintOn && (
+        <div className={styles.first_hint} data-testid="dock-first-hint">
+          <span>
+            {t("home.dock_first_hint")}
+            {questionCard &&
+              " " +
+                t("home.dock_first_hint_keys", {
+                  submit: document.documentElement.getAttribute("data-platform") === "windows" ? "Ctrl+Enter" : "⌘↵",
+                })}
+          </span>
+          <button type="button" className={styles.first_hint_ok} onClick={dismissHint}>
+            {t("home.dock_first_hint_ok")}
+          </button>
+        </div>
+      )}
       {crumbs.length > 0 && (
         <div className={styles.crumbs}>{crumbs.join(" › ")}</div>
       )}
-      <div className={`${styles.body} ${questionCard ? styles.body_flex : ""}`}>
+      <div className={`${styles.body} ${questionCard && !inline ? styles.body_flex : ""}`}>
         <Suspense fallback={<SkeletonCard height={140} />}>
-          <DecisionCard key={active.id} decision={active} compact docked />
+          <DecisionCard key={active.id} decision={active} compact docked natural={inline} />
         </Suspense>
       </div>
     </section>

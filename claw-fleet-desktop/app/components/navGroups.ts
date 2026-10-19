@@ -41,6 +41,17 @@ export function navSectionOf(view: ViewMode): NavSection {
   return SECTION_OF.get(view) ?? "tasks";
 }
 
+/** Nav entries simplified mode (a Settings switch) takes off the sidebar,
+ *  together with the token-speed and usage blocks. The pages stay reachable
+ *  from links inside other pages; only their entries are gone. */
+export const SIMPLIFIED_HIDDEN_SECTIONS: readonly NavSection[] = ["projects", "review"];
+
+/** Whether `view` belongs to a section simplified mode hides — such a page is
+ *  not restored on launch, nor kept on screen when the switch is turned on. */
+export function isHiddenWhenSimplified(view: ViewMode): boolean {
+  return SIMPLIFIED_HIDDEN_SECTIONS.includes(navSectionOf(view));
+}
+
 /** Pages that exist only on some hosts. Terminal needs the backend's
  *  FLEET_TERMINAL; the phone pairing page only where a phone can reach this
  *  host; the lobster fleet only once its Settings toggle is on. */

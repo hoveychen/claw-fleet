@@ -36,6 +36,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
+import { useIframeImgZoom } from "./useIframeImgZoom";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -1257,6 +1258,8 @@ export function WikiDocBody({
   // Which `slug/version` the HTML frame has finished loading.
   const frameKey = `${doc.slug}/${version}`;
   const [frameLoaded, setFrameLoaded] = useState<string | null>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const lightbox = useIframeImgZoom(frameRef);
 
   useEffect(() => {
     if (doc.kind !== "markdown") {
@@ -1297,12 +1300,14 @@ export function WikiDocBody({
         <TopProgress active={frameLoaded !== frameKey} />
         <iframe
           key={frameKey}
+          ref={frameRef}
           className={styles.html_frame}
           sandbox="allow-scripts"
           src={wikiFileUrl(doc.slug, version, doc.entry)}
           title={doc.title}
           onLoad={() => setFrameLoaded(frameKey)}
         />
+        {lightbox}
       </div>
     );
   }

@@ -1323,6 +1323,7 @@ export function SessionDetail({
   // Re-pin on every height change instead.
   const hasMessages = messages.length > 0;
   const hasLiveThinking = !!(shownLiveThinking?.streaming && shownLiveThinking.thinking);
+  const hasDockCards = dockCards.length > 0;
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1344,12 +1345,14 @@ export function SessionDetail({
     // Observe the children, not the scroll box: the box's own border box never
     // changes size, it is the content inside it that grows. Re-subscribing when
     // the child set changes (loading placeholder -> list, live thinking block)
-    // is why those two flags are in the dependency list.
+    // is why those flags are in the dependency list — the inline decision
+    // dock is one such child: a card arriving must keep a following reader
+    // at the bottom, and answering it must not leave them stranded.
     const ro = new ResizeObserver(pin);
     for (const child of Array.from(el.children)) ro.observe(child);
     pin();
     return () => ro.disconnect();
-  }, [liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
+  }, [liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id, hasDockCards]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -1411,6 +1414,7 @@ export function SessionDetail({
   // re-subscribes on those flags; its *size* changes (a growing draft) come
   // through the observer.
   const showsComposer = (canResume || canEnqueue) && !!liveSession;
+  const composerShown = showsComposer && !dockAsks;
   useEffect(() => {
     const el = dockRef.current;
     if (!el) {
@@ -1422,7 +1426,7 @@ export function SessionDetail({
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, [showsComposer, dockCards.length > 0, isFollowing, liveSession?.id]);
+  }, [composerShown, isFollowing, liveSession?.id]);
 
   // Padding is applied by React on the next paint, which grows scrollHeight
   // under a reader who is pinned to the newest message. Re-pin in the same
@@ -2056,6 +2060,21 @@ export function SessionDetail({
                       apiErrorCtx={apiErrorCtx}
                     />
                   </AgentNavProvider>
+                  {/* The cards this task waits on sit at the end of the
+                      transcript, in its flow: scrolling up reads history the
+                      way it does without a card. As a floating overlay a long
+                      card covered nearly the whole pane. */}
+                  {dockCards.length > 0 && (
+                    <div className={`${styles.resume_dock} ${styles.inline_dock}`}>
+                      <DecisionDock
+                        cards={dockCards}
+                        projectName={projectName}
+                        taskTitle={preferredTitle}
+                        keyboard={!paused}
+                        inline
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Composer + follow control, floating over the bottom of the
@@ -2067,24 +2086,14 @@ export function SessionDetail({
                     Resume/enqueue: when the turn has ended submit resumes; while
                     the turn is still running it queues a follow-up (delivered
                     when the turn ends). One of canResume / canEnqueue holds. */}
-                {(showsComposer || dockCards.length > 0 || !isFollowing) && (
+                {(composerShown || !isFollowing) && (
                   <div ref={dockRef} className={styles.dock_layer}>
                     {!isFollowing && (
                       <button className={styles.follow_pill} onClick={scrollToBottom}>
                         ↓ {t("detail.scroll_to_latest")}
                       </button>
                     )}
-                    {dockCards.length > 0 && (
-                      <div className={styles.resume_dock}>
-                        <DecisionDock
-                          cards={dockCards}
-                          projectName={projectName}
-                          taskTitle={preferredTitle}
-                          keyboard={!paused}
-                        />
-                      </div>
-                    )}
-                    {showsComposer && !dockAsks && liveSession && (
+                    {composerShown && liveSession && (
                       <div className={styles.resume_dock}>
                         <ResumeComposer
                           sessionId={liveSession.id}

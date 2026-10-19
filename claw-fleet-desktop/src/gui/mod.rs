@@ -1147,11 +1147,13 @@ pub fn run() {
                     backend.get_wiki_file(&slug, &version, &rel)
                 };
                 let response = match result {
+                    // Html docs get the click-to-zoom bridge on the way out
+                    // (not in the store: exports must stay the author's bytes).
                     Ok(f) => tauri::http::Response::builder()
                         .status(200)
-                        .header("Content-Type", f.mime)
+                        .header("Content-Type", f.mime.clone())
                         .header("Access-Control-Allow-Origin", "*")
-                        .body(f.bytes)
+                        .body(claw_fleet_core::mcp_ipc::with_img_zoom_bytes(&f.mime, f.bytes))
                         .unwrap(),
                     Err(e) => tauri::http::Response::builder()
                         .status(404)

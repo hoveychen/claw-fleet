@@ -4,7 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
-import { openSettings, useSessionsStore } from "../store";
+import { openSettings, useSessionsStore, useUIStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
   ChatComposer,
@@ -209,12 +209,12 @@ export function defaultAgentTool(
 }
 
 /** The workspace to select by default in a fresh new-session form: the remembered
- *  last-used one when it's still a valid option, else the first entry (now
- *  alphabetical), else the chat workspace — a fresh install has no recents at
- *  all, and leaving the pill on its bare "workspace" placeholder only yields a
- *  disabled submit button with nothing saying why. Chat needs no directory, so
- *  it is the one option that is always launchable. Mirrors mobile-web's
- *  `defaultWorkspace`. Returns undefined only when even chat is unavailable. */
+ *  last-used one (chat included) when it's still a valid option, else the first
+ *  recent. A fresh install has neither and gets undefined: it used to fall back
+ *  to chat, which quietly turned a first user's "fix this repo" into a chat with
+ *  no directory. The form's hint says why submit is disabled, and the empty
+ *  task column offers a "pick a project directory" button. Mobile-web's
+ *  `defaultWorkspace` still falls back to chat. */
 export function defaultWorkspace(
   recents: WorkspaceOption[],
   chatPath: string | null | undefined,
@@ -223,7 +223,7 @@ export function defaultWorkspace(
   const valid = new Set(recents.map((w) => w.path));
   if (chatPath) valid.add(chatPath);
   if (lastWorkspace && valid.has(lastWorkspace)) return lastWorkspace;
-  return recents[0]?.path ?? chatPath ?? undefined;
+  return recents[0]?.path;
 }
 
 /** Plain "start a new claude session" form — no project, no task, no queue.
@@ -553,6 +553,17 @@ export function NewSessionForm({
     const picked = await openDialog({ multiple: false, directory: true });
     if (typeof picked === "string") setWorkspace(picked);
   };
+
+  // The empty task column's "pick a project directory" button. Skips the
+  // value present at mount so remounting the form never reopens the picker.
+  const pickNonce = useUIStore((s) => s.workspacePickNonce);
+  const seenPickNonce = useRef(pickNonce);
+  useEffect(() => {
+    if (pickNonce === seenPickNonce.current) return;
+    seenPickNonce.current = pickNonce;
+    void browseWorkspace().then(() => composerRef.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickNonce]);
 
   const handleSubmit = async () => {
     const ws = workspace.trim();

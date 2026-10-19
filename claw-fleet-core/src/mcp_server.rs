@@ -1495,6 +1495,16 @@ fn handle_permission_prompt_call(params: &Value) -> Result<Value, JsonRpcError> 
         .and_then(|v| v.as_str())
         .map(str::to_string);
 
+    // Shell commands are audited by `fleet guard`, which only asks the user
+    // when they opted into `guard_confirm`. Claude Code still raises its own
+    // hard safety checks that `Bash(*)` cannot satisfy (e.g. `cd` compounded
+    // with a write or redirect), and those land here. With confirmation off
+    // the user has said shell commands need no approval, so allow them
+    // instead of raising a card the guard setting promised not to show.
+    if is_guarded_shell_tool(tool_name) && !crate::decision_panel_config::load().guard_confirm {
+        return Ok(permission_allow(tool_input));
+    }
+
     // No live Fleet consumer → nobody can approve. Deny with a reason the
     // agent can act on (there is no native UI to fall back to in headless
     // `-p` mode, so a fast deny beats a doomed 600s wait).
@@ -1555,14 +1565,7 @@ fn handle_permission_prompt_call(params: &Value) -> Result<Value, JsonRpcError> 
 
     match resp.decision {
         crate::permission_prompt_ipc::PermissionPromptDecision::Allow => {
-            let payload = json!({ "behavior": "allow", "updatedInput": tool_input });
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into()),
-                }],
-                "isError": false,
-            }))
+            Ok(permission_allow(tool_input))
         }
         crate::permission_prompt_ipc::PermissionPromptDecision::Deny => {
             let msg = resp
@@ -1575,6 +1578,25 @@ fn handle_permission_prompt_call(params: &Value) -> Result<Value, JsonRpcError> 
             Ok(permission_deny(msg))
         }
     }
+}
+
+/// The shell tools `fleet guard` audits — the same pair its hook matcher
+/// names (`Bash|PowerShell`).
+fn is_guarded_shell_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "Bash" | "PowerShell")
+}
+
+/// Build a `--permission-prompt-tool` allow payload that runs the tool with
+/// its input unchanged.
+fn permission_allow(tool_input: Value) -> Value {
+    let payload = json!({ "behavior": "allow", "updatedInput": tool_input });
+    json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into()),
+        }],
+        "isError": false,
+    })
 }
 
 /// Build a `--permission-prompt-tool` deny payload. The `behavior`/`message`
@@ -2625,6 +2647,78 @@ mod tests {
                 .contains("denied by default"),
             "unexpected message: {payload}"
         );
+    }
+
+    /// Call `fleet__permission_prompt` for `tool_name` under an isolated
+    /// FLEET_HOME with no live consumer, optionally writing a
+    /// `decision-panel.json` first. Returns the parsed contract payload.
+    fn permission_prompt_payload(tool_name: &str, panel_config: Option<&str>) -> Value {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-pp-{}-{}-{}",
+            tool_name,
+            panel_config.is_some(),
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        if let Some(cfg) = panel_config {
+            // `decision_panel_config` resolves FLEET_HOME as the home dir.
+            let dir = tmp.join(".fleet");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("decision-panel.json"), cfg).unwrap();
+        }
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__permission_prompt",
+                "arguments": {
+                    "tool_name": tool_name,
+                    "input": { "command": "cd /tmp && sed -i '' s/a/b/ x" },
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore prior state under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(resp["result"]["isError"], false, "got {resp}");
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        serde_json::from_str(text).expect("contract JSON")
+    }
+
+    #[test]
+    fn permission_prompt_allows_shell_when_guard_confirm_is_off() {
+        // Default config: guard is audit-only, so Claude Code's own hard
+        // checks on a shell command must not raise a card (or deny).
+        for tool in ["Bash", "PowerShell"] {
+            let payload = permission_prompt_payload(tool, None);
+            assert_eq!(payload["behavior"], "allow", "{tool}: {payload}");
+            assert_eq!(
+                payload["updatedInput"]["command"],
+                "cd /tmp && sed -i '' s/a/b/ x"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_prompt_still_asks_for_shell_when_guard_confirm_is_on() {
+        // Opted into confirmation: the request goes through the normal
+        // approval path, which with no consumer denies by default.
+        let payload = permission_prompt_payload("Bash", Some(r#"{"guard_confirm": true}"#));
+        assert_eq!(payload["behavior"], "deny", "{payload}");
     }
 
     #[test]

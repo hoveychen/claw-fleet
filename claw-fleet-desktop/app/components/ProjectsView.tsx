@@ -38,6 +38,8 @@ import { EmptyState } from "./EmptyState";
 import { ProjectMemory } from "./MemoryView";
 import { WorkspaceExplorer } from "./FilesView";
 import { PageShell } from "./PageShell";
+import { ProcPanel } from "./ProcPanel";
+import { ProcTerminal } from "./ProcTerminal";
 import { Presence } from "./Presence";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { SkeletonList, Spinner, loadingStyles } from "./loading";
@@ -45,9 +47,9 @@ import { timeAgo } from "./timeAgo";
 import styles from "./ProjectsView.module.css";
 import fileStyles from "./FilesView.module.css";
 
-export type ProjectTab = "routines" | "memory" | "code";
+export type ProjectTab = "routines" | "memory" | "code" | "commands";
 
-const TABS: ProjectTab[] = ["routines", "memory", "code"];
+const TABS: ProjectTab[] = ["routines", "memory", "code", "commands"];
 
 /** `selectedPath` of the pinned "all routines" row. Never a real path: those
  *  are absolute. */
@@ -264,6 +266,12 @@ export function ProjectsView() {
     );
   }, [projects, archived, selectedPath]);
 
+  // Same set the commands tab lists: this exact directory, exited ones included.
+  const commandCount = useMemo(
+    () => (selected ? procs.filter((p) => p.workspacePath === selected.path).length : 0),
+    [procs, selected],
+  );
+
   const allSelected = selectedPath === ALL_ROUTINES;
   const list = (
     <div className={styles.list}>
@@ -469,7 +477,10 @@ export function ProjectsView() {
                     ? t("projects.tab_routines", "例行")
                     : id === "memory"
                       ? t("projects.tab_memory", "记忆")
-                      : t("projects.tab_code", "代码")}
+                      : id === "code"
+                        ? t("projects.tab_code", "代码")
+                        : t("projects.tab_commands", "命令")}
+                  {id === "commands" && commandCount > 0 && ` (${commandCount})`}
                 </button>
               ))}
             </div>
@@ -479,8 +490,15 @@ export function ProjectsView() {
               <RoutinesPanel key={selected.path} projectPath={selected.path} />
             ) : tab === "memory" ? (
               <ProjectMemory key={selected.path} projectPath={selected.path} />
-            ) : (
+            ) : tab === "code" ? (
               <ProjectCode projectPath={selected.path} name={selected.name} />
+            ) : (
+              <ProcPanel
+                key={selected.path}
+                workspace={selected.path}
+                name={selected.name}
+                renderTerminal={(p) => <ProcTerminal proc={p} />}
+              />
             )}
           </div>
         </div>
@@ -523,8 +541,9 @@ export function ProjectsView() {
   );
 }
 
-/** The project's code: the workspace explorer itself (tree, preview, git bar,
- *  commands). A path clicked in agent prose arrives here as `fileNav`. */
+/** The project's code: the workspace explorer itself (tree, preview, git bar;
+ *  workspace commands have their own tab). A path clicked in agent prose
+ *  arrives here as `fileNav`. */
 function ProjectCode({ projectPath, name }: { projectPath: string; name: string }) {
   const { t } = useTranslation();
   const terminal = useUIStore((s) => s.hostFeatures.terminal);
