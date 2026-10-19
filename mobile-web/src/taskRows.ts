@@ -345,7 +345,14 @@ export function projectSectionRows<T extends Row>(
 
 /** Live subagents across a task's main hops. */
 export function runningSubagents(row: TaskRow): number {
-  return row.hops.reduce((n, h) => n + (h.runningSubagentCount ?? 0), 0);
+  const hops = [...row.hops, ...row.subtasks.flatMap((st) => st.hops)];
+  return hops.reduce((n, h) => n + (h.runningSubagentCount ?? 0), 0);
+}
+
+/** Sub-tasks still at it — running, or parked on a wait — the ones the
+ *  row's helper badge counts next to its subagents. */
+export function activeSubtasks(row: TaskRow): number {
+  return row.subtasks.filter((st) => st.state === "running" || st.state === "waiting").length;
 }
 
 /** `**P2** — run the tests` → `run the tests`: a step title without its id. */

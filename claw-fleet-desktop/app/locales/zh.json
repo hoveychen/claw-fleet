@@ -2573,6 +2573,7 @@
     "no_match": "没有匹配的任务",
     "project_filter_tip": "只看这个项目",
     "running_subagents": "{{count}} 个子代理在跑",
+    "running_subtasks": "{{count}} 个子任务在跑",
     "group_by": "分组",
     "group_by_state": "按状态",
     "group_by_project": "按项目",

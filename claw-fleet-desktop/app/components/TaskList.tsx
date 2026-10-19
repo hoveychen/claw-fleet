@@ -9,6 +9,7 @@ import {
   rowAgentSource,
   rowDetail,
   rowPreview,
+  rowActiveSubtasks,
   rowRunningSubagents,
   type HomeRow,
   type HomeSection,
@@ -184,6 +185,13 @@ const TaskListRow = memo(function TaskListRow({
   const abandoned = row.kind === "task" && row.state === "done" && row.outcome === "abandoned";
   const source = showSource ? rowAgentSource(row) : null;
   const subagents = rowRunningSubagents(row);
+  const subtasks = rowActiveSubtasks(row);
+  const helpersTip = [
+    subtasks > 0 ? t("home.running_subtasks", { count: subtasks }) : null,
+    subagents > 0 ? t("home.running_subagents", { count: subagents }) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const preview = rowPreview(row);
   const detail =
     detailText(rowDetail(row, t("history.untitled")), row, t, now, preview != null) ||
@@ -215,14 +223,14 @@ const TaskListRow = memo(function TaskListRow({
         <span className={styles.title} title={row.title}>
           {row.title}
         </span>
-        {subagents > 0 && (
+        {subagents + subtasks > 0 && (
           <span
             className={styles.subagents}
-            title={t("home.running_subagents", { count: subagents })}
+            title={helpersTip}
             data-testid="task-row-subagents"
           >
             <Bot size={11} strokeWidth={1.8} />
-            {subagents}
+            {subagents + subtasks}
           </span>
         )}
         {!showProject ? null : row.projectPath ? (
