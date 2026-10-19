@@ -611,7 +611,8 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
 /// Resolve the OpenRouter key **the way dsh itself resolves it**, so a user who
 /// already configured dsh does not configure Fleet a second time.
 ///
-/// `settings.yaml` declares the provider under `llm-pi-ai.providers.openrouter`,
+/// dsh's config (see [`plugin_config`] for where it lives) declares the
+/// provider under `llm-pi-ai.providers.openrouter`,
 /// either as an inline `apiKey` or — the shape on a real install — as
 /// `apiKeyEnv: OPENROUTER_API_KEY`, *naming the variable that holds the secret*.
 /// That name is the lookup key everywhere else:
@@ -636,10 +637,8 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
 pub fn openrouter_api_key() -> Option<String> {
     let dsh_home = crate::session::get_dsh_dir()?;
 
-    let settings = read_yaml(&dsh_home.join("settings.yaml"));
-    let provider = settings
-        .as_ref()
-        .and_then(|s| s.pointer("/llm-pi-ai/providers/openrouter").cloned())
+    let provider = plugin_config(&dsh_home, "llm-pi-ai")
+        .and_then(|c| c.pointer("/providers/openrouter").cloned())
         .unwrap_or(Value::Null);
 
     // The variable that holds the secret. `OPENROUTER_API_KEY` is the
@@ -675,11 +674,7 @@ pub fn openrouter_api_key() -> Option<String> {
 pub fn deepseek_api_key() -> Option<String> {
     let dsh_home = crate::session::get_dsh_dir()?;
 
-    let settings = read_yaml(&dsh_home.join("settings.yaml"));
-    let plugin = settings
-        .as_ref()
-        .and_then(|s| s.pointer("/llm-deepseek").cloned())
-        .unwrap_or(Value::Null);
+    let plugin = plugin_config(&dsh_home, "llm-deepseek").unwrap_or(Value::Null);
 
     let var = plugin
         .get("apiKeyEnv")
@@ -698,6 +693,39 @@ pub fn deepseek_api_key() -> Option<String> {
         return Some(key);
     }
     credential_from_store(&dsh_home, var)
+}
+
+/// The profile whose patch layer Fleet reads plugin config from: Fleet talks to
+/// `dsh web`, which boots the `web` profile.
+const DSH_PROFILE: &str = "web";
+
+/// The user-level config of one dsh plugin (`llm-deepseek`, `llm-pi-ai`, …).
+///
+/// dsh 0.2.x moved user config out of `$DSH_HOME/settings.yaml` into each
+/// profile's patch layer, `$DSH_HOME/profiles/<profile>/cordis.patch.yml`: a
+/// top-level array of `{id, name, config}` entries applied in order. Measured
+/// 2026-10-19 on 0.2.1-rc.2: the first boot imports `settings.yaml` into that
+/// file (each top-level key becomes an entry with the same `id`) and deletes
+/// the original, leaving only `settings.yaml.imported`. So the patch layer is
+/// read first — the last entry with a matching id and a `config` wins, as later
+/// entries override earlier ones — and the old file is the fallback for an
+/// install that has not booted 0.2.x yet.
+fn plugin_config(dsh_home: &std::path::Path, id: &str) -> Option<Value> {
+    let patch_path = dsh_home
+        .join("profiles")
+        .join(DSH_PROFILE)
+        .join("cordis.patch.yml");
+    let from_patch = read_yaml(&patch_path).and_then(|patch| {
+        patch
+            .as_array()?
+            .iter()
+            .rev()
+            .filter(|entry| entry.get("id").and_then(Value::as_str) == Some(id))
+            .find_map(|entry| entry.get("config").cloned())
+    });
+    from_patch.or_else(|| {
+        read_yaml(&dsh_home.join("settings.yaml")).and_then(|s| s.get(id).cloned())
+    })
 }
 
 /// Read one credential out of `$DSH_HOME/.credentials.yaml` by its env-var name.
@@ -2129,6 +2157,57 @@ mod tests {
             )
             .unwrap();
             assert_eq!(openrouter_api_key().as_deref(), Some("cred-key"));
+        });
+    }
+
+    /// dsh 0.2.x keeps plugin config in the web profile's patch layer and
+    /// deletes `settings.yaml` on first boot. The layer also carries entries
+    /// with `!!js` expressions (the composed tree has them, e.g.
+    /// `root: !!js dshHomePath('sessions')`), which must not sink the parse.
+    #[test]
+    fn key_env_name_comes_from_the_profile_patch_layer() {
+        with_temp_dsh_home(|base| {
+            let web = base.join("profiles").join("web");
+            std::fs::create_dir_all(&web).unwrap();
+            std::fs::write(
+                web.join("cordis.patch.yml"),
+                "# Your patch layer for this dsh profile\n\
+                 - id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('sessions')\n\
+                 - id: llm-deepseek\n  name: \"@deepseek-ai/dsh-llm-deepseek-api-key\"\n  config:\n    apiKeyEnv: FLEET_TEST_PATCH_DS\n\
+                 - id: llm-pi-ai\n  config:\n    providers:\n      openrouter:\n        apiKeyEnv: FLEET_TEST_PATCH_OR\n",
+            )
+            .unwrap();
+            std::env::set_var("FLEET_TEST_PATCH_DS", "sk-ds-patch");
+            std::env::set_var("FLEET_TEST_PATCH_OR", "sk-or-patch");
+            assert_eq!(deepseek_api_key().as_deref(), Some("sk-ds-patch"));
+            assert_eq!(openrouter_api_key().as_deref(), Some("sk-or-patch"));
+            std::env::remove_var("FLEET_TEST_PATCH_DS");
+            std::env::remove_var("FLEET_TEST_PATCH_OR");
+        });
+    }
+
+    /// When both exist (a leftover `settings.yaml` from before the import),
+    /// the patch layer is what dsh actually runs with, so it wins; a later
+    /// entry with the same id overrides an earlier one.
+    #[test]
+    fn profile_patch_wins_over_a_leftover_settings_yaml() {
+        with_temp_dsh_home(|base| {
+            std::fs::write(base.join("settings.yaml"), "llm-deepseek:\n  apiKey: from-settings\n")
+                .unwrap();
+            let web = base.join("profiles").join("web");
+            std::fs::create_dir_all(&web).unwrap();
+            std::fs::write(
+                web.join("cordis.patch.yml"),
+                "- id: llm-deepseek\n  config:\n    apiKey: earlier-entry\n\
+                 - id: llm-deepseek\n  config:\n    apiKey: from-patch\n",
+            )
+            .unwrap();
+            std::env::remove_var("DEEPSEEK_API_KEY");
+            assert_eq!(deepseek_api_key().as_deref(), Some("from-patch"));
+
+            // A patch layer without the plugin falls through to the old file.
+            std::fs::write(web.join("cordis.patch.yml"), "- id: locale\n  config: {}\n").unwrap();
+            assert_eq!(deepseek_api_key().as_deref(), Some("from-settings"));
         });
     }
 
