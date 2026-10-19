@@ -303,7 +303,7 @@ interface UIState {
   clearOpenTaskNav: () => void;
   /** ⌘N / Ctrl+N from any page: hop to the Tasks page with its list column
    *  open and the settings overlay closed, then bump the nonce so HistoryView
-   *  focuses its "what should get done?" input. 0 = never requested. */
+   *  opens its new-task composer. 0 = never requested. */
   launchFocusNonce: number;
   requestLaunchFocus: () => void;
 }

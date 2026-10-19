@@ -2538,6 +2538,7 @@
   },
   "home": {
     "launch_placeholder": "What should get done? Hand it to a new task…",
+    "launch_button": "New task",
     "launch_hint": "Enter, then pick a project and send",
     "section_needsYou": "Needs you",
     "section_running": "Running",

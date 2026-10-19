@@ -10,9 +10,13 @@
   flex: 0 0 auto;
 }
 
-/* The new-task box: Enter carries the words into the composer. */
+/* The new-task button: opens the composer in the detail pane. */
 .launch {
   display: flex;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
   align-items: center;
   gap: 8px;
   height: 38px;
@@ -23,9 +27,11 @@
   transition: border-color 0.14s, background 0.14s;
 }
 
-.launch:focus-within,
+.launch:hover,
+.launch:focus-visible,
 .launch_active {
   border-color: var(--color-accent);
+  outline: none;
 }
 
 .launch_icon {
@@ -33,23 +39,17 @@
   color: var(--color-text-dim);
 }
 
-.launch:focus-within .launch_icon,
+.launch:hover .launch_icon,
+.launch:focus-visible .launch_icon,
 .launch_active .launch_icon {
   color: var(--color-accent);
 }
 
-.launch_input {
+.launch_label {
   flex: 1 1 auto;
   min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
   color: var(--color-text);
   font-size: var(--font-size-md);
-}
-
-.launch_input::placeholder {
-  color: var(--color-text-dim);
 }
 
 .launch_kbd {
