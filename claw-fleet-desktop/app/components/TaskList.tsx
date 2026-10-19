@@ -1,17 +1,22 @@
-import { memo, type MouseEvent } from "react";
+import { memo, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Folder, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { TaskState } from "../../../shared-ts/taskState";
 import type { SessionInfo } from "../types";
 import { timeAgo } from "./timeAgo";
 import {
+  rowAgentSource,
   rowDetail,
+  rowPreview,
+  rowRunningSubagents,
   type HomeRow,
   type HomeSection,
+  type ProjectGroup,
   type RowDetail,
   type TaskRow,
 } from "./homeRows";
+import { AgentSourceIcon } from "./SessionCard";
 import styles from "./TaskList.module.css";
 
 /** The dot a state wears, in the row and its section heading. Tokens only:
@@ -35,7 +40,15 @@ export function formatSpan(ms: number, t: TFunction): string {
   return t("home.span_d", { n: Math.floor(h / 24) });
 }
 
-function detailText(d: RowDetail, row: HomeRow, t: TFunction, now: number): string {
+/** `hasPreview`: the row shows the last message after this text, which says
+ *  more than the generic "working" filler, so the filler is left out. */
+function detailText(
+  d: RowDetail,
+  row: HomeRow,
+  t: TFunction,
+  now: number,
+  hasPreview = false,
+): string {
   switch (d.kind) {
     case "needsYou":
       return row.kind === "card" ? t("home.detail_card_only") : t("home.detail_needs_you");
@@ -50,7 +63,8 @@ function detailText(d: RowDetail, row: HomeRow, t: TFunction, now: number): stri
     case "step": {
       const parts: string[] = [];
       if (d.total) parts.push(t("home.detail_step", { done: d.done, total: d.total }));
-      parts.push(d.text ?? t("home.detail_working"));
+      if (d.text) parts.push(d.text);
+      else if (!hasPreview) parts.push(t("home.detail_working"));
       if (d.subtasks) parts.push(t("home.detail_subtasks", d.subtasks));
       return parts.join(" · ");
     }
@@ -141,6 +155,11 @@ interface RowProps {
   /** Re-render tick for the relative times. */
   nowTick: number;
   accepting: boolean;
+  /** Rows come from more than one agent: lead the title with its glyph. */
+  showSource: boolean;
+  /** Show the project chip — off when the row already sits under its
+   *  project's heading. */
+  showProject: boolean;
   onOpen: (row: HomeRow) => void;
   onContextMenu: (e: MouseEvent, row: HomeRow) => void;
   onScopeProject: (path: string) => void;
@@ -152,6 +171,8 @@ const TaskListRow = memo(function TaskListRow({
   row,
   active,
   accepting,
+  showSource,
+  showProject,
   onOpen,
   onContextMenu,
   onScopeProject,
@@ -161,8 +182,11 @@ const TaskListRow = memo(function TaskListRow({
   const { t } = useTranslation();
   const now = Date.now();
   const abandoned = row.kind === "task" && row.state === "done" && row.outcome === "abandoned";
+  const source = showSource ? rowAgentSource(row) : null;
+  const subagents = rowRunningSubagents(row);
+  const preview = rowPreview(row);
   const detail =
-    detailText(rowDetail(row, t("history.untitled")), row, t, now) ||
+    detailText(rowDetail(row, t("history.untitled")), row, t, now, preview != null) ||
     (abandoned ? t("home.detail_abandoned") : "");
   const time = rowTime(row, t, now);
   return (
@@ -183,10 +207,25 @@ const TaskListRow = memo(function TaskListRow({
     >
       <div className={styles.line1}>
         <RowMark row={row} onSetDone={onSetDone} />
+        {source && (
+          <span className={styles.source} title={source} data-testid="task-row-source">
+            <AgentSourceIcon source={source} />
+          </span>
+        )}
         <span className={styles.title} title={row.title}>
           {row.title}
         </span>
-        {row.projectPath ? (
+        {subagents > 0 && (
+          <span
+            className={styles.subagents}
+            title={t("home.running_subagents", { count: subagents })}
+            data-testid="task-row-subagents"
+          >
+            <Bot size={11} strokeWidth={1.8} />
+            {subagents}
+          </span>
+        )}
+        {!showProject ? null : row.projectPath ? (
           <button
             type="button"
             className={styles.chip}
@@ -203,11 +242,18 @@ const TaskListRow = memo(function TaskListRow({
         )}
         <span className={styles.time}>{time}</span>
       </div>
-      {(detail || row.state === "review") && (
+      {(detail || preview || row.state === "review") && (
         <div className={styles.line2}>
-          <span className={styles.detail} title={detail}>
-            {detail}
-          </span>
+          {detail && (
+            <span className={styles.detail} title={detail}>
+              {detail}
+            </span>
+          )}
+          {preview && (
+            <span className={styles.preview} title={preview} data-testid="task-row-preview">
+              {preview}
+            </span>
+          )}
           {row.kind === "task" && row.state === "review" && (
             <button
               type="button"
@@ -229,10 +275,16 @@ const TaskListRow = memo(function TaskListRow({
 });
 
 export interface TaskListProps {
-  sections: HomeSection[];
+  /** The column cut by state (default) or by project. */
+  layout: { by: "state"; sections: HomeSection[] } | { by: "project"; groups: ProjectGroup[] };
   activeKey: string | null;
   collapsed: TaskState[];
   onToggleSection: (state: TaskState) => void;
+  /** Project groups folded shut (by-project layout). */
+  collapsedProjects: string[];
+  onToggleProject: (key: string) => void;
+  /** Rows come from more than one agent (see `mixedAgentSources`). */
+  showSource: boolean;
   nowTick: number;
   acceptingKeys: Set<string>;
   onOpen: (row: HomeRow) => void;
@@ -243,25 +295,54 @@ export interface TaskListProps {
   onSetDone: (row: TaskRow, done: boolean) => void;
 }
 
-/** The home's task column: the five state sections, each a list of two-line
- *  task rows. */
-export function TaskList({
-  sections,
-  activeKey,
-  collapsed,
-  onToggleSection,
-  nowTick,
-  acceptingKeys,
-  onOpen,
-  onContextMenu,
-  onScopeProject,
-  onAccept,
-  onSetDone,
-}: TaskListProps) {
+/** The home's task column: two-line task rows, cut into the five state
+ *  sections or into one group per project. */
+export function TaskList(props: TaskListProps) {
   const { t } = useTranslation();
+  const {
+    layout,
+    activeKey,
+    collapsed,
+    onToggleSection,
+    nowTick,
+    acceptingKeys,
+    onAccept,
+  } = props;
+  const renderRow = (row: HomeRow, showProject: boolean) => (
+    <TaskListRow
+      key={row.key}
+      row={row}
+      active={row.key === activeKey}
+      nowTick={nowTick}
+      accepting={acceptingKeys.has(row.key)}
+      showSource={props.showSource}
+      showProject={showProject}
+      onOpen={props.onOpen}
+      onContextMenu={props.onContextMenu}
+      onScopeProject={props.onScopeProject}
+      onAccept={onAccept}
+      onSetDone={props.onSetDone}
+    />
+  );
+  if (layout.by === "project") {
+    return (
+      <>
+        {layout.groups.map((g) => (
+          <ProjectGroupSection
+            key={g.key}
+            group={g}
+            folded={props.collapsedProjects.includes(g.key)}
+            onToggle={props.onToggleProject}
+            onScopeProject={props.onScopeProject}
+            renderRow={(r) => renderRow(r, false)}
+          />
+        ))}
+      </>
+    );
+  }
   return (
     <>
-      {sections.map((section) => {
+      {layout.sections.map((section) => {
         const folded = collapsed.includes(section.state);
         const reviewable = section.rows.filter(
           (r): r is TaskRow => r.kind === "task" && !acceptingKeys.has(r.key),
@@ -293,25 +374,93 @@ export function TaskList({
                 </button>
               )}
             </div>
-            {!folded &&
-              section.rows.map((row) => (
-                <TaskListRow
-                  key={row.key}
-                  row={row}
-                  active={row.key === activeKey}
-                  nowTick={nowTick}
-                  accepting={acceptingKeys.has(row.key)}
-                  onOpen={onOpen}
-                  onContextMenu={onContextMenu}
-                  onScopeProject={onScopeProject}
-                  onAccept={onAccept}
-                  onSetDone={onSetDone}
-                />
-              ))}
+            {!folded && section.rows.map((row) => renderRow(row, true))}
           </section>
         );
       })}
     </>
+  );
+}
+
+/** One project in the by-project layout: a heading that says how many of its
+ *  tasks need the boss, the open rows (state dot on each, "needs you" first),
+ *  and the closed ones folded behind a count — a long-lived project has
+ *  hundreds, and they would bury the live work. */
+function ProjectGroupSection({
+  group,
+  folded,
+  onToggle,
+  onScopeProject,
+  renderRow,
+}: {
+  group: ProjectGroup;
+  folded: boolean;
+  onToggle: (key: string) => void;
+  onScopeProject: (path: string) => void;
+  renderRow: (row: HomeRow) => ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [showDone, setShowDone] = useState(false);
+  const total = group.rows.length + group.doneRows.length;
+  return (
+    <section className={styles.section} data-project={group.key} data-testid="project-group">
+      <div className={styles.section_head}>
+        <button
+          type="button"
+          className={styles.section_toggle}
+          aria-expanded={!folded}
+          onClick={() => onToggle(group.key)}
+          title={group.path ?? group.name}
+        >
+          {folded ? (
+            <ChevronRight size={14} strokeWidth={2} />
+          ) : (
+            <ChevronDown size={14} strokeWidth={2} />
+          )}
+          <Folder size={13} strokeWidth={1.8} />
+          <span className={styles.section_label}>{group.name}</span>
+          <span className={styles.section_count}>{total}</span>
+        </button>
+        <span className={styles.group_tail}>
+          {group.needsYou > 0 && (
+            <span className={styles.needs_badge} data-testid="project-needs-you">
+              {t("home.group_needs_you", { count: group.needsYou })}
+            </span>
+          )}
+          {group.path && (
+            <button
+              type="button"
+              className={`${styles.accept_all} ${styles.group_focus}`}
+              title={t("home.project_filter_tip")}
+              onClick={() => onScopeProject(group.path!)}
+            >
+              {t("home.group_focus")}
+            </button>
+          )}
+        </span>
+      </div>
+      {!folded && (
+        <>
+          {group.rows.map(renderRow)}
+          {group.doneRows.length > 0 && (
+            <button
+              type="button"
+              className={styles.done_toggle}
+              aria-expanded={showDone}
+              onClick={() => setShowDone((v) => !v)}
+            >
+              {showDone ? (
+                <ChevronDown size={12} strokeWidth={2} />
+              ) : (
+                <ChevronRight size={12} strokeWidth={2} />
+              )}
+              {t("home.group_done", { count: group.doneRows.length })}
+            </button>
+          )}
+          {showDone && group.doneRows.map(renderRow)}
+        </>
+      )}
+    </section>
   );
 }
 

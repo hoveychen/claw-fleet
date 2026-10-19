@@ -14,6 +14,7 @@ import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
 import { applySessionsFrame, type SessionsFrame } from "../../shared-ts/sessionsFrame";
 import { TASK_STATES, type TaskState } from "../../shared-ts/taskState";
+import type { HomeGroupBy } from "./components/homeRows";
 
 /** Open the in-app Settings overlay.
  *
@@ -213,6 +214,11 @@ interface UIState {
   /** Home task sections folded shut. "done" starts folded. In the store (and
    *  on disk) so a fold survives the home unmounting and a restart. */
   homeCollapsedSections: TaskState[];
+  /** How the home task column is grouped. On disk, so the choice survives a
+   *  restart. */
+  homeGroupBy: HomeGroupBy;
+  /** Project groups folded shut in the by-project layout (group keys). */
+  homeCollapsedProjects: string[];
   mainViewState: MainViewState;
   updateMainViewState: <K extends keyof MainViewState>(
     view: K,
@@ -222,6 +228,8 @@ interface UIState {
   setHistoryQuery: (q: string) => void;
   setLobsterFleetEnabled: (on: boolean) => void;
   toggleHomeSection: (state: TaskState) => void;
+  setHomeGroupBy: (by: HomeGroupBy) => void;
+  toggleHomeProject: (key: string) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   setTheme: (t: Theme) => void;
@@ -416,6 +424,15 @@ function readHomeCollapsedSections(): TaskState[] {
   }
 }
 
+function readHomeCollapsedProjects(): string[] {
+  try {
+    const parsed = JSON.parse(getItem("home-collapsed-projects") ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** The task rail's project scope: "all", or one repository root path. Stored
  *  under a key of its own, not the retired `<select>`'s `history-workspace-filter`:
  *  nothing read that key for months, so whatever path sits in it on a user's disk
@@ -487,6 +504,8 @@ export const useUIStore = create<UIState>((set) => ({
   historyQuery: "",
   lobsterFleetEnabled: readLobsterFleetEnabled(),
   homeCollapsedSections: readHomeCollapsedSections(),
+  homeGroupBy: getItem("home-group-by") === "project" ? "project" : "state",
+  homeCollapsedProjects: readHomeCollapsedProjects(),
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
   updateMainViewState: (view, patch) =>
     set((state) => ({
@@ -514,6 +533,18 @@ export const useUIStore = create<UIState>((set) => ({
         : [...s.homeCollapsedSections, state];
       setItem("home-collapsed-sections", JSON.stringify(next));
       return { homeCollapsedSections: next };
+    }),
+  setHomeGroupBy: (by) => {
+    setItem("home-group-by", by);
+    set({ homeGroupBy: by });
+  },
+  toggleHomeProject: (key) =>
+    set((s) => {
+      const next = s.homeCollapsedProjects.includes(key)
+        ? s.homeCollapsedProjects.filter((x) => x !== key)
+        : [...s.homeCollapsedProjects, key];
+      setItem("home-collapsed-projects", JSON.stringify(next));
+      return { homeCollapsedProjects: next };
     }),
   setTheme: (t) => {
     setItem("theme", t);

@@ -97,3 +97,15 @@
 .error {
   color: var(--color-error);
 }
+
+/* A later turn of a chain, set off from the one above it. */
+.turn + .turn {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* The follow-up box at the foot of a settled chain. */
+.follow {
+  margin-top: 8px;
+}

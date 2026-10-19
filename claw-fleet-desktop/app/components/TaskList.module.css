@@ -160,8 +160,9 @@
 }
 
 .chip {
-  flex: 0 1 auto;
-  min-width: 0;
+  /* Gives way before the title does, down to a few letters. */
+  flex: 0 2 auto;
+  min-width: 3.5em;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -231,4 +232,113 @@ button.chip:hover {
 .accept:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ── Row signals ─────────────────────────────────────────────────────────── */
+
+/* The agent's glyph, only while the list mixes agents. */
+.source {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-dim);
+}
+
+/* Subagents running under the task right now. */
+.subagents {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--badge-active-fg);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The last message, after the step / wait reason on the second line. It takes
+   only the room the detail leaves (flex-basis 0), so the detail never gives
+   way to it; alone on the line it takes the whole width. */
+.preview {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-sm);
+}
+
+.detail + .preview::before {
+  content: "· ";
+}
+
+.line2 .detail {
+  flex: 0 1 auto;
+}
+
+/* ── By-project layout ───────────────────────────────────────────────────── */
+
+/* "Only this" shows on the heading's hover, so a column of project headings
+   does not read as a column of buttons. */
+.group_focus {
+  display: none;
+}
+
+.section_head:hover .group_focus,
+.group_focus:focus-visible {
+  display: inline-block;
+}
+
+/* A project heading: the name takes what is left and ellipsises. */
+.section[data-project] .section_toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.section[data-project] .section_label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section[data-project] .section_toggle svg {
+  flex: 0 0 auto;
+}
+
+.group_tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.needs_badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(var(--color-error-rgb), 0.14);
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.done_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin: 2px 0 2px 10px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.done_toggle:hover {
+  background: var(--color-bg-row-hover);
+  color: var(--color-text-secondary);
 }

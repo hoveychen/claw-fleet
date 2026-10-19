@@ -11,11 +11,14 @@ import { createRoot, type Root } from "react-dom/client";
 import type { ExplainRecord, SessionInfo } from "../generated/types";
 import type { FleetAskDecision, FleetAskRequest } from "../types";
 
-const invoke = vi.fn(async (cmd: string) => {
+// Records `list_explanations` hands back for the card; empty by default.
+let stored: ExplainRecord[] = [];
+const invoke = vi.fn(async (cmd: string, _args?: unknown) => {
   if (cmd === "explain_selection") return running;
+  if (cmd === "list_explanations") return stored;
   return null;
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...(a as [string])) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...(a as [string, unknown])) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}), emit: vi.fn(async () => {}) }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -108,6 +111,7 @@ afterEach(() => {
   container = null;
   window.getSelection()?.removeAllRanges();
   invoke.mockClear();
+  stored = [];
   useDecisionStore.setState({ decisions: [] });
 });
 
@@ -147,5 +151,52 @@ describe("side questions asked from a decision card", () => {
     const answers = el.querySelector("[data-testid='decision-explain-answers']");
     expect(answers, "the inline card has no column to send it to").not.toBeNull();
     expect(answers!.textContent).toContain("灰度到 5%");
+  });
+
+  it("threads a follow-up under a settled answer and asks it on the same passage", async () => {
+    const done = {
+      ...running,
+      id: "exp-0",
+      createdMs: Date.parse("2026-09-21T12:01:00.000Z"),
+      status: "done",
+      text: "先放 5% 的流量观察。",
+    } as unknown as ExplainRecord;
+    const turn2 = {
+      ...done,
+      id: "exp-2",
+      createdMs: done.createdMs + 1000,
+      question: "观察多久？",
+      thread: ["exp-0"],
+      text: "一天。",
+    } as unknown as ExplainRecord;
+    stored = [turn2, done];
+    const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
+    await act(async () => {});
+
+    const threads = el.querySelectorAll("[data-testid='decision-explain-thread']");
+    expect(threads.length, "both turns are one chain").toBe(1);
+    expect(threads[0].textContent).toContain("观察多久？");
+    // Asking order inside the chain: the first answer above the follow-up.
+    const text = threads[0].textContent ?? "";
+    expect(text.indexOf("先放 5%")).toBeLessThan(text.indexOf("一天。"));
+
+    const form = el.querySelector<HTMLFormElement>("[data-testid='explain-follow-up']");
+    expect(form, "a settled chain offers a follow-up box").not.toBeNull();
+    const input = form!.querySelector("input")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "那回滚呢？");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      form!.requestSubmit();
+    });
+
+    const call = invoke.mock.calls.find(([cmd]) => cmd === "explain_selection");
+    expect(call, "the follow-up forks the session").toBeDefined();
+    const req = (call![1] as { request: { question: string; quote: string; thread: string[] } }).request;
+    expect(req.question).toBe("那回滚呢？");
+    expect(req.quote).toBe("灰度到 5%");
+    expect(req.thread).toEqual(["exp-0", "exp-2"]);
   });
 });

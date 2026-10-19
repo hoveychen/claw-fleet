@@ -12,9 +12,15 @@ import {
   type ExplainRecord,
   type ExplainRequest,
 } from "../explainApi";
-import { cacheHitRatio, costLabel, type AssistantSelection } from "../selectionExplain";
+import {
+  cacheHitRatio,
+  costLabel,
+  groupExplainThreads,
+  type AssistantSelection,
+} from "../selectionExplain";
 import { useSessionsStore } from "../store";
 import { TextBlock } from "./blocks/TextBlock";
+import { ExplainFollowUp } from "./SessionAuxExplain";
 import { SkeletonCard } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import styles from "./DecisionExplainMarks.module.css";
@@ -278,17 +284,26 @@ export function useDecisionExplainMarks(
   };
 }
 
-/** The answers asked from inside a card's question, under it: the quoted
- *  text, then the answer growing as the record is re-read. */
+/**
+ * The answers asked from inside a card's question, under it, one block per
+ * chain: the quoted text once, then every turn in asking order (its question
+ * once the chain has more than one), and — when the latest turn has settled
+ * and the caller can fork — a box to keep asking about the same passage. A
+ * follow-up is its own record threading off the one it continues, so without
+ * the grouping a two-turn exchange would read as two unrelated answers.
+ */
 export function DecisionExplainAnswers({
   answers,
   loading = false,
   onDismiss,
+  onFollowUp,
 }: {
   answers: ExplainRecord[];
   /** The stored answers are still being read (see `DecisionExplain.loading`). */
   loading?: boolean;
   onDismiss: (id: string) => void;
+  /** Continue a chain from its latest turn. Absent hides the follow-up box. */
+  onFollowUp?: (prev: ExplainRecord, question: string) => void | Promise<unknown>;
 }) {
   const { t } = useTranslation();
   // Delayed: the read is a local store hit, and most cards have no side
@@ -302,19 +317,29 @@ export function DecisionExplainAnswers({
       </div>
     ) : null;
   }
+  // Oldest chain first, like the answers before grouping: a card's side
+  // questions read top-down in the order they were asked.
+  const threads = groupExplainThreads(answers).reverse();
   return (
     <div className={styles.list} data-testid="decision-explain-answers">
-      {answers.map((rec) => {
-        const running = rec.status === "running";
-        const failed = rec.status === "error";
-        const hit = cacheHitRatio(rec);
-        const cost = costLabel(rec.costUsd);
+      {threads.map(({ id, records }) => {
+        const first = records[0];
+        const last = records[records.length - 1];
+        const running = last.status === "running";
+        const hit = cacheHitRatio(last);
+        const cost = costLabel(last.costUsd);
+        const multi = records.length > 1;
         return (
-          <div key={rec.id} className={styles.card}>
+          <div key={id} className={styles.card} data-testid="decision-explain-thread">
             <div className={styles.head}>
-              <span className={styles.quote} title={rec.question || undefined}>
-                {rec.quote}
+              <span className={styles.quote} title={first.question || undefined}>
+                {first.quote}
               </span>
+              {multi && (
+                <span className={styles.state}>
+                  {t("detail.explain_turns", "{{count}} 轮", { count: records.length })}
+                </span>
+              )}
               {running && (
                 <span className={styles.state}>
                   <LoaderCircle size={10} aria-hidden="true" className={styles.spin} />
@@ -330,22 +355,35 @@ export function DecisionExplainAnswers({
               <button
                 type="button"
                 className={styles.close}
-                onClick={() => onDismiss(rec.id)}
+                onClick={() => {
+                  for (const r of records) onDismiss(r.id);
+                }}
                 title={t("common.close", "关闭")}
                 aria-label={t("common.close", "关闭")}
               >
                 ✕
               </button>
             </div>
-            {rec.question && <div className={styles.question}>{rec.question}</div>}
-            {rec.text ? (
-              <div className={styles.answer}>
-                <TextBlock text={rec.text} isPartial={running} />
+            {records.map((rec) => (
+              <div key={rec.id} className={multi ? styles.turn : undefined}>
+                {rec.question && <div className={styles.question}>{rec.question}</div>}
+                {rec.text ? (
+                  <div className={styles.answer}>
+                    <TextBlock text={rec.text} isPartial={rec.status === "running"} />
+                  </div>
+                ) : rec.status === "running" ? (
+                  <div className={styles.waiting}>{t("detail.explain_waiting", "正在 fork 会话作答…")}</div>
+                ) : null}
+                {rec.status === "error" && (
+                  <div className={styles.error}>{rec.error || t("detail.explain_failed", "失败")}</div>
+                )}
               </div>
-            ) : running ? (
-              <div className={styles.waiting}>{t("detail.explain_waiting", "正在 fork 会话作答…")}</div>
-            ) : null}
-            {failed && <div className={styles.error}>{rec.error || t("detail.explain_failed", "失败")}</div>}
+            ))}
+            {onFollowUp && last.status === "done" && (
+              <div className={styles.follow}>
+                <ExplainFollowUp onFollowUp={(q) => onFollowUp(last, q)} />
+              </div>
+            )}
           </div>
         );
       })}

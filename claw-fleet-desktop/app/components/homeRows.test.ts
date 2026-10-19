@@ -10,6 +10,10 @@ import {
   rowDetail,
   rowOfSession,
   rowSessionId,
+  mixedAgentSources,
+  projectGroups,
+  rowPreview,
+  rowRunningSubagents,
   sectionRows,
   stepText,
   type TaskRow,
@@ -31,6 +35,7 @@ function session(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
     agentLastActivityMs: 1000,
     aiTitle: `title ${id}`,
     taskId: id,
+    agentSource: "claude-code",
     ...over,
   } as SessionInfo;
 }
@@ -300,5 +305,69 @@ describe("nextNeedsYou", () => {
     const b = rowOfSession(rows, "b")!;
     expect(nextNeedsYou(rows, a.key)?.key).toBe(b.key);
     expect(nextNeedsYou(rows.filter((r) => r.key !== b.key), a.key)).toBeNull();
+  });
+});
+
+describe("projectGroups", () => {
+  it("puts a project with something that needs you first and counts it", () => {
+    const rows = build(
+      [
+        session("a-run", {
+          workspacePath: "/work/a",
+          workspaceName: "a",
+          status: "executing",
+          procAlive: true,
+          lastActivityMs: 9000,
+        }),
+        session("b-done", {
+          workspacePath: "/work/b",
+          workspaceName: "b",
+          taskOutcome: "completed",
+          lastActivityMs: 3000,
+        }),
+        session("b-needs", { workspacePath: "/work/b", workspaceName: "b", lastActivityMs: 2000 }),
+        session("b-review", { workspacePath: "/work/b", workspaceName: "b", lastActivityMs: 4000 }),
+      ],
+      [card("d", "b-needs", 1)],
+    );
+    const groups = projectGroups(rows);
+    expect(groups.map((g) => g.name)).toEqual(["b", "a"]);
+    const b = groups[0];
+    expect(b.needsYou).toBe(1);
+    // Open rows by state ("needs you" above the newer review); done set apart.
+    expect(b.rows.map((r) => r.key)).toEqual(["b-needs", "b-review"]);
+    expect(b.doneRows.map((r) => r.key)).toEqual(["b-done"]);
+  });
+
+  it("keeps recency order between projects that need nothing", () => {
+    const rows = build([
+      session("old", { workspacePath: "/work/old", workspaceName: "old", agentLastActivityMs: 1000 }),
+      session("new", { workspacePath: "/work/new", workspaceName: "new", agentLastActivityMs: 5000 }),
+    ]);
+    expect(projectGroups(rows).map((g) => g.name)).toEqual(["new", "old"]);
+  });
+});
+
+describe("row signals", () => {
+  it("shows the source glyph only when agents are mixed", () => {
+    const same = build([session("a"), session("b")]);
+    expect(mixedAgentSources(same)).toBe(false);
+    const mixed = build([session("a"), session("b", { agentSource: "codex" })]);
+    expect(mixedAgentSources(mixed)).toBe(true);
+  });
+
+  it("adds up running subagents across the main line and its sub-tasks", () => {
+    const rows = build([
+      session("root", { runningSubagentCount: 2 }),
+      session("sub", { taskId: "sub", parentTaskId: "root", runningSubagentCount: 1 }),
+    ]);
+    expect(rowRunningSubagents(rows[0])).toBe(3);
+  });
+
+  it("previews the last message unless it only repeats the title", () => {
+    const [row] = build([session("a", { lastMessagePreview: "  all  tests\npass " })]);
+    expect(rowPreview(row)).toBe("all tests pass");
+    const [same] = build([session("b", { aiTitle: "fix it", lastMessagePreview: "fix it" })]);
+    expect(rowPreview(same)).toBeNull();
   });
 });

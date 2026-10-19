@@ -485,3 +485,87 @@ export function rowDecisions(
 export function nextNeedsYou(rows: HomeRow[], currentKey: string | null): HomeRow | null {
   return rows.find((r) => r.state === "needsYou" && r.key !== currentKey) ?? null;
 }
+
+/** How the home's task column is cut: by task state (the default) or by
+ *  project. */
+export type HomeGroupBy = "state" | "project";
+
+export interface ProjectGroup {
+  /** Repository root, or `name:<projectName>` for a card with no scanned
+   *  session behind it. */
+  key: string;
+  /** Repository root, when there is one to scope to. */
+  path: string | null;
+  name: string;
+  /** Open rows, "needs you" first, then in `HOME_SECTION_ORDER`; input order
+   *  inside a state. */
+  rows: HomeRow[];
+  /** Closed rows, kept apart: the group folds them behind a count. */
+  doneRows: HomeRow[];
+  /** Rows in "needs you", for the group heading. */
+  needsYou: number;
+}
+
+/**
+ * Cut rows into one group per project. A group with something that needs the
+ * boss sorts above one without; otherwise groups keep the order of their most
+ * recent row, which is the input order since rows arrive newest first.
+ */
+export function projectGroups(rows: HomeRow[]): ProjectGroup[] {
+  const by = new Map<string, ProjectGroup>();
+  for (const r of rows) {
+    const key = r.projectPath ?? `name:${r.projectName}`;
+    let g = by.get(key);
+    if (!g) {
+      g = { key, path: r.projectPath, name: r.projectName, rows: [], doneRows: [], needsYou: 0 };
+      by.set(key, g);
+    }
+    if (r.state === "done") g.doneRows.push(r);
+    else g.rows.push(r);
+    if (r.state === "needsYou") g.needsYou += 1;
+  }
+  const rank = (st: TaskState) => HOME_SECTION_ORDER.indexOf(st);
+  const groups = [...by.values()];
+  for (const g of groups) {
+    // Array.prototype.sort is stable, so input order holds inside a state.
+    g.rows.sort((a, b) => rank(a.state) - rank(b.state));
+  }
+  // Stable again: groups tied on "needs you" keep their first-seen order.
+  groups.sort((a, b) => Number(b.needsYou > 0) - Number(a.needsYou > 0));
+  return groups;
+}
+
+/** The agent (claude-code, codex, dsh…) behind a row: the open hop's. */
+export function rowAgentSource(row: HomeRow): string | null {
+  return row.kind === "card" ? (row.session?.agentSource ?? null) : row.tip.agentSource;
+}
+
+/** True when the rows come from more than one agent, the only case a source
+ *  glyph tells one row from another. */
+export function mixedAgentSources(rows: HomeRow[]): boolean {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const src = rowAgentSource(r);
+    if (src) seen.add(src);
+    if (seen.size > 1) return true;
+  }
+  return false;
+}
+
+/** Subagents running right now under the task: the main line's open hop plus
+ *  each sub-task's. */
+export function rowRunningSubagents(row: HomeRow): number {
+  if (row.kind === "card") return row.session?.runningSubagentCount ?? 0;
+  return (
+    (row.tip.runningSubagentCount ?? 0) +
+    row.subtasks.reduce((n, st) => n + (st.tip.runningSubagentCount ?? 0), 0)
+  );
+}
+
+/** The last message of the open hop, unless it only repeats the title. */
+export function rowPreview(row: HomeRow): string | null {
+  const s = row.kind === "card" ? row.session : row.tip;
+  const p = s?.lastMessagePreview?.replace(/\s+/g, " ").trim();
+  if (!p || p === row.title) return null;
+  return p;
+}
