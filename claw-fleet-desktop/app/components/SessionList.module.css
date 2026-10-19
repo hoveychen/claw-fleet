@@ -1,11 +1,11 @@
 /* ── Nav rail ────────────────────────────────────────────────────────────────
-   A fixed 64px icon column: four section entries, icon over label, then the
-   global usage tiles at the foot. No collapse and no resize — there is nothing
-   left to fold. */
+   Folded (the default): a 64px icon column — section entries icon over label,
+   then the global number tiles at the foot. Wide (.sidebar_wide): a
+   drag-resizable sidebar with label rows, the live/usage panels and a footer
+   toolbar. The width is set inline by SessionList.tsx. */
 
 .sidebar {
   flex-shrink: 0;
-  width: 64px;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
@@ -13,6 +13,40 @@
   height: 100vh;
   overflow: hidden;
   position: relative;
+  transition: width var(--motion-base) var(--ease-out);
+}
+
+/* No easing while the resize handle is held: the edge must track the cursor. */
+.sidebar_dragging {
+  transition: none;
+}
+
+/* Set for one fold / unfold. Two identical keyframes under different names so
+   flipping direction restarts the animation. */
+.settle_collapsed > :is(.nav, .sidebar_content, .rail_tiles) {
+  animation: sidebar_settle_a var(--motion-base) var(--ease-out);
+}
+.settle_expanded > :is(.nav, .sidebar_content, .footer) {
+  animation: sidebar_settle_b var(--motion-base) var(--ease-out);
+}
+
+@keyframes sidebar_settle_a {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes sidebar_settle_b {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+  .settle_collapsed > *,
+  .settle_expanded > * {
+    animation: none;
+  }
 }
 
 /* Drag strip; on macOS it is also the room the traffic lights sit in. */
@@ -127,6 +161,110 @@
 .sidebar_content {
   flex: 1;
   min-height: 0;
+}
+
+/* ── Wide variant ─────────────────────────────────────────────────────────── */
+
+.sidebar_wide .nav {
+  gap: 2px;
+  padding: 6px 8px 10px;
+}
+
+.sidebar_wide .nav_item {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.sidebar_wide .nav_icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* Badges sit at the row's end instead of on the icon's corner. */
+.sidebar_wide .nav_badge_running,
+.sidebar_wide .nav_badge_pending {
+  position: static;
+  margin-left: auto;
+  font-size: 10px;
+}
+
+.sidebar_wide .nav_dot {
+  position: static;
+  margin-left: auto;
+  margin-right: 4px;
+}
+
+.sidebar_wide .sidebar_content {
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: 1px solid var(--color-border);
+}
+
+.footer {
+  flex-shrink: 0;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Segmented toggle bar: keep-awake, theme, fold. */
+.footer_toolbar {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.footer_btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+
+.footer_btn + .footer_btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.footer_btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.footer_btn_active,
+.footer_btn_active:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* Unfold button under the rail's number tiles. */
+.rail_expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  margin-top: 2px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+
+.rail_expand:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
 }
 
 /* The usage number tiles at the foot of the rail. Owns the gap and the edge

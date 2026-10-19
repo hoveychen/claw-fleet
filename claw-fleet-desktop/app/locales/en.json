@@ -309,7 +309,8 @@
   "theme": {
     "light": "Light",
     "dark": "Dark",
-    "system": "System"
+    "system": "System",
+    "cycle": "Switch theme"
   },
   "language": "Language",
   "view_list": "List",
@@ -872,6 +873,13 @@
     "title": "Token speed",
     "unit": "tok/s",
     "no_data": "No data yet"
+  },
+  "cost_chart": {
+    "title": "Spend rate",
+    "unit": "$/min"
+  },
+  "live": {
+    "section_title": "Live"
   },
   "tray": {
     "show": "Show",
@@ -1687,6 +1695,8 @@
     }
   },
   "sidebar": {
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
     "secondary_collapse": "Collapse this sidebar",
     "secondary_expand": "Expand sidebar"
   },
@@ -3068,5 +3078,7 @@
     "subtask_count": "{{count}} subtasks",
     "untitled": "(untitled task)",
     "more_tasks": "{{count}} more tasks"
-  }
+  },
+  "keep_awake_on_tooltip": "Keep awake is on — the system won't idle-sleep. Click to turn off",
+  "keep_awake_off_tooltip": "Keep the system awake (like caffeinate -i)"
 }
