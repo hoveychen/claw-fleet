@@ -1323,6 +1323,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
 
+  const unreadCritical = useAuditStore((s) => s.unreadCriticalCount);
   const tabLabels: Record<SettingsTab, string> = {
     general: t("settings.tab_general"),
     alerts: t("settings.tab_alerts"),
@@ -1341,6 +1342,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     >
       {tabIcons[key]}
       {tabLabels[key]}
+      {/* Unread critical audit events live under Security; the dot marks the
+          tab so the path to them can be followed from the menu. */}
+      {key === "security" && unreadCritical > 0 && <span className={styles.page_link_dot} />}
     </button>
   );
 

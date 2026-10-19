@@ -91,7 +91,6 @@ export function SessionList() {
   const simplified = useUIStore((s) => s.simplifiedMode);
   const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const avail = useNavAvailability();
-  const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
   // Running workspace commands across all repos, badged on Projects (its
   // first page is the code browser that lists them).
@@ -262,11 +261,8 @@ export function SessionList() {
             label={t("nav_section_settings", "设置")}
             active={settingsOpen || current === "settings"}
             onClick={openSettings}
-            // An unread critical audit event used to badge its own nav item;
-            // that page now lives under Settings, so the nudge rides on its
-            // entry — a dot, since a red count reads as an error rather than
-            // a nudge.
-            badge={unreadCriticalCount > 0 && <span className={styles.nav_dot} />}
+            // No badge here: unread critical audit events are dotted on the
+            // Security tab inside the Settings panel instead.
           />
         </nav>
 
