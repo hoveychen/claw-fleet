@@ -104,17 +104,19 @@ describe("SessionAuxRail", () => {
     expect(sections[1].textContent).toContain("main.rs");
   });
 
-  it("expands a doc card in place, and dismisses it from its own ✕", () => {
+  // The rail is a near-permanent column, so a collapsed row has no ✕: closing
+  // is something you do to an open reader, not a way to hide the row.
+  it("expands a doc card in place, and offers no ✕ on the collapsed row", () => {
     const onToggleDoc = vi.fn();
     const onCloseDoc = vi.fn();
     const doc = makeAuxDoc("wiki", "arch/overview");
     const el = render({ docs: [doc], onToggleDoc, onCloseDoc });
-    const [open, close] = Array.from(el.querySelectorAll("button")) as HTMLElement[];
+    const buttons = Array.from(el.querySelectorAll("button")) as HTMLElement[];
+    expect(buttons.some((b) => b.textContent === "✕")).toBe(false);
 
-    act(() => open.click());
-    act(() => close.click());
+    act(() => buttons[0].click());
     expect(onToggleDoc).toHaveBeenCalledWith(doc.id);
-    expect(onCloseDoc).toHaveBeenCalledWith(doc.id);
+    expect(onCloseDoc).not.toHaveBeenCalled();
   });
 
   // The rail is too narrow to read in: an expanded doc keeps its row in the
@@ -218,14 +220,16 @@ describe("SessionAuxRail", () => {
     expect(onOpenAgent).toHaveBeenCalledWith(a);
   });
 
-  // A live agent's chip is derived from the scan, so dismissing it would last
-  // until the next tick. Only the expanded card (and a pinned leftover) offers
-  // the ✕.
-  it("offers the ✕ on a live agent's chip too — every card dismisses the same way", () => {
+  // The ✕ only closes an open agent's reader; a collapsed row has none, so
+  // nothing in the rail can hide a live agent.
+  it("offers the ✕ only on an expanded agent card", () => {
     const onCloseAgent = vi.fn();
     const live = agent("sub-1", "Trace the watcher");
-    const el = render({ agents: [live], onCloseAgent });
-    const close = [...el.querySelectorAll("button")].find((b) => b.textContent === "✕");
+    const collapsed = render({ agents: [live], onCloseAgent });
+    expect([...collapsed.querySelectorAll("button")].some((b) => b.textContent === "✕")).toBe(false);
+
+    const open = render({ agents: [live], onCloseAgent, expandedId: agentCardId(live.id) });
+    const close = [...open.querySelectorAll("button")].find((b) => b.textContent === "✕");
     expect(close).toBeTruthy();
     act(() => close!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(onCloseAgent).toHaveBeenCalledWith(live);
