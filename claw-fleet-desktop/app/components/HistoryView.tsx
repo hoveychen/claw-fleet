@@ -1237,6 +1237,7 @@ export function HistoryView() {
                 onLaunching={handleLaunching}
                 onLaunchFailed={handleLaunchFailed}
                 onCreated={handleCreated}
+                showExamples={scanReady && allRows.length === 0}
               />
             </div>
           )}

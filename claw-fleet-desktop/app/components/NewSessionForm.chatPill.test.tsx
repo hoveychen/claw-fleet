@@ -71,12 +71,14 @@ function session(workspacePath: string): SessionInfo {
   } as unknown as SessionInfo;
 }
 
-async function mount() {
+async function mount(opts: { showExamples?: boolean } = {}) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<NewSessionForm onCreated={() => {}} onCancel={() => {}} />);
+    root!.render(
+      <NewSessionForm onCreated={() => {}} onCancel={() => {}} showExamples={opts.showExamples} />,
+    );
   });
   // Let the chat_workspace / sources round-trips land.
   await act(async () => {
@@ -176,11 +178,34 @@ describe("NewSessionForm chat-mode pill", () => {
     expect(workspacePillLabel()).toContain("repo");
   });
 
-  it("toggles off again on a host with no project workspaces yet", async () => {
+  it("asks for a directory, not chat, on a host with no project workspaces yet", async () => {
     await mount();
-    // Nothing else to launch into, so the form opens in chat mode already.
+    // A fresh install must not be dropped into chat: the form opens with no
+    // directory and a button to pick one.
+    expect(pill().getAttribute("aria-pressed")).toBe("false");
+    expect(document.querySelector('[data-testid="pick-workspace-btn"]')).not.toBeNull();
+    await click(pill());
     expect(pill().getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector('[data-testid="pick-workspace-btn"]')).toBeNull();
     await click(pill());
     expect(pill().getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("NewSessionForm example prompts", () => {
+  const examples = () =>
+    Array.from(container!.querySelectorAll<HTMLButtonElement>('[data-testid="new-session-examples"] button'));
+
+  it("renders only when asked to", async () => {
+    await mount();
+    expect(examples()).toHaveLength(0);
+  });
+
+  it("fills the composer and switches chat on for the chat example", async () => {
+    await mount({ showExamples: true });
+    expect(examples()).toHaveLength(4);
+    await click(examples()[3]);
+    expect(pill().getAttribute("aria-pressed")).toBe("true");
+    expect(useComposerDraftStore.getState().drafts["new"]?.prompt).toBeTruthy();
   });
 });
