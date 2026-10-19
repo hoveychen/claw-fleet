@@ -1049,10 +1049,19 @@ export function HistoryView() {
         >
           {!scanReady ? (
             <SkeletonList rows={8} avatar rowHeight={48} className={styles.rail_skeleton} />
-          ) : rows.length === 0 ? (
-            <div className={styles.empty}>
-              {allRows.length === 0 ? t("home.empty") : t("home.no_match")}
+          ) : allRows.length === 0 ? (
+            // No task at all yet: say what happens after the first prompt, not
+            // just where to type it. Gone as soon as one task exists.
+            <div className={styles.empty_intro} data-testid="home-empty-intro">
+              <p className={styles.empty_intro_title}>{t("home.empty")}</p>
+              <ol className={styles.empty_steps}>
+                <li>{t("home.empty_step_write")}</li>
+                <li>{t("home.empty_step_run")}</li>
+                <li>{t("home.empty_step_ask")}</li>
+              </ol>
             </div>
+          ) : rows.length === 0 ? (
+            <div className={styles.empty}>{t("home.no_match")}</div>
           ) : (
             <TaskList
               layout={layout}
@@ -1228,6 +1237,7 @@ export function HistoryView() {
                 onLaunching={handleLaunching}
                 onLaunchFailed={handleLaunchFailed}
                 onCreated={handleCreated}
+                showExamples={scanReady && allRows.length === 0}
               />
             </div>
           )}

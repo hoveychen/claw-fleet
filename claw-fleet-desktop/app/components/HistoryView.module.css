@@ -163,6 +163,32 @@
   text-align: center;
 }
 
+/* First run: no task exists yet, so the column explains the loop instead. */
+.empty_intro {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.empty_intro_title {
+  margin: 0 0 10px;
+  color: var(--color-text);
+}
+
+.empty_steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.empty_steps li::marker {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
 /* ── Inline detail column ────────────────────────────────────────────────── */
 
 /* Fills PageShell's main container: one pane, the session you picked in the

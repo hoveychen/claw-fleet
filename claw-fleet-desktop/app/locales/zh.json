@@ -357,6 +357,7 @@
     "chat_loading": "正在准备纯聊天…",
     "workspace_placeholder": "输入项目目录的绝对路径",
     "browse": "浏览…",
+    "pick_workspace": "选一个项目目录…",
     "model": "模型",
     "model_default": "默认（跟随 CLI 配置）",
     "model_other_vendors": "全部其他厂商（{{count}}）",
@@ -379,6 +380,12 @@
     "permission_bypassPermissions": "跳过所有权限检查",
     "prompt_placeholder": "想让 Agent 做什么？（Enter 提交，Shift+Enter 换行）",
     "hint": "会在所选项目后台启动一个新任务，几秒后出现在任务列表中。",
+    "examples_label": "试试：",
+    "example_explain": "讲讲这个项目的结构和主要模块",
+    "example_bugs": "通读代码，找出最明显的几个 bug",
+    "example_readme": "给这个项目写一份 README",
+    "example_chat": "纯聊天：解释一下什么是 git rebase",
+    "example_chat_prompt": "解释一下什么是 git rebase",
     "hint_chat": "会启动一个不绑定项目的纯聊天任务——不加载全局工程规则，回复就是普通对话。",
     "hint_pick_workspace": "还没选项目——选一个目录，或者打开「纯聊天」。",
     "error_workspace_required": "请先选择项目。",
@@ -1172,7 +1179,7 @@
     "new_form": {
       "title": "新形态：一个想法，一个任务",
       "description": "首页左边是所有项目的所有任务，按「待你处理 / 进行中 / 等待中 / 待验收」分组，每行写着它正在干什么。选中一个任务，中间是和它的对话；它要你拍板时，卡片钉在对话底部，数字键选、⌘↵ 提交，答完自动跳到下一个。右栏是它的子任务、步骤和本任务资料。",
-      "hint": "顶部「想做什么？」随时开新任务（⌘N）。左侧导航是 任务 / 资料 / 项目 / 回顾 / 设置：资料里是文档和产出，项目里是每个项目的例行、记忆和代码，回顾按项目汇总每天的进展。",
+      "hint": "任务列顶部的「新建任务」随时开新任务（⌘N）。左侧导航是 任务 / 资料 / 项目 / 回顾 / 设置：资料里是文档和产出，项目里是每个项目的例行、记忆和代码，回顾按项目汇总每天的进展。",
       "screenshot_alt": "新首页：左边任务列，中间对话，右边步骤与本任务资料"
     },
     "launch": {
@@ -1688,7 +1695,7 @@
     "done": "知道了",
     "new_session": {
       "title": "想做什么，从这里开始",
-      "desc": "首页顶部这个框就是起点：写下想做的事，回车，选好项目就开工。⌘N 随时回到这里。所有任务都在下面这一列，需要你处理的排在最上面。"
+      "desc": "从这里开新任务（⌘N）：在中间写下想做的事、选好项目，回车就开工。所有任务都在下面这一列，需要你处理的排在最上面。"
     }
   },
   "sidebar": {
@@ -2569,7 +2576,10 @@
     "span_m": "{{n}}分",
     "span_hm": "{{h}}时{{m}}分",
     "span_d": "{{n}}天",
-    "empty": "还没有任务，在上面写下想做的事",
+    "empty": "还没有任务，这样开始：",
+    "empty_step_write": "在右边写下想做的事、选好项目，回车",
+    "empty_step_run": "它在后台去做，出现在这一列",
+    "empty_step_ask": "需要你拍板时，它排到最上面，卡片钉在对话底部",
     "no_match": "没有匹配的任务",
     "project_filter_tip": "只看这个项目",
     "running_subagents": "{{count}} 个子代理在跑",
@@ -2581,6 +2591,9 @@
     "group_focus": "只看它",
     "group_done": "已完成 {{count}}",
     "dock_title": "需要你决定",
+    "dock_first_hint": "这是任务在等你拍板。选好、提交后它会接着做，你不用一直盯着；之后有卡片也都会钉在这里。",
+    "dock_first_hint_keys": "数字键选选项，{{submit}} 提交。",
+    "dock_first_hint_ok": "知道了",
     "dock_question_step": "第 {{n}}/{{total}} 问",
     "dock_subtask_source": "· 来自子任务「{{name}}」",
     "dock_subtask_untitled": "子任务",
