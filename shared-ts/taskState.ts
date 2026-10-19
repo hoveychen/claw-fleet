@@ -111,10 +111,11 @@ function hasRunningSubagents(m: TaskMemberView): boolean {
  *    answered.
  * 2. done — the boss pressed finish / abandon.
  * 3. running — any session of the task (main or sub-task) has a turn in
- *    flight. A coordinator watching four busy sub-tasks is running: the work
+ *    flight or background subagents still working. A coordinator watching
+ *    four busy sub-tasks, or parked on three subagents, is running: the work
  *    is moving and burning tokens, whoever holds the turn.
- * 4. waiting — nothing has a turn in flight, but something is parked on a
- *    `fleet watch` or on background subagents it dispatched.
+ * 4. waiting — nothing is spending tokens, but something is parked on a
+ *    `fleet watch` (CI, a timer, another session).
  * 5. review — nothing is moving and the task is not closed: the chain stopped
  *    and the result is waiting to be accepted.
  */
@@ -123,8 +124,8 @@ export function taskStateOf(task: TaskView): TaskState {
   const closed = task.outcome === "completed" || task.outcome === "abandoned";
   if (all.some((m) => (closed ? m.hasPendingDecision : needsHuman(m)))) return "needsYou";
   if (closed) return "done";
-  if (all.some(isWorking)) return "running";
-  if (all.some(hasRunningSubagents) || all.some(isWatching)) return "waiting";
+  if (all.some((m) => isWorking(m) || hasRunningSubagents(m))) return "running";
+  if (all.some(isWatching)) return "waiting";
   return "review";
 }
 

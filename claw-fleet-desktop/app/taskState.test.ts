@@ -65,12 +65,12 @@ describe("taskStateOf", () => {
     ).toBe("review");
   });
 
-  it("a main hop that ended its turn to wait on background subagents is waiting", () => {
+  it("a hop that ended its turn to wait on background subagents is running", () => {
     const parked = m("waitingInput", { procAlive: true, runningSubagents: 3 });
-    expect(taskStateOf({ main: [parked], subtasks: [], outcome: null })).toBe("waiting");
+    expect(taskStateOf({ main: [parked], subtasks: [], outcome: null })).toBe("running");
     expect(
       taskStateOf({ main: [m("idle")], subtasks: [m("waitingInput", { runningSubagents: 1 })], outcome: null }),
-    ).toBe("waiting");
+    ).toBe("running");
   });
 
   it("subagents on a superseded hop do not hold the task out of review", () => {
