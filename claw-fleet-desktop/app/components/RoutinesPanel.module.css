@@ -179,6 +179,10 @@
   font-size: 11px;
   color: var(--color-text-dim);
 }
+.workspace {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
 .dot {
   opacity: 0.5;
 }

@@ -8,7 +8,7 @@ import { useFadeOnChange } from "../hooks/useFadeOnChange";
 import { ResizeHandle } from "./ResizeHandle";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { RAILS } from "./pageShellConfig";
-import { navSectionOf, navSectionTabs, navTabOf } from "./navGroups";
+import { GLOBAL_MEMORY_FILTER, navSectionOfPage, navSectionTabs, navTabOf } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import styles from "./PageShell.module.css";
 import { SkeletonNumber } from "./loading";
@@ -89,7 +89,8 @@ function useSectionTabs(view: ViewMode): ReactNode {
   const { t } = useTranslation();
   const setViewMode = useUIStore((s) => s.setViewMode);
   const avail = useNavAvailability();
-  const tabs = navSectionTabs(navSectionOf(view), avail);
+  const memoryFilter = useUIStore((s) => s.mainViewState.memory.workspaceFilter);
+  const tabs = navSectionTabs(navSectionOfPage(view, memoryFilter), avail);
   const active = navTabOf(view);
   if (tabs.length < 2 || !tabs.includes(active)) return null;
   return (
@@ -103,7 +104,14 @@ function useSectionTabs(view: ViewMode): ReactNode {
             role="tab"
             aria-selected={on}
             className={`${styles.section_tab}${on ? ` ${styles.section_tab_active}` : ""}`}
-            onClick={() => !on && setViewMode(v)}
+            onClick={() => {
+              if (on) return;
+              // The Projects segment is project memory, not the global bucket.
+              if (v === "memory" && memoryFilter === GLOBAL_MEMORY_FILTER) {
+                useUIStore.getState().updateMainViewState("memory", { workspaceFilter: "all", selectedKey: null });
+              }
+              setViewMode(v);
+            }}
           >
             {tabLabel(t, v)}
           </button>

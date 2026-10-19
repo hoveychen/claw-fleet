@@ -4,7 +4,9 @@ import {
   NAV_HOME,
   NAV_SECTIONS,
   NAV_SECTION_VIEWS,
+  GLOBAL_MEMORY_FILTER,
   navSectionOf,
+  navSectionOfPage,
   navSectionTabs,
   navSectionTarget,
   navTabOf,
@@ -61,5 +63,12 @@ describe("nav sections", () => {
     expect(navSectionTabs("settings", avail)).toEqual(["audit", "skills", "mobile"]);
     expect(navTabOf("plugins")).toBe("skills");
     expect(navTabOf("audit")).toBe("audit");
+  });
+
+  it("lights Settings for global memory and Projects for project memory", () => {
+    expect(navSectionOfPage("memory", GLOBAL_MEMORY_FILTER)).toBe("settings");
+    expect(navSectionOfPage("memory", "all")).toBe("projects");
+    expect(navSectionOfPage("memory", "-Users-me-repo")).toBe("projects");
+    expect(navSectionOfPage("files", GLOBAL_MEMORY_FILTER)).toBe("projects");
   });
 });

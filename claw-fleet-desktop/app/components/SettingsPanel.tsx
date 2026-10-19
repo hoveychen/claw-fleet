@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { REPORT_AUTO_POPUP_KEY, useAuditStore, useUIStore, type ViewMode } from "../store";
 import { ChevronRight } from "lucide-react";
+import { GLOBAL_MEMORY_FILTER } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { isWebBuild } from "../hostEnv";
@@ -199,7 +200,7 @@ function MenuPageLinks({ onClose }: { onClose: () => void }) {
       label: t("settings.page_global_memory", "全局记忆"),
       onClick: () =>
         open("memory", () =>
-          useUIStore.getState().updateMainViewState("memory", { workspaceFilter: "__global__", selectedKey: null }),
+          useUIStore.getState().updateMainViewState("memory", { workspaceFilter: GLOBAL_MEMORY_FILTER, selectedKey: null }),
         ),
     },
   ];

@@ -759,8 +759,9 @@
   gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-tool);
+  /* Secondary button: outlined. The primary one (below) is filled. */
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
   text-align: left;
@@ -800,28 +801,28 @@
   color: var(--color-text-secondary);
 }
 
-/* The option the agent recommends is the primary button: solid terracotta. */
-.elicitation_option_recommended,
-.elicitation_option_recommended:hover {
+/* The primary button (the recommended option, else the first): solid terracotta. */
+.elicitation_option_primary,
+.elicitation_option_primary:hover {
   background: var(--color-accent);
   border-color: var(--color-accent);
 }
-.elicitation_option_recommended:hover {
+.elicitation_option_primary:hover {
   background: var(--color-accent-hover);
 }
-.elicitation_option_recommended .elicitation_option_label,
-.elicitation_option_recommended .elicitation_option_desc,
-.elicitation_option_recommended .elicitation_option_num {
+.elicitation_option_primary .elicitation_option_label,
+.elicitation_option_primary .elicitation_option_desc,
+.elicitation_option_primary .elicitation_option_num {
   color: var(--color-on-accent);
 }
-.elicitation_option_recommended .elicitation_option_desc {
+.elicitation_option_primary .elicitation_option_desc {
   opacity: 0.85;
 }
-.elicitation_option_recommended .elicitation_option_num {
+.elicitation_option_primary .elicitation_option_num {
   border-color: rgba(255, 255, 255, 0.5);
 }
 /* Picked: a ring on top of the solid fill, so the choice still reads. */
-.elicitation_option_recommended.elicitation_option_selected {
+.elicitation_option_primary.elicitation_option_selected {
   box-shadow: 0 0 0 2px var(--color-accent-soft);
   border-color: var(--color-on-accent);
 }

@@ -462,6 +462,7 @@
     "ai_skill_save_btn": "保存 skill 文件…",
     "ai_modal_close": "完成",
     "codex_limit": "速率限制",
+    "usage_open_details": "点开查看各窗口额度与历史图",
     "no_usage_data": "暂无用量数据",
     "dsh_balance_tip": "这把 key 背后的 provider 报的剩余余额",
     "dsh_key_limit": "该 key 已用 {{used}} / {{limit}}",
@@ -702,7 +703,7 @@
     "done_items": "已完成 {{count}} 条"
   },
   "memory": {
-    "panel_title": "Memory",
+    "panel_title": "记忆",
     "loading": "加载中…",
     "no_memories": "未找到自动 Memory 文件。",
     "tab_content": "内容",
@@ -1755,7 +1756,7 @@
     "aux_copy_title": "复制标题",
     "aux_copy_artifact_id": "复制产出 ID",
     "aux_copy_content": "复制文件内容",
-    "aux_open_in_files": "在项目页打开",
+    "aux_open_in_files": "在代码页打开",
     "aux_delete_artifact": "删除这份产出",
     "aux_version_of": "{{version}} / 共 {{count}} 版",
     "aux_updated": "更新 {{when}}",
@@ -2704,7 +2705,7 @@
     "reveal_searching": "正在项目里查找 {{path}}…"
   },
   "paths": {
-    "open_in_files": "在项目页中打开",
+    "open_in_files": "在代码页中打开",
     "reveal_in_finder": "在访达中显示",
     "reveal_in_explorer": "在资源管理器中显示",
     "copy_path": "复制路径",
@@ -3019,6 +3020,8 @@
   },
   "nav_tab_projects": "项目",
   "routines": {
+    "chat_dir": "聊天目录",
+    "all_empty_title": "还没有任何例行",
     "title": "例行",
     "create": "新建例行",
     "empty_title": "这个项目还没有例行",
@@ -3033,6 +3036,9 @@
     "create_confirm": "创建"
   },
   "projects": {
+    "all_routines": "全部例行",
+    "all_routines_meta": "跨所有项目",
+    "all_routines_sub": "所有项目的例行，也包括临时目录和聊天目录里的。新建请进具体项目。",
     "empty": "还没有项目。在某个目录里开过任务后，它就会出现在这里。",
     "no_match": "没有符合搜索的项目",
     "running": "{{count}} 进行中",

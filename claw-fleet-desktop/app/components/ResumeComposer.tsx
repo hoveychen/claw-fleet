@@ -133,7 +133,13 @@ export function ResumeComposer({
   };
 
   useEffect(() => {
-    setTimeout(() => composerRef.current?.focus(), 50);
+    const id = setTimeout(() => {
+      // Never take focus from a field the user (or ⌘N's launch input) is in.
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.matches("input, textarea, [contenteditable='true']")) return;
+      composerRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(id);
   }, []);
 
   const addAttachmentEntry = (entry: ChatComposerAttachment) => {

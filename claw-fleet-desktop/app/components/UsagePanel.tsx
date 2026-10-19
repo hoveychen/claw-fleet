@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ClaudeIcon, CodexIcon, DshIcon, FoxyIcon } from "./SessionCard";
 import styles from "./UsagePanel.module.css";
@@ -15,7 +16,7 @@ import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
 import { RailStatTile } from "./RailStatTile";
-import { Presence } from "./Presence";
+import { Presence, useExiting } from "./Presence";
 import { SkeletonCard, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
@@ -485,6 +486,53 @@ function DshUsageSection() {
   );
 }
 
+// ── Rail popover ─────────────────────────────────────────────────────────────
+
+/** The full usage panel, floated beside the rail tile that opened it. Portaled
+ *  to the body because the rail clips its overflow. The history modals the
+ *  sections open are React children of the panel, so their clicks stop at the
+ *  panel instead of reaching the backdrop and closing everything. */
+function UsageDetailsPopover({
+  anchor,
+  onClose,
+  children,
+}: {
+  anchor: DOMRect | null;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  const exiting = useExiting();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Escape closes an open history modal first, not both at once.
+      if (document.querySelector("[data-usage-history]")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const style: React.CSSProperties = anchor
+    ? { left: anchor.right + 8, bottom: Math.max(8, window.innerHeight - anchor.bottom) }
+    : { left: 72, bottom: 8 };
+  return createPortal(
+    <div className={styles.popover_backdrop} data-exiting={exiting || undefined} onClick={onClose}>
+      <div
+        className={styles.popover}
+        style={style}
+        role="dialog"
+        aria-label={t("account.usage")}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.popover_title}>{t("account.usage")}</div>
+        <div className={styles.content}>{children}</div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ── Main panel ───────────────────────────────────────────────────────────────
 
 interface DetectedTools {
@@ -517,6 +565,9 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   const [setupResolved, setSetupResolved] = useState(false);
   const [sourcesResolved, setSourcesResolved] = useState(false);
   const ring = useUsageRing();
+  const tileRef = useRef<HTMLDivElement>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   // The ring is null both before the first answer and when the answers carry
   // no usage windows (e.g. API-key auth). Only a source that has never landed
   // data and is fetching right now counts as loading; refreshes on top of an
@@ -554,29 +605,62 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
 
   if (!hasClaude && !hasCodex && !hasDsh) return null;
 
+  const sections =
+    !setupResolved || !sourcesResolved ? (
+      <SkeletonCard height={110} />
+    ) : (
+      <>
+        {hasClaude && <ClaudeUsageSection />}
+        {hasCodex && <CodexUsageSection />}
+        {hasDsh && <DshUsageSection />}
+      </>
+    );
+
   if (collapsed) {
+    // The rail only has room for a tile, so clicking it opens the full panel
+    // (per-window bars, refresh, history charts) as a popover beside the rail.
+    const openDetails = () => {
+      setAnchor(tileRef.current?.getBoundingClientRect() ?? null);
+      setDetailsOpen((v) => !v);
+    };
+    let tile;
     if (!ring) {
-      return (
+      tile = (
         <RailStatTile
           value="—"
           label={t("account.usage")}
           title={ringLoading ? t("account.loading") : t("account.no_usage_data")}
           loading={ringLoading}
+          onClick={openDetails}
+          accent
+        />
+      );
+    } else {
+      const detail = ring.sources
+        .map((s) => `${s.name}: ${Math.round(s.percent)}%`)
+        .join("\n");
+      const tooltip = `${t("account.usage")} — ${ring.topSource} ${Math.round(ring.overall)}%\n${detail}\n${t("account.usage_open_details")}`;
+      tile = (
+        <RailStatTile
+          value={`${Math.round(ring.overall)}%`}
+          label={ring.topSource}
+          title={tooltip}
+          onClick={openDetails}
           accent
         />
       );
     }
-    const detail = ring.sources
-      .map((s) => `${s.name}: ${Math.round(s.percent)}%`)
-      .join("\n");
-    const tooltip = `${t("account.usage")} — ${ring.topSource} ${Math.round(ring.overall)}%\n${detail}`;
     return (
-      <RailStatTile
-        value={`${Math.round(ring.overall)}%`}
-        label={ring.topSource}
-        title={tooltip}
-        accent
-      />
+      <div ref={tileRef} className={styles.rail_anchor}>
+        {tile}
+        <Presence when={detailsOpen}>
+          {detailsOpen && (
+            <UsageDetailsPopover anchor={anchor} onClose={() => setDetailsOpen(false)}>
+              {sections}
+            </UsageDetailsPopover>
+          )}
+        </Presence>
+      </div>
     );
   }
 
@@ -586,19 +670,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
         <span className={styles.toggle_label}>{t("account.usage")}</span>
         <span className={styles.toggle_icon}>{expanded ? "\u25B2" : "\u25BC"}</span>
       </button>
-      {expanded && (
-        <div className={styles.content}>
-          {!setupResolved || !sourcesResolved ? (
-            <SkeletonCard height={110} />
-          ) : (
-            <>
-              {hasClaude && <ClaudeUsageSection />}
-              {hasCodex && <CodexUsageSection />}
-              {hasDsh && <DshUsageSection />}
-            </>
-          )}
-        </div>
-      )}
+      {expanded && <div className={styles.content}>{sections}</div>}
     </div>
   );
 }
