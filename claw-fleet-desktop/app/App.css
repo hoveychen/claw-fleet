@@ -143,6 +143,11 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-sunken: #191b1e;
 
   --color-bg-secondary: var(--color-bg-sunken);
+  /* Nav rail ground: a notch DIMMER than the canvas, never lighter. Linear's
+     2026 refresh rule — chrome that has not earned attention recedes so the
+     work area leads. Kept to one notch: a sidebar visibly lighter than the
+     canvas was rejected before as looking washed out. */
+  --color-bg-nav: #0b0c0d;
   --color-bg-card: #1c1e21;
   --color-bg-card-hover: #292b2f;
   --color-bg-card-selected: #2d2f33;
@@ -341,6 +346,9 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-sunken: #e7e4dd;
 
   --color-bg-secondary: var(--color-bg-sunken);
+  /* Nav rail ground: one notch below the canvas (between it and `sunken`)
+     so the navigation recedes and the work area leads. See the dark block. */
+  --color-bg-nav: #eae7e1;
   --color-bg-card: #fbfaf7;
   --color-bg-card-hover: #f1eee7;
   --color-bg-card-selected: #e9e5db;
