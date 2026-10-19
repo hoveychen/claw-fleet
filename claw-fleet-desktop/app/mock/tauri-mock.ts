@@ -145,6 +145,18 @@ function guardAnalysisFor(command: string): string {
 
 let spawnCounter = 0;
 
+// The project registry; stateful so archiving round-trips in mock mode.
+const mockProjects: { path: string; name: string; createdAtMs: number; archivedAtMs?: number }[] = [
+  { path: "/Users/demo/workspace/claw-fleet", name: "claw-fleet", createdAtMs: Date.now() - 30 * 86400 * 1000 },
+  { path: "/Users/demo/workspace/api-server", name: "api-server", createdAtMs: Date.now() - 20 * 86400 * 1000 },
+  {
+    path: "/Users/demo/workspace/old-prototype",
+    name: "old-prototype",
+    createdAtMs: Date.now() - 90 * 86400 * 1000,
+    archivedAtMs: Date.now() - 10 * 86400 * 1000,
+  },
+];
+
 // Relay host the Mobile panel shows, mutated by set_mobile_relay_config so the
 // host dropdown is actually switchable under ?mock.
 let mockRelayUrl = RELAY_URL_GLOBAL;
@@ -877,10 +889,15 @@ async function handleIPC(
         },
       ];
     case "list_projects":
-      return [
-        { path: "/Users/demo/workspace/claw-fleet", name: "claw-fleet", createdAtMs: Date.now() - 30 * 86400 * 1000 },
-        { path: "/Users/demo/workspace/api-server", name: "api-server", createdAtMs: Date.now() - 20 * 86400 * 1000 },
-      ];
+      return mockProjects.map((p) => ({ ...p }));
+    case "set_project_archived": {
+      const path = String(args?.path ?? "");
+      const archivedAtMs = args?.archived ? Date.now() : undefined;
+      const hit = mockProjects.find((p) => p.path === path);
+      if (hit) hit.archivedAtMs = archivedAtMs;
+      else mockProjects.push({ path, name: path.split("/").pop() ?? path, createdAtMs: Date.now(), archivedAtMs });
+      return mockProjects.map((p) => ({ ...p }));
+    }
     case "create_routine": {
       const spec = (args?.spec ?? {}) as Record<string, unknown>;
       return spec.interval

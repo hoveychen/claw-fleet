@@ -119,7 +119,8 @@ pub(crate) fn route_routine_create(
     );
 }
 
-/// `GET /projects` — the project registry (`~/.fleet/projects.json`).
+/// `GET /projects` — the project registry (`~/.fleet/projects.json`), after
+/// registering every directory the session snapshot saw an agent in.
 pub(crate) fn route_projects(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -127,6 +128,43 @@ pub(crate) fn route_projects(
     json_header: tiny_http::Header,
     path: &str,
 ) {
+    let sessions = ctx.snapshot.sessions();
+    if let Err(e) =
+        crate::project_registry::discover(sessions.iter().map(|s| s.workspace_path.as_str()))
+    {
+        crate::log_debug(&format!("[projects] discover failed: {e}"));
+    }
     let body = serde_json::to_string(&crate::project_registry::list()).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+#[derive(serde::Deserialize)]
+struct ArchiveProjectBody {
+    path: String,
+    archived: bool,
+}
+
+/// `POST /projects/archive` — body `{ path, archived }`; answers the updated
+/// registry.
+pub(crate) fn route_project_archive(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) = match serde_json::from_slice::<ArchiveProjectBody>(&body_bytes) {
+        Ok(b) => match crate::project_registry::set_archived(&b.path, b.archived) {
+            Ok(list) => (200, serde_json::to_string(&list).unwrap_or_default()),
+            Err(e) => (500, serde_json::json!({ "error": e }).to_string()),
+        },
+        Err(e) => (400, serde_json::json!({ "error": e.to_string() }).to_string()),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(json_header),
+    );
 }

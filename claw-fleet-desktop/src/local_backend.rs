@@ -2195,9 +2195,31 @@ impl LocalBackend {
         claw_fleet_core::routines::create(spec)
     }
 
-    /// The project registry (`~/.fleet/projects.json`).
+    /// The project registry (`~/.fleet/projects.json`), after registering
+    /// every directory the current session list saw an agent in.
     pub fn list_projects(&self) -> Vec<claw_fleet_core::project_registry::Project> {
+        let workspaces: Vec<String> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.workspace_path.clone())
+            .collect();
+        if let Err(e) =
+            claw_fleet_core::project_registry::discover(workspaces.iter().map(String::as_str))
+        {
+            claw_fleet_core::log_debug(&format!("[projects] discover failed: {e}"));
+        }
         claw_fleet_core::project_registry::list()
+    }
+
+    /// Archive or un-archive a project; returns the updated registry.
+    pub fn set_project_archived(
+        &self,
+        path: &str,
+        archived: bool,
+    ) -> Result<Vec<claw_fleet_core::project_registry::Project>, String> {
+        claw_fleet_core::project_registry::set_archived(path, archived)
     }
 
     /// fleet__ask depth-2 test: write a fake `FleetAskRequest` so the

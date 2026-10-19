@@ -1330,6 +1330,10 @@ fn handle_request(
 
             crate::routes::PROJECTS => route_projects(ctx, request, &query, json_header, path),
 
+            crate::routes::PROJECTS_ARCHIVE => {
+                route_project_archive(ctx, request, &query, json_header, path)
+            }
+
             crate::routes::LOOP_CANCEL => {
                 route_loop_cancel(ctx, request, &query, json_header, path)
             }
