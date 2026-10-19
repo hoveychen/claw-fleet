@@ -2586,6 +2586,7 @@
     "dock_prev": "上一张卡",
     "dock_next": "下一张卡",
     "rail_subtasks": "子任务",
+    "rail_subtasks_other": "其他子任务",
     "rail_agents": "子代理",
     "rail_docs": "已打开",
     "rail_explains": "追问",

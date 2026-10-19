@@ -84,6 +84,16 @@ pub struct LaunchSpec {
     /// `SessionInfo::parent_session_id` (Claude Code sub-agent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawned_by_session_id: Option<String>,
+    /// The spawner's plan and step (`P3`) this sub-task was dispatched to
+    /// work on, when the spawner named one (`fleet__spawn` `step`). Lets the
+    /// task rail hang the sub-task under that step. Deliberately not a
+    /// `task_progress` focus record: that would attribute the sub-task to the
+    /// spawner's plan, and the plan gate would then refuse to let it end its
+    /// turn while the spawner's other steps are still open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawned_for_plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawned_for_step: Option<String>,
     /// When Fleet first spawned the session (epoch ms).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
@@ -280,6 +290,15 @@ pub fn note_spawned_by(session_id: &str, parent: &str) {
         return;
     }
     spec.spawned_by_session_id = Some(parent.to_string());
+    write(session_id, &spec);
+}
+
+/// Record which of the spawner's plan steps `session_id` was dispatched for.
+/// Creates the note when the spawn path did not write one.
+pub fn note_spawned_for(session_id: &str, plan_id: &str, step: &str) {
+    let mut spec = get(session_id).unwrap_or_default();
+    spec.spawned_for_plan = Some(plan_id.to_string());
+    spec.spawned_for_step = Some(step.to_string());
     write(session_id, &spec);
 }
 

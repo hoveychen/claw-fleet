@@ -376,6 +376,15 @@ enum Commands {
         /// inherited value.
         #[arg(long)]
         effort: Option<String>,
+        /// The step of your plan (e.g. `P3`) the new session is dispatched to
+        /// work on; the task rail hangs it under that step. The step must
+        /// exist, or nothing is spawned.
+        #[arg(long)]
+        step: Option<String>,
+        /// Plan id `--step` belongs to. Defaults to the plan the creating
+        /// session is on.
+        #[arg(long, requires = "step")]
+        plan: Option<String>,
         /// The session this command acts for. Normally read from the
         /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it
         /// here when your harness has no per-session environment.
@@ -1559,13 +1568,15 @@ fn main() {
         Commands::Plan { action, workspace, session } => {
             commands::plan::cmd_plan(action, workspace.as_deref(), session.as_deref())
         }
-        Commands::Spawn { prompt, workspace, title, model, effort, session } => {
+        Commands::Spawn { prompt, workspace, title, model, effort, step, plan, session } => {
             commands::spawn::cmd_spawn(
                 &prompt,
                 workspace.as_deref(),
                 title.as_deref(),
                 model.as_deref(),
                 effort.as_deref(),
+                step.as_deref(),
+                plan.as_deref(),
                 session.as_deref(),
             )
         }

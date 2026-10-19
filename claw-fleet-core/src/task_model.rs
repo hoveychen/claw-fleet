@@ -136,6 +136,23 @@ pub struct TaskSummary {
     pub last_activity_ms: u64,
     /// Spend of every session in the task, sub-agents and sub-tasks included.
     pub cost_usd: f64,
+    /// Sub-tasks dispatched for a named step of a plan (`fleet__spawn`
+    /// `step`), ordered by sub-task id. Sub-tasks spawned without a step are
+    /// absent.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub subtask_steps: Vec<SubtaskStep>,
+}
+
+/// One sub-task's step link: which plan step it was dispatched to work on.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct SubtaskStep {
+    /// The sub-task's line id (its `task_id`).
+    pub task_id: String,
+    pub plan_id: String,
+    /// Step id, e.g. `P3`.
+    pub step: String,
 }
 
 fn is_active(s: &SessionInfo) -> bool {
@@ -159,12 +176,15 @@ fn is_active(s: &SessionInfo) -> bool {
 fn stamp_summaries(
     sessions: &mut [SessionInfo],
     focus: impl Fn(&str) -> Option<crate::task_progress::TaskProgressRecord>,
+    spawn_step: impl Fn(&str) -> Option<(String, String)>,
 ) {
     let mut by_task: HashMap<String, TaskSummary> = HashMap::new();
     let mut sub_lines: HashMap<String, HashSet<String>> = HashMap::new();
     let mut active_lines: HashMap<String, HashSet<String>> = HashMap::new();
     let mut newest_watch: HashMap<String, (u64, String)> = HashMap::new();
     let mut newest_focus: HashMap<String, (u64, crate::task_progress::TaskProgressRecord)> =
+        HashMap::new();
+    let mut step_links: HashMap<String, std::collections::BTreeMap<String, (String, String)>> =
         HashMap::new();
 
     for s in sessions.iter() {
@@ -186,6 +206,12 @@ fn stamp_summaries(
             sub_lines.entry(top.to_string()).or_default().insert(line.to_string());
             if is_active(s) {
                 active_lines.entry(top.to_string()).or_default().insert(line.to_string());
+            }
+            // The spawn note sits on the line's first hop, whose id is the line id.
+            if s.id == line {
+                if let Some(link) = spawn_step(line) {
+                    step_links.entry(top.to_string()).or_default().insert(line.to_string(), link);
+                }
             }
             continue;
         }
@@ -217,6 +243,12 @@ fn stamp_summaries(
             sum.plan_id = Some(rec.plan_id.clone());
             sum.current_step = rec.current_task.clone();
         }
+        sum.subtask_steps = step_links
+            .remove(top)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(task_id, (plan_id, step))| SubtaskStep { task_id, plan_id, step })
+            .collect();
     }
 
     for s in sessions.iter_mut() {
@@ -230,7 +262,11 @@ fn stamp_summaries(
 /// Stamp [`TaskSummary`] onto top-level task hops. Runs last in the scan's
 /// enrich pass: it reads watches, statuses and outcomes the other enrichers set.
 pub fn enrich_summaries(sessions: &mut [SessionInfo]) {
-    stamp_summaries(sessions, crate::task_progress::read);
+    let notes = crate::launch_spec::registry();
+    stamp_summaries(sessions, crate::task_progress::read, |id| {
+        let spec = notes.get(id)?;
+        Some((spec.spawned_for_plan.clone()?, spec.spawned_for_step.clone()?))
+    });
 }
 
 /// Which task a decision card belongs to, for the inbox breadcrumb
@@ -496,6 +532,10 @@ mod tests {
                 updated: 1,
                 backtracked_from: None,
             })
+        }, |id| {
+            // Only a line's first hop carries the spawn note; a later hop's
+            // lookup must not add a second link for the same line.
+            matches!(id, "b1" | "b2").then(|| ("p".to_string(), "P2".to_string()))
         });
         let sum = rows[0].task_summary.clone().expect("main hop carries it");
         assert_eq!(rows[1].task_summary.as_ref(), Some(&sum));
@@ -509,6 +549,11 @@ mod tests {
         assert_eq!(sum.wait_reason.as_deref(), Some("CI run"));
         assert_eq!(sum.plan_id.as_deref(), Some("p"));
         assert_eq!(sum.current_step.as_deref(), Some("**P2** — x"));
+        assert_eq!(
+            sum.subtask_steps,
+            vec![SubtaskStep { task_id: "b1".into(), plan_id: "p".into(), step: "P2".into() }],
+            "the b-line links once; c was spawned without a step"
+        );
     }
 
     #[test]

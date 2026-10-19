@@ -2592,6 +2592,7 @@
     "dock_prev": "Previous card",
     "dock_next": "Next card",
     "rail_subtasks": "Subtasks",
+    "rail_subtasks_other": "Other sub-tasks",
     "rail_agents": "Subagents",
     "rail_docs": "Opened",
     "rail_explains": "Side questions",

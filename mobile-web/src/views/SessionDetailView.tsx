@@ -128,7 +128,10 @@ import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { Presence } from "../Presence";
 import {
   SegmentBar,
+  StepSubtasks,
   SubtasksPane,
+  subtaskStepLinks,
+  subtasksForStep,
   TaskLibraryPane,
   taskSegments,
   useSubtasks,
@@ -2060,9 +2063,24 @@ export function SessionDetailView({
       {segment !== "chat" && (
         <div className={segStyles.pane}>
           {segment === "subtasks" && (
-            <SubtasksPane rows={subtaskRows} onOpenSessionId={onOpenSessionId} />
+            <SubtasksPane
+              rows={subtaskRows}
+              links={subtaskStepLinks(session)}
+              onOpenSessionId={onOpenSessionId}
+            />
           )}
-          {segment === "steps" && <TaskPlansTab session={session} client={client} />}
+          {segment === "steps" && (
+            <TaskPlansTab
+              session={session}
+              client={client}
+              underStep={(planId, text) => (
+                <StepSubtasks
+                  rows={subtasksForStep(subtaskRows, subtaskStepLinks(session), planId, text)}
+                  onOpenSessionId={onOpenSessionId}
+                />
+              )}
+            />
+          )}
           {segment === "library" && (
             <TaskLibraryPane
               session={session}

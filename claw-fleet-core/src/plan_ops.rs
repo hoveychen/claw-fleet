@@ -406,9 +406,81 @@ pub fn migrate(cwd: &Path, path: Option<PathBuf>) -> Result<PlanOutcome, String>
     })
 }
 
+/// Resolve the `step` (and optional `plan`) a spawner names for a sub-task to
+/// a `(plan_id, "P3")` pair, before anything is spawned. `plan` defaults to the
+/// spawner's focused plan. Errors when the step is malformed, no plan can be
+/// determined, or the plan has no such step — a typo should fail the spawn
+/// call loudly rather than silently hang the sub-task under nothing.
+pub fn resolve_spawn_step(
+    cwd: &Path,
+    plan: Option<&str>,
+    step: &str,
+    spawner_session_id: Option<&str>,
+) -> Result<(String, String), String> {
+    let focus = spawner_session_id
+        .and_then(crate::task_progress::read)
+        .map(|r| r.plan_id);
+    resolve_spawn_step_with(cwd, plan, step, focus)
+}
+
+fn resolve_spawn_step_with(
+    cwd: &Path,
+    plan: Option<&str>,
+    step: &str,
+    focus_plan: Option<String>,
+) -> Result<(String, String), String> {
+    let raw = step.trim().trim_matches('*');
+    let digits = raw.strip_prefix(['P', 'p']).unwrap_or(raw);
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!("step '{step}' is not a step id like P3"));
+    }
+    let step = format!("P{digits}");
+    let plan_id = match plan.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => p.to_string(),
+        None => focus_plan.ok_or(
+            "step given but no plan: you are not on a plan (claim one with fleet__plan resume) \
+             and no plan was named",
+        )?,
+    };
+    let path = pt::find_plan_source(cwd, &plan_id)
+        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let body =
+        pt::plan_body(&content, &plan_id).ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    let marker = format!("**{step}**");
+    if !pt::parse_task_items(&body).iter().any(|it| it.text.contains(&marker)) {
+        return Err(format!("plan '{plan_id}' has no step {step}"));
+    }
+    Ok((plan_id, step))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_step_resolves_against_the_focused_plan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        create(cwd, "demo", "Demo", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        add(cwd, "demo", "P1", "first").unwrap();
+        add(cwd, "demo", "P2", "second").unwrap();
+
+        let focus = || Some("demo".to_string());
+        assert_eq!(
+            resolve_spawn_step_with(cwd, None, "p2", focus()).unwrap(),
+            ("demo".to_string(), "P2".to_string())
+        );
+        assert_eq!(
+            resolve_spawn_step_with(cwd, Some("demo"), "**P1**", None).unwrap().1,
+            "P1"
+        );
+        assert!(resolve_spawn_step_with(cwd, None, "P9", focus()).unwrap_err().contains("no step P9"));
+        assert!(resolve_spawn_step_with(cwd, None, "third", focus()).is_err());
+        assert!(resolve_spawn_step_with(cwd, None, "P1", None).unwrap_err().contains("no plan"));
+        assert!(resolve_spawn_step_with(cwd, Some("nope"), "P1", None).is_err());
+    }
 
     /// Read the workspace's TASKS.md body.
     fn read_tasks(cwd: &Path) -> String {

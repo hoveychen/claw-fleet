@@ -1620,11 +1620,12 @@ export function SessionDetail({
   }, [aux.pinnedAgent, aux.dismissedAgents, liveSubagents, sessions]);
   const railCards = railAgents.length + aux.docs.length + explains.length;
   const inSubtask = !!task && !!liveSession && !task.hops.some((h) => h.id === liveSession.id);
-  const taskSteps = (() => {
+  const taskStepsPlan = (() => {
     if (!task || taskPlans.length === 0) return null;
     const want = liveSession?.taskPlan?.planId;
-    return (taskPlans.find((p) => p.id === want) ?? taskPlans[0]).items;
+    return taskPlans.find((p) => p.id === want) ?? taskPlans[0];
   })();
+  const taskSteps = taskStepsPlan?.items ?? null;
   const taskArtifacts = useTaskArtifacts(task);
   const reviewDocs = useMemo(
     () =>
@@ -2133,6 +2134,7 @@ export function SessionDetail({
                 row={task}
                 openSessionId={liveSession.id}
                 steps={taskSteps}
+                stepsPlanId={taskStepsPlan?.id ?? null}
                 artifacts={taskArtifacts}
                 reviewDocs={reviewDocs}
                 className={styles.task_rail}

@@ -629,10 +629,34 @@ function mkSession(
   };
 }
 
+// The billing task dispatched two sub-tasks: one for its step P4 (so the task
+// rail hangs it under that step) and one errand outside the plan.
+const BILLING_TASK_SUMMARY = {
+  hopCount: 3, subtaskCount: 2, subtasksActive: 1,
+  startedAtMs: NOW - 6 * HOUR, lastActivityMs: NOW - 2 * MIN, costUsd: 4.2,
+  planId: "billing-migration", currentStep: "**P4** — cutover behind flag",
+  subtaskSteps: [{ taskId: "sess-billing-flag", planId: "billing-migration", step: "P4" }],
+};
+
 const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
+  mkSession({
+    id: "sess-billing-flag", workspaceName: "billing-service", status: "executing", currentTool: "Edit",
+    taskId: "sess-billing-flag", parentTaskId: "sess-billing-1",
+    aiTitle: "Wire usage_billing_v2 flag into read path",
+    lastMessagePreview: "Gating InvoiceReader behind the flag...",
+    pid: 71002, pidPrecise: true, createdAtMs: NOW - 20 * MIN, lastActivityMs: NOW - 2 * MIN,
+  }),
+  mkSession({
+    id: "sess-billing-docs", workspaceName: "billing-service", status: "idle",
+    taskId: "sess-billing-docs", parentTaskId: "sess-billing-1",
+    aiTitle: "Refresh billing README",
+    lastMessagePreview: "README updated with the new usage tiers.",
+    createdAtMs: NOW - 30 * MIN, lastActivityMs: NOW - 15 * MIN,
+  }),
   // billing-service — 3-hop handoff chain mid-migration
   mkSession({
-    id: "sess-billing-1", workspaceName: "billing-service", status: "idle",
+    id: "sess-billing-1", workspaceName: "billing-service",
+    taskId: "sess-billing-1", taskSummary: BILLING_TASK_SUMMARY, status: "idle",
     aiTitle: "Usage-based billing migration — P1 schema audit",
     lastMessagePreview: "Context at 97% — handing off to a fresh session with notes.",
     handoff: { chainId: "chain-billing", hop: 1, chainLen: 3 },
@@ -640,7 +664,8 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     lastActivityMs: NOW - 3.2 * HOUR, createdAtMs: NOW - 6 * HOUR,
   }),
   mkSession({
-    id: "sess-billing-2", workspaceName: "billing-service", status: "idle",
+    id: "sess-billing-2", workspaceName: "billing-service",
+    taskId: "sess-billing-1", taskSummary: BILLING_TASK_SUMMARY, status: "idle",
     aiTitle: "Usage-based billing migration — P2/P3 backfill jobs",
     lastMessagePreview: "Backfill validated on staging: 2.1M rows, 0 drift. Relaying P4.",
     handoff: { chainId: "chain-billing", hop: 2, chainLen: 3 },
@@ -648,7 +673,8 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     lastActivityMs: NOW - 40 * MIN, createdAtMs: NOW - 3.1 * HOUR,
   }),
   mkSession({
-    id: "sess-billing-3", workspaceName: "billing-service", status: "executing", currentTool: "Bash",
+    id: "sess-billing-3", workspaceName: "billing-service",
+    taskId: "sess-billing-1", taskSummary: BILLING_TASK_SUMMARY, status: "executing", currentTool: "Bash",
     aiTitle: "Usage-based billing migration — P4 cutover switches",
     lastMessagePreview: "Flipping read path behind usage_billing_v2 flag...",
     handoff: { chainId: "chain-billing", hop: 3, chainLen: 3 },

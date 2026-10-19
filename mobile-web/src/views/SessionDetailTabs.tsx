@@ -287,9 +287,12 @@ export function DecisionHistoryTab({
 export function TaskPlansTab({
   session,
   client,
+  underStep,
 }: {
   session: SessionInfo;
   client: FleetTransport | null;
+  /** What to show beneath one step — the sub-tasks working on it. */
+  underStep?: (planId: string | null | undefined, itemText: string) => React.ReactNode;
 }) {
   const data = useRelayData<TaskPlanDetail[]>(client, "task_plans", {
     workspacePath: session.workspacePath,
@@ -325,11 +328,13 @@ export function TaskPlansTab({
                 current && !item.done && item.text.includes(current),
               );
               return (
-                <TaskItemLine
-                  key={j}
-                  text={item.text}
-                  state={item.done ? "done" : isCurrent ? "current" : "pending"}
-                />
+                <div key={j}>
+                  <TaskItemLine
+                    text={item.text}
+                    state={item.done ? "done" : isCurrent ? "current" : "pending"}
+                  />
+                  {underStep?.(p.id, item.text)}
+                </div>
               );
             })}
           </div>

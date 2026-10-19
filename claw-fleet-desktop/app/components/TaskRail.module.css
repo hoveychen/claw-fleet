@@ -184,8 +184,19 @@
 }
 
 .step_text {
+  flex: 1 1 0;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Sub-tasks dispatched for this step, on their own line under the step text
+   and aligned with it (ring width + gap). */
+.step {
+  flex-wrap: wrap;
+}
+.step_subtasks {
+  flex: 0 0 calc(100% - 22px);
+  margin: 4px 0 2px 22px;
 }
 
 /* The glyph already marks the current step; keep the word for screen readers. */

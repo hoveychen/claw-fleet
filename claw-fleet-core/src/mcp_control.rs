@@ -742,7 +742,9 @@ fn spawn_tool_def() -> Value {
                 "workspace": workspace_arg_schema("the new session runs in"),
                 "title": {"type": "string", "description": "Name the new session up front, so it is labelled in the task list before it has produced any output to name itself by. Strongly recommended."},
                 "model": {"type": "string", "description": "Override model (else inherits yours). Naming another harness's model spawns on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh."},
-                "effort": {"type": "string", "description": "Override reasoning effort (low/medium/high/xhigh/max)."}
+                "effort": {"type": "string", "description": "Override reasoning effort (low/medium/high/xhigh/max)."},
+                "step": {"type": "string", "description": "The step of YOUR plan this sub-task is dispatched to work on, e.g. `P3`. Fleet hangs the sub-task under that step in the task rail, so the boss sees which step has someone on it. Pass it whenever the sub-task carries out (part of) one of your plan's steps; omit it for work outside your plan. The step must exist, or the spawn is refused."},
+                "plan": {"type": "string", "description": "Plan id `step` belongs to. Defaults to the plan you are currently on; only needed when you are not on one or mean another."}
             },
             "required": ["prompt"],
             "additionalProperties": false
@@ -762,6 +764,17 @@ fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
         arg(args, "model").as_deref(),
         arg(args, "effort").as_deref(),
     )?;
+    // Resolved before spawning: a bad step must refuse the call, not leave a
+    // sub-task running that hangs under nothing.
+    let for_step = match arg(args, "step").filter(|s| !s.trim().is_empty()) {
+        Some(step) => Some(crate::plan_ops::resolve_spawn_step(
+            std::path::Path::new(&ctx.workspace),
+            arg(args, "plan").as_deref(),
+            &step,
+            sid,
+        )?),
+        None => None,
+    };
     let resp = crate::agent_source::spawn_session(
         &route.agent_source,
         &crate::agent_source::SpawnSpec {
@@ -781,6 +794,9 @@ fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
         resp.session_id.as_deref(),
     ) {
         let _ = crate::session_title::set_title(new_sid, &workspace, Some(title));
+    }
+    if let (Some((plan_id, step)), Some(new_sid)) = (&for_step, resp.session_id.as_deref()) {
+        crate::launch_spec::note_spawned_for(new_sid, plan_id, step);
     }
     let ws_name = crate::wiki::workspace_name_of(&workspace);
     Ok(match resp.session_id.as_deref() {
