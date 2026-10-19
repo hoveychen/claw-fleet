@@ -1,5 +1,5 @@
-/* The pinned decision card. The dock is the frame — card surface, border and
-   the terracotta bar on the left that marks "waiting on you" — so the card
+/* The pinned decision card. The dock is the frame — card surface and border;
+   the accent dot in the header is the only "waiting on you" mark — so the card
    rendered inside drops its own border and background. While a card waits it
    is what the reader is here for, so it may cover most of the conversation:
    at the old 58vh the options and composer left a long question about three
@@ -13,7 +13,6 @@
   min-height: 0;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
@@ -37,8 +36,27 @@
 }
 
 .title {
-  font-weight: 600;
-  color: var(--color-accent);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.meta {
+  color: var(--color-text-muted, var(--color-text-secondary));
+  white-space: nowrap;
+}
+
+/* Single/multi switch; reads as part of the header line, not as a chip. */
+.mode {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--color-text-muted, var(--color-text-secondary));
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mode:hover {
+  color: var(--color-text);
 }
 
 .source {

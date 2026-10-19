@@ -2580,6 +2580,7 @@
     "group_focus": "只看它",
     "group_done": "已完成 {{count}}",
     "dock_title": "需要你决定",
+    "dock_question_step": "第 {{n}}/{{total}} 问",
     "dock_subtask_source": "· 来自子任务「{{name}}」",
     "dock_subtask_untitled": "子任务",
     "dock_from_subtask": "来自子任务",

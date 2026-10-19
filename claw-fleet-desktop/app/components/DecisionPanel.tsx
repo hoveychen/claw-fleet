@@ -630,7 +630,15 @@ function OptionsCollapseBar({
   );
 }
 
-function ElicitationCard({ decision, compact = false }: { decision: ElicitationDecision; compact?: boolean }) {
+function ElicitationCard({
+  decision,
+  compact = false,
+  docked = false,
+}: {
+  decision: ElicitationDecision;
+  compact?: boolean;
+  docked?: boolean;
+}) {
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
@@ -741,6 +749,8 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
     <div className={`${styles.card} ${styles.card_flex}`}>
       <div className={styles.card_scroll}>
       <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
+      {!docked && (
+      <>
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
@@ -788,6 +798,8 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
 
       {request.aiTitle && (
         <div className={styles.card_subtitle}>{request.aiTitle}</div>
+      )}
+      </>
       )}
 
       {total > 1 && (
@@ -1523,9 +1535,13 @@ function FleetAskFormFieldRow({
 export function FleetAskCard({
   decision,
   compact = false,
+  docked = false,
 }: {
   decision: FleetAskDecision;
   compact?: boolean;
+  /** Pinned in DecisionDock: the dock's header line carries the label, step and
+   *  single/multi switch, and the page already shows project and task title. */
+  docked?: boolean;
 }) {
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
@@ -1662,6 +1678,8 @@ export function FleetAskCard({
     <div className={`${styles.card} ${styles.card_flex}`}>
       <div className={styles.card_scroll}>
       <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
+      {!docked && (
+      <>
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
@@ -1709,6 +1727,8 @@ export function FleetAskCard({
 
       {request.aiTitle && (
         <div className={styles.card_subtitle}>{request.aiTitle}</div>
+      )}
+      </>
       )}
 
       {total > 1 && (
@@ -1920,12 +1940,20 @@ export function FleetAskCard({
 
 // ── Card dispatcher ──────────────────────────────────────────────────────
 
-export function DecisionCard({ decision, compact = false }: { decision: PendingDecision; compact?: boolean }) {
+export function DecisionCard({
+  decision,
+  compact = false,
+  docked = false,
+}: {
+  decision: PendingDecision;
+  compact?: boolean;
+  docked?: boolean;
+}) {
   switch (decision.kind) {
     case "guard":
       return <GuardCard decision={decision} />;
     case "elicitation":
-      return <ElicitationCard decision={decision} compact={compact} />;
+      return <ElicitationCard decision={decision} compact={compact} docked={docked} />;
     case "fleet-ask":
       return <>
         {compact && !!decision.request.reviewDocs?.length && (
@@ -1933,7 +1961,7 @@ export function DecisionCard({ decision, compact = false }: { decision: PendingD
             <ReviewDocsColumn docs={decision.request.reviewDocs} sessionId={decision.request.sessionId} />
           </div>
         )}
-        <FleetAskCard decision={decision} compact={compact} />
+        <FleetAskCard decision={decision} compact={compact} docked={docked} />
       </>;
     case "a2ui-render":
       return <A2uiRenderCard decision={decision} />;
