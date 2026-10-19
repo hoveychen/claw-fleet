@@ -1689,8 +1689,8 @@
     }
   },
   "sidebar": {
-    "collapse": "Collapse sidebar",
-    "expand": "Expand sidebar",
+    "collapse": "Hide list column",
+    "expand": "Show list column",
     "secondary_collapse": "Collapse this sidebar",
     "secondary_expand": "Expand sidebar"
   },

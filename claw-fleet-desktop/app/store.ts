@@ -159,11 +159,11 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
 /** Drop `view` from the auto-collapse record — the reader no longer owns a
  *  panel the user has just toggled by hand. */
 function forgetSecondary(
-  s: { autoCollapsed: { sidebar: boolean; secondary: ViewMode | null } },
+  s: { autoCollapsed: { secondary: ViewMode | null } },
   view: ViewMode,
-): { sidebar: boolean; secondary: ViewMode | null } {
+): { secondary: ViewMode | null } {
   if (s.autoCollapsed.secondary !== view) return s.autoCollapsed;
-  return { ...s.autoCollapsed, secondary: null };
+  return { secondary: null };
 }
 
 interface UIState {
@@ -181,18 +181,13 @@ interface UIState {
    *  doc card expanded in a session's auxiliary rail), so it can put back
    *  exactly what it took and nothing else.
    *
-   *  Deliberately not persisted and deliberately separate from the two fields
+   *  Deliberately not persisted and deliberately separate from the field
    *  above: an auto-collapse is the layout coping with a narrow pane, not a
    *  preference, and a reader closed after the app quit must not boot into a
    *  collapsed sidebar the user never chose. Any manual toggle clears the
    *  matching entry — once the reader has an opinion, the layout stops
    *  pretending it owns that panel. */
-  autoCollapsed: { sidebar: boolean; secondary: ViewMode | null };
-  /** The main nav rail is the 64px icon column (true, the default) or the
-   *  wide, drag-resizable sidebar with live stats and the footer toggles.
-   *  Persisted as "sidebar-collapsed"; only an explicit "false" means wide. */
-  sidebarCollapsed: boolean;
-  setSidebarCollapsed: (on: boolean) => void;
+  autoCollapsed: { secondary: ViewMode | null };
   mascotVisible: boolean;
   /** Launcher rail filters. HistoryView is mounted through SessionList's `viewMode`
    *  ternary, so it unmounts on every trip to another page — including the
@@ -240,7 +235,7 @@ interface UIState {
   /** Collapse a panel to make room for a reader, remembering that *we* did it.
    *  In-memory only — see `autoCollapsed`. No-op if it is already collapsed,
    *  which is what keeps a user's own collapse from being "restored" open. */
-  autoCollapse: (what: "sidebar" | ViewMode) => void;
+  autoCollapse: (view: ViewMode) => void;
   /** Put back whatever `autoCollapse` took, and forget it. */
   autoRestore: () => void;
   setMascotVisible: (on: boolean) => void;
@@ -516,14 +511,7 @@ export const useUIStore = create<UIState>((set) => ({
   viewMode: initialViewMode,
   navLastBySection: { [navSectionOf(initialViewMode)]: initialViewMode },
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
-  autoCollapsed: { sidebar: false, secondary: null },
-  sidebarCollapsed: getItem("sidebar-collapsed") !== "false",
-  setSidebarCollapsed: (on) => {
-    setItem("sidebar-collapsed", on ? "true" : "false");
-    // A hand toggle takes the panel back: whatever the reader does next, it is
-    // not this panel's business any more.
-    set((s) => ({ sidebarCollapsed: on, autoCollapsed: { ...s.autoCollapsed, sidebar: false } }));
-  },
+  autoCollapsed: { secondary: null },
   mascotVisible: getItem("mascot-visible") === "true",
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
   historyQuery: "",
@@ -717,30 +705,22 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("secondary-sidebar-collapsed", JSON.stringify(next));
       return { secondarySidebarCollapsed: next, autoCollapsed: forgetSecondary(s, view) };
     }),
-  autoCollapse: (what) =>
+  autoCollapse: (view) =>
     set((s) => {
-      // The nav sidebar folds in memory only: the reader borrows the room, it
-      // does not change the user's saved preference.
-      if (what === "sidebar") {
-        if (s.sidebarCollapsed) return {};
-        return { sidebarCollapsed: true, autoCollapsed: { ...s.autoCollapsed, sidebar: true } };
-      }
-      if (s.secondarySidebarCollapsed[what]) return {};
+      if (s.secondarySidebarCollapsed[view]) return {};
       return {
-        secondarySidebarCollapsed: { ...s.secondarySidebarCollapsed, [what]: true },
-        autoCollapsed: { ...s.autoCollapsed, secondary: what },
+        secondarySidebarCollapsed: { ...s.secondarySidebarCollapsed, [view]: true },
+        autoCollapsed: { secondary: view },
       };
     }),
   autoRestore: () =>
     set((s) => {
-      const { sidebar, secondary } = s.autoCollapsed;
-      if (!sidebar && secondary == null) return {};
-      const patch: Partial<UIState> = { autoCollapsed: { sidebar: false, secondary: null } };
-      if (sidebar) patch.sidebarCollapsed = false;
-      if (secondary != null) {
-        patch.secondarySidebarCollapsed = { ...s.secondarySidebarCollapsed, [secondary]: false };
-      }
-      return patch;
+      const { secondary } = s.autoCollapsed;
+      if (secondary == null) return {};
+      return {
+        autoCollapsed: { secondary: null },
+        secondarySidebarCollapsed: { ...s.secondarySidebarCollapsed, [secondary]: false },
+      };
     }),
   settingsOpen: false,
   setSettingsOpen: (on) => set({ settingsOpen: on }),

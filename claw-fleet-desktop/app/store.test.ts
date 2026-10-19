@@ -27,47 +27,6 @@ vi.mock("@tauri-apps/api/event", () => ({
  * exercisable; what these cover is the store contract that makes an unmount
  * harmless — the value lives outside React, and it round-trips through storage.
  */
-describe("nav sidebar yields to a wide reader", () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  it("folds the widened sidebar in memory only and gives it back", async () => {
-    const { setItem, getItem } = await import("./storage");
-    setItem("sidebar-collapsed", "false");
-    const { useUIStore } = await import("./store");
-
-    useUIStore.getState().autoCollapse("sidebar");
-    expect(useUIStore.getState().sidebarCollapsed).toBe(true);
-    // The reader borrows the room; the saved preference stays "wide".
-    expect(getItem("sidebar-collapsed")).toBe("false");
-
-    useUIStore.getState().autoRestore();
-    expect(useUIStore.getState().sidebarCollapsed).toBe(false);
-  });
-
-  it("does not reopen a sidebar the user folded by hand", async () => {
-    const { setItem } = await import("./storage");
-    setItem("sidebar-collapsed", "false");
-    const { useUIStore } = await import("./store");
-
-    useUIStore.getState().autoCollapse("sidebar");
-    useUIStore.getState().setSidebarCollapsed(true);
-    useUIStore.getState().autoRestore();
-    expect(useUIStore.getState().sidebarCollapsed).toBe(true);
-  });
-
-  it("leaves an already-folded rail alone", async () => {
-    const { setItem } = await import("./storage");
-    setItem("sidebar-collapsed", "true");
-    const { useUIStore } = await import("./store");
-
-    useUIStore.getState().autoCollapse("sidebar");
-    useUIStore.getState().autoRestore();
-    expect(useUIStore.getState().sidebarCollapsed).toBe(true);
-  });
-});
-
 describe("launchpad rail filters", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -650,7 +609,7 @@ describe("auto-collapse for a wide reader", () => {
     s().autoRestore();
 
     expect(s().secondarySidebarCollapsed.history).toBe(false);
-    expect(s().autoCollapsed).toEqual({ sidebar: false, secondary: null });
+    expect(s().autoCollapsed).toEqual({ secondary: null });
   });
 
   it("never writes an auto-collapse to the settings store", async () => {

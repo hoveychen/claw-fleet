@@ -34,10 +34,6 @@ const ALL_KEYS = [
   "lang-host-default",
   // Per-view collapse map for the secondary sidebars, stored as a JSON blob.
   "secondary-sidebar-collapsed",
-  // Main nav rail: folded to the icon column (the default) or wide, and the
-  // wide width.
-  "sidebar-collapsed",
-  "sidebar-width",
   // Secondary sidebar widths — one per view that owns one.
   "history-rail-width",
   "memory-rail-width",

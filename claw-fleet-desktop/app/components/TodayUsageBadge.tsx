@@ -4,9 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TodayUsage } from "../types";
-import { fmtRailMoney } from "../railNumbers";
 import { singleFlight } from "../singleFlight";
-import { RailStatTile } from "./RailStatTile";
 import { TokenReceiptModal } from "./TokenReceiptModal";
 import stat from "./SidebarStat.module.css";
 import { Presence } from "./Presence";
@@ -24,9 +22,7 @@ function fmtTokens(n: number): string {
  * backend command (works for both LocalBackend and RemoteBackend) and refreshes
  * promptly on every `sessions-updated` push so it tracks live turns.
  */
-export function TodayUsageBadge({
-  collapsed = false,
-}: { collapsed?: boolean } = {}) {
+export function TodayUsageBadge() {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<TodayUsage | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
@@ -103,25 +99,7 @@ export function TodayUsageBadge({
   );
   const openHint = t("today_usage.open_receipt", "查看用量分析");
 
-  if (collapsed) {
-    return (
-      <>
-        {/* Rail tile: `$3.2k`, not `$3165.41` — the exact figure lives in the
-            tooltip and in the receipt this opens. */}
-        <RailStatTile
-          value={loaded ? fmtRailMoney(cost) : "—"}
-          loading={!loaded && !failed}
-          label={railLabel}
-          title={`${title}\n${openHint}`}
-          onClick={() => setShowReceipt(true)}
-          dataWizard="today-usage"
-        />
-        {receipt}
-      </>
-    );
-  }
-
-  // Unfolded sidebar card: exact spend, tokens underneath; opens the receipt.
+  // Sidebar card: exact spend, tokens underneath; opens the receipt.
   return (
     <>
       <button

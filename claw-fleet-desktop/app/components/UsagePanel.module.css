@@ -326,12 +326,7 @@
   background: rgba(0, 0, 0, 0.06);
 }
 
-/* ── Collapsed tile (rail mode) ─────────────────────────────────────────── */
-
-/* Rendered by RailStatTile (accent variant) — shared with TodayUsageBadge and
-   LiveStats so the collapsed rail stack is one consistent size. */
-
-/* ── Rail tile popover ─────────────────────────────────────────────────── */
+/* ── Usage card popover ────────────────────────────────────────────────── */
 
 .rail_anchor {
   display: flex;

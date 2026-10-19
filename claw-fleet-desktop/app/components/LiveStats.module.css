@@ -1,17 +1,7 @@
-/* Unfolded sidebar: the two metric cards stack with the column's gap. Card
+/* The two metric cards stack with the column's gap. Card
    visuals: SidebarStat.module.css. */
 .cards {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-/* ── Collapsed tile (rail mode) ─────────────────────────────────────────── */
-
-/* Both rail tiles join the rail's own tile column (.rail_tiles in
-   SessionList.module.css) rather than forming a nested box — that column owns
-   the gap and padding for the whole collapsed stack. The wrapper stays for the
-   `data-wizard` anchor. Tile visuals: RailStatTile.module.css. */
-.tiles {
-  display: contents;
 }

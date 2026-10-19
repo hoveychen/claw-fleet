@@ -1,7 +1,6 @@
-/* One stat card in the unfolded (116px) sidebar: caption over a value, with an
+/* One stat card in the 116px nav sidebar: caption over a value, with an
    optional sub-line, sparkline or per-source rows underneath. Shared by
-   TodayUsageBadge, LiveStats and UsagePanel so the stack renders at one size.
-   The folded 64px rail uses RailStatTile instead. */
+   TodayUsageBadge, LiveStats and UsagePanel so the stack renders at one size. */
 
 .card {
   display: flex;
@@ -144,7 +143,7 @@
 }
 
 /* macOS vibrancy: a flat fill reads as a hard patch on the translucent
-   sidebar, so the cards use a wash instead (same as RailStatTile). */
+   sidebar, so the cards use a wash instead. */
 :global([data-platform="macos"]) .card {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.1);
