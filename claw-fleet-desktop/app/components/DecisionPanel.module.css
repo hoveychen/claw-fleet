@@ -473,30 +473,50 @@
   border-color: var(--color-error);
 }
 
+/* Submit / Next on a question card: the one filled button in the footer, so
+   the accent is spent on "send" and nowhere else. Disabled it drops to the
+   neutral button rather than a faded accent outline. */
+.btn_primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}
+
+.btn_primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.btn_primary:disabled {
+  opacity: 1;
+  background: var(--color-bg-card);
+  color: var(--color-text-dim);
+  border-color: var(--color-border);
+}
+
 /* The v3 terminal button on a fleet__ask card. Two verdicts, one slot: the
-   agent's `taskComplete` picks which. Ink tokens (text + border + tinted hover)
-   like .btn_allow / .btn_block, not the solid fills — this sits in a footer row
-   of outlined buttons, and a filled block here would read as the primary
-   action, which Submit is. Abandon takes warning rather than error ink: giving
-   up on a task is an outcome, not a danger. */
-.btn_finish {
-  background: transparent;
-  color: var(--color-success);
-  border-color: var(--color-success);
+   agent's `taskComplete` picks which. Neutral at rest, like every other
+   secondary button in the app; the verdict's ink shows only on hover so the
+   footer carries one accent (Submit) instead of three competing colours.
+   Abandon takes warning rather than error ink: giving up on a task is an
+   outcome, not a danger. */
+.btn_finish,
+.btn_abandon {
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
 }
 
 .btn_finish:hover {
   background: rgba(var(--color-success-rgb), 0.08);
-}
-
-.btn_abandon {
-  background: transparent;
-  color: var(--color-warning);
-  border-color: var(--color-warning);
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 
 .btn_abandon:hover {
   background: rgba(var(--color-warning-rgb), 0.08);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
 }
 
 .btn_always_allow {
@@ -769,9 +789,10 @@
   gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  /* Outlined until picked; only the picked option is filled (below). */
-  border: 1px solid var(--color-border-strong);
-  background: transparent;
+  /* Same surface as the app's other buttons (card fill, hairline border)
+     until picked; only the picked option is accent-filled (below). */
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
   text-align: left;
@@ -835,7 +856,7 @@
   display: inline-block;
   margin-left: 6px;
   padding: 0 5px;
-  border: 1px solid rgba(var(--color-accent-rgb), 0.5);
+  background: var(--color-accent-soft);
   border-radius: var(--radius-xs);
   font-size: 10px;
   font-weight: 500;
@@ -844,7 +865,7 @@
   color: var(--color-accent);
 }
 .elicitation_option_selected .elicitation_option_rec {
-  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.2);
   color: var(--color-on-accent);
 }
 
@@ -864,8 +885,8 @@
   padding: 0;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
-  background: var(--color-bg-tool);
-  color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  color: var(--color-text-dim);
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
@@ -877,8 +898,7 @@
 
 .elicitation_option_edit:hover {
   background: var(--color-bg-card-hover);
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+  color: var(--color-text);
 }
 
 /* Mode toggle chip (Single ↔ Multi), shown in the card header */
