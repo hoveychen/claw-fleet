@@ -10,11 +10,16 @@ export const PROSE_MIN_PX = 420;
  * Fold the app's chrome away while a wide reader is open in a pane too narrow
  * to hold both, and put it back when the reader closes.
  *
- * The nav is a fixed icon rail with nothing left to fold, so the only chrome
- * that yields is the page's **secondary sidebar** (the task list). Nothing is
- * ever auto-collapsed twice, and only what this hook took is restored (see the
- * store's `autoCollapsed`), so a panel the reader had already folded by hand
- * does not spring open when a doc card closes.
+ * Order is deliberate: a widened **nav sidebar** folds first — folded it is
+ * still the icon rail, so the cost is nearly nothing — and only if the prose is
+ * *still* short does the page's **secondary sidebar** (the task list) follow.
+ * Nothing is ever auto-collapsed twice, and only what this hook took is
+ * restored (see the store's `autoCollapsed`), so a panel the reader had already
+ * folded by hand does not spring open when a doc card closes.
+ *
+ * One step per pass on purpose: folding a panel widens the pane, the
+ * ResizeObserver in `useDocCardWidth` reports the new width, and this runs
+ * again against a real measurement rather than a prediction of one.
  */
 export function useChromeYield({
   active,
@@ -34,15 +39,20 @@ export function useChromeYield({
 }) {
   const autoCollapse = useUIStore((s) => s.autoCollapse);
   const autoRestore = useUIStore((s) => s.autoRestore);
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const secondaryCollapsed = useUIStore((s) => !!s.secondarySidebarCollapsed[view]);
 
   useEffect(() => {
     if (!enabled || !active) return;
     if (proseW <= 0 || proseW >= PROSE_MIN_PX) return;
+    if (!sidebarCollapsed) {
+      autoCollapse("sidebar");
+      return;
+    }
     // Only pages built on PageShell have a secondary sidebar to fold; setting
     // the flag elsewhere would record a collapse nothing performs.
     if (RAILS[view] && !secondaryCollapsed) autoCollapse(view);
-  }, [enabled, active, proseW, secondaryCollapsed, view, autoCollapse]);
+  }, [enabled, active, proseW, sidebarCollapsed, secondaryCollapsed, view, autoCollapse]);
 
   // Closing the reader — or leaving the pane entirely — hands the chrome back.
   useEffect(() => {
