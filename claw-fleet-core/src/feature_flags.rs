@@ -66,17 +66,18 @@ pub fn host_features() -> HostFeatures {
     }
 }
 
-/// Env var that used to set simplified mode's host default. Simplified mode was
-/// removed in 2026-10; a deployment that still exports it gets a warning rather
-/// than having it ignored without a word.
+/// Env var that used to set simplified mode's host default. That host default
+/// was removed in 2026-10 (simplified mode is now a per-client Settings switch
+/// that only trims the sidebar); a deployment that still exports it gets a
+/// warning rather than having it ignored without a word.
 pub const REMOVED_SIMPLIFIED_ENV: &str = "FLEET_SIMPLIFIED_MODE";
 
 /// The warning for a still-set [`REMOVED_SIMPLIFIED_ENV`], or `None` when unset.
 pub fn removed_env_warning(simplified: Option<&str>) -> Option<String> {
     let raw = simplified?;
     Some(format!(
-        "warning: {REMOVED_SIMPLIFIED_ENV}={raw:?} is ignored: simplified mode was removed \
-         (Tasks / Materials are now the default layout); unset the variable"
+        "warning: {REMOVED_SIMPLIFIED_ENV}={raw:?} is ignored: the host default for simplified \
+         mode was removed (it is a Settings switch now); unset the variable"
     ))
 }
 
