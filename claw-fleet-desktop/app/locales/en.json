@@ -86,7 +86,8 @@
       "command": "Command",
       "cwd": "Directory",
       "wake": "Wake on finish",
-      "tail": "Tail lines"
+      "tail": "Tail lines",
+      "step": "Step"
     },
     "param_for": {
       "handoff": {
