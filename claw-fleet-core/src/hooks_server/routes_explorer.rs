@@ -259,6 +259,10 @@ pub(crate) fn route_explorer_roots(
             crate::file_explorer::find_by_suffix(&ws, &decode("root"), &decode("rel"), &known)
                 .map(|p| serde_json::to_string(&p).unwrap_or_default())
         }
+        crate::routes::EXPLORER_BYTES => {
+            crate::file_explorer::read_bytes(&ws, &decode("root"), &decode("rel"), &known)
+                .map(|b| serde_json::to_string(&b).unwrap_or_default())
+        }
         crate::routes::EXPLORER_SEARCH => {
             let show_ignored = query.get("ignored").map(|s| s == "true").unwrap_or(false);
             crate::file_explorer::search_by_name(

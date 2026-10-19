@@ -77,6 +77,52 @@ pub(crate) fn find_explorer_path(
         .find_explorer_path(&workspace, &root, &rel_suffix)
 }
 
+/// Whole file as base64 + mime, for the PDF / Office previews the webview
+/// renders itself. Refuses files over 30 MiB.
+#[tauri::command(async)]
+pub(crate) fn read_explorer_bytes(
+    workspace: String,
+    root: String,
+    rel_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::file_explorer::ExplorerBytes, String> {
+    state
+        .backend
+        .read_explorer_bytes(&workspace, &root, &rel_path)
+}
+
+/// Open an explorer file with the system default application. Desktop-only
+/// shell action (no `fleet serve` route: a browser tab must not open apps on
+/// the host); the path goes through the same gate as `read_explorer_file`, so
+/// it cannot escape the root. Same shape as `open_artifact_external`.
+#[tauri::command(async)]
+pub(crate) fn open_explorer_file(
+    app: tauri::AppHandle,
+    workspace: String,
+    root: String,
+    rel_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let probe = crate::cmd_probe::CmdProbe::start_watched("open_explorer_file", &rel_path);
+    let result = (|| {
+        let path = state
+            .backend
+            .resolve_explorer_file(&workspace, &root, &rel_path)?;
+        if !path.exists() {
+            return Err(format!("file no longer exists: {}", path.display()));
+        }
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string())
+    })();
+    probe.done(|| match &result {
+        Ok(()) => "ok".to_string(),
+        Err(e) => e.clone(),
+    });
+    result
+}
+
 /// Find files and directories in a project by name (case-insensitive
 /// substring, all whitespace-separated terms must match). Backs the Files
 /// page's search box.

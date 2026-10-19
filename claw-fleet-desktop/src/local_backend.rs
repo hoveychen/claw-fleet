@@ -3098,6 +3098,26 @@ impl LocalBackend {
         crate::file_explorer::find_by_suffix(workspace, root, rel_suffix, &self.known_workspaces())
     }
 
+    pub fn read_explorer_bytes(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerBytes, String> {
+        crate::file_explorer::read_bytes(workspace, root, rel_path, &self.known_workspaces())
+    }
+
+    /// Canonical path of an explorer file, through the same gate as
+    /// `read_explorer_file`. For shell actions that act on the file.
+    pub fn resolve_explorer_file(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+    ) -> Result<std::path::PathBuf, String> {
+        crate::file_explorer::resolve_file(workspace, root, rel_path, &self.known_workspaces())
+    }
+
     pub fn search_explorer_files(
         &self,
         workspace: &str,

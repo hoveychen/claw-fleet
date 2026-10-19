@@ -85,6 +85,21 @@ pub enum ExplorerFileContent {
     Binary { size_bytes: u64 },
 }
 
+/// Raw bytes of one file, for previews the webview renders itself (PDF,
+/// Office documents) rather than the text/image/binary classification of
+/// [`ExplorerFileContent`].
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerBytes {
+    pub base64: String,
+    pub mime: String,
+    pub size_bytes: u64,
+}
+
+/// Files larger than this are refused by [`read_bytes`]: the whole file is
+/// base64-inlined into one response.
+pub const BYTES_READ_CAP: u64 = 30 * 1024 * 1024; // 30 MiB
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Enumerate the browsable roots of `workspace`: the checkout itself plus
@@ -122,6 +137,53 @@ pub fn read_file(
     let ws = validate_workspace(workspace, known_workspaces)?;
     let root = resolve_root(&ws, root)?;
     read_file_at(&root, rel_path)
+}
+
+/// Resolve `rel_path` under a vetted root to the canonical path of an
+/// existing regular file. Same gate as [`read_file`]; used by callers that
+/// act on the file rather than read it (the desktop's "open with default
+/// app").
+pub fn resolve_file(
+    workspace: &str,
+    root: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<PathBuf, String> {
+    let ws = validate_workspace(workspace, known_workspaces)?;
+    let root = resolve_root(&ws, root)?;
+    let path = resolve_rel(&root, rel_path)?;
+    if !path.is_file() {
+        return Err("not a file".into());
+    }
+    Ok(path)
+}
+
+/// Read a whole file as base64 with an extension-derived mime. Same gate as
+/// [`read_file`]; refuses files over [`BYTES_READ_CAP`].
+pub fn read_bytes(
+    workspace: &str,
+    root: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<ExplorerBytes, String> {
+    let path = resolve_file(workspace, root, rel_path, known_workspaces)?;
+    let size_bytes = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if size_bytes > BYTES_READ_CAP {
+        return Err(format!(
+            "file too large to preview: {size_bytes} bytes (limit {BYTES_READ_CAP})"
+        ));
+    }
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    Ok(ExplorerBytes {
+        base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        mime: document_mime(&ext).to_string(),
+        size_bytes: bytes.len() as u64,
+    })
 }
 
 // ── Root-agnostic core ────────────────────────────────────────────────────────
@@ -925,6 +987,16 @@ fn image_mime(ext: &str) -> Option<&'static str> {
     })
 }
 
+fn document_mime(ext: &str) -> &'static str {
+    match ext {
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    }
+}
+
 fn read_head(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
@@ -1558,6 +1630,50 @@ mod tests {
         let w = ws.to_str().unwrap();
         let err = search_by_name(w, w, "a", false, &[]).unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    // ── Raw bytes ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_bytes_returns_base64_with_document_mime() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        fs::write(ws.join("doc.DOCX"), [1u8, 2, 3]).unwrap();
+        fs::write(ws.join("blob.dat"), [0u8]).unwrap();
+        let w = ws.to_str().unwrap();
+
+        let got = read_bytes(w, w, "doc.DOCX", &known(&ws)).unwrap();
+        assert_eq!(got.base64, "AQID");
+        assert_eq!(got.size_bytes, 3);
+        assert_eq!(
+            got.mime,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+        assert_eq!(
+            read_bytes(w, w, "blob.dat", &known(&ws)).unwrap().mime,
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn read_bytes_refuses_oversize_traversal_dirs_and_unknown_workspaces() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+        let big = fs::File::create(ws.join("big.pdf")).unwrap();
+        big.set_len(BYTES_READ_CAP + 1).unwrap();
+        fs::write(tmp.path().join("outside.pdf"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let err = read_bytes(w, w, "big.pdf", &known(&ws)).unwrap_err();
+        assert!(err.contains("too large"), "got: {err}");
+        let err = read_bytes(w, w, "../outside.pdf", &known(&ws)).unwrap_err();
+        assert!(err.contains("traversal"), "got: {err}");
+        assert!(read_bytes(w, w, "sub", &known(&ws)).is_err());
+        let err = read_bytes(w, w, "big.pdf", &[]).unwrap_err();
+        assert!(err.contains("not a known session workspace"), "got: {err}");
+        assert!(resolve_file(w, w, "sub", &known(&ws)).is_err());
     }
 
     #[test]

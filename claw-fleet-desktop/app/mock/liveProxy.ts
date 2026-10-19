@@ -741,6 +741,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { ws: q(a.workspace), root: q(a.root), rel: q(a.relSuffix) },
   }),
 
+  read_explorer_bytes: (a) => ({
+    method: "GET",
+    path: "/explorer_bytes",
+    query: { ws: q(a.workspace), root: q(a.root), rel: q(a.relPath) },
+  }),
+
   search_explorer_files: (a) => ({
     method: "GET",
     path: "/explorer_search",

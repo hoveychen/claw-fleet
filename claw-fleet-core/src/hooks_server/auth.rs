@@ -152,6 +152,8 @@ mod tests {
             routes::BROWSE_PATHS_ADD,
             routes::APPLY_GUARD_HOOK,
             routes::EXPLORER_FILE,
+            // Whole-file read, same power as EXPLORER_FILE.
+            routes::EXPLORER_BYTES,
             // Same read power as EXPLORER_FILE with no workspace gate at all.
             routes::EXPLORER_EXTERNAL_FILE,
             // Reads nothing, but answers "does this path exist" for paths
@@ -234,6 +236,7 @@ mod tests {
         // routes::is_public, this test fails on purpose.
         for p in [
             routes::EXPLORER_FILE,          // reads an arbitrary path
+            routes::EXPLORER_BYTES,         // reads an arbitrary path, whole file
             routes::EXPLORER_EXTERNAL_FILE, // reads an arbitrary path, ungated
             routes::EXPLORER_RESOLVE,       // existence oracle for arbitrary paths
             routes::SCRATCHPAD_FILE,        // reads an arbitrary scratchpad path

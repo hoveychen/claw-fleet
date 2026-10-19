@@ -1643,6 +1643,7 @@ fn handle_request(
             | crate::routes::EXPLORER_EXTERNAL_FILE
             | crate::routes::EXPLORER_FIND
             | crate::routes::EXPLORER_SEARCH
+            | crate::routes::EXPLORER_BYTES
             | crate::routes::EXPLORER_RESOLVE => {
                 route_explorer_roots(ctx, request, &query, json_header, path)
             }
