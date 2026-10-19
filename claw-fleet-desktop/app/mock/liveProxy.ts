@@ -1053,12 +1053,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { session_id: q(a.sessionId) },
   }),
 
-  read_review_doc: (a) => ({
-    method: "POST",
-    path: "/review_doc",
-    body: a.doc,
-  }),
-
   read_scratchpad_file: (a) => ({
     method: "GET",
     path: "/scratchpad_file",

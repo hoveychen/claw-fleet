@@ -115,7 +115,6 @@ pub const DECISIONS_PENDING: &str = "/decisions/pending";
 pub const SESSION_IMAGES: &str = "/session_images";
 /// Bytes of one of them (`?session=<thread id>&name=<file>`).
 pub const SESSION_IMAGE: &str = "/session_image";
-pub const REVIEW_DOC: &str = "/review_doc";
 pub const ENQUEUE_MESSAGE: &str = "/enqueue_message";
 pub const CANCEL_PENDING_MESSAGE: &str = "/cancel_pending_message";
 pub const ELICITATION_PENDING: &str = "/elicitation/pending";

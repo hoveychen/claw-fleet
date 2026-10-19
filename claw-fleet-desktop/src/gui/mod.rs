@@ -1881,7 +1881,6 @@ pub fn run() {
             set_notification_mode,
             get_decision_panel_config,
             set_decision_panel_config,
-            read_review_doc,
             get_user_title,
             set_user_title,
             open_notification_settings,

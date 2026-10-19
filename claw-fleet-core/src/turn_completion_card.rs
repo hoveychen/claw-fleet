@@ -685,6 +685,7 @@ mod tests {
                 outcome: crate::decision_history::FleetAskOutcome::Answered,
                 questions: Vec::new(),
                 answers: Default::default(),
+                review_docs: Vec::new(),
             })
         };
 

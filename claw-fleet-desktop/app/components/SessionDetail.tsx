@@ -43,7 +43,7 @@ import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenC
 import { refetchWikiDocsForMissingSlug, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import { DecisionDock } from "./DecisionDock";
-import { TaskRail, taskRailHasContent, useTaskArtifacts } from "./TaskRail";
+import { collectReviewDocs, TaskRail, taskRailHasContent, useTaskArtifacts } from "./TaskRail";
 import { ReaderHostContext } from "./readerHost";
 import railStyles from "./TaskRail.module.css";
 import type { TaskRow } from "./homeRows";
@@ -1626,6 +1626,14 @@ export function SessionDetail({
     return (taskPlans.find((p) => p.id === want) ?? taskPlans[0]).items;
   })();
   const taskArtifacts = useTaskArtifacts(task);
+  const reviewDocs = useMemo(
+    () =>
+      collectReviewDocs(
+        dockCards.flatMap((d) => (d.kind === "fleet-ask" ? [d.request] : [])),
+        decisionRecords.flatMap((r) => (r.kind === "fleet-ask" ? [r] : [])),
+      ),
+    [dockCards, decisionRecords],
+  );
   /* One rail: the task's sub-tasks, steps and material, and this session's
      subagents, opened docs and side questions. It follows its content by
      default — present when any section has something in it, zero width when
@@ -1639,7 +1647,7 @@ export function SessionDetail({
   const railHasContent =
     railCards > 0 ||
     (liveSession != null &&
-      taskRailHasContent(task, liveSession.id, taskSteps, taskArtifacts));
+      taskRailHasContent(task, liveSession.id, taskSteps, taskArtifacts, reviewDocs));
   const railOpen = railOverride ?? railHasContent;
   /* Width of the expanded doc card, and the grip that changes it. Owned here
      rather than in the rail because the conversation needs the same number: it
@@ -2126,6 +2134,7 @@ export function SessionDetail({
                 openSessionId={liveSession.id}
                 steps={taskSteps}
                 artifacts={taskArtifacts}
+                reviewDocs={reviewDocs}
                 className={styles.task_rail}
                 onOpenSession={(id) => onOpenSession?.(id)}
                 empty={!railHasContent}

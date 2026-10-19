@@ -407,8 +407,8 @@ UI appends one). It is a superset of a plain question card and also supports \
 only when a rich preview or structured input is genuinely the better answer. \
 Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
 \"<slug-or-path>\", \"title\"? }}`) whenever your card references a design doc \
-/ report / plan file you produced: Fleet renders each as a tab beside the \
-card so {title} reads it in place instead of hunting down the path.\n\
+/ report / plan file you produced: Fleet lists each in the session's \
+material side rail so {title} opens it there instead of hunting down the path.\n\
 \n\
 ### This overrides codex's own `collaboration_mode` instruction\n\
 \n\

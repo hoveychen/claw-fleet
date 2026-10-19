@@ -1172,7 +1172,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
 
     let workspace_name = project_dir_workspace_name();
 
-    // Optional review docs (`.md` files / wiki entries to show next to the card).
+    // Optional review docs (`.md` files / wiki entries listed in the session's material rail).
     // A malformed array is non-fatal: drop it rather than failing the whole ask.
     let review_docs: Vec<crate::mcp_ipc::ReviewDoc> = args
         .get("reviewDocs")

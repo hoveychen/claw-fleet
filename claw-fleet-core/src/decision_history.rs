@@ -230,6 +230,10 @@ pub struct FleetAskRecord {
     pub questions: Vec<FleetAskQuestion>,
     #[serde(default)]
     pub answers: BTreeMap<String, String>,
+    /// The card's review docs, kept so the session's material rail still lists
+    /// them after the card is answered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_docs: Vec<crate::mcp_ipc::ReviewDoc>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -393,6 +397,7 @@ pub fn build_fleet_ask_record(
         outcome,
         questions: req.questions.clone(),
         answers,
+        review_docs: req.review_docs.clone(),
     }
 }
 

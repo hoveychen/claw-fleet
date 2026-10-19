@@ -32,7 +32,6 @@ import { StructuredCommandView } from "./StructuredCommandView";
 import { useAutoFlip } from "./useAutoFlip";
 import { AutoHeightFrame } from "./AutoHeightFrame";
 import { DecisionAssetFrame } from "./DecisionAssetFrame";
-import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 import { Presence } from "./Presence";
 import { SkeletonText } from "./loading";
@@ -1852,14 +1851,8 @@ export function DecisionCard({
     case "elicitation":
       return <ElicitationCard decision={decision} compact={compact} docked={docked} natural={natural} />;
     case "fleet-ask":
-      return <>
-        {compact && !!decision.request.reviewDocs?.length && (
-          <div style={{ height: 320, minHeight: 0, display: "flex" }}>
-            <ReviewDocsColumn docs={decision.request.reviewDocs} sessionId={decision.request.sessionId} />
-          </div>
-        )}
-        <FleetAskCard decision={decision} compact={compact} docked={docked} natural={natural} />
-      </>;
+      // Review docs are listed in the session's material rail, not here.
+      return <FleetAskCard decision={decision} compact={compact} docked={docked} natural={natural} />;
     case "a2ui-render":
       return <A2uiRenderCard decision={decision} />;
     case "plan-approval":

@@ -7,10 +7,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronRight, CornerUpLeft, FileText, Image as ImageIcon, File } from "lucide-react";
+import { BookOpen, ChevronRight, CornerUpLeft, FileText, Image as ImageIcon, File } from "lucide-react";
 import { useUIStore } from "../store";
-import type { TaskItem } from "../types";
-import { docId } from "../detailAux";
+import type { ReviewDoc, TaskItem } from "../types";
+import { auxDocLabel, docId } from "../detailAux";
 import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type TaskRow } from "./homeRows";
@@ -58,13 +58,16 @@ export function useTaskArtifacts(row: TaskRow | null): Artifact[] | null {
 }
 
 /** Whether the task half of the rail has anything in it: sub-tasks (or a way
- *  back to the main conversation), plan steps, or filed material. */
+ *  back to the main conversation), plan steps, or filed material. Review docs
+ *  attached to the session's decision cards count even without a task. */
 export function taskRailHasContent(
   row: TaskRow | null,
   openSessionId: string,
   steps: TaskItem[] | null,
   artifacts: Artifact[] | null,
+  reviewDocs: readonly ReviewDoc[] = [],
 ): boolean {
+  if (reviewDocs.length > 0) return true;
   if (!row) return false;
   const inSubtask = !row.hops.some((h) => h.id === openSessionId);
   return (
@@ -75,11 +78,37 @@ export function taskRailHasContent(
   );
 }
 
+function reviewDocLabel(d: ReviewDoc): string {
+  return d.title?.trim() || auxDocLabel(d.kind, d.ref);
+}
+
+/** The review docs across a session's decision cards — pending ones first,
+ *  then answered ones from the decision history — one entry per doc. */
+export function collectReviewDocs(
+  pending: readonly { reviewDocs?: ReviewDoc[] | null }[],
+  answered: readonly { reviewDocs?: ReviewDoc[] | null }[],
+): ReviewDoc[] {
+  const seen = new Set<string>();
+  const out: ReviewDoc[] = [];
+  for (const src of [pending, [...answered].reverse()]) {
+    for (const card of src) {
+      for (const d of card.reviewDocs ?? []) {
+        const id = docId(d.kind, d.ref);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push(d);
+      }
+    }
+  }
+  return out;
+}
+
 export function TaskRail({
   row,
   openSessionId,
   steps,
   artifacts,
+  reviewDocs = [],
   onOpenSession,
   ambient,
   empty,
@@ -95,6 +124,10 @@ export function TaskRail({
   steps: TaskItem[] | null;
   /** See useTaskArtifacts. */
   artifacts: Artifact[] | null;
+  /** Docs the session's decision cards asked the reader to review (`reviewDocs`
+   *  on fleet__ask), deduped. Listed with the material instead of inside the
+   *  card, so a card stays a question and the doc opens in the reader. */
+  reviewDocs?: readonly ReviewDoc[];
   onOpenSession: (sessionId: string) => void;
   /** Running subagents, opened docs and side questions — SessionAuxRail. */
   ambient: ReactNode;
@@ -119,6 +152,13 @@ export function TaskRail({
     if (ingest && ingest.expandedId !== docId("artifact", a.id)) ingest.open("artifact", a.id, title);
     else requestArtifactNav(a.id);
   };
+  const openReviewDoc = (d: ReviewDoc) => {
+    if (!ingest) return;
+    const id = docId(d.kind, d.ref);
+    if (ingest.expandedId === id) return;
+    ingest.open(d.kind, d.ref, reviewDocLabel(d));
+  };
+  const materialCount = (artifacts?.length ?? 0) + reviewDocs.length;
   const [devOpen, setDevOpen] = useState(false);
 
   const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
@@ -215,14 +255,37 @@ export function TaskRail({
 
       {ambient}
 
-      {artifacts && artifacts.length > 0 && (
+      {materialCount > 0 && (
         <section className={styles.block}>
           <h3 className={styles.head}>
             {t("home.rail_material", "Material")}
-            <span className={styles.count}>{artifacts.length}</span>
+            <span className={styles.count}>{materialCount}</span>
           </h3>
           <div className={styles.card}>
-            {artifacts.map((a) => {
+            {reviewDocs.map((d) => {
+              const id = docId(d.kind, d.ref);
+              const open = ingest?.expandedId === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`${styles.item} ${open ? styles.item_open : ""}`}
+                  onClick={() => openReviewDoc(d)}
+                  aria-current={open || undefined}
+                  title={d.ref}
+                >
+                  <span className={styles.item_icon}>
+                    {d.kind === "wiki" ? (
+                      <BookOpen size={14} strokeWidth={1.8} />
+                    ) : (
+                      <FileText size={14} strokeWidth={1.8} />
+                    )}
+                  </span>
+                  <span className={styles.item_title}>{reviewDocLabel(d)}</span>
+                </button>
+              );
+            })}
+            {(artifacts ?? []).map((a) => {
               const open = ingest?.expandedId === docId("artifact", a.id);
               return (
               <button

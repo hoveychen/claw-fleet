@@ -9,7 +9,7 @@ import "../i18n";
 import type { SessionInfo } from "../types";
 import type { Artifact } from "./ArtifactsView";
 import type { TaskRow } from "./homeRows";
-import { TaskRail, taskRailHasContent } from "./TaskRail";
+import { collectReviewDocs, TaskRail, taskRailHasContent } from "./TaskRail";
 import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
 import { useUIStore } from "../store";
 
@@ -112,5 +112,31 @@ describe("TaskRail", () => {
     expect(item().getAttribute("aria-current")).toBe("true");
     act(() => item().click());
     expect(nav).toHaveBeenCalledWith("a1");
+  });
+
+  // fleet__ask reviewDocs used to render as a tab strip inside the card; they
+  // are listed with the material instead and open in the rail's reader.
+  it("lists review docs as material, even on a session with no task", () => {
+    const open = vi.fn();
+    const docs = [
+      { kind: "wiki" as const, ref: "human-zoo/menu-ux-research", title: "Menu research" },
+      { kind: "file" as const, ref: "/repo/docs/plan.md" },
+    ];
+    expect(taskRailHasContent(null, "main", null, null, docs)).toBe(true);
+    const el = render({ reviewDocs: docs }, { open, expandedId: null });
+    expect(el.textContent).toContain("Menu research");
+    expect(el.textContent).toContain("plan.md");
+    act(() => el.querySelector<HTMLButtonElement>("button[title='/repo/docs/plan.md']")!.click());
+    expect(open).toHaveBeenCalledWith("file", "/repo/docs/plan.md", "plan.md");
+  });
+});
+
+describe("collectReviewDocs", () => {
+  it("dedupes across cards, pending first, then newest answered", () => {
+    const a = { kind: "wiki" as const, ref: "a" };
+    const b = { kind: "file" as const, ref: "/b.md" };
+    const c = { kind: "wiki" as const, ref: "c" };
+    const got = collectReviewDocs([{ reviewDocs: [a] }], [{ reviewDocs: [b] }, { reviewDocs: [c, a] }, {}]);
+    expect(got.map((d) => d.ref)).toEqual(["a", "c", "/b.md"]);
   });
 });
