@@ -1768,6 +1768,12 @@ fn merge_incremental_sessions(
         }
         let age_secs = now_ms.saturating_sub(sess.last_activity_ms) as f64 / 1000.0;
         crate::session::age_out_status(sess, age_secs);
+        // Same pairing as the claude-code scan's cache-hit path: a subagent in a
+        // long tool call writes nothing, so the age-out alone demotes it to Idle
+        // on every other source's tick and its rail card blinks out. A subagent
+        // row's `pid` is its parent's live pid as of the last claude-code scan.
+        let parent_alive = sess.pid.is_some();
+        crate::session::apply_subagent_tool_liveness(sess, parent_alive, age_secs);
     }
 
     s.extend(scanned);
@@ -4852,6 +4858,67 @@ mod tests {
             SessionStatus::Active,
             "a polling source's status must survive the retain branch — aging it \
              out here fights the poll tick and blinks the run dot",
+        );
+    }
+
+    /// A subagent parked in one long tool call must survive the retain branch.
+    ///
+    /// The claude-code scan holds such a subagent at Executing past the 60s
+    /// window (`apply_subagent_tool_liveness`: the parent's process is alive and
+    /// the `tool_use` has no result yet). But every dsh poll tick (3s) leaves
+    /// claude-code clean, and the retain branch re-ran only `age_out_status` —
+    /// which demoted it to Idle, so the task rail's subagent card vanished, then
+    /// came back on the next claude-code file event, then vanished again.
+    #[test]
+    fn incremental_rescan_keeps_subagent_in_long_tool_call() {
+        let _lock = claw_fleet_core::paths::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        // As the last claude-code scan left it: two minutes into a Bash call,
+        // its parent's process alive (the subagent row carries the parent's pid).
+        let mut sub = mk_session("agent-1", "claude-code");
+        sub.is_subagent = true;
+        sub.parent_session_id = Some("parent-1".into());
+        sub.status = SessionStatus::Executing;
+        sub.pending_tool_batch = true;
+        sub.pid = Some(4242);
+        sub.last_activity_ms = 0;
+        let now_ms = 2 * 60 * 1000;
+
+        // The same subagent after its parent's process has gone away.
+        let mut orphan = sub.clone();
+        orphan.id = "agent-2".into();
+        orphan.jsonl_path = "/tmp/agent-2.jsonl".into();
+        orphan.pid = None;
+
+        // A dsh poll tick: only dsh is dirty, claude-code rows are retained.
+        let sources: Vec<Box<dyn AgentSource>> = vec![
+            Box::new(MockSource {
+                watch_fs: true,
+                ..MockSource::new("claude-code", "claude", "")
+            }),
+            Box::new(MockSource::new("dsh", "dsh", "dsh://")),
+        ];
+        let out = build_incremental_sessions(&sources, &[sub, orphan], &HashSet::from([1]), now_ms);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+
+        let status_of = |id: &str| out.iter().find(|s| s.id == id).map(|s| s.status.clone());
+        assert_eq!(
+            status_of("agent-1"),
+            Some(SessionStatus::Executing),
+            "a subagent mid tool call was aged out by another source's tick — \
+             the rail card blinks out until the next claude-code rescan",
+        );
+        assert_eq!(
+            status_of("agent-2"),
+            Some(SessionStatus::Idle),
+            "without a live parent the age-out must still apply",
         );
     }
 
