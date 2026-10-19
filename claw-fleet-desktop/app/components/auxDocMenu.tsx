@@ -61,8 +61,10 @@ export interface AuxCardTail {
   isExpanded: boolean;
   onToggle: () => void;
   onClose: () => void;
-  /** Take the card out for good, when `onClose` only collapses it. A delete
-   *  needs this: a reader left on a deliverable that no longer exists. */
+  /** Take the card out for good, on surfaces where `onClose` only collapses it
+   *  (the session rail). Also switches the menu to "take out of the rail"
+   *  wording, and a delete uses it: a reader left on a deliverable that no
+   *  longer exists. */
   onRemove?: () => void;
   onCloseOthers: () => void;
   onCloseAll: () => void;
@@ -114,26 +116,37 @@ function expandItem(tail: AuxCardTail, t: TFunction): ContextMenuItem {
 }
 
 function tailItems(tail: AuxCardTail, t: TFunction): ContextMenuItem[] {
+  // A rail card's ✕ only collapses it, so its menu says "take out of the rail"
+  // for the action that really removes it — "close" there would read as the
+  // same thing the ✕ does. Surfaces without `onRemove` (the Library page's
+  // detail) keep "close", which is what their action is.
+  const remove = tail.onRemove;
   const items: ContextMenuItem[] = [
     {
       id: "close",
-      label: t("detail.aux_close_card", "关闭此卡"),
+      label: remove
+        ? t("detail.aux_remove_card", "从右栏移出")
+        : t("detail.aux_close_card", "关闭此卡"),
       icon: <X {...ICON} />,
       dividerBefore: true,
-      onSelect: tail.onClose,
+      onSelect: remove ?? tail.onClose,
     },
   ];
   if (tail.otherCount > 0) {
     items.push(
       {
         id: "close-others",
-        label: t("detail.aux_close_others", "关闭其他 {{count}} 张", { count: tail.otherCount }),
+        label: remove
+          ? t("detail.aux_remove_others", "移出其他 {{count}} 张", { count: tail.otherCount })
+          : t("detail.aux_close_others", "关闭其他 {{count}} 张", { count: tail.otherCount }),
         icon: <XCircle {...ICON} />,
         onSelect: tail.onCloseOthers,
       },
       {
         id: "close-all",
-        label: t("detail.aux_close_all", "全部关闭"),
+        label: remove
+          ? t("detail.aux_remove_all", "全部移出")
+          : t("detail.aux_close_all", "全部关闭"),
         icon: <XCircle {...ICON} />,
         onSelect: tail.onCloseAll,
       },
