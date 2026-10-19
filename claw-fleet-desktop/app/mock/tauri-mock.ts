@@ -564,14 +564,12 @@ async function handleIPC(
 
     // File explorer (Repos view + the scratchpad tab).
     //
-    // `list_browse_paths` MUST return a list for the same reason the wiki calls
-    // below do: FilesView does `setExtraPaths(await invoke(...))` and then
-    // `extraPaths.filter(...)`, so falling through to `default: return null`
-    // threw inside a render and unmounted the entire app the moment you opened
-    // the 仓库 page under ?mock. Nothing is registered by hand in mock mode, so
-    // the honest answer is an empty list.
+    // `list_browse_paths` MUST return a list: the Projects page spreads it into
+    // its rows, so `default: return null` would throw inside a render. One
+    // hand-added directory keeps that row kind (listed first, removable) on
+    // screen under ?mock.
     case "list_browse_paths":
-      return [];
+      return ["/Users/demo/scratch/notes"];
     case "list_explorer_roots":
       return MOCK_EXPLORER_ROOTS;
     case "list_explorer_dir":

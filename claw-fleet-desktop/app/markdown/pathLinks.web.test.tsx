@@ -65,7 +65,7 @@ function openMenu(): string[] {
 
 describe("PathChip context menu — browser build", () => {
   it("still offers the project page, which works in a tab", () => {
-    expect(openMenu().join("|")).toMatch(/Open in Code|在代码页中打开/);
+    expect(openMenu().join("|")).toMatch(/Open in project code|在项目代码中打开/);
   });
 
   it("does not offer reveal-in-Finder, which would silently do nothing", () => {

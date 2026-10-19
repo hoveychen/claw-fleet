@@ -1768,7 +1768,7 @@
     "aux_copy_title": "Copy title",
     "aux_copy_artifact_id": "Copy deliverable id",
     "aux_copy_content": "Copy file contents",
-    "aux_open_in_files": "Open in Code",
+    "aux_open_in_files": "Open in project code",
     "aux_delete_artifact": "Delete this deliverable",
     "aux_version_of": "{{version}} of {{count}}",
     "aux_updated": "updated {{when}}",
@@ -2730,7 +2730,7 @@
     "reveal_searching": "Searching the project for {{path}}…"
   },
   "paths": {
-    "open_in_files": "Open in Code",
+    "open_in_files": "Open in project code",
     "reveal_in_finder": "Reveal in Finder",
     "reveal_in_explorer": "Show in File Explorer",
     "copy_path": "Copy Path",

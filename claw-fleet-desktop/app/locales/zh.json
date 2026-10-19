@@ -1765,7 +1765,7 @@
     "aux_copy_title": "复制标题",
     "aux_copy_artifact_id": "复制产出 ID",
     "aux_copy_content": "复制文件内容",
-    "aux_open_in_files": "在代码页打开",
+    "aux_open_in_files": "在项目代码中打开",
     "aux_delete_artifact": "删除这份产出",
     "aux_version_of": "{{version}} / 共 {{count}} 版",
     "aux_updated": "更新 {{when}}",
@@ -2724,7 +2724,7 @@
     "reveal_searching": "正在项目里查找 {{path}}…"
   },
   "paths": {
-    "open_in_files": "在代码页中打开",
+    "open_in_files": "在项目代码中打开",
     "reveal_in_finder": "在访达中显示",
     "reveal_in_explorer": "在资源管理器中显示",
     "copy_path": "复制路径",
