@@ -17,12 +17,9 @@ import { CopyButton } from "./CopyButton";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { canRevealPath } from "../canReveal";
 import {
-  useProcStore,
   useUIStore,
   type FileNavRequest,
 } from "../store";
-import { ProcPanel } from "./ProcPanel";
-import { ProcTerminal } from "./ProcTerminal";
 import { FilePreview, FileTree } from "./ExplorerPane";
 import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./ExplorerPane";
 import { planRevealFallback } from "./revealFallback";
@@ -117,15 +114,12 @@ export function WorkspaceExplorer({
   const { t } = useTranslation();
   const clearFileNav = useUIStore((s) => s.clearFileNav);
   const markPathUnresolved = useUIStore((s) => s.markPathUnresolved);
-  const { showIgnored, tab, activeFilePath } = useUIStore(
+  const { showIgnored, activeFilePath } = useUIStore(
     (s) => s.mainViewState.files,
   );
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setShowIgnored = (value: boolean) =>
     updateMainViewState("files", { showIgnored: value });
-  const setTab = (value: "files" | "procs") =>
-    updateMainViewState("files", { tab: value });
-  const procs = useProcStore((s) => s.procs);
   const [roots, setRoots] = useState<ExplorerRoot[] | null>(null);
   const [rootsError, setRootsError] = useState<string | null>(null);
   const [activeRoot, setActiveRoot] = useState<ExplorerRoot | null>(null);
@@ -157,17 +151,6 @@ export function WorkspaceExplorer({
   // otherwise gets no feedback until the backend walk comes back.
   const [revealSearch, setRevealSearch] = useState<string | null>(null);
   const showRevealSearch = useDelayedFlag(revealSearch !== null);
-
-  const procCount = useMemo(
-    () => procs.filter((p) => p.workspacePath === workspace).length,
-    [procs, workspace],
-  );
-
-  // A path clicked in agent prose always means "show me the file" — pull the
-  // explorer back to the files tab even if the user left it on the "Commands" tab.
-  useEffect(() => {
-    if (nav) setTab("files");
-  }, [nav]);
 
   useEffect(() => {
     invoke<ExplorerRoot[]>("list_explorer_roots", { workspace })
@@ -263,7 +246,6 @@ export function WorkspaceExplorer({
   // collide with the non-negative `fileNav` nonces the effect above uses.
   const clickNonce = useRef(0);
   const revealFile = useCallback((relPath: string) => {
-    setTab("files");
     clickNonce.current -= 1;
     setReveal({ relPath, nonce: clickNonce.current });
   }, []);
@@ -362,7 +344,7 @@ export function WorkspaceExplorer({
       <div className={styles.detail_header}>
         <div className={styles.detail_title}>
           {!hideName && <span className={styles.detail_name}>{name}</span>}
-          {tab === "files" && activeFile && (
+          {activeFile && (
             <>
               {!hideName && <span className={styles.detail_sep}>·</span>}
               {activeFile.relativePath}
@@ -371,46 +353,20 @@ export function WorkspaceExplorer({
         </div>
         <div className={styles.detail_actions}>
           {extraActions}
-          {tab === "files" && activeFile && activeRoot && (
+          {activeFile && activeRoot && (
             <CopyButton text={`${activeRoot.path}/${activeFile.relativePath}`} />
           )}
-          {tab === "files" && (
-            <label className={fileStyles.ignored_toggle}>
-              <input
-                type="checkbox"
-                checked={showIgnored}
-                onChange={(e) => setShowIgnored(e.target.checked)}
-              />
-              {t("files.show_ignored")}
-            </label>
-          )}
+          <label className={fileStyles.ignored_toggle}>
+            <input
+              type="checkbox"
+              checked={showIgnored}
+              onChange={(e) => setShowIgnored(e.target.checked)}
+            />
+            {t("files.show_ignored")}
+          </label>
         </div>
       </div>
 
-      <div className={styles.tabs}>
-        <button
-          className={`${styles.tab} ${tab === "files" ? styles.tab_active : ""}`}
-          onClick={() => setTab("files")}
-        >
-          {t("files.tab_files")}
-        </button>
-        <button
-          className={`${styles.tab} ${tab === "procs" ? styles.tab_active : ""}`}
-          onClick={() => setTab("procs")}
-        >
-          {t("files.proc_panel_title")}
-          {procCount > 0 && ` (${procCount})`}
-        </button>
-      </div>
-
-      {tab === "procs" ? (
-        <ProcPanel
-          workspace={workspace}
-          name={name}
-          renderTerminal={(p) => <ProcTerminal proc={p} />}
-        />
-      ) : (
-        <>
           {roots === null && (
             <div
               className={fileStyles.root_pills}
@@ -495,8 +451,6 @@ export function WorkspaceExplorer({
               )}
             </div>
           </div>
-        </>
-      )}
     </>
   );
 }

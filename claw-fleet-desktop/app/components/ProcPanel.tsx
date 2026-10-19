@@ -92,7 +92,7 @@ export function ProcPanel({
 }: {
   workspace: string;
   name: string;
-  /** Injected by FilesView once the terminal component exists — keeps the
+  /** Injected by ProjectsView once the terminal component exists — keeps the
    * panel testable without xterm. */
   renderTerminal?: (proc: ProcRecord) => React.ReactNode;
 }) {
