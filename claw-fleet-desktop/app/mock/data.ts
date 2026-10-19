@@ -3302,7 +3302,7 @@ export const MOCK_MODEL_CATALOG = withCliFlags([
       // 2026-09-10. DeepSeek retired the two older flash ids into aliases of
       // V4.1 Flash and is retiring V4 Pro into it too, so `models.toml` marks
       // all three unlisted and the picker offers exactly this one.
-      m("deepseek-official/deepseek-flash", "DeepSeek V4.1 Flash", "dsh", "standard", DSH_LADDER, "high"),
+      m("deepseek-official/deepseek-flash", "DeepSeek V4.1 Flash 1017", "dsh", "standard", DSH_LADDER, "high"),
     ],
   },
 ]);

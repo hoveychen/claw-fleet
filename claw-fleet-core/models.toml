@@ -306,7 +306,8 @@ max_context = 272000
 # `dsh_source::dsh_models()` 返回的 `session/modelCatalog`（复现见该模块的
 # `live_probe::dump_dsh_models`；前三条 2026-09-08 抓取，`deepseek-flash` 一条
 # 2026-09-10 向 dsh 0.1.5-rc.1 新起的 `dsh web` 抓取——**注意要新起一个**，
-# 升级 dsh 不会换掉已经在跑的 `dsh web` 进程里加载好的旧目录）。四个
+# 升级 dsh 不会换掉已经在跑的 `dsh web` 进程里加载好的旧目录；2026-10-19 升到 0.2.1-rc.2 后用
+# `live_probe::dump_dsh_models` 复测，flash 与 pro 的梯子与默认档不变）。四个
 # deepseek-official 模型一致是 `off / low / high / max`，默认 `high`——
 # **注意没有 `medium`**，这正是凭印象绝对写不对的那种事实。梯子是 provider 级的
 # （`@deepseek-ai/dsh-llm-deepseek` 的 `Config.reasoningEffort` 就是这个 union，
@@ -344,7 +345,15 @@ max_context = 272000
 # 因为 pro 档要下架」）。同一张价目页的脚注 2 给了下架时间表：2026-09-14 12:00
 # 北京时间起，发给 `deepseek-v4-pro` 的请求会被路由到 V4.1 Flash 并按 Flash 价
 # 计费，直到 V4.1 Pro 发布；官方原话是 V4.1 Flash 在性能、成本、速度、总耗时上
-# 已经全面超过 V4 Pro，所以要「有序退役」它。既然它今后连自己都不是了，速查表
+# 已经全面超过 V4 Pro，所以要「有序退役」它。
+#
+# ── 2026-10-19：版本戳变成 DeepSeek-V4.1-Flash-1017，dsh 升到 0.2.1-rc.2 ──
+# 价目页的 MODEL VERSION 一栏现在写 `DeepSeek-V4.1-Flash-1017`，模型名仍是
+# `deepseek-flash`，价格与 1M/384K 不变（峰值 0.006/0.30/1.20，`dsh_cost.rs` 无需改）。
+# 只把 label 跟上版本号。dsh 0.2.1-rc.2 也只是在 UI 上给这个 id 加了个「1017」徽标
+# （`dsh-client-ui-deepseek-model-label-1017`），catalog 里的 name 仍是
+# `DeepSeek-V4.1-Flash`。同版本的 `DEFAULT_MODELS` 只剩 flash 与 pro——两个旧 flash
+# 别名已经从 dsh 的活目录里消失，但 API 仍接受、历史会话里仍有，所以下面两条照留。既然它今后连自己都不是了，速查表
 # 就没有理由再把它作为一个可选项推给 agent。
 #
 # 用 `listed = false` 而不是 `superseded_by`，是因为这两个字段说的不是一回事：
@@ -360,7 +369,7 @@ max_context = 272000
 
 [[model]]
 id = "deepseek-official/deepseek-flash"
-label = "DeepSeek V4.1 Flash"
+label = "DeepSeek V4.1 Flash 1017"
 family = "dsh"
 tier = "standard"
 efforts = ["off", "low", "high", "max"]
