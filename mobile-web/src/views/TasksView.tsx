@@ -640,13 +640,10 @@ export function TasksView({
         <div className={styles.rowBody}>
           <div className={styles.line1}>
             <span className={styles.title}>{r.title}</span>
-            {/* Under a project heading the tag would only repeat it. */}
-            {!projectScope && groupBy === "status" && (
-              <span className={styles.project}>{r.projectName}</span>
-            )}
           </div>
-          {/* Source mark and subagent count ride on the second line, so the
-              title keeps all of the first. */}
+          {/* Source mark, subagent count and project tag ride on the second
+              line, so the title keeps all of the first even beside a stop
+              button on a 390px screen. */}
           <div className={styles.line2}>
             <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
               <AgentSourceIcon source={tip.agentSource} />
@@ -657,6 +654,10 @@ export function TasksView({
                 <Bot size={11} />
                 {subagents}
               </span>
+            )}
+            {/* Under a project heading the tag would only repeat it. */}
+            {!projectScope && groupBy === "status" && (
+              <span className={styles.project}>{r.projectName}</span>
             )}
           </div>
           {snippet ? (

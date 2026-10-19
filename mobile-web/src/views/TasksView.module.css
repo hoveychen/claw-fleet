@@ -337,14 +337,17 @@
   color: var(--color-text);
 }
 
-/* Project tag: a label, not a place — there is no "enter project". */
+/* Project tag: a label, not a place — there is no "enter project". Sits at
+   the end of the second line and gives way before the status text does. */
 .project {
-  flex-shrink: 0;
-  max-width: 40%;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 45%;
+  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 1px 8px;
+  padding: 0 7px;
   border-radius: 6px;
   /* Not bg-input: in light it equals the card, and the chip vanishes. */
   background: var(--color-bg-selected);
