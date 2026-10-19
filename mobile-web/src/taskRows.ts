@@ -148,6 +148,7 @@ export function buildTaskRows<T extends Row>(sessions: T[], opts: BuildOptions):
       hasPendingDecision: pending,
       superseded,
       waking: opts.isWaking?.(s, pending) ?? false,
+      runningSubagents: s.runningSubagentCount ?? 0,
     };
   };
 
@@ -258,6 +259,7 @@ export function subtaskRowsOf<T extends SessionInfo>(
       hasPendingDecision: pending,
       superseded,
       waking: opts.isWaking?.(s, pending) ?? false,
+      runningSubagents: s.runningSubagentCount ?? 0,
     };
   };
   return foldSubtasks(taskId, lines, view, opts.isPending, parentOutcome);

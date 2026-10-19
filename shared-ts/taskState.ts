@@ -40,6 +40,10 @@ export interface TaskMemberView {
    *  started, and the transcript has not caught up yet. Passed in for the
    *  same reason as `quiet`. */
   waking?: boolean;
+  /** `SessionInfo.runningSubagentCount`: in-process subagents (Agent tool)
+   *  still in flight. A main conversation that ended its turn to wait for
+   *  them reads `waitingInput`, but it is not finished. */
+  runningSubagents?: number;
 }
 
 export interface TaskView {
@@ -89,6 +93,12 @@ function isWatching(m: TaskMemberView): boolean {
   return m.status === "watching";
 }
 
+/** Parked on its own background subagents. Only the latest hop counts: a
+ *  superseded hop's helpers died with it. */
+function hasRunningSubagents(m: TaskMemberView): boolean {
+  return !m.superseded && (m.runningSubagents ?? 0) > 0;
+}
+
 /**
  * Which section a task belongs to.
  *
@@ -100,8 +110,9 @@ function isWatching(m: TaskMemberView): boolean {
  *    answered.
  * 2. done — the boss pressed finish / abandon.
  * 3. running — the main conversation has a turn in flight.
- * 4. waiting — the main conversation is parked on a `fleet watch`, or its
- *    sub-tasks are still working / watching.
+ * 4. waiting — the main conversation is parked on a `fleet watch` or on
+ *    background subagents it dispatched, or its sub-tasks are still
+ *    working / watching / waiting on their own subagents.
  * 5. review — nothing is moving and the task is not closed: the chain stopped
  *    and the result is waiting to be accepted.
  */
@@ -111,7 +122,11 @@ export function taskStateOf(task: TaskView): TaskState {
   if (all.some((m) => (closed ? m.hasPendingDecision : needsHuman(m)))) return "needsYou";
   if (closed) return "done";
   if (task.main.some(isWorking)) return "running";
-  if (task.main.some(isWatching) || task.subtasks.some((m) => isWorking(m) || isWatching(m))) {
+  if (
+    all.some(hasRunningSubagents) ||
+    task.main.some(isWatching) ||
+    task.subtasks.some((m) => isWorking(m) || isWatching(m))
+  ) {
     return "waiting";
   }
   return "review";

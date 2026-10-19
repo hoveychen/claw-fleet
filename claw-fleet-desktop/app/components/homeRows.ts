@@ -160,6 +160,7 @@ export function buildHomeRows(
     hasPendingDecision: isPending(s),
     superseded,
     waking: opts.isWaking?.(s, isPending(s)) ?? false,
+    runningSubagents: s.runningSubagentCount ?? 0,
   });
 
   const covered = new Set<string>();
