@@ -4,8 +4,6 @@ import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 import { pickHoverPoint } from "../sparkHover";
 import type { CostSample, SpeedSample } from "../store";
 import { useSessionsStore } from "../store";
-import { fmtRailCount, fmtRailMoney } from "../railNumbers";
-import { RailStatTile } from "./RailStatTile";
 import { SkeletonNumber } from "./loading";
 import styles from "./LiveStats.module.css";
 import stat from "./SidebarStat.module.css";
@@ -54,9 +52,7 @@ function Spark<T extends { time: number }>({
   );
 }
 
-export function LiveStats({
-  collapsed = false,
-}: { collapsed?: boolean } = {}) {
+export function LiveStats() {
   const { t } = useTranslation();
   const speedHistory = useSessionsStore((s) => s.speedHistory);
   const costHistory = useSessionsStore((s) => s.costHistory);
@@ -70,38 +66,10 @@ export function LiveStats({
   const currentSpeed = speedReady ? speedHistory[speedHistory.length - 1].speed : 0;
   const currentCost = costReady ? costHistory[costHistory.length - 1].costPerMin : 0;
 
-  if (collapsed) {
-    // Before the first scan sample there is no value yet: number skeleton, not 0.
-    return (
-      <div className={styles.tiles} data-wizard="token-speed">
-        <RailStatTile
-          value={speedReady ? fmtRailCount(currentSpeed) : ""}
-          loading={!speedReady}
-          label={t("chart.unit")}
-          title={
-            speedReady
-              ? `${t("chart.title")}: ${currentSpeed.toFixed(1)} ${t("chart.unit")}`
-              : `${t("chart.title")}: ${t("loading")}`
-          }
-        />
-        <RailStatTile
-          value={costReady ? fmtRailMoney(currentCost) : ""}
-          loading={!costReady}
-          label={t("cost_chart.unit")}
-          title={
-            costReady
-              ? `${t("cost_chart.title")}: $${currentCost.toFixed(2)} ${t("cost_chart.unit")}`
-              : `${t("cost_chart.title")}: ${t("loading")}`
-          }
-        />
-      </div>
-    );
-  }
-
   const speedShown = hoverSpeed ? hoverSpeed.speed : currentSpeed;
   const costShown = hoverCost ? hoverCost.costPerMin : currentCost;
 
-  // Unfolded sidebar: one card per metric, stacked — a side-by-side pair does
+  // One card per metric, stacked — a side-by-side pair does
   // not fit in 116px.
   return (
     <div className={styles.cards} data-wizard="token-speed">

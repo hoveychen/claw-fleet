@@ -1686,8 +1686,8 @@
     }
   },
   "sidebar": {
-    "collapse": "折叠侧边栏",
-    "expand": "展开侧边栏",
+    "collapse": "折叠列表栏",
+    "expand": "展开列表栏",
     "secondary_collapse": "折叠此侧边栏",
     "secondary_expand": "展开侧边栏"
   },

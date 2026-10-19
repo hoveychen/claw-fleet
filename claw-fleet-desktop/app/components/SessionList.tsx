@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Coffee, FileText, Folder, History, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Settings, SquareCheckBig, Sun } from "lucide-react";
 import { openSettings, runningProcTotal, useAuditStore, useDecisionStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
@@ -25,15 +25,10 @@ import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
 import { LiveStats } from "./LiveStats";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
+import { RAILS, SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 import { navSectionOf, navSectionTarget, type NavSection } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { fmtBadgeCount } from "../railNumbers";
-
-const RAIL_WIDTH = 64;
-// Unfolded width. Fixed, not drag-resizable: at the old 232px default the
-// sidebar took a fifth of a 13" window for a handful of entries and numbers.
-const WIDE_WIDTH = 116;
 
 function NavEntry({
   icon,
@@ -71,11 +66,13 @@ function NavEntry({
  * grows a second level. Settings opens the Settings overlay; its pages (audit,
  * report, skills, phone) are reached from there.
  *
- * Two widths. Folded (the default) it is a 64px icon column whose foot holds
- * bare number tiles. Unfolded it is a fixed 116px sidebar: icon + label rows,
- * a stack of stat cards (today's spend, token speed and spend rate with their
- * 5-minute sparklines, usage per source — the full usage panel opens as a
- * popover), and a toolbar with keep-awake, theme and fold.
+ * One fixed 116px width (not drag-resizable: at the old 232px default the
+ * sidebar took a fifth of a 13" window for a handful of entries and numbers):
+ * icon + label rows, a stack of stat cards (today's spend, token speed and
+ * spend rate with their 5-minute sparklines, usage per source — the full usage
+ * panel opens as a popover), and a toolbar with keep-awake, theme and a toggle
+ * for the current page's list column (its left-hand secondary sidebar). The
+ * nav itself does not fold.
  */
 export function SessionList() {
   const { t } = useTranslation();
@@ -83,6 +80,7 @@ export function SessionList() {
   const viewMode = useUIStore((s) => s.viewMode);
   const setViewMode = useUIStore((s) => s.setViewMode);
   const toggleSecondarySidebar = useUIStore((s) => s.toggleSecondarySidebar);
+  const secondaryCollapsed = useUIStore((s) => !!s.secondarySidebarCollapsed[viewMode]);
   const navLastBySection = useUIStore((s) => s.navLastBySection);
   const settingsOpen = useUIStore((s) => s.settingsOpen);
   // Simplified mode (a Settings switch) drops Projects, Review and the
@@ -98,21 +96,12 @@ export function SessionList() {
   // task's conversation, so this is how it is noticed from any other page.
   const pendingCardCount = useDecisionStore((s) => s.decisions.length);
 
-  const collapsed = useUIStore((s) => s.sidebarCollapsed);
-  const setCollapsed = useUIStore((s) => s.setSidebarCollapsed);
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
-  // Folding re-lays the sidebar out in one frame (labels drop, the panels turn
-  // into tiles) while the width is still easing; fading the new layout in hides
-  // the jump. The class differs per direction so every toggle restarts the
-  // animation, and it is null until the first toggle so launch doesn't fade.
-  const settle = useRef<"collapsed" | "expanded" | null>(null);
-  const prevCollapsed = useRef(collapsed);
-  if (prevCollapsed.current !== collapsed) {
-    prevCollapsed.current = collapsed;
-    settle.current = collapsed ? "collapsed" : "expanded";
-  }
+  // The footer toggle folds the page's list column. Audit's rail sits on the
+  // right and is a detail pane, not a list, so it is left to its own control.
+  const hasListColumn = SECONDARY_SIDEBAR_VIEWS.has(viewMode) && RAILS[viewMode]?.side !== "right";
 
   const current = navSectionOf(viewMode);
   // Re-clicking the entry of the page on screen folds that page's secondary
@@ -186,16 +175,7 @@ export function SessionList() {
 
   return (
     <>
-      <aside
-        className={`${styles.sidebar}${collapsed ? "" : ` ${styles.sidebar_wide}`}${
-          settle.current === "collapsed"
-            ? ` ${styles.settle_collapsed}`
-            : settle.current === "expanded"
-              ? ` ${styles.settle_expanded}`
-              : ""
-        }`}
-        style={{ width: collapsed ? RAIL_WIDTH : WIDE_WIDTH }}
-      >
+      <aside className={styles.sidebar}>
         {/* Drag strip under the macOS traffic lights. */}
         <div className={styles.header} data-tauri-drag-region />
 
@@ -255,89 +235,61 @@ export function SessionList() {
           />
         </nav>
 
-        {collapsed ? (
-          <>
-            <div className={styles.sidebar_content} />
-            {/* Global usage tiles stay on every page (unless simplified). */}
-            <div className={styles.rail_tiles} data-wizard="settings-footer">
-              {/* On a short window the nav keeps its room and these tiles give
-                  way first; see .rail_tile_live / .rail_tile_today. */}
-              {!simplified && (
-                <>
-                  <div className={styles.rail_tile_today}>
-                    <TodayUsageBadge collapsed />
-                  </div>
-                  <div className={styles.rail_tile_live}>
-                    <LiveStats collapsed />
-                  </div>
-                  <UsagePanel collapsed />
-                </>
-              )}
+        <div className={styles.sidebar_content}>
+          {!simplified && (
+            <>
+              <TodayUsageBadge />
+              <LiveStats />
+              <UsagePanel />
+            </>
+          )}
+        </div>
+        <div className={styles.footer} data-wizard="settings-footer">
+          <div className={styles.footer_toolbar} role="group">
+            {keepAwakeSupported && (
               <button
                 type="button"
-                className={styles.rail_expand}
-                onClick={() => setCollapsed(false)}
-                title={t("sidebar.expand")}
-                aria-label={t("sidebar.expand")}
+                className={`${styles.footer_btn}${keepAwake ? ` ${styles.footer_btn_active}` : ""}`}
+                onClick={() => setKeepAwake(!keepAwake)}
+                title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                aria-pressed={keepAwake}
               >
-                <PanelLeftOpen size={15} strokeWidth={1.6} />
+                <Coffee size={14} strokeWidth={1.6} />
               </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className={styles.sidebar_content}>
-              {!simplified && (
-                <>
-                  <TodayUsageBadge />
-                  <LiveStats />
-                  <UsagePanel />
-                </>
+            )}
+            <button
+              type="button"
+              className={styles.footer_btn}
+              // Cycle light → dark → system → light.
+              onClick={() => setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")}
+              title={`${t("theme.cycle")}: ${t(`theme.${theme}`)}`}
+              aria-label={`${t("theme.cycle")}: ${t(`theme.${theme}`)}`}
+            >
+              {theme === "light" ? (
+                <Sun size={14} strokeWidth={1.6} />
+              ) : theme === "dark" ? (
+                <Moon size={14} strokeWidth={1.6} />
+              ) : (
+                <Monitor size={14} strokeWidth={1.6} />
               )}
-            </div>
-            <div className={styles.footer} data-wizard="settings-footer">
-              <div className={styles.footer_toolbar} role="group">
-                {keepAwakeSupported && (
-                  <button
-                    type="button"
-                    className={`${styles.footer_btn}${keepAwake ? ` ${styles.footer_btn_active}` : ""}`}
-                    onClick={() => setKeepAwake(!keepAwake)}
-                    title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                    aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                    aria-pressed={keepAwake}
-                  >
-                    <Coffee size={14} strokeWidth={1.6} />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={styles.footer_btn}
-                  // Cycle light → dark → system → light.
-                  onClick={() => setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")}
-                  title={`${t("theme.cycle")}: ${t(`theme.${theme}`)}`}
-                  aria-label={`${t("theme.cycle")}: ${t(`theme.${theme}`)}`}
-                >
-                  {theme === "light" ? (
-                    <Sun size={14} strokeWidth={1.6} />
-                  ) : theme === "dark" ? (
-                    <Moon size={14} strokeWidth={1.6} />
-                  ) : (
-                    <Monitor size={14} strokeWidth={1.6} />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className={styles.footer_btn}
-                  onClick={() => setCollapsed(true)}
-                  title={t("sidebar.collapse")}
-                  aria-label={t("sidebar.collapse")}
-                >
-                  <PanelLeftClose size={14} strokeWidth={1.6} />
-                </button>
-              </div>
-            </div>
-          </>
-        )}
+            </button>
+            <button
+              type="button"
+              className={styles.footer_btn}
+              onClick={() => toggleSecondarySidebar(viewMode)}
+              disabled={!hasListColumn}
+              title={secondaryCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+              aria-label={secondaryCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+            >
+              {hasListColumn && secondaryCollapsed ? (
+                <PanelLeftOpen size={14} strokeWidth={1.6} />
+              ) : (
+                <PanelLeftClose size={14} strokeWidth={1.6} />
+              )}
+            </button>
+          </div>
+        </div>
       </aside>
 
       {/* Main content area */}

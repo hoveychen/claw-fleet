@@ -1,7 +1,6 @@
-/* ── Nav rail ────────────────────────────────────────────────────────────────
-   Folded (the default): a 64px icon column — section entries icon over label,
-   then the global number tiles at the foot. Wide (.sidebar_wide): a fixed
-   116px sidebar with label rows, a stack of stat cards and a footer toolbar. The width is set inline by SessionList.tsx. */
+/* ── Nav sidebar ─────────────────────────────────────────────────────────────
+   A fixed 116px column: label rows, a stack of stat cards and a footer
+   toolbar. */
 
 .sidebar {
   flex-shrink: 0;
@@ -12,35 +11,7 @@
   height: 100vh;
   overflow: hidden;
   position: relative;
-  transition: width var(--motion-base) var(--ease-out);
-}
-
-/* Set for one fold / unfold. Two identical keyframes under different names so
-   flipping direction restarts the animation. */
-.settle_collapsed > :is(.nav, .sidebar_content, .rail_tiles) {
-  animation: sidebar_settle_a var(--motion-base) var(--ease-out);
-}
-.settle_expanded > :is(.nav, .sidebar_content, .footer) {
-  animation: sidebar_settle_b var(--motion-base) var(--ease-out);
-}
-
-@keyframes sidebar_settle_a {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes sidebar_settle_b {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar {
-    transition: none;
-  }
-  .settle_collapsed > *,
-  .settle_expanded > * {
-    animation: none;
-  }
+  width: 116px;
 }
 
 /* Drag strip; on macOS it is also the room the traffic lights sit in. */
@@ -57,7 +28,7 @@
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
   padding: 6px 6px 10px;
   flex-shrink: 1;
   min-height: 0;
@@ -68,16 +39,15 @@
 .nav_item {
   position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 9px 0 7px;
+  gap: 7px;
+  padding: 7px 8px;
   border-radius: var(--radius-md);
   border: none;
   background: none;
   cursor: pointer;
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
   width: 100%;
@@ -96,8 +66,8 @@
 }
 
 .nav_icon {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -105,17 +75,23 @@
   line-height: 1;
 }
 
+/* A long locale label (Settings, Projects) gives way to the badge. */
 .nav_label {
   white-space: nowrap;
   line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Running-command count on Projects — neutral: a count is information, not a
    call to act. */
+/* Badges ride the icon's top-right corner: at 116px a row-end badge would
+   squeeze "Projects" / "Settings" down to an ellipsis. */
 .nav_badge_running {
   position: absolute;
-  top: 3px;
-  right: 6px;
+  top: 1px;
+  left: 17px;
   font-size: 9px;
   font-weight: 700;
   background: var(--color-bg-secondary);
@@ -129,8 +105,8 @@
 
 .nav_badge_pending {
   position: absolute;
-  top: 3px;
-  right: 6px;
+  top: 1px;
+  left: 17px;
   font-size: 9px;
   font-weight: 700;
   background: var(--color-accent);
@@ -144,64 +120,18 @@
 
 .nav_dot {
   position: absolute;
-  top: 7px;
-  right: 14px;
+  top: 5px;
+  left: 22px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--color-error-solid);
 }
 
+/* The stat-card stack; card visuals live in SidebarStat.module.css. */
 .sidebar_content {
   flex: 1;
   min-height: 0;
-}
-
-/* ── Wide variant ─────────────────────────────────────────────────────────── */
-
-.sidebar_wide .nav {
-  gap: 1px;
-  padding: 6px 6px 10px;
-}
-
-.sidebar_wide .nav_item {
-  flex-direction: row;
-  justify-content: flex-start;
-  gap: 7px;
-  padding: 7px 8px;
-  font-size: 13px;
-}
-
-.sidebar_wide .nav_icon {
-  width: 16px;
-  height: 16px;
-}
-
-/* A long locale label (Settings, Projects) gives way to the badge. */
-.sidebar_wide .nav_label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Badges ride the icon's top-right corner, as on the folded rail: at 116px a
-   row-end badge would squeeze "Projects" / "Settings" down to an ellipsis. */
-.sidebar_wide .nav_badge_running,
-.sidebar_wide .nav_badge_pending {
-  top: 1px;
-  right: auto;
-  left: 17px;
-  font-size: 9px;
-}
-
-.sidebar_wide .nav_dot {
-  top: 5px;
-  right: auto;
-  left: 22px;
-}
-
-/* The stat-card stack; card visuals live in SidebarStat.module.css. */
-.sidebar_wide .sidebar_content {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -217,7 +147,7 @@
   border-top: 1px solid var(--color-border);
 }
 
-/* Segmented toggle bar: keep-awake, theme, fold. */
+/* Segmented toggle bar: keep-awake, theme, secondary-sidebar fold. */
 .footer_toolbar {
   display: flex;
   align-items: stretch;
@@ -244,7 +174,7 @@
   border-left: 1px solid var(--color-border);
 }
 
-.footer_btn:hover {
+.footer_btn:hover:not(:disabled) {
   background: var(--color-bg-card-hover);
   color: var(--color-text);
 }
@@ -255,53 +185,10 @@
   color: var(--color-accent);
 }
 
-/* Unfold button under the rail's number tiles. */
-.rail_expand {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 26px;
-  margin-top: 2px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
-}
-
-.rail_expand:hover {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
-}
-
-/* The usage number tiles at the foot of the rail. Owns the gap and the edge
-   inset for every tile; tile visuals live in RailStatTile.module.css. */
-.rail_tiles {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 6px 10px;
-}
-
-/* Wrappers that let tiles drop out on a short window without disturbing the
-   column's gap. The nav entries matter more than the numbers, so the live
-   tiles go first, then today's spend; usage % and the unfold button stay. */
-.rail_tile_today,
-.rail_tile_live {
-  display: contents;
-}
-
-@media (max-height: 620px) {
-  .rail_tile_live {
-    display: none;
-  }
-}
-
-@media (max-height: 520px) {
-  .rail_tile_today {
-    display: none;
-  }
+/* The current page has no secondary sidebar to fold. */
+.footer_btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Main area held while the host-features probe decides whether the restored

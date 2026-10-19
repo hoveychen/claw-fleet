@@ -16,7 +16,6 @@ import { codexRateLimitBars, type TFunc } from "../codexUsage";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
-import { RailStatTile } from "./RailStatTile";
 import { Presence, useExiting } from "./Presence";
 import { SkeletonCard, SkeletonNumber, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
@@ -549,7 +548,7 @@ interface SetupStatus {
   [key: string]: unknown;
 }
 
-export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) {
+export function UsagePanel() {
   const { t } = useTranslation();
   const [hasClaude, setHasClaude] = useState(true);
   const [hasCodex, setHasCodex] = useState(false);
@@ -560,7 +559,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   // the launcher uses rather than growing a second detection path.
   const [hasDsh, setHasDsh] = useState(false);
   // Which sections exist is only known once both probes below answer; until
-  // then the expanded panel shows a placeholder instead of the default set
+  // then the details panel shows a placeholder instead of the default set
   // (Claude only), which used to grow Codex / dsh sections in late.
   const [setupResolved, setSetupResolved] = useState(false);
   const [sourcesResolved, setSourcesResolved] = useState(false);
@@ -577,7 +576,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   const ringLoading = useDelayedFlag(
     !ring && ((hasClaude && claudeFirstLoad) || ((hasCodex || !setupResolved) && codexFirstLoad)),
   );
-  // Both sidebar widths show only a summary, so load the sources up front
+  // The sidebar shows only a summary, so load the sources up front
   // rather than waiting for the details popover to mount the sections.
   const loadUsage = useUsageStore((s) => s.load);
   useEffect(() => {
@@ -616,7 +615,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
       </>
     );
 
-  // Neither sidebar width has room for the sections themselves, so clicking
+  // The sidebar has no room for the sections themselves, so clicking
   // the summary opens the full panel (per-window bars, refresh, history
   // charts) as a popover beside the sidebar.
   const openDetails = () => {
@@ -640,23 +639,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
       ? t("account.loading")
       : t("account.no_usage_data");
 
-  if (collapsed) {
-    return (
-      <div ref={tileRef} className={styles.rail_anchor}>
-        <RailStatTile
-          value={ring ? `${Math.round(ring.overall)}%` : "—"}
-          label={ring ? ring.topSource : t("account.usage")}
-          title={tooltip}
-          loading={!ring && ringLoading}
-          onClick={openDetails}
-          accent
-        />
-        {popover}
-      </div>
-    );
-  }
-
-  // Unfolded sidebar card: the headline percent, then one thin bar per source.
+  // Sidebar card: the headline percent, then one thin bar per source.
   return (
     <div ref={tileRef} className={styles.rail_anchor}>
       <button
