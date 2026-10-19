@@ -83,8 +83,8 @@ describe("buildHomeRows", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0] as TaskRow;
     expect(row.subtasks.map((st) => st.tip.id)).toEqual(["sub"]);
-    // The main line is idle but a sub-task works: the task waits.
-    expect(row.state).toBe("waiting");
+    // The main line is idle but a sub-task works: the task is running.
+    expect(row.state).toBe("running");
   });
 
   it("lists a sub-task as a task of its own when its parent has no row", () => {
