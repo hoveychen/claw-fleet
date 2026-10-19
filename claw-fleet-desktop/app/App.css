@@ -60,6 +60,15 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --motion-base: 200ms;
   --motion-shift: 10px;
 
+  /* The one surface treatment that says "this strip is a head": a soft tint
+     that fades from the recessed tone into the canvas. Used ONLY on page,
+     pane and dialog heads (PageShell `.banner`, SessionDetail `.hero` /
+     `.aux_head`, ReportView `.detail_header`, SettingsPanel `.header`) — it
+     reads as premium precisely because nothing else carries it, so do not put
+     it on cards or bodies. Lives in :root rather than per theme because both
+     stops are theme tokens; data-theme sits on <html>, so they resolve right. */
+  --surface-head: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
+
   /* Deliberately fixed light canvas — does NOT follow the theme. Hosts foreign
      content that assumes a light background: the pairing QR code (unscannable
      on a dark ground) and agent-authored HTML. Named outside the --color-bg-*

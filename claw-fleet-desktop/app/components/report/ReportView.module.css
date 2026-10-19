@@ -140,6 +140,7 @@
   gap: 10px;
   padding: 14px 24px 10px;
   border-bottom: 1px solid var(--color-border);
+  background: var(--surface-head);
   flex-shrink: 0;
 }
 
