@@ -101,7 +101,7 @@ describe("TaskRail", () => {
     const art = { id: "a1", title: "Report", name: "r.md", mime: "text/markdown", note: "" } as Artifact;
     const open = vi.fn();
     let el = render({ row: row(), artifacts: [art] }, { open, expandedId: null });
-    const item = () => el.querySelector<HTMLButtonElement>("button[title='r.md']")!;
+    const item = () => el.querySelector<HTMLButtonElement>("button[title='Report']")!;
     act(() => item().click());
     expect(open).toHaveBeenCalledWith("artifact", "a1", "Report");
     expect(nav).not.toHaveBeenCalled();

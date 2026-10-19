@@ -228,15 +228,15 @@ export function TaskRail({
               <button
                 key={a.id}
                 type="button"
-                className={`${styles.item} ${open ? styles.item_open : ""}`}
+                className={`${styles.item} ${styles.item_multiline} ${open ? styles.item_open : ""}`}
                 onClick={() => openMaterial(a)}
                 aria-current={open || undefined}
-                title={a.note || a.name}
+                title={a.note ? `${a.title || a.name}\n${a.note}` : a.title || a.name}
               >
                 <span className={styles.item_icon}>
                   <ArtifactGlyph mime={a.mime} />
                 </span>
-                <span className={styles.item_title}>{a.title || a.name}</span>
+                <span className={`${styles.item_title} ${styles.item_title_wrap}`}>{a.title || a.name}</span>
               </button>
               );
             })}
