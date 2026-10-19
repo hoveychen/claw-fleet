@@ -40,6 +40,7 @@ import { WorkspaceExplorer } from "./FilesView";
 import { PageShell } from "./PageShell";
 import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
+import { ProjectOverview } from "./ProjectOverview";
 import { Presence } from "./Presence";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { SkeletonList, Spinner, loadingStyles } from "./loading";
@@ -47,9 +48,9 @@ import { timeAgo } from "./timeAgo";
 import styles from "./ProjectsView.module.css";
 import fileStyles from "./FilesView.module.css";
 
-export type ProjectTab = "routines" | "memory" | "code" | "commands";
+export type ProjectTab = "overview" | "routines" | "memory" | "code" | "commands";
 
-const TABS: ProjectTab[] = ["routines", "memory", "code", "commands"];
+const TABS: ProjectTab[] = ["overview", "routines", "memory", "code", "commands"];
 
 /** `selectedPath` of the pinned "all routines" row. Never a real path: those
  *  are absolute. */
@@ -473,7 +474,9 @@ export function ProjectsView() {
                   className={`${styles.tab_btn}${tab === id ? ` ${styles.tab_active}` : ""}`}
                   onClick={() => set({ tab: id })}
                 >
-                  {id === "routines"
+                  {id === "overview"
+                    ? t("projects.tab_overview", "概览")
+                    : id === "routines"
                     ? t("projects.tab_routines", "例行")
                     : id === "memory"
                       ? t("projects.tab_memory", "记忆")
@@ -486,7 +489,9 @@ export function ProjectsView() {
             </div>
           </div>
           <div className={styles.pane}>
-            {tab === "routines" ? (
+            {tab === "overview" ? (
+              <ProjectOverview key={selected.path} projectPath={selected.path} onTab={(id) => set({ tab: id })} />
+            ) : tab === "routines" ? (
               <RoutinesPanel key={selected.path} projectPath={selected.path} />
             ) : tab === "memory" ? (
               <ProjectMemory key={selected.path} projectPath={selected.path} />
@@ -506,7 +511,7 @@ export function ProjectsView() {
         <EmptyState
           icon={<FolderGit2 size={28} strokeWidth={1.4} />}
           title={t("projects.pick_title", "选一个项目")}
-          subtitle={t("projects.pick_sub", "看它的例行、记忆和代码。")}
+          subtitle={t("projects.pick_sub", "看它眼下的任务、资料、记忆和代码。")}
         />
       )}
       <Presence when={cloning}>

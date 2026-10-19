@@ -76,7 +76,7 @@ export interface MainViewState {
     query: string;
     /** Repo-root path of the open project. */
     selectedPath: string | null;
-    tab: "routines" | "memory" | "code" | "commands";
+    tab: "overview" | "routines" | "memory" | "code" | "commands";
   };
   skills: {
     query: string;
@@ -134,7 +134,7 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     versionBySlug: {},
   },
   library: { query: "", project: "", selectedKey: null },
-  projects: { query: "", selectedPath: null, tab: "routines" },
+  projects: { query: "", selectedPath: null, tab: "overview" },
   skills: {
     query: "",
     sourceFilter: "all",
