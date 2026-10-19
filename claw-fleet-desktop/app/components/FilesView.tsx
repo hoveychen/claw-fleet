@@ -2,19 +2,26 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowDown,
-  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
-  FileDiff,
+  CloudDownload,
+  CloudUpload,
+  Copy,
+  Ellipsis,
+  Eye,
+  EyeOff,
+  FolderSearch,
   GitBranch,
-  Link2,
+  HardDrive,
   RefreshCw,
-  Upload,
 } from "lucide-react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { CopyButton } from "./CopyButton";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
+import { FileKindIcon, fileKind } from "./fileKind";
+import { EmptyState } from "./EmptyState";
 import { canRevealPath } from "../canReveal";
 import {
   useUIStore,
@@ -95,20 +102,18 @@ function basename(p: string): string {
 
 // ── Explorer for one workspace ───────────────────────────────────────────────
 
-/** Also embedded in the Projects page's code tab, which already shows the
- *  project's name in its own header — hence `hideName` and `extraActions`. */
+/** Embedded in the Projects page's code tab. `name` heads the breadcrumb;
+ *  `extraActions` lets the page add its own buttons to the toolbar. */
 export function WorkspaceExplorer({
   workspace,
   name,
   nav,
-  hideName = false,
   extraActions,
 }: {
   workspace: string;
   name: string;
   nav: FileNavRequest | null;
-  hideName?: boolean;
-  /** Rendered at the start of the header's action row. */
+  /** Rendered at the start of the toolbar's action group. */
   extraActions?: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -339,76 +344,163 @@ export function WorkspaceExplorer({
     [updateMainViewState],
   );
 
+  // Back to the root: no file selected, so the preview shows the recent changes.
+  const clearSelection = () => {
+    setActiveFile(null);
+    setExternalPath(null);
+    setRevealMiss(null);
+    updateMainViewState("files", { activeFilePath: null });
+  };
+
+  const git = useGitStatus(workspace, activeRoot?.path ?? null);
+  const changed = useMemo(
+    () => new Map((git.status?.dirtyFiles ?? []).map((f) => [f.path, f.status])),
+    [git.status],
+  );
+
+  const canReveal = canRevealPath();
+  const revealKey =
+    document.documentElement.getAttribute("data-platform") === "windows"
+      ? "paths.reveal_in_explorer"
+      : "paths.reveal_in_finder";
+  const absOf = (rel: string) => (activeRoot ? (rel ? `${activeRoot.path}/${rel}` : activeRoot.path) : rel);
+  const pathActions = (abs: string, dividerBefore = false): ContextMenuItem[] => [
+    ...(canReveal
+      ? [{
+          id: "reveal",
+          label: t(revealKey),
+          icon: <FolderSearch size={13} strokeWidth={1.7} />,
+          dividerBefore,
+          onSelect: () => void invoke("reveal_path", { path: abs }).catch(() => {}),
+        }]
+      : []),
+    {
+      id: "copy",
+      label: t("paths.copy_path"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      dividerBefore: dividerBefore && !canReveal,
+      onSelect: () => void writeText(abs).catch(() => {}),
+    },
+  ];
+
+  // One anchored menu at a time: "⋯", a tree row's right-click, or the root
+  // crumb's worktree switcher.
+  const [menu, setMenu] = useState<{ anchor: ContextMenuAnchor; items: ContextMenuItem[] } | null>(null);
+  const openMenuAt = (el: HTMLElement, items: ContextMenuItem[]) => {
+    const r = el.getBoundingClientRect();
+    setMenu({ anchor: { x: r.left, y: r.bottom + 4 }, items });
+  };
+
+  const openMoreMenu = (el: HTMLElement) =>
+    openMenuAt(el, [
+      {
+        id: "hidden",
+        label: t("files.show_hidden"),
+        icon: showIgnored ? <Eye size={13} strokeWidth={1.7} /> : <EyeOff size={13} strokeWidth={1.7} />,
+        active: showIgnored,
+        onSelect: () => setShowIgnored(!showIgnored),
+      },
+      ...pathActions(activeFile ? absOf(activeFile.relativePath) : absOf(""), true),
+    ]);
+
+  const onEntryContextMenu = (entry: ExplorerEntry, e: React.MouseEvent) =>
+    setMenu({
+      anchor: { x: e.clientX, y: e.clientY },
+      items: [
+        ...(entry.isDir
+          ? []
+          : [{ id: "open", label: t("files.open_here"), onSelect: () => selectFile(entry) }]),
+        ...pathActions(absOf(entry.relativePath), !entry.isDir),
+      ],
+    });
+
+  // Breadcrumb: the root, then every folder down to the selected file.
+  const crumbs = activeFile ? activeFile.relativePath.split("/") : [];
+  const revealDir = (depth: number) => {
+    clickNonce.current -= 1;
+    setReveal({ relPath: crumbs.slice(0, depth + 1).join("/"), nonce: clickNonce.current });
+  };
+  const multiRoot = (roots?.length ?? 0) > 1;
+
   return (
     <>
-      <div className={styles.detail_header}>
-        <div className={styles.detail_title}>
-          {!hideName && <span className={styles.detail_name}>{name}</span>}
-          {activeFile && (
-            <>
-              {!hideName && <span className={styles.detail_sep}>·</span>}
-              {activeFile.relativePath}
-            </>
-          )}
-        </div>
-        <div className={styles.detail_actions}>
-          {extraActions}
-          {activeFile && activeRoot && (
-            <CopyButton text={`${activeRoot.path}/${activeFile.relativePath}`} />
-          )}
-          <label className={fileStyles.ignored_toggle}>
-            <input
-              type="checkbox"
-              checked={showIgnored}
-              onChange={(e) => setShowIgnored(e.target.checked)}
-            />
-            {t("files.show_ignored")}
-          </label>
-        </div>
-      </div>
-
-          {roots === null && (
-            <div
-              className={fileStyles.root_pills}
-              role="status"
-              aria-busy="true"
-              aria-label={t("loading")}
+      <div className={fileStyles.toolbar}>
+        <nav className={fileStyles.crumbs} aria-label={t("files.tree_label")}>
+          {roots === null ? (
+            <Skeleton inline width={120} height={16} radius="var(--radius-pill)" />
+          ) : (
+            <button
+              type="button"
+              className={`${fileStyles.crumb} ${fileStyles.crumb_root}`}
+              title={activeRoot?.path}
+              onClick={(e) =>
+                multiRoot
+                  ? openMenuAt(
+                      e.currentTarget,
+                      roots.map((root) => ({
+                        id: root.path,
+                        label: root.label,
+                        sub: root.branch ?? undefined,
+                        icon: root.isWorktree ? <GitBranch size={13} strokeWidth={1.6} /> : undefined,
+                        active: root.path === activeRoot?.path,
+                        onSelect: () => selectRoot(root),
+                      })),
+                    )
+                  : clearSelection()
+              }
             >
-              <Skeleton inline width={88} height={20} radius="var(--radius-pill)" />
-              <Skeleton inline width={120} height={20} radius="var(--radius-pill)" />
-            </div>
+              <FileKindIcon kind="folder" size={14} className={fileStyles.kind_icon} />
+              {multiRoot ? activeRoot?.label : name}
+              {multiRoot && activeRoot?.branch && (
+                <span className={fileStyles.root_branch}>{activeRoot.branch}</span>
+              )}
+              {multiRoot && <ChevronDown size={12} strokeWidth={2} />}
+            </button>
           )}
-          {roots && roots.length > 1 && (
-            <div className={fileStyles.root_pills}>
-              {roots.map((root) => (
-                <button
-                  key={root.path}
-                  className={`${fileStyles.root_pill} ${activeRoot?.path === root.path ? fileStyles.root_pill_active : ""}`}
-                  onClick={() => selectRoot(root)}
-                  title={root.path}
-                >
-                  {root.isWorktree && <GitBranch size={11} strokeWidth={1.5} />}
-                  {root.label}
-                  {!root.isWorktree && root.branch && (
-                    <span className={fileStyles.root_branch}>{root.branch}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-
+          {crumbs.map((seg, i) => {
+            const last = i === crumbs.length - 1;
+            return (
+              <span key={i} className={fileStyles.crumb_seg}>
+                <ChevronRight size={12} strokeWidth={2} className={fileStyles.crumb_sep} />
+                {last ? (
+                  <span className={`${fileStyles.crumb} ${fileStyles.crumb_current}`}>{seg}</span>
+                ) : (
+                  <button type="button" className={fileStyles.crumb} onClick={() => revealDir(i)}>
+                    {seg}
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </nav>
+        <div className={fileStyles.toolbar_actions}>
+          {extraActions}
           {activeRoot && (
-            <GitStatusBar
+            <SyncStatus
               key={activeRoot.path}
+              git={git}
               workspace={workspace}
               root={activeRoot.path}
               onRevealFile={revealFile}
             />
           )}
+          <button
+            type="button"
+            className={fileStyles.icon_btn}
+            onClick={(e) => openMoreMenu(e.currentTarget)}
+            title={t("files.more")}
+            aria-label={t("files.more")}
+          >
+            <Ellipsis size={15} strokeWidth={1.8} />
+          </button>
+        </div>
+      </div>
 
           <div className={skillStyles.detail_split}>
-            <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
-              <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
+            <aside
+              className={`${skillStyles.tree_pane} ${fileStyles.tree_pane}`}
+              style={{ width: treeWidth }}
+            >
               {roots === null && <SkeletonList rows={10} meta={false} />}
               {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
               {activeRoot && (
@@ -419,6 +511,10 @@ export function WorkspaceExplorer({
                   reveal={reveal}
                   onRevealed={clearFileNav}
                   onRevealFailed={handleRevealFailed}
+                  hideDotfiles={!showIgnored}
+                  changed={changed}
+                  meta="time"
+                  onEntryContextMenu={onEntryContextMenu}
                 />
               )}
 
@@ -447,11 +543,87 @@ export function WorkspaceExplorer({
               ) : activeFile && activeRoot ? (
                 <FilePreview file={activeFile} load={readFile} />
               ) : (
-                <p className={styles.empty}>{t("files.select_file")}</p>
+                <RecentChanges git={git} onPick={revealFile} />
               )}
             </div>
           </div>
+
+      <Presence when={Boolean(menu)}>
+        {menu && <ContextMenu anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />}
+      </Presence>
     </>
+  );
+}
+
+// ── Empty preview: what changed lately ───────────────────────────────────────
+
+/** Git's one-letter status, said the way a person would. */
+function statusKey(status: string): string {
+  switch (status) {
+    case "A":
+    case "?":
+      return "files.scm.st_added";
+    case "D":
+      return "files.scm.st_deleted";
+    case "R":
+      return "files.scm.st_renamed";
+    case "U":
+      return "files.scm.st_conflict";
+    default:
+      return "files.scm.st_modified";
+  }
+}
+
+/**
+ * The preview pane before anything is picked. A blank "pick a file on the left"
+ * wasted the largest area on the page; the files the agents just touched are
+ * what someone opening a project's files most likely came to look at.
+ */
+function RecentChanges({ git, onPick }: { git: GitState; onPick: (relPath: string) => void }) {
+  const { t } = useTranslation();
+  const files = git.status?.isGit ? git.status.dirtyFiles : [];
+  if (!git.loaded) return <SkeletonList rows={5} meta={false} />;
+  if (files.length === 0) {
+    return (
+      <EmptyState
+        icon={<FileKindIcon kind="other" size={28} />}
+        title={t("files.empty_title")}
+        subtitle={t("files.empty_sub")}
+      />
+    );
+  }
+  return (
+    <div className={fileStyles.recent}>
+      <div className={fileStyles.recent_title}>{t("files.recent_title")}</div>
+      <p className={fileStyles.recent_hint}>{t("files.recent_hint")}</p>
+      <ul className={fileStyles.recent_list}>
+        {files.map((f) => {
+          const name = basename(f.path);
+          const dir = f.path.replace(/\/$/, "").slice(0, -name.length).replace(/\/$/, "");
+          return (
+            <li key={f.path}>
+              <button
+                type="button"
+                className={fileStyles.recent_row}
+                onClick={() => onPick(f.path.replace(/\/$/, ""))}
+                title={f.path}
+              >
+                <FileKindIcon
+                  kind={fileKind(name, f.path.endsWith("/"))}
+                  size={16}
+                  className={fileStyles.kind_icon}
+                />
+                <span className={fileStyles.recent_name}>{name}</span>
+                {dir && <span className={fileStyles.recent_dir}>{dir}</span>}
+                <span className={fileStyles.status_tag} data-status={f.status}>
+                  {t(statusKey(f.status))}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -643,31 +815,26 @@ export function ExternalFilePreview({
   );
 }
 
-// ── Source-control status bar for the active root ────────────────────────────
+// ── Source control: status hook + the sync pill ──────────────────────────────
 
-function GitStatusBar({
-  workspace,
-  root,
-  onRevealFile,
-}: {
-  workspace: string;
-  root: string;
-  onRevealFile: (relPath: string) => void;
-}) {
-  const { t } = useTranslation();
+interface GitState {
+  status: GitStatus | null;
+  /** False until the first git_status settles: before that a null `status`
+   *  means "not asked yet", not "not a git repo". */
+  loaded: boolean;
+  refreshing: boolean;
+  refresh: () => void;
+}
+
+/** Shared by the sync pill, the tree's change dots and the recent-changes list,
+ *  so all three agree on one read of the repo. */
+function useGitStatus(workspace: string, root: string | null): GitState {
   const [status, setStatus] = useState<GitStatus | null>(null);
-  // False until the first git_status settles: before that a null `status`
-  // means "not asked yet", not "not a git repo".
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const showRefreshing = useDelayedFlag(refreshing);
-  const [busy, setBusy] = useState<null | "push" | "pull">(null);
-  const [confirm, setConfirm] = useState<null | "push" | "pull">(null);
-  const [opMsg, setOpMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  // Whether the "N 个未提交" chip is expanded into its file list.
-  const [showFiles, setShowFiles] = useState(false);
 
   const refresh = useCallback(() => {
+    if (!root) return;
     setRefreshing(true);
     invoke<GitStatus>("git_status", { workspace, root })
       .then(setStatus)
@@ -679,9 +846,60 @@ function GitStatusBar({
   }, [workspace, root]);
 
   useEffect(() => {
-    setOpMsg(null);
+    setStatus(null);
+    setLoaded(false);
     refresh();
   }, [refresh]);
+
+  return { status, loaded, refreshing, refresh };
+}
+
+/**
+ * Where this copy of the project stands against its cloud copy, in one pill.
+ *
+ * The old bar spelled it in git's own words — the remote URL, push/pull, and
+ * git's raw stdout in a code block. The pill says only the thing that needs
+ * attention; the panel behind it says what each state means and carries the
+ * two actions, with git's output kept behind a "details" fold.
+ */
+function SyncStatus({
+  git,
+  workspace,
+  root,
+  onRevealFile,
+}: {
+  git: GitState;
+  workspace: string;
+  root: string;
+  onRevealFile: (relPath: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { status, loaded, refreshing, refresh } = git;
+  const showRefreshing = useDelayedFlag(refreshing);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<null | "push" | "pull">(null);
+  const [confirm, setConfirm] = useState<null | "push" | "pull">(null);
+  const [opMsg, setOpMsg] = useState<{ ok: boolean; op: "push" | "pull"; text: string } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      // The confirm dialog is portalled outside the wrapper; a click in it must
+      // not fold the panel it was opened from.
+      if (confirm) return;
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !confirm) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, confirm]);
 
   const runOp = useCallback(
     async (op: "push" | "pull") => {
@@ -693,163 +911,194 @@ function GitStatusBar({
           workspace,
           root,
         });
-        setOpMsg({
-          ok: res.ok,
-          text: res.output || (res.ok ? t("files.scm.op_ok") : t("files.scm.op_failed")),
-        });
+        setOpMsg({ ok: res.ok, op, text: res.output });
         refresh();
       } catch (e) {
-        setOpMsg({ ok: false, text: String(e) });
+        setOpMsg({ ok: false, op, text: String(e) });
       } finally {
         setBusy(null);
       }
     },
-    [workspace, root, refresh, t],
+    [workspace, root, refresh],
   );
 
-  // First fetch in flight: hold the bar's place with chip-shaped placeholders
-  // so it doesn't pop in and push the tree down.
   if (!loaded) {
-    return (
-      <div className={fileStyles.scm_bar} role="status" aria-busy="true" aria-label={t("loading")}>
-        <Skeleton inline width={180} height={18} radius="var(--radius-pill)" />
-        <Skeleton inline width={64} height={18} radius="var(--radius-pill)" />
-        <div className={fileStyles.scm_spacer} />
-        <Skeleton inline width={150} height={22} radius="var(--radius-pill)" />
-      </div>
-    );
+    return <Skeleton inline width={84} height={22} radius="var(--radius-pill)" />;
   }
-
-  // Nothing to show for non-git roots (plain directories).
+  // Plain folders have nothing to sync.
   if (!status || !status.isGit) return null;
 
   const ahead = status.ahead ?? 0;
   const behind = status.behind ?? 0;
   const dirty = status.dirtyCount;
-  const clean = ahead === 0 && behind === 0 && dirty === 0;
+  const localOnly = status.upstream == null;
+
+  // The pill names the most pressing state; the panel lists all of them.
+  let tone: "ok" | "warn" | "muted";
+  let label: string;
+  if (behind > 0) {
+    tone = "warn";
+    label = t("files.scm.pill_behind", { n: behind });
+  } else if (ahead > 0) {
+    tone = "warn";
+    label = t("files.scm.pill_ahead", { n: ahead });
+  } else if (dirty > 0) {
+    tone = "warn";
+    label = t("files.scm.pill_dirty", { n: dirty });
+  } else if (localOnly) {
+    tone = "muted";
+    label = t("files.scm.local_only");
+  } else {
+    tone = "ok";
+    label = t("files.scm.synced");
+  }
 
   const confirmMsg =
     confirm === "push"
       ? t("files.scm.push_confirm", {
-          branch: status.branch ?? "HEAD",
           upstream: status.upstream ?? t("files.scm.default_remote"),
         })
       : t("files.scm.pull_confirm", { branch: status.branch ?? "HEAD" });
 
   return (
-    <div className={fileStyles.scm_bar}>
-      <div className={fileStyles.scm_chips}>
-        {status.remoteUrl && (
-          <span className={fileStyles.scm_remote} title={status.remoteUrl}>
-            <Link2 size={12} strokeWidth={1.7} />
-            <span className={fileStyles.scm_remote_url}>{status.remoteUrl}</span>
-            <CopyButton text={status.remoteUrl} label={t("files.scm.copy_remote")} />
-          </span>
+    <div className={fileStyles.sync_wrap} ref={wrapRef}>
+      <button
+        type="button"
+        className={fileStyles.sync_pill}
+        data-tone={tone}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        {busy ? (
+          <Spinner size={12} />
+        ) : tone === "ok" ? (
+          <Check size={13} strokeWidth={2} />
+        ) : tone === "muted" ? (
+          <HardDrive size={13} strokeWidth={1.7} />
+        ) : (
+          <span className={fileStyles.sync_dot} />
         )}
-        {status.upstream == null ? (
-          <span className={fileStyles.scm_muted}>{t("files.scm.no_upstream")}</span>
-        ) : clean ? (
-          <span className={fileStyles.scm_synced}>
-            <Check size={12} strokeWidth={2} />
-            {t("files.scm.synced")}
-          </span>
-        ) : null}
-        {ahead > 0 && (
-          <span className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_ahead}`}>
-            <ArrowUp size={12} strokeWidth={2} />
-            {t("files.scm.ahead", { n: ahead })}
-          </span>
-        )}
-        {behind > 0 && (
-          <span className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_behind}`}>
-            <ArrowDown size={12} strokeWidth={2} />
-            {t("files.scm.behind", { n: behind })}
-          </span>
-        )}
-        {dirty > 0 && (
-          <button
-            type="button"
-            className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_dirty} ${fileStyles.scm_chip_btn}`}
-            onClick={() => setShowFiles((v) => !v)}
-            aria-expanded={showFiles}
-            title={t("files.scm.dirty_toggle")}
-          >
-            <FileDiff size={12} strokeWidth={2} />
-            {t("files.scm.dirty", { n: dirty })}
-            {showFiles ? (
-              <ChevronDown size={12} strokeWidth={2} />
-            ) : (
-              <ChevronRight size={12} strokeWidth={2} />
-            )}
-          </button>
-        )}
-      </div>
+        {label}
+        <ChevronDown size={12} strokeWidth={2} />
+      </button>
 
-      <div className={fileStyles.scm_spacer} />
-
-      <div className={fileStyles.scm_actions}>
-        <button
-          className={fileStyles.scm_btn}
-          disabled={busy !== null || refreshing}
-          onClick={() => {
-            setOpMsg(null);
-            refresh();
-          }}
-          title={t("files.scm.refresh")}
-          aria-label={t("files.scm.refresh")}
-        >
-          {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={12} strokeWidth={1.5} />}
-        </button>
-        <button
-          className={fileStyles.scm_btn}
-          disabled={busy !== null}
-          onClick={() => setConfirm("pull")}
-          title={t("files.scm.pull")}
-        >
-          {busy === "pull" ? <Spinner size={12} /> : <ArrowDown size={12} strokeWidth={1.5} />}
-          {busy === "pull" ? t("files.scm.pulling") : t("files.scm.pull")}
-        </button>
-        <button
-          className={fileStyles.scm_btn}
-          disabled={busy !== null}
-          onClick={() => setConfirm("push")}
-          title={t("files.scm.push")}
-        >
-          {busy === "push" ? <Spinner size={12} /> : <Upload size={12} strokeWidth={1.5} />}
-          {busy === "push" ? t("files.scm.pushing") : t("files.scm.push")}
-        </button>
-      </div>
-
-      {showFiles && dirty > 0 && (
-        <ul className={fileStyles.scm_files}>
-          {status.dirtyFiles.map((f) => (
-            <li key={f.path}>
+      <Presence when={open}>
+        {open && (
+          <div className={fileStyles.sync_panel} role="dialog">
+            <div className={fileStyles.sync_head}>
+              <span className={fileStyles.sync_title}>{t("files.scm.panel_title")}</span>
+              {status.branch && (
+                <span className={fileStyles.sync_branch} title={status.upstream ?? undefined}>
+                  <GitBranch size={11} strokeWidth={1.7} />
+                  {status.branch}
+                </span>
+              )}
+              <span className={fileStyles.scm_spacer} />
               <button
                 type="button"
-                className={fileStyles.scm_file}
-                onClick={() => onRevealFile(f.path)}
-                title={t("files.scm.reveal_file")}
+                className={fileStyles.icon_btn}
+                disabled={busy !== null || refreshing}
+                onClick={() => {
+                  setOpMsg(null);
+                  refresh();
+                }}
+                title={t("files.scm.refresh")}
+                aria-label={t("files.scm.refresh")}
               >
-                <span
-                  className={fileStyles.scm_file_status}
-                  data-status={f.status}
-                >
-                  {f.status}
-                </span>
-                <span className={fileStyles.scm_file_path}>{f.path}</span>
+                {showRefreshing ? <Spinner size={12} /> : <RefreshCw size={13} strokeWidth={1.7} />}
               </button>
-            </li>
-          ))}
-        </ul>
-      )}
+            </div>
 
-      {opMsg && (
-        <div
-          className={`${fileStyles.scm_msg} ${opMsg.ok ? fileStyles.scm_msg_ok : fileStyles.scm_msg_err}`}
-        >
-          {opMsg.text}
-        </div>
-      )}
+            {localOnly ? (
+              <p className={fileStyles.sync_line}>{t("files.scm.local_only_hint")}</p>
+            ) : ahead === 0 && behind === 0 && dirty === 0 ? (
+              <p className={fileStyles.sync_line}>{t("files.scm.synced_hint")}</p>
+            ) : null}
+            {behind > 0 && (
+              <p className={fileStyles.sync_line} data-tone="warn">
+                {t("files.scm.behind_hint", { n: behind })}
+              </p>
+            )}
+            {ahead > 0 && (
+              <p className={fileStyles.sync_line} data-tone="warn">
+                {t("files.scm.ahead_hint", { n: ahead })}
+              </p>
+            )}
+            {dirty > 0 && (
+              <>
+                <p className={fileStyles.sync_line} data-tone="warn">
+                  {t("files.scm.dirty_hint", { n: dirty })}
+                </p>
+                <ul className={fileStyles.scm_files}>
+                  {status.dirtyFiles.map((f) => (
+                    <li key={f.path}>
+                      <button
+                        type="button"
+                        className={fileStyles.scm_file}
+                        onClick={() => {
+                          onRevealFile(f.path.replace(/\/$/, ""));
+                          setOpen(false);
+                        }}
+                        title={t("files.scm.reveal_file")}
+                      >
+                        <span className={fileStyles.status_tag} data-status={f.status}>
+                          {t(statusKey(f.status))}
+                        </span>
+                        <span className={fileStyles.scm_file_path}>{f.path}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {!localOnly && (
+              <div className={fileStyles.sync_actions}>
+                <button
+                  type="button"
+                  className={fileStyles.sync_btn}
+                  disabled={busy !== null}
+                  onClick={() => setConfirm("pull")}
+                >
+                  {busy === "pull" ? <Spinner size={12} /> : <CloudDownload size={13} strokeWidth={1.7} />}
+                  {busy === "pull" ? t("files.scm.pulling") : t("files.scm.pull")}
+                </button>
+                <button
+                  type="button"
+                  className={`${fileStyles.sync_btn} ${ahead > 0 ? fileStyles.sync_btn_primary : ""}`}
+                  disabled={busy !== null}
+                  onClick={() => setConfirm("push")}
+                >
+                  {busy === "push" ? <Spinner size={12} /> : <CloudUpload size={13} strokeWidth={1.7} />}
+                  {busy === "push" ? t("files.scm.pushing") : t("files.scm.push")}
+                </button>
+              </div>
+            )}
+
+            {opMsg && (
+              <div className={fileStyles.sync_result} data-ok={opMsg.ok}>
+                {opMsg.ok
+                  ? t(opMsg.op === "push" ? "files.scm.push_ok" : "files.scm.pull_ok")
+                  : t("files.scm.op_failed")}
+                {opMsg.text && (
+                  <details className={fileStyles.sync_details}>
+                    <summary>{t("files.scm.details")}</summary>
+                    <pre>{opMsg.text}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {status.remoteUrl && (
+              <div className={fileStyles.sync_remote} title={status.remoteUrl}>
+                <span className={fileStyles.sync_remote_label}>{t("files.scm.remote_label")}</span>
+                <span className={fileStyles.scm_remote_url}>{status.remoteUrl}</span>
+                <CopyButton text={status.remoteUrl} label={t("files.scm.copy_remote")} />
+              </div>
+            )}
+          </div>
+        )}
+      </Presence>
 
       <Presence when={Boolean(confirm)}>{confirm && (
         <ConfirmDialog

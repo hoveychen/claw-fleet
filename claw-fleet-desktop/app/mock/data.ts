@@ -4369,12 +4369,18 @@ const dirEntry = (name: string, rel: string) => ({
   isSymlink: false,
 });
 
-const fileEntry = (name: string, rel: string, sizeBytes: number, isIgnored = false) => ({
+const fileEntry = (
+  name: string,
+  rel: string,
+  sizeBytes: number,
+  isIgnored = false,
+  modifiedMs = NOW - 2 * HOUR,
+) => ({
   name,
   relativePath: rel,
   sizeBytes,
   isDir: false,
-  modifiedMs: NOW - 2 * HOUR,
+  modifiedMs,
   isIgnored,
   isSymlink: false,
 });
@@ -4382,6 +4388,8 @@ const fileEntry = (name: string, rel: string, sizeBytes: number, isIgnored = fal
 /** relativePath of the directory being listed ("" = root) → its children. */
 export const MOCK_EXPLORER_TREE: Record<string, ReturnType<typeof fileEntry>[]> = {
   "": [
+    dirEntry(".github", ".github"),
+    dirEntry("docs", "docs"),
     dirEntry("src", "src"),
     dirEntry("app", "app"),
     dirEntry("node_modules", "node_modules"),
@@ -4389,6 +4397,16 @@ export const MOCK_EXPLORER_TREE: Record<string, ReturnType<typeof fileEntry>[]> 
     fileEntry("README.md", "README.md", 8_900),
     fileEntry("index.html", "index.html", 1_180),
     fileEntry(".env.local", ".env.local", 210, true),
+  ],
+  ".github": [fileEntry("ci.yml", ".github/ci.yml", 1_400)],
+  // Office / PDF / image deliverables, the files a non-programmer opens most.
+  docs: [
+    fileEntry("季度报告.docx", "docs/季度报告.docx", 48_200, false, NOW - 20 * 60_000),
+    fileEntry("用户数据.xlsx", "docs/用户数据.xlsx", 96_400, false, NOW - 5 * HOUR),
+    fileEntry("发布会.pptx", "docs/发布会.pptx", 1_820_000, false, NOW - 2 * DAY),
+    fileEntry("合同.pdf", "docs/合同.pdf", 310_000, false, NOW - 6 * DAY),
+    fileEntry("logo.png", "docs/logo.png", 22_800, false, NOW - 9 * DAY),
+    fileEntry("演示.mp4", "docs/演示.mp4", 18_400_000, false, NOW - 9 * DAY),
   ],
   src: [
     dirEntry("components", "src/components"),
@@ -4444,8 +4462,9 @@ export const MOCK_GIT_STATUS = {
   upstream: "origin/main",
   ahead: 2,
   behind: 0,
-  dirtyCount: 3,
+  dirtyCount: 4,
   dirtyFiles: [
+    { path: "docs/季度报告.docx", status: "A" },
     { path: "src/components/FilesView.tsx", status: "M" },
     { path: "src/git_ops.rs", status: "M" },
     { path: "notes/scratch.md", status: "?" },

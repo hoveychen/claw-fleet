@@ -570,7 +570,6 @@ function ProjectCode({ projectPath, name }: { projectPath: string; name: string 
       workspace={projectPath}
       name={name}
       nav={fileNav && repoRootPath(fileNav.workspacePath) === projectPath ? fileNav : null}
-      hideName
       extraActions={
         terminal && (
           <button
