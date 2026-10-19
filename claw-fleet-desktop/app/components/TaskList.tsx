@@ -40,7 +40,15 @@ export function formatSpan(ms: number, t: TFunction): string {
   return t("home.span_d", { n: Math.floor(h / 24) });
 }
 
-function detailText(d: RowDetail, row: HomeRow, t: TFunction, now: number): string {
+/** `hasPreview`: the row shows the last message after this text, which says
+ *  more than the generic "working" filler, so the filler is left out. */
+function detailText(
+  d: RowDetail,
+  row: HomeRow,
+  t: TFunction,
+  now: number,
+  hasPreview = false,
+): string {
   switch (d.kind) {
     case "needsYou":
       return row.kind === "card" ? t("home.detail_card_only") : t("home.detail_needs_you");
@@ -55,7 +63,8 @@ function detailText(d: RowDetail, row: HomeRow, t: TFunction, now: number): stri
     case "step": {
       const parts: string[] = [];
       if (d.total) parts.push(t("home.detail_step", { done: d.done, total: d.total }));
-      parts.push(d.text ?? t("home.detail_working"));
+      if (d.text) parts.push(d.text);
+      else if (!hasPreview) parts.push(t("home.detail_working"));
       if (d.subtasks) parts.push(t("home.detail_subtasks", d.subtasks));
       return parts.join(" · ");
     }
@@ -173,13 +182,13 @@ const TaskListRow = memo(function TaskListRow({
   const { t } = useTranslation();
   const now = Date.now();
   const abandoned = row.kind === "task" && row.state === "done" && row.outcome === "abandoned";
-  const detail =
-    detailText(rowDetail(row, t("history.untitled")), row, t, now) ||
-    (abandoned ? t("home.detail_abandoned") : "");
-  const time = rowTime(row, t, now);
   const source = showSource ? rowAgentSource(row) : null;
   const subagents = rowRunningSubagents(row);
   const preview = rowPreview(row);
+  const detail =
+    detailText(rowDetail(row, t("history.untitled")), row, t, now, preview != null) ||
+    (abandoned ? t("home.detail_abandoned") : "");
+  const time = rowTime(row, t, now);
   return (
     <div
       role="button"
@@ -421,7 +430,7 @@ function ProjectGroupSection({
           {group.path && (
             <button
               type="button"
-              className={styles.accept_all}
+              className={`${styles.accept_all} ${styles.group_focus}`}
               title={t("home.project_filter_tip")}
               onClick={() => onScopeProject(group.path!)}
             >

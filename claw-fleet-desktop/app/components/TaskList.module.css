@@ -160,8 +160,9 @@
 }
 
 .chip {
-  flex: 0 1 auto;
-  min-width: 0;
+  /* Gives way before the title does, down to a few letters. */
+  flex: 0 2 auto;
+  min-width: 3.5em;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -276,6 +277,34 @@ button.chip:hover {
 }
 
 /* ── By-project layout ───────────────────────────────────────────────────── */
+
+/* "Only this" shows on the heading's hover, so a column of project headings
+   does not read as a column of buttons. */
+.group_focus {
+  display: none;
+}
+
+.section_head:hover .group_focus,
+.group_focus:focus-visible {
+  display: inline-block;
+}
+
+/* A project heading: the name takes what is left and ellipsises. */
+.section[data-project] .section_toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.section[data-project] .section_label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section[data-project] .section_toggle svg {
+  flex: 0 0 auto;
+}
 
 .group_tail {
   display: inline-flex;
