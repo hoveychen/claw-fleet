@@ -575,7 +575,7 @@ async function handleIPC(
     case "list_explorer_roots":
       return MOCK_EXPLORER_ROOTS;
     case "list_explorer_dir":
-      return MOCK_EXPLORER_TREE[(args.relativePath as string) ?? ""] ?? [];
+      return MOCK_EXPLORER_TREE[(args.relPath as string) ?? ""] ?? [];
     // The "仓库" (Repos) page's fallback when a clicked path reveals nothing. Mock mode
     // has no filesystem to search, so nothing matches — which exercises the
     // "no such file" notice rather than pretending to rescue the click.

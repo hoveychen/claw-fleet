@@ -3079,9 +3079,6 @@
     "pick_sub": "See its routines, memory and code.",
     "memory_empty": "No memory in this project yet",
     "memory_empty_sub": "What agents note down while working here shows up here.",
-    "procs_running": "{{count}} commands running",
-    "procs_none": "No commands running",
-    "browse_code": "Browse code",
     "open_terminal": "Open terminal"
   },
   "nav_section_review": "Review",
