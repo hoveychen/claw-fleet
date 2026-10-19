@@ -913,25 +913,16 @@ export function HistoryView() {
     if (next) openRow(next);
   }, [openCardCount, activeRowKey, shownRows, openRow]);
 
-  // "What should get done?" — Enter carries the words into the new-task
-  // composer, which asks for the project and sends.
-  const [launchText, setLaunchText] = useState("");
-  const launchInputRef = useRef<HTMLInputElement>(null);
-  const submitLaunch = () => {
-    const prompt = launchText.trim();
-    if (prompt) useComposerDraftStore.getState().patchDraft("new", { prompt });
-    setLaunchText("");
-    handleNewSession();
-  };
   // ⌘N / Ctrl+N on any page lands here (the listener is app-wide, in
-  // SessionList) and focuses it. A nonce raised on another page is consumed on
-  // mount, once the input exists — and only once, so coming back to this page
-  // later does not steal focus again.
+  // SessionList) and opens the new-task composer. A nonce raised on another
+  // page is consumed on mount — and only once, so coming back to this page
+  // later does not reopen the composer.
   const launchFocusNonce = useUIStore((s) => s.launchFocusNonce);
   useEffect(() => {
     if (launchFocusNonce <= consumedLaunchFocus) return;
     consumedLaunchFocus = launchFocusNonce;
-    launchInputRef.current?.focus();
+    handleNewSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [launchFocusNonce]);
   const isMac = document.documentElement.getAttribute("data-platform") !== "windows";
 
@@ -959,30 +950,15 @@ export function HistoryView() {
       secondary={
         <>
         <div className={styles.rail_launch} data-wizard="new-session-btn">
-          <div
+          <button
+            type="button"
             className={`${styles.launch} ${openId === DRAFT_ID ? styles.launch_active : ""}`}
+            onClick={handleNewSession}
           >
             <Plus size={14} strokeWidth={2} className={styles.launch_icon} />
-            <input
-              ref={launchInputRef}
-              type="text"
-              className={styles.launch_input}
-              value={launchText}
-              onChange={(e) => setLaunchText(e.target.value)}
-              onKeyDown={(e) => {
-                // An IME's Enter commits the composition, not the task.
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  submitLaunch();
-                }
-              }}
-              placeholder={t("home.launch_placeholder")}
-              title={t("home.launch_hint")}
-              aria-label={t("home.launch_placeholder")}
-              spellCheck={false}
-            />
+            <span className={styles.launch_label}>{t("home.launch_button")}</span>
             <kbd className={styles.launch_kbd}>{isMac ? "⌘N" : "Ctrl N"}</kbd>
-          </div>
+          </button>
         </div>
         <div className={styles.controls}>
           <div className={styles.scope_row}>

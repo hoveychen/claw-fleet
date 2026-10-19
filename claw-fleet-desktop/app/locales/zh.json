@@ -2535,6 +2535,7 @@
   },
   "home": {
     "launch_placeholder": "想做什么？交给一个新任务…",
+    "launch_button": "新建任务",
     "launch_hint": "回车后选项目再发出",
     "section_needsYou": "待你处理",
     "section_running": "进行中",

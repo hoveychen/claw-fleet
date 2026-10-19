@@ -139,7 +139,7 @@ export function SessionList() {
     [viewMode, navLastBySection, avail, memoryFilter, setViewMode, toggleSecondarySidebar],
   );
 
-  // ⌘N / Ctrl+N anywhere: back to the Tasks page, focused on its launch input.
+  // ⌘N / Ctrl+N anywhere: back to the Tasks page with the new-task composer open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
