@@ -410,6 +410,30 @@
   color: var(--color-text-secondary);
 }
 
+/* A live watch's progress, ahead of the wait reason: the one part of a parked
+   row that moves. Holds its width; a long reported line is cut at the cap. */
+.watch {
+  flex: 0 0 auto;
+  max-width: 45%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.watch[data-tone="warning"] {
+  color: var(--color-warning);
+}
+.watch > svg {
+  flex: 0 0 auto;
+}
+.watchText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .line2Text {
   min-width: 0;
   overflow: hidden;

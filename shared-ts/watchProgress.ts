@@ -100,3 +100,47 @@ export function watchRing(
   }
   return null;
 }
+
+/** The subset of `WatchSummary` a task row's watch token needs. */
+export interface WatchTokenInput extends WatchProgressInput {
+  pollCount: number;
+  structuralFailStreak?: number | null;
+  targets?: ReadonlyArray<{ phase?: string | null }> | null;
+}
+
+/**
+ * A watch squeezed into one token for a task-list row, on both apps: a ring
+ * when there is a fraction (else the caller draws its watch icon) and a short
+ * tail — a percentage, the reported line, elapsed against the expected wait,
+ * or elapsed and the poll count. A session watch says how many of its targets
+ * are done. `alarming` paints it amber: progress stalled, the wait overran, a
+ * target failed, or the `until` command cannot run at all.
+ */
+export function watchRowToken(
+  w: WatchTokenInput,
+  now: number,
+): { ring: { fraction: number; alarming: boolean } | null; text: string; alarming: boolean } {
+  if (w.targets && w.targets.length > 0) {
+    const done = w.targets.filter((x) => x.phase === "done").length;
+    return {
+      ring: null,
+      text: `${done}/${w.targets.length}`,
+      alarming: w.targets.some((x) => x.phase === "failed"),
+    };
+  }
+  const pv = watchProgressView(w, now);
+  const elapsed = compactDuration(now - w.created);
+  const text =
+    pv.kind === "reported"
+      ? pv.fraction !== null
+        ? `${Math.round(pv.fraction * 100)}%`
+        : pv.text
+      : pv.kind === "time"
+        ? `${elapsed}/${compactDuration(pv.expectedMs)}`
+        : `${elapsed}·${w.pollCount}×`;
+  const alarming =
+    (w.structuralFailStreak ?? 0) > 0 ||
+    (pv.kind === "reported" && pv.stalledMs !== null) ||
+    (pv.kind === "time" && pv.overdueMs !== null);
+  return { ring: watchRing(pv), text, alarming };
+}

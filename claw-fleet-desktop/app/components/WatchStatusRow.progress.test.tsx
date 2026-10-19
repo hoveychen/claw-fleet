@@ -12,7 +12,7 @@ import "../i18n";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MOCK_SESSIONS } from "../mock/data";
 import type { SessionInfo, WatchSummary } from "../types";
-import { WATCH_STALL_MS, watchProgressView } from "../../../shared-ts/watchProgress";
+import { WATCH_STALL_MS, watchProgressView, watchRowToken } from "../../../shared-ts/watchProgress";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,6 +56,36 @@ describe("watchProgressView", () => {
 
   it("has nothing to say without either source", () => {
     expect(watchProgressView({ created: 0 }, now)).toEqual({ kind: "none" });
+  });
+});
+
+// The task-row token both apps draw.
+describe("watchRowToken", () => {
+  const now = 1_000 * MIN;
+  const base = { created: now - 30 * MIN, pollCount: 60 };
+
+  it("counts finished targets on a session watch, amber once one failed", () => {
+    expect(watchRowToken({ ...base, targets: [{ phase: "done" }, { phase: "running" }] }, now)).toEqual({
+      ring: null,
+      text: "1/2",
+      alarming: false,
+    });
+    expect(watchRowToken({ ...base, targets: [{ phase: "failed" }] }, now).alarming).toBe(true);
+  });
+
+  it("prefers a percentage, then the reported line, then time, then polls", () => {
+    const pct = watchRowToken({ ...base, progress: "3/8", progressFraction: 0.375, progressChangedAt: now }, now);
+    expect(pct).toMatchObject({ text: "38%", ring: { fraction: 0.375 } });
+    expect(watchRowToken({ ...base, progress: "building", progressChangedAt: now }, now)).toMatchObject({
+      text: "building",
+      ring: null,
+    });
+    expect(watchRowToken({ ...base, expectBy: now + 30 * MIN }, now).text).toBe("30m/1h");
+    expect(watchRowToken(base, now)).toEqual({ ring: null, text: "30m·60×", alarming: false });
+  });
+
+  it("is amber when the until command cannot run", () => {
+    expect(watchRowToken({ ...base, structuralFailStreak: 3 }, now).alarming).toBe(true);
   });
 });
 
