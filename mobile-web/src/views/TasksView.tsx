@@ -559,7 +559,7 @@ export function TasksView({
     const live = r.state === "needsYou" || r.state === "running" || r.state === "waiting";
     const mode = stopMode(tip);
     const stoppable =
-      r.state !== "done" && canControl(tip) && mode !== "spent" && clientFor(tip.deviceId) !== null;
+      live && canControl(tip) && mode !== "spent" && clientFor(tip.deviceId) !== null;
     const stopBusy = stoppingKey === itemKey(tip.deviceId, tip.id);
     const startedAt = tip.taskSummary?.startedAtMs || Math.min(...r.hops.map((h) => h.createdAtMs));
     return (
@@ -627,7 +627,7 @@ export function TasksView({
           >
             {t("验收")}
           </button>
-        ) : (
+        ) : stoppable ? null : (
           <span className={styles.time}>
             {live ? compactDuration(Date.now() - startedAt) : timeAgo(r.lastActivityMs)}
           </span>
