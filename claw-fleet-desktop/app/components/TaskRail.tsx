@@ -155,7 +155,13 @@ export function TaskRail({
                 >
                   <span className={styles.dot} style={{ background: STATE_DOT[st.state] }} />
                   <span className={styles.item_title}>{sessionTitle(st.tip, untitled)}</span>
-                  <span className={styles.item_meta}>{t(`home.section_${st.state}`)}</span>
+                  <span className={styles.item_meta}>
+                    {/* A stopped sub-task reports to the main conversation, not
+                        to the boss, so "review" is not something to accept. */}
+                    {st.state === "review"
+                      ? t("home.subtask_reported", "Reported back")
+                      : t(`home.section_${st.state}`)}
+                  </span>
                   {plan && plan.total > 0 && (
                     <span className={styles.item_meta}>
                       {plan.done}/{plan.total}

@@ -13,7 +13,7 @@ import type { SessionInfo, WikiDoc } from "../types";
 import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
 import { taskLibrary } from "../library";
 import { LibraryList, useLibrary } from "./LibraryList";
-import { isWakingSticky, statusTone, taskStateLabel, timeAgo } from "./TasksView";
+import { isWakingSticky, statusTone, subtaskStateLabel, timeAgo } from "./TasksView";
 import { EmptyState } from "./EmptyState";
 import { SkeletonList } from "./loading";
 import styles from "./TaskSegments.module.css";
@@ -117,7 +117,7 @@ export function SubtasksPane({
           <span className={styles.rowBody}>
             <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
             <span className={styles.rowMeta}>
-              {r.pending ? t("等你回答") : taskStateLabel(r.state)}
+              {r.pending ? t("等你回答") : subtaskStateLabel(r.state)}
               {r.hops.length > 1 && ` · ${t("{0} 段", r.hops.length)}`}
             </span>
           </span>
