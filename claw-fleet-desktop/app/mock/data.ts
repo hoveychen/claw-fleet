@@ -25,6 +25,7 @@ const MOCK_SESSIONS_SEED: Array<
     | "totalInputTokens"
     | "reasoningOutputTokens"
     | "pendingToolBatch"
+    | "awaitingModel"
     | "compactCount"
     | "compactPreTokens"
     | "compactPostTokens"
@@ -565,6 +566,7 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   totalInputTokens: 0,
   reasoningOutputTokens: 0,
   pendingToolBatch: false,
+  awaitingModel: false,
   compactCount: 0,
   compactPreTokens: 0,
   compactPostTokens: 0,
@@ -620,6 +622,7 @@ function mkSession(
     agentSource: "claude-code",
     lastOutcome: null,
     pendingToolBatch: false,
+    awaitingModel: false,
     compactCount: 0,
     compactPreTokens: 0,
     compactPostTokens: 0,

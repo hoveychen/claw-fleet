@@ -209,6 +209,13 @@ pub struct SessionInfo {
     /// wedged on instead of only that it is; `None` whenever the bool is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stuck_tool: Option<StuckTool>,
+    /// True when the transcript's last real record is a user prompt or
+    /// `tool_result`, i.e. the turn is open and an API response is owed (see
+    /// [`detect::awaits_model_reply`]). Computed at parse time and carried
+    /// across cache hits; `apply_pid_liveness` uses it to keep a live process
+    /// whose request is being retried out of `WaitingInput`.
+    #[serde(default)]
+    pub awaiting_model: bool,
     /// Tool the session is running right now (see [`detect::current_tool`]):
     /// the oldest unanswered `tool_use` of the latest batch, interactive waits
     /// included. Only set while the status is a live working/waiting one, so
@@ -802,6 +809,7 @@ mod tests {
             pid_precise: false,
             proc_alive: false,
             pending_tool_batch: false,
+            awaiting_model: false,
             stuck_tool: None,
             current_tool: None,
             last_skill: None,
@@ -2649,6 +2657,49 @@ mod tests {
         s.pending_tool_batch = false;
         apply_pid_liveness(&mut s, true, None, 120.0);
         assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn pid_liveness_open_turn_retrying_the_api_reads_thinking() {
+        // 2026-10-19: the machine slept right after a tool_result, the live
+        // process spent an hour retrying the request (system api_error records
+        // only), and the session read WaitingInput — its task was filed under
+        // "ready to accept" with the turn still open.
+        let tail = vec![
+            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
+            user_tool_result_msg(),
+            json!({"type": "system", "subtype": "api_error", "level": "error"}),
+        ];
+        assert!(awaits_model_reply(&tail));
+
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        s.awaiting_model = awaits_model_reply(&tail);
+        apply_pid_liveness(&mut s, true, None, 3600.0);
+        assert_eq!(s.status, SessionStatus::Thinking);
+
+        // A card hook still wins: parked on a card is WaitingInput.
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        s.awaiting_model = true;
+        apply_pid_liveness(&mut s, true, Some(&HookState::AwaitingUserInput), 3600.0);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn awaits_model_reply_is_false_when_the_move_is_the_users() {
+        // Turn ended.
+        assert!(!awaits_model_reply(&[
+            user_msg(),
+            assistant_msg(vec![text_block("done")], Some("end_turn")),
+        ]));
+        // Parked on a decision card: the tool_use has no result yet.
+        assert!(!awaits_model_reply(&[
+            user_msg(),
+            assistant_msg(vec![tool_use_block("mcp__fleet__fleet__ask")], Some("tool_use")),
+        ]));
+        // Esc interrupt is a user record but ends the turn.
+        assert!(!awaits_model_reply(&[user_msg(), interrupt_user_msg(false)]));
+        // A fresh prompt is owed a reply.
+        assert!(awaits_model_reply(&[user_msg()]));
     }
 
     #[test]

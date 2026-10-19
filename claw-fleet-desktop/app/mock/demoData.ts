@@ -56,6 +56,7 @@ function mkDemo(
     agentSource: "claude-code",
     lastOutcome: null,
     pendingToolBatch: false,
+    awaitingModel: false,
     compactCount: 0,
     compactPreTokens: 0,
     compactPostTokens: 0,

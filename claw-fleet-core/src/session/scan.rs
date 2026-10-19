@@ -323,8 +323,14 @@ pub fn apply_pid_liveness(
                 match hook_state {
                     Some(HookState::ToolExecuting) => SessionStatus::Executing,
                     Some(HookState::ModelProcessing) => SessionStatus::Thinking,
-                    // AwaitingUserInput lands here too: parked on a card is
-                    // exactly what WaitingInput means.
+                    // Parked on a card is exactly what WaitingInput means.
+                    Some(HookState::AwaitingUserInput) => SessionStatus::WaitingInput,
+                    // No hook signal (it slid out of the hooks.jsonl window,
+                    // or the turn has been one long request retry while the
+                    // machine slept or the network was down): the transcript
+                    // tail still says whose move it is. A user tail means the
+                    // API response is owed — the turn is open, not ended.
+                    _ if info.awaiting_model => SessionStatus::Thinking,
                     _ => SessionStatus::WaitingInput,
                 }
             };
@@ -1029,6 +1035,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         pid_precise: false,
         proc_alive: false,
         pending_tool_batch: false,
+        awaiting_model: false,
         stuck_tool: None,
         current_tool: None,
         last_skill: None,

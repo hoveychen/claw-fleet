@@ -372,6 +372,7 @@ mod tests {
             pid_precise: false,
             proc_alive: false,
             pending_tool_batch: false,
+            awaiting_model: false,
             stuck_tool: None,
             current_tool: None,
             last_skill: None,

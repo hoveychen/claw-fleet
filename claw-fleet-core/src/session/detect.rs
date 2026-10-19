@@ -341,6 +341,28 @@ fn is_last_meaningful_an_interrupt(last_lines: &[Value]) -> bool {
     })
 }
 
+/// True iff the turn is open on the model's side: the last user/assistant
+/// record is a `user` one (a prompt or a `tool_result`) that is not an Esc
+/// interrupt, so the next thing owed is an API response.
+///
+/// Age-unaware on purpose. The age heuristics in [`determine_status`] decay a
+/// user tail to Idle after 120s, which is right for a dead process but wrong
+/// for a live one whose request is being retried: on 2026-10-19 a session
+/// whose machine slept kept its process alive through an hour of
+/// `api_error` / `connection_retry` records, read as WaitingInput, and its
+/// task was filed under "ready to accept" while the turn was still open.
+/// [`super::apply_pid_liveness`] combines this with the live pid.
+pub(crate) fn awaits_model_reply(last_lines: &[Value]) -> bool {
+    let last = last_lines.iter().rev().find(|v| {
+        matches!(
+            v.get("type").and_then(|t| t.as_str()),
+            Some("user") | Some("assistant")
+        )
+    });
+    last.is_some_and(|v| v.get("type").and_then(|t| t.as_str()) == Some("user"))
+        && !is_last_meaningful_an_interrupt(last_lines)
+}
+
 /// Minutes-scale floor below which an unresolved tool batch is NOT treated as
 /// stuck. Must be far longer than any real single tool round-trip (a WebFetch,
 /// a Bash build, a WebSearch) so a merely-slow tool never trips it; it exists to

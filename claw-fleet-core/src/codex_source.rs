@@ -2090,6 +2090,7 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
         // Claude scan path, so Codex stamps its own here.
         proc_alive,
         pending_tool_batch: false,
+        awaiting_model: false,
         stuck_tool: None,
         current_tool: None,
         last_skill: None,
@@ -5845,6 +5846,7 @@ fn parse_codex_session(rollout_path: &Path) -> Option<SessionInfo> {
         // Claude scan path, so Codex stamps its own here.
         proc_alive,
         pending_tool_batch: false,
+        awaiting_model: false,
         stuck_tool: None,
         current_tool: None,
         last_skill: None,
