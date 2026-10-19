@@ -55,7 +55,7 @@ function isMemType(s: string | undefined): s is MemType {
   return s === "user" || s === "feedback" || s === "project" || s === "reference";
 }
 
-interface WorkspaceMemory {
+export interface WorkspaceMemory {
   source: "claude-code" | "codex" | string;
   workspaceName: string;
   workspacePath: string;
