@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Brain, CalendarClock, ChevronRight, FileText, Plus, SquareTerminal } from "lucide-react";
+import { BookOpen, Brain, CalendarClock, ChevronRight, FileText, SquareTerminal } from "lucide-react";
 
 import { useDecisionStore, useProcStore, useSessionsStore, useUIStore } from "../store";
 import { isQuietAliveSticky, isWakingSticky } from "../types";
@@ -108,7 +108,6 @@ export function ProjectOverview({
     ui().setHistoryWorkspaceFilter(projectPath);
     ui().setViewMode("history");
   };
-  const newTask = () => ui().requestNewSession({ prompt: "", workspace: projectPath });
   const openLibrary = (selectedKey: string | null) => {
     ui().updateMainViewState("library", { project: projectPath, query: "", selectedKey });
     ui().setViewMode("library");
@@ -133,16 +132,10 @@ export function ProjectOverview({
         title={t("projects.ov_open", "进行中的任务")}
         count={tasks.open.length}
         actions={
-          <>
-            <button type="button" className={styles.link} onClick={newTask}>
-              <Plus size={12} strokeWidth={2} />
-              {t("projects.ov_new_task", "新任务")}
-            </button>
-            <button type="button" className={styles.link} onClick={allTasks}>
-              {t("projects.ov_all_tasks", "在任务页查看")}
-              <ChevronRight size={12} strokeWidth={2} />
-            </button>
-          </>
+          <button type="button" className={styles.link} onClick={allTasks}>
+            {t("projects.ov_all_tasks", "在任务页查看")}
+            <ChevronRight size={12} strokeWidth={2} />
+          </button>
         }
       >
         {tasks.open.length > 0 ? (

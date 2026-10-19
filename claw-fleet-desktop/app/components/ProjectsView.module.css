@@ -230,3 +230,29 @@
 .action:hover {
   background: var(--color-bg-row-hover);
 }
+
+/* Same filled look as RoutinesPanel's .btn_primary. */
+.new_task {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.new_task:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.new_task:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-card), 0 0 0 3px var(--color-accent);
+}
