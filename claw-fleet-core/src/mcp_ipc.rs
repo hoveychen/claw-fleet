@@ -720,14 +720,58 @@ if(a==='clear'){m=[];if(sup()){CSS.highlights.delete(ALL);CSS.highlights.delete(
 if(a==='search'){m=collect(msg.q||'');all();cur(-1);parent.postMessage({__fleetFindResult:{count:m.length}},'*');return;}\
 if(a==='goto'){cur(typeof msg.index==='number'?msg.index:-1);return;}});})();</script>";
 
-/// Append the in-iframe [`AUTOHEIGHT_SCRIPT`] + [`FIND_SCRIPT`] unless the
-/// document already carries them (the autoheight marker gates both — they are
-/// always injected together).
-pub fn with_autoheight(html: &str) -> String {
-    if html.contains(AUTOHEIGHT_MARKER) {
+/// Message key the click-to-zoom bridge posts; present in [`IMG_ZOOM_SCRIPT`].
+/// The phone injects its own copy of the bridge (`mobile-web/src/iframeImgZoom.ts`)
+/// under the same key, so the parents of both apps understand either script.
+pub const IMG_ZOOM_MARKER: &str = "__fleetImgZoom";
+
+/// Click-to-zoom bridge for images inside a sandboxed preview: the parent
+/// cannot see clicks in a cross-origin frame, so a click on an `<img>` posts
+/// `{__fleetImgZoom: <src>}` up and the parent opens its lightbox.
+///
+/// It leaves alone images the document handles itself: a click something else
+/// already `preventDefault`ed, and images inside links, buttons or `onclick`
+/// targets (an interactive wiki demo keeps its own behaviour). The
+/// `__fleetImgZoomOn` flag makes a second copy — the phone appends its own —
+/// a no-op instead of a double post.
+pub const IMG_ZOOM_SCRIPT: &str = "\n<script>(function(){if(window.__fleetImgZoomOn)return;window.__fleetImgZoomOn=1;\
+var Z='a,button,[onclick],[role=button]';\
+var s=document.createElement('style');s.textContent=':where(img){cursor:zoom-in}:where('+Z+') :where(img){cursor:auto}';\
+(document.head||document.documentElement).appendChild(s);\
+document.addEventListener('click',function(e){if(e.defaultPrevented)return;var el=e.target;\
+if(!el||el.tagName!=='IMG'||(el.closest&&el.closest(Z)))return;var src=el.currentSrc||el.src;\
+if(src)parent.postMessage({__fleetImgZoom:src},'*');});})();</script>";
+
+/// Append [`IMG_ZOOM_SCRIPT`] unless the document already carries a zoom
+/// bridge. Applied when a preview is materialized and again when a stored one
+/// is served, so cards written before the bridge existed get it too.
+pub fn with_img_zoom(html: &str) -> String {
+    if html.contains(IMG_ZOOM_MARKER) {
         return html.to_string();
     }
-    format!("{html}{AUTOHEIGHT_SCRIPT}{FIND_SCRIPT}")
+    format!("{html}{IMG_ZOOM_SCRIPT}")
+}
+
+/// [`with_img_zoom`] over a served file's bytes: only `text/html` documents
+/// are touched, and anything that is not valid UTF-8 passes through as-is.
+pub fn with_img_zoom_bytes(mime: &str, bytes: Vec<u8>) -> Vec<u8> {
+    if !mime.starts_with("text/html") {
+        return bytes;
+    }
+    match String::from_utf8(bytes) {
+        Ok(html) => with_img_zoom(&html).into_bytes(),
+        Err(e) => e.into_bytes(),
+    }
+}
+
+/// Append the in-iframe [`AUTOHEIGHT_SCRIPT`] + [`FIND_SCRIPT`] unless the
+/// document already carries them (the autoheight marker gates both — they are
+/// always injected together), then the [`IMG_ZOOM_SCRIPT`] bridge.
+pub fn with_autoheight(html: &str) -> String {
+    if html.contains(AUTOHEIGHT_MARKER) {
+        return with_img_zoom(html);
+    }
+    with_img_zoom(&format!("{html}{AUTOHEIGHT_SCRIPT}{FIND_SCRIPT}"))
 }
 
 /// Whether a document has anything at all to paint.
@@ -932,10 +976,10 @@ pub fn read_decision_asset(id: &str, qidx: &str, rel: &str) -> Result<DecisionAs
     }
 
     let bytes = fs::read(&canon_file).map_err(|e| format!("read '{rel}': {e}"))?;
-    Ok(DecisionAssetBytes {
-        bytes,
-        mime: crate::wiki::mime_for_path(&canon_file).to_string(),
-    })
+    let mime = crate::wiki::mime_for_path(&canon_file).to_string();
+    // Cards stored before the zoom bridge existed get it at read time.
+    let bytes = with_img_zoom_bytes(&mime, bytes);
+    Ok(DecisionAssetBytes { bytes, mime })
 }
 
 /// JSONSchema describing `fleet__ask` arguments. The MCP `tools/list` response
@@ -1871,6 +1915,23 @@ mod tests {
         let mut blank = empty_request("card-blank");
         normalize_html(&mut blank);
         assert_eq!(blank.questions[0].html, None);
+    }
+
+    #[test]
+    fn img_zoom_bridge_rides_on_autoheight_and_on_old_documents() {
+        let out = with_autoheight("<img src=\"a.png\">");
+        assert_eq!(out.matches(IMG_ZOOM_MARKER).count(), IMG_ZOOM_SCRIPT.matches(IMG_ZOOM_MARKER).count());
+        assert_eq!(with_autoheight(&out), out, "second pass must be a no-op");
+
+        // A document stored before the bridge existed: autoheight present, zoom absent.
+        let old = format!("<img src=\"a.png\">{AUTOHEIGHT_SCRIPT}{FIND_SCRIPT}");
+        assert!(with_autoheight(&old).contains(IMG_ZOOM_SCRIPT));
+
+        // Only html is touched at serve time.
+        let png = vec![0x89, b'P', b'N', b'G'];
+        assert_eq!(with_img_zoom_bytes("image/png", png.clone()), png);
+        let served = with_img_zoom_bytes("text/html; charset=utf-8", b"<p>x</p>".to_vec());
+        assert!(String::from_utf8(served).unwrap().ends_with(IMG_ZOOM_SCRIPT));
     }
 
     #[test]

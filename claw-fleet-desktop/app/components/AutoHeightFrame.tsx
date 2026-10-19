@@ -7,6 +7,7 @@ import {
 } from "../decisionFrame";
 import { Skeleton } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
+import { useIframeImgZoom } from "./useIframeImgZoom";
 
 /**
  * The iframe every decision card renders its `html` preview in — the one place
@@ -52,6 +53,7 @@ export function AutoHeightFrame({
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading = pending || loadedKey !== docKey;
   const showSkeleton = useDelayedFlag(loading);
+  const lightbox = useIframeImgZoom(ref);
 
   useEffect(() => {
     // A different document is about to load: drop the old measurement rather
@@ -92,6 +94,7 @@ export function AutoHeightFrame({
           <Skeleton height="100%" radius="0.4rem" />
         </div>
       )}
+      {lightbox}
     </div>
   );
 }
