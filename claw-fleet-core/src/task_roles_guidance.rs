@@ -102,8 +102,9 @@ pub fn render_role_only_reminder(session_id: Option<&str>) -> Option<String> {
 /// Shown to a sub-task that tried to raise a decision card. Agent-facing, so
 /// English like the other tool refusals.
 pub const SUBTASK_ASK_REFUSAL: &str = "\
-fleet__ask is not available to sub-tasks. You were spawned by a task's main conversation, and only \
-that conversation talks to the user. Do not retry and do not fall back to AskUserQuestion. Put \
+Asking the user (fleet__ask, AskUserQuestion, ask_user_question) is not available to sub-tasks. \
+You were spawned by a task's main conversation, and only that conversation talks to the user. Do \
+not retry and do not fall back to another asking tool. Put \
 the report — and any question that needs clarifying, with the candidate answers and your leaning \
 — in your final reply and end the turn; the main conversation reads it and settles the question \
 itself, asking the user only if it has to.";
