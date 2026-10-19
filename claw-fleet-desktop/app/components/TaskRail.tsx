@@ -13,7 +13,7 @@ import type { ReviewDoc, TaskItem } from "../types";
 import { auxDocLabel, docId } from "../detailAux";
 import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
-import { rowMemberIds, sessionTitle, stepText, type TaskRow } from "./homeRows";
+import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
 import styles from "./TaskRail.module.css";
 
@@ -78,6 +78,38 @@ export function taskRailHasContent(
   );
 }
 
+/** The step id (`P3`) a plan item's text starts with, if any. */
+export function stepIdOf(text: string): string | null {
+  return /^\s*\*{0,2}(P\d+[a-z]?)\*{0,2}/.exec(text)?.[1] ?? null;
+}
+
+/** Sub-tasks grouped under the step they were dispatched for (`fleet__spawn`
+ *  `step`), keyed by step id. Only links into `planId` — the plan whose steps
+ *  are on screen — count; the rest, and sub-tasks spawned without a step,
+ *  come back in `loose`. */
+export function groupSubtasksByStep(
+  row: TaskRow,
+  planId: string | null,
+): { byStep: Map<string, SubtaskRow[]>; loose: SubtaskRow[] } {
+  const links = row.hops.find((h) => h.taskSummary)?.taskSummary?.subtaskSteps ?? [];
+  const stepOf = new Map(
+    links.filter((l) => planId != null && l.planId === planId).map((l) => [l.taskId, l.step]),
+  );
+  const byStep = new Map<string, SubtaskRow[]>();
+  const loose: SubtaskRow[] = [];
+  for (const st of row.subtasks) {
+    const step = st.tip.taskId ? stepOf.get(st.tip.taskId) : undefined;
+    if (!step) {
+      loose.push(st);
+      continue;
+    }
+    const list = byStep.get(step);
+    if (list) list.push(st);
+    else byStep.set(step, [st]);
+  }
+  return { byStep, loose };
+}
+
 function reviewDocLabel(d: ReviewDoc): string {
   return d.title?.trim() || auxDocLabel(d.kind, d.ref);
 }
@@ -107,6 +139,7 @@ export function TaskRail({
   row,
   openSessionId,
   steps,
+  stepsPlanId = null,
   artifacts,
   reviewDocs = [],
   onOpenSession,
@@ -122,6 +155,9 @@ export function TaskRail({
   openSessionId: string;
   /** The task's plan items, or null when it has no plan. */
   steps: TaskItem[] | null;
+  /** Id of the plan `steps` come from; sub-tasks dispatched for one of its
+   *  steps are listed under that step. */
+  stepsPlanId?: string | null;
   /** See useTaskArtifacts. */
   artifacts: Artifact[] | null;
   /** Docs the session's decision cards asked the reader to review (`reviewDocs`
@@ -168,6 +204,85 @@ export function TaskRail({
   ).length;
   const doneSteps = steps?.filter((s) => s.done).length ?? 0;
   const current = steps?.findIndex((s) => !s.done) ?? -1;
+  const showSteps = !!steps && steps.length > 0;
+  const { byStep, loose } = row && showSteps
+    ? groupSubtasksByStep(row, stepsPlanId)
+    : { byStep: new Map<string, SubtaskRow[]>(), loose: subtasks };
+  // Once any sub-task hangs under a step, the steps lead and the sub-task
+  // block below keeps only the ones that hang under none.
+  const linked = byStep.size > 0;
+  const listedSubtasks = linked ? loose : subtasks;
+
+  const subtaskButton = (st: SubtaskRow) => {
+    const plan = st.tip.taskPlan;
+    const open = st.hops.some((h) => h.id === openSessionId);
+    return (
+      <button
+        key={st.key}
+        type="button"
+        className={`${styles.item} ${open ? styles.item_open : ""}`}
+        onClick={() => onOpenSession(st.tip.id)}
+        aria-current={open || undefined}
+      >
+        <span className={styles.dot} style={{ background: STATE_DOT[st.state] }} />
+        <span className={styles.item_title}>{sessionTitle(st.tip, untitled)}</span>
+        <span className={styles.item_meta}>
+          {/* A stopped sub-task reports to the main conversation, not
+              to the boss, so "review" is not something to accept. */}
+          {st.state === "review"
+            ? t("home.subtask_reported", "Reported back")
+            : t(`home.section_${st.state}`)}
+        </span>
+        {plan && plan.total > 0 && (
+          <span className={styles.item_meta}>
+            {plan.done}/{plan.total}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const stepsSection = showSteps && (
+    <section className={styles.block}>
+      <h3 className={styles.head}>
+        {t("home.rail_steps", "Steps")}
+        <span className={styles.count}>
+          {doneSteps}/{steps.length}
+        </span>
+      </h3>
+      <ol className={styles.steps}>
+        {steps.map((s, i) => {
+          const id = stepIdOf(s.text);
+          const onIt = (id && byStep.get(id)) || [];
+          return (
+            <li
+              key={i}
+              className={`${styles.step} ${s.done ? styles.step_done : ""} ${i === current ? styles.step_current : ""}`}
+            >
+              <span className={styles.step_mark} aria-hidden>
+                {s.done && (
+                  <svg viewBox="0 0 14 14" className={styles.step_check}>
+                    <path d="M4.2 7.2l1.9 1.9 3.8-4" />
+                  </svg>
+                )}
+              </span>
+              <span className={styles.step_text}>
+                {stepText(s.text) ?? s.text}
+                {i === current && (
+                  <span className={styles.step_now}>{t("home.rail_step_now", "(now)")}</span>
+                )}
+              </span>
+              {onIt.length > 0 && (
+                <div className={`${styles.card} ${styles.step_subtasks}`} data-testid="step-subtasks">
+                  {onIt.map(subtaskButton)}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
 
   return (
     <aside className={`${styles.rail} ${className ?? ""}`} data-testid="task-rail">
@@ -175,12 +290,14 @@ export function TaskRail({
           column, which reads as the rail having failed to load. */}
       {empty && <p className={styles.empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
 
-      {row && (subtasks.length > 0 || inSubtask) && (
+      {linked && stepsSection}
+
+      {row && (listedSubtasks.length > 0 || inSubtask) && (
         <section className={styles.block}>
           <h3 className={styles.head}>
-            {t("home.rail_subtasks", "Sub-tasks")}
+            {linked ? t("home.rail_subtasks_other", "Other sub-tasks") : t("home.rail_subtasks", "Sub-tasks")}
             <span className={styles.count}>
-              {doneSubtasks}/{subtasks.length}
+              {linked ? listedSubtasks.length : `${doneSubtasks}/${subtasks.length}`}
             </span>
           </h3>
           <div className={styles.card}>
@@ -194,70 +311,12 @@ export function TaskRail({
                 <span className={styles.item_title}>{t("home.rail_main", "Main conversation")}</span>
               </button>
             )}
-            {subtasks.map((st) => {
-              const plan = st.tip.taskPlan;
-              const open = st.hops.some((h) => h.id === openSessionId);
-              return (
-                <button
-                  key={st.key}
-                  type="button"
-                  className={`${styles.item} ${open ? styles.item_open : ""}`}
-                  onClick={() => onOpenSession(st.tip.id)}
-                  aria-current={open || undefined}
-                >
-                  <span className={styles.dot} style={{ background: STATE_DOT[st.state] }} />
-                  <span className={styles.item_title}>{sessionTitle(st.tip, untitled)}</span>
-                  <span className={styles.item_meta}>
-                    {/* A stopped sub-task reports to the main conversation, not
-                        to the boss, so "review" is not something to accept. */}
-                    {st.state === "review"
-                      ? t("home.subtask_reported", "Reported back")
-                      : t(`home.section_${st.state}`)}
-                  </span>
-                  {plan && plan.total > 0 && (
-                    <span className={styles.item_meta}>
-                      {plan.done}/{plan.total}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+            {listedSubtasks.map(subtaskButton)}
           </div>
         </section>
       )}
 
-      {steps && steps.length > 0 && (
-        <section className={styles.block}>
-          <h3 className={styles.head}>
-            {t("home.rail_steps", "Steps")}
-            <span className={styles.count}>
-              {doneSteps}/{steps.length}
-            </span>
-          </h3>
-          <ol className={styles.steps}>
-            {steps.map((s, i) => (
-              <li
-                key={i}
-                className={`${styles.step} ${s.done ? styles.step_done : ""} ${i === current ? styles.step_current : ""}`}
-              >
-                <span className={styles.step_mark} aria-hidden>
-                  {s.done && (
-                    <svg viewBox="0 0 14 14" className={styles.step_check}>
-                      <path d="M4.2 7.2l1.9 1.9 3.8-4" />
-                    </svg>
-                  )}
-                </span>
-                <span className={styles.step_text}>
-                  {stepText(s.text) ?? s.text}
-                  {i === current && (
-                    <span className={styles.step_now}>{t("home.rail_step_now", "(now)")}</span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      {!linked && stepsSection}
 
       {ambient}
 

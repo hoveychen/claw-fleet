@@ -9,7 +9,7 @@ import "../i18n";
 import type { SessionInfo } from "../types";
 import type { Artifact } from "./ArtifactsView";
 import type { TaskRow } from "./homeRows";
-import { collectReviewDocs, TaskRail, taskRailHasContent } from "./TaskRail";
+import { collectReviewDocs, groupSubtasksByStep, stepIdOf, TaskRail, taskRailHasContent } from "./TaskRail";
 import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
 import { useUIStore } from "../store";
 
@@ -128,6 +128,63 @@ describe("TaskRail", () => {
     expect(el.textContent).toContain("plan.md");
     act(() => el.querySelector<HTMLButtonElement>("button[title='/repo/docs/plan.md']")!.click());
     expect(open).toHaveBeenCalledWith("file", "/repo/docs/plan.md", "plan.md");
+  });
+});
+
+describe("sub-tasks under steps", () => {
+  const sub = (line: string, title: string) => {
+    const tip = { id: `${line}-tip`, taskId: line, aiTitle: title } as unknown as SessionInfo;
+    return { key: `t::${line}`, tip, hops: [tip], state: "running", pending: false };
+  };
+  const linkedRow = () =>
+    row({
+      hops: [
+        {
+          id: "main",
+          taskSummary: {
+            subtaskSteps: [
+              { taskId: "s1", planId: "demo", step: "P2" },
+              { taskId: "s3", planId: "other", step: "P1" },
+            ],
+          },
+        } as unknown as SessionInfo,
+      ],
+      subtasks: [sub("s1", "Build slice"), sub("s2", "Side errand"), sub("s3", "Elsewhere")] as never,
+    });
+  const steps = [
+    { text: "**P1** — design", done: true },
+    { text: "**P2** — build", done: false },
+  ];
+
+  it("reads the step id off a plan item", () => {
+    expect(stepIdOf("**P12** — x")).toBe("P12");
+    expect(stepIdOf("no id")).toBeNull();
+  });
+
+  // Only links into the plan on screen count: s3 names a step of another plan.
+  it("groups by step of the shown plan and leaves the rest loose", () => {
+    const { byStep, loose } = groupSubtasksByStep(linkedRow(), "demo");
+    expect(byStep.get("P2")?.map((s) => s.tip.taskId)).toEqual(["s1"]);
+    expect(loose.map((s) => s.tip.taskId)).toEqual(["s2", "s3"]);
+  });
+
+  it("renders a linked sub-task under its step and the rest as other sub-tasks", () => {
+    const el = render({ row: linkedRow(), steps, stepsPlanId: "demo" });
+    const nested = el.querySelectorAll("[data-testid='step-subtasks']");
+    expect(nested).toHaveLength(1);
+    expect(nested[0].closest("li")?.textContent).toContain("build");
+    expect(nested[0].textContent).toContain("Build slice");
+    const sections = [...el.querySelectorAll("section")];
+    // Steps lead once something hangs under them.
+    expect(sections[0].textContent).toContain("Build slice");
+    expect(sections[1].textContent).toContain("Side errand");
+    expect(sections[1].textContent).not.toContain("Build slice");
+  });
+
+  it("keeps the plain layout when nothing links", () => {
+    const el = render({ row: linkedRow(), steps, stepsPlanId: "unrelated" });
+    expect(el.querySelectorAll("[data-testid='step-subtasks']")).toHaveLength(0);
+    expect(el.querySelector("section")?.textContent).toContain("Build slice");
   });
 });
 
