@@ -664,7 +664,7 @@ describe("nav section memory", () => {
     s().setViewMode("history");
     expect(s().navLastBySection).toMatchObject({
       library: "artifacts",
-      projects: "memory",
+      settings: "memory",
       tasks: "history",
     });
   });
