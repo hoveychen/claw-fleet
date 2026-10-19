@@ -64,7 +64,7 @@ import {
   getMessagesForSession,
 } from "./data";
 
-import { installWebsiteFixtures, websiteScene, websiteReview } from "./website";
+import { installWebsiteFixtures, websiteScene } from "./website";
 installWebsiteFixtures();
 
 // ── Dynamic session state (simulates live updates) ──────────────────────────
@@ -685,22 +685,6 @@ async function handleIPC(
     case "get_wiki_file_text":
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
         ?? "# Not published\n\nThis document has no mock body.";
-    case "read_review_doc": {
-      if (websiteScene) return {format: "html", title: websiteScene.reviewTitle, body: websiteReview};
-      const doc = (args.doc ?? {}) as { kind?: string; ref?: string; title?: string };
-      if (doc.kind === "wiki") {
-        return {
-          format: "markdown",
-          title: doc.title || (doc.ref ?? "doc"),
-          body: `# Rollback runbook\n\nIf the cutover misbehaves, flip the \`dual_write\` flag back **on** — no restore needed.\n\n1. \`fleetctl flag set dual_write=on\`\n2. Confirm lag < 5s on the replica\n3. Page #billing-oncall\n\n> Rollback is a flag flip, not a data migration.`,
-        };
-      }
-      return {
-        format: "markdown",
-        title: doc.title || "cutover-plan.md",
-        body: `# Cutover plan\n\n## Backfill\n- 2.1M rows validated, **0 drift**\n- dual-write bake: 48h\n\n## Steps\n1. Freeze writes on \`usage_events\` (~40s lock)\n2. Swap read path to the new table\n3. Keep dual-write on for 48h\n\n\`\`\`sql\nUPDATE plans SET migrated = true WHERE id > 0;\n\`\`\`\n\nSee [[billing/rollback-runbook]] for the abort path.`,
-      };
-    }
     case "list_plugins":
       return qaMode ? MOCK_QA_PLUGINS : [];
     case "list_marketplaces":

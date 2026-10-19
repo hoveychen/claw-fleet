@@ -534,7 +534,8 @@ requestedAt: string,
 resolvedAt: string, outcome: ElicitationOutcome, questions: Array<ElicitationQuestion>, 
 answers: { [key in string]: SelectedOption }, };
 
-export type FleetAskHistoryRecord = { id: string, sessionId: string, workspaceName: string, aiTitle?: string | null, requestedAt: string, resolvedAt: string, outcome: FleetAskOutcome, questions: Array<FleetAskQuestion>, answers: { [key in string]: string }, };
+export type FleetAskHistoryRecord = { id: string, sessionId: string, workspaceName: string, aiTitle?: string | null, requestedAt: string, resolvedAt: string, outcome: FleetAskOutcome, questions: Array<FleetAskQuestion>, answers: { [key in string]: string }, 
+reviewDocs?: Array<ReviewDoc>, };
 
 export type PlanApprovalHistoryRecord = { id: string, sessionId: string, workspaceName: string, aiTitle?: string | null, requestedAt: string, resolvedAt: string, outcome: PlanApprovalOutcome, planContent: string, planFilePath?: string | null, 
 editedPlan?: string | null, 

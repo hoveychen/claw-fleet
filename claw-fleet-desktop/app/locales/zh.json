@@ -1018,12 +1018,6 @@
     "prev": "上一个",
     "unsupported": "此环境不支持高亮"
   },
-  "review_docs": {
-    "chip": "📄 文档 · {{count}}",
-    "error": "这份文档没能加载",
-    "loading": "加载中…",
-    "toggle": "待审文档"
-  },
   "loading": "加载中…",
   "update": {
     "available": "新版本 {{version}} 已发布！",

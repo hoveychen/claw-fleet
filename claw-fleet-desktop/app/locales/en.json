@@ -1021,12 +1021,6 @@
     "prev": "Previous",
     "unsupported": "Highlighting is not supported in this environment"
   },
-  "review_docs": {
-    "chip": "📄 Docs · {{count}}",
-    "error": "Couldn't load this document",
-    "loading": "Loading…",
-    "toggle": "Review documents"
-  },
   "loading": "Loading…",
   "update": {
     "available": "New version {{version}} is available!",

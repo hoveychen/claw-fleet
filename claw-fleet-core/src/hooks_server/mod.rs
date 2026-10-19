@@ -1434,10 +1434,6 @@ fn handle_request(
                 route_session_image(ctx, request, &query, json_header, path)
             }
 
-            crate::routes::REVIEW_DOC if request.method() == &tiny_http::Method::Post => {
-                route_review_doc(ctx, request, &query, json_header, path)
-            }
-
             crate::routes::WIKI_SEARCH => {
                 route_wiki_search(ctx, request, &query, json_header, path)
             }

@@ -58,7 +58,8 @@ pub struct FleetAskRequest {
     /// Documents the agent wants the user to review alongside the card — the
     /// `.md` files or wiki entries it just produced, so the user can read them
     /// in-panel instead of hunting them down. Card-level (not per-question):
-    /// the desktop renders one tab per doc in the card's side column. Unlike
+    /// the desktop lists them in the session's material rail, beside the
+    /// conversation rather than inside the card. Unlike
     /// `images`, the body is NOT snapshotted here; the frontend fetches it live
     /// through the backend when the card renders (see `ReviewDoc`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -66,7 +67,7 @@ pub struct FleetAskRequest {
 }
 
 /// One document attached to a `fleet__ask` card for the user to review.
-/// Rendered as a tab in the card's side panel; the body is fetched live by the
+/// Listed in the session's material rail; the body is fetched live by the
 /// frontend (via the backend `read_review_doc`) rather than snapshotted into the
 /// request, so the user always sees the current on-disk content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1067,7 +1068,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
             },
             "reviewDocs": {
                 "type": "array",
-                "description": "OPTIONAL documents for the user to review alongside this card — the `.md` files or wiki entries you just produced. Fleet shows one tab per doc in a side panel next to the card, so the user reads them in place instead of hunting the path down in your prose. Card-level, not per-question. The body is fetched live when the card opens (not snapshotted), so the user always sees the current on-disk content. Use this whenever your answer references a design doc / report / plan file you want signed off.",
+                "description": "OPTIONAL documents for the user to review alongside this card — the `.md` files or wiki entries you just produced. Fleet lists each doc in the session's material side rail (not inside the card), so the user opens and reads them there instead of hunting the path down in your prose. Card-level, not per-question. The body is fetched live when the card opens (not snapshotted), so the user always sees the current on-disk content. Use this whenever your answer references a design doc / report / plan file you want signed off.",
                 "items": {
                     "type": "object",
                     "properties": {

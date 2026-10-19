@@ -2813,13 +2813,6 @@ impl LocalBackend {
         crate::mcp_ipc::read_decision_asset(id, qidx, relpath)
     }
 
-    pub fn read_review_doc(
-        &self,
-        doc: &crate::mcp_ipc::ReviewDoc,
-    ) -> Result<crate::mcp_ipc::ReviewDocContent, String> {
-        crate::mcp_ipc::read_review_doc(doc)
-    }
-
     pub fn list_session_images(&self, session_id: &str) -> Vec<crate::codex_image::GeneratedImage> {
         crate::codex_image::list_thread_images(session_id)
     }
