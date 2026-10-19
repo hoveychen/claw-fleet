@@ -13,12 +13,28 @@
 //! `session/create`'s payload is `{workspaceId?, cwd?, sessionId?, agentPreset?}`
 //! (`sessionCreateRequestSchema` in `dsh-host-apiproxy`). There is no
 //! per-session instruction or plugin-config field, and `dshHome` is *plugin*
-//! config — deployment-wide. `agentPreset` is the one seam: a preset is a
-//! directory holding one `agent.cordis.yml`, user-authored ones live under
-//! `${DSH_HOME:-~/.dsh}/.agent-presets/<id>/`, and preset discovery is
-//! unmemoized (the roster re-reads its roots on every call), so a directory
-//! Fleet writes is visible to the next `session/create` without restarting
-//! `dsh web`.
+//! config — deployment-wide. `agentPreset` is the one seam.
+//!
+//! ## Where the preset is declared (dsh 0.2.x)
+//!
+//! Up to dsh 0.1.x a user preset was a directory,
+//! `$DSH_HOME/.agent-presets/<id>/agent.cordis.yml`. dsh 0.2 dropped that: a
+//! preset is now an `@deepseek-ai/dsh-agent-preset` row (`config: {id, plugins,
+//! name?, description?, order?}`) in a cordis composition, and the shipped
+//! `editing-cordis-compositions` skill says of the old directory "Nothing reads
+//! that directory any more". A Fleet still writing there got
+//! `agent-preset/not-found: Unknown agent preset: fleet-chat` on every chat
+//! spawn (2026-10-19, dsh 0.2.1-rc.2).
+//!
+//! So the declaration lives in its own sentinel region of
+//! `$DSH_HOME/cordis.patch.yml`, the home-level patch layer Fleet already
+//! writes its context plugin into (see [`crate::dsh_plugin`]). dsh watches that
+//! file: verified live on 0.2.1-rc.2, an appended declaration showed up in
+//! `agentPresets/list` within seconds and `session/create` with
+//! `agentPreset: fleet-chat` succeeded, all without restarting `dsh web`.
+//! Activation is asynchronous, though, so the caller waits for the roster to
+//! list the preset before naming it, and falls back to the default when it
+//! does not appear in time.
 //!
 //! So Fleet authors one preset, `fleet-chat`, that is the deployment's own
 //! default composition with a single row patched: the `agent-instructions`
@@ -37,7 +53,9 @@
 //! `standard` would never reach a frozen copy, and the chat sessions would
 //! quietly run last release's agent. So the source text is re-read from the
 //! deployment (`agentPresets/read` on whichever preset reports `isDefault`) and
-//! re-patched every time, which makes upgrades free.
+//! re-patched every time, which makes upgrades nearly free: the first chat
+//! spawn after an upgrade rewrites the declaration and waits for it to
+//! re-activate.
 //!
 //! The patch is textual rather than a YAML round-trip because the shipped
 //! composition uses the loader's own dialect — the `standard` composition
@@ -64,11 +82,22 @@ const INSTRUCTIONS_ROW_ID: &str = "agent-instructions";
 /// would classify as "temporarily unavailable" instead.
 const CHAT_DSH_HOME: &str = "dsh-chat-home";
 
-/// Where dsh looks for user-authored presets, relative to `$DSH_HOME`.
-const USER_PRESET_DIR: &str = ".agent-presets";
+/// Where dsh 0.1.x looked for user-authored presets, relative to `$DSH_HOME`.
+/// Nothing reads it any more; Fleet only removes its own leftover there.
+const LEGACY_PRESET_DIR: &str = ".agent-presets";
 
-/// The one file a preset directory must hold.
-const COMPOSITION_FILE: &str = "agent.cordis.yml";
+/// Sentinels of the chat preset's region in `$DSH_HOME/cordis.patch.yml`.
+const SENTINEL_BEGIN: &str = "# fleet:dsh-chat-preset:begin";
+const SENTINEL_END: &str = "# fleet:dsh-chat-preset:end";
+
+/// Loader row id of the declaration, `preset-<id>` by dsh's own convention.
+const DECLARATION_ROW_ID: &str = "preset-fleet-chat";
+
+/// The declaring plugin every dsh 0.2 preset row names.
+const DECLARING_PLUGIN: &str = "@deepseek-ai/dsh-agent-preset";
+
+/// Indentation of the composition's rows under the declaration's `plugins:`.
+const PLUGINS_INDENT: &str = "          ";
 
 /// Whether a dsh session in `workspace_path` should run the chat preset.
 ///
@@ -160,39 +189,89 @@ pub fn patch_composition(composition: &str, dsh_home: &str) -> Result<String, St
     Ok(text)
 }
 
-/// Absolute path of the chat preset's composition file.
-fn composition_path() -> Result<PathBuf, String> {
-    let home = crate::session::get_dsh_dir().ok_or_else(|| "no dsh home".to_string())?;
-    Ok(home
-        .join(USER_PRESET_DIR)
-        .join(CHAT_PRESET_ID)
-        .join(COMPOSITION_FILE))
+/// Render the sentinel region declaring the chat preset over `plugins`, the
+/// already-patched composition text.
+///
+/// The composition is embedded verbatim, only indented, so the loader's `!!js`
+/// tags and block scalars keep their meaning (a YAML round-trip would not —
+/// see the module header). Blank lines stay blank: indenting them is harmless
+/// inside a block scalar but noisy everywhere else.
+fn render_declaration(plugins: &str) -> String {
+    let mut out = String::new();
+    out.push_str(SENTINEL_BEGIN);
+    out.push_str(
+        "\n# Managed by Claw Fleet — do not edit. The chat workspace's preset: the \
+         deployment default minus the user-global AGENTS.md.\n",
+    );
+    out.push_str("- insert:\n");
+    out.push_str(&format!("    - id: {DECLARATION_ROW_ID}\n"));
+    out.push_str(&format!("      name: '{DECLARING_PLUGIN}'\n"));
+    out.push_str("      config:\n");
+    out.push_str(&format!("        id: {CHAT_PRESET_ID}\n"));
+    out.push_str("        name: Fleet chat\n");
+    out.push_str("        description: Plain chat for the Fleet chat workspace.\n");
+    out.push_str("        plugins:\n");
+    for line in plugins.lines() {
+        if line.trim().is_empty() {
+            out.push('\n');
+        } else {
+            out.push_str(PLUGINS_INDENT);
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out.push_str(SENTINEL_END);
+    out.push('\n');
+    out
 }
 
-/// Write (or refresh) the chat preset from `source_composition` — the text of
-/// the deployment's own default preset — and return its id.
+/// Remove the 0.1.x preset directory Fleet used to write. dsh no longer reads
+/// it, so leaving it only misleads whoever goes looking for the preset.
+fn remove_legacy_preset_dir() {
+    let Some(home) = crate::session::get_dsh_dir() else {
+        return;
+    };
+    let dir = home.join(LEGACY_PRESET_DIR).join(CHAT_PRESET_ID);
+    if dir.exists() {
+        if let Err(e) = fs::remove_dir_all(&dir) {
+            crate::log_debug(&format!(
+                "dsh chat preset: remove legacy {}: {e}",
+                dir.display()
+            ));
+        }
+    }
+}
+
+/// Declare (or refresh) the chat preset from `source_composition` — the text
+/// of the deployment's own default preset. Returns whether the declaration
+/// changed, i.e. whether dsh has to re-activate it before it can be named.
 ///
-/// Idempotent: an unchanged composition is not rewritten, so a chat spawn does
-/// not touch a file the roster may be reading.
-pub fn ensure_chat_preset(source_composition: &str) -> Result<String, String> {
+/// Idempotent: an unchanged declaration is not rewritten, so a chat spawn does
+/// not trigger a reload of a file dsh is watching.
+pub fn ensure_chat_preset(source_composition: &str) -> Result<bool, String> {
     let dsh_home = ensure_chat_dsh_home()?;
     let patched = patch_composition(source_composition, &dsh_home.to_string_lossy())?;
-    let path = composition_path()?;
-    let dir = path
-        .parent()
-        .ok_or_else(|| "chat preset path has no parent".to_string())?;
-    fs::create_dir_all(dir).map_err(|e| format!("create chat preset dir: {e}"))?;
-    let stale = fs::read_to_string(&path)
-        .map(|c| c != patched)
-        .unwrap_or(true);
-    if stale {
-        // Atomic because the roster re-reads its roots on every call: a chat
-        // spawn racing a concurrent `agentPresets/list` must never expose a
-        // half-written composition, which discovery would report as broken.
-        crate::atomic_json::write_atomic(&path, patched.as_bytes())
-            .map_err(|e| format!("write chat preset: {e}"))?;
-    }
-    Ok(CHAT_PRESET_ID.to_string())
+    let changed = crate::dsh_plugin::write_region(
+        SENTINEL_BEGIN,
+        SENTINEL_END,
+        Some(&render_declaration(&patched)),
+    )?;
+    remove_legacy_preset_dir();
+    Ok(changed)
+}
+
+/// Whether an `agentPresets/list` answer offers the chat preset in a state
+/// that can compose a session. A listed-but-broken declaration would fail
+/// `session/create` with `agent-preset/invalid`, so it counts as absent.
+pub fn roster_offers_chat_preset(list: &serde_json::Value) -> bool {
+    list.get("presets")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|presets| {
+            presets.iter().any(|p| {
+                p.get("id").and_then(serde_json::Value::as_str) == Some(CHAT_PRESET_ID)
+                    && p.get("broken").is_none()
+            })
+        })
 }
 
 /// The id of the preset a session would otherwise be created under, read from
@@ -332,6 +411,44 @@ mod tests {
     fn a_composition_without_the_row_is_refused() {
         let err = patch_composition("- id: persona\n  name: x\n", "/tmp/empty").unwrap_err();
         assert!(err.contains("agent-instructions"), "{err}");
+    }
+
+    /// The declaration is a dsh 0.2 `dsh-agent-preset` row whose `plugins` is
+    /// the composition verbatim, one indent level down — `!!js` tags included.
+    #[test]
+    fn the_declaration_nests_the_composition_under_plugins() {
+        let source = "\
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: tool-bash
+  disabled: !!js process.platform === 'win32'
+";
+        let block = render_declaration(source);
+        assert!(block.starts_with(SENTINEL_BEGIN));
+        assert!(block.trim_end().ends_with(SENTINEL_END));
+        assert!(block.contains("    - id: preset-fleet-chat\n"));
+        assert!(block.contains("      name: '@deepseek-ai/dsh-agent-preset'\n"));
+        assert!(block.contains(&format!("        id: {CHAT_PRESET_ID}\n")));
+        assert!(block.contains("        plugins:\n          - id: agent-instructions\n"));
+        assert!(block.contains("\n              maxBytes: 65536\n"));
+        assert!(block.contains("\n            disabled: !!js process.platform === 'win32'\n"));
+        // A blank separator line stays blank rather than turning into indent.
+        assert!(block.contains("maxBytes: 65536\n\n          - id: tool-bash"), "{block}");
+    }
+
+    #[test]
+    fn only_an_unbroken_listing_offers_the_chat_preset() {
+        let listed = json!({ "presets": [{ "id": CHAT_PRESET_ID, "isDefault": false }] });
+        assert!(roster_offers_chat_preset(&listed));
+        let broken = json!({
+            "presets": [{ "id": CHAT_PRESET_ID, "isDefault": false, "broken": "x: never started" }],
+        });
+        assert!(!roster_offers_chat_preset(&broken));
+        let absent = json!({ "presets": [{ "id": "standard", "isDefault": true }] });
+        assert!(!roster_offers_chat_preset(&absent));
     }
 
     #[test]
