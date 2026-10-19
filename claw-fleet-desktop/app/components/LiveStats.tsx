@@ -8,6 +8,7 @@ import { fmtRailCount, fmtRailMoney } from "../railNumbers";
 import { RailStatTile } from "./RailStatTile";
 import { SkeletonNumber } from "./loading";
 import styles from "./LiveStats.module.css";
+import stat from "./SidebarStat.module.css";
 
 function formatClock(ms: number): string {
   const d = new Date(ms);
@@ -23,10 +24,10 @@ function Spark<T extends { time: number }>({
   dataKey: "speed" | "costPerMin";
   onHover: (point: T | null) => void;
 }) {
-  if (data.length < 2) return <div className={styles.spark_placeholder} />;
+  if (data.length < 2) return <div className={stat.spark_placeholder} />;
   return (
-    <div className={styles.spark}>
-      <ResponsiveContainer width="100%" height={24}>
+    <div className={stat.spark}>
+      <ResponsiveContainer width="100%" height={18}>
         <LineChart
           data={data as unknown as object[]}
           margin={{ top: 2, right: 0, left: 0, bottom: 0 }}
@@ -35,7 +36,7 @@ function Spark<T extends { time: number }>({
         >
           {/* No visible tooltip — the hovered value is written back into the KPI
               above instead, since a floating panel would cover the usage card
-              below this 24px-tall sparkline. Mounting Tooltip is still what
+              below this 18px-tall sparkline. Mounting Tooltip is still what
               makes recharts track an active index (and draw the activeDot). */}
           <Tooltip content={() => null} cursor={false} />
           <Line
@@ -100,47 +101,34 @@ export function LiveStats({
   const speedShown = hoverSpeed ? hoverSpeed.speed : currentSpeed;
   const costShown = hoverCost ? hoverCost.costPerMin : currentCost;
 
+  // Unfolded sidebar: one card per metric, stacked — a side-by-side pair does
+  // not fit in 116px.
   return (
-    <section className={styles.section} data-wizard="token-speed">
-      <h3 className={styles.section_title}>{t("live.section_title")}</h3>
-      <div className={styles.kpis}>
-        <div className={styles.kpi}>
-          <div className={styles.kpi_label}>
-            {hoverSpeed
-              ? `${t("chart.title")} · ${formatClock(hoverSpeed.time)}`
-              : t("chart.title")}
-          </div>
-          <div className={styles.kpi_value_row}>
-            <span
-              className={`${styles.kpi_value} ${hoverSpeed ? styles.kpi_value_past : ""}`}
-            >
-              {speedReady ? speedShown.toFixed(1) : <SkeletonNumber width={28} />}
-            </span>
-            <span className={styles.kpi_unit}>{t("chart.unit")}</span>
-          </div>
-          <Spark data={speedHistory} dataKey="speed" onHover={setHoverSpeed} />
-        </div>
-        <div className={styles.kpi}>
-          <div className={styles.kpi_label}>
-            {hoverCost
-              ? `${t("cost_chart.title")} · ${formatClock(hoverCost.time)}`
-              : t("cost_chart.title")}
-          </div>
-          <div className={styles.kpi_value_row}>
-            <span
-              className={`${styles.kpi_value} ${hoverCost ? styles.kpi_value_past : ""}`}
-            >
-              {costReady ? `$${costShown.toFixed(2)}` : <SkeletonNumber width={36} />}
-            </span>
-            <span className={styles.kpi_unit}>{t("cost_chart.unit")}</span>
-          </div>
-          <Spark
-            data={costHistory}
-            dataKey="costPerMin"
-            onHover={setHoverCost}
-          />
-        </div>
+    <div className={styles.cards} data-wizard="token-speed">
+      <div className={stat.card}>
+        <span className={stat.caption}>
+          {hoverSpeed ? formatClock(hoverSpeed.time) : t("chart.title")}
+        </span>
+        <span className={stat.value_row}>
+          <span className={`${stat.value}${hoverSpeed ? ` ${stat.value_past}` : ""}`}>
+            {speedReady ? speedShown.toFixed(1) : <SkeletonNumber width={28} />}
+          </span>
+          <span className={stat.unit}>{t("chart.unit")}</span>
+        </span>
+        <Spark data={speedHistory} dataKey="speed" onHover={setHoverSpeed} />
       </div>
-    </section>
+      <div className={stat.card}>
+        <span className={stat.caption}>
+          {hoverCost ? formatClock(hoverCost.time) : t("cost_chart.title")}
+        </span>
+        <span className={stat.value_row}>
+          <span className={`${stat.value}${hoverCost ? ` ${stat.value_past}` : ""}`}>
+            {costReady ? `$${costShown.toFixed(2)}` : <SkeletonNumber width={36} />}
+          </span>
+          <span className={stat.unit}>{t("cost_chart.unit")}</span>
+        </span>
+        <Spark data={costHistory} dataKey="costPerMin" onHover={setHoverCost} />
+      </div>
+    </div>
   );
 }

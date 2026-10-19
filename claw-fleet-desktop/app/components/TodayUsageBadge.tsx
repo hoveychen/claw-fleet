@@ -8,7 +8,7 @@ import { fmtRailMoney } from "../railNumbers";
 import { singleFlight } from "../singleFlight";
 import { RailStatTile } from "./RailStatTile";
 import { TokenReceiptModal } from "./TokenReceiptModal";
-import styles from "./TodayUsageBadge.module.css";
+import stat from "./SidebarStat.module.css";
 import { Presence } from "./Presence";
 import { SkeletonNumber } from "./loading";
 
@@ -121,23 +121,25 @@ export function TodayUsageBadge({
     );
   }
 
+  // Unfolded sidebar card: exact spend, tokens underneath; opens the receipt.
   return (
-    <section className={styles.section} title={title} data-wizard="today-usage">
-      <h3 className={styles.section_title}>{label}</h3>
+    <>
       <button
         type="button"
-        className={styles.row}
-        title={openHint}
+        className={`${stat.card} ${stat.clickable}`}
+        title={`${title}\n${openHint}`}
         onClick={() => setShowReceipt(true)}
+        data-wizard="today-usage"
       >
-        <span className={styles.cost}>
+        <span className={stat.caption}>{railLabel}</span>
+        <span className={stat.value}>
           {loaded ? `$${cost.toFixed(2)}` : failed ? "—" : <SkeletonNumber width={52} />}
         </span>
-        <span className={styles.tokens}>
-          {loaded ? `${fmtTokens(tokens)} tok` : failed ? "" : <SkeletonNumber width={44} />}
+        <span className={stat.sub}>
+          {loaded ? `${fmtTokens(tokens)} tok` : failed ? "" : <SkeletonNumber width={40} />}
         </span>
       </button>
       {receipt}
-    </section>
+    </>
   );
 }

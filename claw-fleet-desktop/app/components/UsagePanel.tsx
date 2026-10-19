@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ClaudeIcon, CodexIcon, DshIcon, FoxyIcon } from "./SessionCard";
 import styles from "./UsagePanel.module.css";
+import stat from "./SidebarStat.module.css";
 import {
   useUsageStore,
   type UsageStats,
@@ -17,7 +18,7 @@ import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
 import { RailStatTile } from "./RailStatTile";
 import { Presence, useExiting } from "./Presence";
-import { SkeletonCard, Spinner } from "./loading";
+import { SkeletonCard, SkeletonNumber, Spinner } from "./loading";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 
 function formatResetIn(resets_at: string, t: TFunc): string {
@@ -550,7 +551,6 @@ interface SetupStatus {
 
 export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(true);
   const [hasClaude, setHasClaude] = useState(true);
   const [hasCodex, setHasCodex] = useState(false);
   // dsh is not in `detected_tools` (that struct predates it and describes
@@ -577,14 +577,14 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   const ringLoading = useDelayedFlag(
     !ring && ((hasClaude && claudeFirstLoad) || ((hasCodex || !setupResolved) && codexFirstLoad)),
   );
-  // Auto-load Claude usage when collapsed (so tile has data without expanding panel)
+  // Both sidebar widths show only a summary, so load the sources up front
+  // rather than waiting for the details popover to mount the sections.
   const loadUsage = useUsageStore((s) => s.load);
   useEffect(() => {
-    if (!collapsed) return;
     if (hasClaude) loadUsage("claude");
     if (hasCodex) loadUsage("codex");
     if (hasDsh) loadUsage("dsh");
-  }, [collapsed, hasClaude, hasCodex, hasDsh, loadUsage]);
+  }, [hasClaude, hasCodex, hasDsh, loadUsage]);
 
   useEffect(() => {
     invoke<SetupStatus>("check_setup_status")
@@ -616,61 +616,79 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
       </>
     );
 
-  if (collapsed) {
-    // The rail only has room for a tile, so clicking it opens the full panel
-    // (per-window bars, refresh, history charts) as a popover beside the rail.
-    const openDetails = () => {
-      setAnchor(tileRef.current?.getBoundingClientRect() ?? null);
-      setDetailsOpen((v) => !v);
-    };
-    let tile;
-    if (!ring) {
-      tile = (
-        <RailStatTile
-          value="—"
-          label={t("account.usage")}
-          title={ringLoading ? t("account.loading") : t("account.no_usage_data")}
-          loading={ringLoading}
-          onClick={openDetails}
-          accent
-        />
-      );
-    } else {
-      const detail = ring.sources
+  // Neither sidebar width has room for the sections themselves, so clicking
+  // the summary opens the full panel (per-window bars, refresh, history
+  // charts) as a popover beside the sidebar.
+  const openDetails = () => {
+    setAnchor(tileRef.current?.getBoundingClientRect() ?? null);
+    setDetailsOpen((v) => !v);
+  };
+  const popover = (
+    <Presence when={detailsOpen}>
+      {detailsOpen && (
+        <UsageDetailsPopover anchor={anchor} onClose={() => setDetailsOpen(false)}>
+          {sections}
+        </UsageDetailsPopover>
+      )}
+    </Presence>
+  );
+  const tooltip = ring
+    ? `${t("account.usage")} — ${ring.topSource} ${Math.round(ring.overall)}%\n${ring.sources
         .map((s) => `${s.name}: ${Math.round(s.percent)}%`)
-        .join("\n");
-      const tooltip = `${t("account.usage")} — ${ring.topSource} ${Math.round(ring.overall)}%\n${detail}\n${t("account.usage_open_details")}`;
-      tile = (
-        <RailStatTile
-          value={`${Math.round(ring.overall)}%`}
-          label={ring.topSource}
-          title={tooltip}
-          onClick={openDetails}
-          accent
-        />
-      );
-    }
+        .join("\n")}\n${t("account.usage_open_details")}`
+    : ringLoading
+      ? t("account.loading")
+      : t("account.no_usage_data");
+
+  if (collapsed) {
     return (
       <div ref={tileRef} className={styles.rail_anchor}>
-        {tile}
-        <Presence when={detailsOpen}>
-          {detailsOpen && (
-            <UsageDetailsPopover anchor={anchor} onClose={() => setDetailsOpen(false)}>
-              {sections}
-            </UsageDetailsPopover>
-          )}
-        </Presence>
+        <RailStatTile
+          value={ring ? `${Math.round(ring.overall)}%` : "—"}
+          label={ring ? ring.topSource : t("account.usage")}
+          title={tooltip}
+          loading={!ring && ringLoading}
+          onClick={openDetails}
+          accent
+        />
+        {popover}
       </div>
     );
   }
 
+  // Unfolded sidebar card: the headline percent, then one thin bar per source.
   return (
-    <div className={styles.container}>
-      <button className={styles.toggle} onClick={() => setExpanded((v) => !v)}>
-        <span className={styles.toggle_label}>{t("account.usage")}</span>
-        <span className={styles.toggle_icon}>{expanded ? "\u25B2" : "\u25BC"}</span>
+    <div ref={tileRef} className={styles.rail_anchor}>
+      <button
+        type="button"
+        className={`${stat.card} ${stat.clickable}`}
+        title={tooltip}
+        onClick={openDetails}
+      >
+        <span className={stat.caption}>{t("account.usage")}</span>
+        <span className={`${stat.value} ${stat.value_accent}`}>
+          {ring ? `${Math.round(ring.overall)}%` : ringLoading ? <SkeletonNumber width={28} /> : "—"}
+        </span>
+        {ring && (
+          <span className={stat.sources}>
+            {ring.sources.map((src) => (
+              <span key={src.name} className={stat.source}>
+                <span className={stat.source_head}>
+                  <span className={stat.source_name}>{src.name}</span>
+                  <span>{Math.round(src.percent)}%</span>
+                </span>
+                <span className={stat.source_bar}>
+                  <span
+                    className={stat.source_fill}
+                    style={{ width: `${Math.min(100, Math.max(0, src.percent))}%`, display: "block" }}
+                  />
+                </span>
+              </span>
+            ))}
+          </span>
+        )}
       </button>
-      {expanded && <div className={styles.content}>{sections}</div>}
+      {popover}
     </div>
   );
 }

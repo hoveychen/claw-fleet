@@ -1,8 +1,7 @@
 /* ── Nav rail ────────────────────────────────────────────────────────────────
    Folded (the default): a 64px icon column — section entries icon over label,
-   then the global number tiles at the foot. Wide (.sidebar_wide): a
-   drag-resizable sidebar with label rows, the live/usage panels and a footer
-   toolbar. The width is set inline by SessionList.tsx. */
+   then the global number tiles at the foot. Wide (.sidebar_wide): a fixed
+   116px sidebar with label rows, a stack of stat cards and a footer toolbar. The width is set inline by SessionList.tsx. */
 
 .sidebar {
   flex-shrink: 0;
@@ -14,11 +13,6 @@
   overflow: hidden;
   position: relative;
   transition: width var(--motion-base) var(--ease-out);
-}
-
-/* No easing while the resize handle is held: the edge must track the cursor. */
-.sidebar_dragging {
-  transition: none;
 }
 
 /* Set for one fold / unfold. Two identical keyframes under different names so
@@ -166,38 +160,52 @@
 /* ── Wide variant ─────────────────────────────────────────────────────────── */
 
 .sidebar_wide .nav {
-  gap: 2px;
-  padding: 6px 8px 10px;
+  gap: 1px;
+  padding: 6px 6px 10px;
 }
 
 .sidebar_wide .nav_item {
   flex-direction: row;
   justify-content: flex-start;
-  gap: 10px;
-  padding: 7px 10px;
+  gap: 7px;
+  padding: 7px 8px;
   font-size: 13px;
 }
 
 .sidebar_wide .nav_icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
-/* Badges sit at the row's end instead of on the icon's corner. */
+/* A long locale label (Settings, Projects) gives way to the badge. */
+.sidebar_wide .nav_label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Badges ride the icon's top-right corner, as on the folded rail: at 116px a
+   row-end badge would squeeze "Projects" / "Settings" down to an ellipsis. */
 .sidebar_wide .nav_badge_running,
 .sidebar_wide .nav_badge_pending {
-  position: static;
-  margin-left: auto;
-  font-size: 10px;
+  top: 1px;
+  right: auto;
+  left: 17px;
+  font-size: 9px;
 }
 
 .sidebar_wide .nav_dot {
-  position: static;
-  margin-left: auto;
-  margin-right: 4px;
+  top: 5px;
+  right: auto;
+  left: 22px;
 }
 
+/* The stat-card stack; card visuals live in SidebarStat.module.css. */
 .sidebar_wide .sidebar_content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 6px;
   overflow-y: auto;
   overflow-x: hidden;
   border-top: 1px solid var(--color-border);
@@ -205,7 +213,7 @@
 
 .footer {
   flex-shrink: 0;
-  padding: 8px 10px 10px;
+  padding: 8px 6px 10px;
   border-top: 1px solid var(--color-border);
 }
 
