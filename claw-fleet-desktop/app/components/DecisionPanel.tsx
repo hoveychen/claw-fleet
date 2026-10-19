@@ -3,11 +3,6 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { useDecisionStore } from "../store";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
-import { remarkKeepDunder } from "../../../shared-ts/markdownIdentifiers";
-
-/** The "your last message" preview reads what the boss typed, where a bare
- *  `__pycache__` is a name, not bold. */
-const PRECEDING_REMARK_PLUGINS = [...safeRemarkPlugins, remarkKeepDunder];
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
@@ -18,7 +13,6 @@ import {
 import explainStyles from "./DecisionExplainMarks.module.css";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { framePreviewSrcDoc } from "../decisionFrame";
-import { oneLineSnippet, shouldAutoExpand, useLastUserInput } from "../hooks/useLastUserInput";
 import type {
   ElicitationAttachment,
   ElicitationDecision,
@@ -41,7 +35,7 @@ import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 import { Presence } from "./Presence";
-import { SkeletonCard, SkeletonText } from "./loading";
+import { SkeletonText } from "./loading";
 import { fromSubtask, isRecommendedOption, stripRecommendedSuffix } from "./dockKeys";
 
 
@@ -468,109 +462,6 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
 // ── Elicitation card renderer (multi-step wizard) ─────────────────────────
 
 /**
- * What the *user* last said before this question — the prompt they typed, or
- * the answer they gave to the previous decision card. Context, not the thing
- * being answered, so it collapses to a single line by default: a label, a
- * one-line snippet and a count of any further answers. The question itself
- * therefore always starts on the first screen of the card no matter how long
- * the previous round was. Clicking expands a bounded, independently scrolling
- * body. Renders nothing when the transcript holds no earlier user input.
- */
-function LastUserInputRegion({
-  sessionId,
-  requestId,
-}: {
-  sessionId: string;
-  requestId: string;
-}) {
-  const { t } = useTranslation();
-  const { input, loading } = useLastUserInput(sessionId, requestId);
-  const mdComponents = usePathMarkdown(sessionId);
-  const [expanded, setExpanded] = useState(false);
-
-  // One shape for both kinds: an unlabelled single entry for a typed prompt.
-  const entries = useMemo(
-    () =>
-      input
-        ? input.answers?.length
-          ? input.answers
-          : [{ label: "", value: input.text }]
-        : [],
-    [input],
-  );
-  const snippet = useMemo(
-    () => (entries.length ? oneLineSnippet(entries[0].value) : ""),
-    [entries],
-  );
-  // A short single answer opens itself — a click to read one line is a click
-  // too many. A fresh card is a fresh round, so this also resets any manual
-  // toggle the user made on the previous one.
-  const autoExpand = useMemo(() => shouldAutoExpand(entries), [entries]);
-  useEffect(() => {
-    setExpanded(autoExpand);
-  }, [requestId, autoExpand]);
-
-  // Reading the transcript tail: hold the collapsed bar's slot so the question
-  // below does not shift down when it lands.
-  if (loading) {
-    return (
-      <div className={styles.preceding}>
-        <SkeletonCard height={26} />
-      </div>
-    );
-  }
-  if (!input || !entries.length) return null;
-
-  const label =
-    input.kind === "answer"
-      ? t("decision.last_answer_label", "Your last answer")
-      : t("decision.last_prompt_label", "Your last message");
-
-  return (
-    <div className={styles.preceding}>
-      <button
-        type="button"
-        className={styles.preceding_bar}
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        title={snippet}
-      >
-        <svg
-          className={`${styles.preceding_chevron} ${expanded ? styles.preceding_chevron_open : ""}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-        <span className={styles.preceding_label}>{label}</span>
-        {!expanded && <span className={styles.preceding_snippet}>{snippet}</span>}
-        {entries.length > 1 && (
-          <span className={styles.preceding_count}>+{entries.length - 1}</span>
-        )}
-      </button>
-      {expanded && (
-        <div className={styles.preceding_body}>
-          {entries.map((a, i) => (
-            <div key={i} className={styles.preceding_qa}>
-              {a.label && <div className={styles.preceding_q} title={a.label}>{a.label}</div>}
-              <div className={styles.preceding_msg}>
-                <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={PRECEDING_REMARK_PLUGINS} rehypePlugins={safeRehypePlugins} components={mdComponents}>
-                  {normalizeSvgBlankLines(a.value)}
-                </ReactMarkdown>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
  * Slim toggle bar sitting at the top of the card footer. Options always start
  * expanded; collapsing is a manual, per-question act for document-style cards
  * where the reader wants the body to take the full height. Collapsing hides the
@@ -598,7 +489,7 @@ function OptionsCollapseBar({
       aria-expanded={!collapsed}
     >
       <svg
-        className={`${styles.preceding_chevron} ${!collapsed ? styles.preceding_chevron_open : ""}`}
+        className={`${styles.collapse_chevron} ${!collapsed ? styles.collapse_chevron_open : ""}`}
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -751,7 +642,6 @@ function ElicitationCard({
   return (
     <div className={`${styles.card} ${styles.card_flex} ${natural ? styles.card_natural : ""}`}>
       <div className={styles.card_scroll}>
-      <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
       {!docked && (
       <>
       <div className={styles.card_header}>
@@ -1683,7 +1573,6 @@ export function FleetAskCard({
   return (
     <div className={`${styles.card} ${styles.card_flex} ${natural ? styles.card_natural : ""}`}>
       <div className={styles.card_scroll}>
-      <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
       {!docked && (
       <>
       <div className={styles.card_header}>
