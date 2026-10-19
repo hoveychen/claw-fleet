@@ -640,7 +640,7 @@ describe("auto-collapse for a wide reader", () => {
     s().autoRestore();
 
     expect(s().secondarySidebarCollapsed.history).toBe(false);
-    expect(s().autoCollapsed).toEqual({ secondary: null });
+    expect(s().autoCollapsed).toEqual({ sidebar: false, secondary: null });
   });
 
   it("never writes an auto-collapse to the settings store", async () => {
