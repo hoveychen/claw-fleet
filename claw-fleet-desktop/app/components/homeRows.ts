@@ -21,6 +21,7 @@ import {
   type TaskView,
 } from "../../../shared-ts/taskState";
 import { isFleetOwnedTask, type PendingDecision, type SessionInfo } from "../types";
+import type { WatchSummary } from "../generated/types";
 
 /**
  * Section order on the desktop home: what needs you, what is moving, what is
@@ -577,6 +578,13 @@ export function rowTokenSpeed(row: HomeRow): number {
 export function rowActiveSubtasks(row: HomeRow): number {
   if (row.kind === "card") return 0;
   return row.subtasks.filter((st) => st.state === "running" || st.state === "waiting").length;
+}
+
+/** The main line's live `fleet watch`es — what a parked task is waiting on.
+ *  A sub-task's watches are its own business and stay off the task's row. */
+export function rowWatches(row: HomeRow): WatchSummary[] {
+  if (row.kind === "card") return row.session?.watches ?? [];
+  return row.hops.flatMap((h) => h.watches ?? []);
 }
 
 /** The last message of the open hop, unless it only repeats the title. */

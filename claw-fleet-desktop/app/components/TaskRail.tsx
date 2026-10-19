@@ -1,4 +1,5 @@
-// The right column of a session: its task's sub-tasks and steps, the subagents
+// The right column of a session: what it is waiting on (its fleet watches and
+// who waits on it), its task's sub-tasks and steps, the subagents
 // running and the docs and side questions opened in it, the material the task
 // produced. The session internals (model, tokens, relay chain, facets) are not
 // here: they sit behind the header's ··· menu, where the developer view toggles
@@ -143,6 +144,8 @@ export function TaskRail({
   artifacts,
   reviewDocs = [],
   onOpenSession,
+  waiting,
+  waitingCount = 0,
   ambient,
   empty,
   className,
@@ -164,6 +167,11 @@ export function TaskRail({
    *  card, so a card stays a question and the doc opens in the reader. */
   reviewDocs?: readonly ReviewDoc[];
   onOpenSession: (sessionId: string) => void;
+  /** The open session's watches and waiters, already rendered; the rail only
+   *  frames them. Omitted when there are none. */
+  waiting?: ReactNode;
+  /** How many watches and waiters `waiting` lists, for the heading. */
+  waitingCount?: number;
   /** Running subagents, opened docs and side questions — SessionAuxRail. */
   ambient: ReactNode;
   /** Nothing in any section: the header switch is holding the rail open. */
@@ -284,6 +292,17 @@ export function TaskRail({
       {/* Held open by the switch with nothing in it. Saying so beats a blank
           column, which reads as the rail having failed to load. */}
       {empty && <p className={styles.empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
+
+      {/* First: while it is set, the wait is what the session is doing. */}
+      {waiting && (
+        <section className={styles.block} data-testid="rail-waiting">
+          <h3 className={styles.head}>
+            {t("home.rail_waiting", "Waiting on")}
+            <span className={styles.count}>{waitingCount}</span>
+          </h3>
+          {waiting}
+        </section>
+      )}
 
       {linked && stepsSection}
 

@@ -30,14 +30,18 @@ function formatElapsed(ms: number): string {
  * Callers must guard on `session.watches?.length` being truthy.
  *
  * `inline` drops the row wrapper so the chips can sit in a chip row someone else
- * owns (the detail header's meta row), instead of claiming a line of their own.
+ * owns, instead of claiming a line of their own. `stacked` lays them out one per
+ * line with the note allowed to wrap, for a narrow column (the session's right
+ * rail).
  */
 export function WatchStatusRow({
   session,
   inline = false,
+  stacked = false,
 }: {
   session: SessionInfo;
   inline?: boolean;
+  stacked?: boolean;
 }) {
   const { t } = useTranslation();
   // Re-tick once a second so elapsed climbs live even between session polls.
@@ -98,7 +102,7 @@ export function WatchStatusRow({
             {w.note && (
               <>
                 <span className={styles.watch_note}>{w.note}</span>
-                <span aria-hidden>·</span>
+                <span className={styles.note_sep} aria-hidden>·</span>
               </>
             )}
             {broken ? (
@@ -133,7 +137,8 @@ export function WatchStatusRow({
     </>
   );
 
-  return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
+  if (inline) return chips;
+  return <div className={stacked ? styles.watch_stack : styles.watch_row}>{chips}</div>;
 }
 
 /** Short label for a session id: its live AI title, else a short id. */
@@ -180,7 +185,7 @@ function TargetWatchChips({ watch: w, elapsed }: { watch: WatchSummary; elapsed:
         {w.note && (
           <>
             <span className={styles.watch_note}>{w.note}</span>
-            <span aria-hidden>·</span>
+            <span className={styles.note_sep} aria-hidden>·</span>
           </>
         )}
         {t("card.watch_targets_chip", { done, total: targets.length, mode, elapsed })}
@@ -226,7 +231,15 @@ function TargetChip({ target: x, label }: { target: WatchTarget; label: string }
  * The reverse mark on a session other sessions are waiting for: "waited on by
  * N", with each waiter one click away. Callers guard on `session.waitedBy?.length`.
  */
-export function WaitedByRow({ session, inline = false }: { session: SessionInfo; inline?: boolean }) {
+export function WaitedByRow({
+  session,
+  inline = false,
+  stacked = false,
+}: {
+  session: SessionInfo;
+  inline?: boolean;
+  stacked?: boolean;
+}) {
   const { t } = useTranslation();
   const labelOf = useSessionLabel();
   const edges = session.waitedBy ?? [];
@@ -258,5 +271,6 @@ export function WaitedByRow({ session, inline = false }: { session: SessionInfo;
       ))}
     </>
   );
-  return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
+  if (inline) return chips;
+  return <div className={stacked ? styles.watch_stack : styles.watch_row}>{chips}</div>;
 }
