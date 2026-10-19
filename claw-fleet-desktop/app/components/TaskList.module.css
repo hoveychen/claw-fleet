@@ -215,9 +215,8 @@
 }
 
 .chip {
-  /* Gives way before the title does, down to a few letters. */
-  flex: 0 2 auto;
-  min-width: 3.5em;
+  /* Leads line 2 at its own width (capped); the detail text truncates instead. */
+  flex: 0 0 auto;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
