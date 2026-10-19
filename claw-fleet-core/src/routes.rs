@@ -133,6 +133,9 @@ pub const EXPLORER_ROOTS: &str = "/explorer_roots";
 /// Locate a file by the tail of its path, for when the literal path an agent
 /// named does not exist. Same workspace gate as `EXPLORER_DIR`.
 pub const EXPLORER_FIND: &str = "/explorer_find";
+/// Find files and directories in a project by name (the Files page's search
+/// box). Same workspace gate as `EXPLORER_DIR`.
+pub const EXPLORER_SEARCH: &str = "/explorer_search";
 pub const FILE_SIZE: &str = "/file_size";
 /// The bundled Fleet SKILL.md, verbatim.
 ///

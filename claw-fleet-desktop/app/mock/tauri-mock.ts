@@ -599,6 +599,15 @@ async function handleIPC(
     // "no such file" notice rather than pretending to rescue the click.
     case "find_explorer_path":
       return [];
+    // Files page search box: every mock tree level flattened, filtered by
+    // case-insensitive name substring (all whitespace-separated terms).
+    case "search_explorer_files": {
+      const terms = ((args.query as string) ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+      if (terms.length === 0) return [];
+      return Object.values(MOCK_EXPLORER_TREE)
+        .flat()
+        .filter((e) => terms.every((t) => e.name.toLowerCase().includes(t)));
+    }
     case "read_explorer_file": {
       const rel = (args.relPath as string) ?? "";
       // Real HTML (with inline styles + a script) so the iframe preview branch

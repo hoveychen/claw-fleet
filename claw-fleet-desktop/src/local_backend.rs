@@ -3098,6 +3098,22 @@ impl LocalBackend {
         crate::file_explorer::find_by_suffix(workspace, root, rel_suffix, &self.known_workspaces())
     }
 
+    pub fn search_explorer_files(
+        &self,
+        workspace: &str,
+        root: &str,
+        query: &str,
+        show_ignored: bool,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
+        crate::file_explorer::search_by_name(
+            workspace,
+            root,
+            query,
+            show_ignored,
+            &self.known_workspaces(),
+        )
+    }
+
     pub fn read_external_file(
         &self,
         path: &str,

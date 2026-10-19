@@ -77,6 +77,22 @@ pub(crate) fn find_explorer_path(
         .find_explorer_path(&workspace, &root, &rel_suffix)
 }
 
+/// Find files and directories in a project by name (case-insensitive
+/// substring, all whitespace-separated terms must match). Backs the Files
+/// page's search box.
+#[tauri::command(async)]
+pub(crate) fn search_explorer_files(
+    workspace: String,
+    root: String,
+    query: String,
+    show_ignored: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
+    state
+        .backend
+        .search_explorer_files(&workspace, &root, &query, show_ignored)
+}
+
 /// Preview a path that belongs to no workspace — what a `/tmp/foo.md` chip in
 /// agent prose resolves to. Single file, no listing.
 #[tauri::command(async)]

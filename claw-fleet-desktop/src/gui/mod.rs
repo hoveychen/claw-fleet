@@ -1787,6 +1787,7 @@ pub fn run() {
             list_explorer_dir,
             read_explorer_file,
             find_explorer_path,
+            search_explorer_files,
             read_external_file,
             resolve_prose_path,
             list_scratchpad_dir,
