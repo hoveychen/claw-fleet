@@ -1119,6 +1119,15 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         )));
     }
 
+    // Sub-task guard: only a task's main conversation talks to the user; a
+    // sub-task hands its report and open questions back in its final reply.
+    if let Some(parent) = crate::task_roles_guidance::subtask_parent(&session_id) {
+        return Ok(tool_error(format!(
+            "{} (main conversation: {parent})",
+            crate::task_roles_guidance::SUBTASK_ASK_REFUSAL
+        )));
+    }
+
     // Re-entry guard: this session already has a question parked and waiting for
     // the user. An agent that got here anyway ignored the stop notice from that
     // one — hand it straight back rather than stacking a second card the user

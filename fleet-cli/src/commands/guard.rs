@@ -113,10 +113,21 @@ pub(crate) fn cmd_guard() {
             return;
         }
         GuardClassification::NeedsConfirmation { command, risk_tags } => {
+            let cfg = DecisionPanelConfig::load();
+            // Audit-only (the default): the command still lands in the audit
+            // trail, which is rebuilt from transcripts, but nobody is asked to
+            // approve it — the session does not pause. Applies to headless
+            // Codex too: fail-closed below exists for the confirm mode, where
+            // a Critical command must not run unapproved.
+            if !cfg.guard_confirm {
+                claw_fleet_core::log_debug(&format!(
+                    "[guard hook] audit-only, allowing critical command (tags={risk_tags:?})",
+                ));
+                return;
+            }
             // No live consumer (Fleet app not running / no SSE client on
             // `fleet serve`) — fall through silently so Claude isn't blocked
             // by a request nobody will answer.
-            let cfg = DecisionPanelConfig::load();
             let liveness_window = cfg.heartbeat_window();
             let status = consumer_heartbeat::consumer_status(liveness_window);
             if !status.is_alive() {
@@ -301,6 +312,21 @@ pub(crate) fn cmd_elicitation() {
         };
 
     if questions.is_empty() {
+        return;
+    }
+
+    // A sub-task never asks the user; its questions go back to the task's
+    // main conversation in its final reply (the same rule `fleet__ask` enforces).
+    if let Some(parent) = hook_input
+        .session_id
+        .as_deref()
+        .and_then(claw_fleet_core::task_roles_guidance::subtask_parent)
+    {
+        let reason = format!(
+            "{} (main conversation: {parent})",
+            claw_fleet_core::task_roles_guidance::SUBTASK_ASK_REFUSAL
+        );
+        println!("{}", deny_hook_output(&reason));
         return;
     }
 

@@ -785,6 +785,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     wait_seconds: number;
     poll_ms: number;
     heartbeat_window_seconds: number;
+    /** Guard holds risky commands for approval; off = audit-only. */
+    guard_confirm?: boolean;
   }
   const [timeouts, setTimeouts] = useState<DecisionPanelConfig | null>(null);
   // Edit-then-commit-on-blur pattern: free typing during editing, persist
@@ -812,7 +814,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const commitTimeoutField = useCallback(
-    async (field: keyof DecisionPanelConfig) => {
+    async (field: "wait_seconds" | "poll_ms" | "heartbeat_window_seconds") => {
       if (!timeouts || !timeoutsDraft) return;
       const raw = timeoutsDraft[field];
       const parsed = parseInt(raw, 10);
@@ -849,6 +851,22 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       }
     },
     [timeouts, timeoutsDraft],
+  );
+
+  const handleToggleGuardConfirm = useCallback(
+    async (on: boolean) => {
+      if (!timeouts) return;
+      try {
+        const saved = await invoke<DecisionPanelConfig>(
+          "set_decision_panel_config",
+          { cfg: { ...timeouts, guard_confirm: on } },
+        );
+        setTimeouts(saved);
+      } catch (e) {
+        console.error("set_decision_panel_config failed:", e);
+      }
+    },
+    [timeouts],
   );
 
   // ── QA mode diagnostics ───────────────────────────────────────────────
@@ -1697,6 +1715,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     onChange={handleToggleGuardLlm}
                   />
                 </div>
+                {guardEnabled && (
+                  <ToggleRow
+                    label={t("settings.guard_confirm")}
+                    desc={t("settings.guard_confirm_desc")}
+                    checked={timeouts?.guard_confirm ?? false}
+                    onChange={handleToggleGuardConfirm}
+                    loading={!timeoutsSettled}
+                  />
+                )}
               </div>
 
                 <SecurityLinks onClose={onClose} />
