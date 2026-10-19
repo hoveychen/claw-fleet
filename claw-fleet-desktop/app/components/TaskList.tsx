@@ -251,25 +251,26 @@ const TaskListRow = memo(function TaskListRow({
             {subagents + subtasks}
           </span>
         )}
-        {!showProject ? null : row.projectPath ? (
-          <button
-            type="button"
-            className={styles.chip}
-            title={t("home.project_filter_tip")}
-            onClick={(e) => {
-              e.stopPropagation();
-              onScopeProject(row.projectPath!);
-            }}
-          >
-            {row.projectName}
-          </button>
-        ) : (
-          <span className={styles.chip}>{row.projectName}</span>
-        )}
         <span className={styles.time}>{time}</span>
       </div>
-      {(detail || preview || row.state === "review") && (
+      {(showProject || detail || preview || row.state === "review") && (
         <div className={styles.line2}>
+          {/* The project leads line 2 so the title gets line 1's full width. */}
+          {!showProject ? null : row.projectPath ? (
+            <button
+              type="button"
+              className={styles.chip}
+              title={t("home.project_filter_tip")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onScopeProject(row.projectPath!);
+              }}
+            >
+              {row.projectName}
+            </button>
+          ) : (
+            <span className={styles.chip}>{row.projectName}</span>
+          )}
           {detail && (
             <span className={styles.detail} title={detail}>
               {detail}
