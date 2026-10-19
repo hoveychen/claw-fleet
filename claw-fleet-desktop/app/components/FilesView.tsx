@@ -16,6 +16,7 @@ import {
   GitBranch,
   HardDrive,
   RefreshCw,
+  Search,
 } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { CopyButton } from "./CopyButton";
@@ -360,6 +361,45 @@ export function WorkspaceExplorer({
   };
 
   const git = useGitStatus(workspace, activeRoot?.path ?? null);
+
+  // ── Find a file by name ────────────────────────────────────────────────────
+  //
+  // Results stand in for the tree while a query is typed, the way Finder's
+  // search swaps the folder listing out; picking one reveals it in the tree.
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<ExplorerEntry[] | null>(null);
+  const [searchFailed, setSearchFailed] = useState(false);
+  const searching = query.trim() !== "" && hits === null;
+  const showSearching = useDelayedFlag(searching);
+  useEffect(() => {
+    setHits(null);
+    setSearchFailed(false);
+    const q = query.trim();
+    if (!q || !activeRoot) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      invoke<ExplorerEntry[]>("search_explorer_files", {
+        workspace,
+        root: activeRoot.path,
+        query: q,
+        showIgnored,
+      })
+        .then((r) => alive && setHits(r))
+        .catch(() => {
+          if (!alive) return;
+          setHits([]);
+          setSearchFailed(true);
+        });
+    }, 200);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query, workspace, activeRoot, showIgnored]);
+  const pickHit = (entry: ExplorerEntry) => {
+    setQuery("");
+    revealFile(entry.relativePath);
+  };
   const changed = useMemo(
     () => new Map((git.status?.dirtyFiles ?? []).map((f) => [f.path, f.status])),
     [git.status],
@@ -481,6 +521,19 @@ export function WorkspaceExplorer({
           })}
         </nav>
         <div className={fileStyles.toolbar_actions}>
+          <label className={fileStyles.search}>
+            <Search size={13} strokeWidth={1.8} />
+            <input
+              type="search"
+              value={query}
+              placeholder={t("files.search_placeholder")}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setQuery("");
+                if (e.key === "Enter" && hits?.[0]) pickHit(hits[0]);
+              }}
+            />
+          </label>
           {extraActions}
           {activeRoot && (
             <SyncStatus
@@ -510,7 +563,38 @@ export function WorkspaceExplorer({
             >
               {roots === null && <SkeletonList rows={10} meta={false} />}
               {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
+              {query.trim() !== "" && (
+                <div className={fileStyles.hits} role="listbox">
+                  {showSearching && (
+                    <p className={skillStyles.tree_empty}>{t("files.search_searching")}</p>
+                  )}
+                  {hits?.length === 0 && (
+                    <p className={skillStyles.tree_empty}>
+                      {searchFailed ? t("files.search_failed") : t("files.search_none", { q: query.trim() })}
+                    </p>
+                  )}
+                  {hits?.map((h) => {
+                    const parent = h.relativePath.slice(0, -h.name.length).replace(/\/$/, "");
+                    return (
+                      <button
+                        key={h.relativePath}
+                        type="button"
+                        className={`${skillStyles.tree_item} ${fileStyles.tree_row}`}
+                        onClick={() => pickHit(h)}
+                        title={h.relativePath}
+                      >
+                        <FileKindIcon kind={fileKind(h.name, h.isDir)} className={fileStyles.kind_icon} />
+                        <span className={fileStyles.hit_text}>
+                          <span className={skillStyles.tree_name}>{h.name}</span>
+                          {parent && <span className={fileStyles.hit_dir}>{parent}</span>}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {activeRoot && (
+                <div className={fileStyles.tree_host} hidden={query.trim() !== ""}>
                 <FileTree
                   loadDir={loadDir}
                   activeFile={activeFile}
@@ -523,6 +607,7 @@ export function WorkspaceExplorer({
                   meta="time"
                   onEntryContextMenu={onEntryContextMenu}
                 />
+                </div>
               )}
 
               <ResizeHandle active={treeDragging} onMouseDown={onTreeMouseDown} />
