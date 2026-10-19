@@ -10,6 +10,8 @@ import type { SessionInfo } from "../types";
 import type { Artifact } from "./ArtifactsView";
 import type { TaskRow } from "./homeRows";
 import { TaskRail, taskRailHasContent } from "./TaskRail";
+import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
+import { useUIStore } from "../store";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,12 +31,13 @@ function row(over: Partial<TaskRow> = {}): TaskRow {
   return { hops: [main], tip: main, subtasks: [], ...over } as unknown as TaskRow;
 }
 
-function render(props: Partial<Parameters<typeof TaskRail>[0]> = {}) {
+function render(props: Partial<Parameters<typeof TaskRail>[0]> = {}, ingest: IngestOpenContext | null = null) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() =>
     root!.render(
+      <IngestOpenProvider value={ingest}>
       <TaskRail
         row={null}
         openSessionId="main"
@@ -45,7 +48,8 @@ function render(props: Partial<Parameters<typeof TaskRail>[0]> = {}) {
         empty={false}
         developer={null}
         {...props}
-      />,
+      />
+      </IngestOpenProvider>,
     ),
   );
   return container;
@@ -87,5 +91,26 @@ describe("TaskRail", () => {
   it("hosts the ambient sections on a session with no task", () => {
     const el = render({ ambient: <section data-testid="ambient">agents</section> });
     expect(el.querySelector("[data-testid='ambient']")).not.toBeNull();
+  });
+
+  // Material opens in the floating reader beside the conversation, like a
+  // transcript's ingest card, instead of jumping to the artifacts page.
+  it("opens material in the rail first, and the page only once it is open there", () => {
+    const nav = vi.fn();
+    useUIStore.setState({ requestArtifactNav: nav } as never);
+    const art = { id: "a1", title: "Report", name: "r.md", mime: "text/markdown", note: "" } as Artifact;
+    const open = vi.fn();
+    let el = render({ row: row(), artifacts: [art] }, { open, expandedId: null });
+    const item = () => el.querySelector<HTMLButtonElement>("button[title='r.md']")!;
+    act(() => item().click());
+    expect(open).toHaveBeenCalledWith("artifact", "a1", "Report");
+    expect(nav).not.toHaveBeenCalled();
+
+    act(() => root!.unmount());
+    container!.remove();
+    el = render({ row: row(), artifacts: [art] }, { open, expandedId: "artifact:a1" });
+    expect(item().getAttribute("aria-current")).toBe("true");
+    act(() => item().click());
+    expect(nav).toHaveBeenCalledWith("a1");
   });
 });
