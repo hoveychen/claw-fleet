@@ -1109,6 +1109,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "parentSessionId",
     "agentType",
     "runningSubagentCount",
+    // Task row speed-tier pulse (shared-ts/taskSpeed.ts). Rounded to whole
+    // tok/s and dropped at 0 in `slim_sessions_snapshot`: the value eases down
+    // for 5 minutes after a session stops, and sub-tok/s jitter would re-push
+    // every idle-ish row on each 2s tick for nothing.
+    "agentTokenSpeed",
     // Ground truth for "Fleet spawned this" — the phone's Tasks list ANDs it with
     // the entrypoint check so a `claude -p` child that only inherited a Fleet
     // CLAUDE_CODE_ENTRYPOINT stops showing up as a task (mirrors desktop).
@@ -1257,6 +1262,13 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
             for &key in SNAPSHOT_FIELDS {
                 let Some(v) = s.get(key) else { continue };
                 if v.is_null() {
+                    continue;
+                }
+                if key == "agentTokenSpeed" {
+                    let rounded = v.as_f64().unwrap_or(0.0).round();
+                    if rounded >= 1.0 {
+                        out.insert(key.to_string(), Value::from(rounded as u64));
+                    }
                     continue;
                 }
                 if key == "lastMessagePreview" {
@@ -6879,6 +6891,31 @@ mod tests {
         let preview = list[0]["lastMessagePreview"].as_str().unwrap();
         assert_eq!(preview.chars().count(), SNAPSHOT_PREVIEW_CHARS + 1);
         assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn slim_snapshot_rounds_agent_speed_and_drops_zero() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let row = |id: &str, ms: u64, speed: f64| {
+            json!({
+                "id": id, "isSubagent": false, "lastActivityMs": ms,
+                "agentTokenSpeed": speed, "entrypoint": NEW_SESSION_ENTRYPOINT
+            })
+        };
+        let sessions = json!([
+            row("fast", 300, 57.62),
+            row("decayed", 200, 0.4),
+            row("idle", 100, 0.0),
+        ]);
+        let slim = slim_sessions_snapshot(&sessions);
+        let list = slim.as_array().expect("array");
+        // Whole tok/s only: fractional jitter would change the row's bytes
+        // on every tick and re-push it to the phone for nothing.
+        assert_eq!(list[0]["agentTokenSpeed"], json!(58));
+        // Below 1 tok/s rounds to nothing and is omitted, like any other
+        // empty field; the phone reads absent as 0.
+        assert!(list[1].get("agentTokenSpeed").is_none());
+        assert!(list[2].get("agentTokenSpeed").is_none());
     }
 
     #[test]

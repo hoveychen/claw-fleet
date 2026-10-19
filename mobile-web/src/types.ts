@@ -111,6 +111,9 @@ export interface SessionInfo {
   agentType?: string | null;
   /** Live subagent count rolled up onto a main session. */
   runningSubagentCount?: number;
+  /** Output speed (tok/s) of this session plus its subagents, rounded by the
+   *  relay and omitted at 0. Drives the task row's speed-tier pulse. */
+  agentTokenSpeed?: number;
   /** Ground truth that Fleet actually spawned this session (a spawn marker, or a
    *  grandfather for sessions predating the marker). Absent on payloads from a
    *  relay that predates the field — treated as "not a leak" so those don't

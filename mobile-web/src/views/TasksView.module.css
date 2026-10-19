@@ -312,6 +312,52 @@
   color: var(--color-success);
 }
 
+/* Speed tiers (shared-ts/taskSpeed.ts), same as the desktop row dot: colour
+   stays the state, motion is the task's output speed. 0 holds still; 1
+   breathes slowly, 2 quickly; 3 breaks the ring into dashes and spins it. */
+.markToggle[data-speed="1"] svg {
+  animation: mark-breathe 2.4s ease-in-out infinite;
+}
+
+.markToggle[data-speed="2"] svg {
+  animation: mark-breathe 1s ease-in-out infinite;
+}
+
+.markToggle[data-speed="3"] svg {
+  animation: mark-spin 0.9s linear infinite;
+}
+
+.markToggle[data-speed="3"] svg circle {
+  /* r=10 circle, circumference ≈ 62.8: five even dash+gap pairs. */
+  stroke-dasharray: 8.57 4;
+}
+
+@keyframes mark-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes mark-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reduced motion: no breathing; the top tier keeps its dashed ring, held
+   still, so "very fast" still reads. */
+@media (prefers-reduced-motion: reduce) {
+  .markToggle[data-speed] svg {
+    animation: none;
+  }
+}
+
 .rowBody {
   flex: 1;
   min-width: 0;

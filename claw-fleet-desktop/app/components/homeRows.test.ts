@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PendingDecision, SessionInfo, SessionStatus } from "../types";
 import { NEW_SESSION_ENTRYPOINT } from "../types";
+import { speedTier } from "../../../shared-ts/taskSpeed";
 import {
   buildHomeRows,
   filterRows,
@@ -15,6 +16,7 @@ import {
   rowPreview,
   rowActiveSubtasks,
   rowRunningSubagents,
+  rowTokenSpeed,
   sectionRows,
   stepText,
   type TaskRow,
@@ -363,6 +365,32 @@ describe("row signals", () => {
       session("sub", { taskId: "sub", parentTaskId: "root", runningSubagentCount: 1 }),
     ]);
     expect(rowRunningSubagents(rows[0])).toBe(3);
+  });
+
+  it("sums the task's speed over the open main hop and each sub-task's open hop", () => {
+    const rows = build([
+      session("root", { handoff: { chainId: "c", chainLen: 2, hop: 1 }, agentTokenSpeed: 90 }),
+      session("hop2", {
+        taskId: "root",
+        handoff: { chainId: "c", chainLen: 2, hop: 2 },
+        agentTokenSpeed: 30,
+      }),
+      session("sub", { taskId: "sub", parentTaskId: "root", agentTokenSpeed: 25 }),
+    ]);
+    // The retired first hop's leftover speed is not counted.
+    expect(rowTokenSpeed(rows[0])).toBe(55);
+  });
+
+  it("maps speed to tiers: still below 1 tok/s, arc only with helpers fanned out", () => {
+    expect(speedTier(0)).toBe(0);
+    expect(speedTier(0.6)).toBe(0);
+    expect(speedTier(undefined)).toBe(0);
+    expect(speedTier(Number.NaN)).toBe(0);
+    expect(speedTier(1)).toBe(1);
+    expect(speedTier(39.9)).toBe(1);
+    expect(speedTier(40)).toBe(2);
+    expect(speedTier(149)).toBe(2);
+    expect(speedTier(150)).toBe(3);
   });
 
   it("counts the sub-tasks still at it, not the ones that reported back", () => {
