@@ -35,13 +35,13 @@ const FONT_FAMILY = "var(--font-sans)";
  *  "distinguish items by color." Without these, they derive a bunch of
  *  indistinguishable grays from the nearly-neutral primaryColor. */
 const CATEGORICAL_LIGHT = [
-  "#c25232", // accent
+  "#d97757", // accent
   "#1d4ed8", // accent-tool
   "#1b7f87", // teal
   "#178042", // success
   "#9a6a08", // warning
   "#8250df", // info
-  "#b3442a", // accent-bright
+  "#b3442a", // deep terracotta
   "#5d6168", // text-secondary
 ];
 
@@ -156,14 +156,14 @@ const LIGHT: Record<string, string> = {
   taskTextDarkColor: "#1f2023",
   taskTextLightColor: "#fbfaf7",
   taskTextOutsideColor: "#5d6168",
-  activeTaskBkgColor: "#c25232",
-  activeTaskBorderColor: "#a94527",
+  activeTaskBkgColor: "#d97757",
+  activeTaskBorderColor: "#b54a32",
   doneTaskBkgColor: "#d8d4ca",
   doneTaskBorderColor: "#b8b3a8",
   critBkgColor: "#cc3340",
   critBorderColor: "#a82733",
   gridColor: "#ddd9d0",
-  todayLineColor: "#c25232",
+  todayLineColor: "#d97757",
 
   ...scaleKeys(CATEGORICAL_LIGHT, "#ffffff"),
   pieStrokeColor: "#f1efea",
