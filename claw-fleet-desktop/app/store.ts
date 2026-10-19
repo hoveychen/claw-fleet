@@ -77,7 +77,7 @@ export interface MainViewState {
     query: string;
     /** Repo-root path of the open project. */
     selectedPath: string | null;
-    tab: "routines" | "memory" | "code";
+    tab: "routines" | "memory" | "code" | "commands";
   };
   skills: {
     query: string;
@@ -100,7 +100,6 @@ export interface MainViewState {
     // backend state now: `list_browse_paths` / `add_browse_path`.
     activeRootPath: string | null;
     showIgnored: boolean;
-    tab: "files" | "procs";
     activeFilePath: string | null;
   };
   mobile: { urlDraft: string; editingUrl: boolean };
@@ -154,7 +153,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
   files: {
     activeRootPath: null,
     showIgnored: false,
-    tab: "files",
     activeFilePath: null,
   },
   mobile: { urlDraft: "", editingUrl: false },

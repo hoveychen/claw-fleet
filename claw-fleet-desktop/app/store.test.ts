@@ -209,7 +209,6 @@ describe("primary nav page browsing context", () => {
     updateMainViewState("files", {
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
-      tab: "procs",
       activeFilePath: "src/main.rs",
     });
     updateMainViewState("mobile", { editingUrl: true, urlDraft: "wss://relay.example" });
@@ -260,7 +259,6 @@ describe("primary nav page browsing context", () => {
     expect(state.files).toEqual({
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
-      tab: "procs",
       activeFilePath: "src/main.rs",
     });
     expect(state.mobile).toMatchObject({ editingUrl: true, urlDraft: "wss://relay.example" });

@@ -3066,6 +3066,7 @@
     "tab_routines": "例行",
     "tab_memory": "记忆",
     "tab_code": "代码",
+    "tab_commands": "命令",
     "pick_title": "选一个项目",
     "pick_sub": "看它的例行、记忆和代码。",
     "memory_empty": "这个项目还没有记忆",

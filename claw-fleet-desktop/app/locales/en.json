@@ -3074,6 +3074,7 @@
     "tab_routines": "Routines",
     "tab_memory": "Memory",
     "tab_code": "Code",
+    "tab_commands": "Commands",
     "pick_title": "Pick a project",
     "pick_sub": "See its routines, memory and code.",
     "memory_empty": "No memory in this project yet",
