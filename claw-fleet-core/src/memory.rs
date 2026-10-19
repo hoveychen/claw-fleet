@@ -103,6 +103,31 @@ pub enum MemoryEditDetail {
     },
 }
 
+// ── Claude Code project directories ─────────────────────────────────────────
+
+/// The workspace of every Claude Code project directory under
+/// `~/.claude/projects`, with memory or without. The project registry reads
+/// this once to take in directories worked in before it existed.
+pub fn claude_project_workspaces() -> Vec<String> {
+    let Some(claude_dir) = get_claude_dir() else {
+        return vec![];
+    };
+    let Ok(entries) = fs::read_dir(claude_dir.join("projects")) else {
+        return vec![];
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|dir| dir.is_dir())
+        .filter_map(|dir| {
+            let key = dir.file_name()?.to_str()?.to_string();
+            let ws = crate::session::heal_workspace_path(&dir, decode_project_key(&key));
+            // Degenerate keys decode to "/", which is no project.
+            (!ws.split('/').all(|s| s.is_empty())).then_some(ws)
+        })
+        .collect()
+}
+
 // ── Scan all workspace memories ──────────────────────────────────────────────
 
 pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
