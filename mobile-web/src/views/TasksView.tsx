@@ -19,6 +19,7 @@ import {
   MessageCircle,
   Search,
   SearchX,
+  Radar,
   Square,
   WifiOff,
   X,
@@ -38,7 +39,8 @@ import { useChatWorkspaces } from "../useChatWorkspace";
 import { mentionPreview } from "../sessionMention";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { AgentSourceIcon } from "./AgentSourceIcon";
-import { compactDuration } from "../../../shared-ts/watchProgress";
+import { compactDuration, watchRowToken } from "../../../shared-ts/watchProgress";
+import { WatchRing } from "./WatchRing";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import { createWakeLatch, isParkedForWake, stickyWaking } from "../../../shared-ts/wakeLatch";
 import type { TaskState } from "../../../shared-ts/taskState";
@@ -625,6 +627,10 @@ export function TasksView({
       .filter(Boolean)
       .join(" · ");
     const preview = tip.lastMessagePreview ? mentionPreview(tip.lastMessagePreview) : "";
+    // The main line's first watch: what a parked task is waiting on, and how
+    // far along that wait is. Same token as the desktop task row.
+    const watch = r.hops.flatMap((h) => h.watches ?? [])[0];
+    const watchToken = watch ? watchRowToken(watch, Date.now()) : null;
     return (
       <div key={r.key} className={styles.row} onClick={() => onOpenSession(tip)}>
         <button
@@ -665,6 +671,24 @@ export function TasksView({
             <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
               <AgentSourceIcon source={tip.agentSource} />
             </span>
+            {watchToken && (
+              <span
+                className={styles.watch}
+                data-tone={watchToken.alarming ? "warning" : undefined}
+                data-testid="task-row-watch"
+              >
+                {watchToken.ring ? (
+                  <WatchRing
+                    size={12}
+                    fraction={watchToken.ring.fraction}
+                    alarming={watchToken.ring.alarming}
+                  />
+                ) : (
+                  <Radar size={11} />
+                )}
+                <span className={styles.watchText}>{watchToken.text}</span>
+              </span>
+            )}
             {line2 && <span className={styles.line2Text}>{line2}</span>}
             {subagents + liveSubtasks > 0 && (
               <span className={styles.subagents} aria-label={helpersLabel}>

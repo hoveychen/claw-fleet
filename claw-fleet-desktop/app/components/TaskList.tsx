@@ -4,7 +4,7 @@ import { Bot, Check, ChevronDown, ChevronRight, Folder, Radar, X } from "lucide-
 import type { TFunction } from "i18next";
 import type { TaskState } from "../../../shared-ts/taskState";
 import { speedTier } from "../../../shared-ts/taskSpeed";
-import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
+import { compactDuration, watchRowToken } from "../../../shared-ts/watchProgress";
 import type { SessionInfo } from "../types";
 import { timeAgo } from "./timeAgo";
 import {
@@ -171,58 +171,25 @@ function RowMark({
   );
 }
 
-/** How far along the task's first watch is, squeezed into one token: a ring
- *  (or the radar icon when there is no fraction) and a tail — a percentage,
- *  the reported progress line, elapsed against the expected wait, or elapsed
- *  and the poll count. A session watch says how many targets are done. The
- *  note is not repeated: the wait reason after it on the line already says
- *  what is being waited on. Amber when progress stalled, the wait overran or
- *  the `until` command cannot run. */
+/** How far along the task's first watch is, in one token (`watchRowToken`,
+ *  shared with the phone). The note is not repeated: the wait reason after
+ *  it on the line already says what is being waited on. */
 export function RowWatch({ row, now }: { row: HomeRow; now: number }) {
   const { t } = useTranslation();
   const w = rowWatches(row)[0];
   if (!w) return null;
-  if (w.targets && w.targets.length > 0) {
-    const done = w.targets.filter((x) => x.phase === "done").length;
-    const failed = w.targets.some((x) => x.phase === "failed");
-    return (
-      <span
-        className={failed ? styles.watch_alarming : styles.watch}
-        title={w.note ?? undefined}
-        data-testid="task-row-watch"
-      >
-        <Radar size={11} strokeWidth={1.8} />
-        <span className={styles.watch_text}>
-          {done}/{w.targets.length}
-        </span>
-      </span>
-    );
-  }
-  const pv = watchProgressView(w, now);
-  const ring = watchRing(pv);
+  const token = watchRowToken(w, now);
   const elapsed = compactDuration(now - w.created);
-  const tail =
-    pv.kind === "reported"
-      ? pv.fraction !== null
-        ? `${Math.round(pv.fraction * 100)}%`
-        : pv.text
-      : pv.kind === "time"
-        ? `${elapsed}/${compactDuration(pv.expectedMs)}`
-        : `${elapsed}·${w.pollCount}×`;
-  // A non-zero streak: the `until` command cannot run, so the wait never ends.
-  const broken = (w.structuralFailStreak ?? 0) > 0;
-  const alarming =
-    broken ||
-    (pv.kind === "reported" && pv.stalledMs !== null) ||
-    (pv.kind === "time" && pv.overdueMs !== null);
   const title = [
     w.note ?? undefined,
-    broken
-      ? t("card.tip_watch_broken", { count: w.structuralFailStreak, reason: w.lastStderr || "—" })
-      : t("card.tip_watch", { elapsed, count: w.pollCount, poll: w.pollSecs }),
-    pv.kind === "reported"
+    w.targets && w.targets.length > 0
+      ? undefined
+      : (w.structuralFailStreak ?? 0) > 0
+        ? t("card.tip_watch_broken", { count: w.structuralFailStreak, reason: w.lastStderr || "—" })
+        : t("card.tip_watch", { elapsed, count: w.pollCount, poll: w.pollSecs }),
+    w.progress
       ? t("card.tip_watch_progress", {
-          progress: pv.text,
+          progress: w.progress,
           since: compactDuration(now - (w.progressChangedAt ?? w.created)),
         })
       : undefined,
@@ -231,16 +198,16 @@ export function RowWatch({ row, now }: { row: HomeRow; now: number }) {
     .join(" — ");
   return (
     <span
-      className={alarming ? styles.watch_alarming : styles.watch}
+      className={token.alarming ? styles.watch_alarming : styles.watch}
       title={title}
       data-testid="task-row-watch"
     >
-      {ring ? (
-        <WatchRing size={11} fraction={ring.fraction} alarming={ring.alarming} />
+      {token.ring ? (
+        <WatchRing size={11} fraction={token.ring.fraction} alarming={token.ring.alarming} />
       ) : (
         <Radar size={11} strokeWidth={1.8} />
       )}
-      <span className={styles.watch_text}>{tail}</span>
+      <span className={styles.watch_text}>{token.text}</span>
     </span>
   );
 }
