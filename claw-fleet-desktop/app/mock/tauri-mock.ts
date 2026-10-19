@@ -840,6 +840,18 @@ async function handleIPC(
           model: "claude-opus-4-8",
           agentSource: "claude",
         },
+        // A temp-dir routine: never a project, so only the projects page's
+        // "All routines" overview lists it.
+        {
+          id: "e5f6a7b8",
+          workspacePath: "/private/tmp/fleet-scratch",
+          prompt: "每小时抓一次汇率并追加到 rates.csv。",
+          title: "汇率记录",
+          intervalSecs: 3600,
+          nextFireAt: Date.now() + 25 * 60 * 1000,
+          iterationsDone: 12,
+          agentSource: "claude",
+        },
       ];
     case "list_schedules":
       return [

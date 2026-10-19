@@ -41,6 +41,18 @@ export function navSectionOf(view: ViewMode): NavSection {
   return SECTION_OF.get(view) ?? "tasks";
 }
 
+/** The memory page's workspace filter for the machine-wide bucket. */
+export const GLOBAL_MEMORY_FILTER = "__global__";
+
+/** {@link navSectionOf}, refined by what the page is showing. The memory page
+ *  belongs to Projects, but filtered to global memory it is Settings' "global
+ *  memory" page, so Settings is what lights up (and the Projects segment
+ *  switch is not drawn over it). */
+export function navSectionOfPage(view: ViewMode, memoryFilter: string): NavSection {
+  if (view === "memory" && memoryFilter === GLOBAL_MEMORY_FILTER) return "settings";
+  return navSectionOf(view);
+}
+
 /** Pages that exist only on some hosts. Terminal needs the backend's
  *  FLEET_TERMINAL; the phone pairing page only where a phone can reach this
  *  host; the lobster fleet only once its Settings toggle is on. */

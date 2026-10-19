@@ -230,6 +230,10 @@ export function patchSettled(s: SessionInfo, patch: OptimisticPatch): boolean {
  * lives exactly as long as the transcript on disk, within the scanner's
  * 7-day window.
  */
+/** The last ⌘N focus request this page acted on (see `launchFocusNonce`).
+ *  Module scope so it outlives the page unmounting. */
+let consumedLaunchFocus = 0;
+
 export function HistoryView() {
   const { t } = useTranslation();
   // Subscribe per-field: the store also carries speedHistory/costHistory, which
@@ -898,17 +902,16 @@ export function HistoryView() {
     setLaunchText("");
     handleNewSession();
   };
-  // ⌘N / Ctrl+N from anywhere on the page focuses it.
+  // ⌘N / Ctrl+N on any page lands here (the listener is app-wide, in
+  // SessionList) and focuses it. A nonce raised on another page is consumed on
+  // mount, once the input exists — and only once, so coming back to this page
+  // later does not steal focus again.
+  const launchFocusNonce = useUIStore((s) => s.launchFocusNonce);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        launchInputRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    if (launchFocusNonce <= consumedLaunchFocus) return;
+    consumedLaunchFocus = launchFocusNonce;
+    launchInputRef.current?.focus();
+  }, [launchFocusNonce]);
   const isMac = document.documentElement.getAttribute("data-platform") !== "windows";
 
   return (

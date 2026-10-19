@@ -42,7 +42,7 @@ import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 import { Presence } from "./Presence";
 import { SkeletonCard, SkeletonText } from "./loading";
-import { fromSubtask, isRecommendedOption, stripRecommendedSuffix } from "./dockKeys";
+import { fromSubtask, isRecommendedOption, primaryOptionIndex, stripRecommendedSuffix } from "./dockKeys";
 
 
 
@@ -1010,11 +1010,16 @@ function SharedOptionsBlock({
 
   const focusedPreview = question.options.find((o) => o.label === focusedLabel)?.preview;
 
+  const primaryIndex = primaryOptionIndex(
+    question.options.map((o) => o.label),
+    effectiveMulti,
+  );
   const list = (
     <div className={styles.elicitation_options}>
       {question.options.map((opt, index) => {
         const isSelected = selected.includes(opt.label);
         const recommended = isRecommendedOption(opt.label);
+        const primary = index === primaryIndex;
         const isFocused = hasPreview && opt.label === focusedLabel;
         const handleEdit = (e: React.MouseEvent) => {
           e.stopPropagation();
@@ -1035,7 +1040,7 @@ function SharedOptionsBlock({
           >
             <button
               type="button"
-              className={`${styles.elicitation_option} ${recommended ? styles.elicitation_option_recommended : ""} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
+              className={`${styles.elicitation_option} ${primary ? styles.elicitation_option_primary : ""} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
               onClick={() =>
                 onToggle(decisionId, question.question, opt.label, effectiveMulti)
               }

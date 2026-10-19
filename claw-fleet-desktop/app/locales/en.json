@@ -462,6 +462,7 @@
     "ai_skill_save_btn": "Save skill file…",
     "ai_modal_close": "Done",
     "codex_limit": "Rate Limit",
+    "usage_open_details": "Click for per-window limits and history",
     "no_usage_data": "No usage data",
     "dsh_balance_tip": "Remaining balance reported by the provider behind this key",
     "dsh_key_limit": "Key spend {{used}} of {{limit}}",
@@ -1758,7 +1759,7 @@
     "aux_copy_title": "Copy title",
     "aux_copy_artifact_id": "Copy deliverable id",
     "aux_copy_content": "Copy file contents",
-    "aux_open_in_files": "Open in Projects",
+    "aux_open_in_files": "Open in Code",
     "aux_delete_artifact": "Delete this deliverable",
     "aux_version_of": "{{version}} of {{count}}",
     "aux_updated": "updated {{when}}",
@@ -2714,7 +2715,7 @@
     "reveal_searching": "Searching the project for {{path}}…"
   },
   "paths": {
-    "open_in_files": "Open in Projects",
+    "open_in_files": "Open in Code",
     "reveal_in_finder": "Reveal in Finder",
     "reveal_in_explorer": "Show in File Explorer",
     "copy_path": "Copy Path",
@@ -3030,6 +3031,8 @@
   },
   "nav_tab_projects": "Projects",
   "routines": {
+    "chat_dir": "Chat directory",
+    "all_empty_title": "No routines yet",
     "title": "Routines",
     "create": "New routine",
     "empty_title": "No routines in this project yet",
@@ -3044,6 +3047,9 @@
     "create_confirm": "Create"
   },
   "projects": {
+    "all_routines": "All routines",
+    "all_routines_meta": "Across every project",
+    "all_routines_sub": "Routines from every project, including temp and chat directories. To create one, open its project.",
     "empty": "No projects yet. A directory shows up here once a task has run in it.",
     "no_match": "No project matches",
     "running": "{{count}} running",

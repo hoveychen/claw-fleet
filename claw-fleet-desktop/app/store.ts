@@ -288,6 +288,11 @@ interface UIState {
   openTaskNav: OpenTaskNavRequest | null;
   requestOpenTask: (sessionId: string) => void;
   clearOpenTaskNav: () => void;
+  /** ⌘N / Ctrl+N from any page: hop to the Tasks page with its list column
+   *  open and the settings overlay closed, then bump the nonce so HistoryView
+   *  focuses its "what should get done?" input. 0 = never requested. */
+  launchFocusNonce: number;
+  requestLaunchFocus: () => void;
 }
 
 export interface OpenTaskNavRequest {
@@ -587,6 +592,22 @@ export const useUIStore = create<UIState>((set) => ({
       openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
     })),
   clearOpenTaskNav: () => set({ openTaskNav: null }),
+  launchFocusNonce: 0,
+  requestLaunchFocus: () =>
+    set((s) => {
+      let secondary = {};
+      if (s.secondarySidebarCollapsed.history) {
+        const next = { ...s.secondarySidebarCollapsed, history: false };
+        setItem("secondary-sidebar-collapsed", JSON.stringify(next));
+        secondary = { secondarySidebarCollapsed: next, autoCollapsed: forgetSecondary(s, "history") };
+      }
+      return {
+        ...viewModePatch(s, "history"),
+        ...secondary,
+        settingsOpen: false,
+        launchFocusNonce: s.launchFocusNonce + 1,
+      };
+    }),
   toggleSecondarySidebar: (view) =>
     set((s) => {
       const next = {

@@ -26,7 +26,7 @@ export function CodexUsageHistoryModal({ onClose }: Props) {
   // mask-image, which makes it the containing block for position:fixed and
   // would clip the overlay to the sidebar.
   return createPortal(
-    <div className={styles.overlay} data-exiting={exiting || undefined} onClick={onClose}>
+    <div className={styles.overlay} data-exiting={exiting || undefined} data-usage-history onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <span className={styles.title}>{t("account.occupancy_title")}</span>
