@@ -2588,7 +2588,7 @@
     "group_focus": "Only this",
     "group_done": "{{count}} done",
     "dock_title": "Needs your decision",
-    "dock_first_hint": "This is the task waiting on your call. Pick and submit, and it carries on without you watching; every later card is pinned here too.",
+    "dock_first_hint": "This is the task waiting on your call. Pick and submit, and it carries on without you watching; every later card shows up here, at the end of the conversation.",
     "dock_first_hint_keys": "Digits pick an option, {{submit}} submits.",
     "dock_first_hint_ok": "Got it",
     "dock_question_step": "question {{n}} of {{total}}",

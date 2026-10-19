@@ -2582,7 +2582,7 @@
     "group_focus": "只看它",
     "group_done": "已完成 {{count}}",
     "dock_title": "需要你决定",
-    "dock_first_hint": "这是任务在等你拍板。选好、提交后它会接着做，你不用一直盯着；之后有卡片也都会钉在这里。",
+    "dock_first_hint": "这是任务在等你拍板。选好、提交后它会接着做，你不用一直盯着；之后的卡片也都会出现在对话末尾这里。",
     "dock_first_hint_keys": "数字键选选项，{{submit}} 提交。",
     "dock_first_hint_ok": "知道了",
     "dock_question_step": "第 {{n}}/{{total}} 问",
