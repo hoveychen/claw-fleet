@@ -10,6 +10,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CornerUpLeft, FileText, Image as ImageIcon, File } from "lucide-react";
 import { useUIStore } from "../store";
 import type { TaskItem } from "../types";
+import { docId } from "../detailAux";
+import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
@@ -107,6 +109,16 @@ export function TaskRail({
   const { t } = useTranslation();
   const untitled = t("history.untitled");
   const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
+  /* A material row opens like a transcript's ingest card: the first click
+     expands it into the floating reader beside the conversation, and only a
+     click on the one already open there goes to the artifacts page. Outside a
+     provider (tests) it goes straight to the page. */
+  const ingest = useIngestOpen();
+  const openMaterial = (a: Artifact) => {
+    const title = a.title || a.name;
+    if (ingest && ingest.expandedId !== docId("artifact", a.id)) ingest.open("artifact", a.id, title);
+    else requestArtifactNav(a.id);
+  };
   const [devOpen, setDevOpen] = useState(false);
 
   const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
@@ -204,12 +216,15 @@ export function TaskRail({
             <span className={styles.count}>{artifacts.length}</span>
           </h3>
           <div className={styles.card}>
-            {artifacts.map((a) => (
+            {artifacts.map((a) => {
+              const open = ingest?.expandedId === docId("artifact", a.id);
+              return (
               <button
                 key={a.id}
                 type="button"
-                className={styles.item}
-                onClick={() => requestArtifactNav(a.id)}
+                className={`${styles.item} ${open ? styles.item_open : ""}`}
+                onClick={() => openMaterial(a)}
+                aria-current={open || undefined}
                 title={a.note || a.name}
               >
                 <span className={styles.item_icon}>
@@ -217,7 +232,8 @@ export function TaskRail({
                 </span>
                 <span className={styles.item_title}>{a.title || a.name}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
