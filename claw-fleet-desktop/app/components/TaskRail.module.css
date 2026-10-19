@@ -122,7 +122,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Steps: a vertical track of rings, done ones filled, the current one solid. */
+/* Steps: Linear-style status glyphs, not a stepper. Each step carries its own
+   small ring — hollow for todo, half-filled for the current one, filled with a
+   check when done — and nothing connects them; progress lives in the count. */
 .steps {
   list-style: none;
   margin: 0;
@@ -130,52 +132,55 @@
 }
 
 .step {
-  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 5px 0 9px;
+  gap: 8px;
+  padding: 4px 0;
   font-size: 13px;
+  line-height: 18px;
   color: var(--color-text-secondary);
-}
-.step:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  left: 7px;
-  top: 22px;
-  bottom: -3px;
-  width: 1px;
-  background: var(--color-border);
 }
 
 .step_mark {
   flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-  margin-top: 1px;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
   border-radius: 50%;
   border: 1.5px solid var(--color-text-dim);
   box-sizing: border-box;
 }
 
-.step_done {
+.step_current {
   color: var(--color-text);
 }
+/* Half-filled pie inside the ring, inset so the ring stays visible. */
+.step_current .step_mark {
+  border-color: var(--color-accent);
+}
+.step_current .step_mark::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: conic-gradient(var(--color-accent) 0 50%, transparent 50% 100%);
+}
+
 .step_done .step_mark {
   border-color: var(--color-accent);
   background: var(--color-accent);
 }
-.step_done:not(:last-child)::after {
-  background: var(--color-accent);
-}
-
-.step_current {
-  color: var(--color-text);
-  font-weight: 500;
-}
-.step_current .step_mark {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
+.step_check {
+  position: absolute;
+  inset: -1.5px;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--color-on-accent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .step_text {
@@ -183,10 +188,14 @@
   overflow-wrap: anywhere;
 }
 
+/* The glyph already marks the current step; keep the word for screen readers. */
 .step_now {
-  margin-left: 4px;
-  color: var(--color-accent);
-  font-weight: 400;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .empty {

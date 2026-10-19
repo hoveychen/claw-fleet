@@ -240,7 +240,13 @@ export function TaskRail({
                 key={i}
                 className={`${styles.step} ${s.done ? styles.step_done : ""} ${i === current ? styles.step_current : ""}`}
               >
-                <span className={styles.step_mark} aria-hidden />
+                <span className={styles.step_mark} aria-hidden>
+                  {s.done && (
+                    <svg viewBox="0 0 14 14" className={styles.step_check}>
+                      <path d="M4.2 7.2l1.9 1.9 3.8-4" />
+                    </svg>
+                  )}
+                </span>
                 <span className={styles.step_text}>
                   {stepText(s.text) ?? s.text}
                   {i === current && (
