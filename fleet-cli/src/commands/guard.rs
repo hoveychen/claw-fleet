@@ -315,6 +315,21 @@ pub(crate) fn cmd_elicitation() {
         return;
     }
 
+    // A sub-task never asks the user; its questions go back to the task's
+    // main conversation in its final reply (the same rule `fleet__ask` enforces).
+    if let Some(parent) = hook_input
+        .session_id
+        .as_deref()
+        .and_then(claw_fleet_core::task_roles_guidance::subtask_parent)
+    {
+        let reason = format!(
+            "{} (main conversation: {parent})",
+            claw_fleet_core::task_roles_guidance::SUBTASK_ASK_REFUSAL
+        );
+        println!("{}", deny_hook_output(&reason));
+        return;
+    }
+
     // No live consumer — fall through silently; Claude Code will use its
     // native AskUserQuestion UI.
     let cfg = DecisionPanelConfig::load();

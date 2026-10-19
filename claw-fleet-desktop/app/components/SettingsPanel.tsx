@@ -814,7 +814,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const commitTimeoutField = useCallback(
-    async (field: keyof DecisionPanelConfig) => {
+    async (field: "wait_seconds" | "poll_ms" | "heartbeat_window_seconds") => {
       if (!timeouts || !timeoutsDraft) return;
       const raw = timeoutsDraft[field];
       const parsed = parseInt(raw, 10);

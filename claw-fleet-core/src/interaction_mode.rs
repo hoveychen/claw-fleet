@@ -146,9 +146,9 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 2. **无人值守任务豁免**：本回合来自 `fleet schedule` / `fleet loop` 的**自动**触发（prompt 结尾的 footer 会标注「无人值守」）——背后没有真人能回答决策卡。手动「立即运行」有真人在场，不在此列。\n\
 3. **接力登记豁免**：本回合跑过 `fleet handoff`（或 `fleet__handoff` 的 `action=\"register\"`）并拿到 ok 之后，**一张卡都不要再发**，连不带决策的收尾卡也不要。接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），卡会把回合挂住等人点，卡不点后继者就不起来；而且 note 在登记那一刻已冻结，{title_zh}在卡上的任何回答都到不了后继者，只会被静默丢弃。要问的事先问、拿到答案、再按答案写 note 去登记。\n\
 4. **你是子代理**（Agent/Task 工具派出的 sidechain）：**一张卡都不许发**。子代理与父会话跑在同一个 claude CLI 进程里、共用同一个 fleet MCP server，session id 取自进程 env，所以你的卡会记在**父会话**名下，那颗终态按钮关掉的是父会话的任务——{title_zh}一按，`TASK FINISHED` 回给的是你，你的汇报当场被截断。把报告、选项、要问的问题作为**最终文本结果**返回给父会话。`fleet__set_session_title` 同理会改掉父会话标题，`fleet__plan` 会挪走父会话的计划焦点。\n\
-5. **你是子任务**（每轮注入里有「你的角色：子任务」）：回合结束不发汇报卡，结果写进最终回复，由任务主对话来取；只有必须由{title_zh}拍板的事才发卡，见「任务、子任务与汇报」一节。\n\
+5. **你是子任务**（每轮注入里有「你的角色：子任务」）：**一张卡都不许发**，结果写进最终回复，由任务主对话来取；要澄清的问题也写进最终回复交给主对话去定，不直接问{title_zh}，见「任务、子任务与汇报」一节。\n\
 \n\
-服务端也会拒掉第 3、4 种情形的调用——那是安全网，不是许可。\n\
+服务端也会拒掉第 3、4、5 种情形的调用——那是安全网，不是许可。\n\
 \n\
 ## 兜底：`fleet__ask` 缺席时用 `AskUserQuestion`\n\
 \n\
@@ -234,9 +234,9 @@ After the user answers, if the answer assigns you an action, perform it in that 
 2. **Unattended-task exemption**: this turn came from an **automatic** `fleet schedule` / `fleet loop` firing — the prompt's footer says so explicitly — and no human is behind it. A manual \"run now\" does have a human and is NOT exempt.\n\
 3. **Handoff-registered exemption**: once you have run `fleet handoff` (or `fleet__handoff` with `action=\"register\"`) this turn and got ok, raise **no card at all** — not even a decision-free wrap-up. The relay fires on the turn *ending* (the Stop hook consumes the registration and spawns the successor), and a card holds the turn open waiting for a click; until it is clicked the successor never starts. The note also froze at registration, so any answer on that card can never reach the successor and is silently discarded. Ask first, get the answer, then write the note and register.\n\
 4. **You are a subagent** (an Agent/Task sidechain): **raise no cards at all**. A subagent shares the parent session's claude CLI process and fleet MCP server, and the session id comes from the process env — so your card is filed under the **parent** session and its terminal button closes the parent's task; one press returns `TASK FINISHED` to *you* and truncates your report mid-sentence. Return the report, the options and the questions as your **final text result** and let the parent decide. `fleet__set_session_title` likewise renames the parent session and `fleet__plan` steals the parent's plan focus.\n\
-5. **You are a sub-task** (the per-turn injection says \"Your role: sub-task\"): end the turn with no report card; write the result as your final reply for the task's main conversation to collect. Raise a card only for a call {title_en} has to make — see \"Tasks, Sub-tasks And Who Reports\".\n\
+5. **You are a sub-task** (the per-turn injection says \"Your role: sub-task\"): **raise no cards at all**; write the result as your final reply for the task's main conversation to collect. Questions needing clarification go in that reply too, for the main conversation to settle — never ask {title_en} directly. See \"Tasks, Sub-tasks And Who Reports\".\n\
 \n\
-The server also rejects cases 3 and 4 — that gate is a safety net, not a licence.\n\
+The server also rejects cases 3, 4 and 5 — that gate is a safety net, not a licence.\n\
 \n\
 ## Fallback: use `AskUserQuestion` when `fleet__ask` is absent\n\
 \n\
