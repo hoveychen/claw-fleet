@@ -794,9 +794,17 @@ type ArmedCallback = Arc<Mutex<Option<Box<dyn FnOnce(bool) + Send>>>>;
 /// Only the chat workspace asks for one: dsh loads `$DSH_HOME/AGENTS.md` — where
 /// Fleet writes its engineering doctrine — unconditionally, and `session/create`
 /// carries no per-session instruction knob, so the preset is the only seam (see
-/// [`crate::dsh_chat_preset`]). Two RPCs: `agentPresets/list` to learn the
-/// deployment's own default, `agentPresets/read` to get its composition text,
-/// then Fleet re-authors `fleet-chat` from it.
+/// [`crate::dsh_chat_preset`]). `agentPresets/list` to learn the deployment's
+/// own default, `agentPresets/read` to get its composition text, then Fleet
+/// re-declares `fleet-chat` from it in the watched patch file.
+///
+/// The preset is only named once the roster offers it. dsh activates a patched
+/// declaration asynchronously, and naming a preset it has not registered yet is
+/// not a soft miss: `session/create` fails outright with
+/// `agent-preset/not-found`, which is exactly how every chat spawn broke when
+/// dsh 0.2 stopped reading the old preset directory. So a changed declaration
+/// is followed by re-listing until it appears, bounded by
+/// [`CHAT_PRESET_ACTIVATION_WAIT`].
 ///
 /// `call` is a parameter so the orchestration is testable without a live server,
 /// the same way [`history_with`] takes its `fetch`.
@@ -806,6 +814,25 @@ type ArmedCallback = Arc<Mutex<Option<Box<dyn FnOnce(bool) + Send>>>>;
 /// the chat brief still wins on precedence (dsh renders the project file after
 /// the user-global one and tells the model the specific file takes precedence).
 fn resolve_chat_preset<F>(workspace_path: &str, call: F) -> Option<String>
+where
+    F: Fn(&str, Value) -> Result<Value, String>,
+{
+    resolve_chat_preset_within(workspace_path, call, CHAT_PRESET_ACTIVATION_WAIT)
+}
+
+/// How long a chat spawn waits for a just-written declaration to show up on
+/// the roster. Measured on dsh 0.2.1-rc.2: a few seconds, most of it the patch
+/// watcher's debounce plus mounting the composition.
+const CHAT_PRESET_ACTIVATION_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Interval between roster re-reads while waiting for activation.
+const CHAT_PRESET_POLL: std::time::Duration = std::time::Duration::from_millis(300);
+
+fn resolve_chat_preset_within<F>(
+    workspace_path: &str,
+    call: F,
+    wait: std::time::Duration,
+) -> Option<String>
 where
     F: Fn(&str, Value) -> Result<Value, String>,
 {
@@ -826,9 +853,30 @@ where
         log_chat_preset_skip("agentPresets/read answered without a composition");
         None
     })?;
-    crate::dsh_chat_preset::ensure_chat_preset(composition)
+    let changed = crate::dsh_chat_preset::ensure_chat_preset(composition)
         .inspect_err(|e| log_chat_preset_skip(e))
-        .ok()
+        .ok()?;
+    let offered = |list: &Value| crate::dsh_chat_preset::roster_offers_chat_preset(list);
+    if !changed && offered(&listed) {
+        return Some(crate::dsh_chat_preset::CHAT_PRESET_ID.to_string());
+    }
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if let Ok(list) = call("agentPresets/list", json!({})) {
+            if offered(&list) {
+                return Some(crate::dsh_chat_preset::CHAT_PRESET_ID.to_string());
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            log_chat_preset_skip(&format!(
+                "{} not on the roster {}s after declaring it",
+                crate::dsh_chat_preset::CHAT_PRESET_ID,
+                wait.as_secs()
+            ));
+            return None;
+        }
+        std::thread::sleep(CHAT_PRESET_POLL);
+    }
 }
 
 /// Say why a chat session is about to run with the doctrine loaded. Silent
@@ -4148,13 +4196,24 @@ mod tests {
         std::env::set_var("FLEET_HOME", &base);
 
         let calls = std::cell::RefCell::new(Vec::<String>::new());
+        // dsh registers the declaration only after its patch watcher fires, so
+        // the roster lists `fleet-chat` from the second read on.
+        let lists = std::cell::Cell::new(0usize);
         let call = |method: &str, _payload: Value| -> Result<Value, String> {
             calls.borrow_mut().push(method.to_string());
+            if method == "agentPresets/list" {
+                lists.set(lists.get() + 1);
+            }
+            let lists_so_far = lists.get();
             Ok(match method {
+                "agentPresets/list" if lists_so_far == 1 => json!({
+                    "presets": [{ "id": "standard", "isDefault": true }],
+                }),
                 "agentPresets/list" => json!({
-                    "presets": [{ "id": "standard", "trust": "system", "isDefault": true }],
-                    "authorable": true,
-                    "hasDocument": true,
+                    "presets": [
+                        { "id": "standard", "isDefault": true },
+                        { "id": crate::dsh_chat_preset::CHAT_PRESET_ID, "isDefault": false },
+                    ],
                 }),
                 "agentPresets/read" => json!({
                     "agentPreset": "standard",
@@ -4171,27 +4230,57 @@ mod tests {
 
         let chat = base.join(".fleet/chat");
         std::fs::create_dir_all(&chat).unwrap();
+        // A pre-0.2 preset directory is a leftover Fleet owns.
+        let legacy = base
+            .join("dsh-home/.agent-presets")
+            .join(crate::dsh_chat_preset::CHAT_PRESET_ID);
+        std::fs::create_dir_all(&legacy).unwrap();
+
         let got = resolve_chat_preset(&chat.to_string_lossy(), &call);
         assert_eq!(got.as_deref(), Some(crate::dsh_chat_preset::CHAT_PRESET_ID));
         assert_eq!(
             *calls.borrow(),
-            vec!["agentPresets/list", "agentPresets/read"],
-            "the deployment default is read, never hardcoded",
+            vec!["agentPresets/list", "agentPresets/read", "agentPresets/list"],
+            "the default is read, never hardcoded, and the preset is named only once listed",
         );
+        assert!(!legacy.exists(), "the dead 0.1.x preset directory is cleaned up");
 
-        // The authored composition redirects the instruction plugin away from the
-        // real $DSH_HOME, which is the whole point.
-        let composed = std::fs::read_to_string(
-            base.join("dsh-home/.agent-presets")
-                .join(crate::dsh_chat_preset::CHAT_PRESET_ID)
-                .join("agent.cordis.yml"),
-        )
-        .unwrap();
-        assert!(composed.contains("dshHome:"), "{composed}");
-        assert!(composed.contains("dsh-chat-home"), "{composed}");
+        // The declaration lands in the watched patch file and redirects the
+        // instruction plugin away from the real $DSH_HOME, which is the whole point.
+        let patch = std::fs::read_to_string(base.join("dsh-home/cordis.patch.yml")).unwrap();
+        assert!(patch.contains("'@deepseek-ai/dsh-agent-preset'"), "{patch}");
+        assert!(patch.contains("dshHome:"), "{patch}");
+        assert!(patch.contains("dsh-chat-home"), "{patch}");
         assert!(
             !base.join("dsh-chat-home/AGENTS.md").exists(),
             "the stand-in home must stay empty or the doctrine comes back",
+        );
+
+        // An unchanged declaration already on the roster costs no extra list.
+        calls.borrow_mut().clear();
+        let got = resolve_chat_preset(&chat.to_string_lossy(), &call);
+        assert_eq!(got.as_deref(), Some(crate::dsh_chat_preset::CHAT_PRESET_ID));
+        assert_eq!(*calls.borrow(), vec!["agentPresets/list", "agentPresets/read"]);
+
+        // A declaration dsh never registers must not be named: naming it fails
+        // `session/create` outright, so the spawn falls back to the default.
+        std::fs::remove_file(base.join("dsh-home/cordis.patch.yml")).unwrap();
+        let never_listed = |method: &str, _: Value| -> Result<Value, String> {
+            Ok(match method {
+                "agentPresets/list" => json!({ "presets": [{ "id": "standard", "isDefault": true }] }),
+                "agentPresets/read" => json!({
+                    "content": "- id: agent-instructions\n  name: 'x'\n",
+                }),
+                other => panic!("unexpected rpc {other}"),
+            })
+        };
+        assert_eq!(
+            resolve_chat_preset_within(
+                &chat.to_string_lossy(),
+                never_listed,
+                std::time::Duration::ZERO
+            ),
+            None
         );
 
         // A transport failure degrades to "no preset" rather than failing a spawn.

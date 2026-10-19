@@ -195,17 +195,24 @@ fn yaml_scalar(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Strip the Fleet block, returning the user's own content.
+/// Strip the Fleet plugin block, returning everything else.
+fn strip_block(text: &str) -> String {
+    strip_region(text, SENTINEL_BEGIN, SENTINEL_END)
+}
+
+/// Strip one sentinel-delimited region, returning everything else.
 ///
 /// Tolerates a missing end marker (a half-written file from a crash): everything
-/// from `begin` on is dropped in that case, since Fleet wrote all of it.
-fn strip_block(text: &str) -> String {
-    let Some(start) = text.find(SENTINEL_BEGIN) else {
+/// from `begin` on is dropped in that case, since Fleet wrote all of it — which
+/// is also why a second Fleet region in the same file must never sit *after* a
+/// half-written one it does not own; [`write_region`] always appends at the end.
+fn strip_region(text: &str, begin: &str, end_marker: &str) -> String {
+    let Some(start) = text.find(begin) else {
         return text.to_string();
     };
-    let rest = match text[start..].find(SENTINEL_END) {
+    let rest = match text[start..].find(end_marker) {
         Some(offset) => {
-            let end = start + offset + SENTINEL_END.len();
+            let end = start + offset + end_marker.len();
             // Consume the newline that terminated the end marker's line.
             text[end..].strip_prefix('\n').unwrap_or(&text[end..])
         }
@@ -223,17 +230,72 @@ fn has_user_entries(text: &str) -> bool {
     })
 }
 
-/// The single writer for `$DSH_HOME/cordis.patch.yml`.
+/// Splice one Fleet-owned region into a patch file's text: the region is
+/// removed, and re-appended when `block` is given.
+///
+/// Everything outside the region — the user's entries and any other Fleet
+/// region — is kept verbatim. Removing the last entry leaves dsh's `[]`
+/// placeholder rather than an empty document, which dsh throws on.
+fn splice_region(existing: &str, begin: &str, end_marker: &str, block: Option<&str>) -> String {
+    let rest = strip_region(existing, begin, end_marker);
+    match block {
+        Some(block) if has_user_entries(&rest) => format!("{}\n{block}", rest.trim_end()),
+        Some(block) => {
+            // Drop a lone `[]` (or a comments-only file): `[]` cannot precede
+            // list items, and an empty document throws on load.
+            let comments: String = rest
+                .lines()
+                .filter(|l| l.trim().starts_with('#'))
+                .map(|l| format!("{l}\n"))
+                .collect();
+            format!("{comments}{block}")
+        }
+        None if has_user_entries(&rest) => format!("{}\n", rest.trim_end()),
+        None => {
+            // No entries left. An empty file throws on load; `[]` is dsh's own
+            // way to spell "this layer is disabled".
+            let comments: String = rest
+                .lines()
+                .filter(|l| l.trim().starts_with('#'))
+                .map(|l| format!("{l}\n"))
+                .collect();
+            format!("{comments}[]\n")
+        }
+    }
+}
+
+/// Write (or, with `block = None`, remove) one Fleet-owned region of
+/// `$DSH_HOME/cordis.patch.yml`. Returns whether the file changed.
+///
+/// Fleet keeps more than one region in this file — the context plugin here and
+/// the chat preset declaration in [`crate::dsh_chat_preset`] — and every writer
+/// goes through this so each one only ever replaces its own sentinels.
+pub(crate) fn write_region(
+    begin: &str,
+    end_marker: &str,
+    block: Option<&str>,
+) -> Result<bool, String> {
+    let path = patch_path().ok_or("cannot determine dsh home")?;
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let next = splice_region(&existing, begin, end_marker, block);
+    if existing == next && path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    fs::write(&path, next).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(true)
+}
+
+/// Install or remove the Fleet context-plugin block in
+/// `$DSH_HOME/cordis.patch.yml`.
 ///
 /// `enabled` installs (materializing the plugin first) or removes the Fleet
 /// block. Idempotent in both directions, and preserves user-authored entries
 /// outside the sentinels.
 pub fn reconcile_dsh_patch(enabled: bool, user_title: &str, locale: &str) -> Result<(), String> {
-    let path = patch_path().ok_or("cannot determine dsh home")?;
-    let existing = fs::read_to_string(&path).unwrap_or_default();
-    let user = strip_block(&existing);
-
-    let next = if enabled {
+    let block = if enabled {
         let entry = materialize()?;
         // Same gate the MCP injector and the hook appliers use: this file
         // outlives the process, so a `fleetBin` inside a worktree build becomes
@@ -250,39 +312,11 @@ pub fn reconcile_dsh_patch(enabled: bool, user_title: &str, locale: &str) -> Res
             publishable
         });
         let owners = OwnershipDirs::resolve();
-        let block = render_block(&entry, fleet_bin.as_deref(), owners.as_ref(), user_title, locale);
-        if has_user_entries(&user) {
-            format!("{}\n{block}", user.trim_end())
-        } else {
-            // Drop a lone `[]` (or a comments-only file): `[]` cannot precede
-            // list items, and an empty document throws on load.
-            let comments: String = user
-                .lines()
-                .filter(|l| l.trim().starts_with('#'))
-                .map(|l| format!("{l}\n"))
-                .collect();
-            format!("{comments}{block}")
-        }
-    } else if has_user_entries(&user) {
-        format!("{}\n", user.trim_end())
+        Some(render_block(&entry, fleet_bin.as_deref(), owners.as_ref(), user_title, locale))
     } else {
-        // No entries left. An empty file throws on load; `[]` is dsh's own way
-        // to spell "this layer is disabled".
-        let comments: String = user
-            .lines()
-            .filter(|l| l.trim().starts_with('#'))
-            .map(|l| format!("{l}\n"))
-            .collect();
-        format!("{comments}[]\n")
+        None
     };
-
-    if fs::read_to_string(&path).ok().as_deref() == Some(next.as_str()) {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
-    }
-    fs::write(&path, next).map_err(|e| format!("write {}: {e}", path.display()))
+    write_region(SENTINEL_BEGIN, SENTINEL_END, block.as_deref()).map(|_| ())
 }
 
 /// Whether Fleet's plugin block is registered in `$DSH_HOME/cordis.patch.yml`.
@@ -415,6 +449,26 @@ mod tests {
         let uninstalled = strip_block(&reinstalled);
         assert!(uninstalled.contains("name: other"));
         assert!(!uninstalled.contains(ENTRY_ID));
+    }
+
+    /// Two Fleet regions share the file (this plugin and the chat preset
+    /// declaration); rewriting or removing one must leave the other intact.
+    #[test]
+    fn two_fleet_regions_coexist_in_one_patch_file() {
+        let a = "# a:begin\n- insert:\n    - id: a\n# a:end\n";
+        let b = "# b:begin\n- insert:\n    - id: b\n# b:end\n";
+        let one = splice_region("[]\n", "# a:begin", "# a:end", Some(a));
+        assert_eq!(one, a, "the placeholder is dropped");
+        let both = splice_region(&one, "# b:begin", "# b:end", Some(b));
+        assert!(both.contains("- id: a") && both.contains("- id: b"), "{both}");
+        // Rewriting a region in place does not duplicate it or drop the other.
+        let again = splice_region(&both, "# a:begin", "# a:end", Some(a));
+        assert_eq!(again.matches("# a:begin").count(), 1);
+        assert!(again.contains("- id: b"));
+        // Removing one keeps the other; removing both leaves `[]`.
+        let only_b = splice_region(&again, "# a:begin", "# a:end", None);
+        assert!(!only_b.contains("- id: a") && only_b.contains("- id: b"), "{only_b}");
+        assert_eq!(splice_region(&only_b, "# b:begin", "# b:end", None), "[]\n");
     }
 
     #[test]
