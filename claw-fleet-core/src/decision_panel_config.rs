@@ -33,6 +33,14 @@ pub struct DecisionPanelConfig {
     /// allowed to go without writing its heartbeat before the hook considers
     /// it gone and falls through to Claude Code's native UI.
     pub heartbeat_window_seconds: u32,
+    /// Whether `fleet guard` stops a Critical-risk command and waits for the
+    /// user to approve it. Off by default: the command is classified, left in
+    /// the audit trail (which `audit` rebuilds from transcripts) and allowed,
+    /// so no session pauses on an approval card unless the user opted in.
+    /// `serde(default)` keeps an older front-end that posts the config
+    /// without this field from failing the whole save.
+    #[serde(default)]
+    pub guard_confirm: bool,
 }
 
 impl DecisionPanelConfig {
@@ -52,6 +60,7 @@ impl DecisionPanelConfig {
             wait_seconds: Self::DEFAULT_WAIT_SECONDS,
             poll_ms: Self::DEFAULT_POLL_MS,
             heartbeat_window_seconds: Self::DEFAULT_HEARTBEAT_WINDOW_SECONDS,
+            guard_confirm: false,
         }
     }
 
@@ -101,6 +110,7 @@ struct PartialDecisionPanelConfig {
     wait_seconds: Option<u32>,
     poll_ms: Option<u32>,
     heartbeat_window_seconds: Option<u32>,
+    guard_confirm: Option<bool>,
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -138,6 +148,9 @@ pub fn load() -> DecisionPanelConfig {
     }
     if let Some(v) = partial.heartbeat_window_seconds {
         cfg.heartbeat_window_seconds = v;
+    }
+    if let Some(v) = partial.guard_confirm {
+        cfg.guard_confirm = v;
     }
     cfg.clamp();
     cfg
@@ -186,6 +199,9 @@ mod tests {
         if let Some(v) = partial.heartbeat_window_seconds {
             cfg.heartbeat_window_seconds = v;
         }
+        if let Some(v) = partial.guard_confirm {
+            cfg.guard_confirm = v;
+        }
         cfg.clamp();
         cfg
     }
@@ -196,6 +212,22 @@ mod tests {
         assert_eq!(cfg.wait_seconds, 600);
         assert_eq!(cfg.poll_ms, 200);
         assert_eq!(cfg.heartbeat_window_seconds, 30);
+        assert!(!cfg.guard_confirm, "guard is audit-only unless the user opts in");
+    }
+
+    #[test]
+    fn guard_confirm_is_read_from_disk() {
+        assert!(parse(r#"{"guard_confirm": true}"#).guard_confirm);
+        assert!(!parse(r#"{"wait_seconds": 120}"#).guard_confirm);
+    }
+
+    #[test]
+    fn a_full_config_without_guard_confirm_still_deserializes() {
+        let cfg: DecisionPanelConfig = serde_json::from_str(
+            r#"{"wait_seconds": 600, "poll_ms": 200, "heartbeat_window_seconds": 30}"#,
+        )
+        .unwrap();
+        assert!(!cfg.guard_confirm);
     }
 
     #[test]
@@ -267,6 +299,7 @@ mod tests {
             wait_seconds: 180,
             poll_ms: 250,
             heartbeat_window_seconds: 15,
+            guard_confirm: true,
         };
         save(&mut cfg).expect("save should succeed");
         let loaded = load();
