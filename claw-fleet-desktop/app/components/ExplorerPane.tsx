@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 
 import { TextBlock } from "./blocks/TextBlock";
+import { FileKindIcon, fileKind } from "./fileKind";
+import { timeAgo } from "./timeAgo";
 import { CopyButton } from "./CopyButton";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
@@ -87,6 +90,10 @@ export function FileTree({
   reveal,
   onRevealed,
   onRevealFailed,
+  hideDotfiles = false,
+  changed,
+  meta = "size",
+  onEntryContextMenu,
 }: {
   /** Lists one level; "" is the root. null means the level is unreadable. */
   loadDir: (rel: string) => Promise<ExplorerEntry[] | null>;
@@ -103,6 +110,15 @@ export function FileTree({
    * on a path the agent got slightly wrong land on the Files page and stop dead.
    */
   onRevealFailed?: (relPath: string) => void;
+  /** Hide dot-entries (`.github/`, `.env`) the way Finder does. An entry on the
+   *  way to the selected file stays visible, so a revealed path never vanishes. */
+  hideDotfiles?: boolean;
+  /** Root-relative paths with uncommitted changes → their git status letter.
+   *  Files get a dot; a folder gets one when anything under it changed. */
+  changed?: ReadonlyMap<string, string>;
+  /** Right column of a file row: its size (default) or when it last changed. */
+  meta?: "size" | "time";
+  onEntryContextMenu?: (entry: ExplorerEntry, e: React.MouseEvent) => void;
 }) {
   const { t } = useTranslation();
   const [children, setChildren] = useState<Record<string, ExplorerEntry[]>>({});
@@ -240,40 +256,75 @@ export function FileTree({
     [expanded, children, loadDir, opening],
   );
 
+  // Folders holding a change, derived once per status rather than per row.
+  const changedDirs = useMemo(() => {
+    const dirs = new Set<string>();
+    for (const p of changed?.keys() ?? []) {
+      const parts = p.replace(/\/$/, "").split("/");
+      for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
+      if (p.endsWith("/")) dirs.add(p.replace(/\/$/, "")); // an untracked folder
+    }
+    return dirs;
+  }, [changed]);
+
+  const keepVisible = (relPath: string) => {
+    const sel = activeFile?.relativePath;
+    return !!sel && (sel === relPath || sel.startsWith(`${relPath}/`));
+  };
+
   const renderLevel = (rel: string, depth: number): ReactNode[] => {
-    const entries = children[rel] ?? [];
+    const entries = (children[rel] ?? []).filter(
+      (e) => !hideDotfiles || !e.name.startsWith(".") || keepVisible(e.relativePath),
+    );
     return entries.flatMap((entry) => {
-      const pad = 8 + depth * 12;
+      const pad = 6 + depth * 14;
       const ignoredCls = entry.isIgnored ? ` ${fileStyles.entry_ignored}` : "";
+      const onContextMenu = onEntryContextMenu
+        ? (e: React.MouseEvent) => {
+            e.preventDefault();
+            onEntryContextMenu(entry, e);
+          }
+        : undefined;
       if (entry.isDir) {
         const isOpen = expanded.has(entry.relativePath);
         const row = (
           <button
             key={entry.relativePath}
-            className={`${skillStyles.tree_item}${ignoredCls}`}
+            className={`${skillStyles.tree_item} ${fileStyles.tree_row}${ignoredCls}`}
             style={{ paddingLeft: pad }}
             onClick={() => void toggleDir(entry.relativePath)}
+            onContextMenu={onContextMenu}
             title={entry.relativePath}
           >
-            <span className={skillStyles.tree_chevron}>
-              {opening.has(entry.relativePath) ? <Spinner size={10} /> : isOpen ? "▾" : "▸"}
+            <span className={`${fileStyles.tree_chevron} ${isOpen ? fileStyles.tree_chevron_open : ""}`}>
+              {opening.has(entry.relativePath) ? <Spinner size={10} /> : <ChevronRight size={12} strokeWidth={2} />}
             </span>
-            <span className={skillStyles.tree_name}>{entry.name}/</span>
+            <FileKindIcon kind="folder" open={isOpen} className={fileStyles.kind_icon} />
+            <span className={skillStyles.tree_name}>{entry.name}</span>
+            {changedDirs.has(entry.relativePath) && <span className={fileStyles.change_dot} />}
           </button>
         );
         return isOpen ? [row, ...renderLevel(entry.relativePath, depth + 1)] : [row];
       }
       const isActive = activeFile?.relativePath === entry.relativePath;
+      const status = changed?.get(entry.relativePath);
       return [
         <button
           key={entry.relativePath}
-          className={`${skillStyles.tree_item} ${isActive ? skillStyles.tree_item_active : ""}${ignoredCls}`}
-          style={{ paddingLeft: pad }}
+          className={`${skillStyles.tree_item} ${fileStyles.tree_row} ${isActive ? skillStyles.tree_item_active : ""}${ignoredCls}`}
+          style={{ paddingLeft: pad + 16 }}
           onClick={() => onPick(entry)}
-          title={entry.relativePath}
+          onContextMenu={onContextMenu}
+          title={`${entry.relativePath} · ${formatSize(entry.sizeBytes)}`}
         >
+          <FileKindIcon kind={fileKind(entry.name)} className={fileStyles.kind_icon} />
           <span className={skillStyles.tree_name}>{entry.name}</span>
-          <span className={skillStyles.tree_size}>{formatSize(entry.sizeBytes)}</span>
+          {status && <span className={fileStyles.change_dot} data-status={status} />}
+          <span className={skillStyles.tree_size}>
+            {meta === "time" && entry.modifiedMs > 0
+              ? timeAgo(entry.modifiedMs, t)
+              : formatSize(entry.sizeBytes)}
+          </span>
         </button>,
       ];
     });
@@ -303,6 +354,7 @@ export function FilePreview({
   file,
   load,
   onLoaded,
+  renderBinary,
 }: {
   file: ExplorerEntry;
   /** Reads the active file's content. Identity change = re-read. */
@@ -313,6 +365,9 @@ export function FilePreview({
    *  directory listing behind it, which is why that header used to be fed a
    *  hard-coded `sizeBytes: 0` and printed no size at all. `null` on failure. */
   onLoaded?: (content: ExplorerFileContent | null) => void;
+  /** Replaces the bare "can't preview" line for a binary file — the Files page
+   *  puts an "open with the default app" action there. */
+  renderBinary?: (sizeBytes: number) => ReactNode;
 }) {
   const { t } = useTranslation();
   const [content, setContent] = useState<ExplorerFileContent | null>(null);
@@ -356,6 +411,7 @@ export function FilePreview({
   if (error || content === null) return <p className={styles.empty}>{t("files.read_error")}</p>;
 
   if (content.kind === "binary") {
+    if (renderBinary) return <>{renderBinary(content.sizeBytes)}</>;
     return (
       <p className={styles.empty}>
         {t("files.binary_file")} ({formatSize(content.sizeBytes)})

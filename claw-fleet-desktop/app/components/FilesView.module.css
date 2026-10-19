@@ -19,52 +19,74 @@
   border-color: var(--color-accent);
 }
 
-.root_pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 16px 0;
-}
-
-.root_pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.root_pill:hover {
-  color: var(--color-text);
-}
-
-.root_pill_active {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.root_branch {
-  opacity: 0.65;
-}
-
-.ignored_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-
 .entry_ignored {
   opacity: 0.5;
+}
+
+/* ── File tree rows (Files page + session scratchpad) ─────────────────────────
+   Finder-style: UI font, a type icon per row, a rotating chevron for folders.
+   Layered on SkillsView's .tree_item, which stays monospace for the skills tree. */
+.tree_row {
+  font-family: inherit;
+  gap: 6px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.tree_row .tree_chevron + .kind_icon {
+  margin-left: -2px;
+}
+
+.tree_chevron {
+  width: 12px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-dim);
+  transition: transform 120ms ease;
+}
+
+.tree_chevron_open {
+  transform: rotate(90deg);
+}
+
+.kind_icon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Colour families after the apps that own each format; mid-tones that read on
+   both the warm light theme and the dark one. */
+.kind_icon[data-kind="folder"] { color: #d9a441; }
+.kind_icon[data-kind="word"] { color: #3b7dd8; }
+.kind_icon[data-kind="sheet"] { color: #2f9e5b; }
+.kind_icon[data-kind="slides"] { color: #d9683b; }
+.kind_icon[data-kind="pdf"] { color: #d84a4a; }
+.kind_icon[data-kind="image"] { color: #9b6bd6; }
+.kind_icon[data-kind="video"],
+.kind_icon[data-kind="audio"] { color: #c2559b; }
+.kind_icon[data-kind="archive"] { color: #8c7a5b; }
+.kind_icon[data-kind="markdown"],
+.kind_icon[data-kind="web"] { color: #3a9aa8; }
+
+/* "Changed since the last save to git" — the one git fact a non-programmer
+   needs in the tree. Folders carry it too, so a change deep down is findable. */
+.change_dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-warning);
+}
+
+.change_dot[data-status="A"],
+.change_dot[data-status="?"] {
+  background: var(--color-success);
+}
+
+.change_dot[data-status="D"] {
+  background: var(--color-error);
 }
 
 .image_wrap {
@@ -132,149 +154,305 @@
   background: var(--canvas-fixed-light);
 }
 
-/* ── Source control status bar ─────────────────────────────────────────────── */
+/* ── Toolbar: breadcrumb on the left, sync pill + "⋯" on the right ──────────── */
 
-.scm_bar {
+.toolbar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
-  padding: 8px 16px 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  min-height: 44px;
 }
 
-.scm_chips {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.scm_chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* The repo's remote URL. Read-only: this bar is a status surface, and changing a
- * remote is a `git remote set-url` decision that belongs in a terminal. Long
- * URLs are truncated with the full value on hover + a copy button beside it, so
- * the chip can never push the push/pull actions off the row. */
-.scm_remote {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.crumbs {
+  flex: 1;
   min-width: 0;
-  max-width: 320px;
-  color: var(--color-text-dim);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 13px;
 }
 
-.scm_remote_url {
+.crumb_seg {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  cursor: pointer;
 }
 
-.scm_chip_ahead {
-  color: var(--color-accent);
+button.crumb:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
-.scm_chip_behind,
-.scm_chip_dirty {
-  color: var(--color-warning);
+.crumb_root {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--color-text);
 }
 
-.scm_synced {
+.crumb_current {
+  color: var(--color-text);
+  font-weight: 500;
+  cursor: default;
+}
+
+.crumb_sep {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.root_branch {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.toolbar_actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon_btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.icon_btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.icon_btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The tree no longer carries a "FILES" caption — the breadcrumb names it. */
+.tree_pane {
+  padding-top: 6px;
+}
+
+/* ── Sync pill and its panel ──────────────────────────────────────────────── */
+
+.sync_wrap {
+  position: relative;
+}
+
+.sync_pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sync_pill:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.sync_pill[data-tone="ok"] {
   color: var(--color-success);
 }
 
-.scm_muted {
+.sync_pill[data-tone="warn"] {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+  background: var(--color-warning-bg);
+}
+
+.sync_dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sync_panel {
+  composes: pop_enter from "./motion.module.css";
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: 340px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+}
+
+.sync_head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync_title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.sync_branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.sync_line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--color-text-secondary);
-  opacity: 0.7;
+}
+
+.sync_line[data-tone="warn"] {
+  color: var(--color-text);
+}
+
+.sync_actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sync_btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sync_btn:hover:not(:disabled) {
+  background: var(--color-bg-modal-hover);
+}
+
+.sync_btn_primary {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.sync_btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sync_result {
+  font-size: 12px;
+  color: var(--color-success);
+}
+
+.sync_result[data-ok="false"] {
+  color: var(--color-error);
+}
+
+.sync_details {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+}
+
+.sync_details summary {
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.sync_details pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sync_remote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  font-size: 11px;
+  color: var(--color-text-dim);
+  min-width: 0;
+}
+
+.sync_remote_label {
+  flex-shrink: 0;
+}
+
+.scm_remote_url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
 }
 
 .scm_spacer {
   flex: 1;
 }
 
-.scm_actions {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.scm_btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.scm_btn:hover:not(:disabled) {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-}
-
-.scm_btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.scm_msg {
-  width: 100%;
-  margin: 4px 16px 0;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-}
-
-.scm_msg_ok {
-  color: var(--color-success);
-}
-
-.scm_msg_err {
-  color: var(--color-error);
-}
-
-/* The dirty chip is a toggle button; strip the native button chrome so it
- * still reads as a chip, just clickable. */
-.scm_chip_btn {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  cursor: pointer;
-}
-
-.scm_chip_btn:hover {
-  filter: brightness(1.15);
-}
-
-/* Expanded uncommitted-file list — full width so it wraps onto its own row
- * under the chips/actions (mirrors .scm_msg). */
 .scm_files {
-  width: 100%;
-  margin: 4px 8px 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 220px;
+  max-height: 200px;
   overflow-y: auto;
 }
 
@@ -283,55 +461,112 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 3px 8px;
+  padding: 4px 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 11px;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 
 .scm_file:hover {
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-modal-hover);
   color: var(--color-text);
-}
-
-.scm_file_status {
-  flex: 0 0 auto;
-  width: 12px;
-  text-align: center;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-
-/* Status colours: added=green, deleted=red, modified/typechange=warning,
- * renamed=accent, untracked=muted, conflicted=error. */
-.scm_file_status[data-status="A"] {
-  color: var(--color-success);
-}
-.scm_file_status[data-status="D"],
-.scm_file_status[data-status="U"] {
-  color: var(--color-error);
-}
-.scm_file_status[data-status="M"],
-.scm_file_status[data-status="T"] {
-  color: var(--color-warning);
-}
-.scm_file_status[data-status="R"] {
-  color: var(--color-accent);
-}
-.scm_file_status[data-status="?"] {
-  color: var(--color-text-secondary);
-  opacity: 0.7;
 }
 
 .scm_file_path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A change, named in words: 新增 / 修改 / 删除 / 改名 / 冲突. */
+.status_tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: 10.5px;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.status_tag[data-status="A"],
+.status_tag[data-status="?"] {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.status_tag[data-status="D"],
+.status_tag[data-status="U"] {
+  color: var(--color-error);
+  background: var(--color-error-bg);
+}
+
+/* ── Empty preview: recently changed files ────────────────────────────────── */
+
+.recent {
+  max-width: 640px;
+  margin: 8px auto 0;
+}
+
+.recent_title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.recent_hint {
+  margin: 4px 0 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.recent_list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recent_row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent_row:hover {
+  background: var(--color-bg-hover);
+}
+
+.recent_name {
+  font-size: 13px;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.recent_dir {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent_row .status_tag {
+  margin-left: auto;
 }
 
 /* ── Workspace command runner (ProcPanel) ─────────────────────────────────── */
@@ -785,4 +1020,149 @@
 .proc_action:disabled,
 .proc_shortcut_run:disabled {
   cursor: default;
+}
+
+/* ── Selected file: header + viewer ───────────────────────────────────────── */
+
+.file_view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+}
+
+.file_head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.file_head_text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file_head_name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file_head_meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.file_head_actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.head_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.head_btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.file_body {
+  flex: 1;
+  min-height: 0;
+}
+
+.pdf_frame {
+  width: 100%;
+  height: 75vh;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-fixed-light);
+}
+
+.office_stage {
+  height: 75vh;
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* ── Find a file by name ──────────────────────────────────────────────────── */
+
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 200px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text-dim);
+}
+
+.search:focus-within {
+  border-color: var(--color-accent);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+/* The tree stays mounted under a search so its expansion survives the query. */
+.tree_host {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tree_host[hidden] {
+  display: none;
+}
+
+.hits {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.hit_text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hit_dir {
+  font-size: 10.5px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

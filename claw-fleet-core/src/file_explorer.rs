@@ -85,6 +85,21 @@ pub enum ExplorerFileContent {
     Binary { size_bytes: u64 },
 }
 
+/// Raw bytes of one file, for previews the webview renders itself (PDF,
+/// Office documents) rather than the text/image/binary classification of
+/// [`ExplorerFileContent`].
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerBytes {
+    pub base64: String,
+    pub mime: String,
+    pub size_bytes: u64,
+}
+
+/// Files larger than this are refused by [`read_bytes`]: the whole file is
+/// base64-inlined into one response.
+pub const BYTES_READ_CAP: u64 = 30 * 1024 * 1024; // 30 MiB
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Enumerate the browsable roots of `workspace`: the checkout itself plus
@@ -124,6 +139,53 @@ pub fn read_file(
     read_file_at(&root, rel_path)
 }
 
+/// Resolve `rel_path` under a vetted root to the canonical path of an
+/// existing regular file. Same gate as [`read_file`]; used by callers that
+/// act on the file rather than read it (the desktop's "open with default
+/// app").
+pub fn resolve_file(
+    workspace: &str,
+    root: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<PathBuf, String> {
+    let ws = validate_workspace(workspace, known_workspaces)?;
+    let root = resolve_root(&ws, root)?;
+    let path = resolve_rel(&root, rel_path)?;
+    if !path.is_file() {
+        return Err("not a file".into());
+    }
+    Ok(path)
+}
+
+/// Read a whole file as base64 with an extension-derived mime. Same gate as
+/// [`read_file`]; refuses files over [`BYTES_READ_CAP`].
+pub fn read_bytes(
+    workspace: &str,
+    root: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<ExplorerBytes, String> {
+    let path = resolve_file(workspace, root, rel_path, known_workspaces)?;
+    let size_bytes = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if size_bytes > BYTES_READ_CAP {
+        return Err(format!(
+            "file too large to preview: {size_bytes} bytes (limit {BYTES_READ_CAP})"
+        ));
+    }
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    Ok(ExplorerBytes {
+        base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        mime: document_mime(&ext).to_string(),
+        size_bytes: bytes.len() as u64,
+    })
+}
+
 // ── Root-agnostic core ────────────────────────────────────────────────────────
 // `root` must already be canonical and vetted by the caller. The scratchpad
 // surface below reuses these with a root derived from the session id instead
@@ -158,13 +220,6 @@ fn list_dir_in(
         if name == ".git" {
             continue;
         }
-        let is_symlink = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
-        // Follow symlinks for size/kind; fall back to the link's own metadata
-        // when the target is dangling.
-        let Ok(metadata) = crate::tcc::guarded_metadata(&path).or_else(|_| entry.metadata()) else {
-            continue;
-        };
-        let is_dir = metadata.is_dir();
         let rel = if rel_path.is_empty() {
             name.clone()
         } else {
@@ -177,21 +232,9 @@ fn list_dir_in(
         if !show_ignored && is_ignored {
             continue;
         }
-        let modified_ms = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        out.push(ExplorerEntry {
-            name,
-            relative_path: rel,
-            size_bytes: if is_dir { 0 } else { metadata.len() },
-            is_dir,
-            modified_ms,
-            is_ignored,
-            is_symlink,
-        });
+        if let Some(e) = build_entry(&entry, name, rel, is_ignored) {
+            out.push(e);
+        }
     }
 
     out.sort_by(|a, b| {
@@ -200,6 +243,38 @@ fn list_dir_in(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     Ok(out)
+}
+
+/// Build one `ExplorerEntry` from a directory entry. Follows symlinks for
+/// size/kind and falls back to the link's own metadata when the target is
+/// dangling; `None` when neither is readable.
+fn build_entry(
+    entry: &fs::DirEntry,
+    name: String,
+    rel: String,
+    is_ignored: bool,
+) -> Option<ExplorerEntry> {
+    let path = entry.path();
+    let is_symlink = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+    let metadata = crate::tcc::guarded_metadata(&path)
+        .or_else(|_| entry.metadata())
+        .ok()?;
+    let is_dir = metadata.is_dir();
+    let modified_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    Some(ExplorerEntry {
+        name,
+        relative_path: rel,
+        size_bytes: if is_dir { 0 } else { metadata.len() },
+        is_dir,
+        modified_ms,
+        is_ignored,
+        is_symlink,
+    })
 }
 
 fn read_file_at(root: &Path, rel_path: &str) -> Result<ExplorerFileContent, String> {
@@ -621,6 +696,118 @@ pub fn find_by_suffix(
     Ok(hits)
 }
 
+/// More name-search results than this are noise; the user refines the query.
+const NAME_SEARCH_HIT_CAP: usize = 200;
+
+/// Every file and directory under `root` whose *name* contains each
+/// whitespace-separated term of `query`, case-insensitively. Backs the Files
+/// page's "find a file in this project" box.
+///
+/// Same walk as [`find_by_suffix`]: breadth-first, skips `.git`, does not
+/// follow symlinked directories, and is bounded by
+/// [`SUFFIX_SEARCH_VISIT_CAP`]. Unlike the suffix search, gitignored entries
+/// (directories *and* files) are dropped unless `show_ignored` — this mirrors
+/// what the tree shows, so a result is always something the user could have
+/// clicked to.
+///
+/// Ranked: exact name match, then name-prefix match, then the rest; within a
+/// rank, shallower paths first, then alphabetical. At most
+/// [`NAME_SEARCH_HIT_CAP`] results.
+pub fn search_by_name(
+    workspace: &str,
+    root: &str,
+    query: &str,
+    show_ignored: bool,
+    known_workspaces: &[String],
+) -> Result<Vec<ExplorerEntry>, String> {
+    let ws = validate_workspace(workspace, known_workspaces)?;
+    let root = resolve_root(&ws, root)?;
+
+    let full = query.trim().to_lowercase();
+    let terms: Vec<&str> = full.split_whitespace().collect();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let repo = git2::Repository::open(&root).ok();
+    let mut hits: Vec<ExplorerEntry> = Vec::new();
+    let mut visited = 0usize;
+    let mut queue = std::collections::VecDeque::from([String::new()]);
+
+    'walk: while let Some(rel_dir) = queue.pop_front() {
+        let dir = if rel_dir.is_empty() {
+            root.clone()
+        } else {
+            root.join(&rel_dir)
+        };
+        let Ok(rd) = crate::tcc::guarded_read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            visited += 1;
+            if visited > SUFFIX_SEARCH_VISIT_CAP {
+                break 'walk;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if name == ".git" {
+                continue;
+            }
+            let rel = if rel_dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel_dir}/{name}")
+            };
+            let is_ignored = repo
+                .as_ref()
+                .map(|r| r.is_path_ignored(Path::new(&rel)).unwrap_or(false))
+                .unwrap_or(false);
+            if is_ignored && !show_ignored {
+                continue;
+            }
+            // `file_type` does not follow links, so a symlinked directory is
+            // never queued — a link back up the tree would loop.
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                queue.push_back(rel.clone());
+            }
+            let lname = name.to_lowercase();
+            if terms.iter().all(|t| lname.contains(t)) {
+                if let Some(e) = build_entry(&entry, name, rel, is_ignored) {
+                    hits.push(e);
+                }
+            }
+        }
+    }
+
+    let rank = |e: &ExplorerEntry| {
+        let lname = e.name.to_lowercase();
+        if lname == full {
+            0u8
+        } else if lname.starts_with(terms[0]) {
+            1
+        } else {
+            2
+        }
+    };
+    hits.sort_by(|a, b| {
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| {
+                let da = a.relative_path.matches('/').count();
+                let db = b.relative_path.matches('/').count();
+                da.cmp(&db)
+            })
+            .then_with(|| {
+                a.relative_path
+                    .to_lowercase()
+                    .cmp(&b.relative_path.to_lowercase())
+            })
+    });
+    hits.truncate(NAME_SEARCH_HIT_CAP);
+    Ok(hits)
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 /// Validate `workspace` is known and `root` is one of its browsable roots,
@@ -798,6 +985,16 @@ fn image_mime(ext: &str) -> Option<&'static str> {
         "avif" => "image/avif",
         _ => return None,
     })
+}
+
+fn document_mime(ext: &str) -> &'static str {
+    match ext {
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    }
 }
 
 fn read_head(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
@@ -1337,6 +1534,146 @@ mod tests {
         let w = ws.to_str().unwrap();
         let err = find_by_suffix(w, w, "a.txt", &[]).unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    // ── Name search ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn name_search_matches_files_and_dirs_case_insensitively_by_name() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("src").join("Config")).unwrap();
+        fs::write(ws.join("src").join("app_config.rs"), "abc").unwrap();
+        fs::write(ws.join("src").join("Config").join("x.txt"), "x").unwrap();
+        // The path contains "config" but the name does not: no match.
+        fs::write(ws.join("src").join("other.rs"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let hits = search_by_name(w, w, "CONFIG", false, &known(&ws)).unwrap();
+        let paths: Vec<&str> = hits.iter().map(|e| e.relative_path.as_str()).collect();
+        // Exact name ("Config") ranks before a substring match.
+        assert_eq!(paths, vec!["src/Config", "src/app_config.rs"]);
+        assert!(hits[0].is_dir);
+        assert!(!hits[1].is_dir);
+        assert_eq!(hits[1].size_bytes, 3);
+        assert!(hits[1].modified_ms > 0);
+    }
+
+    #[test]
+    fn name_search_requires_every_term_and_ignores_blank_queries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        fs::write(ws.join("files_view.tsx"), "x").unwrap();
+        fs::write(ws.join("files_list.tsx"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let hits = search_by_name(w, w, "  view   FILES ", false, &known(&ws)).unwrap();
+        let names: Vec<&str> = hits.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["files_view.tsx"]);
+        assert!(search_by_name(w, w, "   ", false, &known(&ws))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn name_search_ranks_exact_then_prefix_then_shallow_first() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("a").join("b")).unwrap();
+        fs::write(ws.join("a").join("b").join("main.rs"), "x").unwrap();
+        fs::write(ws.join("a").join("main.rs"), "x").unwrap();
+        fs::write(ws.join("main.rsx"), "x").unwrap();
+        fs::write(ws.join("not_main.rs"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let hits = search_by_name(w, w, "main.rs", false, &known(&ws)).unwrap();
+        let paths: Vec<&str> = hits.iter().map(|e| e.relative_path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["a/main.rs", "a/b/main.rs", "main.rsx", "not_main.rs"]
+        );
+    }
+
+    #[test]
+    fn name_search_hides_gitignored_entries_unless_requested() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        init_repo(&ws);
+        fs::write(ws.join(".gitignore"), "target/\nicon.env\n").unwrap();
+        fs::create_dir_all(ws.join("target")).unwrap();
+        fs::write(ws.join("target").join("icon.png"), "x").unwrap();
+        fs::write(ws.join("icon.env"), "x").unwrap();
+        fs::write(ws.join("icon.svg"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let hidden = search_by_name(w, w, "icon", false, &known(&ws)).unwrap();
+        let paths: Vec<&str> = hidden.iter().map(|e| e.relative_path.as_str()).collect();
+        assert_eq!(paths, vec!["icon.svg"]);
+
+        let shown = search_by_name(w, w, "icon", true, &known(&ws)).unwrap();
+        let paths: Vec<&str> = shown.iter().map(|e| e.relative_path.as_str()).collect();
+        assert_eq!(paths, vec!["icon.env", "icon.svg", "target/icon.png"]);
+        assert!(shown.iter().find(|e| e.name == "icon.env").unwrap().is_ignored);
+        assert!(search_by_name(w, w, ".git", true, &known(&ws))
+            .unwrap()
+            .iter()
+            .all(|e| e.name != ".git"));
+    }
+
+    #[test]
+    fn name_search_inherits_the_workspace_access_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let w = ws.to_str().unwrap();
+        let err = search_by_name(w, w, "a", false, &[]).unwrap_err();
+        assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    // ── Raw bytes ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_bytes_returns_base64_with_document_mime() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        fs::write(ws.join("doc.DOCX"), [1u8, 2, 3]).unwrap();
+        fs::write(ws.join("blob.dat"), [0u8]).unwrap();
+        let w = ws.to_str().unwrap();
+
+        let got = read_bytes(w, w, "doc.DOCX", &known(&ws)).unwrap();
+        assert_eq!(got.base64, "AQID");
+        assert_eq!(got.size_bytes, 3);
+        assert_eq!(
+            got.mime,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+        assert_eq!(
+            read_bytes(w, w, "blob.dat", &known(&ws)).unwrap().mime,
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn read_bytes_refuses_oversize_traversal_dirs_and_unknown_workspaces() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+        let big = fs::File::create(ws.join("big.pdf")).unwrap();
+        big.set_len(BYTES_READ_CAP + 1).unwrap();
+        fs::write(tmp.path().join("outside.pdf"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let err = read_bytes(w, w, "big.pdf", &known(&ws)).unwrap_err();
+        assert!(err.contains("too large"), "got: {err}");
+        let err = read_bytes(w, w, "../outside.pdf", &known(&ws)).unwrap_err();
+        assert!(err.contains("traversal"), "got: {err}");
+        assert!(read_bytes(w, w, "sub", &known(&ws)).is_err());
+        let err = read_bytes(w, w, "big.pdf", &[]).unwrap_err();
+        assert!(err.contains("not a known session workspace"), "got: {err}");
+        assert!(resolve_file(w, w, "sub", &known(&ws)).is_err());
     }
 
     #[test]

@@ -242,6 +242,9 @@ const KNOWN_WEB_GAPS = [
   // reports success on a resolved promise, and nothing would have opened.
   "open_artifact_external",
   "reveal_artifact",
+  // Same for the Files page's "open with default app": FilesView gates it on
+  // `canRevealPath()`, and `fleet serve` deliberately has no route for it.
+  "open_explorer_file",
   // Emit onto the desktop's app-event bus.
   "test_decision_frontend_only",
   "test_fleet_ask_end_to_end",
