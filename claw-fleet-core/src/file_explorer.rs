@@ -636,8 +636,14 @@ pub(crate) fn resolve_validated_root(
 }
 
 /// The full set of directories the explorer may browse: the workspaces the
-/// backend derived from session transcripts, plus the ones the user added by
-/// hand or cloned from the "仓库" (Repository) page ([`crate::browse_paths`]).
+/// backend derived from session transcripts, the repo roots those fold onto,
+/// the registered projects ([`crate::project_registry`]), plus the ones the
+/// user added by hand or cloned ([`crate::browse_paths`]).
+///
+/// The repo roots and projects are here because the Projects page browses a
+/// project at its root: a repo whose sessions all ran in `.worktrees/<id>`
+/// checkouts, or a project registered before any session ran in it, has no
+/// session at the root and was refused as "not a known session workspace".
 ///
 /// Backends call this to build the `known_workspaces` argument the entry points
 /// above take, so both halves of the boundary are decided server-side — a
@@ -645,6 +651,8 @@ pub(crate) fn resolve_validated_root(
 /// because a client asked nicely.
 pub fn browsable_workspaces(session_workspaces: &[String]) -> Vec<String> {
     let mut paths: Vec<String> = session_workspaces.to_vec();
+    paths.extend(session_workspaces.iter().map(|w| crate::session::repo_root_path(w)));
+    paths.extend(crate::project_registry::list().into_iter().map(|p| p.path));
     paths.extend(crate::browse_paths::list());
     paths.sort();
     paths.dedup();
@@ -840,6 +848,23 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    /// Regression: the Projects page browses a project at its repo root. When
+    /// every session of that repo ran in a `.worktrees/<id>` checkout, the root
+    /// itself was never a session workspace and the explorer refused it.
+    #[test]
+    fn the_repo_root_of_a_worktree_session_is_browsable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = fs::canonicalize(dir.path()).unwrap().join("repo");
+        fs::create_dir_all(repo.join(".worktrees/feat/src")).unwrap();
+        let repo_s = repo.to_string_lossy().to_string();
+        let worktree = format!("{repo_s}/.worktrees/feat");
+
+        let known = browsable_workspaces(&[worktree]);
+        let entries = list_dir(&repo_s, &repo_s, "", true, &known)
+            .expect("the repo root of a worktree session must be browsable");
+        assert!(entries.iter().any(|e| e.name == ".worktrees"));
     }
 
     /// Regression: a repo cloned from the 仓库 (Repository) page has no sessions of its own,
