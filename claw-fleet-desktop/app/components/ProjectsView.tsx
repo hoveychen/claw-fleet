@@ -13,6 +13,7 @@ import {
   FolderOpen,
   FolderPlus,
   GitBranch,
+  Plus,
   SquareTerminal,
   Trash2,
 } from "lucide-react";
@@ -464,6 +465,15 @@ export function ProjectsView() {
               <div className={styles.head_name}>{selected.name}</div>
               <div className={styles.head_path}>{selected.path}</div>
             </div>
+            {/* The project's primary action, on every tab: start work here. */}
+            <button
+              type="button"
+              className={styles.new_task}
+              onClick={() => useUIStore.getState().requestNewSession({ prompt: "", workspace: selected.path })}
+            >
+              <Plus size={14} strokeWidth={2.2} />
+              {t("projects.ov_new_task", "新任务")}
+            </button>
             <div className={styles.tab_bar} role="tablist">
               {TABS.map((id) => (
                 <button
