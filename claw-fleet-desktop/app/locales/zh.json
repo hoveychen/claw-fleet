@@ -1765,7 +1765,7 @@
     "aux_copy_title": "复制标题",
     "aux_copy_artifact_id": "复制产出 ID",
     "aux_copy_content": "复制文件内容",
-    "aux_open_in_files": "在代码页打开",
+    "aux_open_in_files": "在项目代码中打开",
     "aux_delete_artifact": "删除这份产出",
     "aux_version_of": "{{version}} / 共 {{count}} 版",
     "aux_updated": "更新 {{when}}",
@@ -2642,7 +2642,6 @@
   },
   "view_files": "项目",
   "files": {
-    "panel_title": "项目",
     "add_path": "添加路径",
     "remove_path": "从列表移除",
     "clone": {
@@ -2661,9 +2660,6 @@
       "failed": "克隆失败。"
     },
     "tab_files": "文件",
-    "no_workspaces_title": "暂无项目",
-    "no_workspaces_subtitle": "有任务跑起来之后，这里会列出它们的项目目录。",
-    "select_workspace": "选择左侧项目浏览文件。",
     "select_file": "选择左侧文件查看内容。",
     "external_title": "项目外的文件（只读预览）",
     "external_close": "关闭",
@@ -2730,7 +2726,7 @@
     "reveal_searching": "正在项目里查找 {{path}}…"
   },
   "paths": {
-    "open_in_files": "在代码页中打开",
+    "open_in_files": "在项目代码中打开",
     "reveal_in_finder": "在访达中显示",
     "reveal_in_explorer": "在资源管理器中显示",
     "copy_path": "复制路径",
@@ -3023,7 +3019,6 @@
   "nav_section_settings": "设置",
   "nav_tab_wiki": "文档",
   "nav_tab_artifacts": "产出",
-  "nav_tab_files": "代码",
   "nav_tab_terminal": "终端",
   "nav_tab_schedule": "例行",
   "nav_tab_memory": "记忆",

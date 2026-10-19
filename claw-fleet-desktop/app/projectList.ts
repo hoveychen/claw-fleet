@@ -15,6 +15,9 @@ export interface ProjectRow {
   lastActiveMs: number;
   /** Top-level tasks of it whose process is alive right now. */
   runningTasks: number;
+  /** Listed only because the user added (or cloned) it by hand: no session
+   *  and no registration. The one kind of row the user can remove. */
+  handAdded?: boolean;
 }
 
 /** The slice of a scanned session this list needs. */
@@ -74,6 +77,24 @@ export function mergeProjects(
     if (!s.isSubagent && s.procAlive) row.runningTasks += 1;
   }
   return [...rows.values()].sort((a, b) => b.lastActiveMs - a.lastActiveMs || a.name.localeCompare(b.name));
+}
+
+/**
+ * `rows` plus the directories the user added or cloned by hand
+ * (`list_browse_paths`) that no session or registration already covers. Those
+ * go first, newest first, as they come back from the backend: a directory the
+ * user just added has no activity yet and would otherwise land at the bottom.
+ */
+export function withBrowsePaths(rows: readonly ProjectRow[], browsePaths: readonly string[]): ProjectRow[] {
+  const known = new Set(rows.map((r) => r.path));
+  const extras: ProjectRow[] = [];
+  for (const raw of browsePaths) {
+    const path = raw.replace(/\/+$/, "");
+    if (!path || known.has(path)) continue;
+    known.add(path);
+    extras.push({ path, name: nameOf(path), lastActiveMs: 0, runningTasks: 0, handAdded: true });
+  }
+  return [...extras, ...rows];
 }
 
 /** The last two segments of a path, for a row's subtitle. */

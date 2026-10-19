@@ -43,7 +43,6 @@ const ALL_KEYS = [
   "memory-rail-width",
   "wiki-rail-width",
   "skills-rail-width",
-  "files-rail-width",
   "terminal-rail-width",
   "plugins-rail-width",
   "audit-rail-width",

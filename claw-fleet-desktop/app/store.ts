@@ -14,6 +14,7 @@ import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
 import { applySessionsFrame, type SessionsFrame } from "../../shared-ts/sessionsFrame";
 import { TASK_STATES, type TaskState } from "../../shared-ts/taskState";
+import { repoRootPath } from "../../shared-ts/repoPath";
 import type { HomeGroupBy } from "./components/homeRows";
 
 /** Open the in-app Settings overlay.
@@ -92,7 +93,6 @@ export interface MainViewState {
     expanded: Record<"enabled" | "downloaded" | "catalog", boolean>;
   };
   files: {
-    selectedWorkspace: string | null;
     // NOTE: the hand-added / cloned directories used to live here, but this
     // store is in-memory only (mainViewState is not in storage.ts ALL_KEYS), so
     // a cloned repo's card vanished on restart — and the backend, which owns
@@ -152,7 +152,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     expanded: { enabled: true, downloaded: true, catalog: false },
   },
   files: {
-    selectedWorkspace: null,
     activeRootPath: null,
     showIgnored: false,
     tab: "files",
@@ -249,10 +248,11 @@ interface UIState {
    *  panel restored on boot is not a preference, it is a surprise. */
   settingsOpen: boolean;
   setSettingsOpen: (on: boolean) => void;
-  /** A pending "reveal this file in the Files page" request, raised when the
-   *  user clicks a path in agent prose. FilesView owns the explorer's
-   *  selection state internally, so a request travels through the store
-   *  rather than through props. FilesView clears it once consumed. */
+  /** A pending "reveal this file" request, raised when the user clicks a path
+   *  in agent prose. It opens the Projects page on the path's project, code
+   *  tab; the explorer there owns its selection state internally, so the
+   *  request travels through the store rather than through props, and the
+   *  explorer clears it once consumed. */
   fileNav: FileNavRequest | null;
   requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
   clearFileNav: () => void;
@@ -447,6 +447,8 @@ const readLobsterFleetEnabled = () => getItem("lobster-fleet-enabled") === "true
  *  the retired Sessions page ("list" / "gallery") above all. */
 function readViewMode(): ViewMode {
   const stored = getItem("viewMode");
+  // The standalone Files page folded into the Projects page's code tab.
+  if (stored === "files") return "projects";
   if (stored === "lobsters" && !readLobsterFleetEnabled()) return "history";
   return isViewMode(stored) ? stored : "history";
 }
@@ -560,7 +562,13 @@ export const useUIStore = create<UIState>((set) => ({
       // Same bookkeeping as setViewMode — a nav that skipped it would snap back
       // to the previous view on the next launch and leave the Work tab's memory
       // pointing at a page the user has since left.
-      ...viewModePatch(s, "files"),
+      ...viewModePatch(s, "projects"),
+      mainViewState: {
+        ...s.mainViewState,
+        // A worktree path opens its repo's project; the explorer there lists
+        // the worktree as a root and picks it for the file.
+        projects: { ...s.mainViewState.projects, selectedPath: repoRootPath(req.workspacePath), tab: "code" },
+      },
       fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
     })),
   clearFileNav: () => set({ fileNav: null }),

@@ -32,7 +32,7 @@ describe("nav sections", () => {
   it("files documents and deliverables under Library, code and memory under Projects", () => {
     expect(navSectionOf("wiki")).toBe("library");
     expect(navSectionOf("artifacts")).toBe("library");
-    for (const v of ["projects", "files", "terminal", "memory"] as const) {
+    for (const v of ["projects", "terminal", "memory"] as const) {
       expect(navSectionOf(v)).toBe("projects");
     }
     expect(navSectionOf("lobsters")).toBe("settings");
@@ -55,7 +55,7 @@ describe("nav sections", () => {
   it("skips pages this host does not have", () => {
     const avail = { terminal: false, mobile: false, lobsters: false };
     expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("projects");
-    expect(navSectionTabs("projects", avail)).toEqual(["projects", "files", "memory"]);
+    expect(navSectionTabs("projects", avail)).toEqual(["projects", "memory"]);
   });
 
   it("folds plugins into the Skills segment and never offers the lobster fleet", () => {
@@ -69,6 +69,6 @@ describe("nav sections", () => {
     expect(navSectionOfPage("memory", GLOBAL_MEMORY_FILTER)).toBe("settings");
     expect(navSectionOfPage("memory", "all")).toBe("projects");
     expect(navSectionOfPage("memory", "-Users-me-repo")).toBe("projects");
-    expect(navSectionOfPage("files", GLOBAL_MEMORY_FILTER)).toBe("projects");
+    expect(navSectionOfPage("terminal", GLOBAL_MEMORY_FILTER)).toBe("projects");
   });
 });

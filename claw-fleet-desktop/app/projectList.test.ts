@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeProjects, pathTail, type ProjectSessionView } from "./projectList";
+import { mergeProjects, pathTail, withBrowsePaths, type ProjectSessionView } from "./projectList";
 
 const session = (over: Partial<ProjectSessionView>): ProjectSessionView => ({
   workspacePath: "/u/repo",
@@ -36,6 +36,21 @@ describe("mergeProjects", () => {
       "/u/.fleet/chat",
     );
     expect(rows).toEqual([]);
+  });
+});
+
+describe("withBrowsePaths", () => {
+  const row = { path: "/w/a", name: "a", lastActiveMs: 5, runningTasks: 0 };
+
+  it("puts hand-added directories first and marks them removable", () => {
+    const out = withBrowsePaths([row], ["/w/new/", "/w/a"]);
+    expect(out.map((r) => r.path)).toEqual(["/w/new", "/w/a"]);
+    expect(out[0]).toMatchObject({ name: "new", handAdded: true });
+    expect(out[1].handAdded).toBeUndefined();
+  });
+
+  it("keeps a hand-added temp directory, which mergeProjects would drop", () => {
+    expect(withBrowsePaths([], ["/tmp/scratch"]).map((r) => r.path)).toEqual(["/tmp/scratch"]);
   });
 });
 

@@ -195,7 +195,7 @@ export function buildChipMenu({
       id: "open-page",
       label:
         doc.kind === "file"
-          ? t("detail.aux_open_in_files", "在代码页打开")
+          ? t("detail.aux_open_in_files", "在项目代码中打开")
           : doc.kind === "wiki"
             ? t("tabs.wiki_open_page", "在知识库中打开")
             : doc.kind === "artifact"
@@ -281,7 +281,7 @@ export function buildFileMenu({
   const openPage: AuxAction | null = onOpenInFiles
     ? {
         id: "open-files",
-        label: t("detail.aux_open_in_files", "在代码页打开"),
+        label: t("detail.aux_open_in_files", "在项目代码中打开"),
         icon: <ExternalLink {...ICON} />,
         onSelect: onOpenInFiles,
       }
