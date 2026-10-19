@@ -9,7 +9,7 @@
 //! user ran an agent by hand; Fleet's own spawns register theirs on the spot
 //! ([`ensure`]). History from before this existed comes in once: the launch
 //! notes via [`crate::task_migration`], and every Claude Code project directory
-//! via [`discover`]'s first run. Projects never expire; the user archives the
+//! and Codex thread cwd via [`discover`]'s first run. Projects never expire; the user archives the
 //! ones they no longer want listed ([`set_archived`]).
 //!
 //! Stored at `~/.fleet/projects.json` as a JSON array of [`Project`].
@@ -36,9 +36,10 @@ pub struct Project {
 const FILE_NAME: &str = "projects.json";
 
 /// Present once [`discover`] has registered every Claude Code project
-/// directory. Without it, the first list after an upgrade would only know the
-/// last seven days of hand-run sessions.
-const BACKFILL_MARKER: &str = "projects-backfill-v1";
+/// directory and Codex thread cwd. Without it, the first list after an upgrade
+/// would only know the last seven days of hand-run sessions. v1 covered Claude
+/// Code only; registering is idempotent, so v2 simply runs both again.
+const BACKFILL_MARKER: &str = "projects-backfill-v2";
 
 fn registry_path() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join(FILE_NAME))
@@ -133,18 +134,38 @@ pub fn ensure(workspace: &str) -> Result<bool, String> {
 
 /// Register every directory the session scan saw an agent in (`workspaces`),
 /// and on the first run every Claude Code project directory under
-/// `~/.claude/projects`, so history older than the scan's seven days is not
-/// lost. Returns how many projects were added.
+/// `~/.claude/projects` and every thread cwd in Codex's SQLite index, so
+/// history older than the scan's seven days is not lost. Returns how many
+/// projects were added.
 pub fn discover<'a>(workspaces: impl IntoIterator<Item = &'a str>) -> Result<usize, String> {
     let path = registry_path().ok_or("cannot determine fleet dir")?;
+    discover_in(&path, workspaces, history_workspaces, is_temp)
+}
+
+/// Every directory an agent has a record of working in, however old: Claude
+/// Code's project directories and the cwd of every thread in Codex's index.
+fn history_workspaces() -> Vec<String> {
+    let mut history = crate::memory::claude_project_workspaces();
+    history.extend(crate::codex_source::all_thread_rollout_cwds().into_values().map(|(_, cwd)| cwd));
+    history.sort();
+    history.dedup();
+    history
+}
+
+fn discover_in<'a>(
+    path: &Path,
+    workspaces: impl IntoIterator<Item = &'a str>,
+    history: impl FnOnce() -> Vec<String>,
+    is_temp: impl Fn(&str) -> bool,
+) -> Result<usize, String> {
     let mut added = 0;
     let marker = path.with_file_name(BACKFILL_MARKER);
     if !marker.exists() {
-        let history = crate::memory::claude_project_workspaces();
-        added += ensure_many_in(&path, history.iter().map(String::as_str), is_temp, false)?;
+        let history = history();
+        added += ensure_many_in(path, history.iter().map(String::as_str), &is_temp, false)?;
         std::fs::write(&marker, b"").map_err(|e| format!("write {}: {e}", marker.display()))?;
     }
-    added += ensure_many_in(&path, workspaces, is_temp, false)?;
+    added += ensure_many_in(path, workspaces, &is_temp, false)?;
     Ok(added)
 }
 
@@ -306,5 +327,26 @@ mod tests {
         assert!(is_temp("/private/var/folders/ab/T/x"));
         assert!(!is_temp("/Users/me/workspace/proj"));
         assert!(!is_temp("/tmpfoo"));
+    }
+
+    #[test]
+    fn first_discover_backfills_history_once() {
+        let base = tempfile::tempdir().unwrap();
+        let codex_repo = base.path().join("codex-repo");
+        let live = base.path().join("live");
+        std::fs::create_dir_all(&codex_repo).unwrap();
+        std::fs::create_dir_all(&live).unwrap();
+        let file = base.path().join("projects.json");
+        let codex_s = codex_repo.to_str().unwrap().to_string();
+
+        let history = || vec![codex_s.clone(), "/scratch-not-a-project/t".to_string()];
+        let added = discover_in(&file, [live.to_str().unwrap()], history, fake_temp).unwrap();
+        assert_eq!(added, 2);
+        assert!(file.with_file_name(BACKFILL_MARKER).exists());
+
+        // The marker stops a second backfill: history is not read again.
+        let added = discover_in(&file, [], || panic!("history read twice"), fake_temp).unwrap();
+        assert_eq!(added, 0);
+        assert_eq!(load(&file).len(), 2);
     }
 }
