@@ -25,6 +25,8 @@ pub(crate) fn cmd_spawn(
     title: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    step: Option<&str>,
+    plan: Option<&str>,
     session: Option<&str>,
 ) {
     let prompt = prompt.trim();
@@ -50,6 +52,23 @@ pub(crate) fn cmd_spawn(
             eprintln!("Error: {e}");
             std::process::exit(2);
         }
+    };
+
+    // Resolved before spawning, so a bad step spawns nothing.
+    let for_step = match step.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(step) => match claw_fleet_core::plan_ops::resolve_spawn_step(
+            std::path::Path::new(&ctx.workspace),
+            plan,
+            step,
+            sid.as_deref(),
+        ) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(2);
+            }
+        },
+        None => None,
     };
 
     let resp = match claw_fleet_core::agent_source::spawn_session(
@@ -85,6 +104,10 @@ pub(crate) fn cmd_spawn(
         {
             eprintln!("warning: could not set title: {e}");
         }
+    }
+
+    if let (Some((plan_id, step)), Some(new_sid)) = (&for_step, resp.session_id.as_deref()) {
+        claw_fleet_core::launch_spec::note_spawned_for(new_sid, plan_id, step);
     }
 
     let ws_name = claw_fleet_core::wiki::workspace_name_of(&workspace_path);

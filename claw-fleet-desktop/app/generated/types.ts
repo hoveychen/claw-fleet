@@ -347,7 +347,12 @@ subtaskCount: number,
 subtasksActive: number, 
 startedAtMs: number, 
 lastActivityMs: number, 
-costUsd: number, };
+costUsd: number, 
+subtaskSteps?: Array<SubtaskStep>, };
+
+export type SubtaskStep = { 
+taskId: string, planId: string, 
+step: string, };
 
 export type DecisionTaskRef = { 
 taskId: string, taskTitle?: string | null, 
