@@ -107,15 +107,6 @@ export interface AuxState {
    *  reading. Expanding a card pins it here; the rail keeps rendering it from
    *  the last snapshot it saw until the reader dismisses it. */
   pinnedAgent: string | null;
-  /** Subagents the reader took out of the rail by hand.
-   *
-   *  Agent cards are derived from the live set, so without this a ✕ on a
-   *  running agent lasted until the next scan tick — which is why the live
-   *  cards had no ✕ at all, and why the rail's three card kinds each meant
-   *  something different by it. Held for the session only: it is "not in my
-   *  way right now", not a judgement about the agent, and the Library facet
-   *  lists it either way. */
-  dismissedAgents: readonly string[];
 }
 
 export const initialAux: AuxState = {
@@ -123,7 +114,6 @@ export const initialAux: AuxState = {
   active: null,
   expanded: null,
   pinnedAgent: null,
-  dismissedAgents: [],
 };
 
 /** Rail id for a subagent card. Prefixed like a doc's, so `expanded` can hold
@@ -275,39 +265,26 @@ export function collapseDoc(state: AuxState): AuxState {
 export function toggleAgent(state: AuxState, sessionId: string): AuxState {
   const id = agentCardId(sessionId);
   if (state.expanded === id) return { ...state, expanded: null };
-  // Expanding an agent is also how the Library hands a dismissed one back.
-  return { ...restoreAgent(state, sessionId), expanded: id, pinnedAgent: sessionId };
+  return { ...state, expanded: id, pinnedAgent: sessionId };
 }
 
 /**
- * Take a subagent card out of the rail — the ✕, on a live card as much as on a
- * pinned leftover.
+ * Close a subagent's reader — the ✕ on its expanded card.
  *
- * It used to work only on the pin, because a live agent's card is derived from
- * the live set and dismissing it would have lasted until the next scan tick.
- * That left the three card kinds disagreeing about what ✕ meant. Recording the
- * dismissal in {@link AuxState.dismissedAgents} makes it stick for the
- * session, which is the whole lifetime the rail has anyway, and the Library
- * facet still lists the agent so nothing is lost by pressing it.
+ * Only the reader closes: a live agent stays in the rail, and a finished one
+ * that was kept only by the pin leaves with the pin. The ✕ used to also take a
+ * live agent out of the rail for the rest of the session, which made sense
+ * when the rail was a stack of cards floating over the conversation; now that
+ * the rail is a near-permanent column, hiding a row from it is a surprise
+ * rather than a relief.
  */
 export function closeAgent(state: AuxState, sessionId: string): AuxState {
   const id = agentCardId(sessionId);
-  const already = state.dismissedAgents.includes(sessionId);
-  if (already && state.pinnedAgent !== sessionId && state.expanded !== id) return state;
+  if (state.pinnedAgent !== sessionId && state.expanded !== id) return state;
   return {
     ...state,
-    dismissedAgents: already ? state.dismissedAgents : [...state.dismissedAgents, sessionId],
     pinnedAgent: state.pinnedAgent === sessionId ? null : state.pinnedAgent,
     expanded: state.expanded === id ? null : state.expanded,
-  };
-}
-
-/** Undo a dismissal — the Library facet handing an agent back to the rail. */
-export function restoreAgent(state: AuxState, sessionId: string): AuxState {
-  if (!state.dismissedAgents.includes(sessionId)) return state;
-  return {
-    ...state,
-    dismissedAgents: state.dismissedAgents.filter((id) => id !== sessionId),
   };
 }
 

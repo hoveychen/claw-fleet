@@ -15,7 +15,6 @@ import {
   orderRailItems,
   pruneTab,
   RAIL_ITEM_CAP,
-  restoreAgent,
   showFacet,
   toggleAgent,
   toggleDoc,
@@ -215,29 +214,14 @@ describe("subagent cards", () => {
     expect(second.pinnedAgent).toBe("sub-2");
   });
 
-  it("dismissing a pinned agent drops the pin and the expansion", () => {
+  it("closing an expanded agent drops the pin and the expansion", () => {
     const st = closeAgent(toggleAgent(initialAux, "sub-1"), "sub-1");
     expect(st.pinnedAgent).toBeNull();
     expect(st.expanded).toBeNull();
   });
 
-  it("dismisses a live agent that was never pinned, and keeps it out", () => {
-    const st = closeAgent(initialAux, "sub-9");
-    expect(st.dismissedAgents).toEqual(["sub-9"]);
-    // Idempotent: a second ✕ on the same card changes nothing.
-    expect(closeAgent(st, "sub-9")).toBe(st);
-  });
-
-  it("expanding a dismissed agent brings it back", () => {
-    const st = toggleAgent(closeAgent(initialAux, "sub-9"), "sub-9");
-    expect(st.dismissedAgents).toEqual([]);
-    expect(st.expanded).toBe(agentCardId("sub-9"));
-  });
-
-  it("restoreAgent undoes a dismissal and leaves an unknown id alone", () => {
-    const st = closeAgent(initialAux, "sub-9");
-    expect(restoreAgent(st, "sub-9").dismissedAgents).toEqual([]);
-    expect(restoreAgent(st, "other")).toBe(st);
+  it("closing a collapsed agent changes nothing", () => {
+    expect(closeAgent(initialAux, "sub-9")).toBe(initialAux);
   });
 
   it("gives an agent an id no doc can collide with", () => {

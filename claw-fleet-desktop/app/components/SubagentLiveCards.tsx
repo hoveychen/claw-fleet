@@ -272,11 +272,9 @@ export function SubagentLiveCards({
                 {spend > 0 && <span>${spend.toFixed(2)}</span>}
               </div>
             </button>
-            {/* Every card carries the ✕, live or pinned: dismissing one is
-                "not in my way right now", and the Library facet lists the
-                agent either way, so there is nothing to lose by pressing it.
-                It used to appear only on a pinned card, which made the rail's
-                three card kinds disagree about what ✕ meant. */}
+            {/* The ✕ closes the reader and nothing more: the row stays in the
+                rail while the agent is live. It only appears on an open card,
+                since a collapsed row has nothing to close. */}
             <div className={styles.agent_card_tools}>
               {isOpen && (
                 <button
@@ -289,15 +287,17 @@ export function SubagentLiveCards({
                   <ExternalLink size={12} strokeWidth={1.8} aria-hidden="true" />
                 </button>
               )}
-              <button
-                type="button"
-                className={styles.agent_card_tool}
-                onClick={() => onClose(a)}
-                title={t("detail.rail_dismiss_card", "从边栏移出（可在「本会话资料」里找回）")}
-                aria-label={t("common.close", "关闭")}
-              >
-                ✕
-              </button>
+              {isOpen && (
+                <button
+                  type="button"
+                  className={styles.agent_card_tool}
+                  onClick={() => onClose(a)}
+                  title={t("common.close", "关闭")}
+                  aria-label={t("common.close", "关闭")}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           </>
         );

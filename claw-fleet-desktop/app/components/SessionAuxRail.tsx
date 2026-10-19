@@ -62,7 +62,8 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
  * **An expanded doc reader has no separate title strip.** Its own `AuxDocBar`
  * is the header — it already carries the name, so a strip above it printed
  * that name a second time. The bar's subject doubles as the collapse control
- * and its trailing ✕ dismisses the card. (An agent reader keeps its strip: its
+ * and so does its trailing ✕: closing a reader never takes the row out of the
+ * rail, which is a near-permanent column now. (An agent reader keeps its strip: its
  * pane is a transcript, which has no header of its own to borrow.)
  *
  * **Every row answers a right-click** with its own menu (`auxDocMenu`), and
@@ -164,6 +165,15 @@ export function SessionAuxRail({
     otherCount: docs.length - 1,
   });
 
+  /** The open reader's tail: its ✕ (and its menu's close item) only collapses
+   *  the card back into the rail. Taking a doc out of the rail is the chip's
+   *  right-click menu, and deleting a deliverable still does it (`onRemove`). */
+  const readerTailFor = (d: AuxDoc): AuxCardTail => ({
+    ...tailFor(d),
+    onClose: () => onToggleDoc(d.id),
+    onRemove: () => onCloseDoc(d.id),
+  });
+
   /** Where a chip's "open in..." action sends this kind. Absent when the destination needs
    *  something this rail does not have (a file with no workspace). */
   const openPageFor = (d: AuxDoc): (() => void) | undefined => {
@@ -230,15 +240,6 @@ export function SessionAuxRail({
                 chip a second line tall. */}
             {meta && <span className={styles.doc_card_meta}>{meta}</span>}
           </button>
-          <button
-            type="button"
-            className={styles.doc_card_close}
-            onClick={() => onCloseDoc(d.id)}
-            title={t("detail.rail_dismiss_card", "从边栏移出（可在「本会话资料」里找回）")}
-            aria-label={t("common.close", "关闭")}
-          >
-            ✕
-          </button>
         </div>
         {isOpen && (
           <InReaderHost>
@@ -259,7 +260,7 @@ export function SessionAuxRail({
               <div className={styles.aux_doc_pane}>
                 <SessionAuxDoc
                   doc={d}
-                  tail={tailFor(d)}
+                  tail={readerTailFor(d)}
                   workspacePath={workspacePath}
                   onOpenWiki={onOpenWiki}
                 />
