@@ -19,6 +19,7 @@ import { TextBlock } from "./blocks/TextBlock";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionDetail.module.css";
 import { Presence } from "./Presence";
+import { InReaderHost } from "./readerHost";
 import { Spinner } from "./loading";
 import { usePending } from "../hooks/usePending";
 
@@ -162,107 +163,122 @@ export function SessionAuxExplain({
     <span className={styles.doc_card_meta}>{cost}</span>
   ) : null;
 
+  const menuNode = (
+    <Presence when={Boolean(menu)}>{menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}</Presence>
+  );
+  // The chip stays in the rail while the chain is open, marked open; the
+  // exchange itself is read in the floating reader beside it (see readerHost).
+  const chip = (
+    <div
+      className={`${styles.rail_card} ${styles.doc_card} ${isOpen ? styles.rail_card_open : ""}`}
+      onContextMenu={onCardContextMenu}
+      data-testid="explain-chip"
+    >
+      <button
+        type="button"
+        className={styles.doc_card_main}
+        onClick={onToggle}
+        title={first.question}
+        aria-expanded={isOpen}
+      >
+        <Icon className={styles.doc_card_icon} data-kind="explain" size={13} strokeWidth={1.8} aria-hidden="true" />
+        <span className={styles.doc_card_label}>{quoteSnippet(first.quote)}</span>
+        {records.length > 1 && (
+          <span className={styles.doc_card_meta}>{t("detail.explain_turns", "{{count}} 轮", { count: records.length })}</span>
+        )}
+        {status}
+      </button>
+      <button
+        type="button"
+        className={styles.doc_card_close}
+        onClick={onClose}
+        title={t("common.close", "关闭")}
+        aria-label={t("common.close", "关闭")}
+      >
+        ✕
+      </button>
+    </div>
+  );
   if (!isOpen) {
     return (
-      <div
-        className={`${styles.rail_card} ${styles.doc_card}`}
-        onContextMenu={onCardContextMenu}
-        data-testid="explain-chip"
-      >
-        <button
-          type="button"
-          className={styles.doc_card_main}
-          onClick={onToggle}
-          title={first.question}
-          aria-expanded={false}
-        >
-          <Icon className={styles.doc_card_icon} data-kind="explain" size={13} strokeWidth={1.8} aria-hidden="true" />
-          <span className={styles.doc_card_label}>{quoteSnippet(first.quote)}</span>
-          {records.length > 1 && (
-            <span className={styles.doc_card_meta}>{t("detail.explain_turns", "{{count}} 轮", { count: records.length })}</span>
-          )}
-          {status}
-        </button>
-        <button
-          type="button"
-          className={styles.doc_card_close}
-          onClick={onClose}
-          title={t("common.close", "关闭")}
-          aria-label={t("common.close", "关闭")}
-        >
-          ✕
-        </button>
-        <Presence when={Boolean(menu)}>{menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}</Presence>
-      </div>
+      <>
+        {chip}
+        {menuNode}
+      </>
     );
   }
 
   return (
-    <div
-      className={`${styles.rail_card} ${styles.doc_card_expanded}`}
-      onContextMenu={onCardContextMenu}
-      data-testid="explain-card"
-    >
-      <div
-        className={styles.doc_card_grip}
-        onPointerDown={onGripDown}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
-      />
-      <div className={`${styles.doc_card} ${styles.doc_card_head}`}>
-        <button
-          type="button"
-          className={styles.doc_card_main}
-          onClick={onToggle}
-          aria-expanded
-          title={t("detail.aux_collapse_card", "收起此卡")}
+    <>
+      {chip}
+      <InReaderHost>
+        <div
+          className={styles.doc_card_expanded}
+          onContextMenu={onCardContextMenu}
+          data-testid="explain-card"
         >
-          <ChevronDown className={styles.doc_card_icon} size={13} strokeWidth={1.8} aria-hidden="true" />
-          <Icon className={styles.doc_card_icon} data-kind="explain" size={13} strokeWidth={1.8} aria-hidden="true" />
-          <span className={styles.doc_card_label}>{first.question}</span>
-          {records.length > 1 && (
-            <span className={styles.doc_card_meta}>{t("detail.explain_turns", "{{count}} 轮", { count: records.length })}</span>
-          )}
-          {status}
-        </button>
-        <button
-          type="button"
-          className={styles.doc_card_close}
-          onClick={onLocate}
-          title={t("detail.explain_locate", "定位原文")}
-          aria-label={t("detail.explain_locate", "定位原文")}
-        >
-          <Crosshair size={11} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={styles.doc_card_close}
-          onClick={onClose}
-          title={t("common.close", "关闭")}
-          aria-label={t("common.close", "关闭")}
-        >
-          ✕
-        </button>
-      </div>
-      <div className={styles.explain_pane}>
-        {/* The passage, as a link back to where it came from. Once per chain:
-            every turn quotes the same one. */}
-        <button
-          type="button"
-          className={styles.explain_quote}
-          onClick={onLocate}
-          title={t("detail.explain_locate", "定位原文")}
-        >
-          {first.quote}
-        </button>
-        {records.map((rec) => (
-          <ExplainTurn key={rec.id} rec={rec} withQuestion={records.length > 1} />
-        ))}
-        {last.status === "done" && <ExplainFollowUp onFollowUp={onFollowUp} />}
-      </div>
-      <Presence when={Boolean(menu)}>{menu && <ContextMenu anchor={menu} items={menuItems} onClose={() => setMenu(null)} />}</Presence>
-    </div>
+          <div
+            className={styles.doc_card_grip}
+            onPointerDown={onGripDown}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
+          />
+          <div className={`${styles.doc_card} ${styles.doc_card_head}`}>
+            <button
+              type="button"
+              className={styles.doc_card_main}
+              onClick={onToggle}
+              aria-expanded
+              title={t("detail.aux_collapse_card", "收起此卡")}
+            >
+              <ChevronDown className={styles.doc_card_icon} size={13} strokeWidth={1.8} aria-hidden="true" />
+              <Icon className={styles.doc_card_icon} data-kind="explain" size={13} strokeWidth={1.8} aria-hidden="true" />
+              <span className={styles.doc_card_label}>{first.question}</span>
+              {records.length > 1 && (
+                <span className={styles.doc_card_meta}>{t("detail.explain_turns", "{{count}} 轮", { count: records.length })}</span>
+              )}
+              {status}
+            </button>
+            <button
+              type="button"
+              className={styles.doc_card_close}
+              onClick={onLocate}
+              title={t("detail.explain_locate", "定位原文")}
+              aria-label={t("detail.explain_locate", "定位原文")}
+            >
+              <Crosshair size={11} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={styles.doc_card_close}
+              onClick={onClose}
+              title={t("common.close", "关闭")}
+              aria-label={t("common.close", "关闭")}
+            >
+              ✕
+            </button>
+          </div>
+          <div className={styles.explain_pane}>
+            {/* The passage, as a link back to where it came from. Once per chain:
+                every turn quotes the same one. */}
+            <button
+              type="button"
+              className={styles.explain_quote}
+              onClick={onLocate}
+              title={t("detail.explain_locate", "定位原文")}
+            >
+              {first.quote}
+            </button>
+            {records.map((rec) => (
+              <ExplainTurn key={rec.id} rec={rec} withQuestion={records.length > 1} />
+            ))}
+            {last.status === "done" && <ExplainFollowUp onFollowUp={onFollowUp} />}
+          </div>
+        </div>
+      </InReaderHost>
+      {menuNode}
+    </>
   );
 }
 

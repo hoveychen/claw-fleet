@@ -7,7 +7,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-react";
-import { useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -21,6 +21,7 @@ import { formatModel, StatusBadge } from "./SessionCard";
 import { timeAgo } from "./timeAgo";
 import styles from "./SessionDetail.module.css";
 import { Presence } from "./Presence";
+import { InReaderHost } from "./readerHost";
 
 /** How many cards render before the rest collapse into a "+N" line. A workflow
  *  fan-out can put a hundred agents in flight at once; the panel is meant to be
@@ -300,35 +301,39 @@ export function SubagentLiveCards({
             </div>
           </>
         );
-        if (!isOpen) {
-          return (
-            <div
-              key={a.id}
-              className={`${styles.rail_card} ${styles.agent_card}`}
-              onContextMenu={onCardContextMenu(a)}
-            >
-              {head}
-            </div>
-          );
-        }
-        return (
+        const row = (
           <div
-            key={a.id}
-            className={`${styles.rail_card} ${styles.doc_card_expanded}`}
+            className={`${styles.rail_card} ${styles.agent_card} ${isOpen ? styles.rail_card_open : ""}`}
             onContextMenu={onCardContextMenu(a)}
           >
-            {/* Same grip as a doc reader: the card grows toward the
-                conversation, so its left edge is the one that moves. */}
-            <div
-              className={styles.doc_card_grip}
-              onPointerDown={onGripDown}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
-            />
-            <div className={`${styles.agent_card} ${styles.doc_card_head}`}>{head}</div>
-            {renderPane(a)}
+            {head}
           </div>
+        );
+        if (!isOpen) return <Fragment key={a.id}>{row}</Fragment>;
+        // The row stays in the rail, marked open; the transcript is read in
+        // the floating reader beside it (see readerHost).
+        return (
+          <Fragment key={a.id}>
+            {row}
+            <InReaderHost>
+              <div
+                className={styles.doc_card_expanded}
+                onContextMenu={onCardContextMenu(a)}
+              >
+                {/* Same grip as a doc reader: the card grows toward the
+                    conversation, so its left edge is the one that moves. */}
+                <div
+                  className={styles.doc_card_grip}
+                  onPointerDown={onGripDown}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
+                />
+                <div className={`${styles.agent_card} ${styles.doc_card_head}`}>{head}</div>
+                {renderPane(a)}
+              </div>
+            </InReaderHost>
+          </Fragment>
         );
       })}
       {hidden > 0 && (

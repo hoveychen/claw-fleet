@@ -82,8 +82,11 @@ describe("SessionAuxExplain as a chain card", () => {
     const text = host.textContent ?? "";
     expect(text.indexOf("a-a")).toBeLessThan(text.indexOf("a-b"));
     expect(host.querySelectorAll("form")).toHaveLength(1);
-    // The passage is quoted once for the chain, not once per turn.
-    expect(text.split("灰度到 5%").length - 1).toBe(1);
+    // The passage is quoted once for the chain, not once per turn. Scoped to
+    // the reader: the chip it was opened from stays in the rail and shows the
+    // quote's snippet too.
+    const reader = host.querySelector("[data-testid='explain-card']")?.textContent ?? "";
+    expect(reader.split("灰度到 5%").length - 1).toBe(1);
   });
 
   it("withholds the follow-up box while the chain's latest turn is forking", () => {

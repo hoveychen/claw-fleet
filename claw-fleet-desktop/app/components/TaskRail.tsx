@@ -1,6 +1,8 @@
-// The right column of a task: its sub-tasks, its steps, the material it
+// The right column of a session: its task's sub-tasks and steps, the subagents
+// running and the docs and side questions opened in it, the material the task
 // produced, and — folded away under "developer view" — the session internals
 // (tokens, notes, temp files, background commands, workflow, relay chain).
+// The one right-hand surface; the header switch shows and hides all of it.
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,34 +21,16 @@ function ArtifactGlyph({ mime }: { mime: string }) {
   return <File size={14} strokeWidth={1.8} />;
 }
 
-export function TaskRail({
-  row,
-  openSessionId,
-  steps,
-  onOpenSession,
-  developer,
-}: {
-  row: TaskRow;
-  /** The session the conversation column shows: the main line, or a sub-task. */
-  openSessionId: string;
-  /** The task's plan items, or null when it has no plan. */
-  steps: TaskItem[] | null;
-  onOpenSession: (sessionId: string) => void;
-  /** The developer view's content, built by the conversation pane that owns
-   *  the facets it opens. */
-  developer: ReactNode;
-}) {
-  const { t } = useTranslation();
-  const untitled = t("history.untitled");
-  const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
-  const [devOpen, setDevOpen] = useState(false);
-
-  const inSubtask = !row.hops.some((h) => h.id === openSessionId);
-
-  // Material is whatever the task's sessions filed in the artifact library.
+/** What the task's sessions filed in the artifact library, newest first. Null
+ *  until the first read lands, and while there is no task. Lives outside the
+ *  rail because SessionDetail decides from it whether the rail has anything
+ *  to show at all. */
+export function useTaskArtifacts(row: TaskRow | null): Artifact[] | null {
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
-  const memberKey = useMemo(() => [...rowMemberIds(row)].sort().join(","), [row]);
+  const memberKey = useMemo(() => (row ? [...rowMemberIds(row)].sort().join(",") : ""), [row]);
   useEffect(() => {
+    setArtifacts(null);
+    if (!memberKey) return;
     let alive = true;
     const members = new Set(memberKey.split(","));
     const load = () =>
@@ -68,8 +52,63 @@ export function TaskRail({
       window.clearInterval(timer);
     };
   }, [memberKey]);
+  return artifacts;
+}
 
-  const doneSubtasks = row.subtasks.filter(
+/** Whether the task half of the rail has anything in it: sub-tasks (or a way
+ *  back to the main conversation), plan steps, or filed material. */
+export function taskRailHasContent(
+  row: TaskRow | null,
+  openSessionId: string,
+  steps: TaskItem[] | null,
+  artifacts: Artifact[] | null,
+): boolean {
+  if (!row) return false;
+  const inSubtask = !row.hops.some((h) => h.id === openSessionId);
+  return (
+    row.subtasks.length > 0 ||
+    inSubtask ||
+    (steps?.length ?? 0) > 0 ||
+    (artifacts?.length ?? 0) > 0
+  );
+}
+
+export function TaskRail({
+  row,
+  openSessionId,
+  steps,
+  artifacts,
+  onOpenSession,
+  ambient,
+  empty,
+  developer,
+}: {
+  /** The task the open session belongs to; null on a session with no task,
+   *  where only the ambient sections and the developer view apply. */
+  row: TaskRow | null;
+  /** The session the conversation column shows: the main line, or a sub-task. */
+  openSessionId: string;
+  /** The task's plan items, or null when it has no plan. */
+  steps: TaskItem[] | null;
+  /** See useTaskArtifacts. */
+  artifacts: Artifact[] | null;
+  onOpenSession: (sessionId: string) => void;
+  /** Running subagents, opened docs and side questions — SessionAuxRail. */
+  ambient: ReactNode;
+  /** Nothing in any section: the header switch is holding the rail open. */
+  empty: boolean;
+  /** The developer view's content, built by the conversation pane that owns
+   *  the facets it opens. */
+  developer: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const untitled = t("history.untitled");
+  const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
+  const [devOpen, setDevOpen] = useState(false);
+
+  const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
+  const subtasks = row?.subtasks ?? [];
+  const doneSubtasks = subtasks.filter(
     (st) => st.state === "review" || st.state === "done",
   ).length;
   const doneSteps = steps?.filter((s) => s.done).length ?? 0;
@@ -77,12 +116,16 @@ export function TaskRail({
 
   return (
     <aside className={styles.rail} data-testid="task-rail">
-      {(row.subtasks.length > 0 || inSubtask) && (
+      {/* Held open by the switch with nothing in it. Saying so beats a blank
+          column, which reads as the rail having failed to load. */}
+      {empty && <p className={styles.empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
+
+      {row && (subtasks.length > 0 || inSubtask) && (
         <section className={styles.block}>
           <h3 className={styles.head}>
             {t("home.rail_subtasks", "Sub-tasks")}
             <span className={styles.count}>
-              {doneSubtasks}/{row.subtasks.length}
+              {doneSubtasks}/{subtasks.length}
             </span>
           </h3>
           <div className={styles.card}>
@@ -96,7 +139,7 @@ export function TaskRail({
                 <span className={styles.item_title}>{t("home.rail_main", "Main conversation")}</span>
               </button>
             )}
-            {row.subtasks.map((st) => {
+            {subtasks.map((st) => {
               const plan = st.tip.taskPlan;
               const open = st.hops.some((h) => h.id === openSessionId);
               return (
@@ -149,14 +192,14 @@ export function TaskRail({
         </section>
       )}
 
-      <section className={styles.block}>
-        <h3 className={styles.head}>
-          {t("home.rail_material", "Material")}
-          {artifacts && artifacts.length > 0 && (
+      {ambient}
+
+      {artifacts && artifacts.length > 0 && (
+        <section className={styles.block}>
+          <h3 className={styles.head}>
+            {t("home.rail_material", "Material")}
             <span className={styles.count}>{artifacts.length}</span>
-          )}
-        </h3>
-        {artifacts && artifacts.length > 0 ? (
+          </h3>
           <div className={styles.card}>
             {artifacts.map((a) => (
               <button
@@ -173,12 +216,8 @@ export function TaskRail({
               </button>
             ))}
           </div>
-        ) : (
-          <p className={styles.empty}>
-            {artifacts == null ? "…" : t("home.rail_material_empty", "Nothing filed yet")}
-          </p>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className={styles.block}>
         <button

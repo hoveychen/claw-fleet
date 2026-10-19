@@ -1,13 +1,18 @@
-/* The task's right column: sub-tasks, steps, material, developer view. Sits in
-   SessionDetail's body row beside the conversation slab, on the sunken gutter
-   rather than a slab of its own — it is reference, not a second pane. */
+/* The session's right column: sub-tasks, steps, subagents, opened docs, side
+   questions, material, developer view. Sits in SessionDetail's body row beside
+   the conversation slab, on the sunken gutter rather than a slab of its own —
+   it is reference, not a second pane. Its width is the row's `--rail-w`, which
+   the facet drawer's offset and fit probe read too. */
 .rail {
-  flex: 0 0 clamp(240px, 22%, 320px);
+  flex: 0 0 var(--rail-w, clamp(240px, 22%, 320px));
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 10px 14px 16px;
+  /* On Windows the column's top reaches the corner the three caption buttons
+     are drawn over (the hero yields that corner while the rail is open). */
+  padding: max(10px, var(--win-caption-inset-y, 0px)) 14px 16px;
   /* The task page hosts the conversation flat (inline), so the rail draws its
      own seam rather than relying on a slab gutter. */
   border-left: 1px solid var(--color-border);
@@ -167,7 +172,7 @@
 }
 
 .empty {
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 12px;
   color: var(--color-text-secondary);
 }

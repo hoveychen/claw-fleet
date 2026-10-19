@@ -1,5 +1,5 @@
-import { ChevronsDownUp, FileText, Globe, NotebookText, Package, PanelRightClose, XCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { FileText, Globe, NotebookText, Package } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -7,7 +7,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealSlugInWikiPage } from "../hooks/useWikiDocs";
 import { useUIStore } from "../store";
 import {
-  agentCardId,
   auxDocMeta,
   explainCardId,
   orderRailItems,
@@ -26,6 +25,8 @@ import { SessionAuxExplain } from "./SessionAuxExplain";
 import { SubagentLiveCards } from "./SubagentLiveCards";
 import styles from "./SessionDetail.module.css";
 import { Presence } from "./Presence";
+import { InReaderHost } from "./readerHost";
+import railStyles from "./TaskRail.module.css";
 
 const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
@@ -36,58 +37,40 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
 };
 
 /**
- * The auxiliary rail — the *ambient* half of the auxiliary surfaces.
+ * The ambient sections of the task rail: each subagent running right now, each
+ * file / wiki doc / page / deliverable the agent named that the reader opened,
+ * and each side question asked about the prose. Rendered inside TaskRail's
+ * column as list rows, one section per kind, each omitted while empty.
  *
- * One rounded, raised card per thing currently in play: each subagent running
- * right now, and each file / wiki doc / page / deliverable the agent named that
- * the reader opened. No tabs, no headings, no dividers — a card's own edge and
- * shadow is the only separation it needs, and "how many are there" is answered
- * by counting shapes rather than reading a strip.
+ * These used to be raised cards floating over the transcript's right side, with
+ * TaskRail as a second column beside them — two right-hand surfaces, one with
+ * no switch, and the facet drawer offset for only one of them. They are one
+ * column now, and the header switch owns all of it.
  *
- * The cards *float over* the transcript's right side (absolutely positioned
- * inside the messages pane) rather than filling a column beside it. They used
- * to be a second slab in the row, which read as a separate window and — the
- * tell — left the transcript's scrollbar stranded in the middle of the pane
- * with another surface to the right of it. The conversation now keeps the whole
- * pane and its scrollbar keeps the right edge; the reading column just holds
- * clear of the band the *collapsed* cards occupy.
+ * **Reading happens beside the rail, not in it.** The column is too narrow to
+ * read a file or a transcript in, so an expanded row stays in place (marked
+ * open) and portals its reader into the host SessionDetail floats over the
+ * conversation's right edge (see readerHost). The conversation holds that
+ * reader's width clear (`--rail-band`, set by SessionDetail), so the reader
+ * never covers prose. Its width is a persisted ratio of the pane (see
+ * useDocCardWidth), dragged from the grip on its left edge.
  *
- * **Reading happens here too.** Clicking a doc card expands it in place into a
- * wide floating card that carries the same readers the repo / wiki / outputs
- * pages use. It used to open the drawer instead, which put the doc's name on
- * screen twice (the drawer's title and the card that had just registered it)
- * and threw a fixed 560px panel over a conversation that, in a narrow pane, was
- * left with a sliver. The drawer is now facet-only.
+ * **A subagent card expands too**, into its transcript, rather than navigating
+ * to the subagent's own session view — which cost you the conversation you
+ * were reading. See SubagentLiveCards.
  *
- * The expanded card is the only thing that grows: the rail's box widens to hold
- * it and the collapsed cards stay `--rail-w`, keeping the right edge. The
- * conversation widens its reserved band to match (`--rail-band`, set by
- * SessionDetail from the same number), so the card never covers prose — the
- * band is padding *inside* the scroller, which is what keeps the transcript's
- * scrollbar on the pane's own right edge. Its width is a persisted ratio of the
- * pane (see useDocCardWidth), dragged from the grip on its left edge.
+ * **An expanded doc reader has no separate title strip.** Its own `AuxDocBar`
+ * is the header — it already carries the name, so a strip above it printed
+ * that name a second time. The bar's subject doubles as the collapse control
+ * and its trailing ✕ dismisses the card. (An agent reader keeps its strip: its
+ * pane is a transcript, which has no header of its own to borrow.)
  *
- * **A subagent card expands here too**, into its transcript. It used to
- * navigate to the subagent's own session view, which cost you the conversation
- * you were reading — for a thing whose only content is its messages. See
- * SubagentLiveCards.
- *
- * **An expanded doc card has no separate title strip.** Its reader's own
- * `AuxDocBar` is the header — it already carries the name, so a strip above it
- * printed that name a second time. The bar's subject doubles as the collapse
- * control and its trailing ✕ dismisses the card. (An agent card keeps its
- * strip: its pane is a transcript, which has no header of its own to borrow.)
- *
- * **Every card answers a right-click** with its own menu (`auxDocMenu`), and
+ * **Every row answers a right-click** with its own menu (`auxDocMenu`), and
  * they must: with no handler, the right-click bubbled to the app-wide menu in
  * `contextMenu.ts` and answered a request to act on a file with
- * Settings / About / Quit. The rail's *background* deliberately answers
- * nothing — it is `pointer-events: none` so the transcript underneath keeps the
- * clicks, which means stack-level actions have to live on the cards
- * (`tailItems`) and only the empty-rail line carries them.
+ * Settings / About / Quit.
  */
 export function SessionAuxRail({
-  open,
   agents,
   docs,
   explains,
@@ -100,7 +83,6 @@ export function SessionAuxRail({
   onCloseDoc,
   onCloseOtherDocs,
   onCloseAllDocs,
-  onCollapseDoc,
   onHideRail,
   onOpenWiki,
   onToggleExplain,
@@ -108,12 +90,8 @@ export function SessionAuxRail({
   onLocateExplain,
   onFollowUpExplain,
   paths,
-  cardWidth,
   onGripDown,
 }: {
-  /** Whether the column is on screen at all. The header's switch owns this;
-   *  its default follows the content (see SessionDetail's `railOpen`). */
-  open: boolean;
   /** Live subagents, most-recently-active first. */
   agents: SessionInfo[];
   docs: AuxDoc[];
@@ -135,8 +113,6 @@ export function SessionAuxRail({
   /** Keep this card, dismiss the rest — the rail caps at 8 and fills up. */
   onCloseOtherDocs: (id: string) => void;
   onCloseAllDocs: () => void;
-  /** Collapse whatever is expanded, without dismissing it. */
-  onCollapseDoc: () => void;
   /** The header switch's own action, offered here too so the rail can be put
    *  away from the thing you want gone rather than from across the header. */
   onHideRail: () => void;
@@ -154,19 +130,15 @@ export function SessionAuxRail({
   onFollowUpExplain: (rec: ExplainRecord, question: string) => void;
   /** Workspace context for path chips inside an expanded agent transcript. */
   paths?: PathLinkContext;
-  /** px width for the expanded card — owned by SessionDetail because the
-   *  conversation has to reserve the same number. 0 when nothing is expanded. */
-  cardWidth: number;
   onGripDown: (e: ReactPointerEvent<HTMLElement>) => void;
 }) {
   const { t } = useTranslation();
   const requestFileNav = useUIStore((s) => s.requestFileNav);
   const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
-  // One menu at a time for the whole rail: a chip's, or the rail's own.
+  // One menu at a time for the whole rail.
   const [menu, setMenu] = useState<{ anchor: ContextMenuAnchor; items: ContextMenuItem[] } | null>(
     null,
   );
-  const expandedDoc = docs.find((d) => d.id === expandedId) ?? null;
   // One card per *chain*, not per record: a follow-up is its own record, so
   // otherwise a three-turn conversation spent three of the rail's ten slots
   // and read bottom-up. A chain's place in the stack is its newest turn, so
@@ -181,15 +153,6 @@ export function SessionAuxRail({
     [explains],
   );
   const stack = orderRailItems(docs, explainThreads, expandedId);
-
-  if (!open) return null;
-  const empty = agents.length === 0 && docs.length === 0 && explains.length === 0;
-  // Either kind of expansion widens the box — a transcript needs the reading
-  // width a file does. Checked against the cards actually in hand, so a stale
-  // id (its agent retired and unpinned) cannot widen the rail around nothing.
-  const expandedAgent = agents.some((a) => agentCardId(a.id) === expandedId);
-  const expandedExplain = explainThreads.some((th) => explainCardId(th.id) === expandedId);
-  const wide = cardWidth > 0 && (expandedDoc != null || expandedAgent || expandedExplain);
 
   const tailFor = (d: AuxDoc): AuxCardTail => ({
     isExpanded: d.id === expandedId,
@@ -237,176 +200,142 @@ export function SessionAuxRail({
     });
   };
 
-  /**
-   * The stack's menu — the one thing no single card can offer on its own
-   * behalf, raised from the empty-rail line.
-   *
-   * There is deliberately **no** `onContextMenu` on the `<aside>`. The rail is
-   * `pointer-events: none` with `.rail > * { pointer-events: auto }` (see the
-   * CSS), so the transparent gaps between cards hand every click to the
-   * transcript underneath — which is the whole reason the rail can float over
-   * the conversation. A handler on the aside reads as correct and passes a
-   * jsdom test (no hit-testing there) while being dead in the app; it was, and
-   * the browser pass is what caught it. Collapsing, clearing the stack and
-   * hiding the rail live in every card's own menu instead (`tailItems`), which
-   * is reachable. This line covers the one state with no card to right-click.
-   */
-  const railItems = (): ContextMenuItem[] => {
-    const items: ContextMenuItem[] = [];
-    if (expandedDoc || expandedAgent || expandedExplain) {
-      items.push({
-        id: "collapse",
-        label: t("detail.aux_collapse_card", "收起此卡"),
-        icon: <ChevronsDownUp size={13} strokeWidth={1.7} />,
-        onSelect: onCollapseDoc,
-      });
-    }
-    if (docs.length > 0) {
-      items.push({
-        id: "close-all",
-        label: t("detail.aux_close_all_docs", "关闭全部 {{count}} 张文档卡", {
-          count: docs.length,
-        }),
-        icon: <XCircle size={13} strokeWidth={1.7} />,
-        onSelect: onCloseAllDocs,
-      });
-    }
-    items.push({
-      id: "hide",
-      label: t("detail.rail_hide", "收起辅助栏"),
-      icon: <PanelRightClose size={13} strokeWidth={1.7} />,
-      dividerBefore: items.length > 0,
-      onSelect: onHideRail,
-    });
-    return items;
+  const renderDoc = (d: AuxDoc) => {
+    const Icon = DOC_ICON[d.kind];
+    const isOpen = d.id === expandedId;
+    const meta = auxDocMeta(d.kind, d.ref);
+    return (
+      <Fragment key={d.id}>
+        <div
+          className={`${styles.rail_card} ${styles.doc_card} ${isOpen ? styles.rail_card_open : ""}`}
+          onContextMenu={(e) => openChipMenu(d, e)}
+        >
+          <button
+            type="button"
+            className={styles.doc_card_main}
+            onClick={() => onToggleDoc(d.id)}
+            title={d.ref}
+            aria-expanded={isOpen}
+          >
+            <Icon
+              className={styles.doc_card_icon}
+              data-kind={d.kind}
+              size={13}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <span className={styles.doc_card_label}>{d.label}</span>
+            {/* One value, mono, dim: enough to tell two chips of the same
+                kind apart (which poster, which version) without making the
+                chip a second line tall. */}
+            {meta && <span className={styles.doc_card_meta}>{meta}</span>}
+          </button>
+          <button
+            type="button"
+            className={styles.doc_card_close}
+            onClick={() => onCloseDoc(d.id)}
+            title={t("detail.rail_dismiss_card", "从边栏移出（可在「本会话资料」里找回）")}
+            aria-label={t("common.close", "关闭")}
+          >
+            ✕
+          </button>
+        </div>
+        {isOpen && (
+          <InReaderHost>
+            <div className={styles.doc_card_expanded}>
+              {/* Grabbed from the card's left edge — the edge that moves, since
+                  the card grows toward the conversation. `separator` with an
+                  orientation is what a resize grip is. */}
+              <div
+                className={styles.doc_card_grip}
+                onPointerDown={onGripDown}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
+              />
+              {/* No title strip above the reader: its own AuxDocBar is the
+                  header (see the note on this component), and that bar carries
+                  both the collapse and the ✕. */}
+              <div className={styles.aux_doc_pane}>
+                <SessionAuxDoc
+                  doc={d}
+                  tail={tailFor(d)}
+                  workspacePath={workspacePath}
+                  onOpenWiki={onOpenWiki}
+                />
+              </div>
+            </div>
+          </InReaderHost>
+        )}
+      </Fragment>
+    );
   };
 
-  // No drag region on the <aside>: the column is pointer-events:none between
-  // the cards so the transcript underneath keeps the wheel and the clicks.
+  const docEntries = stack.flatMap((e) => (e.type === "doc" ? [e.item] : []));
+  const explainEntries = stack.flatMap((e) => (e.type === "explain" ? [e.item] : []));
+
+  // Sections of the task rail, one per kind, each omitted while empty. Order
+  // within a section is the stack's recency order (newest first).
   return (
-    <aside
-      className={`${styles.rail} ${wide ? styles.rail_wide : ""}`}
-      style={wide ? { width: cardWidth } : undefined}
-    >
-      {/* Held open by the switch with nothing in it. Saying so beats an empty
-          column, which reads as the rail having failed to load rather than as
-          "there is genuinely nothing running and nothing opened yet". */}
-      {empty && (
-        <p
-          className={styles.rail_empty}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setMenu({ anchor: { x: e.clientX, y: e.clientY }, items: railItems() });
-          }}
-        >
-          {t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}
-        </p>
-      )}
-      <SubagentLiveCards
-        agents={agents}
-        expandedId={expandedId}
-        onToggle={onToggleAgent}
-        onClose={onCloseAgent}
-        onGoto={onOpenAgent}
-        onHideRail={onHideRail}
-        onGripDown={onGripDown}
-        renderPane={(a) => <SessionAuxAgent agent={a} paths={paths} />}
-      />
-      {/* Questions and docs in one recency-ordered stack below the live
-          agents, newest first — "the last few things I did here" is one
-          question, so it gets one answer rather than two lanes with two caps.
-          Anything past the cap is in the Library facet, not lost. */}
-      {stack.map((entry) => {
-        if (entry.type === "explain") {
-          const th = entry.item;
-          const last = th.records[th.records.length - 1];
-          return (
-            <SessionAuxExplain
-              key={th.id}
-              records={th.records}
-              isOpen={explainCardId(th.id) === expandedId}
-              onToggle={() => onToggleExplain(th.id)}
-              onClose={() => onCloseExplain(th.records.map((r) => r.id))}
-              onLocate={() => onLocateExplain(th.records[0])}
-              onFollowUp={(q) => onFollowUpExplain(last, q)}
-              onGripDown={onGripDown}
+    <>
+      {agents.length > 0 && (
+        <section className={railStyles.block}>
+          <h3 className={railStyles.head}>
+            {t("home.rail_agents", "Subagents")}
+            <span className={railStyles.count}>{agents.length}</span>
+          </h3>
+          <div className={railStyles.card}>
+            <SubagentLiveCards
+              agents={agents}
+              expandedId={expandedId}
+              onToggle={onToggleAgent}
+              onClose={onCloseAgent}
+              onGoto={onOpenAgent}
               onHideRail={onHideRail}
+              onGripDown={onGripDown}
+              renderPane={(a) => <SessionAuxAgent agent={a} paths={paths} />}
             />
-          );
-        }
-        const d = entry.item;
-        const Icon = DOC_ICON[d.kind];
-        const isOpen = d.id === expandedId;
-        const meta = auxDocMeta(d.kind, d.ref);
-        if (!isOpen) {
-          return (
-            <div
-              key={d.id}
-              className={`${styles.rail_card} ${styles.doc_card}`}
-              onContextMenu={(e) => openChipMenu(d, e)}
-            >
-              <button
-                type="button"
-                className={styles.doc_card_main}
-                onClick={() => onToggleDoc(d.id)}
-                title={d.ref}
-                aria-expanded={false}
-              >
-                <Icon
-                  className={styles.doc_card_icon}
-                  data-kind={d.kind}
-                  size={13}
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-                <span className={styles.doc_card_label}>{d.label}</span>
-                {/* One value, mono, dim: enough to tell two chips of the same
-                    kind apart (which poster, which version) without making the
-                    chip a second line tall. */}
-                {meta && <span className={styles.doc_card_meta}>{meta}</span>}
-              </button>
-              <button
-                type="button"
-                className={styles.doc_card_close}
-                onClick={() => onCloseDoc(d.id)}
-                title={t("detail.rail_dismiss_card", "从边栏移出（可在「本会话资料」里找回）")}
-                aria-label={t("common.close", "关闭")}
-              >
-                ✕
-              </button>
-            </div>
-          );
-        }
-        return (
-          <div key={d.id} className={`${styles.rail_card} ${styles.doc_card_expanded}`}>
-            {/* Grabbed from the card's left edge — the edge that moves, since
-                the card grows toward the conversation. `separator` with an
-                orientation is what a resize grip is. */}
-            <div
-              className={styles.doc_card_grip}
-              onPointerDown={onGripDown}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
-            />
-            {/* No title strip above the reader: its own AuxDocBar is the header
-                (see the note on this component), and that bar carries both the
-                collapse and the ✕. */}
-            <div className={styles.aux_doc_pane}>
-              <SessionAuxDoc
-                doc={d}
-                tail={tailFor(d)}
-                workspacePath={workspacePath}
-                onOpenWiki={onOpenWiki}
-              />
-            </div>
           </div>
-        );
-      })}
+        </section>
+      )}
+      {docEntries.length > 0 && (
+        <section className={railStyles.block}>
+          <h3 className={railStyles.head}>
+            {t("home.rail_docs", "Opened")}
+            <span className={railStyles.count}>{docEntries.length}</span>
+          </h3>
+          <div className={railStyles.card}>{docEntries.map(renderDoc)}</div>
+        </section>
+      )}
+      {explainEntries.length > 0 && (
+        <section className={railStyles.block}>
+          <h3 className={railStyles.head}>
+            {t("home.rail_explains", "Side questions")}
+            <span className={railStyles.count}>{explainEntries.length}</span>
+          </h3>
+          <div className={railStyles.card}>
+            {explainEntries.map((th) => {
+              const last = th.records[th.records.length - 1];
+              return (
+                <SessionAuxExplain
+                  key={th.id}
+                  records={th.records}
+                  isOpen={explainCardId(th.id) === expandedId}
+                  onToggle={() => onToggleExplain(th.id)}
+                  onClose={() => onCloseExplain(th.records.map((r) => r.id))}
+                  onLocate={() => onLocateExplain(th.records[0])}
+                  onFollowUp={(q) => onFollowUpExplain(last, q)}
+                  onGripDown={onGripDown}
+                  onHideRail={onHideRail}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
       <Presence when={Boolean(menu)}>{menu && (
         <ContextMenu anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />
       )}</Presence>
-    </aside>
+    </>
   );
 }

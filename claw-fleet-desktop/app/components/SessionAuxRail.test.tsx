@@ -6,11 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
 import { agentCardId, makeAuxDoc } from "../detailAux";
 import type { SessionInfo } from "../types";
+import { ReaderHostContext } from "./readerHost";
 import { SessionAuxRail } from "./SessionAuxRail";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement | null = null;
+let readerHost: HTMLDivElement | null = null;
 let root: Root | null = null;
 
 afterEach(() => {
@@ -18,6 +20,8 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  readerHost?.remove();
+  readerHost = null;
   document.body.querySelectorAll("[class*='menu']").forEach((n) => n.remove());
 });
 
@@ -32,14 +36,18 @@ function agent(id: string, title: string): SessionInfo {
   } as unknown as SessionInfo;
 }
 
+/** Renders the sections into `container`, and any expanded reader into a
+ *  separate host element the way SessionDetail does. */
 function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
   container = document.createElement("div");
+  readerHost = document.createElement("div");
   document.body.appendChild(container);
+  document.body.appendChild(readerHost);
   root = createRoot(container);
   act(() =>
     root!.render(
+      <ReaderHostContext.Provider value={readerHost}>
       <SessionAuxRail
-        open
         agents={[]}
         docs={[]}
         explains={[]}
@@ -52,57 +60,48 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         onCloseDoc={() => {}}
         onCloseOtherDocs={() => {}}
         onCloseAllDocs={() => {}}
-        onCollapseDoc={() => {}}
         onHideRail={() => {}}
         onOpenWiki={() => {}}
         onToggleExplain={() => {}}
         onCloseExplain={() => {}}
         onLocateExplain={() => {}}
         onFollowUpExplain={() => {}}
-        cardWidth={420}
         onGripDown={() => {}}
         {...props}
-      />,
+      />
+      </ReaderHostContext.Provider>,
     ),
   );
   return container;
 }
 
 describe("SessionAuxRail", () => {
-  // The reason the rail can be permanent: closed, it is not a narrow empty
-  // frame, it is not there at all. SessionDetail closes it by default whenever
-  // nothing is in play.
-  it("costs no width when closed", () => {
-    expect(render({ open: false }).childElementCount).toBe(0);
+  // Each section is omitted while empty; with nothing in play there is
+  // nothing to render, and TaskRail says why if the switch holds it open.
+  it("renders nothing when nothing is in play", () => {
+    expect(render().childElementCount).toBe(0);
   });
 
-  // Held open by the header switch on a session with nothing in play: say so,
-  // rather than showing a blank column that reads as a failure to load.
-  it("says why it is empty when the reader pinned it open", () => {
-    const el = render({ open: true });
-
-    expect(el.querySelector("aside")).not.toBeNull();
-    expect(el.querySelector("aside > p")?.textContent).toBeTruthy();
-  });
-
-  it("shows a card per live subagent", () => {
+  it("shows a row per live subagent under its own heading", () => {
     const el = render({ agents: [agent("a", "Trace the watcher")] });
 
-    expect(el.querySelector("aside")).not.toBeNull();
+    expect(el.querySelectorAll("section")).toHaveLength(1);
+    expect(el.querySelector("h3")?.textContent).toContain(i18n.t("home.rail_agents"));
     expect(el.textContent).toContain("Trace the watcher");
   });
 
-  // Cards only, one column, no tab strip and no section headings — the two
-  // kinds are siblings in the same stack.
-  it("stacks doc cards with the agent cards and offers no tabs", () => {
+  // One section per kind, as list rows in the rail — no tab strip.
+  it("gives docs a section of their own below the agents, and offers no tabs", () => {
     const el = render({
       agents: [agent("a", "Trace the watcher")],
       docs: [makeAuxDoc("file", "/repo/src/main.rs")],
     });
 
     expect(el.querySelector('[role="tablist"]')).toBeNull();
-    expect(el.textContent).toContain("main.rs");
-    expect(el.querySelectorAll("aside > *")).toHaveLength(2);
+    const sections = el.querySelectorAll("section");
+    expect(sections).toHaveLength(2);
+    expect(sections[0].textContent).toContain("Trace the watcher");
+    expect(sections[1].textContent).toContain("main.rs");
   });
 
   it("expands a doc card in place, and dismisses it from its own ✕", () => {
@@ -118,18 +117,21 @@ describe("SessionAuxRail", () => {
     expect(onCloseDoc).toHaveBeenCalledWith(doc.id);
   });
 
-  // The whole point of the change: a doc is read in its own card, and the
-  // drawer — which used to carry it, under a duplicate copy of this same
-  // name — is not involved. The reader lands inside the card's own element.
-  it("reads the expanded doc inside the card, with a width grip", () => {
+  // The rail is too narrow to read in: an expanded doc keeps its row in the
+  // rail, marked open, and is read in the floating reader beside it — never in
+  // the drawer, which used to carry it under a duplicate copy of this name.
+  it("reads the expanded doc in the floating reader, keeping its row in the rail", () => {
     const doc = makeAuxDoc("wiki", "arch/overview");
     const el = render({ docs: [doc], expandedId: doc.id });
-    const card = el.querySelector("aside > div:last-child") as HTMLElement;
 
-    expect(card.querySelector('[role="separator"]')).not.toBeNull();
-    // WikiTabPane mounts inside the card rather than in a drawer beside it.
-    expect(card.querySelector("[class*='aux_doc_pane']")).not.toBeNull();
-    expect(el.querySelectorAll("aside > *")).toHaveLength(1);
+    const row = el.querySelector("[aria-expanded]") as HTMLElement;
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    expect(el.querySelector("[class*='doc_card_expanded']")).toBeNull();
+
+    const reader = readerHost!.querySelector("[class*='doc_card_expanded']") as HTMLElement;
+    expect(reader.querySelector('[role="separator"]')).not.toBeNull();
+    // WikiTabPane mounts inside the reader rather than in a drawer.
+    expect(reader.querySelector("[class*='aux_doc_pane']")).not.toBeNull();
   });
 
   // An expanded doc card's header is the reader's own AuxDocBar. It used to be
@@ -140,6 +142,7 @@ describe("SessionAuxRail", () => {
     const el = render({ docs: [doc], expandedId: doc.id });
 
     expect(el.querySelector("[class*='doc_card_head']")).toBeNull();
+    expect(readerHost!.querySelector("[class*='doc_card_head']")).toBeNull();
   });
 
   // A chip's disambiguator: `auxDocMeta` reads it off the ref, so two same-named
@@ -167,12 +170,9 @@ describe("SessionAuxRail", () => {
     expect(menu.textContent).toContain("/repo/src/main.rs");
   });
 
-  // Regression guard for a bug the unit tests could not see and the browser
-  // pass caught: `.rail` is `pointer-events: none` (so the transcript keeps the
-  // clicks between cards), which means an `onContextMenu` on the <aside> is
-  // dead in the app while passing in jsdom, where there is no hit-testing. The
-  // stack-level actions therefore have to live on the cards.
-  it("puts hiding the rail on a card's menu, not on the rail's dead background", () => {
+  // Hiding the rail is offered from the thing you want gone, not only from
+  // across the header.
+  it("puts hiding the rail on a card's menu", () => {
     const el = render({ docs: [makeAuxDoc("file", "/repo/a.rs")] });
     const chip = el.querySelector("[class*='doc_card']") as HTMLElement;
 
@@ -184,27 +184,6 @@ describe("SessionAuxRail", () => {
     );
 
     expect(labels.some((l) => /辅助栏|side rail/i.test(l))).toBe(true);
-    // And the aside itself must not carry one, or the fix rots back.
-    const rail = el.querySelector("aside") as HTMLElement;
-    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
-    act(() => void rail.dispatchEvent(ev));
-    expect(ev.defaultPrevented).toBe(false);
-  });
-
-  // The one state with no card to right-click: held open by the switch with
-  // nothing in play. That line IS a `.rail > *`, so it does get the events.
-  it("carries the stack menu on the empty-rail line", () => {
-    const onHideRail = vi.fn();
-    const el = render({ open: true, onHideRail });
-    const line = el.querySelector("aside > p") as HTMLElement;
-    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
-
-    act(() => void line.dispatchEvent(ev));
-    expect(ev.defaultPrevented).toBe(true);
-    const items = Array.from(document.body.querySelectorAll("[class*='menu'] button"));
-    expect(items).toHaveLength(1);
-    act(() => (items[0] as HTMLElement).click());
-    expect(onHideRail).toHaveBeenCalled();
   });
 
   // The behaviour this rail change is for: a subagent is read here, not by
@@ -220,11 +199,13 @@ describe("SessionAuxRail", () => {
     expect(onOpenAgent).not.toHaveBeenCalled();
   });
 
-  it("gives the expanded subagent card a width grip and a way out to its page", () => {
+  it("gives the expanded subagent reader a width grip and a way out to its page", () => {
     const onOpenAgent = vi.fn();
     const a = agent("sub-1", "Trace the watcher");
     const el = render({ agents: [a], expandedId: agentCardId("sub-1"), onOpenAgent });
-    const card = el.querySelector("aside > div") as HTMLElement;
+    // The row stays in the rail; the transcript is read beside it.
+    expect(el.textContent).toContain("Trace the watcher");
+    const card = readerHost!.querySelector("[class*='doc_card_expanded']") as HTMLElement;
 
     expect(card.querySelector('[role="separator"]')).not.toBeNull();
     // The transcript pane mounts inside the card: grip + head + pane.
