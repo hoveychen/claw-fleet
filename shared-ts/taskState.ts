@@ -5,7 +5,8 @@
  * A task is judged as a whole: its main conversation (every relay hop of it)
  * plus every sub-task it spawned. Per-session run status is an input, not the
  * answer — a task whose main hop has gone quiet while two sub-tasks work is
- * "waiting", not "ended".
+ * "running", not "ended": the boss reads the list as "is this moving and
+ * spending tokens", not "what is the coordinator doing".
  *
  * Order is the order the boss reads in: what needs them, what is ready to
  * accept, what is moving, what is parked, what is closed.
@@ -109,10 +110,11 @@ function hasRunningSubagents(m: TaskMemberView): boolean {
  *    done from the list, say, after it hit a rate limit), the error is
  *    answered.
  * 2. done — the boss pressed finish / abandon.
- * 3. running — the main conversation has a turn in flight.
- * 4. waiting — the main conversation is parked on a `fleet watch` or on
- *    background subagents it dispatched, or its sub-tasks are still
- *    working / watching / waiting on their own subagents.
+ * 3. running — any session of the task (main or sub-task) has a turn in
+ *    flight. A coordinator watching four busy sub-tasks is running: the work
+ *    is moving and burning tokens, whoever holds the turn.
+ * 4. waiting — nothing has a turn in flight, but something is parked on a
+ *    `fleet watch` or on background subagents it dispatched.
  * 5. review — nothing is moving and the task is not closed: the chain stopped
  *    and the result is waiting to be accepted.
  */
@@ -121,14 +123,8 @@ export function taskStateOf(task: TaskView): TaskState {
   const closed = task.outcome === "completed" || task.outcome === "abandoned";
   if (all.some((m) => (closed ? m.hasPendingDecision : needsHuman(m)))) return "needsYou";
   if (closed) return "done";
-  if (task.main.some(isWorking)) return "running";
-  if (
-    all.some(hasRunningSubagents) ||
-    task.main.some(isWatching) ||
-    task.subtasks.some((m) => isWorking(m) || isWatching(m))
-  ) {
-    return "waiting";
-  }
+  if (all.some(isWorking)) return "running";
+  if (all.some(hasRunningSubagents) || all.some(isWatching)) return "waiting";
   return "review";
 }
 

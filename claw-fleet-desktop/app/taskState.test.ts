@@ -47,9 +47,16 @@ describe("taskStateOf", () => {
     expect(taskStateOf({ main: [m("idle", { quiet: true })], subtasks: [], outcome: null })).toBe("running");
   });
 
-  it("a main hop parked on a watch, or working sub-tasks, is waiting", () => {
+  it("a main hop or sub-task parked on a watch, with nothing in flight, is waiting", () => {
     expect(taskStateOf({ main: [m("watching")], subtasks: [], outcome: null })).toBe("waiting");
-    expect(taskStateOf({ main: [m("idle")], subtasks: [m("executing")], outcome: null })).toBe("waiting");
+    expect(taskStateOf({ main: [m("idle")], subtasks: [m("watching")], outcome: null })).toBe("waiting");
+  });
+
+  it("a sub-task in flight makes the task running even while the main hop watches", () => {
+    expect(taskStateOf({ main: [m("idle")], subtasks: [m("executing")], outcome: null })).toBe("running");
+    expect(
+      taskStateOf({ main: [m("watching")], subtasks: [m("executing"), m("thinking")], outcome: null }),
+    ).toBe("running");
   });
 
   it("a parked waitingInput process without a card is not running", () => {
