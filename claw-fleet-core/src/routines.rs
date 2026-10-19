@@ -1,4 +1,4 @@
-//! Routines (例行): the user-facing name for Fleet's future tasks.
+//! Routines (定时): the user-facing name for Fleet's future tasks.
 //!
 //! Underneath a routine is either a one-shot [`crate::schedule`] or a recurring
 //! [`crate::agent_loop`]; both stores and their timers stay as they are. This
