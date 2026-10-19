@@ -2577,6 +2577,8 @@
     "project_filter_tip": "Show only this project",
     "running_subagents": "{{count}} subagents running",
     "running_subagents_one": "1 subagent running",
+    "running_subtasks": "{{count}} subtasks running",
+    "running_subtasks_one": "1 subtask running",
     "group_by": "Group",
     "group_by_state": "By status",
     "group_by_project": "By project",

@@ -13,6 +13,7 @@ import {
   mixedAgentSources,
   projectGroups,
   rowPreview,
+  rowActiveSubtasks,
   rowRunningSubagents,
   sectionRows,
   stepText,
@@ -362,6 +363,15 @@ describe("row signals", () => {
       session("sub", { taskId: "sub", parentTaskId: "root", runningSubagentCount: 1 }),
     ]);
     expect(rowRunningSubagents(rows[0])).toBe(3);
+  });
+
+  it("counts the sub-tasks still at it, not the ones that reported back", () => {
+    const rows = build([
+      session("root"),
+      session("live", { taskId: "live", parentTaskId: "root", status: "executing", procAlive: true }),
+      session("over", { taskId: "over", parentTaskId: "root" }),
+    ]);
+    expect(rowActiveSubtasks(rows[0])).toBe(1);
   });
 
   it("previews the last message unless it only repeats the title", () => {

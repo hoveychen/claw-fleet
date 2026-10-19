@@ -3,6 +3,7 @@ import {
   buildTaskRows,
   projectSectionRows,
   rowDetail,
+  activeSubtasks,
   runningSubagents,
   sectionRows,
   stepText,
@@ -177,6 +178,25 @@ describe("runningSubagents", () => {
       s({ id: "h2", taskId: "h1", runningSubagentCount: 2, handoff: { chainId: "c", hop: 2, chainLen: 2 } as never }),
     ]);
     expect(runningSubagents(rows[0])).toBe(3);
+  });
+
+  it("also counts subagents inside sub-tasks", () => {
+    const rows = build([
+      s({ id: "root", taskId: "root", runningSubagentCount: 1 }),
+      s({ id: "sub", taskId: "sub", parentTaskId: "root", runningSubagentCount: 2 }),
+    ]);
+    expect(runningSubagents(rows[0])).toBe(3);
+  });
+});
+
+describe("activeSubtasks", () => {
+  it("counts the sub-tasks still at it, not the ones that reported back", () => {
+    const rows = build([
+      s({ id: "root", taskId: "root" }),
+      s({ id: "live", taskId: "live", parentTaskId: "root", status: "executing", procAlive: true }),
+      s({ id: "over", taskId: "over", parentTaskId: "root" }),
+    ]);
+    expect(activeSubtasks(rows[0])).toBe(1);
   });
 });
 

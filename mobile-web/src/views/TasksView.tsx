@@ -47,6 +47,7 @@ import {
   projectScopeKey,
   projectSectionRows,
   rowDetail,
+  activeSubtasks,
   runningSubagents,
   sectionRows,
   subtaskTally,
@@ -608,6 +609,13 @@ export function TasksView({
     const stopBusy = stoppingKey === itemKey(tip.deviceId, tip.id);
     const startedAt = tip.taskSummary?.startedAtMs || Math.min(...r.hops.map((h) => h.createdAtMs));
     const subagents = runningSubagents(r);
+    const liveSubtasks = activeSubtasks(r);
+    const helpersLabel = [
+      liveSubtasks > 0 ? t("{0} 个子任务在跑", liveSubtasks) : null,
+      subagents > 0 ? t("{0} 个子代理在跑", subagents) : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
     const preview = tip.lastMessagePreview ? mentionPreview(tip.lastMessagePreview) : "";
     return (
       <div key={r.key} className={styles.row} onClick={() => onOpenSession(tip)}>
@@ -649,10 +657,10 @@ export function TasksView({
               <AgentSourceIcon source={tip.agentSource} />
             </span>
             {line2 && <span className={styles.line2Text}>{line2}</span>}
-            {subagents > 0 && (
-              <span className={styles.subagents} aria-label={t("{0} 个子代理在跑", subagents)}>
+            {subagents + liveSubtasks > 0 && (
+              <span className={styles.subagents} aria-label={helpersLabel}>
                 <Bot size={11} />
-                {subagents}
+                {subagents + liveSubtasks}
               </span>
             )}
             {/* Under a project heading the tag would only repeat it. */}

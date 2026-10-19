@@ -562,6 +562,13 @@ export function rowRunningSubagents(row: HomeRow): number {
   );
 }
 
+/** Sub-tasks still at it — running, or parked on a wait — the ones the
+ *  row's helper badge counts next to its subagents. */
+export function rowActiveSubtasks(row: HomeRow): number {
+  if (row.kind === "card") return 0;
+  return row.subtasks.filter((st) => st.state === "running" || st.state === "waiting").length;
+}
+
 /** The last message of the open hop, unless it only repeats the title. */
 export function rowPreview(row: HomeRow): string | null {
   const s = row.kind === "card" ? row.session : row.tip;
