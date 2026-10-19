@@ -3,10 +3,11 @@
 // here one at a time, so answering never means scrolling the transcript to
 // find the question. Digits pick options, ⌘↵ sends, Esc denies a guard.
 
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDecisionStore, useUIStore } from "../store";
 import type { PendingDecision } from "../types";
+import { getItem, setItem } from "../storage";
 import { SkeletonCard } from "./loading";
 import { dockAction, fromSubtask } from "./dockKeys";
 import styles from "./DecisionDock.module.css";
@@ -16,6 +17,10 @@ import styles from "./DecisionDock.module.css";
 const DecisionCard = lazy(() =>
   import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
 );
+
+/** Set once the first-ever docked card's explainer has been dismissed or the
+ *  card it sat on was answered. */
+export const DOCK_HINT_SEEN_KEY = "decision-dock-hint-seen";
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -45,6 +50,21 @@ export function DecisionDock({
   const [activeId, setActiveId] = useState<string | null>(null);
   const index = Math.max(0, cards.findIndex((c) => c.id === activeId));
   const active = cards[index] ?? null;
+
+  // First card ever: one line on what this is. It goes for good once dismissed,
+  // or once the card it first appeared on is gone (answered).
+  const [hintOn, setHintOn] = useState(() => !getItem(DOCK_HINT_SEEN_KEY));
+  const hintCardId = useRef<string | null>(null);
+  const dismissHint = () => {
+    setHintOn(false);
+    setItem(DOCK_HINT_SEEN_KEY, "1");
+  };
+  useEffect(() => {
+    if (!hintOn || !active) return;
+    if (hintCardId.current == null) hintCardId.current = active.id;
+    else if (!cards.some((c) => c.id === hintCardId.current)) dismissHint();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hintOn, active?.id, cards]);
 
   const toggleElicitationOption = useDecisionStore((s) => s.toggleElicitationOption);
   const toggleFleetAskOption = useDecisionStore((s) => s.toggleFleetAskOption);
@@ -195,6 +215,21 @@ export function DecisionDock({
           </span>
         )}
       </header>
+      {hintOn && (
+        <div className={styles.first_hint} data-testid="dock-first-hint">
+          <span>
+            {t("home.dock_first_hint")}
+            {questionCard &&
+              " " +
+                t("home.dock_first_hint_keys", {
+                  submit: document.documentElement.getAttribute("data-platform") === "windows" ? "Ctrl+Enter" : "⌘↵",
+                })}
+          </span>
+          <button type="button" className={styles.first_hint_ok} onClick={dismissHint}>
+            {t("home.dock_first_hint_ok")}
+          </button>
+        </div>
+      )}
       {crumbs.length > 0 && (
         <div className={styles.crumbs}>{crumbs.join(" › ")}</div>
       )}
