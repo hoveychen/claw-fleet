@@ -223,7 +223,10 @@ fn spawn_edges_in_file(path: &Path, parent: &str) -> Vec<(String, String)> {
 fn spawn_edges_in_transcript(mut reader: impl std::io::BufRead, parent: &str) -> Vec<(String, String)> {
     use std::collections::HashSet;
 
-    let has = |hay: &[u8], needle: &[u8]| hay.windows(needle.len()).any(|w| w == needle);
+    use memchr::memmem::Finder;
+    let spawn_tool = Finder::new(b"fleet__spawn");
+    let spawn_cli = Finder::new(b"fleet spawn");
+    let spawn_ok = Finder::new(b"ok: session ");
     let mut spawn_calls: HashSet<String> = HashSet::new();
     let mut edges = Vec::new();
     let mut line = Vec::new();
@@ -233,8 +236,8 @@ fn spawn_edges_in_transcript(mut reader: impl std::io::BufRead, parent: &str) ->
             Ok(0) | Err(_) => break,
             Ok(_) => {}
         }
-        let call_line = has(&line, b"fleet__spawn") || has(&line, b"fleet spawn");
-        let result_line = has(&line, b"ok: session ");
+        let call_line = spawn_tool.find(&line).is_some() || spawn_cli.find(&line).is_some();
+        let result_line = spawn_ok.find(&line).is_some();
         if !call_line && !result_line {
             continue;
         }
