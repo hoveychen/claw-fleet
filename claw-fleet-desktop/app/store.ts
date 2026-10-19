@@ -647,7 +647,7 @@ export const useUIStore = create<UIState>((set) => ({
       hostFeatures: features,
       simplifiedMode,
       ...(simplifiedMode && !s.simplifiedMode &&
-      isHiddenWhenSimplified(s.viewMode, s.mainViewState.memory.workspaceFilter)
+      isHiddenWhenSimplified(s.viewMode)
         ? viewModePatch(s, NAV_HOME)
         : {}),
       // The last-used page is restored from storage, so a host that used to
