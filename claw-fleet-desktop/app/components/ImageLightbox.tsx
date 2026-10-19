@@ -33,11 +33,71 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
   const nativeMacShare = !isWebBuild() && navigator.platform.toLowerCase().includes("mac");
   const canShare = nativeMacShare || typeof navigator.share === "function";
 
-  const setScale = (value: number) => {
-    const next = Math.max(1, Math.min(5, value));
-    setZoom(next);
-    if (next === 1) setPan({ x: 0, y: 0 });
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  // Latest zoom/pan for the native gesture listeners, which outlive renders.
+  const view = useRef({ zoom: 1, pan: { x: 0, y: 0 } });
+
+  // Keeps the scaled image covering the stage: no panning past its edges.
+  const clampPan = (scale: number, x: number, y: number) => {
+    const img = imgRef.current, stage = stageRef.current;
+    if (!img || !stage) return { x, y };
+    const limitX = Math.max(0, (img.offsetWidth * scale - stage.clientWidth) / 2);
+    const limitY = Math.max(0, (img.offsetHeight * scale - stage.clientHeight) / 2);
+    return { x: Math.max(-limitX, Math.min(limitX, x)), y: Math.max(-limitY, Math.min(limitY, y)) };
   };
+
+  const applyView = (scale: number, x: number, y: number) => {
+    const next = { zoom: scale, pan: clampPan(scale, x, y) };
+    view.current = next;
+    setZoom(next.zoom);
+    setPan(next.pan);
+  };
+
+  // Zooms to `value`, keeping the image point under `anchor` (client coords;
+  // the stage centre when omitted) fixed on screen, like macOS Preview.
+  const setScale = (value: number, anchor?: { x: number; y: number }) => {
+    const next = Math.max(1, Math.min(5, value));
+    const { zoom: cur, pan: p } = view.current;
+    const rect = stageRef.current?.getBoundingClientRect();
+    if (!rect || !anchor || next === 1) { applyView(next, next === 1 ? 0 : p.x * next / cur, next === 1 ? 0 : p.y * next / cur); return; }
+    const ax = anchor.x - (rect.left + rect.width / 2), ay = anchor.y - (rect.top + rect.height / 2);
+    applyView(next, ax - (ax - p.x) * next / cur, ay - (ay - p.y) * next / cur);
+  };
+
+  // Trackpad gestures, macOS style: pinch zooms, two-finger scroll pans.
+  // Native listeners because React's wheel handler is passive and cannot stop
+  // the page from scrolling. WebKit reports a pinch as gesture* events; Chromium
+  // (the web build) reports it as a wheel event with ctrlKey set.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey) { setScale(view.current.zoom * Math.exp(-e.deltaY * 0.01), { x: e.clientX, y: e.clientY }); return; }
+      const { zoom: cur, pan: p } = view.current;
+      if (cur > 1) applyView(cur, p.x - e.deltaX, p.y - e.deltaY);
+    };
+    let gestureStart = 1;
+    type GestureEvt = Event & { scale: number; clientX: number; clientY: number };
+    const onGestureStart = (e: Event) => { e.preventDefault(); gestureStart = view.current.zoom; };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as GestureEvt;
+      setScale(gestureStart * g.scale, { x: g.clientX, y: g.clientY });
+    };
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    stage.addEventListener("gesturestart", onGestureStart);
+    stage.addEventListener("gesturechange", onGestureChange);
+    stage.addEventListener("gestureend", onGestureStart);
+    return () => {
+      stage.removeEventListener("wheel", onWheel);
+      stage.removeEventListener("gesturestart", onGestureStart);
+      stage.removeEventListener("gesturechange", onGestureChange);
+      stage.removeEventListener("gestureend", onGestureStart);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const action = async (kind: "copy" | "save" | "share") => {
     setBusy(kind);
@@ -141,9 +201,10 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
       >
         <X size={19} />
       </button>
-      <div className={styles.stage} onClick={(e) => e.stopPropagation()} onWheel={(e) => { e.preventDefault(); setScale(zoom + (e.deltaY < 0 ? 0.5 : -0.5)); }}>
+      <div ref={stageRef} className={styles.stage} onClick={(e) => e.stopPropagation()}>
       {!imageReady && <SkeletonCard className={styles.placeholder} width="min(640px, 100%)" height="min(420px, 60vh)" />}
       <img
+        ref={imgRef}
         src={src}
         alt={alt ?? ""}
         className={styles.image}
@@ -155,13 +216,7 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
         onPointerDown={(e) => { if (zoom === 1) return; drag.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }; e.currentTarget.setPointerCapture(e.pointerId); }}
         onPointerMove={(e) => {
           if (!drag.current) return;
-          const rect = e.currentTarget.getBoundingClientRect();
-          const stage = e.currentTarget.parentElement!.getBoundingClientRect();
-          const limitX = Math.max(0, (rect.width - stage.width) / 2);
-          const limitY = Math.max(0, (rect.height - stage.height) / 2);
-          const x = drag.current.panX + e.clientX - drag.current.x;
-          const y = drag.current.panY + e.clientY - drag.current.y;
-          setPan({ x: Math.max(-limitX, Math.min(limitX, x)), y: Math.max(-limitY, Math.min(limitY, y)) });
+          applyView(zoom, drag.current.panX + e.clientX - drag.current.x, drag.current.panY + e.clientY - drag.current.y);
         }}
         onPointerUp={() => { drag.current = null; }}
         onPointerCancel={() => { drag.current = null; }}

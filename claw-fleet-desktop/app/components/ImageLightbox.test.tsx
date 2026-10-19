@@ -69,3 +69,18 @@ it("zooms the message image, resets it, and saves the original bytes", async () 
   expect(save).toHaveBeenCalledWith({ defaultPath: "picture.png" });
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("save_preview_image", { dest: "/tmp/picture.png", base64: btoa("image bytes") }));
 });
+
+it("zooms on a trackpad pinch but not on a two-finger scroll", async () => {
+  await act(async () => root.render(<ImageLightbox src="data:image/png;base64,AA==" onClose={() => {}} />));
+  const stage = document.querySelector<HTMLImageElement>('[role="dialog"] img')!.parentElement!;
+  const zoomLabel = () => document.querySelector('[role="dialog"] span')!.textContent;
+  await act(async () => { stage.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true })); });
+  expect(zoomLabel()).toBe("100%");
+  // Chromium reports a pinch as ctrl+wheel.
+  await act(async () => { stage.dispatchEvent(new WheelEvent("wheel", { deltaY: -50, ctrlKey: true, cancelable: true })); });
+  expect(zoomLabel()).toBe(`${Math.round(Math.exp(0.5) * 100)}%`);
+  // WebKit reports it as gesture events carrying a cumulative scale.
+  await act(async () => { stage.dispatchEvent(new Event("gesturestart", { cancelable: true })); });
+  await act(async () => { stage.dispatchEvent(Object.assign(new Event("gesturechange", { cancelable: true }), { scale: 2 })); });
+  expect(zoomLabel()).toBe(`${Math.round(Math.exp(0.5) * 200)}%`);
+});
