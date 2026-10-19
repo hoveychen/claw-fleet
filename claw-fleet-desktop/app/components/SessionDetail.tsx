@@ -2078,7 +2078,8 @@ export function SessionDetail({
                       <DecisionDock
                         cards={dockCards}
                         projectName={projectName}
-                        taskTitle={preferredTitle}
+                        // The crumb names the task, not the open sub-task.
+                        taskTitle={inSubtask && task ? task.title : preferredTitle}
                         keyboard={!paused}
                         inline
                       />
