@@ -43,7 +43,8 @@ import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenC
 import { refetchWikiDocsForMissingSlug, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import { DecisionDock } from "./DecisionDock";
-import { TaskRail } from "./TaskRail";
+import { TaskRail, taskRailHasContent, useTaskArtifacts } from "./TaskRail";
+import { ReaderHostContext } from "./readerHost";
 import railStyles from "./TaskRail.module.css";
 import type { TaskRow } from "./homeRows";
 import { formatSpan } from "./TaskList";
@@ -602,6 +603,9 @@ export function SessionDetail({
   /* The messages pane. The expanded doc card's width is a ratio of *this* box,
      and the transcript reserves the same number as a right-hand band. */
   const messagesPaneRef = useRef<HTMLDivElement>(null);
+  // Where an expanded rail row draws its reader (see readerHost). State, not a
+  // ref: the rail's portals have to re-render once the element exists.
+  const [readerHost, setReaderHost] = useState<HTMLDivElement | null>(null);
   /* The row holding the two slabs, and the width it would have to have to seat
      the drawer *beside* the rail — see `railCovered` below. Both measured: the
      second one comes off a zero-height probe (`.fit_probe`) whose width is that
@@ -1138,9 +1142,6 @@ export function SessionDetail({
   const dropAllDocs = useCallback(() => {
     setAux((st) => closeAllDocs(st));
   }, []);
-  const collapseDocCard = useCallback(() => {
-    setAux((st) => collapseDoc(st));
-  }, []);
   /* A side-question card expands into its exchange the way a doc card does. */
   const pickExplain = useCallback((id: string) => {
     setAux((st) => toggleExplain(st, id));
@@ -1615,14 +1616,28 @@ export function SessionDetail({
     return pinned ? [pinned, ...live].sort(byCreation) : live;
   }, [aux.pinnedAgent, aux.dismissedAgents, liveSubagents, sessions]);
   const railCards = railAgents.length + aux.docs.length + explains.length;
-  /* The rail follows its content by default — present when it has cards, zero
-     width when it does not — until the reader says otherwise with the toolbar
-     switch. The switch owns *this* layer, not the drawer: the drawer is a place
-     you go look one thing up, and it is reached by naming that thing (the ···
-     menu's facets, or a rail card). A switch that opened the drawer had to
-     invent which facet to show, which is how pressing it on a fresh session
+  const inSubtask = !!task && !!liveSession && !task.hops.some((h) => h.id === liveSession.id);
+  const taskSteps = (() => {
+    if (!task || taskPlans.length === 0) return null;
+    const want = liveSession?.taskPlan?.planId;
+    return (taskPlans.find((p) => p.id === want) ?? taskPlans[0]).items;
+  })();
+  const taskArtifacts = useTaskArtifacts(task);
+  /* One rail: the task's sub-tasks, steps and material, and this session's
+     subagents, opened docs and side questions. It follows its content by
+     default — present when any section has something in it, zero width when
+     none does — until the reader says otherwise with the toolbar switch. The
+     developer view does not count as content: everything in it is also in the
+     ··· menu. The switch owns *this* layer, not the drawer: the drawer is a
+     place you go look one thing up, and it is reached by naming that thing
+     (the ··· menu's facets, or a rail row). A switch that opened the drawer had
+     to invent which facet to show, which is how pressing it on a fresh session
      landed on Skills — an answer to a question nobody asked. */
-  const railOpen = railOverride ?? railCards > 0;
+  const railHasContent =
+    railCards > 0 ||
+    (liveSession != null &&
+      taskRailHasContent(task, liveSession.id, taskSteps, taskArtifacts));
+  const railOpen = railOverride ?? railHasContent;
   /* Width of the expanded doc card, and the grip that changes it. Owned here
      rather than in the rail because the conversation needs the same number: it
      holds a band of exactly this width clear (`--rail-band` below), which is
@@ -1640,8 +1655,8 @@ export function SessionDetail({
     enabled: chromeAdaptive,
   });
   const toggleRail = useCallback(() => {
-    setRailOverride((prev) => !(prev ?? railCards > 0));
-  }, [railCards]);
+    setRailOverride((prev) => !(prev ?? railHasContent));
+  }, [railHasContent]);
   /* Can the drawer be seated *beside* the rail at this width? The design has it
      stop at the rail's left edge, so the card you clicked to open it stays
      readable — but that only works while the row is wide enough to hold both.
@@ -1786,12 +1801,6 @@ export function SessionDetail({
   const taskCost = task
     ? taskSum?.costUsd ?? task.hops.reduce((n, h) => n + (h.totalCostUsd ?? 0), 0)
     : 0;
-  const inSubtask = !!task && !!liveSession && !task.hops.some((h) => h.id === liveSession.id);
-  const taskSteps = (() => {
-    if (!task || taskPlans.length === 0) return null;
-    const want = liveSession?.taskPlan?.planId;
-    return (taskPlans.find((p) => p.id === want) ?? taskPlans[0]).items;
-  })();
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
@@ -1801,7 +1810,7 @@ export function SessionDetail({
       <WebLinkProvider value={openWebInAux}>
       <IngestOpenProvider value={ingestOpen}>
       <div
-        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""} ${railCovered ? styles.rail_covered : ""}`}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""} ${railCovered ? styles.rail_covered : ""} ${docCardW > 0 ? styles.reader_open : ""}`}
         /* Standalone only: the pane grows by what the reader needs, so the room
            the auto-collapsed chrome gave up lands here rather than in the list
            beside it. Inline hosts own their own width. */
@@ -2099,45 +2108,49 @@ export function SessionDetail({
                   </div>
                 )}
 
-                {/* The ambient layer — inside the messages pane on purpose, so
-                    it floats over the transcript's right side (below the hero)
-                    rather than standing beside it as a second column. The
-                    transcript keeps the full pane, which is what keeps its
-                    scrollbar on the pane's right edge. */}
-                <SessionAuxRail
-                  open={railOpen}
-                  agents={railAgents}
-                  docs={aux.docs}
-                  explains={explains}
-                  expandedId={aux.expanded}
-                  workspacePath={workspacePath ?? ""}
-                  onOpenAgent={open}
-                  onToggleAgent={pickAgent}
-                  onCloseAgent={dropAgent}
-                  onToggleDoc={pickDoc}
-                  onCloseDoc={dropDoc}
-                  onCloseOtherDocs={dropOtherDocs}
-                  onCloseAllDocs={dropAllDocs}
-                  onCollapseDoc={collapseDocCard}
-                  onHideRail={toggleRail}
-                  onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
-                  onToggleExplain={pickExplain}
-                  onCloseExplain={dropExplain}
-                  onLocateExplain={locateExplain}
-                  onFollowUpExplain={followUpExplain}
-                  paths={pathLinks}
-                  cardWidth={docCardW}
-                  onGripDown={onGripDown}
-                />
+                {/* An expanded rail row's reader — inside the messages pane on
+                    purpose, so it floats over the transcript's right side
+                    (below the hero, directly left of the rail) rather than
+                    standing beside it as another column. The transcript keeps
+                    the full pane, which is what keeps its scrollbar on the
+                    pane's right edge. */}
+                <div ref={setReaderHost} className={styles.reader_host} />
               </div>
             </div>
 
-            {task && (
+            {railOpen && (
+              <ReaderHostContext.Provider value={readerHost}>
               <TaskRail
                 row={task}
                 openSessionId={liveSession.id}
                 steps={taskSteps}
+                artifacts={taskArtifacts}
                 onOpenSession={(id) => onOpenSession?.(id)}
+                empty={!railHasContent}
+                ambient={
+                    <SessionAuxRail
+                      agents={railAgents}
+                      docs={aux.docs}
+                      explains={explains}
+                      expandedId={aux.expanded}
+                      workspacePath={workspacePath ?? ""}
+                      onOpenAgent={open}
+                      onToggleAgent={pickAgent}
+                      onCloseAgent={dropAgent}
+                      onToggleDoc={pickDoc}
+                      onCloseDoc={dropDoc}
+                      onCloseOtherDocs={dropOtherDocs}
+                      onCloseAllDocs={dropAllDocs}
+                      onHideRail={toggleRail}
+                      onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                      onToggleExplain={pickExplain}
+                      onCloseExplain={dropExplain}
+                      onLocateExplain={locateExplain}
+                      onFollowUpExplain={followUpExplain}
+                      paths={pathLinks}
+                      onGripDown={onGripDown}
+                    />
+                }
                 developer={
                   <>
                     <div className={railStyles.dev_row}>
@@ -2158,6 +2171,7 @@ export function SessionDetail({
                   </>
                 }
               />
+              </ReaderHostContext.Provider>
             )}
 
             {auxOpen && (

@@ -50,20 +50,20 @@
 .rail_open {
   --rail-open: 1;
 }
+/* Marker: an expanded rail card's reader is floating over the conversation
+   (see .reader_host); the transcript and composer hold its band clear. */
+.reader_open {
+  --reader-open: 1;
+}
+
 /* With the rail present the drawer and its scrim stop at the rail's left edge:
-   the rail is the *other* layer of information, and covering the card you just
-   clicked to open the drawer is the drawer answering a question by hiding it.
-   The transcript's reading column and the composer keep clear of the same
-   band (see .scroll_area / .dock_layer below) — the rail floats over the
-   conversation, so the space it needs is padding inside the scroller, not a
-   column of its own. */
+   the rail is the *other* layer of information, and covering the row you just
+   clicked to open the drawer is the drawer answering a question by hiding it. */
 .rail_open .body_row {
-  /* The band's width plus its own 10px offset from the pane edge and a gutter,
-     measured from the row's padding box — the drawer's `right` is relative to
-     that, the rail's to the slab inside it. Verified in the mock at 1512px:
-     with a bare `+ slab-gap` the drawer's right edge landed 3px *over* the
-     cards' left edge. */
-  --rail-space: calc(var(--rail-band) + var(--rail-gutter));
+  /* The rail column plus the gap between it and the conversation slab. The
+     drawer's `right` is measured from the row's padding box, which already
+     adds the row's own padding (`--slab-gap`) on top. */
+  --rail-space: calc(var(--rail-w) + var(--slab-gap));
 }
 
 /* Too narrow to seat the drawer beside the rail, so it covers it instead of
@@ -76,10 +76,10 @@
 }
 
 /* How wide the row would have to be for the drawer to fit beside the rail:
-   both slab gutters, the rail's band, the gap between them, and the drawer's
-   ideal width. Expressed here rather than as numbers in TS so the clamp() and
+   the row's two paddings, the rail column, the gap before it, and the
+   drawer's ideal width. Expressed here rather than as numbers in TS so the clamp() and
    the percentage stay in one place — SessionDetail measures this box and
-   compares it with the row's real width. Deliberately reads --rail-band and
+   compares it with the row's real width. Deliberately reads --rail-w and
    not --rail-space: the latter is what `.rail_covered` above switches off, and
    a probe that moved with the answer would oscillate. */
 .fit_probe {
@@ -88,7 +88,7 @@
   left: 0;
   height: 0;
   width: calc(
-    var(--slab-gap) * 2 + var(--rail-band) + var(--rail-gutter) + var(--drawer-w)
+    var(--slab-gap) * 3 + var(--rail-w) + var(--drawer-w)
   );
   visibility: hidden;
   pointer-events: none;
@@ -111,19 +111,18 @@
 
 /* Windows frameless: leave room on the right for the three caption buttons
    drawn by <WindowsFrameOverlay> (3 x 46px). Only when the hero actually
-   reaches the pane's right edge. The card rail no longer competes for it — it
-   floats over the transcript *below* the hero now — so the only element that
-   can take that corner away is the drawer, and only while the rail is not
-   holding a band open to the right of it (see .aux_head below). Skipped for
-   the inline form, which sits below a host chrome that already accounts for
-   the buttons. */
+   reaches the pane's right edge: the rail column takes that corner while it is
+   open (and pads its own top for the buttons), and so does the drawer when it
+   is open (see .aux_head below). Skipped for the inline form, which sits below
+   a host chrome that already accounts for the buttons. */
 .root:not(.inline) .hero {
   /* The slab already stands --slab-gap clear of the window edge, so that much
      of the caption strip is cleared for free. max() keeps the term from going
      negative and eating the base padding off-Windows, where the inset is 0. */
   padding-right: calc(16px + max(0px, var(--win-caption-inset-x) - var(--slab-gap, 0px)));
 }
-.root:not(.inline).aux_open:not(.rail_open) .hero {
+.root:not(.inline).aux_open .hero,
+.root:not(.inline).rail_open .hero {
   padding-right: 16px;
 }
 
@@ -386,19 +385,22 @@
   /* One knob for the gutter, so the resizer and the Windows caption inset can
      both be expressed in terms of it instead of repeating a magic 8. */
   --slab-gap: 8px;
-  /* The card rail's width, named here because four rules need the same number:
-     the rail's own box, the right padding the transcript and composer hold
-     clear for it, and the right offset of the drawer and its scrim (which stop
-     short of the rail rather than covering it). Declared on the row so the
-     percentage resolves against one element for all four. */
-  --rail-w: clamp(220px, 18%, 320px);
-  /* The band on the right that the conversation, the composer and the drawer
-     all hold clear. It is the rail's own width — until a doc card expands, when
-     SessionDetail overrides it inline with that card's measured width, so the
-     reader pushes the prose aside instead of covering it. */
-  --rail-band: var(--rail-w);
-  /* The gap between the drawer's right edge and the rail's cards. */
-  --rail-gutter: 24px;
+  /* The rail column's width (TaskRail), named here because three rules need
+     the same number: the column's own box, and the right offset of the drawer
+     and its scrim (which stop short of the rail rather than covering it) and
+     the probe that decides whether they can. Declared on the row so the
+     percentage resolves against one element for all of them. */
+  --rail-w: clamp(240px, 22%, 320px);
+  /* The band on the right of the conversation that the transcript and the
+     composer hold clear: 0 until a rail card expands, when SessionDetail sets
+     it inline to the reader's measured width, so the reader floating there
+     pushes the prose aside instead of covering it. */
+  --rail-band: 0px;
+  /* One padding for every rail row, named once: an agent row and a doc row
+     are the same object seen from two sides, and they stack in one list. The
+     expanded readers reuse the rows' metrics for their heads. */
+  --rail-card-pad-y: 8px;
+  --rail-card-pad-x: 10px;
   /* The drawer's ideal reading width. Wide enough to be a real reader: a facet
      panel and a file preview both land there. */
   --drawer-w: 560px;
@@ -606,67 +608,40 @@
   overflow-x: hidden;
 }
 
-/* ── Auxiliary card rail ────────────────────────────────────────────────────
-   The ambient layer: one raised card per thing in play (each running subagent,
-   each doc the reader opened).
+/* ── Rail rows and the floating reader ───────────────────────────────────
+   The subagent / doc / side-question rows live in TaskRail's column, inside
+   its bordered section cards, so they are plain list rows: no frame of their
+   own, a hairline between neighbours, the column's hover and open fills.
 
-   It *floats over* the transcript's right side rather than being a column of
-   its own beside it. It used to be a real flex column in .body_row, which made
-   the conversation a narrower slab with its own frame and — the tell — put the
-   transcript's scrollbar in the *middle* of the pane, with a second surface to
-   the right of it. Cards are not a window; they are things resting on the
-   conversation. So the rail is absolutely positioned inside .messages_pane
-   (below the hero, above the scroller), the transcript keeps the full width and
-   its scrollbar stays on the pane's right edge, and the reading column simply
-   keeps clear of the band the cards occupy (see .scroll_area below).
-
-   pointer-events: none on the column, restored on each card: the empty space
-   between and below the cards is transcript, and the wheel/click belongs to it.
-
-   No frame of its own — the cards' own fill, hairline and shadow are the only
-   separation they need, which is also why there are no dividers and no
-   headings here. */
-.rail {
+   Expanding one keeps its row (marked open) and portals the reader into
+   .reader_host: absolutely positioned over the messages pane's right edge —
+   directly left of the rail column, below the hero — so a file or a transcript
+   gets a reading width the column cannot give it. pointer-events: none on the
+   host, restored on the reader: nothing else in it, and the transcript under
+   its empty space keeps the wheel and the clicks. */
+.reader_host {
   position: absolute;
   z-index: 4;
   top: 0;
   bottom: 0;
   /* Clear of the scroller's scrollbar (6px on Windows, an overlay bar on
-     macOS) so a card never sits under the thumb. */
+     macOS) so the reader never sits under the thumb. */
   right: 10px;
-  width: var(--rail-w);
+  width: var(--rail-band);
   box-sizing: border-box;
   padding: 12px 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-  /* The rail scrolls its own overflow without handing the rest of the wheel
-     gesture to the transcript underneath. */
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  background: transparent;
   pointer-events: none;
 }
-.rail::-webkit-scrollbar { display: none; }
-.rail > * {
+.reader_host > * {
   pointer-events: auto;
 }
-
-/* A card expanded into a reader needs more than --rail-w, so the *box* widens
-   (its px width is set inline from the persisted ratio — see SessionAuxRail)
-   while every collapsed card keeps --rail-w and the right edge. The transcript's
-   reserved band does NOT widen with it: that is what keeps this a card floating
-   over the conversation instead of a column squeezing it, and it is why the
-   widened area has to stay pointer-transparent between the cards. */
-.rail_wide > *:not(.doc_card_expanded) {
-  width: var(--rail-w);
-  align-self: flex-end;
+.root.inline .reader_host {
+  right: 8px;
 }
 
-/* Only ever seen when the switch pinned the rail open with nothing in it.
-   No card, no frame: a line of dim text over the transcript, so the empty rail
-   still reads as absence rather than as a card that failed to fill. */
+/* Shown inside an expanded agent reader before its transcript has loaded. */
 .rail_empty {
   margin: 0;
   padding: 8px 10px;
@@ -675,42 +650,22 @@
   color: var(--color-text-dim);
 }
 
-/* Inline hosts (DecisionPanel's detail column, the 任务 page's 4-way split)
-   have a few hundred px to spend in total, so the rail takes a thinner cut of
-   it than in the standalone pane. It stays rather than being dropped: "what is
-   running right now" is exactly what those two surfaces are for. */
-.root.inline .body_row {
-  --rail-w: clamp(150px, 30%, 240px);
-}
-.root.inline .rail {
-  right: 8px;
-}
-
-/* The raised card. One shape for both kinds, so the rail reads as one stack of
-   objects: card fill, a hairline all round, and a drop shadow. The hairline is
-   what the old inset-top-highlight version could not do once the ground under
-   the cards became the transcript itself — at #fbfaf7 on #f1efea the fill alone
-   is a one-step difference, and a card floating over prose has to state its own
-   edge. */
 .rail_card {
   flex: 0 0 auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-card);
-  box-shadow: var(--shadow-card-hover);
-  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+  min-width: 0;
+  background: transparent;
+  transition: background 0.15s;
+}
+.rail_card + .rail_card {
+  border-top: 1px solid var(--color-border);
 }
 .rail_card:hover {
   background: var(--color-bg-card-hover);
-  transform: translateY(-1px);
 }
-
-/* One padding for every card in the rail, named once: an agent card and a doc
-   card are the same object seen from two sides, and they stack directly on top
-   of each other. Two different insets read as two different kinds of thing. */
-.rail {
-  --rail-card-pad-y: 9px;
-  --rail-card-pad-x: 11px;
+/* Its reader is open beside the rail — the same fill TaskRail gives the
+   sub-task the conversation column is showing. */
+.rail_card_open {
+  background: var(--color-accent-soft);
 }
 
 /* The agent card is a row: the clickable body, and — only once it has been
@@ -778,9 +733,10 @@
   align-items: center;
 }
 
-/* The reader. Same card — same fill, hairline and shadow — grown to hold one of
-   the three doc panes, and given the rail's whole (widened) box. It takes the
-   height the rail has left, so the page inside scrolls rather than the rail. */
+/* The reader: a raised card floating over the conversation in .reader_host,
+   holding a doc pane, a subagent transcript or a side-question exchange. It
+   takes the host's whole height, so the page inside scrolls rather than the
+   host. */
 .doc_card_expanded {
   position: relative;
   display: flex;
@@ -788,6 +744,10 @@
   flex: 1 1 auto;
   min-height: 220px;
   overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-drawer);
 }
 
 /* The expanded card's own title row keeps the collapsed card's metrics, so
@@ -1021,23 +981,23 @@
   overflow-x: hidden;
 }
 
-/* Make room for the floating card rail *inside* the scroller, not beside it.
+/* Make room for the floating reader *inside* the scroller, not beside it.
    Padding rather than a narrower box on purpose: the scrollbar belongs to this
    element's edge, so it stays on the pane's right edge (where a scrollbar
    belongs) while the centred reading column re-centres in what is left. The
    composer floats over the same scroller and has to move with it. */
-.rail_open .scroll_area,
-.rail_open .dock_layer {
-  /* The band's width, its 10px offset from the pane edge, and a 16px gutter so
-     prose stops short of the cards instead of touching them. Transitioned
-     because expanding a doc card changes it: the prose reflowing in one step
-     reads as the page having jumped. */
+.reader_open .scroll_area,
+.reader_open .dock_layer {
+  /* The reader's width, its 10px offset from the pane edge, and a 16px gutter
+     so prose stops short of it instead of touching it. Transitioned because
+     opening a reader changes it: the prose reflowing in one step reads as the
+     page having jumped. */
   padding-right: calc(var(--rail-band) + 26px);
   transition: padding-right 140ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
-  .rail_open .scroll_area,
-  .rail_open .dock_layer { transition: none; }
+  .reader_open .scroll_area,
+  .reader_open .dock_layer { transition: none; }
 }
 
 /* The "load earlier" button moved into MessageList, which owns the render
