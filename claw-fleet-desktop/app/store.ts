@@ -14,6 +14,7 @@ import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
 import { applySessionsFrame, type SessionsFrame } from "../../shared-ts/sessionsFrame";
 import { TASK_STATES, type TaskState } from "../../shared-ts/taskState";
+import { repoRootPath } from "../../shared-ts/repoPath";
 import type { HomeGroupBy } from "./components/homeRows";
 
 /** Open the in-app Settings overlay.
@@ -249,10 +250,11 @@ interface UIState {
    *  panel restored on boot is not a preference, it is a surprise. */
   settingsOpen: boolean;
   setSettingsOpen: (on: boolean) => void;
-  /** A pending "reveal this file in the Files page" request, raised when the
-   *  user clicks a path in agent prose. FilesView owns the explorer's
-   *  selection state internally, so a request travels through the store
-   *  rather than through props. FilesView clears it once consumed. */
+  /** A pending "reveal this file" request, raised when the user clicks a path
+   *  in agent prose. It opens the Projects page on the path's project, code
+   *  tab; the explorer there owns its selection state internally, so the
+   *  request travels through the store rather than through props, and the
+   *  explorer clears it once consumed. */
   fileNav: FileNavRequest | null;
   requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
   clearFileNav: () => void;
@@ -560,7 +562,13 @@ export const useUIStore = create<UIState>((set) => ({
       // Same bookkeeping as setViewMode — a nav that skipped it would snap back
       // to the previous view on the next launch and leave the Work tab's memory
       // pointing at a page the user has since left.
-      ...viewModePatch(s, "files"),
+      ...viewModePatch(s, "projects"),
+      mainViewState: {
+        ...s.mainViewState,
+        // A worktree path opens its repo's project; the explorer there lists
+        // the worktree as a root and picks it for the file.
+        projects: { ...s.mainViewState.projects, selectedPath: repoRootPath(req.workspacePath), tab: "code" },
+      },
       fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
     })),
   clearFileNav: () => set({ fileNav: null }),

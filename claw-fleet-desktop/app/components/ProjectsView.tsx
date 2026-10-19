@@ -200,10 +200,20 @@ export function ProjectsView() {
     if (!q) return projects ?? [];
     return (projects ?? []).filter((p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
   }, [projects, query]);
-  const selected = useMemo(
-    () => (projects ?? []).find((p) => p.path === selectedPath) ?? null,
-    [projects, selectedPath],
-  );
+  // A path clicked in agent prose can point into a directory that is not a
+  // project (a temp dir, the chat workspace). It still opens, as a bare row
+  // the list does not show.
+  const selected = useMemo<ProjectRow | null>(() => {
+    if (!projects || !selectedPath || selectedPath === ALL_ROUTINES) return null;
+    return (
+      projects.find((p) => p.path === selectedPath) ?? {
+        path: selectedPath,
+        name: selectedPath.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || selectedPath,
+        lastActiveMs: 0,
+        runningTasks: 0,
+      }
+    );
+  }, [projects, selectedPath]);
 
   const allSelected = selectedPath === ALL_ROUTINES;
   const list = (
@@ -503,6 +513,7 @@ function ProjectCode({ projectPath, name }: { projectPath: string; name: string 
   const { t } = useTranslation();
   const terminal = useUIStore((s) => s.hostFeatures.terminal);
   const selectedWorkspace = useUIStore((s) => s.mainViewState.files.selectedWorkspace);
+  const fileNav = useUIStore((s) => s.fileNav);
 
   useEffect(() => {
     if (selectedWorkspace !== projectPath) {
@@ -515,7 +526,7 @@ function ProjectCode({ projectPath, name }: { projectPath: string; name: string 
       key={projectPath}
       workspace={projectPath}
       name={name}
-      nav={null}
+      nav={fileNav && repoRootPath(fileNav.workspacePath) === projectPath ? fileNav : null}
       hideName
       extraActions={
         terminal && (
