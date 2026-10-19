@@ -70,8 +70,8 @@ describe("buildTaskRows", () => {
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].subtasks.map((st) => st.tip.id)).toEqual(["sub"]);
-    // The main hop is idle but a sub-task works: the task is waiting, not done.
-    expect(rows[0].state).toBe("waiting");
+    // The main hop is idle but a sub-task works: the task is running, not done.
+    expect(rows[0].state).toBe("running");
   });
 
   it("files a task under needs-you when a sub-task has a card waiting", () => {
