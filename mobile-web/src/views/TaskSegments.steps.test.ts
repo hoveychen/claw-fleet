@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import type { SessionInfo } from "../types";
+import { stepIdOf, subtaskStepLinks, subtasksForStep, type useSubtasks } from "./TaskSegments";
+
+type Rows = ReturnType<typeof useSubtasks>;
+
+describe("sub-tasks under steps", () => {
+  const main = {
+    id: "main",
+    taskSummary: {
+      subtaskSteps: [
+        { taskId: "s1", planId: "demo", step: "P2" },
+        { taskId: "s2", planId: "other", step: "P2" },
+      ],
+    },
+  } as unknown as SessionInfo;
+  const rows = ["s1", "s2", "s3"].map((line) => ({
+    key: line,
+    tip: { id: `${line}-tip`, taskId: line },
+    hops: [],
+    state: "running",
+    pending: false,
+  })) as unknown as Rows;
+
+  it("reads the step id off a plan item", () => {
+    expect(stepIdOf("**P2** — build")).toBe("P2");
+    expect(stepIdOf("build")).toBeNull();
+  });
+
+  it("matches on both plan and step", () => {
+    const links = subtaskStepLinks(main);
+    const got = subtasksForStep(rows, links, "demo", "**P2** — build");
+    expect(got.map((r) => r.tip.taskId)).toEqual(["s1"]);
+    expect(subtasksForStep(rows, links, "demo", "**P1** — design")).toEqual([]);
+    expect(subtasksForStep(rows, links, null, "**P2** — build")).toEqual([]);
+  });
+});

@@ -167,3 +167,8 @@
   color: var(--color-error);
   background: var(--color-bg-card);
 }
+
+/* Sub-tasks nested under a step in the steps tab, indented past the checkbox. */
+.stepSubtasks {
+  margin: 2px 0 8px 26px;
+}

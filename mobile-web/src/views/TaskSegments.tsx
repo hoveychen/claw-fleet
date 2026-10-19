@@ -9,7 +9,7 @@ import { useMemo } from "react";
 import { ChevronRight, FolderOpen, GitFork, WifiOff } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
-import type { SessionInfo, WikiDoc } from "../types";
+import type { SessionInfo, SubtaskStep, WikiDoc } from "../types";
 import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
 import { taskLibrary } from "../library";
 import { LibraryList, useLibrary } from "./LibraryList";
@@ -87,11 +87,73 @@ export function useSubtasks(
   );
 }
 
-export function SubtasksPane({
+type SubtaskRows = ReturnType<typeof useSubtasks>;
+
+/** The step id (`P3`) a plan item's text starts with, if any. */
+export function stepIdOf(text: string): string | null {
+  return /^\s*\*{0,2}(P\d+[a-z]?)\*{0,2}/.exec(text)?.[1] ?? null;
+}
+
+/** Sub-task line id → the step it was dispatched for (`fleet__spawn` `step`),
+ *  read off the task summary the main hops carry. */
+export function subtaskStepLinks(session: SessionInfo): Map<string, SubtaskStep> {
+  return new Map((session.taskSummary?.subtaskSteps ?? []).map((l) => [l.taskId, l]));
+}
+
+/** The sub-tasks dispatched for one step of `planId`. */
+export function subtasksForStep(
+  rows: SubtaskRows,
+  links: Map<string, SubtaskStep>,
+  planId: string | null | undefined,
+  itemText: string,
+): SubtaskRows {
+  const step = stepIdOf(itemText);
+  if (!step || !planId) return [];
+  return rows.filter((r) => {
+    const l = r.tip.taskId ? links.get(r.tip.taskId) : undefined;
+    return l?.planId === planId && l.step === step;
+  });
+}
+
+/** Compact sub-task rows nested under a step in the steps tab. */
+export function StepSubtasks({
   rows,
   onOpenSessionId,
 }: {
-  rows: ReturnType<typeof useSubtasks>;
+  rows: SubtaskRows;
+  onOpenSessionId: (id: string) => void;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className={`${styles.card} ${styles.stepSubtasks}`}>
+      {rows.map((r) => (
+        <button
+          key={r.key}
+          type="button"
+          className={styles.row}
+          onClick={() => onOpenSessionId(r.tip.id)}
+        >
+          <span className={styles.dot} data-state={r.state} />
+          <span className={styles.rowBody}>
+            <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
+            <span className={styles.rowMeta}>
+              {r.pending ? t("等你回答") : subtaskStateLabel(r.state)}
+            </span>
+          </span>
+          <ChevronRight size={16} className={styles.chevron} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function SubtasksPane({
+  rows,
+  links,
+  onOpenSessionId,
+}: {
+  rows: SubtaskRows;
+  links?: Map<string, SubtaskStep>;
   onOpenSessionId: (id: string) => void;
 }) {
   if (rows.length === 0) {
@@ -118,6 +180,10 @@ export function SubtasksPane({
             <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
             <span className={styles.rowMeta}>
               {r.pending ? t("等你回答") : subtaskStateLabel(r.state)}
+              {(() => {
+                const step = r.tip.taskId ? links?.get(r.tip.taskId)?.step : undefined;
+                return step ? ` · ${t("第 {0} 步", step.slice(1))}` : "";
+              })()}
               {r.hops.length > 1 && ` · ${t("{0} 段", r.hops.length)}`}
             </span>
           </span>
