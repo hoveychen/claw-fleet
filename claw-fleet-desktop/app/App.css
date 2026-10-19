@@ -402,13 +402,15 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --shadow-modal: 0 24px 60px rgba(32, 28, 18, 0.18), 0 2px 8px rgba(32, 28, 18, 0.1);
   --shadow-float: 0 8px 24px rgba(32, 28, 18, 0.12), 0 1px 3px rgba(32, 28, 18, 0.07);
 
-  --color-accent: #c25232;
-  --color-accent-bright: #b3442a;
+  --color-accent: #d97757;
+  --color-accent-bright: #e8916f;
   --color-accent-tool: #1d4ed8;
-  --color-accent-hover: #a94527;
-  --color-accent-rgb: 194, 82, 50;
-  --color-accent-soft: rgba(194, 82, 50, 0.13);
-  /* White on the light accent #c25232 measures 4.9:1 — passes WCAG AA. */
+  --color-accent-hover: #b54a32;
+  --color-accent-rgb: 217, 119, 87;
+  --color-accent-soft: rgba(217, 119, 87, 0.14);
+  /* Same terracotta as dark (#d97757), by choice: the deeper #c25232 used from
+     2026-07-13 read as a different, redder orange. The cost is legibility —
+     white on it is 3.1:1 and it is 2.7:1 as text on the paper canvas. */
   --color-on-accent: #ffffff;
 
   /* Status badge colors — light (fg darkened one shade for contrast on the pale bgs) */

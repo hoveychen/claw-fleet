@@ -100,9 +100,11 @@
   color-scheme: dark;
 }
 
-/* 亮色：暖纸底 + 深炭字，对比层级是暗色的反转（卡片比底色更亮），
-   珊瑚 accent 压深一档保证在浅底上的可读性。theme.ts 总是把解析后的
-   light/dark 写进 html[data-theme]，这里不需要媒体查询分支。 */
+/* Light: warm paper ground + charcoal text; the contrast ladder is the dark
+   one inverted (cards lighter than the ground). The accent is the same
+   terracotta as dark (#d97757) — the deeper #c25232 read as a different
+   orange. theme.ts always writes the resolved light/dark into
+   html[data-theme], so no media-query branch is needed here. */
 :root[data-theme="light"] {
   --color-bg: #f1efea;
   --color-bg-secondary: #e7e4dd;
@@ -115,9 +117,9 @@
   --color-text-dim: #6f7078;
   --color-border: rgba(32, 28, 18, 0.11);
   --color-border-strong: rgba(32, 28, 18, 0.22);
-  --color-accent: #c25232;
-  --color-accent-hover: #a94527;
-  --color-accent-soft: rgba(194, 82, 50, 0.13);
+  --color-accent: #d97757;
+  --color-accent-hover: #b54a32;
+  --color-accent-soft: rgba(217, 119, 87, 0.14);
   --color-warning-soft: rgba(154, 106, 8, 0.12);
   --color-bg-user: #e9d7c9;
   --color-success: #178042;

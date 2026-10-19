@@ -46,8 +46,8 @@ const THEMES = {
   light: {
     background: "#fbfaf7",
     foreground: "#1f2023",
-    cursor: "#c25232",
-    selectionBackground: "rgba(194, 82, 50, 0.28)",
+    cursor: "#d97757",
+    selectionBackground: "rgba(217, 119, 87, 0.28)",
   },
 } as const;
 
