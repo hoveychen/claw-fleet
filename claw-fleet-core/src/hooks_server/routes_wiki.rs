@@ -98,8 +98,10 @@ pub(crate) fn route_wiki_asset_prefix(
         Ok(f) => {
             let mime_header: tiny_http::Header =
                 format!("Content-Type: {}", f.mime).parse().unwrap();
-            let _ =
-                request.respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+            // This is the iframe path, so html gets the click-to-zoom bridge
+            // (as the desktop `fleet-wiki://` handler does).
+            let bytes = crate::mcp_ipc::with_img_zoom_bytes(&f.mime, f.bytes);
+            let _ = request.respond(tiny_http::Response::from_data(bytes).with_header(mime_header));
         }
         Err(_) => {
             let _ = request.respond(tiny_http::Response::empty(404));

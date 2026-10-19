@@ -5,26 +5,25 @@
 // opens the lightbox. The sandbox keeps `allow-scripts` (needed anyway for the
 // height reporter) but NOT `allow-same-origin`, so this runs without granting
 // the document DOM/storage access to the parent.
+//
+// Decision previews served by core already carry core's copy of the bridge
+// (`mcp_ipc::IMG_ZOOM_SCRIPT`); the `__fleetImgZoomOn` flag both scripts set
+// keeps a document from posting every tap twice.
 
-const ZOOM_KEY = "__fleetImgZoom";
+export { parseImgZoom } from "../../shared-ts/iframeImgZoom";
 
 /** Append to a srcDoc string. Adds a zoom-in cursor and a capture-phase click
  *  listener that posts `{ __fleetImgZoom: <src> }` to the parent window. */
 export const IMG_ZOOM_INJECT = `<style>img{cursor:zoom-in}</style><script>
+(function(){
+if(window.__fleetImgZoomOn)return;window.__fleetImgZoomOn=1;
 document.addEventListener('click',function(e){
   var el=e.target;
   while(el&&el.tagName!=='IMG')el=el.parentElement;
   if(el&&el.tagName==='IMG'){
     var src=el.currentSrc||el.src;
-    if(src)parent.postMessage({${JSON.stringify(ZOOM_KEY)}:src},'*');
+    if(src)parent.postMessage({"__fleetImgZoom":src},'*');
   }
 },true);
+})();
 </script>`;
-
-/** Pull the image src out of a postMessage payload, or null if it isn't a
- *  zoom message. Validate the shape — the payload crosses a trust boundary. */
-export function parseImgZoom(data: unknown): string | null {
-  if (!data || typeof data !== "object") return null;
-  const src = (data as Record<string, unknown>)[ZOOM_KEY];
-  return typeof src === "string" && src.length > 0 ? src : null;
-}
