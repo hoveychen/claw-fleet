@@ -1122,9 +1122,15 @@ fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [L
 /// Claude Code merges `--settings` hooks with the user's own (measured on
 /// 2.1.284: both fire), so this carries Fleet's hooks only and leaves the
 /// user's settings.json untouched.
+///
+/// `role_only` adds the UserPromptSubmit `prd-context` hook on its own for a
+/// session whose plan injection is switched off: that command then emits just
+/// a sub-task's role line (see `fleet prd-context`), which belongs to the
+/// task-roles rules rather than to the plans.
 pub(crate) fn launch_hooks(
     fleet_bin: &str,
     events: bool,
+    role_only: bool,
     enabled: impl Fn(crate::control_plane_prefs::Feature) -> bool,
 ) -> Value {
     let mut hooks: Map<String, Value> = Map::new();
@@ -1152,6 +1158,11 @@ pub(crate) fn launch_hooks(
             }
             push(h.event, group);
         }
+    }
+    if role_only && !enabled(crate::control_plane_prefs::Feature::PrdContextHook) {
+        let mut entry = fleet_subcommand_hook_with(cfg!(windows), fleet_bin, "prd-context");
+        entry["timeout"] = json!(10_000);
+        push("UserPromptSubmit", json!({ "hooks": [entry] }));
     }
     Value::Object(hooks)
 }

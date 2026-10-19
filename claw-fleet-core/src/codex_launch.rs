@@ -1046,8 +1046,8 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
 ///
 /// Gated on the codex PRD concept specifically (active-plans is a TASKS.md / PRD
 /// concern): static and dynamic (this) injection move together with the PRD
-/// toggle. PRD switched off / no active plan → returns the prompt unchanged
-/// (AC3 graceful degradation).
+/// toggle. PRD switched off → only a sub-task's role line goes in; no active
+/// plan and no role → returns the prompt unchanged (AC3 graceful degradation).
 ///
 /// A resume whose previous turn already carried byte-identical text prepends
 /// nothing — that copy is still in the thread's history. See
@@ -1058,12 +1058,16 @@ fn maybe_prepend_active_plans(
     session_id: Option<&str>,
     prompt: &str,
 ) -> String {
-    if crate::control_plane_prefs::is_disabled(crate::control_plane_prefs::Feature::PrdDiscipline)
-    {
-        return prompt.to_string();
-    }
-    let reminder =
-        crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id);
+    // With PRD off the plans stay out, but a sub-task's role line does not:
+    // it belongs to the task-roles rules, and a sub-task that never hears it
+    // raises report cards as if it were the coordinator.
+    let reminder = if crate::control_plane_prefs::is_disabled(
+        crate::control_plane_prefs::Feature::PrdDiscipline,
+    ) {
+        crate::task_roles_guidance::render_role_only_reminder(session_id)
+    } else {
+        crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id)
+    };
     let rollout = session_id.and_then(crate::codex_source::find_codex_rollout);
     prepend_reminder(reminder.as_deref(), rollout.as_deref(), prompt)
 }

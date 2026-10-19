@@ -68,7 +68,7 @@ pub fn render_section_compact(title: &str) -> String {
     format!(
         "## Tasks, Sub-tasks And Who Reports\n\
 \n\
-- With no \"你的角色：子任务\" line in the per-turn injection you are a task's main conversation: do small things yourself; before spawning sub-tasks with `fleet__spawn`, raise a proposal card and wait for {title} to confirm; then wait on them with `fleet__watch` `sessions`, read each final reply with `fleet__inspect`, and report the summary — only you report to {title}.\n\
+- With no \"Your role: sub-task\" / \"你的角色：子任务\" line in the per-turn injection you are a task's main conversation: do small things yourself; before spawning sub-tasks with `fleet__spawn`, raise a proposal card and wait for {title} to confirm; then wait on them with `fleet__watch` `sessions`, read each final reply with `fleet__inspect`, and report the summary — only you report to {title}.\n\
 - As a sub-task: no report card, never set `taskComplete`; your final reply is the result. Raise a card only for a call {title} must make.\n\
 - In cards say project / task / sub-task / step / waiting, never hop, relay, P-task, plan tree, watch or session."
     )
@@ -76,17 +76,43 @@ pub fn render_section_compact(title: &str) -> String {
 
 /// The per-turn role line for a sub-task; `None` for a task's main
 /// conversation (the default the section assumes) and for unknown sessions.
+/// Worded in the voice (title, locale) Fleet's launches use, like the section
+/// it points at.
 pub fn render_role_reminder(session_id: Option<&str>) -> Option<String> {
     let sid = session_id?;
     let graph = crate::task_model::TaskGraph::load();
-    role_reminder_for(&graph, sid)
+    let (title, locale) = crate::claude_launch::guidance_voice();
+    role_reminder_for(&graph, sid, &title, &locale)
 }
 
-pub(crate) fn role_reminder_for(graph: &crate::task_model::TaskGraph, sid: &str) -> Option<String> {
+/// [`render_role_reminder`] on its own, wrapped as a `<system-reminder>`: the
+/// per-turn carrier for a session whose plan injection is switched off
+/// (PRD discipline / the prd-context hook). The role line is part of the
+/// task-roles rules, not of the plans, so it must not go quiet with them.
+pub fn render_role_only_reminder(session_id: Option<&str>) -> Option<String> {
+    render_role_reminder(session_id)
+        .map(|line| format!("<system-reminder>\n{line}\n</system-reminder>"))
+}
+
+pub(crate) fn role_reminder_for(
+    graph: &crate::task_model::TaskGraph,
+    sid: &str,
+    user_title: &str,
+    locale: &str,
+) -> Option<String> {
     let parent = graph.place(sid).parent_task_id?;
+    if locale == "zh" {
+        let title = if user_title.is_empty() { "老板" } else { user_title };
+        return Some(format!(
+            "你的角色：子任务（所属任务的主对话 {parent}）。按「任务、子任务与汇报」一节：不发汇报卡、不设 `taskComplete`，\
+             结果写进最终回复由主对话来取；只有必须由{title}拍板的事才发决策卡。"
+        ));
+    }
+    let title = if user_title.is_empty() { "Boss" } else { user_title };
     Some(format!(
-        "你的角色：子任务（所属任务的主对话 {parent}）。按「任务、子任务与汇报」一节：不发汇报卡、不设 `taskComplete`，\
-         结果写进最终回复由主对话来取；只有必须由老板拍板的事才发决策卡。"
+        "Your role: sub-task (of the task whose main conversation is {parent}). Per \"Tasks, Sub-tasks And Who Reports\": \
+         raise no report card and never set `taskComplete`; your final reply is the result, which the main conversation \
+         collects. Raise a decision card only for a call {title} has to make."
     ))
 }
 
@@ -101,10 +127,28 @@ mod tests {
             vec![vec!["main-1".to_string(), "main-2".to_string()]],
             vec![("sub-1".to_string(), "main-2".to_string())],
         );
-        let line = role_reminder_for(&graph, "sub-1").expect("sub-task gets a role line");
+        let line = role_reminder_for(&graph, "sub-1", "", "zh").expect("sub-task gets a role line");
         assert!(line.contains("子任务") && line.contains("main-1"), "{line}");
-        assert!(role_reminder_for(&graph, "main-2").is_none());
-        assert!(role_reminder_for(&graph, "stranger").is_none());
+        assert!(line.contains("老板"), "{line}");
+        assert!(role_reminder_for(&graph, "main-2", "", "zh").is_none());
+        assert!(role_reminder_for(&graph, "stranger", "", "zh").is_none());
+    }
+
+    #[test]
+    fn role_line_follows_title_and_locale() {
+        let graph = TaskGraph::new(
+            vec![vec!["main-1".to_string()]],
+            vec![("sub-1".to_string(), "main-1".to_string())],
+        );
+        let zh = role_reminder_for(&graph, "sub-1", "主人", "zh").unwrap();
+        assert!(zh.starts_with("你的角色：子任务") && zh.contains("主人") && !zh.contains("老板"), "{zh}");
+        for locale in ["en", "ja", "ko"] {
+            let en = role_reminder_for(&graph, "sub-1", "", locale).unwrap();
+            assert!(en.starts_with("Your role: sub-task") && en.contains("Boss"), "{locale}: {en}");
+            assert!(!en.contains("老板"), "{locale}: {en}");
+        }
+        let named = role_reminder_for(&graph, "sub-1", "Alex", "en").unwrap();
+        assert!(named.contains("Alex") && !named.contains("Boss"), "{named}");
     }
 
     #[test]
