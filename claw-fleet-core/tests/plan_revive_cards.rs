@@ -65,18 +65,20 @@ fn boss_closed_plan_asks_first_and_the_answer_becomes_a_snooze() {
     let card_id = st["askCardId"].as_str().unwrap().to_string();
     let card = claw_fleet_core::elicitation::read_request(&card_id).expect("card on disk");
     assert_eq!(card.session_id, owner);
-    assert!(card.questions[0].question.contains("`toy`"));
+    // Cards name the task by its title, never by plan id (f695754b).
+    assert!(card.questions[0].question.contains("「toy plan」"));
+    assert!(!card.questions[0].question.contains("`toy`"));
     assert!(card.questions[0].question.contains("\n---\n"));
 
     // While the card is out, further passes neither re-ask nor spawn.
     claw_fleet_core::plan_revive::tick();
     assert_eq!(read_json(&state_path)["plans"][&key]["askCardId"], card_id.as_str());
 
-    // The boss picks "静默 7 天".
+    // The boss picks "7 天内别管".
     let question = card.questions[0].question.clone();
     std::fs::write(
         fleet.join("elicitation").join(format!("{card_id}.response.json")),
-        serde_json::json!({"id": card_id, "declined": false, "answers": {question: "静默 7 天"}})
+        serde_json::json!({"id": card_id, "declined": false, "answers": {question: "7 天内别管"}})
             .to_string(),
     )
     .unwrap();
