@@ -25,7 +25,10 @@ pub struct Project {
     pub path: String,
     /// Display name, from [`crate::session::workspace_name`].
     pub name: String,
-    /// When Fleet first registered it (epoch ms).
+    /// When Fleet first registered it (epoch ms). A project taken in from
+    /// history ([`discover`]'s backfill) carries the last activity found there
+    /// instead: the project page falls back to this field for its recency
+    /// order, and the moment of the backfill says nothing about the project.
     pub created_at_ms: u64,
     /// When the user archived it (epoch ms). Archived projects stay registered,
     /// so the scan does not bring them back, but the project page hides them.
@@ -38,8 +41,11 @@ const FILE_NAME: &str = "projects.json";
 /// Present once [`discover`] has registered every Claude Code project
 /// directory and Codex thread cwd. Without it, the first list after an upgrade
 /// would only know the last seven days of hand-run sessions. v1 covered Claude
-/// Code only; registering is idempotent, so v2 simply runs both again.
-const BACKFILL_MARKER: &str = "projects-backfill-v2";
+/// Code only; v2 added Codex. Both stamped every project with the time of the
+/// backfill, which floated dozens of long-idle projects to the top of the
+/// list at once; v3 runs again and moves those stamps back to the last
+/// activity.
+const BACKFILL_MARKER: &str = "projects-backfill-v3";
 
 fn registry_path() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join(FILE_NAME))
@@ -142,27 +148,37 @@ pub fn discover<'a>(workspaces: impl IntoIterator<Item = &'a str>) -> Result<usi
     discover_in(&path, workspaces, history_workspaces, is_temp)
 }
 
-/// Every directory an agent has a record of working in, however old: Claude
-/// Code's project directories and the cwd of every thread in Codex's index.
-fn history_workspaces() -> Vec<String> {
+/// Every directory an agent has a record of working in, however old, with
+/// when it last did (epoch ms, 0 when unknown): Claude Code's project
+/// directories and the cwd of every thread in Codex's index.
+fn history_workspaces() -> Vec<(String, u64)> {
     let mut history = crate::memory::claude_project_workspaces();
-    history.extend(crate::codex_source::all_thread_rollout_cwds().into_values().map(|(_, cwd)| cwd));
-    history.sort();
-    history.dedup();
+    history.extend(
+        crate::codex_source::all_thread_rollout_cwds()
+            .into_values()
+            .map(|(rollout, cwd)| (cwd, mtime_ms(Path::new(&rollout)))),
+    );
     history
+}
+
+fn mtime_ms(path: &Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn discover_in<'a>(
     path: &Path,
     workspaces: impl IntoIterator<Item = &'a str>,
-    history: impl FnOnce() -> Vec<String>,
+    history: impl FnOnce() -> Vec<(String, u64)>,
     is_temp: impl Fn(&str) -> bool,
 ) -> Result<usize, String> {
     let mut added = 0;
     let marker = path.with_file_name(BACKFILL_MARKER);
     if !marker.exists() {
-        let history = history();
-        added += ensure_many_in(path, history.iter().map(String::as_str), &is_temp, false)?;
+        added += backfill_in(path, history(), &is_temp, now_ms())?;
         std::fs::write(&marker, b"").map_err(|e| format!("write {}: {e}", marker.display()))?;
     }
     added += ensure_many_in(path, workspaces, &is_temp, false)?;
@@ -194,6 +210,50 @@ fn set_archived_in(path: &Path, project: &str, archived: bool, now: u64) -> Resu
     }
     save(path, &projects)?;
     Ok(projects)
+}
+
+/// Register the projects of `history` (workspace, last activity) stamped with
+/// that activity, and move an existing project's stamp back to it when it is
+/// earlier — which only a previous backfill's "now" can be. Returns how many
+/// projects were added.
+fn backfill_in(
+    path: &Path,
+    history: Vec<(String, u64)>,
+    is_temp: impl Fn(&str) -> bool,
+    now: u64,
+) -> Result<usize, String> {
+    // Worktrees and several Codex threads share a project: keep its latest.
+    let mut latest = std::collections::BTreeMap::<String, u64>::new();
+    for (ws, at) in history {
+        if let Some(root) = project_path_with(&ws, &is_temp) {
+            let e = latest.entry(root).or_default();
+            *e = (*e).max(at);
+        }
+    }
+    let mut projects = load_for_write(path)?;
+    let mut added = 0;
+    let mut changed = false;
+    for (root, at) in latest {
+        if let Some(p) = projects.iter_mut().find(|p| p.path == root) {
+            if at > 0 && at < p.created_at_ms {
+                p.created_at_ms = at;
+                changed = true;
+            }
+            continue;
+        }
+        projects.push(Project {
+            name: crate::session::workspace_name(&root),
+            path: root,
+            created_at_ms: if at > 0 { at } else { now },
+            archived_at_ms: None,
+        });
+        added += 1;
+        changed = true;
+    }
+    if changed {
+        save(path, &projects)?;
+    }
+    Ok(added)
 }
 
 fn ensure_many_in<'a>(
@@ -339,7 +399,12 @@ mod tests {
         let file = base.path().join("projects.json");
         let codex_s = codex_repo.to_str().unwrap().to_string();
 
-        let history = || vec![codex_s.clone(), "/scratch-not-a-project/t".to_string()];
+        let history = || {
+            vec![
+                (codex_s.clone(), 5),
+                ("/scratch-not-a-project/t".to_string(), 6),
+            ]
+        };
         let added = discover_in(&file, [live.to_str().unwrap()], history, fake_temp).unwrap();
         assert_eq!(added, 2);
         assert!(file.with_file_name(BACKFILL_MARKER).exists());
@@ -348,5 +413,70 @@ mod tests {
         let added = discover_in(&file, [], || panic!("history read twice"), fake_temp).unwrap();
         assert_eq!(added, 0);
         assert_eq!(load(&file).len(), 2);
+    }
+
+    #[test]
+    fn backfill_stamps_last_activity_and_repairs_an_earlier_backfills_now() {
+        let base = tempfile::tempdir().unwrap();
+        let file = base.path().join("projects.json");
+        let old = base.path().join("old");
+        let fresh = base.path().join("fresh");
+        let quiet = base.path().join("quiet");
+        let spawned = base.path().join("spawned");
+        for d in [&old, &fresh, &quiet, &spawned] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let s = |p: &PathBuf| p.to_str().unwrap().to_string();
+        // What v2 left behind: an idle project stamped with the backfill's
+        // "now", and one registered by a spawn before its latest activity.
+        save(
+            &file,
+            &[
+                Project {
+                    path: s(&old),
+                    name: "old".into(),
+                    created_at_ms: 1_000,
+                    archived_at_ms: None,
+                },
+                Project {
+                    path: s(&spawned),
+                    name: "spawned".into(),
+                    created_at_ms: 300,
+                    archived_at_ms: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let wt = fresh.join(".worktrees").join("x");
+        std::fs::create_dir_all(&wt).unwrap();
+        let history = vec![
+            (s(&old), 100),
+            (s(&spawned), 400),
+            (s(&fresh), 200),
+            (s(&wt), 250),
+            (s(&quiet), 0),
+        ];
+        assert_eq!(backfill_in(&file, history, fake_temp, 9_999).unwrap(), 2);
+
+        let at = |p: &PathBuf| {
+            load(&file)
+                .into_iter()
+                .find(|x| x.path == s(p))
+                .unwrap()
+                .created_at_ms
+        };
+        assert_eq!(
+            at(&old),
+            100,
+            "a backfill's now moves back to the real activity"
+        );
+        assert_eq!(
+            at(&spawned),
+            300,
+            "a later activity leaves the registration alone"
+        );
+        assert_eq!(at(&fresh), 250, "the latest of a project's worktrees wins");
+        assert_eq!(at(&quiet), 9_999, "no known activity falls back to now");
     }
 }
