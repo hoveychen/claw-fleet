@@ -50,6 +50,16 @@ describe("buildTaskRows", () => {
     expect(rows[0].hops.map((h) => h.id).sort()).toEqual(["h1", "h2"]);
   });
 
+  it("lists a sub-task as a task of its own when its parent has no row", () => {
+    const rows = build([
+      s({ id: "cli", taskId: "cli", entrypoint: "cli" }),
+      s({ id: "sub", taskId: "sub", parentTaskId: "cli" }),
+      s({ id: "lost", taskId: "lost", parentTaskId: "aged-out", status: "executing", procAlive: true }),
+    ]);
+    expect(rows.map((r) => r.tip.id).sort()).toEqual(["lost", "sub"]);
+    expect(rows.find((r) => r.tip.id === "lost")!.state).toBe("running");
+  });
+
   it("puts sub-tasks under their task instead of on the list", () => {
     const rows = build([
       s({ id: "t", taskId: "t" }),

@@ -334,6 +334,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Stop kills the process, so it is red; interrupt only ends the current
+   turn and stays neutral. */
+.stopButton {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+  background: none;
+  color: var(--color-error);
+  font-size: var(--t-aux, 12px);
+}
+
+.stopButton[data-mode="interrupt"] {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.stopButton:disabled {
+  opacity: 0.5;
+}
+
 .acceptButton {
   flex-shrink: 0;
   padding: 5px 12px;

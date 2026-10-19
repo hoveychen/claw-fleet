@@ -15,6 +15,7 @@ import {
   Inbox,
   Search,
   SearchX,
+  Square,
   WifiOff,
   X,
   XCircle,
@@ -41,6 +42,7 @@ import {
   type RowDetail,
   type TaskRow,
 } from "../taskRows";
+import { canControl, runStop, stopMode } from "./sessionStop";
 import styles from "./TasksView.module.css";
 
 /** Document-level scrollbar is shared by all tabs; the task view unmounts/remounts with
@@ -265,6 +267,8 @@ export function TasksView({
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set());
   const [reopened, setReopened] = useState<ReadonlySet<string>>(() => new Set());
   const [accepting, setAccepting] = useState(false);
+  // Row whose stop / interrupt is in flight (`itemKey` of its tip).
+  const [stoppingKey, setStoppingKey] = useState<string | null>(null);
 
   const deviceIds = useMemo(() => [...new Set(sessions.map((s) => s.deviceId))], [sessions]);
   const { searching, ftsMatchKeys, snippetByKey } = useRelaySearch(deviceIds, clientFor, search);
@@ -384,6 +388,24 @@ export function TasksView({
       setAccepting(false);
     },
     [clientFor],
+  );
+
+  /** Stop or interrupt a task's latest main hop, on its own machine: a pid
+   *  only means something on the host that reported it. */
+  const stop = useCallback(
+    async (s: WithDevice<SessionInfo>) => {
+      const transport = clientFor(s.deviceId);
+      if (!transport || stoppingKey) return;
+      setStoppingKey(itemKey(s.deviceId, s.id));
+      try {
+        await runStop(transport, s, confirm);
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : t("操作失败"));
+      } finally {
+        setStoppingKey(null);
+      }
+    },
+    [clientFor, stoppingKey, confirm],
   );
 
   /** Reopen a closed task (改回进行中 / 撤销验收) on its own machine. */
@@ -535,6 +557,10 @@ export function TasksView({
       .filter(Boolean)
       .join(" · ");
     const live = r.state === "needsYou" || r.state === "running" || r.state === "waiting";
+    const mode = stopMode(tip);
+    const stoppable =
+      r.state !== "done" && canControl(tip) && mode !== "spent" && clientFor(tip.deviceId) !== null;
+    const stopBusy = stoppingKey === itemKey(tip.deviceId, tip.id);
     const startedAt = tip.taskSummary?.startedAtMs || Math.min(...r.hops.map((h) => h.createdAtMs));
     return (
       <div key={r.key} className={styles.row} onClick={() => onOpenSession(tip)}>
@@ -575,6 +601,21 @@ export function TasksView({
             line2 && <div className={styles.line2}>{line2}</div>
           )}
         </div>
+        {stoppable && (
+          <button
+            className={styles.stopButton}
+            data-mode={mode}
+            disabled={stopBusy}
+            aria-label={mode === "interrupt" ? t("中断当前回合") : t("停止")}
+            onClick={(e) => {
+              e.stopPropagation();
+              void stop(tip);
+            }}
+          >
+            {stopBusy ? <Spinner size={12} /> : <Square size={11} />}
+            {mode === "interrupt" ? t("中断") : t("停止")}
+          </button>
+        )}
         {r.state === "review" ? (
           <button
             className={styles.acceptButton}
