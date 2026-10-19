@@ -1,0 +1,156 @@
+/* One stat card in the unfolded (116px) sidebar: caption over a value, with an
+   optional sub-line, sparkline or per-source rows underneath. Shared by
+   TodayUsageBadge, LiveStats and UsagePanel so the stack renders at one size.
+   The folded 64px rail uses RailStatTile instead. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px 6px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  user-select: none;
+  cursor: default;
+  /* Reset button chrome for the clickable variant. */
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.clickable {
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.clickable:hover {
+  border-color: var(--color-accent);
+}
+
+.caption {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.value_row {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+}
+
+.value {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.value_accent {
+  color: var(--color-accent);
+}
+
+/* Hovering a sparkline rewrites the value with that instant's reading; the
+   accent says "this is not the live number any more". */
+.value_past {
+  color: var(--color-accent);
+}
+
+.unit {
+  font-size: 9px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sub {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spark {
+  margin-top: 2px;
+  height: 18px;
+  cursor: crosshair;
+}
+
+.spark_placeholder {
+  margin-top: 2px;
+  height: 18px;
+}
+
+/* Per-source usage rows under the headline percent. */
+.sources {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.source_head {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.source_name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.source_bar {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(128, 128, 128, 0.22);
+  overflow: hidden;
+}
+
+.source_fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+
+/* macOS vibrancy: a flat fill reads as a hard patch on the translucent
+   sidebar, so the cards use a wash instead (same as RailStatTile). */
+:global([data-platform="macos"]) .card {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global([data-platform="macos"][data-theme="light"]) .card {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}

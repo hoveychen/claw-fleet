@@ -24,8 +24,6 @@ import styles from "./SessionList.module.css";
 import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
 import { LiveStats } from "./LiveStats";
-import { ResizeHandle } from "./ResizeHandle";
-import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 import { navSectionOf, navSectionTarget, type NavSection } from "./navGroups";
@@ -33,9 +31,9 @@ import { useNavAvailability } from "../hooks/useNavAvailability";
 import { fmtBadgeCount } from "../railNumbers";
 
 const RAIL_WIDTH = 64;
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 400;
-const DEFAULT_WIDTH = 232;
+// Unfolded width. Fixed, not drag-resizable: at the old 232px default the
+// sidebar took a fifth of a 13" window for a handful of entries and numbers.
+const WIDE_WIDTH = 116;
 
 function NavEntry({
   icon,
@@ -74,9 +72,10 @@ function NavEntry({
  * report, skills, phone) are reached from there.
  *
  * Two widths. Folded (the default) it is a 64px icon column whose foot holds
- * bare number tiles. Unfolded it is a drag-resizable sidebar: icon + label
- * rows, the live token-speed / spend-rate block with its 5-minute sparklines,
- * the usage panel inline, and a toolbar with keep-awake, theme and fold.
+ * bare number tiles. Unfolded it is a fixed 116px sidebar: icon + label rows,
+ * a stack of stat cards (today's spend, token speed and spend rate with their
+ * 5-minute sparklines, usage per source — the full usage panel opens as a
+ * popover), and a toolbar with keep-awake, theme and fold.
  */
 export function SessionList() {
   const { t } = useTranslation();
@@ -104,11 +103,6 @@ export function SessionList() {
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
-  const {
-    width: wideWidth,
-    isDragging,
-    onMouseDown: onResizeMouseDown,
-  } = useResizableWidth("sidebar-width", { min: MIN_WIDTH, max: MAX_WIDTH, initial: DEFAULT_WIDTH });
   // Folding re-lays the sidebar out in one frame (labels drop, the panels turn
   // into tiles) while the width is still easing; fading the new layout in hides
   // the jump. The class differs per direction so every toggle restarts the
@@ -199,8 +193,8 @@ export function SessionList() {
             : settle.current === "expanded"
               ? ` ${styles.settle_expanded}`
               : ""
-        }${isDragging ? ` ${styles.sidebar_dragging}` : ""}`}
-        style={{ width: collapsed ? RAIL_WIDTH : wideWidth }}
+        }`}
+        style={{ width: collapsed ? RAIL_WIDTH : WIDE_WIDTH }}
       >
         {/* Drag strip under the macOS traffic lights. */}
         <div className={styles.header} data-tauri-drag-region />
@@ -292,8 +286,6 @@ export function SessionList() {
           </>
         ) : (
           <>
-            {/* Wide, the usage panel opens inline here instead of as the
-                popover the rail tile raises. */}
             <div className={styles.sidebar_content}>
               {!simplified && (
                 <>
@@ -344,7 +336,6 @@ export function SessionList() {
                 </button>
               </div>
             </div>
-            <ResizeHandle active={isDragging} onMouseDown={onResizeMouseDown} />
           </>
         )}
       </aside>
