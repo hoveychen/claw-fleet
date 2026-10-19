@@ -1330,6 +1330,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
   maybePopupReport: async (date: string) => {
     if (!date) return;
     if (!resolveFeature(REPORT_AUTO_POPUP_KEY)) return;
+    // Simplified mode hides Review, so it does not push Review's popup either.
+    // Checked before anything is recorded, so switching it off later still
+    // lets the day's popup through.
+    if (useUIStore.getState().simplifiedMode) return;
     // One popup per date, ever.
     if ((getItem(REPORT_LAST_POPPED_KEY) ?? "") >= date) return;
     if (get().reportPopupDate) return;
