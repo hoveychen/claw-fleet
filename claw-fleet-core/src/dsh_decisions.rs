@@ -251,6 +251,9 @@ fn approval_outcome(allow: bool) -> Value {
 /// One card the bridge has raised and is waiting on.
 enum Pending {
     Approval,
+    /// A sub-task's `ask_user_question`: no card was raised, and the question
+    /// is refused as soon as a live generation can carry the answer.
+    Refuse,
     Question {
         questions: Vec<DshQuestion>,
         /// The card's question texts, in the same order — the keys the answer
@@ -269,6 +272,7 @@ impl Pending {
         match self {
             Self::Approval => crate::permission_prompt_ipc::cleanup(id),
             Self::Question { .. } => crate::elicitation::cleanup(id),
+            Self::Refuse => {}
         }
     }
 }
@@ -366,7 +370,9 @@ fn worker(
             Err(RecvTimeoutError::Disconnected) => {
                 let generation = generation(&client_id);
                 for (id, entry) in pending.drain() {
-                    if let (Pending::Question { .. }, Some(client_id)) = (&entry, &generation) {
+                    if let (Pending::Question { .. } | Pending::Refuse, Some(client_id)) =
+                        (&entry, &generation)
+                    {
                         let _ = client.refuse_event(client_id, &id, ABANDONED_MESSAGE);
                     }
                     entry.cleanup(&id);
@@ -426,6 +432,12 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             if questions.is_empty() {
                 // Nothing to render, and an empty answer array would fail the
                 // server's length check anyway.
+                return;
+            }
+            // Only a task's main conversation talks to the user; a sub-task's
+            // question goes back to it in the sub-task's final reply.
+            if crate::task_roles_guidance::subtask_parent(&session_id).is_some() {
+                pending.insert(event_id, Pending::Refuse);
                 return;
             }
             let (workspace_name, ai_title) = session_meta(client, &session_id);
@@ -494,6 +506,7 @@ fn collect_answers(
                 crate::permission_prompt_ipc::try_read_response(id).is_some()
             }
             Pending::Question { .. } => crate::elicitation::try_read_response(id).is_some(),
+            Pending::Refuse => true,
         })
         .map(|(id, _)| id.clone())
         .collect();
@@ -520,6 +533,12 @@ fn collect_answers(
                         crate::log_debug(&format!("dsh decisions: respond {id}: {e}"));
                     }
                     record_question_history(request, &r);
+                }
+            }
+            Pending::Refuse => {
+                let message = crate::task_roles_guidance::SUBTASK_ASK_REFUSAL;
+                if let Err(e) = client.refuse_event(client_id, &id, message) {
+                    crate::log_debug(&format!("dsh decisions: refuse sub-task ask {id}: {e}"));
                 }
             }
         }
