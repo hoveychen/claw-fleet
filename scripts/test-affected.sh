@@ -34,6 +34,9 @@ CORE_GUARD_FILTERS=(
   "wakeup_guard::"
   "tests::every_skip_target_names_a_real_target"
   "tests::every_bundled_body_is_a_skill"
+  # Any guidance module (task_roles_guidance, prd_discipline, ...) can push the
+  # codex blocks over this size guard.
+  "codex_guidance::tests::all_four_blocks_fit_under_agents_md_budget"
 )
 CORE_GUARD_TESTS=(
   mobile_relay_drift_guard

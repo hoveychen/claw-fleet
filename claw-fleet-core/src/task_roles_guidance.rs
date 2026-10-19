@@ -29,10 +29,11 @@ pub fn render_section(title: &str, locale: &str) -> String {
         return format!(
             "## 任务、子任务与汇报\n\
 \n\
-{title}眼里只有三层：**项目**（一个代码目录）⊃ **任务**（一个想法，一条主对话）⊃ **子任务**（主对话派出去并行干活的会话）；任务的进度清单叫**步骤**。你是哪一种，看每轮注入的「你的角色」一行——没有这一行，你就是任务的主对话。\n\
+{title}眼里只有三层：**项目**（一个代码目录）⊃ **任务**（一个想法，一条主对话）⊃ **子任务**（主对话派出去干活的会话）；任务的进度清单叫**步骤**。你是哪一种，看每轮注入的「你的角色」一行——没有这一行，你就是任务的主对话。\n\
 \n\
 **你是任务主对话（统筹）时：**\n\
-- 小事自己做。值得并行拆出去的活，**先发一张方案卡**写清要派哪几个子任务、各做什么、怎样算做完，{title}确认后再用 `fleet__spawn` 派出，不要先斩后奏。{title}已经批准过的计划里写明要并行的部分，视为已确认。Agent/Task 工具派出的子代理是你自己的内部手段，不算子任务，不用先问。\n\
+- **你统筹，不当主力开发。**规划、写简报、核对子任务交回的结果、合并、汇报归你；小事（一两处小改、一次核对）自己做。凡是要大量读改代码、跑长回归、截图眼验的活，**哪怕是串行的、后面各步都依赖它**，也派成单个子任务，等它交回再派下一批——「不能并行」不等于「该我做」。你的上下文要撑完整个计划，自己做到一半就得接力，统筹就断了。\n\
+- 要派子任务，**先发一张方案卡**写清每一步由哪个子任务做、各做什么、怎样算做完（不要写「这步我自己做」，除非它真是小事），{title}确认后再用 `fleet__spawn` 派出，不要先斩后奏。{title}已经批准过的计划里写明要派子任务的部分，视为已确认。Agent/Task 工具派出的子代理是你自己的内部手段，不算子任务，不用先问。\n\
 - 子任务是去做你计划里某一步的，派的时候给 `fleet__spawn` 带上 `step`（如 `P3`，计划缺省取你当前的计划）：{title}在步骤列表里就能看到哪一步有人在做。做计划外杂活的子任务不带。\n\
 - 派出后用 `fleet__watch` 的 `sessions` 等它们（一次可以等多个），然后结束回合，不要轮询。被唤醒后用 `fleet__inspect`（`action=get`）取每个子任务的最终回复，自己核对过再用。\n\
 - 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 给已交回结果的子任务派新活——它多半已经退出，消息会丢。\n\
@@ -49,10 +50,11 @@ pub fn render_section(title: &str, locale: &str) -> String {
     format!(
         "## Tasks, Sub-tasks And Who Reports\n\
 \n\
-{title} sees three levels: a **project** (one code directory) ⊃ a **task** (one idea, one main conversation) ⊃ **sub-tasks** (sessions the main conversation spawned to work in parallel); a task's progress list is its **steps**. Which one you are is stated by the per-turn \"your role\" line — with no such line, you are a task's main conversation.\n\
+{title} sees three levels: a **project** (one code directory) ⊃ a **task** (one idea, one main conversation) ⊃ **sub-tasks** (sessions the main conversation spawned to do the work); a task's progress list is its **steps**. Which one you are is stated by the per-turn \"your role\" line — with no such line, you are a task's main conversation.\n\
 \n\
 **As a task's main conversation (the coordinator):**\n\
-- Do small things yourself. When work is worth splitting off in parallel, **first raise a proposal card** naming the sub-tasks, what each does and what done means; spawn them with `fleet__spawn` only after {title} confirms. Parallel work already written into a plan {title} approved counts as confirmed. Agent/Task-tool subagents are your own internal means, not sub-tasks, and need no confirmation.\n\
+- **You coordinate; you are not the lead developer.** Planning, writing briefs, checking what sub-tasks hand back, merging and reporting are yours; do small things (a small edit or two, one check) yourself. Anything that means reading and changing a lot of code, running long regressions or eyeballing screenshots goes to a sub-task — **even when it is serial and every later step depends on it**: spawn it alone, wait for it, then spawn the next batch. \"Cannot run in parallel\" does not mean \"mine to do\". Your context has to last the whole plan; doing the work yourself until you need a relay breaks the coordination.\n\
+- Before spawning, **first raise a proposal card** naming which sub-task does each step, what it does and what done means (do not write \"I do this step myself\" unless it really is small); spawn them with `fleet__spawn` only after {title} confirms. Sub-tasks already written into a plan {title} approved count as confirmed. Agent/Task-tool subagents are your own internal means, not sub-tasks, and need no confirmation.\n\
 - When a sub-task carries out a step of your plan, pass `step` to `fleet__spawn` (e.g. `P3`; the plan defaults to the one you are on), so {title} sees in the step list which step has someone on it. Leave it off for work outside your plan.\n\
 - Once spawned, wait for them with `fleet__watch` and its `sessions` field (one watch can wait on several) and end the turn — do not poll. When woken, fetch each sub-task's final reply with `fleet__inspect` (`action=get`) and check it before relying on it.\n\
 - A sub-task's final reply may carry **open questions** — clarifying them is your job, not {title}'s. Settle what the request and context allow; raise a card to {title} only for a call {title} really has to make. Then `fleet__spawn` a fresh sub-task carrying the answer (its brief says how far the last one got), or finish the work yourself; do not hand new work to a sub-task that already reported with `fleet__control` send — it has most likely exited and the message is lost.\n\
@@ -74,7 +76,7 @@ pub fn render_section_compact(title: &str) -> String {
     format!(
         "## Tasks, Sub-tasks And Who Reports\n\
 \n\
-- With no \"Your role: sub-task\" / \"你的角色：子任务\" line in the per-turn injection you are a task's main conversation: do small things yourself; before spawning sub-tasks with `fleet__spawn`, raise a proposal card and wait for {title} to confirm; then wait on them with `fleet__watch` `sessions`, read each final reply with `fleet__inspect`, and report the summary — only you report to {title}.\n\
+- With no \"Your role: sub-task\" / \"你的角色：子任务\" line in the per-turn injection you are a task's main conversation: do small things yourself, delegate heavy work even when it is serial; before spawning sub-tasks with `fleet__spawn`, raise a proposal card and wait for {title} to confirm; then wait on them with `fleet__watch` `sessions`, read each final reply with `fleet__inspect`, and report the summary — only you report to {title}.\n\
 - As a sub-task: raise no card at all and never set `taskComplete`; your final reply is the result. Put anything needing clarification in that reply (question, options, your leaning) and let the main conversation settle it.\n\
 - As the main conversation, settle a sub-task's open questions yourself, asking {title} only for a real call; continue with a fresh `fleet__spawn`, not a `send` to the finished sub-task.\n\
 - In cards say project / task / sub-task / step / waiting, never hop, relay, P-task, plan tree, watch or session."
@@ -177,13 +179,23 @@ mod tests {
     #[test]
     fn section_covers_both_roles_in_both_locales() {
         for (locale, needles) in [
-            ("zh", ["先发一张方案卡", "一张卡都不发", "待澄清的问题", "sessions", "第 3 步"]),
-            ("en", ["first raise a proposal card", "Raise no card at all", "open questions", "sessions", "step 3"]),
+            ("zh", ["先发一张方案卡", "一张卡都不发", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的"]),
+            ("en", ["first raise a proposal card", "Raise no card at all", "open questions", "sessions", "step 3", "even when it is serial"]),
         ] {
             let s = render_section("老板", locale);
             for n in needles {
                 assert!(s.contains(n), "{locale}: missing {n:?}");
             }
         }
+    }
+
+    /// A coordinator that reads "split off what can run in parallel" concludes
+    /// that serial foundation work is its own, fills its context and relays
+    /// before a single sub-task is spawned. Every carrier must say otherwise.
+    #[test]
+    fn coordinator_delegates_serial_heavy_work() {
+        assert!(!render_section("老板", "zh").contains("值得并行拆出去"));
+        assert!(!render_section("Boss", "en").contains("worth splitting off in parallel"));
+        assert!(render_section_compact("Boss").contains("even when it is serial"));
     }
 }
