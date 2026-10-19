@@ -82,8 +82,6 @@ export function DecisionDock({
   const submitFleetAsk = useDecisionStore((s) => s.submitFleetAsk);
   const respond = useDecisionStore((s) => s.respond);
   const respondToPermissionPrompt = useDecisionStore((s) => s.respondToPermissionPrompt);
-  const setElicitationMultiSelectOverride = useDecisionStore((s) => s.setElicitationMultiSelectOverride);
-  const setFleetAskMultiSelectOverride = useDecisionStore((s) => s.setFleetAskMultiSelectOverride);
 
   useEffect(() => {
     if (!keyboard || !active) return;
@@ -151,18 +149,11 @@ export function DecisionDock({
   const questionCard = active.kind === "elicitation" || active.kind === "fleet-ask";
 
   // A docked card drops its own header row (icon, "Agent Question", project,
-  // task title — the page already shows all of them), so the two controls that
-  // row carried live on the dock's single header line instead.
+  // task title — the page already shows all of them), so the step counter that
+  // row carried lives on the dock's single header line instead. The
+  // single/multi toggle stays in the card, right above its options.
   const asked = active.kind === "elicitation" || active.kind === "fleet-ask" ? active : null;
-  const q = asked ? asked.request.questions[asked.step] : null;
   const stepCount = asked ? asked.request.questions.length : 0;
-  const canToggleMode = !!q && !q.multiSelect && (q.options?.length ?? 0) > 0;
-  const effectiveMulti = !!q && (q.multiSelect || asked?.multiSelectOverrides[q.question] === true);
-  const toggleMode = () => {
-    if (!q) return;
-    if (active.kind === "elicitation") setElicitationMultiSelectOverride(active.id, q.question, !effectiveMulti);
-    else if (active.kind === "fleet-ask") setFleetAskMultiSelectOverride(active.id, q.question, !effectiveMulti);
-  };
 
   return (
     <section className={`${styles.dock} ${inline ? styles.dock_inline : ""}`} data-testid="decision-dock" aria-label={t("home.dock_title", "Needs your decision")}>
@@ -185,16 +176,6 @@ export function DecisionDock({
               defaultValue: "question {{n}} of {{total}}",
             })}
           </span>
-        )}
-        {canToggleMode && (
-          <button
-            type="button"
-            className={styles.mode}
-            onClick={toggleMode}
-            title={t("fleet_ask.mode_tooltip", "Switch between single/multi select")}
-          >
-            · {effectiveMulti ? t("fleet_ask.mode_multi", "Multi") : t("fleet_ask.mode_single", "Single")}
-          </button>
         )}
         <span className={styles.spacer} />
         {cards.length > 1 && (

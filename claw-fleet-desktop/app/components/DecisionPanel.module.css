@@ -173,6 +173,20 @@
 .options_collapse_bar:hover {
   color: var(--color-text);
 }
+.options_tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.options_tools .options_collapse_bar {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 0;
+}
+.options_tools_spacer {
+  flex: 1;
+}
 .options_collapse_label {
   flex-shrink: 0;
 }

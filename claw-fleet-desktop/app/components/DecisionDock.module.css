@@ -85,19 +85,6 @@
 }
 
 /* Single/multi switch; reads as part of the header line, not as a chip. */
-.mode {
-  padding: 0;
-  border: none;
-  background: transparent;
-  font: inherit;
-  color: var(--color-text-muted, var(--color-text-secondary));
-  cursor: pointer;
-  white-space: nowrap;
-}
-.mode:hover {
-  color: var(--color-text);
-}
-
 .source {
   color: var(--color-text-secondary);
   overflow: hidden;
