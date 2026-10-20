@@ -1284,6 +1284,7 @@ mod tests {
             None,
             None,
             &[],
+            &Default::default(),
         )
         .expect("initial codex spawn");
         let tid = resp.session_id.expect("thread id");
@@ -1345,6 +1346,7 @@ mod tests {
             None,
             None,
             &[],
+            &Default::default(),
         )
         .expect("initial codex spawn");
         let tid = resp.session_id.expect("thread id");

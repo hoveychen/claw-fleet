@@ -2052,8 +2052,79 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
     .into_iter()
     .flatten()
     .collect();
+    wrap_reminder(lead, render_plans_reminder_body(cwd, session_id))
+}
+
+/// What a brand-new session is known to be before it has an id of its own.
+///
+/// Codex mints its thread id only after its first prompt has been handed
+/// over, so that prompt cannot be rendered from the task graph or the task
+/// profile the way every later turn is. The launcher passes what it does know
+/// instead: who spawned it, and the type `fleet__task split` is about to file
+/// for it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FreshSession<'a> {
+    /// The session that spawned this one (`fleet__spawn`); `None` for a
+    /// task's main conversation.
+    pub spawned_by: Option<&'a str>,
+    /// The type a split will write into the new task's profile once the
+    /// thread id is known.
+    pub preset_type: Option<crate::task_profile::TaskType>,
+}
+
+/// [`render_active_plans_reminder`] for a session whose id does not exist yet
+/// (a new codex thread's first prompt). Its lead section is worked out from
+/// [`FreshSession`] rather than looked up: a main conversation is told to
+/// report its task profile — or, when a split preset its type, gets that
+/// type's workflow — and a sub-task gets its task's workflow in the sub-task
+/// wording, never the self-report line (`fleet__task set` refuses sub-tasks).
+pub fn render_fresh_session_reminder(cwd: &Path, fresh: &FreshSession) -> Option<String> {
+    let (title, locale) = crate::claude_launch::guidance_voice();
+    let graph = crate::task_model::TaskGraph::load();
+    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale);
+    let lead = workflow.into_iter().collect();
+    wrap_reminder(lead, render_plans_reminder_body(cwd, None))
+}
+
+fn fresh_session_workflow(
+    graph: &crate::task_model::TaskGraph,
+    fresh: &FreshSession,
+    title: &str,
+    locale: &str,
+) -> Option<String> {
+    match fresh.spawned_by {
+        Some(parent) => {
+            let place = graph.place(parent);
+            let task = place.parent_task_id.unwrap_or(place.task_id);
+            let task_type = crate::task_profile::read(&task).map(|p| p.task_type);
+            workflow_for(task_type, true, title, locale)
+        }
+        None => workflow_for(fresh.preset_type, false, title, locale),
+    }
+}
+
+/// The workflow part of the lead section: the type's block worded for the
+/// reader's role, or — for a main conversation whose task has no profile
+/// (`task_type` is `None`) — the nudge to report one.
+fn workflow_for(
+    task_type: Option<crate::task_profile::TaskType>,
+    is_subtask: bool,
+    title: &str,
+    locale: &str,
+) -> Option<String> {
+    use crate::task_workflow_guidance as wf;
+    match (task_type, is_subtask) {
+        (None, false) => Some(wf::self_report_line(locale).to_string()),
+        (t, true) => wf::render_block(t.unwrap_or_default(), wf::Role::Subtask, title, locale),
+        (Some(t), false) => wf::render_block(t, wf::Role::Lead, title, locale),
+    }
+}
+
+/// Put the lead section above the plans body, or wrap it alone when there is
+/// no plan to show.
+fn wrap_reminder(lead: Vec<String>, body: Option<String>) -> Option<String> {
     let goal = (!lead.is_empty()).then(|| cap_lead(&lead.join("\n\n")));
-    match (goal, render_plans_reminder_body(cwd, session_id)) {
+    match (goal, body) {
         (None, body) => body,
         // The trailing mark lets `prd_context_dedup` recognise a lead-only
         // reminder too; without it a workflow block (~2 KB) would be re-sent
@@ -2125,13 +2196,9 @@ fn task_lead_for(
         }
         block
     });
-    let role = if is_subtask { wf::Role::Subtask } else { wf::Role::Lead };
     // No profile yet: a main conversation is nudged to report one instead.
-    let workflow = if profile.is_none() && !is_subtask {
-        Some(wf::self_report_line(locale).to_string())
-    } else {
-        wf::render_block(task_type, role, title, locale)
-    };
+    let profiled_type = profile.as_ref().map(|p| p.task_type);
+    let workflow = workflow_for(profiled_type, is_subtask, title, locale);
     TaskLead {
         goal_block,
         workflow,
@@ -2767,6 +2834,75 @@ trailing notes outside\n";
         let wf = sub.workflow.expect("sub-task inherits the task's type");
         assert!(wf.contains("你是子任务") && wf.contains("没查到什么"), "{wf}");
         assert!(!wf.contains("计划卡"), "{wf}");
+    }
+
+    /// A new codex thread's first prompt is rendered before it has an id. A
+    /// main conversation is still nudged to report its profile, a split's
+    /// preset type yields that type's lead workflow instead, and a sub-task
+    /// gets its task's workflow in the sub-task wording — never the nudge,
+    /// since `fleet__task set` refuses sub-tasks.
+    #[test]
+    fn fresh_session_workflow_follows_role_and_preset() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        set("res-t", Some(TaskType::Research), Some("弄清 Y"), None, ProfileSetter::Agent).unwrap();
+        let graph = crate::task_model::TaskGraph::new(
+            Vec::<Vec<String>>::new(),
+            vec![("res-sub".to_string(), "res-t".to_string())],
+        );
+        let render = |fresh: FreshSession| fresh_session_workflow(&graph, &fresh, "", "zh");
+
+        let main = render(FreshSession::default()).expect("a main conversation is nudged");
+        assert!(main.contains("fleet__task action=set"), "{main}");
+
+        let split = render(FreshSession {
+            preset_type: Some(TaskType::Research),
+            ..Default::default()
+        })
+        .expect("preset research workflow");
+        assert!(split.contains("知识台账") && !split.contains("你是子任务"), "{split}");
+        assert!(!split.contains("本任务还没有画像"), "{split}");
+        let general = render(FreshSession {
+            preset_type: Some(TaskType::General),
+            ..Default::default()
+        });
+        assert!(general.is_none(), "a preset profile is never nudged: {general:?}");
+
+        // Spawned by the task's main conversation, or by one of its sub-tasks.
+        for parent in ["res-t", "res-sub"] {
+            let sub = render(FreshSession {
+                spawned_by: Some(parent),
+                ..Default::default()
+            })
+            .expect("sub-task inherits the task's type");
+            assert!(sub.contains("你是子任务") && sub.contains("没查到什么"), "{sub}");
+            assert!(!sub.contains("fleet__task action=set"), "{sub}");
+        }
+        let orphan = render(FreshSession {
+            spawned_by: Some("unprofiled"),
+            ..Default::default()
+        });
+        assert!(
+            orphan.as_deref().is_none_or(|s| !s.contains("fleet__task action=set")),
+            "{orphan:?}"
+        );
+    }
+
+    /// The end-to-end shape of the above: a workspace with no TASKS.md still
+    /// gets a reminder for a fresh main conversation (the id-keyed renderer
+    /// returns `None` there — the gap codex's first turn fell into).
+    #[test]
+    fn fresh_session_reminder_carries_the_self_report_without_plans() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        let ws = tempfile::tempdir().unwrap();
+        assert!(render_active_plans_reminder(ws.path(), None).is_none());
+        let out = render_fresh_session_reminder(ws.path(), &FreshSession::default())
+            .expect("fresh main conversation reminder");
+        assert!(out.starts_with("<system-reminder>\n"), "{out}");
+        assert!(out.contains("fleet__task action=set"), "{out}");
+        assert!(out.contains(PLAN_REMINDER_MARK), "{out}");
     }
 
     /// `prd_context_dedup` skips an unchanged reminder, so the same profile

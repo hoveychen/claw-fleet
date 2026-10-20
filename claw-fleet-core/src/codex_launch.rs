@@ -1099,6 +1099,57 @@ fn prepend_recent_sessions_block(prompt: &str, block: Option<&str>) -> String {
     }
 }
 
+/// [`maybe_prepend_active_plans`] for a brand-new thread's first prompt.
+///
+/// There is no thread id yet, so the role and task profile cannot be looked
+/// up; `fresh` says what the launcher knows instead (see
+/// [`crate::prd_tasks::FreshSession`]). Without it a codex main conversation's
+/// first turn carried neither the self-report nudge nor any workflow — codex's
+/// standing guidance leaves both to the per-turn injection — so a one-turn
+/// codex task never saw either.
+fn maybe_prepend_fresh_session(
+    workspace_path: &str,
+    fresh: &crate::prd_tasks::FreshSession,
+    prompt: &str,
+) -> String {
+    let reminder = if crate::control_plane_prefs::is_disabled(
+        crate::control_plane_prefs::Feature::PrdDiscipline,
+    ) {
+        None
+    } else {
+        crate::prd_tasks::render_fresh_session_reminder(Path::new(workspace_path), fresh)
+    };
+    prepend_reminder(reminder.as_deref(), None, prompt)
+}
+
+thread_local! {
+    static SPLIT_PRESET: std::cell::Cell<Option<crate::task_profile::TaskType>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Run `f` — a `fleet__task split` launch — with `task_type` as the type the
+/// split will file for the new task. A codex thread spawned inside reads it
+/// through [`split_preset`] to render its first prompt; the profile itself can
+/// only be written once the thread id is back, after that prompt is gone.
+///
+/// A thread-local rather than a [`crate::agent_source::SpawnSpec`] field:
+/// split is the only caller, and the spec is built by hand in a dozen places.
+/// The codex spawn runs on the calling thread, so the value reaches it.
+pub fn with_split_preset<R>(
+    task_type: Option<crate::task_profile::TaskType>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let prev = SPLIT_PRESET.with(|c| c.replace(task_type));
+    let out = f();
+    SPLIT_PRESET.with(|c| c.set(prev));
+    out
+}
+
+/// The type set by an enclosing [`with_split_preset`], if any.
+pub fn split_preset() -> Option<crate::task_profile::TaskType> {
+    SPLIT_PRESET.with(|c| c.get())
+}
+
 /// Decide the final prompt from the rendered reminder and the thread's rollout.
 ///
 /// Split out from [`maybe_prepend_active_plans`] so the fallbacks are testable
@@ -1135,6 +1186,7 @@ pub fn spawn_new_codex_session(
     model: Option<&str>,
     effort: Option<&str>,
     images: &[String],
+    fresh: &crate::prd_tasks::FreshSession,
 ) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
@@ -1183,9 +1235,9 @@ pub fn spawn_new_codex_session(
     pre_prompt.extend(fleet_notify_args());
     // Skip Codex's flaky WebSocket transport on ChatGPT logins (no-op otherwise).
     pre_prompt.extend(codex_ws_disable_args(model));
-    // Channel B: prepend the workspace's active TASKS.md plans (new session has
-    // no thread id yet, so no backtrack backstop — pass None).
-    let prompt = maybe_prepend_active_plans(&workspace_path, None, prompt);
+    // Channel B: prepend the workspace's active TASKS.md plans plus the lead
+    // section `fresh` determines (no thread id yet, so no backtrack backstop).
+    let prompt = maybe_prepend_fresh_session(&workspace_path, fresh, prompt);
     // The recent-sessions block, codex's arm of Claude's `SessionStart` hook.
     // Only on spawn: a codex thread is one context, and unlike the plan
     // reminder this block is background about the repo, not turn state, so
@@ -1645,6 +1697,48 @@ mod tests {
             prepend_recent_sessions_block("launch prompt", Some("recent sessions")),
             "recent sessions\n\nlaunch prompt"
         );
+    }
+
+    /// A new codex thread's first prompt carries the task lead section even
+    /// though the thread has no id yet: the self-report nudge for a main
+    /// conversation, the preset type's workflow for a split (read through the
+    /// thread-local the split sets, as `CodexSource::spawn` does), and neither
+    /// nudge for a sub-task.
+    #[test]
+    fn fresh_codex_prompt_carries_the_task_lead() {
+        use crate::prd_tasks::FreshSession;
+        use crate::task_profile::TaskType;
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(home.path());
+        let ws = tempfile::tempdir().unwrap();
+        let ws = ws.path().to_str().unwrap();
+
+        let main = maybe_prepend_fresh_session(ws, &FreshSession::default(), "go");
+        assert!(main.contains("fleet__task action=set"), "{main}");
+        assert!(main.ends_with("\n\ngo"), "{main}");
+
+        assert_eq!(split_preset(), None);
+        let split = with_split_preset(Some(TaskType::Research), || {
+            let fresh = FreshSession {
+                spawned_by: None,
+                preset_type: split_preset(),
+            };
+            maybe_prepend_fresh_session(ws, &fresh, "go")
+        });
+        assert_eq!(split_preset(), None, "the preset does not outlive the split");
+        assert!(split.contains("本任务的流程：研究") || split.contains("research"), "{split}");
+        assert!(split.contains("知识台账") || split.contains("ledger"), "{split}");
+        assert!(!split.contains("fleet__task action=set"), "{split}");
+
+        let sub = maybe_prepend_fresh_session(
+            ws,
+            &FreshSession {
+                spawned_by: Some("some-main-conversation"),
+                preset_type: None,
+            },
+            "go",
+        );
+        assert!(!sub.contains("fleet__task action=set"), "{sub}");
     }
 
     /// The reminder rides at the head of the prompt, and only a rollout that
@@ -2344,6 +2438,7 @@ mod tests {
             None,
             None,
             &[],
+            &Default::default(),
         )
         .expect("spawn should succeed");
         assert!(resp.pid > 0, "got a pid");
@@ -2374,6 +2469,7 @@ mod tests {
             None,
             None,
             &[],
+            &Default::default(),
         )
         .expect("spawn should succeed");
         let sid = resp.session_id.expect("thread id captured");
@@ -2417,8 +2513,15 @@ mod tests {
     fn live_kill_tears_down_codex_process() {
         let ws = std::env::temp_dir().join(format!("fleet-codex-kill-{}", std::process::id()));
         std::fs::create_dir_all(&ws).unwrap();
-        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "wait quietly", None, None, &[])
-            .expect("spawn should succeed");
+        let resp = spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "wait quietly",
+            None,
+            None,
+            &[],
+            &Default::default(),
+        )
+        .expect("spawn should succeed");
         let pid = resp.pid;
         crate::session::kill_pid_impl(pid).expect("kill should not error");
         // Give the tree-SIGTERM a moment to land, then confirm the pid is dead.
@@ -2566,6 +2669,7 @@ mod tests {
             None,
             None,
             &[],
+            &Default::default(),
         )
         .expect("initial spawn should succeed");
         let tid = resp.session_id.expect("thread id captured");
