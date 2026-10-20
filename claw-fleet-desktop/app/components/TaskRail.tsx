@@ -275,7 +275,10 @@ export function TaskRail({
             ? t(OUTCOME_LABEL[outcome][0], OUTCOME_LABEL[outcome][1])
             : t(`home.section_${st.state}`)}
         </span>
-        {plan && plan.total > 0 && (
+        {/* Under a step the step itself carries the progress; the sub-task's
+            own plan count would repeat the header's X/Y, and it is computed
+            at transcript parse time, so a finished sub-task shows a stale one. */}
+        {!step && plan && plan.total > 0 && (
           <span className={styles.item_meta}>
             {plan.done}/{plan.total}
           </span>
