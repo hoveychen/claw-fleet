@@ -146,10 +146,12 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
                 },
             }))
         }
-        "tools/list" => Ok(tools_list_result(
-            session_is_fleet_owned(),
-            client_has_native_image_gen(),
-        )),
+        "tools/list" => {
+            let tools = tools_list_result(session_is_fleet_owned(), client_has_native_image_gen());
+            let subtask =
+                crate::task_roles_guidance::session_has_subtask_role(&current_session_id());
+            Ok(if subtask { without_card_tools(tools) } else { tools })
+        }
         "tools/call" => handle_tool_call(params),
         other => Err(JsonRpcError {
             code: -32601,
@@ -210,6 +212,25 @@ fn tools_list_result(fleet_owned: bool, client_draws_its_own: bool) -> Value {
         tools.extend(crate::mcp_control::control_tool_defs());
     }
     json!({ "tools": tools })
+}
+
+/// The tools that put a card in front of the user.
+const CARD_TOOL_NAMES: [&str; 2] = ["fleet__ask", "fleet__render_a2ui"];
+
+/// A sub-task's tool list: the card tools removed. A sub-task answers to its
+/// coordinator, so it should not even see a way to ask the user; the refusal
+/// in `handle_fleet_ask_call` stays as the net for a session whose role was
+/// recorded only after its server listed tools (a Codex sub-task's first
+/// launch).
+fn without_card_tools(mut list: Value) -> Value {
+    if let Some(tools) = list.get_mut("tools").and_then(Value::as_array_mut) {
+        tools.retain(|t| {
+            !t.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|n| CARD_TOOL_NAMES.contains(&n))
+        });
+    }
+    list
 }
 
 /// MCP `clientInfo.name` of the harness on the other end of this stdio pipe,
@@ -2054,6 +2075,24 @@ mod tests {
         }
         // The UI tools remain present alongside them.
         assert!(names.contains(&"fleet__ask"));
+    }
+
+    #[test]
+    fn subtask_tool_list_drops_only_the_card_tools() {
+        let full = tools_list_result(true, false);
+        let full_len = full["tools"].as_array().unwrap().len();
+        let result = without_card_tools(full);
+        let names: Vec<&str> = result["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        for card in CARD_TOOL_NAMES {
+            assert!(!names.contains(&card), "{card} must be withheld from a sub-task");
+        }
+        assert_eq!(names.len(), full_len - CARD_TOOL_NAMES.len());
+        assert!(names.contains(&"fleet__spawn") && names.contains(&"fleet__set_session_title"));
     }
 
     #[test]

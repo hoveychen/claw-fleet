@@ -259,6 +259,47 @@ If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — n
     )
 }
 
+/// What a Claude sub-task gets in place of [`render_guidance`]. A sub-task
+/// talks to its coordinator, not to the user, and its card tools are withheld
+/// (see `claude_launch`), so the card rules, the persona, the TTS divider and
+/// the explain marks are all dropped; what stays is the language rule (the
+/// user still reads its transcript) and the sub-task section.
+pub fn render_subtask_guidance(user_title: &str, locale: &str) -> String {
+    let title = if user_title.is_empty() {
+        if locale == "zh" { "老板" } else { "Boss" }
+    } else {
+        user_title
+    };
+    let section = crate::task_roles_guidance::render_subtask_section(title, locale);
+    // Same reason as the thinking line in `render_guidance`: thinking does not
+    // follow the prompt language unless asked for outright.
+    let language = match locale {
+        "zh" => "- 回合中途的叙述和最终回复都用中文。\n\
+- 思考过程（extended thinking）也必须用中文写。读英文代码、英文文档时同样保持中文思考，不要切回英文。\n\
+- 每次调用工具之前，先用一两句中文写下：刚才的结果说明了什么、接下来要做什么。\n",
+        "ja" => "- Write your narration, final reply and extended thinking in Japanese.\n",
+        "ko" => "- Write your narration, final reply and extended thinking in Korean.\n",
+        _ => "",
+    };
+    if locale == "zh" {
+        return format!(
+            "# Fleet 子任务模式 (managed by Claw Fleet — do not edit)\n\
+\n\
+## 语言\n\
+\n\
+{language}\
+\n\
+{section}"
+        );
+    }
+    let language = if language.is_empty() {
+        String::new()
+    } else {
+        format!("## Language\n\n{language}\n")
+    };
+    format!("# Fleet Sub-task Mode (managed by Claw Fleet — do not edit)\n\n{language}{section}")
+}
+
 /// Switch interaction mode on for Fleet-started sessions. The guidance is rendered
 /// into each launch's system prompt ([`crate::claude_launch`]) with the title
 /// and locale reconciled there; the arguments stay for the callers' sake.
