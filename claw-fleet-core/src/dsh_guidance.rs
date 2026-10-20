@@ -499,6 +499,13 @@ dropped anyway. End the turn with one line of plain text.\n\
 - **Plan mode is the exception dsh already enforces:** when you are in plan \
 mode, present the plan through `exit_plan_mode`, not through \
 `ask_user_question`. Do not ask \"should I proceed?\" as a card there.\n\
+- **Task profile:** dsh has no `fleet__task` tool. Wherever guidance or the \
+per-turn injection says `fleet__task action=set` / `action=split`, run \
+`fleet task set --type <dev|research|general> --goal \"<what done means>\" \
+--session <your session id>` / `fleet task split --prompt \"<complete brief>\" \
+[--type …] [--goal …] --session <your session id>`. As a task's main \
+conversation, run `fleet task set` once before you end your first turn \
+(unsure → general); a sub-task never does.\n\
 \n\
 {explain_marks}\n\
 \n\
@@ -1131,6 +1138,13 @@ fn strip_block(content: &str, begin: &str, end: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// dsh has no MCP bridge, so the task-profile rules must name the CLI.
+    #[test]
+    fn interaction_block_maps_fleet_task_to_the_cli() {
+        let g = render_dsh_interaction_block("Boss", "zh");
+        assert!(g.contains("fleet task set --type") && g.contains("fleet task split"), "{g}");
+    }
 
     #[test]
     fn prd_block_carries_worktree_and_rhythm() {

@@ -31,6 +31,7 @@
 /// The coordinator's standing section. `locale` other than `zh` gets the
 /// English text, the same split the interaction blocks use.
 pub fn render_section(title: &str, locale: &str) -> String {
+    let drift = crate::task_workflow_guidance::render_drift_section(title, locale);
     if locale == "zh" {
         return format!(
             "## 任务、子任务与汇报\n\
@@ -52,6 +53,8 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 或 resume 给已交回结果的子任务派新活——send 的消息多半会丢（它已经退出），resume 会被拒绝。\n\
 - **断网或服务中断后**，回合中途断掉的子任务会列在每轮注入里：「可恢复」的先核对它已经做完了什么，再用 `fleet__control action=resume id=<id>` 让它接着做；已交回结果的子任务绝不唤醒，新活照样用 `fleet__spawn` 派。Agent/Task 工具派的子代理跟你一起被切断后没法恢复，重新派一次。\n\
 - **只有你向{title}汇报。**子任务都回报后，把结果汇总成一张卡；整件事做完了才设 `taskComplete: true`，{title}在任务列表里看到的就是「待验收」。\n\
+\n\
+{drift}\
 \n\
 **子任务那边**：子任务启动时就没有决策卡规则和发卡工具，它把结果、自己做的假设和待澄清的问题写在最终回复里交给你。\n\
 \n\
@@ -79,6 +82,8 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **After a network or service interruption**, sub-tasks that died mid-turn are listed in the per-turn injection: check what a recoverable one already finished, then wake it with `fleet__control action=resume id=<id>`. A sub-task that already reported is never woken — new work still goes through `fleet__spawn`. Agent/Task-tool subagents cut off along with you cannot be resumed; dispatch them again.\n\
 - **Only you report to {title}.** When every sub-task has reported back, summarise the result in one card; set `taskComplete: true` only when the whole task is done — that is what {title} sees as \"awaiting review\".\n\
 \n\
+{drift}\
+\n\
 **On the sub-task's side**: a sub-task is launched without the card rules or the card tools; it hands you its result, the assumptions it made and any open questions in its final reply.\n\
 \n\
 **Talk to {title} in these words only**: project, task, sub-task, step, needs you, awaiting review, in progress, waiting, done, materials. Hop, relay, P-task, plan tree, watch, session, worktree and TASKS.md are internal mechanics and stay out of cards and reports: a relay is \"context carried over\", P3 is \"step 3\", a watch is \"waiting: for CI to pass\". Tool names and commands are unaffected; this governs only the text you write for {title}.\n"
@@ -99,6 +104,7 @@ pub fn render_subtask_section(title: &str, locale: &str) -> String {
 - **简报只写了你想不到的东西。**统筹和你是同一个模型，常识性的事它不会展开，你按常识和仓库现状去做就好；简报里写明的{title}原话、约束、验收标准和不做的事，要逐条遵守。\n\
 - **需要澄清时交回统筹**（需求不清、方向上的岔路、要不要做破坏性操作）：能按简报和常识定的自己定，在最终回复里写明做了什么假设；定不了的，停在安全的地方（已提交、没有做到一半的破坏性操作），把问题、候选答案和你的倾向写进最终回复，然后结束回合，由统筹来定。\n\
 - **最终回复就是交付物**，统筹会来取：改了什么、合并的 commit、怎么验证的、遗留问题、做过的假设、待澄清的问题。写给统筹看，不用寒暄和客套。\n\
+- 交付物按任务类型：开发类附证据（测试输出、截图或命令结果）；**研究类交回「结论 + 证据 + 置信度 + 没查到什么」**，推断单独标注，不必交 commit。\n\
 - 接力、等待、步骤照常使用。\n"
         );
     }
@@ -111,6 +117,7 @@ A task's main conversation (the coordinator) spawned you with `fleet__spawn`; yo
 - **The brief holds only what you could not think of.** The coordinator is the same model as you and leaves common practice unsaid — follow common sense and the repo as it stands. What the brief does state ({title}'s words, constraints, what done means, what is out of scope) you follow point by point.\n\
 - **Hand clarifications back to the coordinator** (an unclear requirement, a fork in direction, whether to do something destructive): settle what the brief and common sense allow and state the assumptions in your final reply; for the rest, stop somewhere safe (committed, no destructive step half done), write the question, the candidate answers and your leaning into the final reply and end the turn — the coordinator decides.\n\
 - **Your final reply is the deliverable** the coordinator collects: what changed, the merge commit, how it was verified, what is left, the assumptions you made and the open questions. Write it for the coordinator; skip pleasantries.\n\
+- The deliverable depends on the task type: dev work comes with evidence (test output, screenshots or command results); **research hands back conclusions + evidence + confidence + what you could not find**, inferences marked, no commit needed.\n\
 - Handoff, waiting and steps work as usual.\n"
     )
 }

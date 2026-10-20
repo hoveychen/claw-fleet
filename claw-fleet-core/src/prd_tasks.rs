@@ -1853,7 +1853,12 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
     let goal = (!lead.is_empty()).then(|| cap_lead(&lead.join("\n\n")));
     match (goal, render_plans_reminder_body(cwd, session_id)) {
         (None, body) => body,
-        (Some(g), None) => Some(format!("<system-reminder>\n{g}\n</system-reminder>")),
+        // The trailing mark lets `prd_context_dedup` recognise a lead-only
+        // reminder too; without it a workflow block (~2 KB) would be re-sent
+        // every turn in a workspace with no active plan.
+        (Some(g), None) => Some(format!(
+            "<system-reminder>\n{g}\n\n(re-injected by {PLAN_REMINDER_MARK} when it changes)\n</system-reminder>"
+        )),
         // Above the plans, not below: the finish line is what the next task is
         // measured against, and a reader who stops early should hit it first.
         (Some(g), Some(body)) => Some(body.replacen(
@@ -1919,9 +1924,15 @@ fn task_lead_for(
         block
     });
     let role = if is_subtask { wf::Role::Subtask } else { wf::Role::Lead };
+    // No profile yet: a main conversation is nudged to report one instead.
+    let workflow = if profile.is_none() && !is_subtask {
+        Some(wf::self_report_line(locale).to_string())
+    } else {
+        wf::render_block(task_type, role, title, locale)
+    };
     TaskLead {
         goal_block,
-        workflow: wf::render_block(task_type, role, title, locale),
+        workflow,
     }
 }
 
@@ -2460,8 +2471,9 @@ trailing notes outside\n";
             "names the flag it governs: {out}"
         );
 
-        // A session on no chain gets nothing extra.
-        assert!(render_active_plans_reminder(&ws, Some("stranger")).is_none());
+        // A session on no chain gets no goal — only the profile nudge.
+        let stranger = render_active_plans_reminder(&ws, Some("stranger")).expect("nudge");
+        assert!(!stranger.contains("本链目标") && stranger.contains("fleet__task action=set"));
         // Neither does a chain with no stated goal.
         assert!(
             render_chain_goal_block(Some("s1")).is_some(),
@@ -2544,7 +2556,9 @@ trailing notes outside\n";
         assert!(gen.workflow.is_none(), "general keeps today's behaviour");
 
         let none = lead("nobody");
-        assert!(none.goal_block.is_none() && none.workflow.is_none());
+        assert!(none.goal_block.is_none());
+        let nudge = none.workflow.expect("an unprofiled main conversation is nudged");
+        assert!(nudge.contains("fleet__task action=set"), "{nudge}");
 
         let sub = lead("sub-1");
         assert!(sub.goal_block.is_none(), "the task goal is not the sub-task's finish line");

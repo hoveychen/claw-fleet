@@ -87,6 +87,55 @@ pub fn drift_line(title: &str, locale: &str) -> String {
     )
 }
 
+/// The standing goal-drift rule for a task's main conversation, with the
+/// design's boundary examples. Part of the coordinator's section in
+/// [`crate::task_roles_guidance::render_section`]; the per-turn
+/// [`drift_line`] is its one-sentence reminder.
+pub fn render_drift_section(title: &str, locale: &str) -> String {
+    if locale == "zh" {
+        return format!(
+            "**目标变了才开新任务，类型变了只算换阶段。**每轮注入里的「本任务目标」是判据：\n\
+- {title}的新消息是原目标的**延续或下一阶段**（由前面的结论直接引出）→ 留在本任务，必要时开一个不同 kind 的子计划（研究 → 设计 → 开发是同一个目标的三个阶段）。\n\
+- 是**与原目标无关的新目标** → 先不动手，发卡建议「开为新任务」：选项含「开为新任务 / 并入本任务（改目标要写理由）」，并问原任务「结束 / 挂起 / 继续并行」。{title}同意后用 `fleet__task action=split` 带完整简报开出去；绝不自己拆。\n\
+- 边界例子：调研任务类型的 harness →「基于这个做产品架构」= 延续；修桌面端 CPU 占用 →「顺便看下手机端为什么登录不上」= 新目标；实现某功能 →「先查一下竞品怎么做的」= 延续，开 research 子计划。\n"
+        );
+    }
+    format!(
+        "**A new goal opens a new task; a new type is only a new stage.** The per-turn \"task goal\" line is the test:\n\
+- {title}'s new message **continues the goal or is its next stage** (it follows from what was concluded) → stay in this task, opening a child plan of another kind if needed (research → design → dev are three stages of one goal).\n\
+- It is **a new goal unrelated to this one** → do not start on it; raise a card proposing \"open as a new task\", with options open as new task / fold into this task (changing the goal needs a reason), and ask whether this task ends, is parked or runs on in parallel. Once {title} agrees, open it with `fleet__task action=split` carrying a complete brief; never split on your own.\n\
+- Boundary examples: researching harnesses per task type → \"design the product architecture from this\" = continuation; fixing desktop CPU use → \"also check why the phone cannot log in\" = new goal; implementing a feature → \"first look at how competitors do it\" = continuation, open a research child plan.\n"
+    )
+}
+
+/// The first-turn self-report rule, worded for the Claude session-title
+/// section it sits in.
+pub fn render_self_report(locale: &str) -> String {
+    if locale == "zh" {
+        return "**任务画像同理**：你是任务的主对话时（每轮注入里没有「你的角色：子任务」），第一个回合结束前还要调用一次 \
+`fleet__task action=set`，报上 `type`（dev 改代码 / research 产出知识 / general 其他）和一句话 `goal`（做到什么算完）。\
+没把握就选 general；之后只在类型或目标真的变了时再调。子任务不调用。"
+            .to_string();
+    }
+    "**Same for the task profile**: as a task's main conversation (no \"Your role: sub-task\" line in the per-turn \
+injection), also call `fleet__task action=set` once before you end your first turn, with a `type` (dev = changes \
+code / research = produces knowledge / general = anything else) and a one-sentence `goal` (what done means). When \
+unsure, pick general; call it again only when the type or goal really changes. Sub-tasks do not call it."
+        .to_string()
+}
+
+/// The per-turn nudge for a task's main conversation whose task has no
+/// profile yet. It is the only carrier of the rule for codex (whose standing
+/// block has no room left) and a backstop for the others; it disappears — and
+/// so stops costing anything — once the profile is written.
+pub fn self_report_line(locale: &str) -> &'static str {
+    if locale == "zh" {
+        "本任务还没有画像：本回合结束前调用一次 `fleet__task action=set`，报 `type`（dev / research / general，没把握选 general）和一句话 `goal`（做到什么算完）。"
+    } else {
+        "This task has no profile yet: before this turn ends, call `fleet__task action=set` once with a `type` (dev / research / general; unsure → general) and a one-sentence `goal` (what done means)."
+    }
+}
+
 fn research_lead_zh(title: &str) -> String {
     format!(
         "## 本任务的流程：研究\n\
