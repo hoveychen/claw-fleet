@@ -22,9 +22,9 @@
 //!   blocks, which are written once per machine and cannot vary per session.
 //!   Their size budget has no room for the briefing and model-choice rules;
 //!   those reach every harness through the `fleet__spawn` tool description.
-//! - [`render_role_reminder`]: one line per turn, through
+//! - [`render_role_reminder`]: per turn, through
 //!   [`crate::prd_tasks::render_active_plans_reminder`], telling a sub-task it
-//!   is one. A launch-time rule alone does not survive compaction, and codex
+//!   is one, and telling a coordinator which of its sub-tasks died mid-turn. A launch-time rule alone does not survive compaction, and codex
 //!   follows prompt-prepended text far better than its AGENTS.md (memory
 //!   `codex_agents_md_short_rule_ignored`).
 
@@ -49,7 +49,8 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **简报只写对方想不到的。**子任务和你是同一个模型，知识、能力和判断都相同，你一句话就懂的事它也一句话就懂。所以简报的篇幅留给它从仓库和常识里推不出来的东西：{title}的原话和对齐过的结论、已经踩过的坑和排除掉的路、非显然的约束与取舍、验收标准、明确不做的事、该先读的资料。怎么写测试、按规范提交、别破坏现有功能这类常识不要展开，也别替它做它自己会做的推理。\n\
 - 子任务是去做你计划里某一步的，派的时候给 `fleet__spawn` 带上 `step`（如 `P3`，计划缺省取你当前的计划）：{title}在步骤列表里就能看到哪一步有人在做。做计划外杂活的子任务不带。\n\
 - 派出后用 `fleet__watch` 的 `sessions` 等它们（一次可以等多个），然后结束回合，不要轮询。被唤醒后用 `fleet__inspect`（`action=get`）取每个子任务的最终回复，自己核对过再用。\n\
-- 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 给已交回结果的子任务派新活——它多半已经退出，消息会丢。\n\
+- 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 或 resume 给已交回结果的子任务派新活——send 的消息多半会丢（它已经退出），resume 会被拒绝。\n\
+- **断网或服务中断后**，回合中途断掉的子任务会列在每轮注入里：「可恢复」的先核对它已经做完了什么，再用 `fleet__control action=resume id=<id>` 让它接着做；已交回结果的子任务绝不唤醒，新活照样用 `fleet__spawn` 派。Agent/Task 工具派的子代理跟你一起被切断后没法恢复，重新派一次。\n\
 - **只有你向{title}汇报。**子任务都回报后，把结果汇总成一张卡；整件事做完了才设 `taskComplete: true`，{title}在任务列表里看到的就是「待验收」。\n\
 \n\
 **子任务那边**：子任务启动时就没有决策卡规则和发卡工具，它把结果、自己做的假设和待澄清的问题写在最终回复里交给你。\n\
@@ -74,7 +75,8 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **A brief carries only what the sub-task could not think of.** It is the same model as you, with the same knowledge, ability and judgement — what you would get from one sentence, it gets from one sentence. Spend the brief on what it cannot work out from the repo and common sense: {title}'s own words and settled decisions, pitfalls already hit and paths already ruled out, non-obvious constraints and trade-offs, what done means, what is out of scope, and what to read first. Do not spell out common practice (write tests, commit by the rules, don't break existing features), and do not do reasoning for it that it would do itself.\n\
 - When a sub-task carries out a step of your plan, pass `step` to `fleet__spawn` (e.g. `P3`; the plan defaults to the one you are on), so {title} sees in the step list which step has someone on it. Leave it off for work outside your plan.\n\
 - Once spawned, wait for them with `fleet__watch` and its `sessions` field (one watch can wait on several) and end the turn — do not poll. When woken, fetch each sub-task's final reply with `fleet__inspect` (`action=get`) and check it before relying on it.\n\
-- A sub-task's final reply may carry **open questions** — clarifying them is your job, not {title}'s. Settle what the request and context allow; raise a card to {title} only for a call {title} really has to make. Then `fleet__spawn` a fresh sub-task carrying the answer (its brief says how far the last one got), or finish the work yourself; do not hand new work to a sub-task that already reported with `fleet__control` send — it has most likely exited and the message is lost.\n\
+- A sub-task's final reply may carry **open questions** — clarifying them is your job, not {title}'s. Settle what the request and context allow; raise a card to {title} only for a call {title} really has to make. Then `fleet__spawn` a fresh sub-task carrying the answer (its brief says how far the last one got), or finish the work yourself; do not hand new work to a sub-task that already reported with `fleet__control` send or resume — it has most likely exited, so a send is lost, and a resume is refused.\n\
+- **After a network or service interruption**, sub-tasks that died mid-turn are listed in the per-turn injection: check what a recoverable one already finished, then wake it with `fleet__control action=resume id=<id>`. A sub-task that already reported is never woken — new work still goes through `fleet__spawn`. Agent/Task-tool subagents cut off along with you cannot be resumed; dispatch them again.\n\
 - **Only you report to {title}.** When every sub-task has reported back, summarise the result in one card; set `taskComplete: true` only when the whole task is done — that is what {title} sees as \"awaiting review\".\n\
 \n\
 **On the sub-task's side**: a sub-task is launched without the card rules or the card tools; it hands you its result, the assumptions it made and any open questions in its final reply.\n\
@@ -122,20 +124,146 @@ pub fn render_section_compact(title: &str) -> String {
 \n\
 - With no \"Your role: sub-task\" / \"你的角色：子任务\" line in the per-turn injection you are a task's main conversation: do small things yourself, delegate heavy work even when it is serial; before spawning sub-tasks with `fleet__spawn`, raise a proposal card and wait for {title} to confirm; then wait on them with `fleet__watch` `sessions`, read each final reply with `fleet__inspect`, and report the summary — only you report to {title}.\n\
 - As a sub-task: raise no card at all and never set `taskComplete`; your final reply is the result. Put anything needing clarification in that reply (question, options, your leaning) and let the main conversation settle it.\n\
-- As the main conversation, settle a sub-task's open questions yourself, asking {title} only for a real call; continue with a fresh `fleet__spawn`, not a `send` to the finished sub-task.\n\
+- As the main conversation, settle a sub-task's open questions yourself, asking {title} only for a real call; continue with a fresh `fleet__spawn`, not `send`/`resume` on the finished sub-task.\n\
 - In cards say project / task / sub-task / step / waiting, never hop, relay, P-task, plan tree, watch or session."
     )
 }
 
-/// The per-turn role line for a sub-task; `None` for a task's main
-/// conversation (the default the section assumes) and for unknown sessions.
+/// The per-turn role line for a sub-task; for a task's main conversation (the
+/// default the section assumes) and unknown sessions, no role line.
 /// Worded in the voice (title, locale) Fleet's launches use, like the section
 /// it points at.
+///
+/// Also carries the coordinator's recovery block ([`recovery_block_for`]) when
+/// sub-tasks this session's chain spawned died mid-turn or failed in a way the
+/// coordinator has to act on — so every per-turn carrier (the Claude hook, the
+/// codex prompt-prepend, the dsh plugin) gets it without wiring of its own.
 pub fn render_role_reminder(session_id: Option<&str>) -> Option<String> {
     let sid = session_id?;
     let graph = crate::task_model::TaskGraph::load();
     let (title, locale) = crate::claude_launch::guidance_voice();
-    role_reminder_for(&graph, sid, &title, &locale)
+    let parts: Vec<String> = [
+        role_reminder_for(&graph, sid, &title, &locale),
+        recovery_reminder(&graph, sid, &title, &locale),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
+}
+
+/// Whether a sub-task in this class belongs in the coordinator's per-turn
+/// recovery block: the ones it can resume, and the two it must not resume
+/// blindly but should know about. Done / Running / Parked / Blocked and the
+/// rest stay out — listing a Done one would invite waking it.
+pub fn needs_coordinator_attention(class: crate::subtask_recovery::RecoveryClass) -> bool {
+    use crate::subtask_recovery::RecoveryClass as C;
+    matches!(class, C::Recoverable | C::AuthFailed | C::UserInterrupted)
+}
+
+/// How long one turn's reminder may spend probing uncached sub-tasks. The
+/// hook runs before every prompt, and the dsh plugin gives its whole guidance
+/// command 5 s; children left unprobed are picked up on a later turn.
+const RECOVERY_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_millis(800);
+
+fn recovery_reminder(
+    graph: &crate::task_model::TaskGraph,
+    sid: &str,
+    user_title: &str,
+    locale: &str,
+) -> Option<String> {
+    let rows: Vec<(crate::subtask_recovery::SubtaskStatus, Option<String>)> =
+        crate::subtask_recovery::children_needing(
+            sid,
+            graph,
+            needs_coordinator_attention,
+            RECOVERY_PROBE_BUDGET,
+        )
+            .into_iter()
+            .map(|c| {
+                let name = crate::session_title::read(&c.session_id);
+                (c, name)
+            })
+            .collect();
+    recovery_block_for(&rows, user_title, locale)
+}
+
+/// The coordinator's recovery block: one line per sub-task that needs it
+/// (short id, title, step, class, why), then what to do about each class
+/// present. `None` when no row qualifies. Rows are filtered here too, so a
+/// caller cannot leak a Done sub-task into the list.
+pub(crate) fn recovery_block_for(
+    rows: &[(crate::subtask_recovery::SubtaskStatus, Option<String>)],
+    user_title: &str,
+    locale: &str,
+) -> Option<String> {
+    use crate::subtask_recovery::{short_id, RecoveryClass as C};
+    let rows: Vec<_> = rows.iter().filter(|(c, _)| needs_coordinator_attention(c.class)).collect();
+    if rows.is_empty() {
+        return None;
+    }
+    let has = |k: C| rows.iter().any(|(c, _)| c.class == k);
+    let zh = locale == "zh";
+    let title = match (user_title.is_empty(), zh) {
+        (false, _) => user_title,
+        (true, true) => "老板",
+        (true, false) => "Boss",
+    };
+    let mut out = String::new();
+    if zh {
+        out.push_str("你派出的子任务里有中途断掉、需要你处理的：\n");
+    } else {
+        out.push_str("Some sub-tasks you spawned stopped mid-way and need you:\n");
+    }
+    for (c, name) in &rows {
+        let mut line = format!("- `{}`", short_id(&c.session_id));
+        if let Some(n) = name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            line.push_str(&if zh { format!("「{n}」") } else { format!(" \"{n}\"") });
+        }
+        if let Some(step) = c.step.as_deref() {
+            line.push_str(&if zh { format!(" 步骤 {step}") } else { format!(" step {step}") });
+        }
+        let class = match (c.class, zh) {
+            (C::Recoverable, true) => "可恢复",
+            (C::AuthFailed, true) => "鉴权/账号失败",
+            (C::UserInterrupted, true) => "被手动打断",
+            (C::Recoverable, false) => "recoverable",
+            (C::AuthFailed, false) => "auth/account failure",
+            (C::UserInterrupted, false) => "interrupted by hand",
+            _ => unreachable!("filtered by needs_coordinator_attention"),
+        };
+        line.push_str(&format!(" · {class}"));
+        let detail = c.detail.trim();
+        if !detail.is_empty() {
+            line.push_str(&if zh { format!("：{detail}") } else { format!(": {detail}") });
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    if zh {
+        if has(C::Recoverable) {
+            out.push_str("「可恢复」的：先核对它已经做完了什么（git 状态、已有提交、已写的文件），再用 `fleet__control action=resume id=<id>` 让它接着做。\n");
+        }
+        if has(C::AuthFailed) {
+            out.push_str(&format!("「鉴权/账号失败」的：先修好凭证或问{title}，不要盲目 resume——修好之前只会再失败一次。\n"));
+        }
+        if has(C::UserInterrupted) {
+            out.push_str(&format!("「被手动打断」的：是{title}有意停下的，除非{title}要求，不要 resume。\n"));
+        }
+        out.push_str("已交回结果的子任务不会列在这里，也绝不唤醒；要给它新活，用 `fleet__spawn` 派新子任务。");
+    } else {
+        if has(C::Recoverable) {
+            out.push_str("Recoverable: first check what it already finished (git status, existing commits, files written), then wake it with `fleet__control action=resume id=<id>`.\n");
+        }
+        if has(C::AuthFailed) {
+            out.push_str(&format!("Auth/account failure: fix the credentials or ask {title} first; do not resume blindly — it would just fail again.\n"));
+        }
+        if has(C::UserInterrupted) {
+            out.push_str(&format!("Interrupted by hand: {title} stopped it on purpose; do not resume it unless {title} asks.\n"));
+        }
+        out.push_str("Sub-tasks that already handed back their result are never listed here and are never woken; new work for them goes through `fleet__spawn`.");
+    }
+    Some(out)
 }
 
 /// [`render_role_reminder`] on its own, wrapped as a `<system-reminder>`: the
@@ -272,5 +400,115 @@ mod tests {
         assert!(!render_section("老板", "zh").contains("值得并行拆出去"));
         assert!(!render_section("Boss", "en").contains("worth splitting off in parallel"));
         assert!(render_section_compact("Boss").contains("even when it is serial"));
+    }
+
+    fn status(id: &str, class: crate::subtask_recovery::RecoveryClass) -> crate::subtask_recovery::SubtaskStatus {
+        crate::subtask_recovery::SubtaskStatus {
+            session_id: id.to_string(),
+            effective_id: id.to_string(),
+            spawned_by: "coord".to_string(),
+            step: Some("P2".to_string()),
+            workspace: None,
+            source: Some("claude".to_string()),
+            phase: crate::session_probe::Phase::Failed,
+            class,
+            detail: "进程在回合中途退出".to_string(),
+        }
+    }
+
+    const ALL_CLASSES: [crate::subtask_recovery::RecoveryClass; 10] = {
+        use crate::subtask_recovery::RecoveryClass as C;
+        [
+            C::Recoverable,
+            C::Done,
+            C::Running,
+            C::Blocked,
+            C::Parked,
+            C::UserInterrupted,
+            C::AuthFailed,
+            C::Failed,
+            C::Closed,
+            C::Unknown,
+        ]
+    };
+
+    #[test]
+    fn recovery_block_only_for_recoverable_auth_or_interrupted_children() {
+        use crate::subtask_recovery::RecoveryClass as C;
+        for class in ALL_CLASSES {
+            let rows = vec![(status("aaaaaaaa-1111", class), None)];
+            let wanted = matches!(class, C::Recoverable | C::AuthFailed | C::UserInterrupted);
+            assert_eq!(needs_coordinator_attention(class), wanted, "{class:?}");
+            for locale in ["zh", "en"] {
+                assert_eq!(
+                    recovery_block_for(&rows, "", locale).is_some(),
+                    wanted,
+                    "{class:?} {locale}"
+                );
+            }
+        }
+        // Done siblings never leak into a block that exists for another child.
+        let rows = vec![
+            (status("dddddddd-done", C::Done), None),
+            (status("rrrrrrrr-rec", C::Recoverable), None),
+        ];
+        let block = recovery_block_for(&rows, "", "zh").unwrap();
+        assert!(block.contains("`rrrrrrrr`") && !block.contains("dddddddd"), "{block}");
+        assert!(recovery_block_for(&[], "", "zh").is_none());
+    }
+
+    #[test]
+    fn recovery_block_says_what_to_do_per_class() {
+        use crate::subtask_recovery::RecoveryClass as C;
+        let rows = vec![
+            (status("11111111-x", C::Recoverable), Some("修登录页".to_string())),
+            (status("22222222-x", C::AuthFailed), None),
+            (status("33333333-x", C::UserInterrupted), None),
+        ];
+        let zh = recovery_block_for(&rows, "", "zh").unwrap();
+        for n in [
+            "`11111111`「修登录页」 步骤 P2 · 可恢复：进程在回合中途退出",
+            "`22222222` 步骤 P2 · 鉴权/账号失败",
+            "`33333333` 步骤 P2 · 被手动打断",
+            "fleet__control action=resume id=<id>",
+            "先核对它已经做完了什么",
+            "先修好凭证或问老板",
+            "老板有意停下",
+            "绝不唤醒",
+            "fleet__spawn",
+        ] {
+            assert!(zh.contains(n), "zh missing {n:?}:\n{zh}");
+        }
+        let en = recovery_block_for(&rows, "Alex", "en").unwrap();
+        for n in [
+            "`11111111` \"修登录页\" step P2 · recoverable",
+            "fleet__control action=resume id=<id>",
+            "ask Alex first",
+            "Alex stopped it on purpose",
+            "never woken",
+            "fleet__spawn",
+        ] {
+            assert!(en.contains(n), "en missing {n:?}:\n{en}");
+        }
+        assert!(!en.contains("老板") && !en.contains("Boss"), "{en}");
+        // Only the instructions for the classes present are spelled out.
+        let only = recovery_block_for(&rows[..1], "", "zh").unwrap();
+        assert!(!only.contains("鉴权") && !only.contains("手动打断"), "{only}");
+    }
+
+    #[test]
+    fn coordinator_guidance_covers_mid_turn_recovery() {
+        for (locale, needles) in [
+            ("zh", ["断网或服务中断后", "action=resume", "绝不唤醒", "重新派一次", "send 或 resume"]),
+            ("en", ["network or service interruption", "action=resume", "never woken", "dispatch them again", "send or resume"]),
+        ] {
+            let s = render_section("老板", locale);
+            for n in needles {
+                assert!(s.contains(n), "{locale}: missing {n:?}");
+            }
+        }
+        // The compact codex / dsh block has ~8 bytes of AGENTS.md headroom;
+        // the how-to arrives with the per-turn block itself.
+        assert!(render_section_compact("Boss").contains("not `send`/`resume` on the finished"));
     }
 }

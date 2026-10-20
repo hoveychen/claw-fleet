@@ -235,6 +235,171 @@ pub fn children_of(coordinator_session_id: &str) -> Vec<SubtaskStatus> {
         .collect()
 }
 
+/// The sub-tasks of `coordinator_session_id` whose class passes `wanted`, for
+/// the per-turn reminder. Reads edges and line roots off the already-loaded
+/// `graph`, and skips the probe for a child whose last verdict was settled
+/// ([`is_settled`]) on a transcript that has not changed since
+/// ([`VerdictCache`]). Probing stops once `budget` is spent; the children left
+/// over are probed on a later turn, by which time the cache has grown.
+///
+/// Measured 2026-10-20 on real coordinators with ~30 children each (debug
+/// build): an uncached probe of every child took 1–4 s.
+pub fn children_needing(
+    coordinator_session_id: &str,
+    graph: &crate::task_model::TaskGraph,
+    wanted: impl Fn(RecoveryClass) -> bool,
+    budget: std::time::Duration,
+) -> Vec<SubtaskStatus> {
+    let started = std::time::Instant::now();
+    // The coordinator's hops, off the graph rather than another read of the
+    // handoff chains: every session on its line that appears in an edge.
+    let root = graph.line_root(coordinator_session_id);
+    let mut chain = vec![coordinator_session_id.to_string()];
+    chain.extend(
+        graph
+            .spawn_edges()
+            .flat_map(|(c, p)| [c, p])
+            .filter(|id| id != coordinator_session_id && graph.line_root(id) == root),
+    );
+    let cache = VerdictCache::open();
+    let mut out = Vec::new();
+    for (child, parent) in children_from_edges(&chain, graph.spawn_edges(), |id| graph.line_root(id)) {
+        let Some(cache) = &cache else {
+            out.push(status_of(&child, &parent));
+            continue;
+        };
+        let hint = cache.read(&child);
+        if hint.as_ref().is_some_and(CachedVerdict::still_settled) {
+            continue;
+        }
+        if started.elapsed() > budget {
+            break;
+        }
+        // Stamped before the probe, on the hop the last probe ended up at: a
+        // write landing mid-probe then fails the stamp check instead of
+        // pinning a stale verdict.
+        let hop = hint.map(|h| h.effective_id).unwrap_or_else(|| child.clone());
+        let before = VerdictCache::transcript_stamp(&hop);
+        let st = status_of(&child, &parent);
+        cache.record(&st, &hop, before);
+        out.push(st);
+    }
+    out.retain(|st| wanted(st.class));
+    out
+}
+
+/// Classes that cannot turn into one the reminder lists while the transcript
+/// stays as it is: the turn ended (Done) or the task was closed. Anything that
+/// changes them (a resume, a new turn) writes to the transcript; a relay
+/// successor can only appear after a handoff, which a probe reports as
+/// running, not settled. Failed is not one: a lost remote workspace that
+/// reconnects turns it Recoverable with the transcript untouched.
+fn is_settled(class: RecoveryClass) -> bool {
+    matches!(class, RecoveryClass::Done | RecoveryClass::Closed)
+}
+
+/// One file per child under `~/.fleet/subtask-verdicts/`: the last class, the
+/// hop the probe followed the child to, and the (path, mtime, len) of that
+/// hop's transcript. A settled hit costs one file read and one `stat`.
+struct VerdictCache {
+    dir: std::path::PathBuf,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedVerdict {
+    effective_id: String,
+    class: RecoveryClass,
+    /// Absent when the verdict is not reusable — the entry then only tells
+    /// the next probe which hop to stamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transcript: Option<String>,
+    #[serde(default)]
+    mtime_ms: u64,
+    #[serde(default)]
+    len: u64,
+}
+
+impl CachedVerdict {
+    fn still_settled(&self) -> bool {
+        is_settled(self.class)
+            && self
+                .transcript
+                .as_deref()
+                .is_some_and(|t| VerdictCache::stamp(t) == Some((self.mtime_ms, self.len)))
+    }
+}
+
+impl VerdictCache {
+    fn open() -> Option<Self> {
+        let dir = crate::session::real_home_dir()?
+            .join(".fleet")
+            .join("subtask-verdicts");
+        Some(Self { dir })
+    }
+
+    fn path(&self, id: &str) -> Option<std::path::PathBuf> {
+        (!id.is_empty() && !id.contains(['/', '\\', '.']))
+            .then(|| self.dir.join(format!("{id}.json")))
+    }
+
+    fn stamp(path: &str) -> Option<(u64, u64)> {
+        let m = std::fs::metadata(path).ok()?;
+        let mtime = m
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis() as u64;
+        Some((mtime, m.len()))
+    }
+
+    fn read(&self, child: &str) -> Option<CachedVerdict> {
+        let raw = std::fs::read_to_string(self.path(child)?).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    /// The transcript path `hop`'s launch note names, with its stamp.
+    fn transcript_stamp(hop: &str) -> Option<(String, (u64, u64))> {
+        let t = crate::launch_spec::get(hop)?.transcript?;
+        let s = Self::stamp(&t)?;
+        Some((t, s))
+    }
+
+    /// Store the verdict. It is reusable only when settled, the probe ended on
+    /// the hop that was stamped beforehand (`stamped_hop`), and that
+    /// transcript did not move during the probe; otherwise only the hop is
+    /// kept, for the next probe to stamp.
+    fn record(
+        &self,
+        st: &SubtaskStatus,
+        stamped_hop: &str,
+        before: Option<(String, (u64, u64))>,
+    ) {
+        let Some(path) = self.path(&st.session_id) else {
+            return;
+        };
+        let reusable = before
+            .filter(|_| is_settled(st.class) && st.effective_id == stamped_hop)
+            .filter(|(t, s)| Self::stamp(t).as_ref() == Some(s));
+        let (transcript, (mtime_ms, len)) = match reusable {
+            Some((t, s)) => (Some(t), s),
+            None => (None, (0, 0)),
+        };
+        let v = CachedVerdict {
+            effective_id: st.effective_id.clone(),
+            class: st.class,
+            transcript,
+            mtime_ms,
+            len,
+        };
+        let _ = std::fs::create_dir_all(&self.dir);
+        if let Ok(json) = serde_json::to_string(&v) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
 /// Why [`resume_child`] will not wake a session of this class. Agent-facing.
 fn refusal(class: RecoveryClass) -> &'static str {
     match class {
@@ -385,7 +550,7 @@ fn resume_children_with(
         .collect()
 }
 
-fn short_id(id: &str) -> &str {
+pub(crate) fn short_id(id: &str) -> &str {
     let id = id.strip_prefix("session-").unwrap_or(id);
     id.get(..8).unwrap_or(id)
 }
@@ -566,6 +731,39 @@ mod tests {
     }
 
     #[test]
+    fn cached_verdict_is_reused_only_while_settled_and_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = dir.path().join("t.jsonl");
+        std::fs::write(&t, "{}\n").unwrap();
+        let path = t.to_string_lossy().to_string();
+        let (mtime_ms, len) = VerdictCache::stamp(&path).unwrap();
+        let v = |class, transcript: Option<String>| CachedVerdict {
+            effective_id: s("a"),
+            class,
+            transcript,
+            mtime_ms,
+            len,
+        };
+        assert!(v(RecoveryClass::Done, Some(path.clone())).still_settled());
+        assert!(v(RecoveryClass::Closed, Some(path.clone())).still_settled());
+        // A hint without a transcript, or a class that can still move, is
+        // never reused.
+        assert!(!v(RecoveryClass::Done, None).still_settled());
+        for c in [
+            RecoveryClass::Recoverable,
+            RecoveryClass::Failed,
+            RecoveryClass::Running,
+            RecoveryClass::AuthFailed,
+            RecoveryClass::UserInterrupted,
+        ] {
+            assert!(!v(c, Some(path.clone())).still_settled(), "{c:?}");
+        }
+        // A new turn appends to the transcript: the verdict is stale.
+        std::fs::write(&t, "{}\n{}\n").unwrap();
+        assert!(!v(RecoveryClass::Done, Some(path)).still_settled());
+    }
+
+    #[test]
     fn status_round_trips_through_json() {
         let st = SubtaskStatus {
             session_id: s("a"),
@@ -630,3 +828,4 @@ mod tests {
         assert_eq!(v, serde_json::json!({"sessionId": "a", "ok": false, "message": "x"}));
     }
 }
+
