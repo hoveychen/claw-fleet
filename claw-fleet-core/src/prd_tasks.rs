@@ -1209,9 +1209,14 @@ pub struct BacktrackScope {
     /// conversation that spawned it decides what happens next.
     pub subtask: Option<SubtaskScope>,
     /// Whether another live session is on this plan
-    /// ([`crate::plan_revive::plans_attended_by_others`]). Such a plan and its
-    /// subtree are never chosen, and the walk does not climb past it.
+    /// ([`crate::plan_revive::held_by_others`]). Such a plan and its subtree
+    /// are never chosen, and the walk does not climb past it.
     pub claimed_elsewhere: Box<dyn Fn(&str) -> bool>,
+    /// Whether a live sub-task was dispatched to this `(plan, step)`
+    /// ([`crate::plan_revive::HeldByOthers::steps`]). The main conversation's
+    /// walk reads such a step as taken: it is never the next task, and a plan
+    /// whose open steps are all taken is not chosen.
+    pub held_step: Box<dyn Fn(&str, &str) -> bool>,
 }
 
 /// What bounds a sub-task's backtrack.
@@ -1231,6 +1236,7 @@ impl BacktrackScope {
         Self {
             subtask: None,
             claimed_elsewhere: Box::new(|_| false),
+            held_step: Box::new(|_, _| false),
         }
     }
 
@@ -1245,17 +1251,22 @@ impl BacktrackScope {
             .unwrap_or_else(|| cwd.to_path_buf())
             .to_string_lossy()
             .into_owned();
-        let claimed = std::cell::OnceCell::new();
         let subtask = crate::task_model::is_subtask(&me).then(|| SubtaskScope {
             assignment: crate::task_model::assignment(&me),
             created: crate::task_model::plans_created_by_line(&me),
         });
+        let held = std::rc::Rc::new(std::cell::OnceCell::new());
+        let load = move || crate::plan_revive::held_by_others(&ws, &me);
+        let load = std::rc::Rc::new(load);
+        let (held2, load2) = (held.clone(), load.clone());
         Self {
             subtask,
-            claimed_elsewhere: Box::new(move |id| {
-                claimed
-                    .get_or_init(|| crate::plan_revive::plans_attended_by_others(&ws, &me))
-                    .contains(id)
+            claimed_elsewhere: Box::new(move |id| held.get_or_init(|| load()).plans.contains(id)),
+            held_step: Box::new(move |plan, step| {
+                held2
+                    .get_or_init(|| load2())
+                    .steps
+                    .contains(&(plan.to_string(), step.to_string()))
             }),
         }
     }
@@ -1287,7 +1298,48 @@ pub fn resolve_backtrack_target_scoped(
     // The plain walk first: when the tree is done there is no need to pay for
     // the claim scan.
     next_plan_in_tree(&blocks, completed_plan)?;
+    let blocks = without_held_steps(blocks, &*scope.held_step);
     next_plan_in_tree_avoiding(&blocks, completed_plan, &*scope.claimed_elsewhere)
+}
+
+/// `blocks` with every open step `held` names ticked, so a walk over them
+/// neither offers that step nor counts it as work left in its plan.
+pub fn without_held_steps(
+    blocks: Vec<SourcedBlock>,
+    held: &dyn Fn(&str, &str) -> bool,
+) -> Vec<SourcedBlock> {
+    blocks
+        .into_iter()
+        .map(|mut b| {
+            let Some(id) = b.id.clone() else { return b };
+            if !b.body.lines().any(|l| {
+                is_pending_task_line(l) && p_label(&checkbox_text(l)).is_some_and(|p| held(&id, p))
+            }) {
+                return b;
+            }
+            let mut body: String = b
+                .body
+                .lines()
+                .map(|l| {
+                    let taken = is_pending_task_line(l)
+                        && p_label(&checkbox_text(l)).is_some_and(|p| held(&id, p));
+                    if taken { l.replacen("- [ ]", "- [x]", 1) } else { l.to_string() }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if b.body.ends_with('\n') {
+                body.push('\n');
+            }
+            b.body = body;
+            b
+        })
+        .collect()
+}
+
+/// The `Pn` of a task text that starts with `**Pn**`.
+fn p_label(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("**")?;
+    rest.split_once("**").map(|(label, _)| label.trim()).filter(|l| !l.is_empty())
 }
 
 /// The backtrack for a sub-task that just finished `finished`: the ordinary
@@ -1298,7 +1350,11 @@ pub fn resolve_backtrack_target_scoped(
 /// sub-task's line created itself (`created`) — `finished` itself when its
 /// parent is someone else's. So a sub-task that split its work into child
 /// plans walks all of them, while one put on a plan the spawner wrote is not
-/// handed that plan's siblings.
+/// handed that plan's siblings. When that root is the line's own plan hung
+/// under someone else's, every plan the line hung under that same parent is
+/// walked with it (the parent standing in as an empty root), so a sub-task
+/// that split its step into `s1` and `s2` under the spawner's plan is not let
+/// go after `s1`.
 ///
 /// Dispatched to step `S` of the spawner's plan `P` (`assignment`), only `S`
 /// is its work in `P`: the climb never enters `P`, and once the root's subtree
@@ -1330,12 +1386,30 @@ pub fn next_plan_for_subtask(
             _ => break,
         }
     }
-    // The root's subtree, with the root cut loose from its parent.
-    let mut members: HashSet<&str> = HashSet::from([root]);
+    // A root the line created under someone else's plan is one of possibly
+    // several siblings it hung there (`plan create` defaults the parent to the
+    // focused plan, and a dispatched sub-task's focus is the spawner's plan).
+    // Those siblings are one piece of work: the walk runs under that plan as a
+    // stand-in root that has no work of its own and keeps only the line's
+    // children, so finishing one leads to the next and none of the outside
+    // plan's own steps or other children are handed out.
+    let boundary = parent
+        .get(root)
+        .copied()
+        .filter(|_| created(root))
+        .filter(|b| blocks.iter().any(|x| x.id.as_deref() == Some(*b)));
+    let mut members: HashSet<&str> = match boundary {
+        Some(b) => std::iter::once(b)
+            .chain(parent.iter().filter(|(c, p)| **p == b && created(c)).map(|(c, _)| *c))
+            .collect(),
+        None => HashSet::from([root]),
+    };
+    let top = boundary.unwrap_or(root);
+    // The subtree under `top`, with `top` cut loose from its parent.
     loop {
         let before = members.len();
         for (c, p) in &parent {
-            if members.contains(p) {
+            if Some(*p) != boundary && members.contains(p) {
                 members.insert(c);
             }
         }
@@ -1346,12 +1420,18 @@ pub fn next_plan_for_subtask(
     let subtree: Vec<SourcedBlock> = blocks
         .iter()
         .filter(|b| b.id.as_deref().is_some_and(|id| members.contains(id)))
-        .map(|b| SourcedBlock {
-            parent: if b.id.as_deref() == Some(root) { None } else { b.parent.clone() },
-            ..b.clone()
+        .map(|b| {
+            let is_top = b.id.as_deref() == Some(top);
+            SourcedBlock {
+                parent: if is_top { None } else { b.parent.clone() },
+                body: if boundary.is_some() && is_top { String::new() } else { b.body.clone() },
+                ..b.clone()
+            }
         })
         .collect();
-    if let Some(t) = next_plan_in_tree_avoiding(&subtree, finished, avoid) {
+    // Whoever else is on the outside plan does not own the line's children.
+    let avoid = |id: &str| Some(id) != boundary && avoid(id);
+    if let Some(t) = next_plan_in_tree_avoiding(&subtree, finished, &avoid) {
         return Some(t);
     }
     // Back to the assigned step, once nothing in the root's subtree is open.

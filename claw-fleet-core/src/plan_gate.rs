@@ -550,6 +550,7 @@ mod tests {
                         created: created.clone(),
                     }),
                     claimed_elsewhere: Box::new(|id| claimed.contains(&id)),
+                    held_step: Box::new(|_, _| false),
                 },
             },
         )
@@ -655,6 +656,82 @@ mod tests {
         assert_eq!(scoped_created(&root, "s", true, &[], Some(("par", "P2")), &["s"]), None);
         // Focused on `par` itself with P2 ticked: released by the step rule.
         assert_eq!(scoped_created(&root, "par", true, &[], Some(("par", "P2")), &["s"]), None);
+    }
+
+    /// The spawner's plan with two child plans a sub-task hung under it.
+    const SIBLINGS_UNDER_SPAWNER: &str = "\
+<!-- fleet:prd:begin id=\"par\" v=\"2\" -->
+
+**Plan:** spawner's plan
+
+- [x] **P1** — one
+- [ ] **P2** — sub step
+- [ ] **P3** — spawner's own
+
+<!-- fleet:prd:end id=\"par\" -->
+
+<!-- fleet:prd:begin id=\"s1\" v=\"2\" parent=\"par\" -->
+
+**Plan:** sub-task part 1
+
+- [x] **P1** — s1 work
+
+<!-- fleet:prd:end id=\"s1\" -->
+
+<!-- fleet:prd:begin id=\"other\" v=\"2\" parent=\"par\" -->
+
+**Plan:** the spawner's other child
+
+- [ ] **P1** — not the sub-task's
+
+<!-- fleet:prd:end id=\"other\" -->
+
+<!-- fleet:prd:begin id=\"s2\" v=\"2\" parent=\"par\" -->
+
+**Plan:** sub-task part 2
+
+- [ ] **P1** — s2 work
+
+<!-- fleet:prd:end id=\"s2\" -->
+";
+
+    /// A sub-task dispatched to `par` P2 that split the step into `s1` and
+    /// `s2` under `par` goes from `s1` to `s2`, then back to P2 — even while
+    /// the spawner is live on `par`. Before, each child was its own root and
+    /// finishing `s1` pointed straight at P2, so ticking P2 let it go with
+    /// `s2` undone.
+    #[test]
+    fn a_step_subtask_walks_all_the_children_it_hung_under_the_spawners_plan() {
+        let created = ["s1", "s2"];
+        let step = Some(("par", "P2"));
+        let (_t, root) = ws(SIBLINGS_UNDER_SPAWNER);
+        let reason = scoped_created(&root, "s1", true, &["par"], step, &created).expect("s2 open");
+        assert!(reason.contains("plan `s2`"), "{reason}");
+        assert!(!reason.contains("not the sub-task's"), "{reason}");
+        let rest = SIBLINGS_UNDER_SPAWNER.replace("- [ ] **P1** — s2 work", "- [x] **P1** — s2 work");
+        let (_t, root) = ws(&rest);
+        let reason = scoped_created(&root, "s2", true, &["par"], step, &created).expect("P2 open");
+        assert!(reason.contains("plan `par`"), "{reason}");
+        assert!(reason.contains("**P2** — sub step"), "{reason}");
+        assert!(!reason.contains("spawner's own"), "{reason}");
+    }
+
+    /// A sub-task with no step that resumed the spawner's plan (`par` here)
+    /// and created `s1` and `s2` under it goes from `s1` to `s2`, and is let
+    /// go after `s2` without being handed `par`'s own steps or its other
+    /// child.
+    #[test]
+    fn a_subtask_without_a_step_walks_its_children_under_a_resumed_plan() {
+        let created = ["s1", "s2"];
+        let (_t, root) = ws(SIBLINGS_UNDER_SPAWNER);
+        let reason = scoped_created(&root, "s1", true, &[], None, &created).expect("s2 open");
+        assert!(reason.contains("plan `s2`"), "{reason}");
+        let rest = SIBLINGS_UNDER_SPAWNER.replace("- [ ] **P1** — s2 work", "- [x] **P1** — s2 work");
+        let (_t, root) = ws(&rest);
+        assert_eq!(scoped_created(&root, "s2", true, &[], None, &created), None);
+        // A sibling another live session took over is skipped, as anywhere.
+        let (_t, root) = ws(SIBLINGS_UNDER_SPAWNER);
+        assert_eq!(scoped_created(&root, "s1", true, &["s2"], None, &created), None);
     }
 
     /// The handoff successor of a step sub-task inherits the assignment (it is
