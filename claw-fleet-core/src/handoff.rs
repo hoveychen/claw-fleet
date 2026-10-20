@@ -391,7 +391,12 @@ pub fn register(
     }
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
-    register_in(
+    // A task's goal lives in its profile (`task_profile`); the relay's goal is
+    // checked against it too, then mirrored into it once registration holds.
+    if let Some(g) = goal {
+        crate::task_profile::sync_handoff_goal(session_id, g, goal_reason, true)?;
+    }
+    let rec = register_in(
         &pdir,
         &cdir,
         session_id,
@@ -406,7 +411,13 @@ pub fn register(
         goal_reason,
         agent_source,
         now_ms(),
-    )
+    )?;
+    if let Some(g) = goal {
+        if let Err(e) = crate::task_profile::sync_handoff_goal(session_id, g, goal_reason, false) {
+            crate::log_debug(&format!("handoff: mirror goal into task profile: {e}"));
+        }
+    }
+    Ok(rec)
 }
 
 /// Refuse a goal change that arrives without a reason.

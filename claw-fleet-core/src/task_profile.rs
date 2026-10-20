@@ -294,6 +294,56 @@ pub fn set_for_session(
     set(&task_id, task_type, goal, goal_reason, by)
 }
 
+/// The profile goal that governs `session_id`'s own conversation line, when
+/// it is a main-line hop. A sub-task line is judged by its own relay chain's
+/// goal, never by the parent task's profile — that goal is the boss's finish
+/// line for the whole task, not the sub-task's.
+pub fn main_line_goal(session_id: &str) -> Option<String> {
+    let place = place_of(session_id);
+    if place.parent_task_id.is_some() {
+        return None;
+    }
+    read(&place.task_id)?.goal
+}
+
+/// The goal a relay chain is judged against: the task profile's goal when the
+/// chain is a task's main line and has one, else the chain's own recorded goal
+/// (chains from before task profiles existed, and sub-task chains).
+pub fn effective_chain_goal(session_id: &str, chain_goal: Option<&str>) -> Option<String> {
+    pick_goal(main_line_goal(session_id), chain_goal)
+}
+
+fn pick_goal(profile_goal: Option<String>, chain_goal: Option<&str>) -> Option<String> {
+    profile_goal
+        .filter(|g| !g.trim().is_empty())
+        .or_else(|| chain_goal.map(str::to_string))
+}
+
+/// Mirror a relay's `--goal` into the task profile. Only main-line hops write
+/// it; a sub-task's chain goal stays on its chain. `check_only` validates the
+/// change against the profile's current goal without writing — the handoff
+/// path checks before it registers and writes only once registration succeeded.
+pub fn sync_handoff_goal(
+    session_id: &str,
+    goal: &str,
+    goal_reason: Option<&str>,
+    check_only: bool,
+) -> Result<(), String> {
+    let goal = goal.trim();
+    if goal.is_empty() {
+        return Ok(());
+    }
+    let place = place_of(session_id);
+    if place.parent_task_id.is_some() {
+        return Ok(());
+    }
+    if check_only {
+        let current = read(&place.task_id).and_then(|p| p.goal);
+        return crate::handoff::check_goal_change(current.as_deref(), goal, goal_reason);
+    }
+    set(&place.task_id, None, Some(goal), goal_reason, ProfileSetter::Agent).map(|_| ())
+}
+
 /// Plain-text rendering for `fleet__task action=get` and `fleet task get`.
 pub fn render(task_id: &str, p: Option<&TaskProfile>) -> String {
     let Some(p) = p else {
@@ -398,6 +448,27 @@ mod tests {
         assert!(set_in(&dir, "t", None, Some("  "), None, ProfileSetter::Agent, 3).is_err());
         assert!(set_in(&dir, "../x", Some(TaskType::Dev), None, None, ProfileSetter::Agent, 3).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn profile_goal_wins_over_the_chain_goal_and_old_chains_still_resolve() {
+        assert_eq!(pick_goal(Some("profile".into()), Some("chain")).as_deref(), Some("profile"));
+        assert_eq!(pick_goal(None, Some("chain")).as_deref(), Some("chain"));
+        assert_eq!(pick_goal(Some(" ".into()), Some("chain")).as_deref(), Some("chain"));
+        assert_eq!(pick_goal(None, None), None);
+    }
+
+    #[test]
+    fn a_relay_goal_is_checked_against_and_mirrored_into_the_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        sync_handoff_goal("h1", "目标 A", None, true).unwrap();
+        assert_eq!(read("h1"), None, "check_only writes nothing");
+        sync_handoff_goal("h1", "目标 A", None, false).unwrap();
+        assert_eq!(read("h1").unwrap().goal.as_deref(), Some("目标 A"));
+        assert!(sync_handoff_goal("h1", "目标 B", None, true).is_err());
+        sync_handoff_goal("h1", "目标 B", Some("老板改了"), false).unwrap();
+        assert_eq!(main_line_goal("h1").as_deref(), Some("目标 B"));
     }
 
     #[test]
