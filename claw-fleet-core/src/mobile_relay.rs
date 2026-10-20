@@ -1123,6 +1123,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // the rest under it.
     "taskId",
     "parentTaskId",
+    // How a stopped sub-task's last turn ended: only a clean end reads as
+    // "reported back"; one that died mid-turn or was interrupted says so.
+    // One short string, absent on codex / dsh rows.
+    "lastTurnEnd",
     // Task row data (current step, wait reason, sub-task counts, spend), on
     // main-conversation hops of a top-level task only.
     "taskSummary",
@@ -3967,7 +3971,7 @@ fn serve_reopen_tasks(params: &Value) -> Result<Value, String> {
 fn serve_subtasks_recovery(params: &Value) -> Result<Value, String> {
     let req: crate::subtask_recovery::SubtaskListRequest = serde_json::from_value(params.clone())
         .map_err(|e| format!("bad subtasks_recovery params: {e}"))?;
-    serde_json::to_value(crate::subtask_recovery::children_of(&req.session_id))
+    serde_json::to_value(crate::subtask_recovery::descendants_of(&req.session_id))
         .map_err(|e| e.to_string())
 }
 

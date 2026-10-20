@@ -292,7 +292,7 @@ pub const SOURCES_CONFIG: &str = "/sources_config";
 pub const SPAWN_SESSION: &str = "/spawn_session";
 pub const STOP: &str = "/stop";
 /// A coordinator's sub-tasks classified for recovery
-/// (`subtask_recovery::children_of`), and the batch resume behind the task
+/// (`subtask_recovery::descendants_of`), and the batch resume behind the task
 /// page's "recover interrupted sub-tasks" action. Both POST a JSON body.
 pub const SUBTASKS_RECOVERY: &str = "/subtasks/recovery";
 pub const SUBTASKS_RESUME: &str = "/subtasks/resume";

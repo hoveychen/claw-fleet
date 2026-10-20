@@ -1036,6 +1036,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         proc_alive: false,
         pending_tool_batch: false,
         awaiting_model: false,
+        last_turn_end: None,
         stuck_tool: None,
         current_tool: None,
         last_skill: None,

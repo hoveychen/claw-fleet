@@ -68,9 +68,21 @@ pub fn gate_reason_in(
     let plan_id = rec.plan_id.as_str();
     let src = pt::find_plan_source(cwd, plan_id)?;
     let content = std::fs::read_to_string(&src).ok()?;
-    let body = pt::plan_body(&content, plan_id)?;
+    let block = pt::plan_block(&content, plan_id)?;
+    let body = block.body;
 
-    if body.lines().any(pt::is_pending_task_line) {
+    if pt::has_open_work(&body, block.kind) {
+        // A research plan may legitimately end early; name that exit too, or
+        // the gate pushes the agent to tick boxes that no longer mean anything.
+        let research_exit = if block.kind == pt::PlanKind::Research {
+            format!(
+                "\n• 这是 research plan:答案已够(问题已答 / 最近一轮没有新结论 / 预算用完) → \
+                 `fleet__plan action=stop plan_id={plan_id} reason=...` 记下停止理由即可收尾;\
+                 发现推翻了原拆分 → `fleet__plan action=replan` 重拆未完成的 P"
+            )
+        } else {
+            String::new()
+        };
         let next = pt::first_pending_task(&body).unwrap_or_else(|| "第一个未完成的 P".to_string());
         let (done, total) = pt::count_tasks(&body);
         return Some(format!(
@@ -84,7 +96,7 @@ pub fn gate_reason_in(
              • 上下文快满了 → `fleet handoff --note \"...\" --plan {plan_id} --next <P>` 登记接力\n\
              • 在等外部条件(CI/构建/部署) → `fleet watch create --until '...'`;\
              在等派出去的子任务 → `fleet watch create --sessions <id,...>`\n\
-             • 这个 plan 真的被外部阻塞(等账号/等资源) → 说明阻塞点并请示老板改派"
+             • 这个 plan 真的被外部阻塞(等账号/等资源) → 说明阻塞点并请示老板改派{research_exit}"
         ));
     }
 
@@ -333,6 +345,81 @@ mod tests {
             gate_reason_in(&root, Some(&focus("kid", 200)), Some(100), false, false),
             None
         );
+    }
+
+    const RESEARCH_PENDING: &str = "\
+<!-- fleet:prd:begin id=\"mine\" v=\"2\" kind=\"research\" -->
+
+**Plan:** Study
+
+- [x] **P1** — survey
+- [ ] **P2** — dig deeper
+
+<!-- fleet:prd:end id=\"mine\" -->
+";
+
+    /// Research plan without a stop reason: the gate fires and names the stop
+    /// and replan exits alongside the usual ones.
+    #[test]
+    fn research_plan_blocks_until_stopped_and_names_the_stop_exit() {
+        let (_t, root) = ws(RESEARCH_PENDING);
+        let reason = gate_reason_in(&root, Some(&focus("mine", 200)), Some(100), false, false)
+            .expect("pending research plan ⇒ gate fires");
+        assert!(reason.contains("action=stop plan_id=mine"), "{reason}");
+        assert!(reason.contains("replan"), "{reason}");
+    }
+
+    /// Research plan with a recorded stop reason counts as complete.
+    #[test]
+    fn stopped_research_plan_releases_the_gate() {
+        let stopped = pt::record_stop(RESEARCH_PENDING, "mine", "饱和:最近一轮没有新结论").unwrap();
+        let (_t, root) = ws(&stopped);
+        assert_eq!(
+            gate_reason_in(&root, Some(&focus("mine", 200)), Some(100), false, false),
+            None
+        );
+    }
+
+    /// A stopped research child still sends the agent up to its pending parent.
+    #[test]
+    fn stopped_research_child_still_backtracks_to_parent() {
+        let body = "\
+<!-- fleet:prd:begin id=\"par\" v=\"2\" -->
+
+**Plan:** Parent
+
+- [ ] **P4** — parent tail
+
+<!-- fleet:prd:end id=\"par\" -->
+
+<!-- fleet:prd:begin id=\"kid\" v=\"2\" parent=\"par\" kind=\"research\" -->
+
+**Plan:** Child
+
+- [ ] **P1** — open question
+
+> 停止：问题已答
+
+<!-- fleet:prd:end id=\"kid\" -->
+";
+        let (_t, root) = ws(body);
+        let reason = gate_reason_in(&root, Some(&focus("kid", 200)), Some(100), false, false)
+            .expect("stopped child + pending parent ⇒ climb");
+        assert!(reason.contains("**P4** — parent tail"), "{reason}");
+    }
+
+    /// Exec behaviour is unchanged: a stop marker in an exec plan is inert and
+    /// the refusal text does not offer the research-only exit.
+    #[test]
+    fn exec_plan_ignores_a_stop_marker() {
+        let body = ONE_PENDING.replace(
+            "- [ ] **P2** — still open\n",
+            "- [ ] **P2** — still open\n\n> 停止：nope\n",
+        );
+        let (_t, root) = ws(&body);
+        let reason = gate_reason_in(&root, Some(&focus("mine", 200)), Some(100), false, false)
+            .expect("exec plan with open box ⇒ gate fires");
+        assert!(!reason.contains("action=stop"), "{reason}");
     }
 
     /// A focus record naming a plan that exists in no TASKS.md here (another

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFrozenOrder, statusTone } from "./TasksView";
+import { applyFrozenOrder, statusTone, subtaskStateLabel } from "./TasksView";
 import type { SessionInfo } from "../types";
 
 describe("statusTone quiet-alive", () => {
@@ -105,5 +105,24 @@ describe("applyFrozenOrder", () => {
     const rows = [row("dev-a", "s"), row("dev-b", "s")];
     const out = applyFrozenOrder(rows, frozen, keyOf);
     expect(keys(out)).toEqual(["dev-b::s", "dev-a::s"]);
+  });
+});
+
+describe("subtaskStateLabel", () => {
+  // The test runner resolves to English (no zh browser locale).
+  it("says reported back only for a clean end", () => {
+    expect(subtaskStateLabel("review", "clean")).toBe("Reported back");
+    // codex / dsh rows carry no reading: keep the old wording.
+    expect(subtaskStateLabel("review", undefined)).toBe("Reported back");
+    expect(subtaskStateLabel("review", "midTurn")).toBe("Stopped mid-turn");
+    expect(subtaskStateLabel("review", "interrupted")).toBe("Interrupted by hand");
+    expect(subtaskStateLabel("review", "authFailed")).toBe("Auth failed");
+    expect(subtaskStateLabel("review", "failed")).toBe("Permanent error");
+  });
+
+  it("leaves non-stopped states to the task state label", () => {
+    // A running row's tail is mid-turn by definition; that is not a failure.
+    expect(subtaskStateLabel("running", "midTurn")).toBe("In progress");
+    expect(subtaskStateLabel("done", "midTurn")).toBe("Done");
   });
 });

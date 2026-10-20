@@ -51,6 +51,8 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "create": return t("新建步骤清单 {0}", plan);
       case "add": return t("添加任务 {0} · {1}", task, plan);
       case "resume": return t("接手步骤清单 {0}", plan);
+      case "replan": return t("重拆步骤清单 {0}", plan);
+      case "stop": return t("结束调研 {0}", plan);
       case "migrate": return t("迁移 TASKS.md");
       case "list": return t("列出步骤清单");
       case "get": return t("查看步骤清单 {0}", plan);

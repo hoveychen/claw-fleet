@@ -321,7 +321,8 @@ export function TaskPlansTab({
             {/* Explore plan P-tasks produce understanding, not work; the deliverable is
                 the exec subplans they spawn. Reading the list as "work to do" is a category error,
                 so we mark it like the desktop does. */}
-            {p.kind === "explore" && <div className={styles.planKind}>explore</div>}
+            {p.kind !== "exec" && <div className={styles.planKind}>{p.kind}</div>}
+            {p.stopReason && <div className={styles.planKind}>{t("已停止：{0}", p.stopReason)}</div>}
             <PlanStrip items={p.items} done={done} />
             {p.items.map((item, j) => {
               const isCurrent = Boolean(

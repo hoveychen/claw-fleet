@@ -632,10 +632,11 @@ function mkSession(
   };
 }
 
-// The billing task dispatched two sub-tasks: one for its step P4 (so the task
-// rail hangs it under that step) and one errand outside the plan.
+// The billing task dispatched three sub-tasks: one for its step P4 (so the task
+// rail hangs it under that step) and two errands outside the plan, one of
+// which died mid-turn.
 const BILLING_TASK_SUMMARY = {
-  hopCount: 3, subtaskCount: 2, subtasksActive: 1,
+  hopCount: 3, subtaskCount: 3, subtasksActive: 1,
   startedAtMs: NOW - 6 * HOUR, lastActivityMs: NOW - 2 * MIN, costUsd: 4.2,
   planId: "billing-migration", currentStep: "**P4** — cutover behind flag",
   subtaskSteps: [{ taskId: "sess-billing-flag", planId: "billing-migration", step: "P4" }],
@@ -659,7 +660,18 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     taskId: "sess-billing-docs", parentTaskId: "sess-billing-1",
     aiTitle: "Refresh billing README",
     lastMessagePreview: "README updated with the new usage tiers.",
+    lastTurnEnd: "clean",
     createdAtMs: NOW - 30 * MIN, lastActivityMs: NOW - 15 * MIN,
+  }),
+  // Killed mid-turn (the machine lost network): stopped, but it never
+  // reported back, so the rail must not say it did.
+  mkSession({
+    id: "sess-billing-backfill", workspaceName: "billing-service", status: "idle",
+    taskId: "sess-billing-backfill", parentTaskId: "sess-billing-1",
+    aiTitle: "Backfill usage events for March",
+    lastMessagePreview: "Running the backfill against the staging replica...",
+    lastTurnEnd: "midTurn",
+    createdAtMs: NOW - 25 * MIN, lastActivityMs: NOW - 12 * MIN,
   }),
   // billing-service — 3-hop handoff chain mid-migration
   mkSession({

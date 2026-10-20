@@ -103,7 +103,7 @@ pub(crate) fn route_tasks_reopen(
 }
 
 /// A coordinator's sub-tasks, each probed and classified for recovery: see
-/// `subtask_recovery::children_of`.
+/// `subtask_recovery::descendants_of`.
 pub(crate) fn route_subtasks_recovery(
     _ctx: &ServeCtx,
     mut request: tiny_http::Request,
@@ -115,7 +115,7 @@ pub(crate) fn route_subtasks_recovery(
         match serde_json::from_slice::<crate::subtask_recovery::SubtaskListRequest>(&body_bytes) {
             Ok(req) => (
                 200,
-                serde_json::to_value(crate::subtask_recovery::children_of(&req.session_id))
+                serde_json::to_value(crate::subtask_recovery::descendants_of(&req.session_id))
                     .unwrap_or_default(),
             ),
             Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),

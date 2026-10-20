@@ -2619,7 +2619,7 @@ impl LocalBackend {
         &self,
         session_id: &str,
     ) -> Vec<claw_fleet_core::subtask_recovery::SubtaskStatus> {
-        claw_fleet_core::subtask_recovery::children_of(session_id)
+        claw_fleet_core::subtask_recovery::descendants_of(session_id)
     }
 
     /// Resume the chosen sub-tasks; each id is re-probed and refused unless it
@@ -4816,6 +4816,7 @@ mod tests {
             proc_alive: false,
             pending_tool_batch: false,
             awaiting_model: false,
+            last_turn_end: None,
             stuck_tool: None,
             pending_messages: Vec::new(),
             last_skill: None,

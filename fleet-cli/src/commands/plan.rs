@@ -60,6 +60,14 @@ pub(crate) fn cmd_plan(action: PlanCommands, workspace: Option<&str>, session: O
             task,
             text,
         } => emit(plan_ops::add(&cwd, &plan_id, &task, &text)),
+        PlanCommands::Replan {
+            plan_id,
+            tasks,
+            reason,
+        } => emit(plan_ops::replan(&cwd, &plan_id, &tasks, &reason, sid.as_deref())),
+        PlanCommands::Stop { plan_id, reason } => {
+            emit(plan_ops::stop(&cwd, &plan_id, &reason, sid.as_deref()))
+        }
         PlanCommands::Migrate { path } => emit(plan_ops::migrate(&cwd, path)),
         PlanCommands::Snooze {
             plan_id,

@@ -45,6 +45,7 @@ import { WatchRing } from "./WatchRing";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import { createWakeLatch, isParkedForWake, stickyWaking } from "../../../shared-ts/wakeLatch";
 import type { TaskState } from "../../../shared-ts/taskState";
+import { subtaskOutcome, type TurnEnd } from "../../../shared-ts/subtaskOutcome";
 import { speedTier } from "../../../shared-ts/taskSpeed";
 import {
   buildTaskRows,
@@ -186,10 +187,24 @@ export function taskStateLabel(state: TaskState): string {
   return t("已完成");
 }
 
-/** A sub-task's state in words. A stopped sub-task has reported to the main
- *  conversation, not to the boss, so "review" reads as reported back. */
-export function subtaskStateLabel(state: TaskState): string {
-  return state === "review" ? t("已回报") : taskStateLabel(state);
+/** A sub-task's state in words. A stopped sub-task reports to the main
+ *  conversation, not to the boss, so a clean "review" reads as reported back;
+ *  one whose last turn did not end cleanly says how it stopped. */
+export function subtaskStateLabel(state: TaskState, lastTurnEnd?: TurnEnd | null): string {
+  switch (subtaskOutcome(state, lastTurnEnd)) {
+    case "reported":
+      return t("已回报");
+    case "midTurn":
+      return t("中途断了");
+    case "interrupted":
+      return t("被手动中断");
+    case "authFailed":
+      return t("鉴权失败");
+    case "failed":
+      return t("永久错误");
+    default:
+      return taskStateLabel(state);
+  }
 }
 
 /** The second line of a row, in words. */

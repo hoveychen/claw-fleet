@@ -78,6 +78,28 @@ pub struct StuckTool {
     pub since_ms: Option<u64>,
 }
 
+/// How the transcript's last main-chain turn ended, as read from its tail.
+/// Lets a list tell a sub-task that finished and reported back apart from one
+/// whose process died mid-turn — both read as a stopped session otherwise.
+/// Same reading as [`crate::session_probe::claude_tail_verdict`], which the
+/// sub-task recovery block uses, so the two never disagree.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum TurnEnd {
+    /// The turn finished normally (`end_turn` and friends).
+    Clean,
+    /// The turn never reached its end: the process died mid-turn, or the
+    /// last record is a transient API error (server error, rate limit).
+    MidTurn,
+    /// Cut off on purpose (Esc / SIGINT).
+    Interrupted,
+    /// A permanent credential / account / credit failure.
+    AuthFailed,
+    /// Any other permanent API error.
+    Failed,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -216,6 +238,12 @@ pub struct SessionInfo {
     /// whose request is being retried out of `WaitingInput`.
     #[serde(default)]
     pub awaiting_model: bool,
+    /// How the last turn ended, read from the transcript tail at parse time
+    /// and carried across cache hits. Only meaningful once the session has
+    /// stopped. `None` when nothing readable is in the tail and for harnesses
+    /// that do not compute it (codex, dsh).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_turn_end: Option<TurnEnd>,
     /// Tool the session is running right now (see [`detect::current_tool`]):
     /// the oldest unanswered `tool_use` of the latest batch, interactive waits
     /// included. Only set while the status is a live working/waiting one, so
@@ -810,6 +838,7 @@ mod tests {
             proc_alive: false,
             pending_tool_batch: false,
             awaiting_model: false,
+            last_turn_end: None,
             stuck_tool: None,
             current_tool: None,
             last_skill: None,

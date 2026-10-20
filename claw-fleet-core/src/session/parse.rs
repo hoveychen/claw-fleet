@@ -966,6 +966,7 @@ pub fn parse_session_info(
         pending_tool_batch,
         stuck_tool,
         awaiting_model: awaits_model_reply(&last_n),
+        last_turn_end: crate::session_probe::turn_end_of(&crate::session_probe::claude_tail_verdict(&last_n)),
         // Raw, status-unaware; `settle_current_tool` clears it once the final
         // status is known.
         current_tool: current_tool(&last_n),

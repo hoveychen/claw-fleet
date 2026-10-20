@@ -35,6 +35,12 @@ pub enum PlanKind {
     /// Investigation work: the P-tasks produce understanding, and the plan's
     /// deliverable is the `Exec` child plans it spawns — not edits of its own.
     Explore,
+    /// Research work whose deliverable *is* the knowledge: a wiki report with
+    /// conclusions, evidence and confidence. It need not spawn any child plan,
+    /// its P-list may be rewritten as findings come in (`replan`), and it may end
+    /// before every box is ticked once a stop reason is recorded (`stop`) —
+    /// budget spent, saturation, or the question answered.
+    Research,
 }
 
 impl PlanKind {
@@ -44,6 +50,7 @@ impl PlanKind {
         match self {
             PlanKind::Exec => None,
             PlanKind::Explore => Some("explore"),
+            PlanKind::Research => Some("research"),
         }
     }
 
@@ -53,6 +60,7 @@ impl PlanKind {
     pub fn from_attr(value: Option<&str>) -> Self {
         match value.map(str::trim) {
             Some("explore") => PlanKind::Explore,
+            Some("research") => PlanKind::Research,
             _ => PlanKind::Exec,
         }
     }
@@ -61,6 +69,16 @@ impl PlanKind {
         match self {
             PlanKind::Exec => "exec",
             PlanKind::Explore => "explore",
+            PlanKind::Research => "research",
+        }
+    }
+
+    /// Bracketed tag appended to a plan heading in the injection, e.g.
+    /// ` [research]`. Empty for `Exec`, the unremarkable default.
+    pub fn heading_tag(self) -> String {
+        match self.as_attr() {
+            Some(k) => format!(" [{k}]"),
+            None => String::new(),
         }
     }
 }
@@ -163,6 +181,12 @@ pub struct TaskPlanDetail {
     /// already labels and the detail panels used to hide.
     pub kind: PlanKind,
     pub items: Vec<TaskItem>,
+    /// Why a research plan was ended early (`fleet plan stop`). Set only for a
+    /// [`PlanKind::Research`] plan carrying a stop marker; such a plan counts as
+    /// complete even with boxes left unticked. See [`stop_reason`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub stop_reason: Option<String>,
 }
 
 /// A structural problem detected while parsing a TASKS.md. Surfaced to the agent
@@ -577,6 +601,258 @@ pub fn plan_parent(content: &str, plan_id: &str) -> Option<String> {
         .and_then(|b| b.parent)
 }
 
+/// The whole plan block with `plan_id` (body plus sentinel attributes such as
+/// its kind), if present.
+pub fn plan_block(content: &str, plan_id: &str) -> Option<PrdBlock> {
+    extract_prd_blocks(content)
+        .into_iter()
+        .find(|b| b.id.as_deref() == Some(plan_id))
+}
+
+/// Prefix of the line `fleet plan stop` writes into a research plan's body.
+/// Chinese because TASKS.md is written for the boss; the parser also accepts an
+/// ASCII colon so a hand-written marker is not silently ignored.
+pub const STOP_MARKER: &str = "> 停止：";
+/// Prefix of each line `fleet plan replan` appends to record why the pending
+/// P-tasks were rewritten. Kept as history: one line per replan.
+pub const REPLAN_MARKER: &str = "> 重拆：";
+
+/// Reason recorded by the last top-level stop marker in `body`, regardless of
+/// the plan's kind. Callers deciding completion want [`has_open_work`].
+pub fn stop_reason(body: &str) -> Option<String> {
+    body.lines()
+        .filter(|l| !l.starts_with(' ') && !l.starts_with('\t'))
+        .filter_map(|l| {
+            l.strip_prefix(STOP_MARKER)
+                .or_else(|| l.strip_prefix("> 停止:"))
+                .map(|r| r.trim().to_string())
+        })
+        .filter(|r| !r.is_empty())
+        .last()
+}
+
+/// The stop reason that actually counts: only a research plan may be ended by
+/// a recorded reason. A marker hand-pasted into an exec or explore plan is
+/// inert, so those kinds keep meaning "done when every box is ticked".
+pub fn effective_stop_reason(body: &str, kind: PlanKind) -> Option<String> {
+    (kind == PlanKind::Research).then(|| stop_reason(body)).flatten()
+}
+
+/// Whether a plan still has work the plan gate, the backtrack, the reviver and
+/// the injection should treat as outstanding: a pending top-level P-task, and —
+/// for a research plan — no recorded stop reason. The single definition of
+/// "open", so the stop rule reaches every consumer at once.
+pub fn has_open_work(body: &str, kind: PlanKind) -> bool {
+    body.lines().any(is_pending_task_line) && effective_stop_reason(body, kind).is_none()
+}
+
+/// Record why research plan `plan_id` is ending with boxes left unticked, as a
+/// `> 停止：<reason>` line just before its end sentinel. A previous stop line is
+/// replaced, not duplicated. Refused for any other kind: exec and explore plans
+/// are done when their boxes are, and a stop reason must not become a way to
+/// walk past the plan gate.
+pub fn record_stop(content: &str, plan_id: &str, reason: &str) -> Result<String, String> {
+    let reason = one_line(reason);
+    if reason.is_empty() {
+        return Err("stop needs a reason: budget spent, saturation (the last round \
+                    produced no new finding), or the question is answered"
+            .to_string());
+    }
+    let block = plan_block(content, plan_id).ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    if block.kind != PlanKind::Research {
+        return Err(format!(
+            "plan '{plan_id}' has kind `{}`; only research plans can be stopped with a reason. \
+             Finish its P-tasks, or replan them if the work changed.",
+            block.kind.label()
+        ));
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut in_target = false;
+    let mut drop_blank = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if std::mem::take(&mut drop_blank) && trimmed.is_empty() {
+            continue;
+        }
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
+            in_target = attrs.id.as_deref() == Some(plan_id);
+            out.push(line.to_string());
+            continue;
+        }
+        if parse_sentinel(trimmed, "end").is_some() {
+            if in_target {
+                push_marker(&mut out, &format!("{STOP_MARKER}{reason}"));
+            }
+            in_target = false;
+            out.push(line.to_string());
+            continue;
+        }
+        if in_target && is_stop_line(line) {
+            // Drop the old marker and the blank line that followed it.
+            drop_blank = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    Ok(join_preserving_eol(out, content))
+}
+
+fn is_stop_line(line: &str) -> bool {
+    line.starts_with(STOP_MARKER) || line.starts_with("> 停止:")
+}
+
+/// Collapse a reason to one trimmed line — it is written as a single marker
+/// line, and an embedded newline would break the block's structure.
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Append a marker line before an end sentinel, separated by blank lines so a
+/// later appended `- [ ]` is not swallowed into the blockquote when rendered.
+fn push_marker(out: &mut Vec<String>, marker: &str) {
+    if out.last().is_some_and(|l| !l.trim().is_empty()) {
+        out.push(String::new());
+    }
+    out.push(marker.to_string());
+    out.push(String::new());
+}
+
+
+/// Numeric part of a `**P<n>**` label at the start of a task's text.
+fn p_number(task_text: &str) -> Option<u32> {
+    let rest = task_text.trim_start().strip_prefix("**P")?;
+    let end = rest.find("**")?;
+    rest[..end].parse().ok()
+}
+
+/// Strip a leading `**P<n>**` label and its ` — ` separator from replan input,
+/// so an agent that wrote labels itself does not end up with `**P3** — **P2** — …`.
+fn strip_p_label(text: &str) -> &str {
+    let t = text.trim();
+    if let Some(rest) = t.strip_prefix("**P") {
+        if let Some(end) = rest.find("**") {
+            if end > 0 && rest[..end].chars().all(|c| c.is_ascii_digit()) {
+                return rest[end + 2..]
+                    .trim_start()
+                    .trim_start_matches(['—', '-', ':', '：'])
+                    .trim();
+            }
+        }
+    }
+    t
+}
+
+/// Replace every still-pending P-task of `plan_id` (with its indented note
+/// lines) by `tasks`, and record `reason` as a `> 重拆：` line. Ticked P-tasks
+/// stay exactly as they are — a replan rewrites the road ahead, never the
+/// record of what was done. New tasks are numbered on from the highest ticked
+/// label and take the place of the first removed task (or follow the last
+/// ticked one). A stop marker is cleared: replanning reopens the plan.
+///
+/// Refused without a reason (the point is a visible record of why the plan
+/// changed) and with an empty task list (that would be a way to empty a plan
+/// and walk past the gate).
+pub fn replan(content: &str, plan_id: &str, tasks: &[String], reason: &str) -> Result<String, String> {
+    let reason = one_line(reason);
+    if reason.is_empty() {
+        return Err("replan needs a reason: what finding made the old P-tasks wrong".to_string());
+    }
+    let tasks: Vec<&str> = tasks.iter().map(|t| strip_p_label(t)).filter(|t| !t.is_empty()).collect();
+    if tasks.is_empty() {
+        return Err("replan needs at least one new P-task; to end a research plan early use stop".to_string());
+    }
+    let block = plan_block(content, plan_id).ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    let kept_max = block
+        .body
+        .lines()
+        .filter(|l| top_level_checkbox(l) == Some(true))
+        .filter_map(|l| p_number(&checkbox_text(l)))
+        .max()
+        .unwrap_or_else(|| count_tasks(&block.body).0);
+    let new_lines: Vec<String> = tasks
+        .iter()
+        .enumerate()
+        .map(|(i, t)| format!("- [ ] **P{}** — {t}", kept_max + 1 + i as u32))
+        .collect();
+
+    let mut out: Vec<String> = Vec::new();
+    let mut in_target = false;
+    let mut skipping_notes = false;
+    let mut insert_at: Option<usize> = None;
+    let mut last_done_end: Option<usize> = None;
+    let mut drop_blank = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if std::mem::take(&mut drop_blank) && trimmed.is_empty() {
+            continue;
+        }
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
+            in_target = attrs.id.as_deref() == Some(plan_id);
+            skipping_notes = false;
+            out.push(line.to_string());
+            continue;
+        }
+        if parse_sentinel(trimmed, "end").is_some() {
+            if in_target {
+                let at = insert_at.or(last_done_end);
+                match at {
+                    Some(i) => {
+                        for (k, l) in new_lines.iter().enumerate() {
+                            out.insert(i + k, l.clone());
+                        }
+                    }
+                    None => {
+                        if out.last().is_some_and(|l| !l.trim().is_empty()) {
+                            out.push(String::new());
+                        }
+                        out.extend(new_lines.iter().cloned());
+                    }
+                }
+                push_marker(&mut out, &format!("{REPLAN_MARKER}{reason}"));
+            }
+            in_target = false;
+            out.push(line.to_string());
+            continue;
+        }
+        if !in_target {
+            out.push(line.to_string());
+            continue;
+        }
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if skipping_notes {
+            if indented {
+                continue;
+            }
+            skipping_notes = false;
+        }
+        match top_level_checkbox(line) {
+            Some(false) => {
+                insert_at.get_or_insert(out.len());
+                skipping_notes = true;
+                continue;
+            }
+            Some(true) => {
+                out.push(line.to_string());
+                last_done_end = Some(out.len());
+                continue;
+            }
+            None => {}
+        }
+        if indented && last_done_end == Some(out.len()) {
+            // A ticked task's note lines travel with it.
+            out.push(line.to_string());
+            last_done_end = Some(out.len());
+            continue;
+        }
+        if is_stop_line(line) {
+            drop_blank = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    Ok(join_preserving_eol(out, content))
+}
+
 /// Set the `[ ]`/`[x]` state of the top-level task matching `p_label` (matched
 /// as the bold token `**<label>**`) inside plan `plan_id`. Errors when the plan
 /// or the task isn't found.
@@ -838,10 +1114,10 @@ pub fn collect_from_sources(
         }
         for b in blocks {
             let body = if active_only {
-                match distill_active_block(&b.body) {
-                    Some(d) => d,
-                    None => continue,
+                if !has_open_work(&b.body, b.kind) {
+                    continue;
                 }
+                b.body.trim().to_string()
             } else {
                 b.body.trim().to_string()
             };
@@ -950,7 +1226,7 @@ pub fn next_plan_in_tree(blocks: &[SourcedBlock], finished: &str) -> Option<Back
             children.entry(p).or_default().push(id);
         }
         body.insert(id, &b.body);
-        if b.body.lines().any(is_pending_task_line) {
+        if has_open_work(&b.body, b.kind) {
             pending.insert(id);
         }
     }
@@ -1079,9 +1355,7 @@ fn render_compact_block(b: &SourcedBlock, tag: Option<String>) -> String {
     let label = b.id.as_deref().unwrap_or("(anonymous)");
     let (done, total) = count_tasks(&b.body);
     let mut head = format!("## Plan: {label}");
-    if b.kind == PlanKind::Explore {
-        head.push_str(" [explore]");
-    }
+    head.push_str(&b.kind.heading_tag());
     if let Some(title) = extract_plan_name(&b.body) {
         head.push_str(&format!(" — {title}"));
     }
@@ -1175,9 +1449,7 @@ fn render_cursor_neighborhood(
     let label = focused.id.as_deref().unwrap_or("(anonymous)");
     let (done, total) = count_tasks(&focused.body);
     let mut head = format!("## 你当前归属的 plan: {label}");
-    if focused.kind == PlanKind::Explore {
-        head.push_str(" [explore]");
-    }
+    head.push_str(&focused.kind.heading_tag());
     if let Some(title) = extract_plan_name(&focused.body) {
         head.push_str(&format!(" — {title}"));
     }
@@ -1197,6 +1469,20 @@ fn render_cursor_neighborhood(
             "` 把结论拆成可执行的子计划,让老板在动手前能逐条看到要做什么;\
              除了调研必需的临时脚本,不要在这个 plan 里改生产代码。\n\n",
         );
+    }
+    if focused.kind == PlanKind::Research {
+        out.push_str(
+            "> **这是一个 research plan。** 交付物是知识本身:一份 wiki 报告(`fleet__wiki publish`),\
+             每条结论带证据、置信度,并写明没覆盖什么;不必派生子 plan,不改生产代码,也不需要 worktree。\
+             发现推翻了原拆分时,用 `fleet__plan action=replan plan_id=",
+        );
+        out.push_str(label);
+        out.push_str(
+            " tasks=[...] reason=...` 重拆未完成的 P;答案已够(问题已答 / 最近一轮没有新结论 / 预算用完)\
+             就 `fleet__plan action=stop plan_id=",
+        );
+        out.push_str(label);
+        out.push_str(" reason=...` 记下停止理由后收尾,不必硬勾剩下的框。\n\n");
     }
     out.push_str(focused.body.trim());
 
@@ -1241,7 +1527,7 @@ fn render_plans_body(
 ) -> (String, bool, Vec<SourcedBlock>) {
     let active: Vec<SourcedBlock> = all_blocks
         .iter()
-        .filter(|b| b.body.lines().any(is_pending_task_line))
+        .filter(|b| has_open_work(&b.body, b.kind))
         .cloned()
         .collect();
 
@@ -1433,6 +1719,7 @@ fn list_workspace_task_plans_scoped(cwd: &Path, scope: PlanScope) -> Vec<TaskPla
             id: b.id,
             kind: b.kind,
             items: parse_task_items(&b.body),
+            stop_reason: effective_stop_reason(&b.body, b.kind),
         })
         .collect()
 }
@@ -1513,8 +1800,8 @@ fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     let focused = rec.plan_id.as_str();
     let src = find_plan_source(cwd, focused)?;
     let content = std::fs::read_to_string(&src).ok()?;
-    let body = plan_body(&content, focused)?;
-    if body.lines().any(is_pending_task_line) {
+    let block = plan_block(&content, focused)?;
+    if has_open_work(&block.body, block.kind) {
         return None;
     }
     let target = resolve_backtrack_target(cwd, focused)?;
@@ -2716,6 +3003,148 @@ trailing notes outside\n";
             !out.contains("build [explore]"),
             "exec must not be marked: {out}"
         );
+    }
+
+    // ── Plan kind: research, stop and replan ──────────────────────────────────
+
+    const RESEARCH: &str = "\
+<!-- fleet:prd:begin id=\"other\" v=\"2\" -->
+
+**Plan:** Other
+
+- [ ] **P1** — untouched
+
+
+<!-- fleet:prd:end id=\"other\" -->
+
+<!-- fleet:prd:begin id=\"r\" v=\"2\" kind=\"research\" -->
+
+**Plan:** Study it
+
+- [x] **P1** — survey
+  - note: kept with P1
+- [ ] **P2** — compare A and B
+  - note: goes with P2
+- [ ] **P3** — write up
+
+<!-- fleet:prd:end id=\"r\" -->
+";
+
+    fn exec_twin() -> String {
+        RESEARCH.replace(" kind=\"research\"", "")
+    }
+
+    #[test]
+    fn research_kind_round_trips_and_is_tagged() {
+        let out = create_plan("", "r", "R", None, PlanKind::Research).unwrap();
+        assert!(out.contains("v=\"2\" kind=\"research\""), "{out}");
+        assert_eq!(extract_prd_blocks(&out)[0].kind, PlanKind::Research);
+        assert_eq!(PlanKind::from_attr(Some("research")), PlanKind::Research);
+        assert_eq!(PlanKind::Research.heading_tag(), " [research]");
+        assert_eq!(PlanKind::Exec.heading_tag(), "");
+
+        let mut b = sbp("r", "**Plan:** R\n\n- [ ] **P1** — x\n", None);
+        b.kind = PlanKind::Research;
+        let (flat, _, _) = render_plans_body(std::slice::from_ref(&b), None, None);
+        assert!(flat.contains("## Plan: r [research] — R"), "{flat}");
+        let (focused, cursor, _) = render_plans_body(&[b], Some("r"), None);
+        assert!(cursor);
+        assert!(focused.contains("research plan"), "{focused}");
+        assert!(focused.contains("wiki"), "names the report deliverable: {focused}");
+        assert!(focused.contains("action=replan plan_id=r"), "{focused}");
+        assert!(focused.contains("action=stop plan_id=r"), "{focused}");
+    }
+
+    #[test]
+    fn stop_closes_a_research_plan_everywhere() {
+        let out = record_stop(RESEARCH, "r", "  问题已答:\n A 胜出 ").unwrap();
+        assert!(out.contains("> 停止：问题已答: A 胜出\n"), "{out}");
+        let b = plan_block(&out, "r").unwrap();
+        assert!(!has_open_work(&b.body, b.kind));
+        assert_eq!(effective_stop_reason(&b.body, b.kind).as_deref(), Some("问题已答: A 胜出"));
+        // Boxes are not ticked behind the agent's back.
+        assert!(out.contains("- [ ] **P2** — compare A and B"));
+        // The other plan is byte-identical.
+        assert_eq!(plan_body(&out, "other"), plan_body(RESEARCH, "other"));
+
+        // A second stop replaces the first rather than stacking.
+        let again = record_stop(&out, "r", "预算用完").unwrap();
+        assert_eq!(again.matches("> 停止：").count(), 1, "{again}");
+        assert!(again.contains("> 停止：预算用完"));
+        let body = plan_body(&again, "r").unwrap();
+        assert!(!body.contains("\n\n\n"), "no blank-line gap left: {body}");
+    }
+
+    #[test]
+    fn stop_is_refused_without_reason_or_outside_research() {
+        assert!(record_stop(RESEARCH, "r", "   ").is_err());
+        let err = record_stop(&exec_twin(), "r", "done enough").unwrap_err();
+        assert!(err.contains("only research plans"), "{err}");
+        assert!(record_stop(RESEARCH, "missing", "x").is_err());
+    }
+
+    /// A stop marker hand-pasted into an exec plan is inert.
+    #[test]
+    fn stop_marker_does_not_close_exec_or_explore_plans() {
+        let body = "- [ ] **P1** — x\n\n> 停止：nope\n";
+        assert!(has_open_work(body, PlanKind::Exec));
+        assert!(has_open_work(body, PlanKind::Explore));
+        assert!(!has_open_work(body, PlanKind::Research));
+        assert_eq!(effective_stop_reason(body, PlanKind::Exec), None);
+    }
+
+    #[test]
+    fn stopped_research_child_backtracks_to_parent() {
+        let mut par = sbp("par", "- [ ] **P2** — parent tail\n", None);
+        par.kind = PlanKind::Exec;
+        let mut kid = sbp("kid", "- [ ] **P1** — open\n\n> 停止：饱和\n", Some("par"));
+        kid.kind = PlanKind::Research;
+        let t = next_plan_in_tree(&[par, kid], "kid").expect("stopped child ⇒ climb");
+        assert_eq!(t.plan_id, "par");
+    }
+
+    #[test]
+    fn replan_keeps_ticked_tasks_and_replaces_pending_ones() {
+        let tasks = vec![
+            "deep-dive A".to_string(),
+            "**P9** — benchmark B".to_string(),
+        ];
+        let out = replan(RESEARCH, "r", &tasks, "survey showed C is irrelevant").unwrap();
+        let body = plan_body(&out, "r").unwrap();
+        assert!(
+            body.contains("- [x] **P1** — survey\n  - note: kept with P1\n- [ ] **P2** — deep-dive A\n- [ ] **P3** — benchmark B\n"),
+            "{body}"
+        );
+        assert!(!body.contains("compare A and B"), "{body}");
+        assert!(!body.contains("goes with P2"), "pending notes go with their task: {body}");
+        assert!(!body.contains("write up"), "{body}");
+        assert!(body.contains("> 重拆：survey showed C is irrelevant"), "{body}");
+        assert_eq!(plan_body(&out, "other"), plan_body(RESEARCH, "other"));
+        // Replan is open to every kind.
+        assert!(replan(&exec_twin(), "r", &tasks, "why").is_ok());
+    }
+
+    #[test]
+    fn replan_refuses_without_reason_or_tasks() {
+        let tasks = vec!["x".to_string()];
+        let err = replan(RESEARCH, "r", &tasks, "  ").unwrap_err();
+        assert!(err.contains("reason"), "{err}");
+        assert!(replan(RESEARCH, "r", &[], "why").is_err());
+        assert!(replan(RESEARCH, "r", &["  ".to_string()], "why").is_err());
+        assert!(replan(RESEARCH, "missing", &tasks, "why").is_err());
+    }
+
+    #[test]
+    fn replan_reopens_a_stopped_plan_and_appends_when_nothing_is_pending() {
+        let stopped = record_stop(RESEARCH, "r", "饱和").unwrap();
+        let out = replan(&stopped, "r", &["new angle".to_string()], "老板追问").unwrap();
+        let b = plan_block(&out, "r").unwrap();
+        assert!(stop_reason(&b.body).is_none(), "{}", b.body);
+        assert!(has_open_work(&b.body, b.kind));
+
+        let all_done = "<!-- fleet:prd:begin id=\"d\" v=\"2\" -->\n\n**Plan:** D\n\n- [x] **P1** — a\n- [x] **P2** — b\n\n<!-- fleet:prd:end id=\"d\" -->\n";
+        let out = replan(all_done, "d", &["c".to_string()], "more").unwrap();
+        assert!(out.contains("- [x] **P2** — b\n- [ ] **P3** — c\n"), "{out}");
     }
 
     // ── Cursor-neighborhood rendering (P1) ────────────────────────────────────

@@ -279,6 +279,9 @@ const DICT: Record<string, string> = {
   "查看步骤清单 {0}": "View step list {0}",
   "静默步骤清单 {0}": "Snooze step list {0}",
   "取消静默 {0}": "Unsnooze plan {0}",
+  "重拆步骤清单 {0}": "Replan step list {0}",
+  "结束调研 {0}": "Stop research {0}",
+  "已停止：{0}": "Stopped: {0}",
   "起子任务": "Spawn subtask",
   "查看续接记录": "View continuation history",
   "查看 {0} 的版本": "Versions of {0}",
@@ -374,6 +377,7 @@ const DICT: Record<string, string> = {
   老板已回复: "Answered",
   "{0} 段": "{0} parts",
   "第 {0} 步": "step {0}",
+  "由「{0}」派出": "spawned by \"{0}\"",
   // ── Settings / More tab ──
   设置: "Settings",
   语言: "Language",
@@ -1163,6 +1167,8 @@ const DICT: Record<string, string> = {
   // ── Task model: task list ──
   "待验收": "Ready to accept",
   "已回报": "Reported back",
+  中途断了: "Stopped mid-turn",
+  鉴权失败: "Auth failed",
   "等待中": "Waiting",
   "来自子任务 {0} · 需要你决定": "From sub-task {0} · needs your call",
   "需要你决定": "Needs your call",
