@@ -30,6 +30,55 @@ pub(crate) fn route_tasks_accept(
     );
 }
 
+/// The profile of the task a session belongs to: see
+/// `task_profile::view_for_session`.
+pub(crate) fn route_task_profile_get(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) =
+        match serde_json::from_slice::<crate::task_profile::TaskProfileQuery>(&body_bytes) {
+            Ok(req) => (
+                200,
+                serde_json::to_value(crate::task_profile::view_for_session(&req.session_id))
+                    .unwrap_or_default(),
+            ),
+            Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),
+        };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
+/// The boss rewriting a task's type / goal: see `task_profile::set_by_boss`.
+/// A goal change without a reason is a 400 carrying the refusal text.
+pub(crate) fn route_task_profile_set(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) =
+        match serde_json::from_slice::<crate::task_profile::SetTaskProfileRequest>(&body_bytes) {
+            Ok(req) => match crate::task_profile::set_by_boss(&req) {
+                Ok(p) => (200, serde_json::to_value(p).unwrap_or_default()),
+                Err(e) => (400, serde_json::json!({ "error": e })),
+            },
+            Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),
+        };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
 /// Undo an acceptance / a terminal button: see `task_model::reopen_tasks`.
 pub(crate) fn route_tasks_reopen(
     _ctx: &ServeCtx,

@@ -146,6 +146,13 @@ pub struct SetTaskProfileRequest {
     pub goal_reason: Option<String>,
 }
 
+/// Request body for reading the profile of the task a session belongs to.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProfileQuery {
+    pub session_id: String,
+}
+
 fn profile_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("task-profile"))
 }
@@ -342,6 +349,28 @@ pub fn sync_handoff_goal(
         return crate::handoff::check_goal_change(current.as_deref(), goal, goal_reason);
     }
     set(&place.task_id, None, Some(goal), goal_reason, ProfileSetter::Agent).map(|_| ())
+}
+
+/// What the clients show for a session's task: the stored profile of the task
+/// it belongs to, or an empty `general` one (`updated == 0`) when none exists.
+pub fn view_for_session(session_id: &str) -> TaskProfile {
+    let task_id = owning_task_id(session_id);
+    read(&task_id).unwrap_or(TaskProfile {
+        task_id,
+        ..Default::default()
+    })
+}
+
+/// The boss rewriting a task's profile from a client (desktop, `fleet serve`,
+/// mobile relay all land here).
+pub fn set_by_boss(req: &SetTaskProfileRequest) -> Result<TaskProfile, String> {
+    set_for_session(
+        req.session_id.trim(),
+        req.task_type,
+        req.goal.as_deref(),
+        req.goal_reason.as_deref(),
+        ProfileSetter::Boss,
+    )
 }
 
 /// Plain-text rendering for `fleet__task action=get` and `fleet task get`.

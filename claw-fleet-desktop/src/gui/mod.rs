@@ -1681,6 +1681,8 @@ pub fn run() {
             set_session_mark,
             accept_tasks,
             reopen_tasks,
+            get_task_profile,
+            set_task_profile,
             list_subtask_recovery,
             resume_subtasks,
             set_session_title,

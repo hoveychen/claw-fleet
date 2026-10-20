@@ -278,6 +278,35 @@ pub(crate) fn accept_tasks(
     Ok(state.backend.accept_tasks(&session_ids))
 }
 
+/// The profile (type + goal) of the task a session belongs to.
+#[tauri::command]
+pub(crate) fn get_task_profile(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::task_profile::TaskProfile, String> {
+    Ok(state.backend.get_task_profile(&session_id))
+}
+
+/// The boss rewriting a task's type and/or goal from the task view. A goal
+/// change needs `goal_reason`. `(async)`: it re-emits the whole session list.
+#[tauri::command(async)]
+pub(crate) fn set_task_profile(
+    session_id: String,
+    task_type: Option<claw_fleet_core::task_profile::TaskType>,
+    goal: Option<String>,
+    goal_reason: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::task_profile::TaskProfile, String> {
+    state
+        .backend
+        .set_task_profile(&claw_fleet_core::task_profile::SetTaskProfileRequest {
+            session_id,
+            task_type,
+            goal,
+            goal_reason,
+        })
+}
+
 /// A task coordinator's sub-tasks classified for recovery. Probes every
 /// sub-task's transcript tail, so it runs on the blocking pool.
 #[tauri::command]

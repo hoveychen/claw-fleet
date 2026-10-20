@@ -160,6 +160,9 @@ pub struct TaskSummary {
     /// absent.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub subtask_steps: Vec<SubtaskStep>,
+    /// The task's type and goal (`task_profile`), when one was set.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub profile: Option<crate::task_profile::TaskProfileBrief>,
 }
 
 /// One sub-task's step link: which plan step it was dispatched to work on.
@@ -196,6 +199,7 @@ fn stamp_summaries(
     sessions: &mut [SessionInfo],
     focus: impl Fn(&str) -> Option<crate::task_progress::TaskProgressRecord>,
     spawn_step: impl Fn(&str) -> Option<(String, String)>,
+    profile: impl Fn(&str) -> Option<crate::task_profile::TaskProfileBrief>,
 ) {
     let mut by_task: HashMap<String, TaskSummary> = HashMap::new();
     let mut sub_lines: HashMap<String, HashSet<String>> = HashMap::new();
@@ -268,6 +272,7 @@ fn stamp_summaries(
             .into_iter()
             .map(|(task_id, (plan_id, step))| SubtaskStep { task_id, plan_id, step })
             .collect();
+        sum.profile = profile(top);
     }
 
     for s in sessions.iter_mut() {
@@ -282,10 +287,27 @@ fn stamp_summaries(
 /// enrich pass: it reads watches, statuses and outcomes the other enrichers set.
 pub fn enrich_summaries(sessions: &mut [SessionInfo]) {
     let notes = crate::launch_spec::registry();
-    stamp_summaries(sessions, crate::task_progress::read, |id| {
-        let spec = notes.get(id)?;
-        Some((spec.spawned_for_plan.clone()?, spec.spawned_for_step.clone()?))
-    });
+    let profiles = crate::task_profile::load_all();
+    stamp_summaries(
+        sessions,
+        crate::task_progress::read,
+        |id| {
+            let spec = notes.get(id)?;
+            Some((spec.spawned_for_plan.clone()?, spec.spawned_for_step.clone()?))
+        },
+        |task| profiles.get(task).map(Into::into),
+    );
+}
+
+/// Refresh just the profile slice of already-stamped summaries, after a
+/// profile write, without re-running the whole summary pass.
+pub fn restamp_profiles(sessions: &mut [SessionInfo]) {
+    let profiles = crate::task_profile::load_all();
+    for s in sessions.iter_mut() {
+        if let (Some(sum), Some(task)) = (s.task_summary.as_mut(), s.task_id.as_deref()) {
+            sum.profile = profiles.get(task).map(Into::into);
+        }
+    }
 }
 
 /// Which task a decision card belongs to, for the inbox breadcrumb
@@ -573,11 +595,22 @@ mod tests {
             // Only a line's first hop carries the spawn note; a later hop's
             // lookup must not add a second link for the same line.
             matches!(id, "b1" | "b2").then(|| ("p".to_string(), "P2".to_string()))
+        }, |task| {
+            (task == "a1").then(|| crate::task_profile::TaskProfileBrief {
+                task_type: crate::task_profile::TaskType::Research,
+                goal: Some("g".into()),
+                set_by: crate::task_profile::ProfileSetter::Agent,
+            })
         });
         let sum = rows[0].task_summary.clone().expect("main hop carries it");
         assert_eq!(rows[1].task_summary.as_ref(), Some(&sum));
         assert!(rows[2].task_summary.is_none() && rows[4].task_summary.is_none());
         assert_eq!(sum.hop_count, 2);
+        assert_eq!(
+            sum.profile.as_ref().map(|p| (p.task_type, p.goal.as_deref())),
+            Some((crate::task_profile::TaskType::Research, Some("g"))),
+            "the task's profile rides on its summary"
+        );
         assert_eq!(sum.subtask_count, 2, "b-line counts once, c once");
         assert_eq!(sum.subtasks_active, 1);
         assert_eq!(sum.started_at_ms, 50);

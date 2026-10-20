@@ -2587,6 +2587,26 @@ impl LocalBackend {
         n
     }
 
+    /// The profile (type + goal) of the task `session_id` belongs to.
+    pub fn get_task_profile(&self, session_id: &str) -> claw_fleet_core::task_profile::TaskProfile {
+        claw_fleet_core::task_profile::view_for_session(session_id)
+    }
+
+    /// The boss rewriting a task's type / goal; re-emits the session list so
+    /// the task rows pick it up at once.
+    pub fn set_task_profile(
+        &self,
+        req: &claw_fleet_core::task_profile::SetTaskProfileRequest,
+    ) -> Result<claw_fleet_core::task_profile::TaskProfile, String> {
+        let p = claw_fleet_core::task_profile::set_by_boss(req)?;
+        {
+            let mut list = self.sessions.lock().unwrap();
+            claw_fleet_core::task_model::restamp_profiles(&mut list);
+        }
+        self.restamp_marks_and_emit();
+        Ok(p)
+    }
+
     pub fn reopen_tasks(&self, session_ids: &[String]) -> usize {
         let n = claw_fleet_core::task_model::reopen_tasks(session_ids);
         self.restamp_marks_and_emit();
