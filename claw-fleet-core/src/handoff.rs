@@ -411,10 +411,11 @@ pub fn register(
 
 /// Refuse a goal change that arrives without a reason.
 ///
-/// `current` is what the chain already carries. Setting one for the first time
+/// `current` is what the chain (or task profile, see [`crate::task_profile`])
+/// already carries. Setting one for the first time
 /// needs no reason (nothing is being revised) and neither does restating the
 /// same one; replacing a different, non-empty objective does.
-fn check_goal_change(
+pub(crate) fn check_goal_change(
     current: Option<&str>,
     goal: &str,
     reason: Option<&str>,
@@ -430,8 +431,8 @@ fn check_goal_change(
         return Ok(());
     }
     Err(format!(
-        "this chain's goal is already \"{current}\" and you are changing it to \"{goal}\" \
-         without saying why. Changing course is allowed — silently narrowing the chain's \
+        "the goal is already \"{current}\" and you are changing it to \"{goal}\" \
+         without saying why. Changing course is allowed — silently narrowing the task's \
          objective down to the plan in front of you is what this refuses. Pass a reason \
          alongside the new goal, and tell the boss you changed it."
     ))
