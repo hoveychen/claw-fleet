@@ -505,7 +505,7 @@ pub fn on_codex_turn_exit(session_id: &str) {
     if session_id.is_empty() {
         return;
     }
-    if let Err(e) = crate::idle::mark_idle(session_id) {
+    if let Err(e) = crate::idle::mark_idle(session_id, &[]) {
         crate::log_debug(&format!("codex turn exit: mark_idle {session_id}: {e}"));
     }
     match crate::handoff::consume_and_spawn(session_id) {
