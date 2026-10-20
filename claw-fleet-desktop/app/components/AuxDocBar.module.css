@@ -147,3 +147,42 @@
   opacity: 0.45;
   cursor: default;
 }
+
+/* ── maximized card ─────────────────────────────────────────────────────────
+   Any reader in the rail can be lifted into a near-full-window frame from the
+   bar's maximize button. The frame wears the reader's own pane class too, so
+   its bar and body lay out exactly as they do in the rail, only bigger. */
+
+.max_overlay {
+  composes: overlay_enter from "./motion.module.css";
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 40px 48px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+}
+
+.max_frame {
+  composes: modal_enter from "./motion.module.css";
+  width: min(1400px, 100%);
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+
+/* What the rail slot shows while its card is away in the overlay. */
+.max_placeholder {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 60px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
