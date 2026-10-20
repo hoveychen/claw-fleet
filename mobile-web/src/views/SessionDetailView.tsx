@@ -2069,6 +2069,7 @@ export function SessionDetailView({
               onOpenSessionId={onOpenSessionId}
               client={client}
               coordinatorId={session.id}
+              workspacePath={session.workspacePath}
             />
           )}
           {segment === "steps" && (

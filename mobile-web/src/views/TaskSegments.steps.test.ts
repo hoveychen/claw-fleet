@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SessionInfo } from "../types";
-import { stepIdOf, subtaskStepLinks, subtasksForStep, type useSubtasks } from "./TaskSegments";
+import type { SessionInfo, TaskPlanDetail } from "../types";
+import { doneStepKeys, stepIdOf, subtaskStepLinks, subtasksForStep, type useSubtasks } from "./TaskSegments";
 
 type Rows = ReturnType<typeof useSubtasks>;
 
@@ -33,5 +33,22 @@ describe("sub-tasks under steps", () => {
     expect(got.map((r) => r.tip.taskId)).toEqual(["s1"]);
     expect(subtasksForStep(rows, links, "demo", "**P1** — design")).toEqual([]);
     expect(subtasksForStep(rows, links, null, "**P2** — build")).toEqual([]);
+  });
+});
+
+describe("doneStepKeys", () => {
+  it("keys the checked-off steps by plan and step id", () => {
+    const plans = [
+      {
+        id: "demo",
+        items: [
+          { text: "**P1** — design", done: true },
+          { text: "**P2** — build", done: false },
+          { text: "no step id", done: true },
+        ],
+      },
+      { id: null, items: [{ text: "**P1** — loose", done: true }] },
+    ] as unknown as TaskPlanDetail[];
+    expect([...doneStepKeys(plans)]).toEqual(["demo\u0000P1"]);
   });
 });
