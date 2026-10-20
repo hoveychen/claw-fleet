@@ -65,7 +65,7 @@ impl RecoveryClass {
     }
 }
 
-/// One sub-task of a coordinator, as [`children_of`] reports it.
+/// One sub-task of a task, as [`descendants_of`] reports it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtaskStatus {
@@ -76,6 +76,10 @@ pub struct SubtaskStatus {
     pub effective_id: String,
     /// The coordinator hop that spawned it.
     pub spawned_by: String,
+    /// For a sub-task of a sub-task ([`descendants_of`]): the `session_id` of
+    /// the listed sub-task it descends from. Absent for direct children.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
     /// Plan step it was dispatched for (`fleet__spawn` `step`), when named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
@@ -176,13 +180,6 @@ pub fn children_from_edges(
     out
 }
 
-fn line_root(session_id: &str) -> String {
-    crate::task_review::task_sessions(session_id)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| session_id.to_string())
-}
-
 /// Whether any hop of `session_id`'s own task carries a terminal outcome.
 fn task_closed(session_id: &str) -> bool {
     crate::task_review::task_sessions(session_id)
@@ -211,6 +208,7 @@ fn status_of(child: &str, spawned_by: &str) -> SubtaskStatus {
         session_id: child.to_string(),
         effective_id: probe.effective_id,
         spawned_by: spawned_by.to_string(),
+        via: None,
         step: spec.as_ref().and_then(|s| s.spawned_for_step.clone()),
         workspace: crate::launch_spec::get(&facts.effective_id)
             .and_then(|s| s.workspace)
@@ -222,22 +220,86 @@ fn status_of(child: &str, spawned_by: &str) -> SubtaskStatus {
     }
 }
 
-/// Every sub-task spawned by any hop of `coordinator_session_id`'s relay chain,
-/// each classified. Ordered by session id. A child whose last verdict was
-/// settled on a transcript that has not changed since comes from the
-/// [`VerdictCache`] instead of a fresh probe; every child is listed, with no
-/// time budget. This is the UI's list path, polled every 30 s per open task.
-pub fn children_of(coordinator_session_id: &str) -> Vec<SubtaskStatus> {
+/// One row of [`descendants_from_edges`]: the spawned session, the hop that
+/// spawned it, and — below the first level — the `child` of the row it
+/// descends from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Descendant {
+    pub child: String,
+    pub spawner: String,
+    pub via: Option<String>,
+}
+
+/// Every sub-task line below `root_chain`, transitively: its children, their
+/// children, and so on, breadth first, each level in [`children_from_edges`]
+/// order. Pure. A line's hops are taken from the edges themselves (every
+/// session on that line appearing in one) — a hop that spawned nothing has
+/// no children to contribute. Each line is listed once, so a cycle in the
+/// edges (only corrupt notes could produce one) ends the walk.
+pub fn descendants_from_edges(
+    root_chain: &[String],
+    edges: &[(String, String)],
+    line_root: impl Fn(&str) -> String,
+) -> Vec<Descendant> {
+    let mut hops_of: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for id in edges.iter().flat_map(|(c, p)| [c, p]) {
+        let hops = hops_of.entry(line_root(id)).or_default();
+        if !hops.contains(id) {
+            hops.push(id.clone());
+        }
+    }
+    let mut seen: HashSet<String> = root_chain.iter().map(|id| line_root(id)).collect();
+    let mut out = Vec::new();
+    let mut queue = std::collections::VecDeque::from([(root_chain.to_vec(), None::<String>)]);
+    while let Some((chain, via)) = queue.pop_front() {
+        for (child, spawner) in children_from_edges(&chain, edges.iter().cloned(), &line_root) {
+            let line = line_root(&child);
+            if !seen.insert(line.clone()) {
+                continue;
+            }
+            let mut child_chain = vec![child.clone()];
+            child_chain.extend(
+                hops_of
+                    .get(&line)
+                    .into_iter()
+                    .flatten()
+                    .filter(|h| **h != child)
+                    .cloned(),
+            );
+            queue.push_back((child_chain, Some(child.clone())));
+            out.push(Descendant {
+                child,
+                spawner,
+                via: via.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// Every sub-task below `coordinator_session_id`'s task, each classified:
+/// the ones any hop of its relay chain spawned, and transitively the ones
+/// those spawned, each through its own relay chain — what the task page's
+/// rail lists. Rows below the first level carry [`SubtaskStatus::via`]. A
+/// child whose last verdict was settled on a transcript that has not changed
+/// since comes from the [`VerdictCache`] instead of a fresh probe; every
+/// child is listed, with no time budget. This is the UI's list path, polled
+/// every 30 s per open task. The per-turn reminder stays on direct children
+/// ([`children_needing`]): each sub-task coordinates its own.
+pub fn descendants_of(coordinator_session_id: &str) -> Vec<SubtaskStatus> {
     let chain = crate::task_review::task_sessions(coordinator_session_id);
-    let edges = crate::launch_spec::registry()
-        .into_iter()
-        .filter_map(|(id, spec)| spec.spawned_by_session_id.map(|p| (id, p)));
+    let graph = crate::task_model::TaskGraph::load();
+    let edges: Vec<(String, String)> = graph.spawn_edges().collect();
     let cache = VerdictCache::open();
-    children_from_edges(&chain, edges, line_root)
+    descendants_from_edges(&chain, &edges, |id| graph.line_root(id))
         .into_iter()
-        .map(|(child, parent)| match &cache {
-            Some(cache) => cache.status(&child, &parent, status_of),
-            None => status_of(&child, &parent),
+        .map(|d| {
+            let mut st = match &cache {
+                Some(cache) => cache.status(&d.child, &d.spawner, status_of),
+                None => status_of(&d.child, &d.spawner),
+            };
+            st.via = d.via;
+            st
         })
         .collect()
 }
@@ -770,6 +832,64 @@ mod tests {
         assert_eq!(got, vec![(s("a"), s("c1")), (s("b"), s("c1"))]);
     }
 
+    fn d(child: &str, spawner: &str, via: Option<&str>) -> Descendant {
+        Descendant {
+            child: s(child),
+            spawner: s(spawner),
+            via: via.map(s),
+        }
+    }
+
+    #[test]
+    fn descendants_walk_every_level_breadth_first() {
+        // c spawned a and b; a spawned g; g spawned gg; x is unrelated.
+        let edges = vec![
+            (s("a"), s("c")),
+            (s("b"), s("c")),
+            (s("g"), s("a")),
+            (s("gg"), s("g")),
+            (s("x"), s("other")),
+        ];
+        let got = descendants_from_edges(&[s("c")], &edges, |id| id.to_string());
+        assert_eq!(
+            got,
+            vec![
+                d("a", "c", None),
+                d("b", "c", None),
+                d("g", "a", Some("a")),
+                d("gg", "g", Some("g")),
+            ]
+        );
+    }
+
+    #[test]
+    fn descendants_follow_relay_hops_on_every_level() {
+        // Coordinator c1 -> c2; c2 spawned a; a handed off to a2, and a2
+        // spawned g. g's spawner is a2, but it descends from row a.
+        let edges = vec![(s("a"), s("c2")), (s("g"), s("a2"))];
+        let root = |id: &str| match id {
+            "c2" => s("c1"),
+            "a2" => s("a"),
+            other => other.to_string(),
+        };
+        let got = descendants_from_edges(&[s("c1"), s("c2")], &edges, root);
+        assert_eq!(got, vec![d("a", "c2", None), d("g", "a2", Some("a"))]);
+    }
+
+    #[test]
+    fn descendants_stop_at_cycles() {
+        // a spawned b, b spawned a (corrupt notes), and b also "spawned" the
+        // coordinator. Each line is listed once and the walk terminates.
+        let edges = vec![
+            (s("a"), s("c")),
+            (s("b"), s("a")),
+            (s("a"), s("b")),
+            (s("c"), s("b")),
+        ];
+        let got = descendants_from_edges(&[s("c")], &edges, |id| id.to_string());
+        assert_eq!(got, vec![d("a", "c", None), d("b", "a", Some("a"))]);
+    }
+
     #[test]
     fn cached_verdict_is_reused_only_while_settled_and_unchanged() {
         let dir = tempfile::tempdir().unwrap();
@@ -818,6 +938,7 @@ mod tests {
             session_id: s(id),
             effective_id: s(id),
             spawned_by: s("c1"),
+            via: None,
             step: None,
             workspace: None,
             source: None,
@@ -881,6 +1002,7 @@ mod tests {
             session_id: s("a"),
             effective_id: s("a"),
             spawned_by: s("c1"),
+            via: None,
             step: Some(s("P1")),
             workspace: None,
             source: Some(s("claude")),
