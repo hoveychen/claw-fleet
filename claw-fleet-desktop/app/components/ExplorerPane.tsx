@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 
 import { TextBlock } from "./blocks/TextBlock";
+import { ZoomableImage } from "./ZoomableImage";
 import { FileKindIcon, fileKind } from "./fileKind";
 import { timeAgo } from "./timeAgo";
 import { CopyButton } from "./CopyButton";
@@ -422,7 +423,7 @@ export function FilePreview({
   if (content.kind === "image") {
     return (
       <div className={fileStyles.image_wrap}>
-        <img
+        <ZoomableImage
           className={fileStyles.image_preview}
           src={`data:${content.mime};base64,${content.base64}`}
           alt={file.name}

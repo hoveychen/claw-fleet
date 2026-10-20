@@ -112,7 +112,8 @@ export async function renderPptxInto(
   blob: Blob,
   host: HTMLElement,
   width: number,
-): Promise<void> {
+  startSlide = 0,
+): Promise<{ currentIndex: number }> {
   const { init } = await import("pptx-preview");
   const previewer = init(host, {
     width,
@@ -120,7 +121,13 @@ export async function renderPptxInto(
     mode: "slide",
   });
   await previewer.preview(await (await repairPptxContentTypes(blob)).arrayBuffer());
+  // A re-render at a new width (the card was maximized) lands on the slide the
+  // reader was on, not back at the cover.
+  if (startSlide > 0 && startSlide < previewer.slideCount) {
+    previewer.renderSingleSlide(startSlide);
+  }
   previewer.updatePagination();
+  return previewer;
 }
 
 /**

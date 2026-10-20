@@ -58,6 +58,7 @@ import { ZipBrowser } from "./ZipBrowser";
 import { EmptyState } from "./EmptyState";
 import { TextBlock } from "./blocks/TextBlock";
 import styles from "./ArtifactsView.module.css";
+import { ZoomableImage } from "./ZoomableImage";
 
 /** Mirrors `claw_fleet_core::artifacts::Artifact`. */
 export interface Artifact {
@@ -2316,7 +2317,7 @@ function PreviewStage({ item }: { item: StageItem }) {
         ) : (
           <>
             {mediaSkeleton}
-            <img
+            <ZoomableImage
               src={url}
               alt={item.title}
               className={mediaLoaded ? undefined : styles.stage_media_pending}

@@ -372,3 +372,10 @@ export function AuxDocBar({
     </div>
   );
 }
+
+/** Whether the reader this is rendered in is maximized. Readers use it to turn
+ *  on controls that only make sense with the room — an image's zoom and pan
+ *  would otherwise swallow the rail's wheel scrolling. False outside a pane. */
+export function useAuxMaximized(): boolean {
+  return useContext(AuxMaximizeContext)?.maximized ?? false;
+}
