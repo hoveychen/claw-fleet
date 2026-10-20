@@ -875,6 +875,37 @@
   opacity: 0.75;
 }
 
+/* Boundary below a prepended relay leg: the interrupt rule's shape in the
+   accent colour, with air around it — it is a change of session. */
+.legRule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+  color: var(--color-accent);
+}
+
+.legRule::before,
+.legRule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-accent);
+  opacity: 0.45;
+}
+
+/* Wraps instead of truncating: on a phone a long title would otherwise eat
+   the hand-off time, which is half of what the rule is for. */
+.legRuleLabel {
+  max-width: 78%;
+  text-align: center;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
 /* Compaction boundary reuses the interrupt rule, as a button that unfolds the
    summary below it. */
 .compactRule {
