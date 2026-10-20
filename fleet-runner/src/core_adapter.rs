@@ -70,6 +70,7 @@ impl FleetCore for RealFleetCore {
                 session_id: (task.tool == "claude").then(|| task.attempt_id.to_string()),
                 entrypoint: CLOUD_TASK_ENTRYPOINT.into(),
                 images: Vec::new(),
+                spawned_by: None,
             },
         )?;
         Ok(LaunchResult {
