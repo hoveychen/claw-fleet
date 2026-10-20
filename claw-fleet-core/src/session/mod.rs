@@ -28,8 +28,11 @@ pub enum SessionStatus {
     // details (resets_at, limit_type) live on SessionInfo.rate_limit
     ServerErrored, // last assistant message was isApiErrorMessage + error=server_error
     // (the transient "Server error mid-response / Response stalled
-    // mid-stream" family). Unlike RateLimited it resumes immediately
-    // — the auto-resume scheduler retries Fleet-headless sessions.
+    // mid-stream" family), or one of the other transient records
+    // `detect_server_error` whitelists (unparseable tool call, the
+    // "403 Request not allowed" auth error). Unlike RateLimited it
+    // resumes immediately — the auto-resume scheduler retries
+    // Fleet-headless sessions.
     RemoteDisconnected, // The session ran on a registered remote workspace whose
     // transport (rca over ssh) died mid-run. Fleet stopped the
     // agent on purpose — left running it would have kept working
@@ -727,6 +730,67 @@ mod tests {
                 )],
                 Some("end_turn"),
             ),
+        ];
+        assert!(!detect_server_error(&lines));
+    }
+
+    #[test]
+    fn auth_403_request_not_allowed_is_retryable() {
+        // Same `authentication_failed` enum as the permanent failures, but this
+        // exact text clears on its own: 259 of 299 episodes on this machine
+        // were followed by a normal reply (2026-10-20).
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "authentication_failed",
+                "Failed to authenticate. API Error: 403 Request not allowed",
+                "2026-10-20T10:00:00.000Z",
+            ),
+        ];
+        assert!(
+            detect_server_error(&lines),
+            "a 403 Request not allowed must be treated as transient"
+        );
+    }
+
+    #[test]
+    fn auth_failures_other_than_403_stay_permanent() {
+        // Expired OAuth and logged-out sessions cannot fix themselves; retrying
+        // them would only burn spawns.
+        for text in [
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+            "Not logged in · Please run /login",
+            "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+        ] {
+            let lines = vec![
+                user_msg(),
+                api_error_msg("authentication_failed", text, "2026-10-20T10:00:00.000Z"),
+            ];
+            assert!(!detect_server_error(&lines), "{text} must not be retryable");
+        }
+        // The 403 text under a different enum is not this record either.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "invalid_request",
+                "API Error: 403 Request not allowed",
+                "2026-10-20T10:00:00.000Z",
+            ),
+        ];
+        assert!(!detect_server_error(&lines));
+    }
+
+    #[test]
+    fn auth_403_stale_when_real_turn_follows() {
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "authentication_failed",
+                "Failed to authenticate. API Error: 403 Request not allowed",
+                "2026-10-20T10:00:00.000Z",
+            ),
+            user_msg(),
+            assistant_msg(vec![text_block("recovered")], Some("end_turn")),
         ];
         assert!(!detect_server_error(&lines));
     }

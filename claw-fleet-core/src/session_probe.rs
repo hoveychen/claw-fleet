@@ -405,9 +405,10 @@ pub fn claude_tail_verdict(lines: &[Value]) -> TailVerdict {
             return match v["error"].as_str() {
                 Some("rate_limit") => TailVerdict::RateLimited,
                 Some("server_error") => TailVerdict::ServerError,
-                // The unparseable-tool-call record carries no enum and is
+                // The unparseable-tool-call record (no enum) and the transient
+                // "403 Request not allowed" (`authentication_failed`) are
                 // retried like a server error (see `detect_server_error`).
-                None if crate::session::detect_server_error(std::slice::from_ref(v)) => {
+                _ if crate::session::detect_server_error(std::slice::from_ref(v)) => {
                     TailVerdict::ServerError
                 }
                 other => TailVerdict::Fatal(api_error_text(v, other)),
