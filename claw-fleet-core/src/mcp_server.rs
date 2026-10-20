@@ -1578,19 +1578,38 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
         resp.answers.clone(),
     );
 
-    // Pack answers as JSON so the agent can parse structured form values. A
-    // terminal-option repair rides back as a *second* text block, never mixed
-    // into the first — agents parse block one as JSON.
-    let answers_json = serde_json::to_string(&resp.answers).unwrap_or_else(|_| "{}".into());
+    Ok(answered_result(&resp.answers, &stripped))
+}
+
+/// The tool result for an answered `fleet__ask` card.
+///
+/// A terminal-option repair note has to live inside `structuredContent`, not
+/// only in `content`: when a result carries `structuredContent`, Claude Code
+/// 2.1.284 hands the model that JSON and drops every `content` block (probe on
+/// 2026-10-20 — a second text block vanished from the transcript's
+/// `tool_result`). `structuredContent` itself stays, because the desktop's
+/// `DecisionToolCard` and the mobile relay's `tool_result_digest` read the
+/// answers out of the JSON-string `toolUseResult` it produces.
+fn answered_result(
+    answers: &std::collections::BTreeMap<String, String>,
+    stripped: &StrippedEndOptions,
+) -> Value {
+    // Pack answers as JSON so the agent can parse structured form values. For
+    // clients that do read `content`, the note rides as a *second* text block,
+    // never mixed into the first — agents parse block one as JSON.
+    let answers_json = serde_json::to_string(answers).unwrap_or_else(|_| "{}".into());
     let mut content = vec![json!({ "type": "text", "text": answers_json })];
+    let mut structured = json!({ "answers": answers });
     if !stripped.is_empty() {
-        content.push(json!({ "type": "text", "text": stripped.note() }));
+        let note = stripped.note();
+        content.push(json!({ "type": "text", "text": note }));
+        structured["note"] = json!(note);
     }
-    Ok(json!({
+    json!({
         "content": content,
-        "structuredContent": { "answers": resp.answers },
+        "structuredContent": structured,
         "isError": false,
-    }))
+    })
 }
 
 /// What the agent is told when a card came back with `cancelled: true`.
@@ -2847,6 +2866,37 @@ mod tests {
         let stripped = strip_hand_rolled_end_options(&mut qs);
         assert!(stripped.is_empty());
         assert_eq!(qs[0].options.len(), 2);
+    }
+
+    #[test]
+    fn answered_result_carries_strip_note_in_structured_content() {
+        // Claude Code shows the model only `structuredContent` when present, so
+        // the repair note must be in there, next to the answers the desktop and
+        // mobile readers parse.
+        let answers: std::collections::BTreeMap<String, String> =
+            [("Q".to_string(), "A".to_string())].into();
+        let stripped = StrippedEndOptions {
+            labels: vec!["收工".into()],
+            implies_complete: true,
+        };
+        let result = answered_result(&answers, &stripped);
+        assert_eq!(result["structuredContent"]["answers"]["Q"], "A");
+        let note = result["structuredContent"]["note"]
+            .as_str()
+            .expect("note in structuredContent");
+        assert!(note.contains("taskComplete"));
+        assert_eq!(result["content"][1]["text"], note);
+        let first: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(first["Q"], "A", "block one stays plain answers JSON");
+
+        let clean = StrippedEndOptions {
+            labels: Vec::new(),
+            implies_complete: false,
+        };
+        let result = answered_result(&answers, &clean);
+        assert!(result["structuredContent"].get("note").is_none());
+        assert_eq!(result["content"].as_array().unwrap().len(), 1);
     }
 
     #[test]
