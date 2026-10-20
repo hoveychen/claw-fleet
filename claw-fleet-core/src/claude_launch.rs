@@ -150,15 +150,24 @@ impl GlobalCarriers {
 
 /// Render the guidance concepts `include` admits, in the order the old
 /// CLAUDE.md imports used. Deterministic for a given input, which is what keeps
-/// a fork's system prompt identical to its parent's.
+/// a fork's system prompt identical to its parent's (a fork is rendered for
+/// its parent's role, see [`launch_session_id`]).
+///
+/// A sub-task gets the sub-task block in place of the interaction block: it
+/// talks to its coordinator, never to the user, so the card rules are noise.
 fn render_guidance_with(
     user_title: &str,
     locale: &str,
+    subtask: bool,
     include: impl Fn(Feature) -> bool,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
     if include(Feature::InteractionMode) {
-        parts.push(crate::interaction_mode::render_guidance(user_title, locale));
+        parts.push(if subtask {
+            crate::interaction_mode::render_subtask_guidance(user_title, locale)
+        } else {
+            crate::interaction_mode::render_guidance(user_title, locale)
+        });
     }
     if include(Feature::PrdDiscipline) {
         parts.push(crate::prd_discipline::render_guidance(user_title, locale));
@@ -216,14 +225,14 @@ pub fn guidance_voice() -> (String, String) {
 
 /// The text handed to `--append-system-prompt-file`: lessons, then the
 /// concept guidance. `None` when there is nothing to add.
-fn system_prompt_text(global: &GlobalCarriers) -> Option<String> {
+fn system_prompt_text(global: &GlobalCarriers, subtask: bool) -> Option<String> {
     let lessons = if global.lessons {
         String::new()
     } else {
         crate::lessons_store::managed_file_content().unwrap_or_default()
     };
     let (title, locale) = guidance_voice();
-    let guidance = render_guidance_with(&title, &locale, |f| global.wants(f));
+    let guidance = render_guidance_with(&title, &locale, subtask, |f| global.wants(f));
     let text = join_sections(vec![lessons, guidance]);
     (!text.is_empty()).then_some(text)
 }
@@ -306,8 +315,42 @@ struct Shape {
     /// Prefix on the launch file names. A launch that excludes the user layer
     /// gets different contents (every hook, not only the ones the global
     /// config lacks), and two launches starting at once must not overwrite
-    /// each other's file between write and read.
+    /// each other's file between write and read. A sub-task's system prompt
+    /// differs from its coordinator's, so it gets its own prefix for the same
+    /// reason.
     file_prefix: &'static str,
+    /// The session is a sub-task (see [`launch_is_subtask`]): sub-task
+    /// guidance, and the native `AskUserQuestion` disallowed.
+    subtask: bool,
+}
+
+/// The session id a launch argv runs as, for picking its role. `--resume`
+/// comes first: a fork carries both its parent's `--resume` and its own
+/// `--session-id`, and must be rendered for the parent's role so its system
+/// prompt — and with it the prompt cache — matches the parent's.
+fn launch_session_id(args: &[String]) -> Option<&str> {
+    let value_of = |flag: &str| {
+        args.iter().enumerate().find_map(|(i, a)| {
+            if a == flag {
+                args.get(i + 1).map(String::as_str)
+            } else {
+                a.strip_prefix(flag).and_then(|v| v.strip_prefix('='))
+            }
+        })
+    };
+    value_of("--resume")
+        .or_else(|| value_of("-r"))
+        .or_else(|| value_of("--session-id"))
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// Whether the launch is a sub-task's. Works at first launch because the
+/// spawn path records the sub-task edge under a pre-assigned id before
+/// launching (`agent_source::spawn_session`), and for a relay successor
+/// because the chain link is recorded before its spawn.
+fn launch_is_subtask(args: &[String]) -> bool {
+    launch_session_id(args)
+        .is_some_and(|sid| crate::task_roles_guidance::subtask_parent(sid).is_some())
 }
 
 /// The arguments that make a `claude` launch in `workspace_path` a Fleet
@@ -324,6 +367,7 @@ struct Shape {
 pub fn fleet_launch_args_for(existing: &[String], workspace_path: &str) -> Vec<String> {
     let chat = crate::chat_workspace::is_chat_workspace(workspace_path);
     let isolated = chat || excludes_user_settings(existing);
+    let subtask = !chat && launch_is_subtask(existing);
     let shape = Shape {
         global: if isolated {
             GlobalCarriers::default()
@@ -331,7 +375,13 @@ pub fn fleet_launch_args_for(existing: &[String], workspace_path: &str) -> Vec<S
             GlobalCarriers::probe()
         },
         system_prompt: !chat,
-        file_prefix: if isolated { "isolated-" } else { "" },
+        file_prefix: match (isolated, subtask) {
+            (false, false) => "",
+            (true, false) => "isolated-",
+            (false, true) => "subtask-",
+            (true, true) => "isolated-subtask-",
+        },
+        subtask,
     };
     let fleet_bin = crate::hooks::resolve_fleet_binary();
     launch_args_shaped(existing, fleet_bin.as_deref(), &shape)
@@ -347,6 +397,7 @@ fn launch_args_with(
         global: global.clone(),
         system_prompt: true,
         file_prefix: "",
+        subtask: false,
     };
     launch_args_shaped(existing, fleet_bin, &shape)
 }
@@ -385,10 +436,17 @@ fn launch_args_shaped(existing: &[String], fleet_bin: Option<&str>, shape: &Shap
 
     if let Some(text) = shape
         .system_prompt
-        .then(|| system_prompt_text(global))
+        .then(|| system_prompt_text(global, shape.subtask))
         .flatten()
     {
         emit("--append-system-prompt-file", SYSTEM_PROMPT_FILE, text);
+    }
+
+    // A sub-task reports to its coordinator, never to the user: take the
+    // native asking tool away (the MCP server withholds its own card tools).
+    if shape.subtask {
+        out.push("--disallowedTools".to_string());
+        out.push("AskUserQuestion".to_string());
     }
 
     // Naming a tool the CLI cannot resolve aborts it at startup, so this rides
@@ -582,6 +640,44 @@ mod tests {
         assert!(text.contains(prd.trim_end()));
         assert!(text.find(interaction.trim_end()) < text.find(prd.trim_end()));
         assert!(!text.contains(crate::wiki_guidance::render_guidance("zh").trim_end()));
+    }
+
+    #[test]
+    fn a_subtask_launch_gets_subtask_guidance_and_no_asking_tool() {
+        let _h = Home::new("subtask");
+        reconcile_guidance("老板", "zh").unwrap();
+        let shape = Shape {
+            global: none(),
+            system_prompt: true,
+            file_prefix: "subtask-",
+            subtask: true,
+        };
+        let args = launch_args_shaped(&[], Some(BIN), &shape);
+        let path = value_after(&args, "--append-system-prompt-file").unwrap();
+        assert!(path.ends_with(&format!("subtask-{SYSTEM_PROMPT_FILE}")), "{path}");
+        let text = fs::read_to_string(path).unwrap();
+        let sub = crate::interaction_mode::render_subtask_guidance("老板", "zh");
+        assert!(text.contains(sub.trim_end()));
+        assert!(!text.contains("fleet__ask` 可用时"), "card rules leaked into a sub-task");
+        assert_eq!(value_after(&args, "--disallowedTools"), Some("AskUserQuestion"));
+
+        // The coordinator keeps the card rules and its asking tool.
+        let main = launch_args_with(&[], Some(BIN), &none());
+        assert!(value_after(&main, "--disallowedTools").is_none());
+    }
+
+    #[test]
+    fn the_role_is_read_off_the_resumed_session_before_the_new_id() {
+        let argv = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(launch_session_id(&argv(&["-p", "x", "--session-id", "new"])), Some("new"));
+        // A fork renders for its origin, so the cached prefix matches.
+        assert_eq!(
+            launch_session_id(&argv(&["--resume", "origin", "--fork-session", "--session-id", "f"])),
+            Some("origin")
+        );
+        assert_eq!(launch_session_id(&argv(&["--resume=abc"])), Some("abc"));
+        assert_eq!(launch_session_id(&argv(&["-r", "abc"])), Some("abc"));
+        assert_eq!(launch_session_id(&argv(&["-p", "x"])), None);
     }
 
     #[test]

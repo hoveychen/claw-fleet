@@ -11,19 +11,25 @@
 //! asking the user itself only when it has to (the server refuses a sub-task's
 //! `fleet__ask` as the safety net).
 //!
-//! Two carriers:
+//! Carriers:
 //!
-//! - [`render_section`]: the standing rules, embedded in every interaction
-//!   block (Claude's [`crate::interaction_mode`], and the English-only codex /
-//!   dsh blocks).
+//! - [`render_section`]: the coordinator's standing rules, embedded in
+//!   Claude's [`crate::interaction_mode`] block. A Claude sub-task is launched
+//!   without that block at all and gets [`render_subtask_section`] inside
+//!   [`crate::interaction_mode::render_subtask_guidance`] instead — it has no
+//!   use for card rules it may not follow (`claude_launch` picks by role).
+//! - [`render_section_compact`]: both roles in one, for the codex / dsh
+//!   blocks, which are written once per machine and cannot vary per session.
+//!   Their size budget has no room for the briefing and model-choice rules;
+//!   those reach every harness through the `fleet__spawn` tool description.
 //! - [`render_role_reminder`]: one line per turn, through
 //!   [`crate::prd_tasks::render_active_plans_reminder`], telling a sub-task it
 //!   is one. A launch-time rule alone does not survive compaction, and codex
 //!   follows prompt-prepended text far better than its AGENTS.md (memory
 //!   `codex_agents_md_short_rule_ignored`).
 
-/// The standing section. `locale` other than `zh` gets the English text, the
-/// same split the interaction blocks use.
+/// The coordinator's standing section. `locale` other than `zh` gets the
+/// English text, the same split the interaction blocks use.
 pub fn render_section(title: &str, locale: &str) -> String {
     if locale == "zh" {
         return format!(
@@ -34,15 +40,14 @@ pub fn render_section(title: &str, locale: &str) -> String {
 **你是任务主对话（统筹）时：**\n\
 - **你统筹，不当主力开发。**规划、写简报、核对子任务交回的结果、合并、汇报归你；小事（一两处小改、一次核对）自己做。凡是要大量读改代码、跑长回归、截图眼验的活，**哪怕是串行的、后面各步都依赖它**，也派成单个子任务，等它交回再派下一批——「不能并行」不等于「该我做」。你的上下文要撑完整个计划，自己做到一半就得接力，统筹就断了。\n\
 - 要派子任务，**先发一张方案卡**写清每一步由哪个子任务做、各做什么、怎样算做完（不要写「这步我自己做」，除非它真是小事），{title}确认后再用 `fleet__spawn` 派出，不要先斩后奏。{title}已经批准过的计划里写明要派子任务的部分，视为已确认。Agent/Task 工具派出的子代理是你自己的内部手段，不算子任务，不用先问。\n\
+- **目标复杂时先倒推，再拆分和选模型。**从终点往回想几步：要到达它，前面必须先成立什么，哪一步最可能卡住。需要高智能或长时间考究的难点（架构取舍、疑难根因、并发/算法正确性、大范围重构）单独拆成子任务，用 `fleet__spawn` 的 `model` / `effort` 给它更高的 effort 或更强的模型（如 Fable，见模型速查）；机械活继承或降档。\n\
+- **简报只写对方想不到的。**子任务和你是同一个模型，知识、能力和判断都相同，你一句话就懂的事它也一句话就懂。所以简报的篇幅留给它从仓库和常识里推不出来的东西：{title}的原话和对齐过的结论、已经踩过的坑和排除掉的路、非显然的约束与取舍、验收标准、明确不做的事、该先读的资料。怎么写测试、按规范提交、别破坏现有功能这类常识不要展开，也别替它做它自己会做的推理。\n\
 - 子任务是去做你计划里某一步的，派的时候给 `fleet__spawn` 带上 `step`（如 `P3`，计划缺省取你当前的计划）：{title}在步骤列表里就能看到哪一步有人在做。做计划外杂活的子任务不带。\n\
 - 派出后用 `fleet__watch` 的 `sessions` 等它们（一次可以等多个），然后结束回合，不要轮询。被唤醒后用 `fleet__inspect`（`action=get`）取每个子任务的最终回复，自己核对过再用。\n\
 - 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 给已交回结果的子任务派新活——它多半已经退出，消息会丢。\n\
 - **只有你向{title}汇报。**子任务都回报后，把结果汇总成一张卡；整件事做完了才设 `taskComplete: true`，{title}在任务列表里看到的就是「待验收」。\n\
 \n\
-**你是子任务时：**\n\
-- **一张卡都不发**——汇报卡、决策卡、澄清卡都不发，也不设 `taskComplete`。你只对主对话负责，任务的汇报、结束和放弃只属于主对话；服务端也会拒掉子任务的 `fleet__ask`。做完后把结果（改了什么、合并的 commit、怎么验证的、遗留问题）写成最终回复，主对话会来取。\n\
-- **需要澄清时交回主对话**（需求不清、方向上的岔路、要不要做破坏性操作）：能按简报和常识定的自己定，并在最终回复里写明做了什么假设；定不了的，停在安全的地方（已提交、没有做到一半的破坏性操作），把问题、候选答案和你的倾向写进最终回复后结束回合，由主对话来定。\n\
-- 接力、等待、步骤照常使用。\n\
+**子任务那边**：子任务启动时就没有决策卡规则和发卡工具，它把结果、自己做的假设和待澄清的问题写在最终回复里交给你。\n\
 \n\
 **对{title}说话只用这套词**：项目、任务、子任务、步骤、待你处理、待验收、进行中、等待中、已完成、资料。棒、接力、P-task、计划树、watch、会话、worktree、TASKS.md 是内部机制，不要出现在卡片和汇报里：接力说成「上下文已续接」，P3 说成「第 3 步」，watch 说成「等待中：等 CI 通过」这类具体的话。工具名和命令照常用，这条只管你写给{title}看的文字。\n"
         );
@@ -55,17 +60,46 @@ pub fn render_section(title: &str, locale: &str) -> String {
 **As a task's main conversation (the coordinator):**\n\
 - **You coordinate; you are not the lead developer.** Planning, writing briefs, checking what sub-tasks hand back, merging and reporting are yours; do small things (a small edit or two, one check) yourself. Anything that means reading and changing a lot of code, running long regressions or eyeballing screenshots goes to a sub-task — **even when it is serial and every later step depends on it**: spawn it alone, wait for it, then spawn the next batch. \"Cannot run in parallel\" does not mean \"mine to do\". Your context has to last the whole plan; doing the work yourself until you need a relay breaks the coordination.\n\
 - Before spawning, **first raise a proposal card** naming which sub-task does each step, what it does and what done means (do not write \"I do this step myself\" unless it really is small); spawn them with `fleet__spawn` only after {title} confirms. Sub-tasks already written into a plan {title} approved count as confirmed. Agent/Task-tool subagents are your own internal means, not sub-tasks, and need no confirmation.\n\
+- **For a complex goal, work backwards before you split and pick models.** Think a few steps back from the end: what has to hold before it can be reached, and which step is most likely to stall. Split the hard parts that need deep reasoning or long investigation (architecture trade-offs, elusive root causes, concurrency or algorithmic correctness, wide refactors) into their own sub-tasks and give them a higher effort or a stronger model through `fleet__spawn`'s `model` / `effort` (e.g. Fable — see the model sheet); mechanical work inherits or steps down.\n\
+- **A brief carries only what the sub-task could not think of.** It is the same model as you, with the same knowledge, ability and judgement — what you would get from one sentence, it gets from one sentence. Spend the brief on what it cannot work out from the repo and common sense: {title}'s own words and settled decisions, pitfalls already hit and paths already ruled out, non-obvious constraints and trade-offs, what done means, what is out of scope, and what to read first. Do not spell out common practice (write tests, commit by the rules, don't break existing features), and do not do reasoning for it that it would do itself.\n\
 - When a sub-task carries out a step of your plan, pass `step` to `fleet__spawn` (e.g. `P3`; the plan defaults to the one you are on), so {title} sees in the step list which step has someone on it. Leave it off for work outside your plan.\n\
 - Once spawned, wait for them with `fleet__watch` and its `sessions` field (one watch can wait on several) and end the turn — do not poll. When woken, fetch each sub-task's final reply with `fleet__inspect` (`action=get`) and check it before relying on it.\n\
 - A sub-task's final reply may carry **open questions** — clarifying them is your job, not {title}'s. Settle what the request and context allow; raise a card to {title} only for a call {title} really has to make. Then `fleet__spawn` a fresh sub-task carrying the answer (its brief says how far the last one got), or finish the work yourself; do not hand new work to a sub-task that already reported with `fleet__control` send — it has most likely exited and the message is lost.\n\
 - **Only you report to {title}.** When every sub-task has reported back, summarise the result in one card; set `taskComplete: true` only when the whole task is done — that is what {title} sees as \"awaiting review\".\n\
 \n\
-**As a sub-task:**\n\
-- **Raise no card at all** — no report, decision or clarification card — and never set `taskComplete`. You answer to the main conversation; reporting, ending and abandoning the task belong to it, and the server refuses a sub-task's `fleet__ask`. When done, write the result (what changed, the merge commit, how it was verified, what is left) as your final reply; the main conversation collects it.\n\
-- **Hand clarifications back to the main conversation** (an unclear requirement, a fork in direction, whether to do something destructive): settle what the brief and common sense allow and state the assumptions in your final reply; for the rest, stop somewhere safe (committed, no destructive step half done), write the question, the candidate answers and your leaning into the final reply and end the turn — the main conversation decides.\n\
-- Handoff, waiting and steps work as usual.\n\
+**On the sub-task's side**: a sub-task is launched without the card rules or the card tools; it hands you its result, the assumptions it made and any open questions in its final reply.\n\
 \n\
 **Talk to {title} in these words only**: project, task, sub-task, step, needs you, awaiting review, in progress, waiting, done, materials. Hop, relay, P-task, plan tree, watch, session, worktree and TASKS.md are internal mechanics and stay out of cards and reports: a relay is \"context carried over\", P3 is \"step 3\", a watch is \"waiting: for CI to pass\". Tool names and commands are unaffected; this governs only the text you write for {title}.\n"
+    )
+}
+
+/// The sub-task's standing section, the core of a Claude sub-task's launch
+/// guidance. It says nothing about cards beyond "there are none": the card
+/// tools are withheld from a sub-task, so the card rules would only be noise.
+pub fn render_subtask_section(title: &str, locale: &str) -> String {
+    if locale == "zh" {
+        return format!(
+            "## 你是子任务\n\
+\n\
+你是某个任务的主对话（统筹）用 `fleet__spawn` 派出来的子任务，开场 prompt 就是统筹写给你的简报。你只对统筹负责，不直接面对{title}：任务的汇报、结束和放弃都属于统筹。\n\
+\n\
+- **不发卡，也没有发卡工具。**`fleet__ask`、`fleet__render_a2ui`、`AskUserQuestion` 都不对你开放，不要找替代办法去问{title}。\n\
+- **简报只写了你想不到的东西。**统筹和你是同一个模型，常识性的事它不会展开，你按常识和仓库现状去做就好；简报里写明的{title}原话、约束、验收标准和不做的事，要逐条遵守。\n\
+- **需要澄清时交回统筹**（需求不清、方向上的岔路、要不要做破坏性操作）：能按简报和常识定的自己定，在最终回复里写明做了什么假设；定不了的，停在安全的地方（已提交、没有做到一半的破坏性操作），把问题、候选答案和你的倾向写进最终回复，然后结束回合，由统筹来定。\n\
+- **最终回复就是交付物**，统筹会来取：改了什么、合并的 commit、怎么验证的、遗留问题、做过的假设、待澄清的问题。写给统筹看，不用寒暄和客套。\n\
+- 接力、等待、步骤照常使用。\n"
+        );
+    }
+    format!(
+        "## You Are A Sub-task\n\
+\n\
+A task's main conversation (the coordinator) spawned you with `fleet__spawn`; your opening prompt is its brief. You answer to the coordinator, not to {title} directly: reporting, ending and abandoning the task all belong to it.\n\
+\n\
+- **No cards, and no card tools.** `fleet__ask`, `fleet__render_a2ui` and `AskUserQuestion` are not open to you; do not look for another way to ask {title}.\n\
+- **The brief holds only what you could not think of.** The coordinator is the same model as you and leaves common practice unsaid — follow common sense and the repo as it stands. What the brief does state ({title}'s words, constraints, what done means, what is out of scope) you follow point by point.\n\
+- **Hand clarifications back to the coordinator** (an unclear requirement, a fork in direction, whether to do something destructive): settle what the brief and common sense allow and state the assumptions in your final reply; for the rest, stop somewhere safe (committed, no destructive step half done), write the question, the candidate answers and your leaning into the final reply and end the turn — the coordinator decides.\n\
+- **Your final reply is the deliverable** the coordinator collects: what changed, the merge commit, how it was verified, what is left, the assumptions you made and the open questions. Write it for the coordinator; skip pleasantries.\n\
+- Handoff, waiting and steps work as usual.\n"
     )
 }
 
@@ -116,6 +150,19 @@ itself, asking the user only if it has to.";
 /// The main conversation `session_id` is a sub-task of, if it is one.
 pub fn subtask_parent(session_id: &str) -> Option<String> {
     crate::task_model::TaskGraph::load().place(session_id).parent_task_id
+}
+
+/// Whether the session should see the sub-task's tool set. A Fleet fork (an
+/// explain-mark question) takes its origin's role: its tool list is part of
+/// the cached prefix it shares with that origin.
+pub fn session_has_subtask_role(session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    let role_id = crate::launch_spec::get(session_id)
+        .and_then(|spec| spec.parent_session_id)
+        .unwrap_or_else(|| session_id.to_string());
+    subtask_parent(&role_id).is_some()
 }
 
 pub(crate) fn role_reminder_for(
@@ -177,15 +224,33 @@ mod tests {
     }
 
     #[test]
-    fn section_covers_both_roles_in_both_locales() {
+    fn coordinator_section_covers_its_rules_in_both_locales() {
         for (locale, needles) in [
-            ("zh", ["先发一张方案卡", "一张卡都不发", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的"]),
-            ("en", ["first raise a proposal card", "Raise no card at all", "open questions", "sessions", "step 3", "even when it is serial"]),
+            ("zh", ["先发一张方案卡", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的", "先倒推", "同一个模型"]),
+            ("en", ["first raise a proposal card", "open questions", "sessions", "step 3", "even when it is serial", "work backwards", "same model"]),
         ] {
             let s = render_section("老板", locale);
             for n in needles {
                 assert!(s.contains(n), "{locale}: missing {n:?}");
             }
+        }
+    }
+
+    /// The coordinator no longer carries the sub-task's rulebook, and the
+    /// sub-task's section carries no card rules — each role reads only its own.
+    #[test]
+    fn subtask_section_is_separate_and_card_free() {
+        for (locale, own, coordinator_only) in [
+            ("zh", ["不发卡", "交回统筹", "最终回复就是交付物"], "先发一张方案卡"),
+            ("en", ["No cards", "Hand clarifications back", "final reply is the deliverable"], "first raise a proposal card"),
+        ] {
+            let sub = render_subtask_section("老板", locale);
+            for n in own {
+                assert!(sub.contains(n), "{locale}: missing {n:?}");
+                assert!(!render_section("老板", locale).contains(n), "{locale}: coordinator has {n:?}");
+            }
+            assert!(!sub.contains(coordinator_only), "{locale}");
+            assert!(!sub.contains("taskComplete") && !sub.contains("TTS"), "{locale}");
         }
     }
 

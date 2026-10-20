@@ -738,11 +738,11 @@ fn spawn_tool_def() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "The prompt the new session opens with — its full brief, since nobody is there to answer follow-up questions. Name the plan id, the background docs to read, and what 'done' means."},
+                "prompt": {"type": "string", "description": "The brief the new session opens with. It is the same model as you, with the same knowledge and judgement, so write only what it could not work out from the repo and common sense: the boss's own words and settled decisions, pitfalls already hit and paths ruled out, non-obvious constraints and trade-offs, what 'done' means, what is out of scope, the plan id and docs to read first. Skip what one sentence conveys. It cannot ask the boss; open questions come back to you in its final reply."},
                 "workspace": workspace_arg_schema("the new session runs in"),
                 "title": {"type": "string", "description": "Name the new session up front, so it is labelled in the task list before it has produced any output to name itself by. Strongly recommended."},
-                "model": {"type": "string", "description": "Override model (else inherits yours). Naming another harness's model spawns on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh."},
-                "effort": {"type": "string", "description": "Override reasoning effort (low/medium/high/xhigh/max)."},
+                "model": {"type": "string", "description": "Override model (else inherits yours). Pick a stronger one (e.g. Fable) for a step that needs deep reasoning or long investigation; inherit for mechanical work. Naming another harness's model spawns on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh."},
+                "effort": {"type": "string", "description": "Override reasoning effort (low/medium/high/xhigh/max). Raise it for the hard steps you found by working backwards from the goal; lower it for mechanical ones."},
                 "step": {"type": "string", "description": "The step of YOUR plan this sub-task is dispatched to work on, e.g. `P3`. Fleet hangs the sub-task under that step in the task rail, so the boss sees which step has someone on it. Pass it whenever the sub-task carries out (part of) one of your plan's steps; omit it for work outside your plan. The step must exist, or the spawn is refused."},
                 "plan": {"type": "string", "description": "Plan id `step` belongs to. Defaults to the plan you are currently on; only needed when you are not on one or mean another."}
             },
