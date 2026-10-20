@@ -162,7 +162,7 @@ pub fn list_thread_images(id: &str) -> Vec<GeneratedImage> {
 // codex_image turns each correctly ended in plain text — `fleet__ask` is not
 // registered on the image launch, so the agent hit `not a function` and fell
 // back, which is the headless behaviour we want. Then
-// `turn_completion_card::maybe_raise` saw a task session whose process had
+// the (since removed) turn-completion card saw a task session whose process had
 // exited without raising a card, put up a "Task Complete" card, and on the answer
 // resumed the thread through `agent_source::resume_session` — the *normal*
 // session path, which does register the fleet MCP server and does bypass the

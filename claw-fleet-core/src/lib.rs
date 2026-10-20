@@ -273,7 +273,6 @@ pub mod tcc;
 pub mod today_usage;
 pub mod token_analysis;
 pub mod transcript_chain;
-pub mod turn_completion_card;
 pub mod user_attachments;
 pub mod wakeup_guard;
 pub mod watch;
