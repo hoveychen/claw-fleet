@@ -402,8 +402,10 @@ pub fn set_by_boss(req: &SetTaskProfileRequest) -> Result<TaskProfile, String> {
 pub fn render(task_id: &str, p: Option<&TaskProfile>) -> String {
     let Some(p) = p else {
         return format!(
-            "task {task_id}: no profile yet (type defaults to general). \
-             Call fleet__task action=set with type and goal.\n"
+            "task {task_id}: no profile yet (type undecided). \
+             The type is settled by the boss pressing Start on a kickoff card \
+             (fleet__task action=kickoff), not by you; you may write the goal \
+             with fleet__task action=set goal=....\n"
         );
     };
     let mut out = format!("task {task_id}\ntype: {}\n", p.task_type.as_str());
