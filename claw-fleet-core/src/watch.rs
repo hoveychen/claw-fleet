@@ -913,6 +913,22 @@ fn list_in(dir: &Path) -> Vec<WatchRecord> {
     out
 }
 
+/// Whether `session_id` owns a watch that is still armed — any kind, `until`
+/// or `sessions`. The plan gate treats this as a legitimate way to end a turn.
+pub fn session_has_live_watch(session_id: &str) -> bool {
+    let Some(dir) = watches_dir() else {
+        return false;
+    };
+    session_has_live_watch_in(&dir, session_id, now_ms())
+}
+
+pub(crate) fn session_has_live_watch_in(dir: &Path, session_id: &str, now: u64) -> bool {
+    !session_id.trim().is_empty()
+        && list_in(dir)
+            .iter()
+            .any(|w| w.session_id == session_id && w.is_live(now))
+}
+
 // ── session enrichment ────────────────────────────────────────────────────────
 
 /// Lightweight per-session view of an active watch, embedded into `SessionInfo`
@@ -2055,6 +2071,49 @@ mod tests {
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    /// The plan gate's watch exit: an armed `until` watch owned by the session
+    /// counts, someone else's or an expired one does not.
+    #[test]
+    fn live_watch_counts_only_for_its_owner_and_until_deadline() {
+        let d = dir();
+        let rec = make(d.path(), "w1", 1_000);
+        assert!(session_has_live_watch_in(d.path(), "sess-1", 2_000));
+        assert!(!session_has_live_watch_in(d.path(), "sess-2", 2_000));
+        assert!(!session_has_live_watch_in(d.path(), "", 2_000));
+        assert!(
+            !session_has_live_watch_in(d.path(), "sess-1", rec.deadline_at),
+            "past the deadline the watch no longer resumes anyone"
+        );
+    }
+
+    /// A `sessions` watch (waiting on spawned sub-tasks) is the coordinator's
+    /// usual exit and must count just like an `until` watch.
+    #[test]
+    fn live_watch_counts_a_sessions_watch() {
+        let d = dir();
+        let rec = insert_in(
+            d.path(),
+            "coord",
+            "/ws",
+            "",
+            vec![WatchTarget::new("child-1", 1_000)],
+            WaitMode::All,
+            None,
+            Some("sub-tasks"),
+            30,
+            DEFAULT_TIMEOUT_SECS,
+            None,
+            None,
+            None,
+            "w2",
+            1_000,
+        )
+        .unwrap();
+        write_record(d.path(), &rec).unwrap();
+        assert!(session_has_live_watch_in(d.path(), "coord", 2_000));
+        assert!(!session_has_live_watch_in(d.path(), "child-1", 2_000));
     }
 
     fn make(d: &Path, id: &str, now: u64) -> WatchRecord {
