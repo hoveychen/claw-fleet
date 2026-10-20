@@ -731,6 +731,39 @@ mod tests {
     }
 
     #[test]
+    fn cached_verdict_is_reused_only_while_settled_and_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = dir.path().join("t.jsonl");
+        std::fs::write(&t, "{}\n").unwrap();
+        let path = t.to_string_lossy().to_string();
+        let (mtime_ms, len) = VerdictCache::stamp(&path).unwrap();
+        let v = |class, transcript: Option<String>| CachedVerdict {
+            effective_id: s("a"),
+            class,
+            transcript,
+            mtime_ms,
+            len,
+        };
+        assert!(v(RecoveryClass::Done, Some(path.clone())).still_settled());
+        assert!(v(RecoveryClass::Closed, Some(path.clone())).still_settled());
+        // A hint without a transcript, or a class that can still move, is
+        // never reused.
+        assert!(!v(RecoveryClass::Done, None).still_settled());
+        for c in [
+            RecoveryClass::Recoverable,
+            RecoveryClass::Failed,
+            RecoveryClass::Running,
+            RecoveryClass::AuthFailed,
+            RecoveryClass::UserInterrupted,
+        ] {
+            assert!(!v(c, Some(path.clone())).still_settled(), "{c:?}");
+        }
+        // A new turn appends to the transcript: the verdict is stale.
+        std::fs::write(&t, "{}\n{}\n").unwrap();
+        assert!(!v(RecoveryClass::Done, Some(path)).still_settled());
+    }
+
+    #[test]
     fn status_round_trips_through_json() {
         let st = SubtaskStatus {
             session_id: s("a"),
