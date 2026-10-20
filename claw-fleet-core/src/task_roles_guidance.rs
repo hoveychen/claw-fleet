@@ -114,7 +114,7 @@ pub fn render_section_compact(title: &str) -> String {
 \n\
 - With no \"Your role: sub-task\" / \"你的角色：子任务\" line in the per-turn injection you are a task's main conversation: do small things yourself, delegate heavy work even when it is serial; before spawning sub-tasks with `fleet__spawn`, raise a proposal card and wait for {title} to confirm; then wait on them with `fleet__watch` `sessions`, read each final reply with `fleet__inspect`, and report the summary — only you report to {title}.\n\
 - As a sub-task: raise no card at all and never set `taskComplete`; your final reply is the result. Put anything needing clarification in that reply (question, options, your leaning) and let the main conversation settle it.\n\
-- As the main conversation, settle a sub-task's open questions yourself, asking {title} only for a real call; continue with a fresh `fleet__spawn`, not a `send` to the finished sub-task. Only a sub-task the per-turn injection lists as died mid-turn is woken, with `fleet__control action=resume`; Agent-tool subagents cut off with you are re-dispatched.\n\
+- As the main conversation, settle a sub-task's open questions yourself, asking {title} only for a real call; continue with a fresh `fleet__spawn`, not `send`/`resume` on the finished sub-task.\n\
 - In cards say project / task / sub-task / step / waiting, never hop, relay, P-task, plan tree, watch or session."
     )
 }
@@ -497,7 +497,8 @@ mod tests {
                 assert!(s.contains(n), "{locale}: missing {n:?}");
             }
         }
-        let compact = render_section_compact("Boss");
-        assert!(compact.contains("action=resume") && compact.contains("re-dispatched"), "{compact}");
+        // The compact codex / dsh block has ~8 bytes of AGENTS.md headroom;
+        // the how-to arrives with the per-turn block itself.
+        assert!(render_section_compact("Boss").contains("not `send`/`resume` on the finished"));
     }
 }
