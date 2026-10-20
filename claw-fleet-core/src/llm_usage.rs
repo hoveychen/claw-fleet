@@ -40,6 +40,8 @@ pub const SCENARIO_MASCOT_QUIPS: &str = "mascot_quips";
 /// ([`crate::session_explain`]). Logged here because the fork persists no
 /// transcript of its own, so nothing else would ever account for the spend.
 pub const SCENARIO_SESSION_EXPLAIN: &str = "session_explain";
+/// The commit-time diff review run from `fleet guard` ([`crate::reward_hack`]).
+pub const SCENARIO_REWARD_HACK_CHECK: &str = "reward_hack_check";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
