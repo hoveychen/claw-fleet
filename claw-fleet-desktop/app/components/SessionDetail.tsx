@@ -53,7 +53,7 @@ import { getItem, setItem } from "../storage";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel, OutOfCreditsNotice } from "./SessionCard";
 import { inlinePendingFleetAsk, withCodexDecisionHistory } from "./codexDecision";
-import { useChromeYield } from "../hooks/useChromeYield";
+import { PROSE_MIN_PX, READER_MIN_PX, useChromeYield } from "../hooks/useChromeYield";
 import { useDocCardWidth } from "../hooks/useDocCardWidth";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -1674,9 +1674,34 @@ export function SessionDetail({
     proseW: paneW > 0 ? paneW - docCardW - 26 : 0,
     enabled: chromeAdaptive,
   });
+  /* The rail yields too: while a reader is open and either it or the
+     conversation beside it is cramped, the rail column folds away so the pane
+     can widen both. It is only hidden, not unmounted — the reader is a rail card
+     portaled out, and unmounting the rail would close it. Latched until the
+     reader closes: folding widens the card, and re-testing against that width
+     would just open the rail again. The toolbar switch brings it back
+     ("declined"), and then it stays put for this reader. */
+  const [railYield, setRailYield] = useState<"none" | "folded" | "declined">("none");
+  useEffect(() => {
+    if (!docExpanded) {
+      setRailYield("none");
+      return;
+    }
+    if (railYield !== "none" || paneW <= 0 || docCardW <= 0) return;
+    if (docCardW < READER_MIN_PX || paneW - docCardW - 26 < PROSE_MIN_PX) setRailYield("folded");
+  }, [docExpanded, railYield, paneW, docCardW]);
+  const railFolded = railOpen && railYield === "folded";
+  const railShown = railOpen && !railFolded;
   const toggleRail = useCallback(() => {
+    if (railFolded) {
+      setRailYield("declined");
+      return;
+    }
+    // Showing the rail by hand also brings back a reader that hiding it closed;
+    // folding the rail again right then would make the switch look dead.
+    if (!railOpen && aux.expanded != null) setRailYield("declined");
     setRailOverride((prev) => !(prev ?? railHasContent));
-  }, [railHasContent]);
+  }, [railHasContent, railFolded, railOpen, aux.expanded]);
   /* Can the drawer be seated *beside* the rail at this width? The design has it
      stop at the rail's left edge, so the card you clicked to open it stays
      readable — but that only works while the row is wide enough to hold both.
@@ -1687,7 +1712,7 @@ export function SessionDetail({
      1280px that clipped 173px including its own title. So when it does not fit,
      it gives up the side-by-side and slides in over the rail instead, which is
      also what you expect a drawer entering from the right to do. */
-  const railCovered = railOpen && auxOpen && bodyRowW > 0 && bodyRowW < railFitW;
+  const railCovered = railShown && auxOpen && bodyRowW > 0 && bodyRowW < railFitW;
 
   /*
    * Escape closes the drawer, then collapses the expanded rail card.
@@ -1830,7 +1855,7 @@ export function SessionDetail({
       <WebLinkProvider value={openWebInAux}>
       <IngestOpenProvider value={ingestOpen}>
       <div
-        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""} ${railCovered ? styles.rail_covered : ""} ${docCardW > 0 ? styles.reader_open : ""}`}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railShown ? styles.rail_open : ""} ${railCovered ? styles.rail_covered : ""} ${docCardW > 0 ? styles.reader_open : ""}`}
         /* Standalone only: the pane grows by what the reader needs, so the room
            the auto-collapsed chrome gave up lands here rather than in the list
            beside it. Inline hosts own their own width. */
@@ -1981,11 +2006,11 @@ export function SessionDetail({
                   <div className={styles.hero_tools} data-tauri-drag-region>
                     <button
                       type="button"
-                      className={`${styles.hero_tool} ${railOpen ? styles.hero_tool_on : ""}`}
+                      className={`${styles.hero_tool} ${railShown ? styles.hero_tool_on : ""}`}
                       onClick={toggleRail}
-                      aria-pressed={railOpen}
-                      title={railOpen ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
-                      aria-label={railOpen ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
+                      aria-pressed={railShown}
+                      title={railShown ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
+                      aria-label={railShown ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
                     >
                       <PanelRight size={14} strokeWidth={1.8} />
                     </button>
@@ -2144,7 +2169,7 @@ export function SessionDetail({
                 stepsPlanId={taskStepsPlan?.id ?? null}
                 artifacts={taskArtifacts}
                 reviewDocs={reviewDocs}
-                className={styles.task_rail}
+                className={`${styles.task_rail} ${railFolded ? styles.task_rail_folded : ""}`}
                 onOpenSession={(id) => onOpenSession?.(id)}
                 waiting={
                   watchCount + waiterCount > 0 ? (
