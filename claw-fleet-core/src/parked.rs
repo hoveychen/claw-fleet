@@ -779,7 +779,16 @@ where
         interrupt_session(&card.session_id);
     }
 
-    let prompt = build_resume_prompt(&card, response);
+    let mut prompt = build_resume_prompt(&card, response);
+    // A kickoff card settles the task here, before the session wakes, so the
+    // resumed turn already runs under the type the boss approved — and is told
+    // what was set up. See `crate::task_kickoff`.
+    if card.kind == ParkedKind::FleetAsk {
+        if let Some(note) = crate::task_kickoff::on_parked_answer(id, response) {
+            prompt.push_str("\n\n");
+            prompt.push_str(&note);
+        }
+    }
     // The resumed session is the *same* session continuing its work, so it has to
     // come back on the same model and effort it was running. Falling through to
     // the CLI default would silently switch models mid-task — an `opus[1m]`
@@ -853,6 +862,8 @@ where
     // Captured before the action runs: both branches destroy the card.
     let card = get(id);
     let outcome = if dismissed {
+        // A dismissed kickoff card settles nothing; drop its filed kickoff.
+        crate::task_kickoff::take_pending(id);
         discard(id)
     } else {
         answer_fn(id, response)

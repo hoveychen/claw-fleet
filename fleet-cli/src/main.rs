@@ -1030,11 +1030,9 @@ pub(crate) enum JobCommands {
 
 #[derive(Subcommand)]
 pub(crate) enum TaskCommands {
-    /// Set the task's type and/or goal (first turn; again only when it changes).
+    /// Set the task's goal. The type is not set here: only the boss settles it,
+    /// via a kickoff card or the task list.
     Set {
-        /// dev | research | general
-        #[arg(long = "type")]
-        task_type: Option<String>,
         /// One sentence of "the work is done when ...".
         #[arg(long)]
         goal: Option<String>,
@@ -1051,9 +1049,6 @@ pub(crate) enum TaskCommands {
         prompt: String,
         #[arg(long)]
         title: Option<String>,
-        /// dev | research | general
-        #[arg(long = "type")]
-        task_type: Option<String>,
         #[arg(long)]
         goal: Option<String>,
         /// Project directory for the new task (defaults to this session's).

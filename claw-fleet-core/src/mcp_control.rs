@@ -215,12 +215,16 @@ fn handoff_tool_def() -> Value {
 fn task_tool_def() -> Value {
     json!({
         "name": "fleet__task",
-        "description": "Define the task this conversation is working on: its type (dev / research / general — picks the workflow Fleet guides you through) and its goal (one sentence of \"the work is done when …\"). Call `set` once on your FIRST turn, before ending it; call it again only when the type or goal really changes — a goal change needs `goalReason`. Only the task's main conversation may `set`; a sub-task can `get`. When the boss asks for something unrelated to the current goal, `split` it into a NEW top-level task instead of mixing two goals in one. Actions: set (type and/or goal; goalReason when replacing a goal), get, split (prompt required — the new task's full brief; title/type/goal/workspace optional).",
+        "description": "Define the task this conversation is working on. A task starts undecided; you never label its type yourself — the boss settles it. Once the conversation has made clear what the job is, and before you start researching (looking things up, spawning sub-tasks, running experiments), call `kickoff` with the research plan's first step: it raises a kickoff card offering 开工 / 改一下再开 / 还没聊完 and waits for the answer. Only 开工 makes this a research task, creates its `kind=research` plan (one P per sub-question, with an empty findings ledger) and returns the research workflow; any other answer comes back to you as-is and writes nothing. `set` writes the goal (one sentence of \"the work is done when …\"; replacing a goal needs `goalReason`). Only the task's main conversation may `kickoff` or `set`; a sub-task can `get`. When the boss asks for something unrelated to the current goal, `split` it into a NEW top-level task instead of mixing two goals in one. Actions: kickoff (question, subquestions, budget, stop, deliverable — all required), set (goal; goalReason when replacing a goal), get, split (prompt required — the new task's full brief; title/goal/workspace optional).",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["set", "get", "split"]},
-                "type": {"type": "string", "enum": ["dev", "research", "general"], "description": "set/split: the task's type. dev = changes code; research = produces knowledge (a report, findings, a recommendation); general = anything else."},
+                "action": {"type": "string", "enum": ["kickoff", "set", "get", "split"]},
+                "question": {"type": "string", "description": "kickoff: the research question, one sentence."},
+                "subquestions": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "kickoff: how the question splits; each becomes a P-task of the research plan."},
+                "budget": {"type": "string", "enum": ["self", "2-4", "5+"], "description": "kickoff: fan-out tier — self = look it up yourself; 2-4 sub-agents for a comparison; 5+ for complex research."},
+                "stop": {"type": "string", "description": "kickoff: the stop condition — when the answer is good enough to end."},
+                "deliverable": {"type": "string", "enum": ["wiki", "reply"], "description": "kickoff: where the result goes — a wiki report, or a conclusion in the conversation."},
                 "goal": {"type": "string", "description": "set/split: one sentence of \"the work is done when …\"."},
                 "goalReason": {"type": "string", "description": "set only: why you are replacing a goal the task already has. Required for a change; tell the boss you changed it."},
                 "prompt": {"type": "string", "description": "split only: the new task's complete brief, including whatever context it needs from this conversation. Required for split."},
@@ -895,12 +899,28 @@ fn workspace_arg_schema(what: &str) -> Value {
 /// `mcp_server` refuses that one action for subagents with this clause.
 pub const TASK_SET_EFFECT: &str = "redefined your PARENT session's task (type/goal)";
 
-fn task_type_arg(args: &Value) -> Result<Option<crate::task_profile::TaskType>, String> {
-    match arg(args, "type").filter(|t| !t.trim().is_empty()) {
-        None => Ok(None),
-        Some(t) => crate::task_profile::TaskType::parse(&t)
-            .map(Some)
-            .ok_or_else(|| format!("unknown task type `{t}` — use dev, research or general")),
+/// Same for `kickoff`, which raises a card in the parent's name and settles
+/// its task's type.
+pub const TASK_KICKOFF_EFFECT: &str =
+    "raised a kickoff card in your PARENT session's name and settled its task's type";
+
+/// Refuse a `type` argument: agents no longer label a task. A task starts
+/// undecided and only the boss settles it — through a kickoff card
+/// (`fleet__task action=kickoff`) or the task list. `general` is let through
+/// as the no-op it is.
+fn refuse_agent_type(args: &Value) -> Result<(), String> {
+    let Some(t) = arg(args, "type").filter(|t| !t.trim().is_empty()) else {
+        return Ok(());
+    };
+    match crate::task_profile::TaskType::parse(&t) {
+        Some(crate::task_profile::TaskType::General) => Ok(()),
+        _ => Err(format!(
+            "`type` is no longer set by the agent (got `{t}`): a task stays undecided until the \
+             boss settles it. Once the job is clear and before you start researching, call \
+             `fleet__task action=kickoff` with question / subquestions / budget / stop / \
+             deliverable — the boss pressing 开工 on that card makes it a research task. \
+             `set` still takes `goal`."
+        )),
     }
 }
 
@@ -910,69 +930,42 @@ fn handle_task(args: &Value, sid: Option<&str>) -> Result<String, String> {
     let sid = sid.ok_or(NO_SESSION_ID)?;
     match action.as_str() {
         "set" => {
-            let type_arg = task_type_arg(args)?;
-            let prev_type = tp::for_session(sid).map(|p| p.task_type);
+            refuse_agent_type(args)?;
             let p = tp::set_for_session(
                 sid,
-                type_arg,
+                None,
                 arg(args, "goal").as_deref(),
                 arg(args, "goalReason").as_deref(),
                 tp::ProfileSetter::Agent,
             )?;
-            let (title, locale) = crate::claude_launch::guidance_voice();
-            Ok(render_task_set(&p, prev_type, type_arg, &title, &locale))
+            Ok(render_task_set(&p))
         }
+        // The card lives in the MCP server (`mcp_server::handle_task_kickoff_call`),
+        // which intercepts this action before it gets here; only the CLI does.
+        "kickoff" => Err("kickoff raises a Decision Card, so it is only available as the \
+             `fleet__task` MCP tool, not from the `fleet task` CLI."
+            .to_string()),
         "get" => {
             let task_id = tp::owning_task_id(sid);
             Ok(tp::render(&task_id, tp::read(&task_id).as_ref()))
         }
         "split" => handle_task_split(args, sid),
-        other => Err(format!("unknown fleet__task action `{other}` (set / get / split)")),
+        other => Err(format!(
+            "unknown fleet__task action `{other}` (kickoff / set / get / split)"
+        )),
     }
 }
 
-/// The return of `fleet__task action=set`. The first line is the confirmation
-/// the desktop and mobile cards show (they keep only that line for `set`).
-///
-/// When the call sets the type to something new, the type's workflow block
-/// follows: the per-turn injection only carries it from the next turn on, so
-/// without this a first-turn `set` left the rest of that turn — the whole of a
-/// one-turn task — running without the workflow. A goal-only `set`, or one
-/// repeating the current type, adds nothing: the block is already in view.
-fn render_task_set(
-    p: &crate::task_profile::TaskProfile,
-    prev_type: Option<crate::task_profile::TaskType>,
-    type_arg: Option<crate::task_profile::TaskType>,
-    title: &str,
-    locale: &str,
-) -> String {
-    use crate::task_workflow_guidance as wf;
-    let confirm = format!(
+/// The return of `fleet__task action=set`: the confirmation line the desktop
+/// and mobile cards show. `set` no longer changes the type, so it never
+/// carries a workflow block — that comes with `kickoff`.
+fn render_task_set(p: &crate::task_profile::TaskProfile) -> String {
+    format!(
         "ok: task {} saved (type={}, goal={})",
         p.task_id,
         p.task_type.as_str(),
         p.goal.as_deref().unwrap_or("-"),
-    );
-    // `set` is refused for sub-tasks, so the reader is always the lead.
-    let block = type_arg
-        .filter(|t| prev_type != Some(*t))
-        .filter(|_| !wf::flow_block_off(&session_workspace()))
-        .and_then(|t| wf::render_block(t, wf::Role::Lead, title, locale));
-    match block {
-        Some(block) => format!("{confirm}\n\n{block}"),
-        None => confirm,
-    }
-}
-
-/// The calling agent's workspace, resolved like `mcp_server`'s
-/// `resolve_workspace_cwd`: `CLAUDE_PROJECT_DIR`, else the inherited cwd.
-fn session_workspace() -> std::path::PathBuf {
-    std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .filter(|d| !d.trim().is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+    )
 }
 
 /// `fleet__task action=split`: start a NEW top-level task for a request whose
@@ -983,7 +976,9 @@ fn session_workspace() -> std::path::PathBuf {
 fn handle_task_split(args: &Value, sid: &str) -> Result<String, String> {
     use crate::task_profile as tp;
     let prompt = req(args, "prompt")?;
-    let task_type = task_type_arg(args)?;
+    // The new task starts undecided like any other; it kicks off on its own.
+    refuse_agent_type(args)?;
+    let task_type: Option<tp::TaskType> = None;
     let goal = arg(args, "goal");
     let place = tp::place_of(sid);
     if place.parent_task_id.is_some() {
@@ -1925,39 +1920,38 @@ mod tests {
     }
 
     #[test]
-    fn task_set_return_carries_workflow_block_when_type_changes() {
+    fn task_set_returns_the_confirm_line_only() {
         use crate::task_profile::{TaskProfile, TaskType};
-        let profile = |t: TaskType| TaskProfile {
+        let p = TaskProfile {
             task_id: "t1".to_string(),
-            task_type: t,
+            task_type: TaskType::Research,
             goal: Some("answer X".to_string()),
             ..Default::default()
         };
-        let confirm = "ok: task t1 saved (type=research, goal=answer X)";
+        assert_eq!(render_task_set(&p), "ok: task t1 saved (type=research, goal=answer X)");
+    }
 
-        // First set to research: confirm line first, then the research block.
-        let out = render_task_set(&profile(TaskType::Research), None, Some(TaskType::Research), "", "zh");
-        assert_eq!(out.lines().next(), Some(confirm), "{out}");
-        assert!(out.contains("## 本任务的流程：研究"), "{out}");
-        assert!(out.contains("知识台账"), "{out}");
-        // English voice renders the English block.
-        let en = render_task_set(&profile(TaskType::Research), None, Some(TaskType::Research), "", "en");
-        assert!(en.contains("This task's workflow: research"), "{en}");
+    /// Agents no longer label a task: a non-general `type` on `set` or `split`
+    /// is refused with a pointer at `kickoff`, without writing anything.
+    #[test]
+    fn set_and_split_refuse_an_agent_written_type() {
+        for t in ["research", "dev", "ops"] {
+            let err = refuse_agent_type(&json!({ "type": t })).unwrap_err();
+            assert!(err.contains("action=kickoff"), "{err}");
+        }
+        refuse_agent_type(&json!({ "type": "general" })).unwrap();
+        refuse_agent_type(&json!({ "goal": "g" })).unwrap();
 
-        // Switching dev -> research also attaches it.
-        let out = render_task_set(&profile(TaskType::Research), Some(TaskType::Dev), Some(TaskType::Research), "", "zh");
-        assert!(out.contains("## 本任务的流程：研究"), "{out}");
-
-        // Same type again, or a goal-only set: the confirm line alone.
-        let same = render_task_set(&profile(TaskType::Research), Some(TaskType::Research), Some(TaskType::Research), "", "zh");
-        assert_eq!(same, confirm);
-        let goal_only = render_task_set(&profile(TaskType::Research), None, None, "", "zh");
-        assert_eq!(goal_only, confirm);
-
-        // general has no workflow block.
-        let general = render_task_set(&profile(TaskType::General), None, Some(TaskType::General), "", "zh");
-        assert_eq!(general, "ok: task t1 saved (type=general, goal=answer X)");
-        assert!(!general.contains("本任务的流程"), "{general}");
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(home.path());
+        let err = handle_task(&json!({ "action": "set", "type": "research", "goal": "g" }), Some("s1"))
+            .unwrap_err();
+        assert!(err.contains("kickoff"), "{err}");
+        assert!(crate::task_profile::read("s1").is_none(), "nothing written");
+        let ok = handle_task(&json!({ "action": "set", "goal": "g" }), Some("s1")).unwrap();
+        assert!(ok.contains("type=general, goal=g"), "{ok}");
+        let err = handle_task(&json!({ "action": "kickoff" }), Some("s1")).unwrap_err();
+        assert!(err.contains("MCP tool"), "{err}");
     }
 
     #[test]

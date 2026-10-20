@@ -104,8 +104,10 @@ function summaryVars(input: Record<string, unknown>): Record<string, string> {
     line: typeof input.line_no === "number" ? String(input.line_no) : s("line_no"),
     // `job run` is identified by the command line it launches.
     command: s("command"),
-    // `task set` is identified by the type it declares.
+    // `task set` is identified by the type it declares, `task kickoff` by
+    // the research question on its card.
     type: s("type"),
+    question: s("question"),
   };
 }
 

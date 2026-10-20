@@ -311,7 +311,9 @@ export function classifyResult(
   }
   // `task set` follows its confirmation line with the task type's workflow
   // block, which is addressed to the agent; the card keeps the confirmation.
-  if (tool === "task" && action === "set") {
+  // So does a `task kickoff` the boss started (its result opens with `ok:`);
+  // any other kickoff answer comes back as the card's raw answers.
+  if (tool === "task" && (action === "set" || (action === "kickoff" && text.startsWith("ok:")))) {
     return { kind: "confirm", text: text.split("\n")[0] };
   }
   const mutates = PROSE_TOOL_MUTATES[tool];

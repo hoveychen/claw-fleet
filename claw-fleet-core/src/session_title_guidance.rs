@@ -17,9 +17,9 @@
 //! - [`Harness::Codex`] — codex defers MCP tools, so the call must be made with
 //!   the fully-qualified direct-call shape inside the outer `exec`.
 //!
-//! The Claude section also carries the first-turn task-profile self-report
-//! (`fleet__task action=set`, worded in [`crate::task_workflow_guidance`]):
-//! it has the same deadline, and the design put the two side by side.
+//! The Claude section also carries the one-line kickoff rule (the task's type
+//! is settled by a kickoff card, `fleet__task action=kickoff`, never by the
+//! agent labelling it). It replaced a first-turn self-report that sat here.
 //!
 //! **dsh is deliberately absent.** A dsh session has no Fleet MCP server at all
 //! (see [`crate::dsh_guidance`]), so `fleet__set_session_title` does not exist
@@ -73,10 +73,10 @@ pub fn render_session_title_section(user_title: &str, locale: &str, harness: Har
 一样要认得出来。如果对话主题后来发生了实质变化，再调用一次换成新标题；\
 否则不要每轮都改名。\n\
 \n\
-{tail}{self_report}\n",
+{tail}{kickoff}\n",
             title = user_title,
             tail = tail(user_title, locale, harness),
-            self_report = self_report(locale, harness),
+            kickoff = kickoff_rule(user_title, locale, harness),
         )
     } else {
         format!(
@@ -95,25 +95,33 @@ questions — a short session still has to be recognisable in the list. If the \
 topic later changes materially, call it again with the new title; otherwise do \
 not rename on every turn.\n\
 \n\
-{tail}{self_report}\n",
+{tail}{kickoff}\n",
             title = user_title,
             tail = tail(user_title, locale, harness),
-            self_report = self_report(locale, harness),
+            kickoff = kickoff_rule(user_title, locale, harness),
         )
     }
 }
 
-/// The first-turn task-profile paragraph, Claude only: codex's block has no
-/// byte budget left for it, so codex gets the rule from the per-turn
-/// injection instead ([`crate::task_workflow_guidance::self_report_line`]),
-/// which it follows better than standing guidance anyway.
-fn self_report(locale: &str, harness: Harness) -> String {
-    match harness {
-        Harness::Claude => format!(
-            "\n\n{}",
-            crate::task_workflow_guidance::render_self_report(locale)
+/// The kickoff rule, Claude only: `kickoff` is not wired for codex or dsh yet.
+/// The task stays undecided while the conversation is still working out what
+/// the job is; once it is clear and research is about to start, the agent
+/// raises a kickoff card and the boss's 开工 settles the type.
+fn kickoff_rule(user_title: &str, locale: &str, harness: Harness) -> String {
+    match (harness, locale == "zh") {
+        (Harness::Codex, _) => String::new(),
+        (Harness::Claude, true) => format!(
+            "\n\n**任务类型不由你贴**：先和{user_title}聊清楚；准备动手研究（查资料、派子任务、跑实验）之前，\
+用 `fleet__task action=kickoff` 发开工卡（研究问题、子问题、预算、停止条件、交付形式），\
+{user_title}点「开工」才定型。`goal` 照旧可以随时用 `fleet__task action=set` 写。子任务不调用。"
         ),
-        Harness::Codex => String::new(),
+        (Harness::Claude, false) => format!(
+            "\n\n**You do not label the task's type**: talk it through with {user_title} first; before \
+you start researching (looking things up, spawning sub-tasks, running experiments), raise a kickoff \
+card with `fleet__task action=kickoff` (the question, sub-questions, budget, stop condition, \
+deliverable) — the type is settled only when {user_title} presses Start. You can still write the \
+`goal` any time with `fleet__task action=set`. Sub-tasks do not call it."
+        ),
     }
 }
 
@@ -338,17 +346,20 @@ mod tests {
         }
     }
 
-    /// The task-profile self-report rides next to the title rule for Claude;
-    /// codex gets it per turn instead (no budget left in its block).
+    /// The kickoff rule rides next to the title rule for Claude only (kickoff
+    /// is not wired for codex yet), and the first-turn self-report it replaced
+    /// is gone.
     #[test]
-    fn claude_variant_asks_for_the_first_turn_task_profile() {
+    fn claude_variant_points_at_kickoff_not_a_self_report() {
         for locale in ["en", "zh"] {
             let claude = render_session_title_section("Boss", locale, Harness::Claude);
-            assert!(claude.contains("`fleet__task action=set`"), "{locale}: {claude}");
+            assert!(claude.contains("`fleet__task action=kickoff`"), "{locale}: {claude}");
+            assert!(!claude.contains("没把握就选 general") && !claude.contains("unsure"), "{claude}");
             let codex = render_session_title_section("Boss", locale, Harness::Codex);
             assert!(!codex.contains("fleet__task"), "{locale}: {codex}");
         }
-        assert!(render_session_title_section("老板", "zh", Harness::Claude).contains("没把握就选 general"));
+        let zh = render_session_title_section("老板", "zh", Harness::Claude);
+        assert!(zh.contains("老板点「开工」才定型"), "{zh}");
     }
 
     #[test]

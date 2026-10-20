@@ -80,6 +80,11 @@
       "root_reason": "顶层原因",
       "goal": "目标",
       "goalReason": "改目标原因",
+      "question": "研究问题",
+      "subquestions": "子问题",
+      "budget": "预算",
+      "stop": "停止条件",
+      "deliverable": "交付形式",
       "expect_by": "预期时间",
       "progress": "进度命令",
       "old_text": "原文",
@@ -200,6 +205,7 @@
         "list": "列出作业"
       },
       "task": {
+        "kickoff": "发开工卡 {{question}}",
         "set": "定义任务 {{type}}",
         "get": "查看任务画像",
         "split": "拆出新任务 {{title}}"
@@ -3184,7 +3190,7 @@
     "type": {
       "dev": "开发",
       "research": "调研",
-      "general": "通用"
+      "general": "未定"
     },
     "no_goal": "未设目标",
     "edit": "改写",

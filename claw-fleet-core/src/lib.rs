@@ -265,6 +265,7 @@ pub mod task_migration;
 pub mod task_model;
 pub mod task_roles_guidance;
 pub mod task_outcome;
+pub mod task_kickoff;
 pub mod task_profile;
 pub mod task_workflow_guidance;
 pub mod task_progress;

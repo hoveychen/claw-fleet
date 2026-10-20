@@ -2128,8 +2128,7 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
     let lead: Vec<String> = [
         crate::task_roles_guidance::render_role_reminder(session_id),
         task.as_ref().and_then(|t| t.goal_block.clone()),
-        task.and_then(|t| t.workflow)
-            .filter(|w| !flow_off || crate::task_workflow_guidance::is_self_report_line(w)),
+        task.and_then(|t| t.workflow).filter(|_| !flow_off),
     ]
     .into_iter()
     .flatten()
@@ -2161,16 +2160,14 @@ pub struct FreshSession<'a> {
 
 /// [`render_active_plans_reminder`] for a session whose id does not exist yet
 /// (a new codex thread's first prompt). Its lead section is worked out from
-/// [`FreshSession`] rather than looked up: a main conversation is told to
-/// report its task profile — or, when a split preset its type, gets that
-/// type's workflow — and a sub-task gets its task's workflow in the sub-task
-/// wording, never the self-report line (`fleet__task set` refuses sub-tasks).
+/// [`FreshSession`] rather than looked up: a main conversation gets its preset
+/// type's workflow (none while undecided), and a sub-task gets its task's
+/// workflow in the sub-task wording.
 pub fn render_fresh_session_reminder(cwd: &Path, fresh: &FreshSession) -> Option<String> {
     let (title, locale) = crate::claude_launch::guidance_voice();
     let graph = crate::task_model::TaskGraph::load();
     let flow_off = crate::task_workflow_guidance::flow_block_off(cwd);
-    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale)
-        .filter(|w| !flow_off || crate::task_workflow_guidance::is_self_report_line(w));
+    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale).filter(|_| !flow_off);
     let lead = workflow.into_iter().collect();
     wrap_reminder(lead, render_plans_reminder_body(cwd, None))
 }
@@ -2202,8 +2199,8 @@ fn fresh_session_workflow(
 }
 
 /// The workflow part of the lead section: the type's block worded for the
-/// reader's role, or — for a main conversation whose task has no profile
-/// (`task_type` is `None`) — the nudge to report one.
+/// reader's role. A task with no profile is undecided, which gets nothing —
+/// its type is settled by a kickoff card the boss approves, not reported.
 fn workflow_for(
     task_type: Option<crate::task_profile::TaskType>,
     is_subtask: bool,
@@ -2211,11 +2208,8 @@ fn workflow_for(
     locale: &str,
 ) -> Option<String> {
     use crate::task_workflow_guidance as wf;
-    match (task_type, is_subtask) {
-        (None, false) => Some(wf::self_report_line(locale).to_string()),
-        (t, true) => wf::render_block(t.unwrap_or_default(), wf::Role::Subtask, title, locale),
-        (Some(t), false) => wf::render_block(t, wf::Role::Lead, title, locale),
-    }
+    let role = if is_subtask { wf::Role::Subtask } else { wf::Role::Lead };
+    wf::render_block(task_type.unwrap_or_default(), role, title, locale)
 }
 
 /// The per-turn task nudge: a one-line `<system-reminder>` that callers emit
@@ -2393,7 +2387,6 @@ fn task_lead_for(
         }
         block
     });
-    // No profile yet: a main conversation is nudged to report one instead.
     let profiled_type = profile.as_ref().map(|p| p.task_type);
     let workflow = workflow_for(profiled_type, is_subtask, title, locale);
     TaskLead {
@@ -2937,9 +2930,9 @@ trailing notes outside\n";
             "names the flag it governs: {out}"
         );
 
-        // A session on no chain gets no goal — only the profile nudge.
-        let stranger = render_active_plans_reminder(&ws, Some("stranger")).expect("nudge");
-        assert!(!stranger.contains("本链目标") && stranger.contains("fleet__task action=set"));
+        // A session on no chain, with no profile, gets nothing: an undecided
+        // task is no longer nudged to label itself.
+        assert!(render_active_plans_reminder(&ws, Some("stranger")).is_none());
         // Neither does a chain with no stated goal.
         assert!(
             render_chain_goal_block(Some("s1")).is_some(),
@@ -2997,7 +2990,7 @@ trailing notes outside\n";
         use crate::task_profile::{set, ProfileSetter, TaskType};
         let dir = tempfile::tempdir().unwrap();
         let _home = crate::paths::fleet_home_guard(dir.path());
-        let by = ProfileSetter::Agent;
+        let by = ProfileSetter::Boss;
         set("dev-t", Some(TaskType::Dev), Some("修好 X"), None, by).unwrap();
         set("res-t", Some(TaskType::Research), Some("弄清 Y"), None, by).unwrap();
         set("gen-t", Some(TaskType::General), Some("聊聊 Z"), None, by).unwrap();
@@ -3023,8 +3016,11 @@ trailing notes outside\n";
 
         let none = lead("nobody");
         assert!(none.goal_block.is_none());
-        let nudge = none.workflow.expect("an unprofiled main conversation is nudged");
-        assert!(nudge.contains("fleet__task action=set"), "{nudge}");
+        assert!(none.workflow.is_none(), "an undecided task is not nudged to self-report");
+
+        // A type an agent wrote itself is a guess and reads as undecided.
+        set("agent-t", Some(TaskType::Research), Some("弄清 W"), None, ProfileSetter::Agent).unwrap();
+        assert!(lead("agent-t").workflow.is_none());
 
         let sub = lead("sub-1");
         assert!(sub.goal_block.is_none(), "the task goal is not the sub-task's finish line");
@@ -3034,24 +3030,22 @@ trailing notes outside\n";
     }
 
     /// A new codex thread's first prompt is rendered before it has an id. A
-    /// main conversation is still nudged to report its profile, a split's
-    /// preset type yields that type's lead workflow instead, and a sub-task
-    /// gets its task's workflow in the sub-task wording — never the nudge,
-    /// since `fleet__task set` refuses sub-tasks.
+    /// main conversation gets nothing (an undecided task is not nudged), a
+    /// preset type yields that type's lead workflow, and a sub-task gets its
+    /// task's workflow in the sub-task wording.
     #[test]
     fn fresh_session_workflow_follows_role_and_preset() {
         use crate::task_profile::{set, ProfileSetter, TaskType};
         let dir = tempfile::tempdir().unwrap();
         let _home = crate::paths::fleet_home_guard(dir.path());
-        set("res-t", Some(TaskType::Research), Some("弄清 Y"), None, ProfileSetter::Agent).unwrap();
+        set("res-t", Some(TaskType::Research), Some("弄清 Y"), None, ProfileSetter::Boss).unwrap();
         let graph = crate::task_model::TaskGraph::new(
             Vec::<Vec<String>>::new(),
             vec![("res-sub".to_string(), "res-t".to_string())],
         );
         let render = |fresh: FreshSession| fresh_session_workflow(&graph, &fresh, "", "zh");
 
-        let main = render(FreshSession::default()).expect("a main conversation is nudged");
-        assert!(main.contains("fleet__task action=set"), "{main}");
+        assert!(render(FreshSession::default()).is_none(), "an undecided main conversation");
 
         let split = render(FreshSession {
             preset_type: Some(TaskType::Research),
@@ -3059,7 +3053,6 @@ trailing notes outside\n";
         })
         .expect("preset research workflow");
         assert!(split.contains("知识台账") && !split.contains("你是子任务"), "{split}");
-        assert!(!split.contains("本任务还没有画像"), "{split}");
         let general = render(FreshSession {
             preset_type: Some(TaskType::General),
             ..Default::default()
@@ -3088,16 +3081,15 @@ trailing notes outside\n";
 
     /// A codex handoff successor's first prompt follows its predecessor's
     /// task: a profiled main-conversation chain gets that type's lead
-    /// workflow and no self-report nudge (it would overwrite a boss-set
-    /// profile), a sub-task chain gets the sub-task wording, and only an
-    /// unprofiled main-conversation chain is still nudged.
+    /// workflow, a sub-task chain gets the sub-task wording, and an undecided
+    /// main-conversation chain gets nothing.
     #[test]
     fn fresh_session_workflow_for_a_relay_follows_the_predecessor() {
         use crate::task_profile::{set, ProfileSetter, TaskType};
         let dir = tempfile::tempdir().unwrap();
         let _home = crate::paths::fleet_home_guard(dir.path());
         set("lead-1", Some(TaskType::Research), Some("弄清 Y"), None, ProfileSetter::Boss).unwrap();
-        set("res-t", Some(TaskType::Research), Some("弄清 Z"), None, ProfileSetter::Agent).unwrap();
+        set("res-t", Some(TaskType::Research), Some("弄清 Z"), None, ProfileSetter::Boss).unwrap();
         let graph = crate::task_model::TaskGraph::new(
             vec![
                 vec!["lead-1".to_string(), "lead-2".to_string()],
@@ -3126,23 +3118,26 @@ trailing notes outside\n";
         assert!(sub.contains("你是子任务") && sub.contains("没查到什么"), "{sub}");
         assert!(!sub.contains("fleet__task action=set"), "{sub}");
 
-        let solo = relay("solo-2").expect("an unprofiled main chain is nudged");
-        assert!(solo.contains("fleet__task action=set"), "{solo}");
+        assert!(relay("solo-2").is_none(), "an undecided main chain is not nudged");
     }
 
-    /// The end-to-end shape of the above: a workspace with no TASKS.md still
-    /// gets a reminder for a fresh main conversation (the id-keyed renderer
-    /// returns `None` there — the gap codex's first turn fell into).
+    /// The end-to-end shape of the above: a workspace with no TASKS.md gets a
+    /// lead-only reminder for a fresh session whose type is known, and nothing
+    /// for an undecided one.
     #[test]
-    fn fresh_session_reminder_carries_the_self_report_without_plans() {
+    fn fresh_session_reminder_without_plans_follows_the_preset() {
         let dir = tempfile::tempdir().unwrap();
         let _home = crate::paths::fleet_home_guard(dir.path());
         let ws = tempfile::tempdir().unwrap();
         assert!(render_active_plans_reminder(ws.path(), None).is_none());
-        let out = render_fresh_session_reminder(ws.path(), &FreshSession::default())
-            .expect("fresh main conversation reminder");
+        assert!(render_fresh_session_reminder(ws.path(), &FreshSession::default()).is_none());
+        let fresh = FreshSession {
+            preset_type: Some(crate::task_profile::TaskType::Research),
+            ..Default::default()
+        };
+        let out = render_fresh_session_reminder(ws.path(), &fresh).expect("preset reminder");
         assert!(out.starts_with("<system-reminder>\n"), "{out}");
-        assert!(out.contains("fleet__task action=set"), "{out}");
+        assert!(out.contains("知识台账") || out.contains("ledger"), "{out}");
         assert!(out.contains(PLAN_REMINDER_MARK), "{out}");
     }
 
@@ -3157,7 +3152,7 @@ trailing notes outside\n";
             Some(crate::task_profile::TaskType::Research),
             Some("弄清 Y"),
             None,
-            crate::task_profile::ProfileSetter::Agent,
+            crate::task_profile::ProfileSetter::Boss,
         )
         .unwrap();
         let ws = dir.path().join("ws");
@@ -3211,8 +3206,8 @@ trailing notes outside\n";
         use crate::task_profile::{set, ProfileSetter, TaskType};
         let dir = tempfile::tempdir().unwrap();
         let _home = crate::paths::fleet_home_guard(dir.path());
-        set("res-main", Some(TaskType::Research), Some("弄清 HF 事件模型能否用于回测"), None, ProfileSetter::Agent).unwrap();
-        set("dev-main", Some(TaskType::Dev), Some("修好 X"), None, ProfileSetter::Agent).unwrap();
+        set("res-main", Some(TaskType::Research), Some("弄清 HF 事件模型能否用于回测"), None, ProfileSetter::Boss).unwrap();
+        set("dev-main", Some(TaskType::Dev), Some("修好 X"), None, ProfileSetter::Boss).unwrap();
         let ws = dir.path().join("ws");
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(
@@ -3267,7 +3262,7 @@ trailing notes outside\n";
         assert!(moved.contains("下一步 **P3**"), "{moved}");
 
         // A research task with no attributed plan is told to create one.
-        set("res-bare", Some(TaskType::Research), None, None, ProfileSetter::Agent).unwrap();
+        set("res-bare", Some(TaskType::Research), None, None, ProfileSetter::Boss).unwrap();
         let bare = render_task_nudge(&ws, Some("res-bare")).unwrap();
         assert!(bare.contains("kind=research"), "{bare}");
 

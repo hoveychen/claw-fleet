@@ -1,7 +1,8 @@
 //! Per-task-type workflow blocks — how a `dev` or `research` task is run.
 //!
-//! The task's type lives in its profile ([`crate::task_profile`]), reported by
-//! the agent on its first turn. That is too late for the launch-time system
+//! The task's type lives in its profile ([`crate::task_profile`]), settled when
+//! the boss approves a kickoff card ([`crate::task_kickoff`]). That is too late
+//! for the launch-time system
 //! prompt, so the block rides the per-turn lead section of
 //! [`crate::prd_tasks::render_active_plans_reminder`], which reaches all three
 //! harnesses (the Claude hook, the codex prompt-prepend, the dsh plugin).
@@ -117,38 +118,10 @@ pub fn render_drift_section(title: &str, locale: &str) -> String {
     )
 }
 
-/// The first-turn self-report rule, worded for the Claude session-title
-/// section it sits in.
-pub fn render_self_report(locale: &str) -> String {
-    if locale == "zh" {
-        return "**任务画像同理**：你是任务的主对话时（每轮注入里没有「你的角色：子任务」），第一个回合结束前还要调用一次 \
-`fleet__task action=set`，报上 `type`（dev 改代码 / research 产出知识 / general 其他）和一句话 `goal`（做到什么算完）。\
-没把握就选 general；之后只在类型或目标真的变了时再调。子任务不调用。"
-            .to_string();
-    }
-    "**Same for the task profile**: as a task's main conversation (no \"Your role: sub-task\" line in the per-turn \
-injection), also call `fleet__task action=set` once before you end your first turn, with a `type` (dev = changes \
-code / research = produces knowledge / general = anything else) and a one-sentence `goal` (what done means). When \
-unsure, pick general; call it again only when the type or goal really changes. Sub-tasks do not call it."
-        .to_string()
-}
-
-/// The per-turn nudge for a task's main conversation whose task has no
-/// profile yet. It is the only carrier of the rule for codex (whose standing
-/// block has no room left) and a backstop for the others; it disappears — and
-/// so stops costing anything — once the profile is written.
-pub fn self_report_line(locale: &str) -> &'static str {
-    if locale == "zh" {
-        "本任务还没有画像：本回合结束前调用一次 `fleet__task action=set`，报 `type`（dev / research / general，没把握选 general）和一句话 `goal`（做到什么算完）。"
-    } else {
-        "This task has no profile yet: before this turn ends, call `fleet__task action=set` once with a `type` (dev / research / general; unsure → general) and a one-sentence `goal` (what done means)."
-    }
-}
-
 /// Experiment switch for the task-type ablation: workspaces listed in
 /// `~/.fleet/experiments/no-flow-block.txt` (one path per line, `#` comments)
-/// get no workflow block, while the self-report line still reaches them, so
-/// the block is the only difference between the two arms. A listed path also
+/// get no workflow block, so the block is the only difference between the
+/// two arms. A listed path also
 /// covers everything below it (its `.worktrees/*`). No file = nobody affected.
 pub const FLOW_BLOCK_OFF_FILE: &str = "experiments/no-flow-block.txt";
 
@@ -165,12 +138,6 @@ fn listed_in(list: &str, cwd: &std::path::Path) -> bool {
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .any(|l| cwd.starts_with(canon(std::path::Path::new(l))))
-}
-
-/// Whether `text` is the self-report nudge (either locale) rather than a
-/// workflow block — the one piece [`flow_block_off`] must leave in place.
-pub fn is_self_report_line(text: &str) -> bool {
-    text == self_report_line("zh") || text == self_report_line("en")
 }
 
 fn research_lead_zh(title: &str) -> String {
@@ -296,8 +263,6 @@ mod tests {
         // A sibling sharing a name prefix is not "below" the listed path.
         let sib = std::path::PathBuf::from(format!("{}-2", ws.path().display()));
         assert!(!listed_in(&list, &sib));
-        assert!(is_self_report_line(self_report_line("zh")));
-        assert!(!is_self_report_line(&render_block(TaskType::Dev, Role::Lead, "", "zh").unwrap()));
     }
 
     #[test]
