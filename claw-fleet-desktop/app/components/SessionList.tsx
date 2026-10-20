@@ -25,7 +25,7 @@ import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
 import { LiveStats } from "./LiveStats";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { RAILS, SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
+import { hasFoldableListColumn } from "./pageShellConfig";
 import { navSectionOf, navSectionTarget, type NavSection } from "./navGroups";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { fmtBadgeCount } from "../railNumbers";
@@ -99,17 +99,17 @@ export function SessionList() {
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
-  // The footer toggle folds the page's list column. Audit's rail sits on the
-  // right and is a detail pane, not a list, so it is left to its own control.
-  const hasListColumn = SECONDARY_SIDEBAR_VIEWS.has(viewMode) && RAILS[viewMode]?.side !== "right";
+  // The footer toggle folds the page's list column.
+  const hasListColumn = hasFoldableListColumn(viewMode);
 
   const current = navSectionOf(viewMode);
   // Re-clicking the entry of the page on screen folds that page's secondary
-  // sidebar instead of being a no-op.
+  // sidebar instead of being a no-op — the same toggle, behind the same gate,
+  // as the footer fold button.
   const goSection = useCallback(
     (section: NavSection) => {
       const target = navSectionTarget(section, navLastBySection, avail);
-      if (viewMode === target && SECONDARY_SIDEBAR_VIEWS.has(target)) {
+      if (viewMode === target && hasFoldableListColumn(target)) {
         toggleSecondarySidebar(target);
       } else {
         setViewMode(target);

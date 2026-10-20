@@ -41,3 +41,11 @@ export const RAILS: Partial<Record<ViewMode, RailConfig>> = {
 export const SECONDARY_SIDEBAR_VIEWS: ReadonlySet<ViewMode> = new Set(
   Object.keys(RAILS) as ViewMode[],
 );
+
+/** Whether `view` has a left-hand list column the nav rail can fold — the one
+ *  gate shared by "re-click the active nav item" and the footer fold button.
+ *  Audit's rail sits on the right and is a detail pane, not a list, so it is
+ *  left to its own control. */
+export function hasFoldableListColumn(view: ViewMode): boolean {
+  return SECONDARY_SIDEBAR_VIEWS.has(view) && RAILS[view]?.side !== "right";
+}
