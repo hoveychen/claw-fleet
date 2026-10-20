@@ -401,7 +401,7 @@ mod tests {
             Some(crate::task_profile::TaskType::Research),
             Some("answer a question"),
             None,
-            crate::task_profile::ProfileSetter::Agent,
+            crate::task_profile::ProfileSetter::Boss,
         )
         .expect("write profile");
         let bare = tempfile::tempdir().expect("tempdir");

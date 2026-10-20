@@ -1700,10 +1700,9 @@ mod tests {
     }
 
     /// A new codex thread's first prompt carries the task lead section even
-    /// though the thread has no id yet: the self-report nudge for a main
+    /// though the thread has no id yet: nothing for an undecided main
     /// conversation, the preset type's workflow for a split (read through the
-    /// thread-local the split sets, as `CodexSource::spawn` does), and neither
-    /// nudge for a sub-task.
+    /// thread-local the split sets, as `CodexSource::spawn` does).
     #[test]
     fn fresh_codex_prompt_carries_the_task_lead() {
         use crate::prd_tasks::FreshSession;
@@ -1714,8 +1713,7 @@ mod tests {
         let ws = ws.path().to_str().unwrap();
 
         let main = maybe_prepend_fresh_session(ws, &FreshSession::default(), "go");
-        assert!(main.contains("fleet__task action=set"), "{main}");
-        assert!(main.ends_with("\n\ngo"), "{main}");
+        assert_eq!(main, "go", "an undecided main conversation gets no lead section");
 
         assert_eq!(split_preset(), None);
         let split = with_split_preset(Some(TaskType::Research), || {

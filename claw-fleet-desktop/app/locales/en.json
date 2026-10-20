@@ -80,6 +80,11 @@
       "root_reason": "Why top-level",
       "goal": "Goal",
       "goalReason": "Why the goal changed",
+      "question": "Question",
+      "subquestions": "Sub-questions",
+      "budget": "Budget",
+      "stop": "Stop when",
+      "deliverable": "Deliverable",
       "expect_by": "Expected by",
       "progress": "Progress command",
       "old_text": "Old text",
@@ -200,6 +205,7 @@
         "list": "List jobs"
       },
       "task": {
+        "kickoff": "Kickoff card {{question}}",
         "set": "Define task {{type}}",
         "get": "Read task profile",
         "split": "Split off new task {{title}}"
@@ -3193,7 +3199,7 @@
     "type": {
       "dev": "Dev",
       "research": "Research",
-      "general": "General"
+      "general": "Undecided"
     },
     "no_goal": "No goal set",
     "edit": "Edit",

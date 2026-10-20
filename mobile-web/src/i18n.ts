@@ -343,6 +343,7 @@ const DICT: Record<string, string> = {
   "定义任务 {0}": "Define task {0}",
   查看任务画像: "Read task profile",
   "拆出新任务 {0}": "Split off new task {0}",
+  "发开工卡 {0}": "Kickoff card {0}",
   巡检: "Inspect",
   信号: "Signal",
   笔记: "Notes",
@@ -1240,7 +1241,7 @@ const DICT: Record<string, string> = {
   // ── Task profile (type + goal) ──
   "开发": "Dev",
   "调研": "Research",
-  "通用": "General",
+  "未定": "Undecided",
   "你改过": "Set by you",
   "改写": "Edit",
   "还没定目标": "No goal yet",

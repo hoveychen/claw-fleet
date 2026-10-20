@@ -149,6 +149,7 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
     }
   } else if (tool === "task") {
     switch (action) {
+      case "kickoff": return t("发开工卡 {0}", str(input, "question"));
       case "set": return t("定义任务 {0}", str(input, "type"));
       case "get": return t("查看任务画像");
       case "split": return t("拆出新任务 {0}", str(input, "title"));

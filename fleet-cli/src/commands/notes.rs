@@ -55,20 +55,17 @@ pub(crate) fn cmd_notes(action: NotesCommands, session: Option<&str>) {
 /// `fleet task` — CLI face of `fleet__task`, same output as the MCP tool.
 pub(crate) fn cmd_task(action: TaskCommands, session: Option<&str>) {
     let args = match action {
-        TaskCommands::Set {
-            task_type,
-            goal,
-            goal_reason,
-        } => json!({"action":"set","type":task_type,"goal":goal,"goalReason":goal_reason}),
+        TaskCommands::Set { goal, goal_reason } => {
+            json!({"action":"set","goal":goal,"goalReason":goal_reason})
+        }
         TaskCommands::Get => json!({"action":"get"}),
         TaskCommands::Split {
             prompt,
             title,
-            task_type,
             goal,
             workspace,
         } => json!({
-            "action":"split","prompt":prompt,"title":title,"type":task_type,
+            "action":"split","prompt":prompt,"title":title,
             "goal":goal,"workspace":workspace
         }),
     };

@@ -88,6 +88,16 @@ describe("classifyResult", () => {
     });
   });
 
+  it("keeps only the confirmation line of a started `task kickoff`, raw answers otherwise", () => {
+    const started = "ok: 老板点了「开工」——任务 t1 定为研究型。\n\n## 本任务的流程：研究";
+    expect(classifyResult("task", "kickoff", started, false)).toEqual({
+      kind: "confirm",
+      text: "ok: 老板点了「开工」——任务 t1 定为研究型。",
+    });
+    const answered = '{"q":"还没聊完"}';
+    expect(classifyResult("task", "kickoff", answered, false)).toEqual({ kind: "raw", text: answered });
+  });
+
   it("classifies an errored call as `error`, keeping the message", () => {
     const r = classifyResult("plan", "check", "plan 'x' not found", true);
     expect(r).toEqual({ kind: "error", text: "plan 'x' not found" });

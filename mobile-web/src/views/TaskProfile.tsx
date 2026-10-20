@@ -20,7 +20,7 @@ export function taskTypeLabel(type: TaskType): string {
     case "research":
       return t("调研");
     default:
-      return t("通用");
+      return t("未定");
   }
 }
 

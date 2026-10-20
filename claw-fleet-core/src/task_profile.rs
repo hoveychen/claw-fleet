@@ -5,10 +5,14 @@
 //! profile is the durable record the per-turn guidance and the three clients
 //! read to know which workflow applies and what counts as done:
 //!
-//! - `type` — `dev` / `research` / `general`. The agent reports it on its first
-//!   turn (`fleet__task action=set`); the boss can rewrite it from the task
-//!   list. A missing profile, or an unknown type string written by a newer
-//!   build, reads as `general` — today's behaviour.
+//! - `type` — `dev` / `research` / `general`. A task starts `general`, which the
+//!   clients show as "undecided". Only the boss decides it: by pressing 开工 on a
+//!   kickoff card the agent raised (`fleet__task action=kickoff`, see
+//!   [`crate::task_kickoff`]) or by rewriting it from the task list. A type an
+//!   agent wrote on its own (older builds let `fleet__task set` do that, and
+//!   most of those labels were guesses) reads as `general` — see
+//!   [`TaskProfile::type_set_by`]. A missing profile, or an unknown type string
+//!   written by a newer build, also reads as `general`.
 //! - `goal` — one sentence of "the work is done when …". Changing a goal that
 //!   is already set requires a reason, the same rule
 //!   [`crate::handoff`] applies to a relay chain's goal; every change is kept in
@@ -104,9 +108,29 @@ pub struct TaskProfile {
     pub goal_history: Vec<GoalChange>,
     #[serde(default)]
     pub set_by: ProfileSetter,
+    /// Who wrote `task_type`. `set_by` names the last writer of *any* field, so
+    /// it cannot tell a boss-approved type apart from an agent's goal edit made
+    /// afterwards. A non-general type only counts when this is `Boss`; anything
+    /// else — including its absence on profiles written before it existed —
+    /// reads as `general` ([`normalized`]). Kept out of the TS bindings: the
+    /// clients only ever see the normalized type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(skip))]
+    pub type_set_by: Option<ProfileSetter>,
     /// Epoch ms of the last write.
     #[serde(default)]
     pub updated: u64,
+}
+
+/// The profile as every reader should see it: a type nobody but an agent ever
+/// vouched for is dropped back to `general`. Applied on read rather than by a
+/// one-off rewrite of `~/.fleet/task-profile/`, so a profile an older build's
+/// still-running MCP server writes after the upgrade is caught too.
+fn normalized(mut p: TaskProfile) -> TaskProfile {
+    if p.task_type != TaskType::General && p.type_set_by != Some(ProfileSetter::Boss) {
+        p.task_type = TaskType::General;
+    }
+    p
 }
 
 /// The slice of a profile a task row carries (`TaskSummary::profile`).
@@ -178,7 +202,7 @@ fn read_in(dir: &Path, task_id: &str) -> Option<TaskProfile> {
         return None;
     }
     let raw = std::fs::read_to_string(dir.join(format!("{task_id}.json"))).ok()?;
-    serde_json::from_str(&raw).ok()
+    serde_json::from_str(&raw).ok().map(normalized)
 }
 
 /// Every stored profile keyed by task id (cached directory read; the scan's
@@ -192,7 +216,7 @@ pub fn load_all() -> HashMap<String, TaskProfile> {
     CACHE
         .load(&dir)
         .into_iter()
-        .map(|(_, p)| (p.task_id.clone(), p))
+        .map(|(_, p)| (p.task_id.clone(), normalized(p)))
         .collect()
 }
 
@@ -248,6 +272,7 @@ fn set_in(
         }
         if let Some(t) = task_type {
             p.task_type = t;
+            p.type_set_by = Some(by);
         }
         p.set_by = by;
         p.updated = now;
@@ -255,7 +280,7 @@ fn set_in(
         crate::atomic_json::write_atomic(&path, &json)
             .map_err(|e| format!("write task profile: {e}"))?;
         crate::json_dir_cache::note_changed(&path);
-        Ok(p)
+        Ok(normalized(p))
     })
 }
 
@@ -442,7 +467,7 @@ mod tests {
     #[test]
     fn first_goal_needs_no_reason_and_a_change_needs_one() {
         let dir = tmp("goal");
-        let p = set_in(&dir, "t", Some(TaskType::Research), Some("答清 X"), None, ProfileSetter::Agent, 1)
+        let p = set_in(&dir, "t", Some(TaskType::Research), Some("答清 X"), None, ProfileSetter::Boss, 1)
             .unwrap();
         assert_eq!(p.goal.as_deref(), Some("答清 X"));
         assert_eq!(p.goal_history.len(), 1);
@@ -472,7 +497,7 @@ mod tests {
     fn type_only_set_keeps_the_goal_and_empty_set_is_refused() {
         let dir = tmp("type");
         set_in(&dir, "t", None, Some("g"), None, ProfileSetter::Agent, 1).unwrap();
-        let p = set_in(&dir, "t", Some(TaskType::Dev), None, None, ProfileSetter::Agent, 2).unwrap();
+        let p = set_in(&dir, "t", Some(TaskType::Dev), None, None, ProfileSetter::Boss, 2).unwrap();
         assert_eq!((p.task_type, p.goal.as_deref()), (TaskType::Dev, Some("g")));
         assert!(set_in(&dir, "t", None, Some("  "), None, ProfileSetter::Agent, 3).is_err());
         assert!(set_in(&dir, "../x", Some(TaskType::Dev), None, None, ProfileSetter::Agent, 3).is_err());
@@ -498,6 +523,37 @@ mod tests {
         assert!(sync_handoff_goal("h1", "目标 B", None, true).is_err());
         sync_handoff_goal("h1", "目标 B", Some("老板改了"), false).unwrap();
         assert_eq!(main_line_goal("h1").as_deref(), Some("目标 B"));
+    }
+
+    /// v1 let agents label their own task on the first turn, mostly by guessing.
+    /// Those labels must read as undecided; a boss-written type survives, and
+    /// so does it across a later agent goal edit (which flips `set_by`).
+    #[test]
+    fn only_a_boss_written_type_counts() {
+        let dir = tmp("norm");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("legacy.json"),
+            r#"{"taskId":"legacy","type":"research","setBy":"agent","updated":1}"#,
+        )
+        .unwrap();
+        assert_eq!(read_in(&dir, "legacy").unwrap().task_type, TaskType::General);
+        // A legacy boss-written profile predates `typeSetBy` too: also undecided.
+        std::fs::write(
+            dir.join("old-boss.json"),
+            r#"{"taskId":"old-boss","type":"dev","setBy":"boss","updated":1}"#,
+        )
+        .unwrap();
+        assert_eq!(read_in(&dir, "old-boss").unwrap().task_type, TaskType::General);
+
+        let p = set_in(&dir, "a", Some(TaskType::Dev), None, None, ProfileSetter::Agent, 1).unwrap();
+        assert_eq!(p.task_type, TaskType::General, "an agent-written type never counts");
+
+        set_in(&dir, "b", Some(TaskType::Research), None, None, ProfileSetter::Boss, 1).unwrap();
+        let p = set_in(&dir, "b", None, Some("g"), None, ProfileSetter::Agent, 2).unwrap();
+        assert_eq!((p.task_type, p.set_by), (TaskType::Research, ProfileSetter::Agent));
+        assert_eq!(read_in(&dir, "b").unwrap().task_type, TaskType::Research);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

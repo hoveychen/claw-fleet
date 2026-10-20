@@ -1,7 +1,8 @@
 //! Per-task-type workflow blocks — how a `dev` or `research` task is run.
 //!
-//! The task's type lives in its profile ([`crate::task_profile`]), reported by
-//! the agent on its first turn. That is too late for the launch-time system
+//! The task's type lives in its profile ([`crate::task_profile`]), settled when
+//! the boss approves a kickoff card ([`crate::task_kickoff`]). That is too late
+//! for the launch-time system
 //! prompt, so the block rides the per-turn lead section of
 //! [`crate::prd_tasks::render_active_plans_reminder`], which reaches all three
 //! harnesses (the Claude hook, the codex prompt-prepend, the dsh plugin).
@@ -106,34 +107,6 @@ pub fn render_drift_section(title: &str, locale: &str) -> String {
 - It is **a new goal unrelated to this one** → do not start on it; raise a card proposing \"open as a new task\", with options open as new task / fold into this task (changing the goal needs a reason), and ask whether this task ends, is parked or runs on in parallel. Once {title} agrees, open it with `fleet__task action=split` carrying a complete brief; never split on your own.\n\
 - Boundary examples: researching harnesses per task type → \"design the product architecture from this\" = continuation; fixing desktop CPU use → \"also check why the phone cannot log in\" = new goal; implementing a feature → \"first look at how competitors do it\" = continuation, open a research child plan.\n"
     )
-}
-
-/// The first-turn self-report rule, worded for the Claude session-title
-/// section it sits in.
-pub fn render_self_report(locale: &str) -> String {
-    if locale == "zh" {
-        return "**任务画像同理**：你是任务的主对话时（每轮注入里没有「你的角色：子任务」），第一个回合结束前还要调用一次 \
-`fleet__task action=set`，报上 `type`（dev 改代码 / research 产出知识 / general 其他）和一句话 `goal`（做到什么算完）。\
-没把握就选 general；之后只在类型或目标真的变了时再调。子任务不调用。"
-            .to_string();
-    }
-    "**Same for the task profile**: as a task's main conversation (no \"Your role: sub-task\" line in the per-turn \
-injection), also call `fleet__task action=set` once before you end your first turn, with a `type` (dev = changes \
-code / research = produces knowledge / general = anything else) and a one-sentence `goal` (what done means). When \
-unsure, pick general; call it again only when the type or goal really changes. Sub-tasks do not call it."
-        .to_string()
-}
-
-/// The per-turn nudge for a task's main conversation whose task has no
-/// profile yet. It is the only carrier of the rule for codex (whose standing
-/// block has no room left) and a backstop for the others; it disappears — and
-/// so stops costing anything — once the profile is written.
-pub fn self_report_line(locale: &str) -> &'static str {
-    if locale == "zh" {
-        "本任务还没有画像：本回合结束前调用一次 `fleet__task action=set`，报 `type`（dev / research / general，没把握选 general）和一句话 `goal`（做到什么算完）。"
-    } else {
-        "This task has no profile yet: before this turn ends, call `fleet__task action=set` once with a `type` (dev / research / general; unsure → general) and a one-sentence `goal` (what done means)."
-    }
 }
 
 fn research_lead_zh(title: &str) -> String {

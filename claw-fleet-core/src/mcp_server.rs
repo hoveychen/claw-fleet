@@ -447,6 +447,16 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
             return Ok(refusal);
         }
     }
+    if name == "fleet__task"
+        && crate::mcp_control::arg(&args, "action").as_deref() == Some("kickoff")
+    {
+        if let Some(refusal) =
+            refuse_if_subagent(name, crate::mcp_control::TASK_KICKOFF_EFFECT, &args)
+        {
+            return Ok(refusal);
+        }
+        return handle_task_kickoff_call(&args);
+    }
     let sid = current_session_id();
     let session_id = (!sid.is_empty()).then_some(sid.as_str());
     let cwd = resolve_workspace_cwd();
@@ -1044,6 +1054,89 @@ fn strip_hand_rolled_end_options(
 }
 
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
+    run_fleet_ask(params, |_| {})
+}
+
+/// `fleet__task action=kickoff`: raise the kickoff card through the ordinary
+/// `fleet__ask` producer and act on the answer — see [`crate::task_kickoff`].
+/// Only 开工 settles the task; any other answer is handed back unchanged.
+///
+/// The kickoff is filed under the card's request id before the wait starts,
+/// because a card that times out is parked and answered later by a process
+/// that never saw this call ([`crate::parked::answer_with`] applies it then).
+/// The sub-task and subagent refusals are the card path's own.
+fn handle_task_kickoff_call(args: &Value) -> Result<Value, JsonRpcError> {
+    use crate::task_kickoff as tk;
+    let kickoff = match tk::parse_research(args) {
+        Ok(k) => k,
+        Err(e) => return Ok(tool_error(e)),
+    };
+    let session_id = current_session_id();
+    if session_id.is_empty() {
+        return Ok(tool_error(
+            "Fleet could not resolve the current session id, so it cannot tell which task to \
+             kick off."
+                .into(),
+        ));
+    }
+    let (title, locale) = crate::claude_launch::guidance_voice();
+    let question = tk::card_question(&kickoff, &locale);
+    let question_text = question.question.clone();
+    let cwd = resolve_workspace_cwd();
+    let pending = tk::PendingKickoff {
+        session_id: session_id.clone(),
+        cwd: cwd.to_string_lossy().into_owned(),
+        question: question_text.clone(),
+        title: title.clone(),
+        locale: locale.clone(),
+        kickoff: kickoff.clone(),
+    };
+    let params = json!({ "arguments": { "questions": [question] } });
+    let mut queued: Option<String> = None;
+    let result = run_fleet_ask(&params, |request_id| {
+        if let Err(e) = tk::save_pending(request_id, &pending) {
+            eprintln!("task_kickoff save_pending: {e}");
+        }
+        queued = Some(request_id.to_string());
+    })?;
+    // A parked card keeps its record for whoever answers it later.
+    if let Some(request_id) = queued.as_deref() {
+        if !crate::parked::is_parked(request_id) {
+            tk::take_pending(request_id);
+        }
+    }
+    if result.get("isError").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(result);
+    }
+    let answers: std::collections::BTreeMap<String, String> = result
+        .get("structuredContent")
+        .and_then(|c| c.get("answers"))
+        .and_then(|a| serde_json::from_value(a.clone()).ok())
+        .unwrap_or_default();
+    let answer = tk::answer_of(&answers, &question_text).unwrap_or("");
+    if !tk::is_start_answer(answer) {
+        let mut result = result;
+        if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
+            content.push(json!({ "type": "text", "text": tk::not_started_note(&locale) }));
+        }
+        return Ok(result);
+    }
+    match tk::apply_start(&session_id, &cwd, &kickoff, &title, &locale) {
+        Ok(text) => Ok(json!({
+            "content": [{ "type": "text", "text": text }],
+            "structuredContent": { "answers": answers, "started": true },
+            "isError": false,
+        })),
+        Err(e) => Ok(tool_error(format!(
+            "The boss pressed 开工 but Fleet could not settle the task: {e}"
+        ))),
+    }
+}
+
+/// The `fleet__ask` producer. `on_queued` runs with the request id once the
+/// card has been handed to the consumer and before the wait — the one moment a
+/// caller can file something under the id while it is still certain to matter.
+fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let mut questions: Vec<crate::mcp_ipc::FleetAskQuestion> = match args.get("questions").cloned()
     {
@@ -1246,6 +1339,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
             "Failed to queue fleet__ask request: {e}"
         )));
     }
+    on_queued(&request_id);
 
     // Poll for the response, watching the consumer heartbeat so we exit
     // promptly if the desktop / fleet serve dies mid-flight.
