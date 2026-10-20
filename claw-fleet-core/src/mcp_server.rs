@@ -1273,9 +1273,17 @@ fn handle_task_kickoff_call(args: &Value) -> Result<Value, JsonRpcError> {
         .and_then(|c| c.get("answers"))
         .and_then(|a| serde_json::from_value(a.clone()).ok())
         .unwrap_or_default();
+    // Neither branch below carries `structuredContent`: when a result has one,
+    // Claude Code 2.1.284 hands the model that JSON and drops `content`, so the
+    // research layer (or the not-started note) would never reach it. Seen in
+    // trial session 8c57567d: the kickoff result arrived as
+    // `{"answers":…,"started":true}` with no research layer.
     let answer = tk::answer_of(&answers, &question_text).unwrap_or("");
     if !tk::is_start_answer(answer) {
         let mut result = result;
+        if let Some(obj) = result.as_object_mut() {
+            obj.remove("structuredContent");
+        }
         if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
             content.push(json!({ "type": "text", "text": tk::not_started_note(&locale) }));
         }
@@ -1284,7 +1292,6 @@ fn handle_task_kickoff_call(args: &Value) -> Result<Value, JsonRpcError> {
     match tk::apply_start(&session_id, &cwd, &kickoff, &title, &locale) {
         Ok(text) => Ok(json!({
             "content": [{ "type": "text", "text": text }],
-            "structuredContent": { "answers": answers, "started": true },
             "isError": false,
         })),
         Err(e) => Ok(tool_error(format!(
