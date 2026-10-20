@@ -1103,16 +1103,20 @@ where
     // predecessor's model and effort. Falling through to the CLI default here
     // would silently switch models mid-plan. `permission_mode` is deliberately
     // left to the default: a relay should not inherit an elevated mode.
-    let spawned = spawn(
-        &pending.agent_source,
-        &pending.workspace_path,
-        &prompt,
-        pending.model.as_deref(),
-        pending.effort.as_deref(),
-        None,
-        HANDOFF_ENTRYPOINT,
-        pre_assigned.as_deref(),
-    )
+    // A codex successor's first prompt is rendered before it has an id; the
+    // predecessor tells it which task — and which role — it continues.
+    let spawned = crate::codex_launch::with_continuation(&pending.from_session_id, || {
+        spawn(
+            &pending.agent_source,
+            &pending.workspace_path,
+            &prompt,
+            pending.model.as_deref(),
+            pending.effort.as_deref(),
+            None,
+            HANDOFF_ENTRYPOINT,
+            pre_assigned.as_deref(),
+        )
+    })
     .and_then(|resp| {
         resp.session_id
             .ok_or_else(|| "spawn returned no session id".to_string())
@@ -1895,6 +1899,35 @@ mod tests {
         assert_eq!(to.as_deref(), Some("t2"));
         let chain = chain_containing_in(&cdir, "t1").unwrap();
         assert_eq!(successor_of(&chain, "t1").as_deref(), Some("t2"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A codex successor's first prompt is rendered inside the spawn, before
+    /// the thread has an id, from what `CodexSource::spawn` reads off the
+    /// launch hint. The spawn must therefore run with the predecessor set as
+    /// the continuation — and only for the duration of the spawn.
+    #[test]
+    fn successor_spawn_runs_with_the_predecessor_as_continuation() {
+        let (root, pdir, cdir) = fresh_dirs("codex-continuation");
+        register_in(
+            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, None, None, "codex",
+            1000,
+        )
+        .unwrap();
+        assert_eq!(crate::codex_launch::continuation(), None);
+        consume_and_spawn_in(&pdir, &cdir, None, None, "t1", 1001, |_, _, _, _, _, _, _, _| {
+            assert_eq!(crate::codex_launch::continuation().as_deref(), Some("t1"));
+            Ok(crate::session_launch::SpawnSessionResponse {
+                pid: 7,
+                session_id: Some("t2".to_string()),
+            })
+        })
+        .unwrap();
+        assert_eq!(
+            crate::codex_launch::continuation(),
+            None,
+            "the continuation does not outlive the spawn"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -327,7 +327,7 @@ export function TaskRail({
   );
 
   return (
-    <aside className={`${styles.rail} ${className ?? ""}`} data-testid="task-rail">
+    <aside className={`${styles.rail} ${className ?? ""}`} data-testid="task-rail" data-reader-keep>
       {/* Held open by the switch with nothing in it. Saying so beats a blank
           column, which reads as the rail having failed to load. */}
       {empty && <p className={styles.empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
