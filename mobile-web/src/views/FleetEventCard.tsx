@@ -16,10 +16,10 @@ const ICON: Record<FleetEvent["kind"], string> = {
 
 function kindLabel(kind: FleetEvent["kind"]): string {
   return {
-    watch: "Fleet watch",
-    handoff: "Fleet handoff",
-    loop: "Fleet loop",
-    schedule: "Fleet schedule",
+    watch: t("Fleet 监视"),
+    handoff: t("Fleet 续接"),
+    loop: t("Fleet 重复定时"),
+    schedule: t("Fleet 定时"),
     decision: t("Fleet 决策卡答复"),
   }[kind];
 }
