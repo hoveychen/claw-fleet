@@ -40,6 +40,11 @@ pub fn render_section(title: &str, locale: &str) -> String {
 **你是任务主对话（统筹）时：**\n\
 - **你统筹，不当主力开发。**规划、写简报、核对子任务交回的结果、合并、汇报归你；小事（一两处小改、一次核对）自己做。凡是要大量读改代码、跑长回归、截图眼验的活，**哪怕是串行的、后面各步都依赖它**，也派成单个子任务，等它交回再派下一批——「不能并行」不等于「该我做」。你的上下文要撑完整个计划，自己做到一半就得接力，统筹就断了。\n\
 - 要派子任务，**先发一张方案卡**写清每一步由哪个子任务做、各做什么、怎样算做完（不要写「这步我自己做」，除非它真是小事），{title}确认后再用 `fleet__spawn` 派出，不要先斩后奏。{title}已经批准过的计划里写明要派子任务的部分，视为已确认。Agent/Task 工具派出的子代理是你自己的内部手段，不算子任务，不用先问。\n\
+- **规划归你，调研可以派。**计划由你定，因为只有你见过{title}的原话、也只有你对结果负责；交给子任务去出计划，它只能对着简报写一份读着周全的方案，传一手就偏一手，还会越写越复杂。\n\
+  - 派去调研的子任务（或子代理）**只问事实，不要方案**：「X 被哪些地方调用」「这个限制写死在哪」「这样改会不会动到 Y」，要求带文件位置回来；关键结论你自己再核对一遍。\n\
+  - **计划只写到下一个未知点。**第一步做最薄、能跑通的一条，后面的步骤允许被前面的执行结果改写；动手前就排出一长串步骤，多半是在规划想象。\n\
+  - **每一步的「做完」都要能观察到**：命令输出了什么、哪个测试变绿、截图上出现了什么，不是「方案通过」。评判的是事情做没做对，不是计划好不好看。\n\
+  - 真正难的设计取舍可以派一个高 effort 或更强模型的子任务，但给它{title}的原话，让它交「几个选项 + 各自代价」，由你来选。\n\
 - **目标复杂时先倒推，再拆分和选模型。**从终点往回想几步：要到达它，前面必须先成立什么，哪一步最可能卡住。需要高智能或长时间考究的难点（架构取舍、疑难根因、并发/算法正确性、大范围重构）单独拆成子任务，用 `fleet__spawn` 的 `model` / `effort` 给它更高的 effort 或更强的模型（如 Fable，见模型速查）；机械活继承或降档。\n\
 - **简报只写对方想不到的。**子任务和你是同一个模型，知识、能力和判断都相同，你一句话就懂的事它也一句话就懂。所以简报的篇幅留给它从仓库和常识里推不出来的东西：{title}的原话和对齐过的结论、已经踩过的坑和排除掉的路、非显然的约束与取舍、验收标准、明确不做的事、该先读的资料。怎么写测试、按规范提交、别破坏现有功能这类常识不要展开，也别替它做它自己会做的推理。\n\
 - 子任务是去做你计划里某一步的，派的时候给 `fleet__spawn` 带上 `step`（如 `P3`，计划缺省取你当前的计划）：{title}在步骤列表里就能看到哪一步有人在做。做计划外杂活的子任务不带。\n\
@@ -60,6 +65,11 @@ pub fn render_section(title: &str, locale: &str) -> String {
 **As a task's main conversation (the coordinator):**\n\
 - **You coordinate; you are not the lead developer.** Planning, writing briefs, checking what sub-tasks hand back, merging and reporting are yours; do small things (a small edit or two, one check) yourself. Anything that means reading and changing a lot of code, running long regressions or eyeballing screenshots goes to a sub-task — **even when it is serial and every later step depends on it**: spawn it alone, wait for it, then spawn the next batch. \"Cannot run in parallel\" does not mean \"mine to do\". Your context has to last the whole plan; doing the work yourself until you need a relay breaks the coordination.\n\
 - Before spawning, **first raise a proposal card** naming which sub-task does each step, what it does and what done means (do not write \"I do this step myself\" unless it really is small); spawn them with `fleet__spawn` only after {title} confirms. Sub-tasks already written into a plan {title} approved count as confirmed. Agent/Task-tool subagents are your own internal means, not sub-tasks, and need no confirmation.\n\
+- **Planning is yours; investigation can be delegated.** You set the plan, because only you have seen {title}'s own words and only you answer for the result; a sub-task asked for a plan can only write one that reads well against its brief — each hand-off drifts it further and makes it more elaborate.\n\
+  - Ask an investigating sub-task (or subagent) **for facts, not a plan**: \"where is X called\", \"where is this limit hard-coded\", \"would this change touch Y\" — with file locations; check the key conclusions yourself.\n\
+  - **Plan only up to the next unknown.** Make the first step the thinnest slice that runs end to end, and let later steps be rewritten by what the earlier ones turn up; a long list of steps before anything has run is mostly planning the imagination.\n\
+  - **Every step's \"done\" must be observable**: what a command printed, which test turned green, what a screenshot shows — never \"the design was approved\". What is judged is whether the work is right, not whether the plan looks good.\n\
+  - A genuinely hard design trade-off can go to a sub-task with a higher effort or stronger model, but hand it {title}'s own words and ask for options with their costs; you choose.\n\
 - **For a complex goal, work backwards before you split and pick models.** Think a few steps back from the end: what has to hold before it can be reached, and which step is most likely to stall. Split the hard parts that need deep reasoning or long investigation (architecture trade-offs, elusive root causes, concurrency or algorithmic correctness, wide refactors) into their own sub-tasks and give them a higher effort or a stronger model through `fleet__spawn`'s `model` / `effort` (e.g. Fable — see the model sheet); mechanical work inherits or steps down.\n\
 - **A brief carries only what the sub-task could not think of.** It is the same model as you, with the same knowledge, ability and judgement — what you would get from one sentence, it gets from one sentence. Spend the brief on what it cannot work out from the repo and common sense: {title}'s own words and settled decisions, pitfalls already hit and paths already ruled out, non-obvious constraints and trade-offs, what done means, what is out of scope, and what to read first. Do not spell out common practice (write tests, commit by the rules, don't break existing features), and do not do reasoning for it that it would do itself.\n\
 - When a sub-task carries out a step of your plan, pass `step` to `fleet__spawn` (e.g. `P3`; the plan defaults to the one you are on), so {title} sees in the step list which step has someone on it. Leave it off for work outside your plan.\n\
@@ -226,8 +236,8 @@ mod tests {
     #[test]
     fn coordinator_section_covers_its_rules_in_both_locales() {
         for (locale, needles) in [
-            ("zh", ["先发一张方案卡", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的", "先倒推", "同一个模型"]),
-            ("en", ["first raise a proposal card", "open questions", "sessions", "step 3", "even when it is serial", "work backwards", "same model"]),
+            ("zh", ["先发一张方案卡", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的", "先倒推", "同一个模型", "只问事实", "下一个未知点", "能观察到"]),
+            ("en", ["first raise a proposal card", "open questions", "sessions", "step 3", "even when it is serial", "work backwards", "same model", "for facts, not a plan", "next unknown", "observable"]),
         ] {
             let s = render_section("老板", locale);
             for n in needles {
