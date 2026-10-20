@@ -453,14 +453,14 @@ function DaySeparator({ isoDay }: { isoDay: string }) {
  * to, and when it handed the baton to the leg below.
  */
 function LegDivider({ info }: { info: LegDividerInfo }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (
     <div className={styles.leg_sep} data-testid="leg-divider">
       <span className={styles.leg_sep_label} title={info.sessionId}>
         {t("detail.prev_leg_divider", {
           hop: info.hop,
           title: info.title,
-          time: new Date(info.handedAt).toLocaleString(undefined, {
+          time: new Date(info.handedAt).toLocaleString(i18n.language, {
             month: "short",
             day: "numeric",
             hour: "2-digit",

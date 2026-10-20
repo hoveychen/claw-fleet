@@ -1197,7 +1197,56 @@ export const MOCK_PLAN_FOREST: PlanForest = {
 
 // ── Messages (for session detail view) ──────────────────────────────────────
 
+/** A scripted relay leg: an optional Fleet handoff event, then plain turns a
+ *  minute apart. */
+function billingLeg(
+  prefix: string,
+  startMs: number,
+  event: "successor" | null,
+  turns: ["user" | "assistant", string][],
+): RawMessage[] {
+  const rows: RawMessage[] = [];
+  if (event) {
+    rows.push({
+      type: "user",
+      uuid: `${prefix}-event`,
+      timestamp: new Date(startMs).toISOString(),
+      fleetEvent: { kind: "handoff", status: event },
+      message: { role: "user", content: "Continue the relay from the handoff note." },
+    });
+  }
+  turns.forEach(([role, text], i) => {
+    rows.push({
+      type: role,
+      uuid: `${prefix}-${i}`,
+      timestamp: new Date(startMs + (i + 1) * MIN).toISOString(),
+      message:
+        role === "user"
+          ? { role, content: text }
+          : { role, model: "claude-opus-4-8", content: [{ type: "text", text }] },
+    });
+  });
+  return rows;
+}
+
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
+  // The three legs of chain-billing, short enough that each one is fully
+  // loaded on open — so the task page's "load leg N" control can walk the
+  // relay back from leg 3 to leg 1.
+  "sess-billing-1": billingLeg("b1", NOW - 6 * HOUR, null, [
+    ["user", "Plan the usage-based billing migration and audit the current schema first."],
+    ["assistant", "Audited `usage_events` and `ledger_entries`. Two blockers: no `(ts, idempotency_key)` unique index, and proration lives in application code. Written up in the wiki."],
+    ["assistant", "Context at 97% — handing off to a fresh session with notes."],
+  ]),
+  "sess-billing-2": billingLeg("b2", NOW - 3.1 * HOUR, "successor", [
+    ["assistant", "Picked up P2. Creating the unique index concurrently before any backfill runs."],
+    ["assistant", "Backfill validated on staging: 2.1M rows, 0 drift. Relaying P4."],
+  ]),
+  "sess-billing-3": billingLeg("b3", NOW - 38 * MIN, "successor", [
+    ["assistant", "Picked up P4: flipping the read path behind `usage_billing_v2`, dual-write stays on for 48h."],
+    ["user", "先只切 top 50 租户，三个企业租户保持旧路径。"],
+    ["assistant", "Done — the flag now gates the top 50 tenants; the three enterprise tenants are pinned to the legacy reader. Watching `ledger_v2_miss_total`."],
+  ]),
   // A session that failed three ways in a row. Deliberately hung on
   // `sess-quiet-alive`: it is one of the two mock sessions that is neither a
   // subagent nor IDE-attached, so it is the only place the resume-backed

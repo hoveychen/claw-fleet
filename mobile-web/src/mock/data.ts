@@ -208,6 +208,40 @@ export const MOCK_SESSIONS: SessionInfo[] = [
       currentTask: "P4 — cutover behind flag",
     },
   },
+  // Earlier leg of chain-billing: what "加载第 N 棒" on sess-billing-3 prepends.
+  {
+    id: "sess-billing-1",
+    workspacePath: "/Users/demo/workspace/billing-service",
+    workspaceName: "billing-service",
+    aiTitle: "Usage-based billing migration — P1 schema audit",
+    status: "idle",
+    isSubagent: false,
+    lastMessagePreview: "",
+    lastActivityMs: NOW - 3 * 60 * MIN,
+    createdAtMs: NOW - 6 * 60 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/billing-service/sess-billing-1.jsonl",
+    model: "claude-opus-4-20250805",
+    entrypoint: "claw-fleet-newsession",
+    procAlive: false,
+    handoff: { chainId: "chain-billing", hop: 1, chainLen: 3 },
+  } as SessionInfo,
+  // Earlier leg of chain-billing: what "加载第 N 棒" on sess-billing-3 prepends.
+  {
+    id: "sess-billing-2",
+    workspacePath: "/Users/demo/workspace/billing-service",
+    workspaceName: "billing-service",
+    aiTitle: "Usage-based billing migration — P2/P3 backfill jobs",
+    status: "idle",
+    isSubagent: false,
+    lastMessagePreview: "",
+    lastActivityMs: NOW - 40 * MIN,
+    createdAtMs: NOW - 3 * 60 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/billing-service/sess-billing-2.jsonl",
+    model: "claude-opus-4-20250805",
+    entrypoint: "claw-fleet-handoff",
+    procAlive: false,
+    handoff: { chainId: "chain-billing", hop: 2, chainLen: 3 },
+  } as SessionInfo,
   {
     id: "sess-e2e-main",
     workspacePath: "/Users/demo/workspace/e2e-tests",
@@ -614,6 +648,17 @@ export const MOCK_DSH_SESSION_COST = {
 };
 
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
+  // Earlier legs of chain-billing (see sess-billing-1/2 above).
+  "/Users/demo/.claude/projects/billing-service/sess-billing-1.jsonl": [
+    { type: "user", uuid: "b1-0", timestamp: new Date(NOW - 6 * 60 * MIN).toISOString(), message: { role: "user", content: "Plan the usage-based billing migration and audit the current schema first." } },
+    { type: "assistant", uuid: "b1-1", timestamp: new Date(NOW - 6 * 60 * MIN + MIN).toISOString(), message: { role: "assistant", content: [{ type: "text", text: "Audited usage_events and ledger_entries: no (ts, idempotency_key) unique index, and proration lives in application code." }] } },
+    { type: "assistant", uuid: "b1-2", timestamp: new Date(NOW - 3 * 60 * MIN - MIN).toISOString(), message: { role: "assistant", content: [{ type: "text", text: "Context at 97% — handing off to a fresh session with notes." }] } },
+  ],
+  "/Users/demo/.claude/projects/billing-service/sess-billing-2.jsonl": [
+    { type: "user", uuid: "b2-e", timestamp: new Date(NOW - 3 * 60 * MIN).toISOString(), fleetEvent: { kind: "handoff", status: "successor" }, message: { role: "user", content: "Continue the relay from the handoff note." } },
+    { type: "assistant", uuid: "b2-0", timestamp: new Date(NOW - 3 * 60 * MIN + MIN).toISOString(), message: { role: "assistant", content: [{ type: "text", text: "Picked up P2. Creating the unique index concurrently before any backfill runs." }] } },
+    { type: "assistant", uuid: "b2-1", timestamp: new Date(NOW - 41 * MIN).toISOString(), message: { role: "assistant", content: [{ type: "text", text: "Backfill validated on staging: 2.1M rows, 0 drift. Relaying P4." }] } },
+  ],
   // Work-run fixtures: a finished band (thinking + tools ×2 records) between
   // prose, then a live tail run — the session is `waitingInput`... the tail run
   // exercises the collapsed/expanded band; the api-server session status keeps
