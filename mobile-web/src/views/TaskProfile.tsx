@@ -24,9 +24,11 @@ export function taskTypeLabel(type: TaskType): string {
   }
 }
 
-/** The task's type as a small chip; the goal rides its tooltip. */
+/** The task's type as a small chip; the goal rides its tooltip. An undecided
+ *  task shows no chip: most tasks never get past undecided, so on the list it
+ *  would only be noise. */
 export function TaskTypeChip({ profile }: { profile: TaskProfileBrief | null | undefined }) {
-  if (!profile) return null;
+  if (!profile || profile.type === "general") return null;
   return (
     <span
       className={styles.chip}
