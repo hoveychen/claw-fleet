@@ -22,7 +22,7 @@ pub const DENY_REASON: &str = "Fleet: this `git commit` message contains a Claud
 /// `commit`, allowing global options in between (`git -C dir commit`,
 /// `git -c k=v commit`). Commands are split on newlines and shell separators,
 /// so `git status && make commit` does not count.
-fn runs_git_commit(command: &str) -> bool {
+pub(crate) fn runs_git_commit(command: &str) -> bool {
     command
         .split(|c| matches!(c, '\n' | ';' | '&' | '|' | '(' | ')'))
         .any(|segment| {

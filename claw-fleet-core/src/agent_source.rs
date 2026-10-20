@@ -544,7 +544,35 @@ pub fn spawn_session(
     let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
-    let resp = source.spawn(spec)?;
+    // A Claude sub-task gets its id up front and its edge recorded before the
+    // launch, so `claude_launch` can already tell it is a sub-task and hand it
+    // the sub-task guidance. Codex mints its own thread id, so it keeps
+    // learning its role from the per-turn role line only.
+    let presigned;
+    let mut presigned_id: Option<String> = None;
+    let spec = match (tool, spec.spawned_by.as_deref(), spec.session_id.as_deref()) {
+        ("claude", Some(parent), None) => {
+            let sid = crate::session_launch::resolve_new_session_id(None)?;
+            crate::launch_spec::note_spawned_by(&sid, parent);
+            presigned_id = Some(sid.clone());
+            presigned = SpawnSpec {
+                session_id: Some(sid),
+                ..spec.clone()
+            };
+            &presigned
+        }
+        _ => spec,
+    };
+    let resp = match source.spawn(spec) {
+        Ok(resp) => resp,
+        Err(e) => {
+            // Do not leave a launch note for a session that never started.
+            if let Some(sid) = &presigned_id {
+                crate::launch_spec::forget(sid);
+            }
+            return Err(e);
+        }
+    };
     // Every source has written its launch note by the time `spawn` returns
     // (Codex does it before handing back the thread id), so this merge does
     // not race the source's own read-modify-write.
