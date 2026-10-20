@@ -195,6 +195,17 @@ describe("sub-tasks under steps", () => {
     expect(sections[1].textContent).not.toContain("Build slice");
   });
 
+  // The step header already shows the plan's X/Y; a sub-task's own plan
+  // count is a parse-time snapshot that goes stale once it finishes.
+  it("shows a sub-task's plan count only when it is not under a step", () => {
+    const r = linkedRow();
+    for (const st of r.subtasks) (st.tip as { taskPlan?: unknown }).taskPlan = { done: 1, total: 3 };
+    const el = render({ row: r, steps, stepsPlanId: "demo" });
+    const nested = el.querySelector("[data-testid='step-subtasks']")!;
+    expect(nested.textContent).not.toContain("1/3");
+    expect([...el.querySelectorAll("section")][1].textContent).toContain("1/3");
+  });
+
   it("keeps the plain layout when nothing links", () => {
     const el = render({ row: linkedRow(), steps, stepsPlanId: "unrelated" });
     expect(el.querySelectorAll("[data-testid='step-subtasks']")).toHaveLength(0);
