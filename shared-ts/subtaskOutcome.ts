@@ -12,7 +12,15 @@ import type { TaskState } from "./taskState";
 /** Mirrors `claw_fleet_core::session::TurnEnd`. */
 export type TurnEnd = "clean" | "midTurn" | "interrupted" | "authFailed" | "failed";
 
-export type SubtaskOutcome = "reported" | "midTurn" | "interrupted" | "authFailed" | "failed";
+/** `takenOver` is never returned by `subtaskOutcome` itself; see
+ *  `subtaskOutcomeOnStep`. */
+export type SubtaskOutcome =
+  | "reported"
+  | "midTurn"
+  | "interrupted"
+  | "authFailed"
+  | "failed"
+  | "takenOver";
 
 /** The outcome a stopped sub-task's row shows, or null when the row is not a
  *  stopped one (its task state already says everything). A missing
@@ -25,6 +33,21 @@ export function subtaskOutcome(
   if (state !== "review") return null;
   if (lastTurnEnd == null || lastTurnEnd === "clean") return "reported";
   return lastTurnEnd;
+}
+
+/** The outcome of a sub-task dispatched for a plan step. A stop that was not a
+ *  clean report back stops being an alarm once the work moved on without it:
+ *  the step it was dispatched for is checked off, or a sub-task dispatched
+ *  later for the same step exists. Its row then reads "taken over" rather than
+ *  as a live failure, which made a waiting task look stuck on it. */
+export function subtaskOutcomeOnStep(
+  sub: { state: TaskState; lastTurnEnd: TurnEnd | null | undefined; createdAtMs: number },
+  step: { done: boolean; siblingCreatedAtMs: readonly number[] },
+): SubtaskOutcome | null {
+  const outcome = subtaskOutcome(sub.state, sub.lastTurnEnd);
+  if (outcome == null || outcome === "reported") return outcome;
+  if (step.done || step.siblingCreatedAtMs.some((ms) => ms > sub.createdAtMs)) return "takenOver";
+  return outcome;
 }
 
 /** Whether a sub-task counts toward a task's "n/m finished" tally: it is done,

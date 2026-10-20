@@ -292,7 +292,7 @@ export function TaskPlansTab({
   session: SessionInfo;
   client: FleetTransport | null;
   /** What to show beneath one step — the sub-tasks working on it. */
-  underStep?: (planId: string | null | undefined, itemText: string) => React.ReactNode;
+  underStep?: (planId: string | null | undefined, itemText: string, done: boolean) => React.ReactNode;
 }) {
   const data = useRelayData<TaskPlanDetail[]>(client, "task_plans", {
     workspacePath: session.workspacePath,
@@ -334,7 +334,7 @@ export function TaskPlansTab({
                     text={item.text}
                     state={item.done ? "done" : isCurrent ? "current" : "pending"}
                   />
-                  {underStep?.(p.id, item.text)}
+                  {underStep?.(p.id, item.text, item.done)}
                 </div>
               );
             })}

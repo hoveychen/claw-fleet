@@ -16,7 +16,12 @@ import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
-import { subtaskCountsAsFinished, subtaskOutcome, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
+import {
+  subtaskCountsAsFinished,
+  subtaskOutcome,
+  subtaskOutcomeOnStep,
+  type SubtaskOutcome,
+} from "../../../shared-ts/subtaskOutcome";
 import { SubtaskRecoveryBlock } from "./SubtaskRecovery";
 import styles from "./TaskRail.module.css";
 
@@ -27,6 +32,7 @@ const OUTCOME_DOT: Record<SubtaskOutcome, string> = {
   interrupted: "var(--color-text-dim)",
   authFailed: "var(--color-error)",
   failed: "var(--color-error)",
+  takenOver: "var(--color-text-dim)",
 };
 
 const OUTCOME_LABEL: Record<SubtaskOutcome, [string, string]> = {
@@ -35,6 +41,7 @@ const OUTCOME_LABEL: Record<SubtaskOutcome, [string, string]> = {
   interrupted: ["home.subtask_interrupted", "Interrupted by hand"],
   authFailed: ["home.subtask_auth_failed", "Auth failed"],
   failed: ["home.subtask_failed", "Permanent error"],
+  takenOver: ["home.subtask_taken_over", "Taken over"],
 };
 
 function ArtifactGlyph({ mime }: { mime: string }) {
@@ -235,10 +242,18 @@ export function TaskRail({
   const linked = byStep.size > 0;
   const listedSubtasks = linked ? loose : subtasks;
 
-  const subtaskButton = (st: SubtaskRow) => {
+  /** `step` is set for a sub-task listed under the plan step it was
+   *  dispatched for: whether that step is checked off, and every sub-task on
+   *  it (this one included). */
+  const subtaskButton = (st: SubtaskRow, step?: { done: boolean; on: SubtaskRow[] }) => {
     const plan = st.tip.taskPlan;
     const open = st.hops.some((h) => h.id === openSessionId);
-    const outcome = subtaskOutcome(st.state, st.tip.lastTurnEnd);
+    const outcome = step
+      ? subtaskOutcomeOnStep(
+          { state: st.state, lastTurnEnd: st.tip.lastTurnEnd, createdAtMs: st.hops[0].createdAtMs },
+          { done: step.done, siblingCreatedAtMs: step.on.map((x) => x.hops[0].createdAtMs) },
+        )
+      : subtaskOutcome(st.state, st.tip.lastTurnEnd);
     return (
       <button
         key={st.key}
@@ -301,7 +316,7 @@ export function TaskRail({
               </span>
               {onIt.length > 0 && (
                 <div className={`${styles.card} ${styles.step_subtasks}`} data-testid="step-subtasks">
-                  {onIt.map(subtaskButton)}
+                  {onIt.map((st) => subtaskButton(st, { done: s.done, on: onIt }))}
                 </div>
               )}
             </li>
@@ -361,7 +376,7 @@ export function TaskRail({
                 <span className={styles.item_title}>{t("home.rail_main", "Main conversation")}</span>
               </button>
             )}
-            {listedSubtasks.map(subtaskButton)}
+            {listedSubtasks.map((st) => subtaskButton(st))}
           </div>
         </section>
       )}

@@ -14,7 +14,7 @@ import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
 import { taskLibrary } from "../library";
 import { LibraryList, useLibrary } from "./LibraryList";
 import { isWakingSticky, statusTone, subtaskStateLabel, timeAgo } from "./TasksView";
-import { subtaskOutcome } from "../../../shared-ts/subtaskOutcome";
+import { subtaskOutcomeOnStep, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
 import { EmptyState } from "./EmptyState";
 import { SkeletonList } from "./loading";
 import { SubtaskRecoveryBanner } from "./SubtaskRecovery";
@@ -117,38 +117,49 @@ export function subtasksForStep(
   });
 }
 
+/** A step-linked sub-task's outcome; see `subtaskOutcomeOnStep`. `onStep` is
+ *  every sub-task dispatched for the same step, this one included. */
+function outcomeOnStep(r: SubtaskRows[number], stepDone: boolean, onStep: SubtaskRows): SubtaskOutcome | null {
+  return subtaskOutcomeOnStep(
+    { state: r.state, lastTurnEnd: r.tip.lastTurnEnd, createdAtMs: r.hops[0].createdAtMs },
+    { done: stepDone, siblingCreatedAtMs: onStep.map((x) => x.hops[0].createdAtMs) },
+  );
+}
+
 /** Compact sub-task rows nested under a step in the steps tab. */
 export function StepSubtasks({
   rows,
+  stepDone,
   onOpenSessionId,
 }: {
   rows: SubtaskRows;
+  /** The step these rows were dispatched for is checked off. */
+  stepDone: boolean;
   onOpenSessionId: (id: string) => void;
 }) {
   if (rows.length === 0) return null;
   return (
     <div className={`${styles.card} ${styles.stepSubtasks}`}>
-      {rows.map((r) => (
-        <button
-          key={r.key}
-          type="button"
-          className={styles.row}
-          onClick={() => onOpenSessionId(r.tip.id)}
-        >
-          <span
-            className={styles.dot}
-            data-state={r.state}
-            data-outcome={subtaskOutcome(r.state, r.tip.lastTurnEnd) ?? undefined}
-          />
-          <span className={styles.rowBody}>
-            <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
-            <span className={styles.rowMeta}>
-              {r.pending ? t("等你回答") : subtaskStateLabel(r.state, r.tip.lastTurnEnd)}
+      {rows.map((r) => {
+        const outcome = outcomeOnStep(r, stepDone, rows);
+        return (
+          <button
+            key={r.key}
+            type="button"
+            className={styles.row}
+            onClick={() => onOpenSessionId(r.tip.id)}
+          >
+            <span className={styles.dot} data-state={r.state} data-outcome={outcome ?? undefined} />
+            <span className={styles.rowBody}>
+              <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
+              <span className={styles.rowMeta}>
+                {r.pending ? t("等你回答") : subtaskStateLabel(r.state, outcome)}
+              </span>
             </span>
-          </span>
-          <ChevronRight size={16} className={styles.chevron} />
-        </button>
-      ))}
+            <ChevronRight size={16} className={styles.chevron} />
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -182,6 +193,16 @@ export function SubtasksPane({
     const r = rows.find((x) => x.hops.some((h) => h.id === id));
     return r ? taskTitle(r.tip, t("未命名任务")) : null;
   };
+  // This tab has no plan items, so whether a step is checked off is unknown
+  // here; only a later sub-task on the same step marks one as taken over.
+  const stepKey = (r: SubtaskRows[number]) => {
+    const l = r.tip.taskId ? links?.get(r.tip.taskId) : undefined;
+    return l ? `${l.planId}\u0000${l.step}` : null;
+  };
+  const outcomeOf = (r: SubtaskRows[number]) => {
+    const key = stepKey(r);
+    return outcomeOnStep(r, false, key ? rows.filter((x) => stepKey(x) === key) : [r]);
+  };
   return (
     <>
     <SubtaskRecoveryBanner client={client} coordinatorId={coordinatorId} titleOf={titleOf} />
@@ -193,15 +214,11 @@ export function SubtasksPane({
           className={styles.row}
           onClick={() => onOpenSessionId(r.tip.id)}
         >
-          <span
-            className={styles.dot}
-            data-state={r.state}
-            data-outcome={subtaskOutcome(r.state, r.tip.lastTurnEnd) ?? undefined}
-          />
+          <span className={styles.dot} data-state={r.state} data-outcome={outcomeOf(r) ?? undefined} />
           <span className={styles.rowBody}>
             <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
             <span className={styles.rowMeta}>
-              {r.pending ? t("等你回答") : subtaskStateLabel(r.state, r.tip.lastTurnEnd)}
+              {r.pending ? t("等你回答") : subtaskStateLabel(r.state, outcomeOf(r))}
               {(() => {
                 const step = r.tip.taskId ? links?.get(r.tip.taskId)?.step : undefined;
                 return step ? ` · ${t("第 {0} 步", step.slice(1))}` : "";

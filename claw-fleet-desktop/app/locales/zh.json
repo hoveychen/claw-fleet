@@ -2634,6 +2634,7 @@
     "subtask_interrupted": "被手动中断",
     "subtask_auth_failed": "鉴权失败",
     "subtask_failed": "永久错误",
+    "subtask_taken_over": "已被接手",
     "elapsed": "已运行 {{span}}"
   },
   "history": {
