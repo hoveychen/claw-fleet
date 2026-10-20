@@ -866,7 +866,7 @@ mod tests {
                 Some(t),
                 None,
                 None,
-                crate::task_profile::ProfileSetter::Agent,
+                crate::task_profile::ProfileSetter::Boss,
             )
             .unwrap();
             assert_eq!(subtask_layer_for(&task), want);

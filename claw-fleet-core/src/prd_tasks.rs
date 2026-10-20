@@ -3206,8 +3206,8 @@ trailing notes outside\n";
         use crate::task_profile::{set, ProfileSetter, TaskType};
         let dir = tempfile::tempdir().unwrap();
         let _home = crate::paths::fleet_home_guard(dir.path());
-        set("res-main", Some(TaskType::Research), Some("弄清 HF 事件模型能否用于回测"), None, ProfileSetter::Agent).unwrap();
-        set("dev-main", Some(TaskType::Dev), Some("修好 X"), None, ProfileSetter::Agent).unwrap();
+        set("res-main", Some(TaskType::Research), Some("弄清 HF 事件模型能否用于回测"), None, ProfileSetter::Boss).unwrap();
+        set("dev-main", Some(TaskType::Dev), Some("修好 X"), None, ProfileSetter::Boss).unwrap();
         let ws = dir.path().join("ws");
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(
@@ -3262,7 +3262,7 @@ trailing notes outside\n";
         assert!(moved.contains("下一步 **P3**"), "{moved}");
 
         // A research task with no attributed plan is told to create one.
-        set("res-bare", Some(TaskType::Research), None, None, ProfileSetter::Agent).unwrap();
+        set("res-bare", Some(TaskType::Research), None, None, ProfileSetter::Boss).unwrap();
         let bare = render_task_nudge(&ws, Some("res-bare")).unwrap();
         assert!(bare.contains("kind=research"), "{bare}");
 
