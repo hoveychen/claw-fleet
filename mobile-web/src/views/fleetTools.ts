@@ -267,7 +267,7 @@ const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
   job: ["stop"],
   notes: ["write", "edit", "append"],
   artifact: ["add", "delete"],
-  control: ["stop", "interrupt"],
+  control: ["stop", "interrupt", "resume"],
 };
 
 export function classifyResult(

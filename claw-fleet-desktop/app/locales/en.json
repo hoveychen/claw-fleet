@@ -172,6 +172,7 @@
       "control": {
         "stop": "Stopped agent {{id}}",
         "interrupt": "Interrupted agent {{id}}",
+        "resume": "Resumed sub-task {{id}}",
         "send": "Message agent {{id}}"
       },
       "notes": {

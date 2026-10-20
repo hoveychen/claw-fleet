@@ -172,6 +172,7 @@
       "control": {
         "stop": "停止 agent {{id}}",
         "interrupt": "打断 agent {{id}}",
+        "resume": "唤醒子任务 {{id}}",
         "send": "给 agent {{id}} 发消息"
       },
       "notes": {
