@@ -182,7 +182,7 @@ pub fn create(
         .map(|r| r.plan_id)
         // Another workspace's plan is not a parent candidate here.
         .filter(|id| pt::find_plan_source(cwd, id).is_some());
-    create_in(
+    let outcome = create_in(
         cwd,
         plan_id,
         title,
@@ -192,7 +192,12 @@ pub fn create(
         kind,
         session_id,
         focus.as_deref(),
-    )
+    )?;
+    // A sub-task's backtrack stays inside the plans its own line created.
+    if let Some(sid) = session_id {
+        crate::launch_spec::note_created_plan(sid, plan_id);
+    }
+    Ok(outcome)
 }
 
 /// [`create`] with the session's focused plan injected, so tests can drive the

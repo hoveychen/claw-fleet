@@ -100,6 +100,12 @@ pub struct LaunchSpec {
     /// [`Self::spawned_by_session_id`] it puts no edge in the task model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub split_from_task: Option<String>,
+    /// Plans this session created (`fleet plan create`). A sub-task's
+    /// backtrack stays inside the plan tree its line built for itself
+    /// ([`crate::prd_tasks::next_plan_for_subtask`]); this is how that tree is
+    /// told apart from the spawner's plans it was put to work on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_plans: Vec<String>,
     /// When Fleet first spawned the session (epoch ms).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
@@ -305,6 +311,20 @@ pub fn note_spawned_for(session_id: &str, plan_id: &str, step: &str) {
     let mut spec = get(session_id).unwrap_or_default();
     spec.spawned_for_plan = Some(plan_id.to_string());
     spec.spawned_for_step = Some(step.to_string());
+    write(session_id, &spec);
+}
+
+/// Record that `session_id` created plan `plan_id`. Only an existing note is
+/// touched: the one reader is a sub-task's backtrack, and every sub-task is a
+/// session Fleet spawned.
+pub fn note_created_plan(session_id: &str, plan_id: &str) {
+    let Some(mut spec) = get(session_id) else {
+        return;
+    };
+    if spec.created_plans.iter().any(|p| p == plan_id) {
+        return;
+    }
+    spec.created_plans.push(plan_id.to_string());
     write(session_id, &spec);
 }
 

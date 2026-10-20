@@ -125,6 +125,51 @@ pub fn is_subtask(session_id: &str) -> bool {
     TaskGraph::load().place(session_id).parent_task_id.is_some()
 }
 
+/// The spawner's plan and step `session_id`'s line was dispatched to
+/// (`LaunchSpec::spawned_for_plan` / `spawned_for_step`). Only the spawned
+/// session's launch note carries it, so a handoff successor reads it off its
+/// relay chain's first hop — the same lookup [`TaskGraph::spawning_session`]
+/// does for the spawn edge.
+pub fn assignment(session_id: &str) -> Option<(String, String)> {
+    assignment_with(
+        session_id,
+        &|id| crate::handoff::chain_containing(id)?.session_ids().into_iter().next(),
+        &note_assignment,
+    )
+}
+
+/// [`assignment`] with the line-root lookup and the launch-note read
+/// injected: callers resolving many sessions pass an index, tests pass maps.
+pub fn assignment_with(
+    session_id: &str,
+    line_root: &dyn Fn(&str) -> Option<String>,
+    note: &dyn Fn(&str) -> Option<(String, String)>,
+) -> Option<(String, String)> {
+    note(session_id).or_else(|| {
+        let root = line_root(session_id).filter(|r| r != session_id)?;
+        note(&root)
+    })
+}
+
+/// Plans created by any hop of `session_id`'s relay line
+/// (`LaunchSpec::created_plans`).
+pub fn plans_created_by_line(session_id: &str) -> HashSet<String> {
+    let hops = crate::handoff::chain_containing(session_id)
+        .map(|c| c.session_ids())
+        .unwrap_or_default();
+    std::iter::once(session_id.to_string())
+        .chain(hops)
+        .filter_map(|id| crate::launch_spec::get(&id))
+        .flat_map(|spec| spec.created_plans)
+        .collect()
+}
+
+/// The assignment recorded in `session_id`'s own launch note.
+pub fn note_assignment(session_id: &str) -> Option<(String, String)> {
+    let spec = crate::launch_spec::get(session_id)?;
+    Some((spec.spawned_for_plan?, spec.spawned_for_step?))
+}
+
 /// Sub-task edges `(child, spawner)` from launch notes. Only
 /// `spawned_by_session_id` makes one: a task split off another
 /// (`split_from_task`) is a top-level task of its own.
@@ -502,6 +547,24 @@ fn stamp(graph: &TaskGraph, sessions: &mut [SessionInfo]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A session's own note wins; a handoff successor, whose note carries no
+    /// assignment, reads its line's first hop.
+    #[test]
+    fn assignment_is_read_off_the_line_root() {
+        let notes = |sid: &str| match sid {
+            "S" => Some(("par".to_string(), "P2".to_string())),
+            "T" => Some(("own".to_string(), "P1".to_string())),
+            _ => None,
+        };
+        let root = |sid: &str| Some(if sid.starts_with('S') { "S" } else { sid }.to_string());
+        let want = Some(("par".to_string(), "P2".to_string()));
+        assert_eq!(assignment_with("S", &root, &notes), want);
+        assert_eq!(assignment_with("S3", &root, &notes), want);
+        assert_eq!(assignment_with("T", &root, &notes).unwrap().0, "own");
+        assert_eq!(assignment_with("M", &root, &notes), None);
+        assert_eq!(assignment_with("S3", &|_| None, &notes), None);
+    }
 
     fn ids(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()

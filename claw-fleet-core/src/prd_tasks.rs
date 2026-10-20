@@ -1203,22 +1203,33 @@ pub fn resolve_backtrack_target(cwd: &Path, completed_plan: &str) -> Option<Back
 /// the plan gate then refused to let A end its turn — B was trapped the same
 /// way.
 pub struct BacktrackScope {
-    /// The session is a sub-task ([`crate::task_model::is_subtask`]). Its
-    /// assignment ends with the plan it was put on, so it is never walked to
-    /// another plan of the tree; the main conversation that spawned it decides
-    /// what happens next.
-    pub subtask: bool,
+    /// Set when the session is a sub-task ([`crate::task_model::is_subtask`]).
+    /// A sub-task walks only the subtree of its own root plan and never climbs
+    /// out of it into the spawner's work ([`next_plan_for_subtask`]); the main
+    /// conversation that spawned it decides what happens next.
+    pub subtask: Option<SubtaskScope>,
     /// Whether another live session is on this plan
     /// ([`crate::plan_revive::plans_attended_by_others`]). Such a plan and its
     /// subtree are never chosen, and the walk does not climb past it.
     pub claimed_elsewhere: Box<dyn Fn(&str) -> bool>,
 }
 
+/// What bounds a sub-task's backtrack.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SubtaskScope {
+    /// The spawner's plan and step the sub-task's line was dispatched to
+    /// ([`crate::task_model::assignment`]), when it was dispatched to one.
+    pub assignment: Option<(String, String)>,
+    /// Plans the sub-task's line created
+    /// ([`crate::task_model::plans_created_by_line`]).
+    pub created: HashSet<String>,
+}
+
 impl BacktrackScope {
     /// The tree-order walk with nothing to avoid.
     pub fn unscoped() -> Self {
         Self {
-            subtask: false,
+            subtask: None,
             claimed_elsewhere: Box::new(|_| false),
         }
     }
@@ -1235,8 +1246,12 @@ impl BacktrackScope {
             .to_string_lossy()
             .into_owned();
         let claimed = std::cell::OnceCell::new();
+        let subtask = crate::task_model::is_subtask(&me).then(|| SubtaskScope {
+            assignment: crate::task_model::assignment(&me),
+            created: crate::task_model::plans_created_by_line(&me),
+        });
         Self {
-            subtask: crate::task_model::is_subtask(&me),
+            subtask,
             claimed_elsewhere: Box::new(move |id| {
                 claimed
                     .get_or_init(|| crate::plan_revive::plans_attended_by_others(&ws, &me))
@@ -1246,25 +1261,113 @@ impl BacktrackScope {
     }
 }
 
-/// [`resolve_backtrack_target`] for the session described by `scope`: `None`
-/// for a sub-task, and plans another live session is on are skipped. When
-/// skipping leaves nothing, there is no backtrack — the turn may end.
+/// [`resolve_backtrack_target`] for the session described by `scope`: a
+/// sub-task stays inside its own root plan ([`next_plan_for_subtask`]), and
+/// plans another live session is on are skipped. When that leaves nothing,
+/// there is no backtrack — the turn may end.
 pub fn resolve_backtrack_target_scoped(
     cwd: &Path,
     completed_plan: &str,
     scope: &BacktrackScope,
 ) -> Option<BacktrackTarget> {
-    if scope.subtask {
-        return None;
-    }
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     let (raw, _) = collect_from_sources(&sources, false);
     let blocks = dedup_blocks_keep_latest_mtime(raw);
+    if let Some(sub) = &scope.subtask {
+        let assignment = sub.assignment.as_ref().map(|(p, s)| (p.as_str(), s.as_str()));
+        return next_plan_for_subtask(
+            &blocks,
+            completed_plan,
+            assignment,
+            &|id| sub.created.contains(id),
+            &*scope.claimed_elsewhere,
+        );
+    }
     // The plain walk first: when the tree is done there is no need to pay for
     // the claim scan.
     next_plan_in_tree(&blocks, completed_plan)?;
     next_plan_in_tree_avoiding(&blocks, completed_plan, &*scope.claimed_elsewhere)
+}
+
+/// The backtrack for a sub-task that just finished `finished`: the ordinary
+/// tree-order walk ([`next_plan_in_tree_avoiding`]), confined to the subtree of
+/// the sub-task's own root plan and never climbing out of it.
+///
+/// The root is the highest plan reached from `finished` through ancestors the
+/// sub-task's line created itself (`created`) — `finished` itself when its
+/// parent is someone else's. So a sub-task that split its work into child
+/// plans walks all of them, while one put on a plan the spawner wrote is not
+/// handed that plan's siblings.
+///
+/// Dispatched to step `S` of the spawner's plan `P` (`assignment`), only `S`
+/// is its work in `P`: the climb never enters `P`, and once the root's subtree
+/// is done the walk points back at `S` while it is still open. Finishing `P`
+/// itself ends the walk — `P`'s other steps and child plans are the
+/// spawner's.
+///
+/// Before this, a sub-task never backtracked, and one that split its own work
+/// into child plans was let go after the first child.
+pub fn next_plan_for_subtask(
+    blocks: &[SourcedBlock],
+    finished: &str,
+    assignment: Option<(&str, &str)>,
+    created: &dyn Fn(&str) -> bool,
+    avoid: &dyn Fn(&str) -> bool,
+) -> Option<BacktrackTarget> {
+    let assigned_plan = assignment.map(|(p, _)| p);
+    if assigned_plan == Some(finished) {
+        return None;
+    }
+    let parent: HashMap<&str, &str> = blocks
+        .iter()
+        .filter_map(|b| Some((b.id.as_deref()?, b.parent.as_deref()?)))
+        .collect();
+    let mut root = finished;
+    for _ in 0..64 {
+        match parent.get(root) {
+            Some(p) if Some(*p) != assigned_plan && created(p) => root = p,
+            _ => break,
+        }
+    }
+    // The root's subtree, with the root cut loose from its parent.
+    let mut members: HashSet<&str> = HashSet::from([root]);
+    loop {
+        let before = members.len();
+        for (c, p) in &parent {
+            if members.contains(p) {
+                members.insert(c);
+            }
+        }
+        if members.len() == before {
+            break;
+        }
+    }
+    let subtree: Vec<SourcedBlock> = blocks
+        .iter()
+        .filter(|b| b.id.as_deref().is_some_and(|id| members.contains(id)))
+        .map(|b| SourcedBlock {
+            parent: if b.id.as_deref() == Some(root) { None } else { b.parent.clone() },
+            ..b.clone()
+        })
+        .collect();
+    if let Some(t) = next_plan_in_tree_avoiding(&subtree, finished, avoid) {
+        return Some(t);
+    }
+    // Back to the assigned step, once nothing in the root's subtree is open.
+    let (plan, step) = assignment?;
+    if subtree.iter().any(|b| has_open_work(&b.body, b.kind)) {
+        return None;
+    }
+    let label = format!("**{step}**");
+    let block = blocks.iter().find(|b| b.id.as_deref() == Some(plan))?;
+    let open = parse_task_items(&block.body)
+        .into_iter()
+        .find(|it| !it.done && it.text.contains(&label))?;
+    Some(BacktrackTarget {
+        plan_id: plan.to_string(),
+        next_task: Some(open.text),
+    })
 }
 
 /// The single definition of "what comes next" in a plan tree, shared by the
