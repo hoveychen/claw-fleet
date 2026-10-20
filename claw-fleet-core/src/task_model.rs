@@ -68,6 +68,17 @@ impl TaskGraph {
         Self::new(chains, spawned)
     }
 
+    /// Every spawn edge as `(child, spawner)`, so a caller that already loaded
+    /// the graph does not read the launch-note registry a second time.
+    pub fn spawn_edges(&self) -> impl Iterator<Item = (String, String)> + '_ {
+        self.spawned_by.iter().map(|(c, p)| (c.clone(), p.clone()))
+    }
+
+    /// First hop of the relay chain `id` is on (`id` itself when it is on none).
+    pub fn line_root(&self, id: &str) -> String {
+        self.line_root_of(id).to_string()
+    }
+
     fn line_root_of<'a>(&'a self, id: &'a str) -> &'a str {
         self.line_root.get(id).map(String::as_str).unwrap_or(id)
     }
