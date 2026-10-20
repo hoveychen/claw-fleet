@@ -232,8 +232,13 @@ pub(crate) fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> 
 /// IS such a `server_error` entry — i.e. no subsequent real turn has started.
 /// Every *other* API error (`authentication_failed`, `invalid_request`,
 /// `oauth_org_not_allowed`, `model_not_found`, …) is permanent and must NOT be
-/// auto-retried, so this returns `false` for them: only `server_error` and the
-/// unparseable-tool-call record below are whitelisted.
+/// auto-retried, so this returns `false` for them: only `server_error`, the
+/// unparseable-tool-call record and the transient 403 below are whitelisted.
+///
+/// ## The third family: a transient 403
+///
+/// See [`is_transient_auth_403`]: one specific `authentication_failed` text
+/// that turned out to clear on its own.
 ///
 /// ## The second family: an unparseable tool call
 ///
@@ -263,7 +268,8 @@ pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
         // Only the transient families are retryable; every other API error is
         // permanent and must not re-fire spawns forever.
         return v.get("error").and_then(|e| e.as_str()) == Some("server_error")
-            || is_unparseable_tool_call(v);
+            || is_unparseable_tool_call(v)
+            || is_transient_auth_403(v);
     }
     false
 }
@@ -307,6 +313,34 @@ fn is_unparseable_tool_call(v: &Value) -> bool {
         b.get("text")
             .and_then(|t| t.as_str())
             .is_some_and(|t| t.contains("tool call could not be parsed"))
+    })
+}
+
+/// The `authentication_failed` record whose text is `403 Request not allowed`.
+///
+/// It shares its `error` enum with genuinely permanent failures — "OAuth
+/// session expired and could not be refreshed", "Not logged in" — so only the
+/// text tells them apart, and only this one text is whitelisted. Measured
+/// across every transcript on this machine (2026-10-20): 299 such 403 episodes,
+/// 259 of which were followed by a normal assistant reply in the same session,
+/// 221 of those after a single 403. The credential was fine; the request was
+/// refused for a while. The scheduler's existing per-episode cap and debounce
+/// bound the retries, so a 403 that does persist stops after a few attempts.
+fn is_transient_auth_403(v: &Value) -> bool {
+    if v.get("error").and_then(|e| e.as_str()) != Some("authentication_failed") {
+        return false;
+    }
+    let Some(blocks) = v
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return false;
+    };
+    blocks.iter().any(|b| {
+        b.get("text")
+            .and_then(|t| t.as_str())
+            .is_some_and(|t| t.contains("403 Request not allowed"))
     })
 }
 
