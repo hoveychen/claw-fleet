@@ -283,6 +283,19 @@ enum Commands {
     /// [internal] Plan-approval hook — intercepts ExitPlanMode for Fleet UI
     #[command(hide = true)]
     PlanApproval,
+    /// [internal] Interrupt a session once its timed-out hook verdict is recorded.
+    /// Started detached by the elicitation / plan-approval hooks.
+    #[command(name = "parked-interrupt", hide = true)]
+    ParkedInterrupt {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        tool_use_id: Option<String>,
+        #[arg(long)]
+        transcript: Option<std::path::PathBuf>,
+        #[arg(long)]
+        from: Option<u64>,
+    },
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
@@ -1572,6 +1585,17 @@ fn main() {
         },
         Commands::Elicitation => commands::guard::cmd_elicitation(),
         Commands::Mcp => commands::guard::cmd_mcp(),
+        Commands::ParkedInterrupt {
+            session,
+            tool_use_id,
+            transcript,
+            from,
+        } => claw_fleet_core::parked::ResultWatch {
+            session_id: session,
+            tool_use_id,
+            transcript: transcript.zip(from),
+        }
+        .interrupt_once_recorded(),
         Commands::LaunchArgs { workspace, existing } => {
             let args = claw_fleet_core::claude_launch::fleet_launch_args_local(&existing, &workspace);
             println!("{}", serde_json::to_string(&args).unwrap_or_else(|_| "[]".into()));
@@ -1768,4 +1792,36 @@ fn main() {
     // A one-shot command may have started the authenticated machine-level dsh
     // service. Leave it for the desktop/next CLI process to adopt; terminating
     // it here would interrupt turns merely because `fleet agents` returned.
+}
+
+#[cfg(test)]
+mod parked_interrupt_args_tests {
+    use super::*;
+    use clap::Parser;
+
+    /// The hooks hand their wait to a detached child through
+    /// `ResultWatch::to_args`; the subcommand must read back the same watch.
+    #[test]
+    fn parked_interrupt_parses_what_result_watch_emits() {
+        let watch = claw_fleet_core::parked::ResultWatch {
+            session_id: "sess-1".into(),
+            tool_use_id: Some("toolu_X".into()),
+            transcript: Some(("/tmp/t.jsonl".into(), 4096)),
+        };
+        let argv = std::iter::once("fleet".to_string()).chain(watch.to_args());
+        let cli = Cli::try_parse_from(argv).expect("parked-interrupt args parse");
+        match cli.command {
+            Commands::ParkedInterrupt {
+                session,
+                tool_use_id,
+                transcript,
+                from,
+            } => {
+                assert_eq!(session, "sess-1");
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_X"));
+                assert_eq!(transcript.zip(from), watch.transcript);
+            }
+            _ => panic!("expected the parked-interrupt subcommand"),
+        }
+    }
 }

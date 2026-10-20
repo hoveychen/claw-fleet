@@ -68,7 +68,13 @@ pub fn run() -> std::io::Result<()> {
         if is_blocking_call(&line) {
             let out = out.clone();
             workers.push(std::thread::spawn(move || {
-                if let Some(resp) = handle_line(&line) {
+                let keepalive = progress_token(&line)
+                    .map(|token| ProgressKeepalive::start(out.clone(), token));
+                let resp = handle_line(&line);
+                // Joined before the response goes out: no progress may follow
+                // the result it belongs to.
+                drop(keepalive);
+                if let Some(resp) = resp {
                     let _ = write_response(&out, &resp);
                 }
             }));
@@ -97,6 +103,89 @@ fn is_blocking_call(line: &str) -> bool {
         Some("fleet__ask" | "fleet__render_a2ui" | "fleet__permission_prompt") => true,
         Some("fleet__job") => params["arguments"]["action"].as_str() == Some("wait"),
         _ => false,
+    }
+}
+
+/// How often a blocking call reports progress. Claude Code aborts a tool call
+/// that sends "no response or progress" for its idle timeout (default 1800s,
+/// `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`), and a progress notification resets that
+/// clock — measured 2026-10-20 against CC 2.1.284: with a 60s idle timeout an
+/// 80s silent call was aborted, the same call reporting every 2s returned. A
+/// decision card waiting the boss's configured 1800s used to tie with that
+/// timeout to the second, and when CC won the agent read an MCP error instead
+/// of Fleet's stop notice (session 71455b6e, 2026-10-19).
+const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The `_meta.progressToken` the client attached to a `tools/call`, if any.
+fn progress_token(line: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    v.pointer("/params/_meta/progressToken")
+        .filter(|t| t.is_string() || t.is_number())
+        .cloned()
+}
+
+/// The id Claude Code gives the tool-use block a `tools/call` answers
+/// (`_meta["claudecode/toolUseId"]`) — the key its `tool_result` row carries in
+/// the transcript.
+fn client_tool_use_id(params: &Value) -> Option<&str> {
+    params
+        .get("_meta")
+        .and_then(|m| m.get("claudecode/toolUseId"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+}
+
+fn progress_notification(token: &Value, progress: u64) -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": { "progressToken": token, "progress": progress },
+    })
+    .to_string()
+}
+
+/// Emits `notifications/progress` for one in-flight call every
+/// [`PROGRESS_INTERVAL`] until dropped; dropping stops and joins the ticker.
+struct ProgressKeepalive {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    ticker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProgressKeepalive {
+    fn start(out: std::sync::Arc<std::sync::Mutex<std::io::Stdout>>, token: Value) -> Self {
+        Self::start_with(PROGRESS_INTERVAL, token, move |line| {
+            let _ = write_response(&out, line);
+        })
+    }
+
+    fn start_with(
+        interval: std::time::Duration,
+        token: Value,
+        emit: impl Fn(&str) + Send + 'static,
+    ) -> Self {
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        let ticker = std::thread::spawn(move || {
+            let mut progress = 0u64;
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                stopped.recv_timeout(interval)
+            {
+                progress += 1;
+                emit(&progress_notification(&token, progress));
+            }
+        });
+        Self {
+            stop: Some(stop),
+            ticker: Some(ticker),
+        }
+    }
+}
+
+impl Drop for ProgressKeepalive {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(t) = self.ticker.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -1285,12 +1374,14 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         // Fleet-owned session: keep the question alive as a parked card and cut
         // this turn short, instead of handing the agent an error it will "route
         // around" by pressing on without an answer. `park_and_stop` SIGINTs the
-        // CLI, so control may never come back from this call.
+        // CLI right after this result is recorded, so the stop notice is the
+        // last thing the turn reads.
         if crate::parked::park_and_stop(
             &request_id,
             crate::parked::ParkedKind::FleetAsk,
             &req.session_id,
             &req,
+            client_tool_use_id(params),
         ) {
             return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
         }
@@ -1462,6 +1553,7 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
             crate::parked::ParkedKind::A2uiRender,
             &req.session_id,
             &req,
+            client_tool_use_id(params),
         ) {
             return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
         }
@@ -1664,6 +1756,46 @@ mod tests {
         assert!(!is_blocking_call(
             &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}).to_string()
         ));
+    }
+
+    /// The `_meta` shape Claude Code 2.1.284 sends on every `tools/call`
+    /// (captured from a probe server on 2026-10-20).
+    #[test]
+    fn reads_progress_token_and_tool_use_id_from_call_meta() {
+        let line = r#"{"method":"tools/call","params":{"name":"ping","arguments":{},"_meta":{"claudecode/toolUseId":"toolu_01UHD","progressToken":2}},"jsonrpc":"2.0","id":2}"#;
+        assert_eq!(progress_token(line), Some(json!(2)));
+        let v: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(client_tool_use_id(&v["params"]), Some("toolu_01UHD"));
+
+        let bare = r#"{"method":"tools/call","params":{"name":"ping","arguments":{}},"jsonrpc":"2.0","id":3}"#;
+        assert_eq!(progress_token(bare), None);
+        let v: Value = serde_json::from_str(bare).unwrap();
+        assert_eq!(client_tool_use_id(&v["params"]), None);
+    }
+
+    #[test]
+    fn keepalive_reports_rising_progress_and_stops_when_dropped() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let sink = seen.clone();
+        let keepalive = ProgressKeepalive::start_with(
+            std::time::Duration::from_millis(20),
+            json!("tok"),
+            move |line| sink.lock().unwrap().push(serde_json::from_str(line).unwrap()),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(130));
+        drop(keepalive);
+        let after_drop = seen.lock().unwrap().len();
+        std::thread::sleep(std::time::Duration::from_millis(80));
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), after_drop, "no progress may follow the drop");
+        assert!(seen.len() >= 2, "expected several ticks, got {}", seen.len());
+        for (i, n) in seen.iter().enumerate() {
+            assert_eq!(n["method"], "notifications/progress");
+            assert_eq!(n["params"]["progressToken"], "tok");
+            assert_eq!(n["params"]["progress"], json!(i as u64 + 1));
+            assert!(n.get("id").is_none(), "a notification carries no id");
+        }
     }
 
     #[test]
