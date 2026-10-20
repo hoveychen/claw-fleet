@@ -1122,9 +1122,40 @@ fn maybe_prepend_fresh_session(
     prepend_reminder(reminder.as_deref(), None, prompt)
 }
 
+/// What the launcher knows about a codex thread it is about to spawn beyond
+/// the [`crate::agent_source::SpawnSpec`]; see [`with_split_preset`] and
+/// [`with_continuation`].
+#[derive(Clone, Default)]
+struct LaunchHint {
+    preset_type: Option<crate::task_profile::TaskType>,
+    continues: Option<String>,
+}
+
 thread_local! {
-    static SPLIT_PRESET: std::cell::Cell<Option<crate::task_profile::TaskType>> =
-        const { std::cell::Cell::new(None) };
+    static LAUNCH_HINT: std::cell::RefCell<LaunchHint> =
+        std::cell::RefCell::new(LaunchHint::default());
+}
+
+/// Restores the previous [`LaunchHint`] on drop, so a panic inside the
+/// scoped launch cannot leak the hint into a later spawn on the same thread.
+struct LaunchHintGuard(Option<LaunchHint>);
+
+impl Drop for LaunchHintGuard {
+    fn drop(&mut self) {
+        if let Some(prev) = self.0.take() {
+            LAUNCH_HINT.with(|h| *h.borrow_mut() = prev);
+        }
+    }
+}
+
+fn scoped_hint<R>(edit: impl FnOnce(&mut LaunchHint), f: impl FnOnce() -> R) -> R {
+    let prev = LAUNCH_HINT.with(|h| {
+        let prev = h.borrow().clone();
+        edit(&mut h.borrow_mut());
+        prev
+    });
+    let _guard = LaunchHintGuard(Some(prev));
+    f()
 }
 
 /// Run `f` — a `fleet__task split` launch — with `task_type` as the type the
@@ -1139,15 +1170,26 @@ pub fn with_split_preset<R>(
     task_type: Option<crate::task_profile::TaskType>,
     f: impl FnOnce() -> R,
 ) -> R {
-    let prev = SPLIT_PRESET.with(|c| c.replace(task_type));
-    let out = f();
-    SPLIT_PRESET.with(|c| c.set(prev));
-    out
+    scoped_hint(|h| h.preset_type = task_type, f)
 }
 
 /// The type set by an enclosing [`with_split_preset`], if any.
 pub fn split_preset() -> Option<crate::task_profile::TaskType> {
-    SPLIT_PRESET.with(|c| c.get())
+    LAUNCH_HINT.with(|h| h.borrow().preset_type)
+}
+
+/// Run `f` — a handoff's successor spawn — with `predecessor` as the session
+/// the new thread relays from. Without it a codex successor's first prompt
+/// was rendered as a brand-new task's main conversation and told to report a
+/// profile its task already had (see [`crate::prd_tasks::FreshSession`]).
+/// Same thread-local route as [`with_split_preset`], for the same reason.
+pub fn with_continuation<R>(predecessor: &str, f: impl FnOnce() -> R) -> R {
+    scoped_hint(|h| h.continues = Some(predecessor.to_string()), f)
+}
+
+/// The predecessor set by an enclosing [`with_continuation`], if any.
+pub fn continuation() -> Option<String> {
+    LAUNCH_HINT.with(|h| h.borrow().continues.clone())
 }
 
 /// Decide the final prompt from the rendered reminder and the thread's rollout.
@@ -1720,8 +1762,8 @@ mod tests {
         assert_eq!(split_preset(), None);
         let split = with_split_preset(Some(TaskType::Research), || {
             let fresh = FreshSession {
-                spawned_by: None,
                 preset_type: split_preset(),
+                ..Default::default()
             };
             maybe_prepend_fresh_session(ws, &fresh, "go")
         });
@@ -1734,11 +1776,31 @@ mod tests {
             ws,
             &FreshSession {
                 spawned_by: Some("some-main-conversation"),
-                preset_type: None,
+                ..Default::default()
             },
             "go",
         );
         assert!(!sub.contains("fleet__task action=set"), "{sub}");
+    }
+
+    /// The launch hint is restored even when the scoped launch panics, so a
+    /// later spawn on the same thread is not rendered with a stale preset or
+    /// predecessor.
+    #[test]
+    fn launch_hint_is_restored_after_a_panic() {
+        use crate::task_profile::TaskType;
+        let caught = std::panic::catch_unwind(|| {
+            with_split_preset(Some(TaskType::Dev), || {
+                with_continuation("pred", || panic!("spawn blew up"))
+            })
+        });
+        assert!(caught.is_err());
+        assert_eq!(split_preset(), None);
+        assert_eq!(continuation(), None);
+        let nested = with_split_preset(Some(TaskType::Dev), || {
+            with_continuation("pred", || (split_preset(), continuation()))
+        });
+        assert_eq!(nested, (Some(TaskType::Dev), Some("pred".to_string())));
     }
 
     /// The reminder rides at the head of the prompt, and only a rollout that

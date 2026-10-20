@@ -2072,6 +2072,11 @@ pub struct FreshSession<'a> {
     /// The type a split will write into the new task's profile once the
     /// thread id is known.
     pub preset_type: Option<crate::task_profile::TaskType>,
+    /// The session this one relays from (`fleet handoff`). A successor joins
+    /// its predecessor's task, so it is rendered from the predecessor's place
+    /// — sub-task or main conversation, profiled or not — instead of as a new
+    /// task. Takes precedence over the two fields above.
+    pub continues: Option<&'a str>,
 }
 
 /// [`render_active_plans_reminder`] for a session whose id does not exist yet
@@ -2094,6 +2099,15 @@ fn fresh_session_workflow(
     title: &str,
     locale: &str,
 ) -> Option<String> {
+    if let Some(predecessor) = fresh.continues {
+        // Same lookup `task_lead_for` does for an id that exists: the
+        // predecessor's place is the successor's place.
+        let place = graph.place(predecessor);
+        let is_subtask = place.parent_task_id.is_some();
+        let task = place.parent_task_id.unwrap_or(place.task_id);
+        let task_type = crate::task_profile::read(&task).map(|p| p.task_type);
+        return workflow_for(task_type, is_subtask, title, locale);
+    }
     match fresh.spawned_by {
         Some(parent) => {
             let place = graph.place(parent);
@@ -2889,6 +2903,50 @@ trailing notes outside\n";
             orphan.as_deref().is_none_or(|s| !s.contains("fleet__task action=set")),
             "{orphan:?}"
         );
+    }
+
+    /// A codex handoff successor's first prompt follows its predecessor's
+    /// task: a profiled main-conversation chain gets that type's lead
+    /// workflow and no self-report nudge (it would overwrite a boss-set
+    /// profile), a sub-task chain gets the sub-task wording, and only an
+    /// unprofiled main-conversation chain is still nudged.
+    #[test]
+    fn fresh_session_workflow_for_a_relay_follows_the_predecessor() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        set("lead-1", Some(TaskType::Research), Some("弄清 Y"), None, ProfileSetter::Boss).unwrap();
+        set("res-t", Some(TaskType::Research), Some("弄清 Z"), None, ProfileSetter::Agent).unwrap();
+        let graph = crate::task_model::TaskGraph::new(
+            vec![
+                vec!["lead-1".to_string(), "lead-2".to_string()],
+                vec!["sub-a".to_string(), "sub-b".to_string()],
+                vec!["solo-1".to_string(), "solo-2".to_string()],
+            ],
+            vec![("sub-a".to_string(), "res-t".to_string())],
+        );
+        let relay = |predecessor: &str| {
+            fresh_session_workflow(
+                &graph,
+                &FreshSession {
+                    continues: Some(predecessor),
+                    ..Default::default()
+                },
+                "",
+                "zh",
+            )
+        };
+
+        let lead = relay("lead-2").expect("the task's research workflow");
+        assert!(lead.contains("知识台账") && !lead.contains("你是子任务"), "{lead}");
+        assert!(!lead.contains("fleet__task action=set"), "{lead}");
+
+        let sub = relay("sub-b").expect("sub-task inherits the task's type");
+        assert!(sub.contains("你是子任务") && sub.contains("没查到什么"), "{sub}");
+        assert!(!sub.contains("fleet__task action=set"), "{sub}");
+
+        let solo = relay("solo-2").expect("an unprofiled main chain is nudged");
+        assert!(solo.contains("fleet__task action=set"), "{solo}");
     }
 
     /// The end-to-end shape of the above: a workspace with no TASKS.md still
