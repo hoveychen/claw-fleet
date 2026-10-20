@@ -291,6 +291,12 @@ export function TasksView({
     "tasks:collapsedProjects",
     [],
   );
+  // Inside a project section the done rows fold behind one "N done" line, the
+  // way the status view folds its done section; opened per project.
+  const [openDoneProjects, setOpenDoneProjects] = useDraft<string[]>(
+    "tasks:openDoneProjects",
+    [],
+  );
   // Accepted (marked done) rows move to the done section at once, reopened
   // rows leave it at once; the next snapshot confirms either.
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set());
@@ -411,6 +417,13 @@ export function TasksView({
         prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
       ),
     [setCollapsedProjects],
+  );
+  const toggleProjectDone = useCallback(
+    (key: string) =>
+      setOpenDoneProjects((prev) =>
+        prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+      ),
+    [setOpenDoneProjects],
   );
 
   /** Accept tasks on their own machines; rows leave the section optimistically
@@ -837,6 +850,10 @@ export function TasksView({
       <div className={styles.list}>
         {projectSections.map((sec) => {
           const collapsed = !search.trim() && !projectScope && collapsedProjects.includes(sec.key);
+          // Rows are already sorted by state, so the done ones are the tail.
+          const doneRows = sec.rows.filter((r) => r.state === "done");
+          const liveRows = sec.rows.filter((r) => r.state !== "done");
+          const doneOpen = !!search.trim() || openDoneProjects.includes(sec.key);
           return (
             <section key={sec.key} className={styles.section}>
               <div className={styles.sectionHead}>
@@ -865,7 +882,18 @@ export function TasksView({
                   <ChevronDown size={16} />
                 </button>
               </div>
-              {!collapsed && sec.rows.map(renderRow)}
+              {!collapsed && liveRows.map(renderRow)}
+              {!collapsed && doneRows.length > 0 && (
+                <button
+                  className={styles.doneFold}
+                  aria-expanded={doneOpen}
+                  onClick={() => toggleProjectDone(sec.key)}
+                >
+                  <span>{t("已完成 {0} 条", doneRows.length)}</span>
+                  <ChevronDown size={14} className={styles.doneFoldChevron} data-open={doneOpen} />
+                </button>
+              )}
+              {!collapsed && doneOpen && doneRows.map(renderRow)}
             </section>
           );
         })}
