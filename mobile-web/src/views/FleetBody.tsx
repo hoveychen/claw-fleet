@@ -120,6 +120,7 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "send": return t("给 agent {0} 发消息", id);
       case "stop": return t("停止 agent {0}", id);
       case "interrupt": return t("打断 agent {0}", id);
+      case "resume": return t("唤醒子任务 {0}", id);
     }
   } else if (tool === "notes") {
     const path = str(input, "path");
