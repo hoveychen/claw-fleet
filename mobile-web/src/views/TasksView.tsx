@@ -868,7 +868,10 @@ export function TasksView({
                     <Folder size={14} className={styles.sectionIcon} />
                   )}
                   <span className={styles.sectionName}>{sec.chat ? t("纯聊天") : sec.name}</span>
-                  <span className={styles.sectionCount}>{sec.rows.length}</span>
+                  {/* Unfinished rows only; the done ones are counted on their fold. */}
+                  {liveRows.length > 0 && (
+                    <span className={styles.sectionCount}>{liveRows.length}</span>
+                  )}
                   {sec.needsYou > 0 && (
                     <span className={styles.needsYouBadge}>{t("需要你 {0}", sec.needsYou)}</span>
                   )}
