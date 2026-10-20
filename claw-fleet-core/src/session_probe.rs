@@ -148,6 +148,10 @@ pub struct Facts {
     /// A decision card / permission prompt is waiting for the user.
     pub pending_decision: bool,
     pub proc_alive: bool,
+    /// Background tasks the last Stop left running (from the idle sentinel,
+    /// [`crate::idle::IdleRecord::background`]), as their descriptions. Only
+    /// read while the process is alive — a dead process took them with it.
+    pub background_running: Vec<String>,
     /// dsh only: the roster's `running` bit.
     pub dsh_running: Option<bool>,
     pub tail: Option<TailVerdict>,
@@ -286,6 +290,11 @@ pub fn gather(target_id: &str) -> Facts {
     if f.source.as_deref() != Some("dsh") {
         f.proc_alive = crate::parked::session_alive(&effective);
     }
+    if f.proc_alive {
+        f.background_running = crate::idle::read_idle(&effective)
+            .map(|r| r.background.iter().map(background_label).collect())
+            .unwrap_or_default();
+    }
     if let Some(path) = transcript {
         f.located = true;
         f.tail_mtime_ms = std::fs::metadata(&path)
@@ -299,6 +308,15 @@ pub fn gather(target_id: &str) -> Facts {
         f.locate_error = Some("找不到这个会话的 transcript".to_string());
     }
     f
+}
+
+fn background_label(t: &crate::bg_guard::BackgroundTask) -> String {
+    match (t.description.is_empty(), t.task_type.is_empty()) {
+        (false, false) => format!("{}：{}", t.task_type, t.description),
+        (false, true) => t.description.clone(),
+        (true, false) => format!("{} {}", t.task_type, t.id),
+        (true, true) => t.id.clone(),
+    }
 }
 
 fn read_tail_verdict(path: &Path, source: Option<&str>) -> TailVerdict {
@@ -596,6 +614,20 @@ pub fn classify(f: &Facts, now: u64) -> Probe {
     let quiet_ms = f.tail_mtime_ms.map(|m| now.saturating_sub(m)).unwrap_or(u64::MAX);
     let tail = f.tail.clone().unwrap_or(TailVerdict::Empty);
     if f.proc_alive {
+        // Ended with background tasks still running: a headless `-p` run stays
+        // alive waiting for its subagents and re-invokes the model with their
+        // results; a TUI is re-invoked the same way. Another turn is coming, so
+        // this Stop is not the finish — however long the quiet lasts.
+        if tail == TailVerdict::Ended && !f.background_running.is_empty() {
+            let n = f.background_running.len();
+            let shown: Vec<&str> =
+                f.background_running.iter().take(3).map(|s| s.as_str()).collect();
+            return verdict(
+                f,
+                Phase::Running,
+                format!("回合已收尾，但还有 {n} 个后台任务在跑（{}）", shown.join("；")),
+            );
+        }
         // Alive and ended: a headless run on its way out, or a TUI at its
         // prompt. Only the second outlasts the window.
         if tail == TailVerdict::Ended && quiet_ms >= ALIVE_IDLE_DONE_MS {
@@ -766,6 +798,41 @@ mod tests {
         assert_eq!(classify(&f, NOW).phase, Phase::Running);
         f.tail_mtime_ms = Some(NOW - ALIVE_IDLE_DONE_MS);
         assert_eq!(classify(&f, NOW).phase, Phase::Done);
+    }
+
+    /// Replays session 8c57567d (2026-10-20): its 11:20:16 UTC Stop left a
+    /// Codex-research subagent and a shell running while the `-p` process
+    /// waited; a session watch read the three quiet minutes after it as
+    /// "回合已结束（进程仍在，等待输入）" and fired at 11:21:39. The payloads
+    /// below are that Stop and the real final one (12:04:02), trimmed to the
+    /// fields the probe reads.
+    #[test]
+    fn a_stop_that_leaves_background_tasks_running_is_not_done() {
+        let early = r#"{"session_id":"8c57567d-7a13-4f85-a292-bc827a777469","hook_event_name":"Stop","stop_hook_active":true,"background_tasks":[{"id":"a2cb887591e038bbd","type":"subagent","status":"running","description":"调研 Codex CLI 记忆机制","agent_type":"general-purpose"},{"id":"buxi2o9me","type":"shell","status":"running","description":"Shallow clone codex repo and list core files","command":"git clone --depth 1 https://github.com/openai/codex.git codex"}],"session_crons":[]}"#;
+        let last = r#"{"session_id":"8c57567d-7a13-4f85-a292-bc827a777469","hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[]}"#;
+        let facts_at = |payload: &str| {
+            let p = crate::bg_guard::parse_stop_payload(payload).unwrap();
+            let mut f = facts();
+            f.proc_alive = true;
+            f.tail = Some(TailVerdict::Ended);
+            f.tail_mtime_ms = Some(NOW - 97_000); // probe at 11:21:39 → 83s quiet; any ≥60s
+            f.background_running = crate::bg_guard::running_tasks(&p)
+                .into_iter()
+                .map(background_label)
+                .collect();
+            f
+        };
+        let p = classify(&facts_at(early), NOW);
+        assert_eq!(p.phase, Phase::Running, "{}", p.detail);
+        assert!(p.detail.contains("2 个后台任务"), "{}", p.detail);
+        assert!(p.detail.contains("subagent：调研 Codex CLI 记忆机制"), "{}", p.detail);
+        assert_eq!(classify(&facts_at(last), NOW).phase, Phase::Done);
+
+        // The record is only consulted while the process lives.
+        let mut gone = facts_at(early);
+        gone.proc_alive = false;
+        gone.background_running.clear();
+        assert_eq!(classify(&gone, NOW).phase, Phase::Done);
     }
 
     #[test]

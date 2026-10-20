@@ -93,7 +93,13 @@ pub(crate) fn cmd_session_idle() {
         }
     }
 
-    if let Err(e) = claw_fleet_core::idle::mark_idle(&sid) {
+    // Record what is still running: a Stop that leaves subagents behind is not
+    // the session's last turn, and the session watch must not read it as one.
+    let background = stop_payload
+        .as_ref()
+        .map(|p| p.background_tasks.as_slice())
+        .unwrap_or_default();
+    if let Err(e) = claw_fleet_core::idle::mark_idle(&sid, background) {
         eprintln!("fleet session idle: {e}");
     }
     timing.phase("mark_idle");
