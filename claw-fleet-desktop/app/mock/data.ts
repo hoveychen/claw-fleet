@@ -639,6 +639,11 @@ const BILLING_TASK_SUMMARY = {
   startedAtMs: NOW - 6 * HOUR, lastActivityMs: NOW - 2 * MIN, costUsd: 4.2,
   planId: "billing-migration", currentStep: "**P4** — cutover behind flag",
   subtaskSteps: [{ taskId: "sess-billing-flag", planId: "billing-migration", step: "P4" }],
+  profile: {
+    type: "dev" as const,
+    goal: "Usage-based billing live behind usage_billing_v2 with zero invoice drift",
+    setBy: "agent" as const,
+  },
 };
 
 const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [

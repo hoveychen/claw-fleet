@@ -31,6 +31,7 @@ import { repoRootPath } from "../../../shared-ts/repoPath";
 import { currentViewMetrics, formatSnapshot, takeScrollSnapshot } from "../scrollSnapshot";
 import { AgentNavProvider } from "./AgentNavContext";
 import { HandoffChainRow } from "./HandoffChainRow";
+import { TaskProfileBar } from "./TaskProfileBar";
 import { PlanProgressRow } from "./PlanProgressRow";
 import { WaitedByRow, WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
@@ -1995,6 +1996,7 @@ export function SessionDetail({
                     </>
                     )}
                   </div>
+                  {task && <TaskProfileBar sessionId={task.tip.id} profile={taskSum?.profile} />}
                   </div>
                   {/* Toolbar. The rail's switch leads it — this is the control
                       for the column beside the conversation, and nothing else.
