@@ -102,6 +102,16 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 - **Case B 报告 + 决策**：Q1 = 报告正文 + 第一个决策，Q2..Q4 = 其余决策各一问。超过 3 个决策就留最关键的，在 Q1 末尾提一句被推迟的。\n\
 - **Case C 纯澄清问题**：一问 2–4 个候选答案。\n\
 \n\
+## 开工卡（硬规则）\n\
+\n\
+任务开始时类型是「未定」，类型**不由你贴**，只由{title_zh}点过头的开工卡定。\n\
+\n\
+- **触发点：准备动手研究之前**——要去查资料（搜网页、翻文档或代码去回答一个开放问题）、派子任务或 subagent、跑实验或探针，就**必须先**调用 `fleet__task action=kickoff` 发开工卡（研究问题、子问题、预算、停止条件、交付形式），{title_zh}点「开工」才定型，定型后再动手。先动手、事后补卡算违规。\n\
+- **不触发：问一句答一句。**靠上下文里已有的信息、或一两次顺手查看就能当场答完的问题，不发开工卡，任务就停在「未定」——这是正常结局，不要为了定型硬补一张。判据不是「这回合有没有调工具」，而是「接下来是不是要花多轮去查、去派、去跑」。\n\
+- **聊到一半转成研究**（讨论中途想跑个实验验证、想派人去查），就在那一刻、动手之前发。卡被答「改一下再开」或「还没聊完」时类型不变，照答案改了再发或继续聊。\n\
+- 开工卡本身就是这一回合交给{title_zh}的决策卡（它会等{title_zh}作答），不要再另包一张 `fleet__ask`。\n\
+- `fleet__task` 在 Fleet 会话里通常直接可调；若它出现在 deferred 清单里，首次调用前先用 `ToolSearch` 以 `select:mcp__fleet__fleet__task` 加载——被延迟不等于缺席，不能因此跳过开工卡。`goal` 照旧可以随时用 `fleet__task action=set` 写，与开工无关。\n\
+\n\
 ## 语音摘要分隔符（TTS）\n\
 \n\
 前端把**第一个问题的 `question`** 在一行只含 `---` 处切分来生成 TTS 播报，所以每个 `question` 都必须恰好含一个这样的分隔符：\n\
@@ -189,6 +199,16 @@ When `fleet__ask` is available this session, every turn that would otherwise han
 - **Case A — pure report**: `question` = the report body; options = guesses at what {title_en} wants next (each a concrete action).\n\
 - **Case B — report + decisions**: Q1 = report body + the first decision; Q2..Q4 = one question per remaining decision. Past three, keep the most important and mention the deferred ones at the end of Q1.\n\
 - **Case C — one clarifying question**: 2–4 candidate answers.\n\
+\n\
+## Kickoff Card (hard rule)\n\
+\n\
+A task starts with its type undecided. **You never label the type yourself**; only a kickoff card {title_en} has approved settles it.\n\
+\n\
+- **Trigger: right before you start researching** — looking things up (searching the web, digging through docs or code to answer an open question), spawning sub-tasks or subagents, running experiments or probes. You **MUST first** call `fleet__task action=kickoff` to raise the kickoff card (the question, sub-questions, budget, stop condition, deliverable); the type is settled only when {title_en} presses Start, and only then do you begin. Starting first and raising the card afterwards is a violation.\n\
+- **No trigger: one question, one answer.** A question you can answer on the spot from what is already in context, or with a quick look or two, gets no kickoff card and the task stays undecided — that is a normal ending, so never add a card just to settle the type. The test is not \"did this turn call a tool\" but \"is the next stretch several rounds of looking up, delegating or running things\".\n\
+- **A conversation that turns into research midway** (you want to run an experiment to check a point, or send someone to dig) raises the card at that moment, before acting. If {title_en} answers \"Revise first\" or \"Not done talking\", the type stays undecided: revise and raise it again, or keep talking.\n\
+- The kickoff card IS this turn's decision card (it waits for {title_en}'s answer); do not wrap another `fleet__ask` around it.\n\
+- `fleet__task` is usually directly callable in a Fleet session; if it shows up in the deferred list, load it first with `ToolSearch` using `select:mcp__fleet__fleet__task` — deferred does not mean absent and is never a reason to skip the card. You can still write the `goal` any time with `fleet__task action=set`; that has nothing to do with kickoff.\n\
 \n\
 ## Speech Summary Divider (TTS)\n\
 \n\
@@ -684,5 +704,74 @@ mod tests {
             render_guidance("老板", "zh").contains("一张卡都不许发"),
             "zh guidance must carry the outright subagent ban heading"
         );
+    }
+
+    /// Text of the `## <heading>` section, up to the next `## ` heading.
+    fn section<'a>(doc: &'a str, heading: &str) -> &'a str {
+        let start = doc
+            .find(heading)
+            .unwrap_or_else(|| panic!("missing section {heading}"));
+        let body = &doc[start + heading.len()..];
+        &body[..body.find("\n## ").unwrap_or(body.len())]
+    }
+
+    /// The kickoff rule is a hard rule in the card guidance, not a trailing line
+    /// of the title section: on the 2aa22fa7 trial an agent ran experiments for
+    /// a whole session without ever calling `fleet__task`. The section must
+    /// name the trigger (research about to start), separate it from the
+    /// one-question-one-answer task that stays undecided, and teach the
+    /// ToolSearch fallback in case the tool is still deferred.
+    #[test]
+    fn render_carries_the_kickoff_hard_rule_in_both_locales() {
+        let zh = render_guidance("老板", "zh");
+        let s = section(&zh, "## 开工卡（硬规则）");
+        for needle in [
+            "`fleet__task action=kickoff`",
+            "准备动手研究之前",
+            "查资料",
+            "派子任务",
+            "跑实验",
+            "必须先",
+            "问一句答一句",
+            "停在「未定」",
+            "select:mcp__fleet__fleet__task",
+        ] {
+            assert!(s.contains(needle), "zh kickoff section lacks {needle}: {s}");
+        }
+
+        let en = render_guidance("Boss", "en");
+        let s = section(&en, "## Kickoff Card (hard rule)");
+        for needle in [
+            "`fleet__task action=kickoff`",
+            "right before you start researching",
+            "spawning sub-tasks",
+            "running experiments",
+            "MUST first",
+            "one question, one answer",
+            "stays undecided",
+            "select:mcp__fleet__fleet__task",
+        ] {
+            assert!(s.contains(needle), "en kickoff section lacks {needle}: {s}");
+        }
+    }
+
+    /// The rule is stated once: only the interaction-mode section carries it,
+    /// and a sub-task (which never kicks off) does not get it at all.
+    #[test]
+    fn kickoff_rule_is_stated_once_and_not_for_sub_tasks() {
+        for (title, locale) in [("老板", "zh"), ("Boss", "en")] {
+            let g = render_guidance(title, locale);
+            assert_eq!(g.matches("action=kickoff").count(), 1, "{locale}");
+            let title_section = crate::session_title_guidance::render_session_title_section(
+                title,
+                locale,
+                crate::session_title_guidance::Harness::Claude,
+            );
+            assert!(!title_section.contains("kickoff"), "{locale}: {title_section}");
+            assert!(
+                !render_subtask_guidance(title, locale).contains("action=kickoff"),
+                "{locale}: sub-tasks never raise a kickoff card"
+            );
+        }
     }
 }

@@ -307,7 +307,41 @@ fn tools_list_result(fleet_owned: bool, client_draws_its_own: bool) -> Value {
     if fleet_owned {
         tools.extend(crate::mcp_control::control_tool_defs());
     }
+    mark_always_load(&mut tools);
     json!({ "tools": tools })
+}
+
+/// Tools Claude Code must load up front instead of deferring behind ToolSearch.
+///
+/// Claude Code 2.1.284 defers every MCP tool by default: the model sees only the
+/// name and has to `ToolSearch select:…` before the first call. A rule that says
+/// "call X before Y" then competes with that extra step, and on the kickoff
+/// trial (session 2aa22fa7) `fleet__task` was never called at all. CC reads a
+/// per-tool `_meta["anthropic/alwaysLoad"] === true` into the tool's
+/// `alwaysLoad` flag, and an `alwaysLoad` tool is never deferred (strings in the
+/// 2.1.284 binary: `alwaysLoad:g||Y._meta?.["anthropic/alwaysLoad"]===!0` and
+/// `function TAe(e){if(e.alwaysLoad===!0)return!1;…}`).
+///
+/// Kept to the tools a guidance rule tells the agent to call unprompted: the
+/// title (every session, first turn), the decision card (every turn in
+/// interaction mode) and `fleet__task` (the kickoff card). Every tool listed
+/// here costs its full schema in every request, so the rest stay deferred.
+/// Other clients ignore the key.
+pub const ALWAYS_LOAD_TOOL_NAMES: [&str; 3] =
+    ["fleet__ask", "fleet__set_session_title", "fleet__task"];
+
+const ALWAYS_LOAD_META_KEY: &str = "anthropic/alwaysLoad";
+
+fn mark_always_load(tools: &mut [Value]) {
+    for tool in tools.iter_mut() {
+        let listed = tool
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|n| ALWAYS_LOAD_TOOL_NAMES.contains(&n));
+        if listed {
+            tool["_meta"] = json!({ ALWAYS_LOAD_META_KEY: true });
+        }
+    }
 }
 
 /// The tools that put a card in front of the user.
@@ -1954,6 +1988,30 @@ mod tests {
         assert_eq!(resp["id"], 1);
         assert_eq!(resp["result"]["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(resp["result"]["serverInfo"]["name"], SERVER_NAME);
+    }
+
+    /// Exactly the tools in `ALWAYS_LOAD_TOOL_NAMES` carry
+    /// `_meta["anthropic/alwaysLoad"] = true`; every other tool stays deferred.
+    /// Every listed name must actually be advertised, or the list has drifted.
+    #[test]
+    fn only_the_always_load_tools_opt_out_of_deferral() {
+        let result = tools_list_result(true, false);
+        let tools = result["tools"].as_array().unwrap();
+        for name in ALWAYS_LOAD_TOOL_NAMES {
+            assert!(
+                tools.iter().any(|t| t["name"] == name),
+                "{name} is in ALWAYS_LOAD_TOOL_NAMES but not advertised"
+            );
+        }
+        for t in tools {
+            let name = t["name"].as_str().unwrap();
+            let flagged = t.pointer("/_meta/anthropic~1alwaysLoad") == Some(&json!(true));
+            assert_eq!(
+                flagged,
+                ALWAYS_LOAD_TOOL_NAMES.contains(&name),
+                "{name}: alwaysLoad flag does not match the list"
+            );
+        }
     }
 
     #[test]
