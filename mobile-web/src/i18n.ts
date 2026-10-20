@@ -1230,4 +1230,16 @@ const DICT: Record<string, string> = {
   "打开任务": "Open task",
   "搜索任务标题、项目…": "Search task titles, projects…",
   "停止这个任务": "Stop this task",
+  // ── Task profile (type + goal) ──
+  "开发": "Dev",
+  "调研": "Research",
+  "通用": "General",
+  "你改过": "Set by you",
+  "改写": "Edit",
+  "还没定目标": "No goal yet",
+  "类型": "Type",
+  "一句话：做完什么这件事才算完": "One line: what has to be done for this task to count as finished",
+  "为什么改目标": "Why change the goal",
+  "会记进目标历史": "Recorded in the goal history",
+  "改目标要写一句理由": "Changing the goal needs a reason",
 };

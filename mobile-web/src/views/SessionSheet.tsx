@@ -52,6 +52,7 @@ import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { DetailPane } from "./sessionStatusPills";
 import { compactDuration, watchProgressView, watchRing } from "../../../shared-ts/watchProgress";
 import { WatchRing } from "./WatchRing";
+import { TaskProfileSection } from "./TaskProfile";
 import { SkeletonNumber, Spinner } from "./loading";
 import styles from "./SessionSheet.module.css";
 
@@ -362,6 +363,16 @@ export function SessionSheet({
                   </span>
                 ))}
               </div>
+            )}
+
+            {/* Only a task's main line carries a summary; a sub-task's type and
+                goal belong to the task that spawned it. */}
+            {session.taskSummary && (
+              <TaskProfileSection
+                sessionId={session.id}
+                profile={session.taskSummary.profile}
+                client={client}
+              />
             )}
 
             {/* Blocking errors in full. The pill row only fits "Remote Disconnected"

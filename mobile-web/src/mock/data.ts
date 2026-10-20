@@ -84,6 +84,21 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     // the `agent-explore-1` row below — giving a count in mock that has no corresponding row would leave the
     // scope list half-empty while the pill shouts anyway, which is the shape where mock hides a real bug.
     runningSubagentCount: 1,
+    // A task's main line carries its summary; the profile drives the type chip
+    // on the task row and the type + goal block in the detail sheet.
+    taskSummary: {
+      hopCount: 1,
+      subtaskCount: 0,
+      subtasksActive: 0,
+      startedAtMs: NOW - 45 * MIN,
+      lastActivityMs: NOW - 2 * MIN,
+      costUsd: 4.33,
+      profile: {
+        type: "dev",
+        goal: "JWT issuer 校验修好并合进 main，旧 token 仍能通过",
+        setBy: "agent",
+      },
+    },
   },
   {
     // Subagent of sess-api-main. Kept in the snapshot purely as a drill-down
