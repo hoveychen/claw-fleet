@@ -135,7 +135,7 @@ pub fn class_of(
 /// `oauth_org_not_allowed`, `billing_error`) and Codex's `codex_error_info`
 /// (`usage_limit_exceeded`), plus the message texts seen in real transcripts
 /// ("Request not allowed" is the 403).
-fn is_account_error(e: &str) -> bool {
+pub(crate) fn is_account_error(e: &str) -> bool {
     let e = e.to_ascii_lowercase();
     [
         "authentication",

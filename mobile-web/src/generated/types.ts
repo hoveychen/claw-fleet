@@ -54,6 +54,7 @@ procAlive: boolean,
 pendingToolBatch: boolean, 
 stuckTool?: StuckTool | null, 
 awaitingModel: boolean, 
+lastTurnEnd?: TurnEnd | null, 
 currentTool?: string | null, lastSkill: string | null, 
 contextPercent: number | null, 
 agentSource: string, 
@@ -81,6 +82,8 @@ parentTaskId?: string | null,
 taskSummary?: TaskSummary | null, };
 
 export type StuckTool = { name: string, sinceMs?: number | null, };
+
+export type TurnEnd = "clean" | "midTurn" | "interrupted" | "authFailed" | "failed";
 
 export type SessionMark = "pending" | "done";
 

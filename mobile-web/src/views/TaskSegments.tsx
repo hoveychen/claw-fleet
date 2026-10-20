@@ -14,6 +14,7 @@ import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
 import { taskLibrary } from "../library";
 import { LibraryList, useLibrary } from "./LibraryList";
 import { isWakingSticky, statusTone, subtaskStateLabel, timeAgo } from "./TasksView";
+import { subtaskOutcome } from "../../../shared-ts/subtaskOutcome";
 import { EmptyState } from "./EmptyState";
 import { SkeletonList } from "./loading";
 import { SubtaskRecoveryBanner } from "./SubtaskRecovery";
@@ -134,11 +135,15 @@ export function StepSubtasks({
           className={styles.row}
           onClick={() => onOpenSessionId(r.tip.id)}
         >
-          <span className={styles.dot} data-state={r.state} />
+          <span
+            className={styles.dot}
+            data-state={r.state}
+            data-outcome={subtaskOutcome(r.state, r.tip.lastTurnEnd) ?? undefined}
+          />
           <span className={styles.rowBody}>
             <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
             <span className={styles.rowMeta}>
-              {r.pending ? t("等你回答") : subtaskStateLabel(r.state)}
+              {r.pending ? t("等你回答") : subtaskStateLabel(r.state, r.tip.lastTurnEnd)}
             </span>
           </span>
           <ChevronRight size={16} className={styles.chevron} />
@@ -188,11 +193,15 @@ export function SubtasksPane({
           className={styles.row}
           onClick={() => onOpenSessionId(r.tip.id)}
         >
-          <span className={styles.dot} data-state={r.state} />
+          <span
+            className={styles.dot}
+            data-state={r.state}
+            data-outcome={subtaskOutcome(r.state, r.tip.lastTurnEnd) ?? undefined}
+          />
           <span className={styles.rowBody}>
             <span className={styles.rowTitle}>{taskTitle(r.tip, t("未命名任务"))}</span>
             <span className={styles.rowMeta}>
-              {r.pending ? t("等你回答") : subtaskStateLabel(r.state)}
+              {r.pending ? t("等你回答") : subtaskStateLabel(r.state, r.tip.lastTurnEnd)}
               {(() => {
                 const step = r.tip.taskId ? links?.get(r.tip.taskId)?.step : undefined;
                 return step ? ` · ${t("第 {0} 步", step.slice(1))}` : "";

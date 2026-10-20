@@ -2614,6 +2614,10 @@
     "rail_developer": "开发者视图",
     "rail_main": "主对话",
     "subtask_reported": "已回报",
+    "subtask_mid_turn": "中途断了",
+    "subtask_interrupted": "被手动中断",
+    "subtask_auth_failed": "鉴权失败",
+    "subtask_failed": "永久错误",
     "elapsed": "已运行 {{span}}"
   },
   "history": {
