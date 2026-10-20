@@ -595,7 +595,7 @@ fn follow_owners(
 /// Is a focus record's workspace the workspace rooted at `main_root`? Records
 /// name the main checkout, but a session started inside a worktree may name
 /// that instead.
-fn in_workspace(record_ws: &str, main_root: &str) -> bool {
+pub(crate) fn in_workspace(record_ws: &str, main_root: &str) -> bool {
     let r = record_ws.trim_end_matches('/');
     r == main_root || r.starts_with(&format!("{main_root}/.worktrees/"))
 }
