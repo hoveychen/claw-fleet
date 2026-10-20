@@ -214,23 +214,19 @@ pub fn research_next_line(step: &ResearchStep, locale: &str) -> String {
     }
 }
 
-fn dev_lead_zh(title: &str) -> String {
+fn dev_lead_zh(_title: &str) -> String {
     format!(
         "## 本任务的流程：开发\n\
-提交纪律、worktree、计划节奏照 PRD 纪律 Rule 1/3/4 执行，此处只补三条：\n\
-- **交付前独立核验**：多步 exec 计划在最终汇报前，派一个干净上下文的核验子任务，拿{title}的原始症状和验收标准去证伪你的改动，而不是复述你的结论。\n\
-- **接力后先冒烟**：后继者动手前，先把已勾掉的步骤的验收命令跑一遍，确认没被破坏。\n\
-- **汇报附证据**：贴测试输出、截图或命令结果，不只说「已通过」。"
+提交纪律、worktree、计划节奏照 PRD 纪律 Rule 1/3/4 执行，此处只补一条：\n\
+- **接力后先冒烟**：后继者动手前，先把已勾掉的步骤的验收命令跑一遍，确认没被破坏。"
     )
 }
 
-fn dev_lead_en(title: &str) -> String {
+fn dev_lead_en(_title: &str) -> String {
     format!(
         "## This task's workflow: dev\n\
-Commit discipline, worktrees and plan cadence follow PRD discipline Rules 1/3/4; this adds three things:\n\
-- **Independent check before delivery**: before the final report of a multi-step exec plan, spawn a verification sub-task with a clean context that tries to refute your change against {title}'s original symptom and acceptance criteria — not one that restates your conclusion.\n\
-- **Smoke-test after a relay**: before a successor changes anything, it reruns the acceptance commands of the steps already ticked.\n\
-- **Report with evidence**: paste test output, screenshots or command results, not just \"passes\"."
+Commit discipline, worktrees and plan cadence follow PRD discipline Rules 1/3/4; this adds one thing:\n\
+- **Smoke-test after a relay**: before a successor changes anything, it reruns the acceptance commands of the steps already ticked."
     )
 }
 
@@ -332,11 +328,15 @@ mod tests {
     }
 
     #[test]
-    fn dev_lead_points_at_existing_rules_and_adds_three() {
+    fn dev_lead_points_at_existing_rules_and_adds_the_smoke_test() {
         let zh = render_block(TaskType::Dev, Role::Lead, "", "zh").unwrap();
         assert!(zh.contains("Rule 1/3/4"));
-        for needle in ["独立核验", "冒烟", "证据"] {
-            assert!(zh.contains(needle), "zh dev block lacks {needle}");
+        assert!(zh.contains("冒烟"), "zh dev block lacks the relay smoke test");
+        // The independent-check and report-with-evidence items were dropped
+        // after the 2026-10-20 ablation measured 0/4 compliance with and
+        // without them (wiki experiments/task-type-flow-block-ablation).
+        for gone in ["独立核验", "汇报附证据"] {
+            assert!(!zh.contains(gone), "zh dev block still has {gone}");
         }
         // Points at the worktree rule, does not restate it.
         assert!(!zh.contains("git worktree add"));
