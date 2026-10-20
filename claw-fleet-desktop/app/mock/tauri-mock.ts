@@ -367,6 +367,33 @@ async function handleIPC(
       return tasks.size;
     }
 
+    case "list_subtask_recovery":
+      return mockSubtaskRecovery(args.sessionId as string);
+
+    case "resume_subtasks": {
+      // Mirror core `subtask_recovery::resume_children`: one outcome per id,
+      // refusing anything that is not recoverable.
+      const byId = new Map(
+        mockSubtaskRecovery(String(args.sessionId ?? "")).map((s) => [s.sessionId, s]),
+      );
+      const all = new Map(
+        currentSessions
+          .filter((s) => s.parentTaskId)
+          .flatMap((s) => mockSubtaskRecovery(s.parentTaskId!))
+          .map((s) => [s.sessionId, s]),
+      );
+      return ((args.sessionIds as string[]) ?? []).map((id) => {
+        const st = byId.get(id) ?? all.get(id);
+        return st?.class === "recoverable"
+          ? { sessionId: id, ok: true, message: `ok: resumed ${id.slice(0, 8)}; it was: ${st.detail}` }
+          : {
+              sessionId: id,
+              ok: false,
+              message: `refused to resume ${id.slice(0, 8)}: its last turn ended cleanly — it already handed back its result`,
+            };
+      });
+    }
+
     case "reopen_tasks": {
       // Mirror core `task_model::reopen_tasks`: clear the outcome and the done
       // mark on every hop of each named task.
@@ -1901,4 +1928,26 @@ export function triggerPromoScene(scene: PromoScene): void {
   const driver = (window as unknown as { __mock_fleet_ask?: () => string }).__mock_fleet_ask;
   if (!driver) throw new Error("promo ask driver was not installed");
   driver();
+}
+
+/** Sub-task recovery rows for a coordinator: its first sub-task died mid-turn,
+ *  the second failed on auth, the rest finished. Enough to show the rail button
+ *  and every kind of row in its confirm list. */
+function mockSubtaskRecovery(coordinatorId: string) {
+  const coord = currentSessions.find((s) => s.id === coordinatorId);
+  const taskId = coord?.taskId ?? coordinatorId;
+  const kids = currentSessions.filter((s) => s.parentTaskId === taskId);
+  const shapes = [
+    { class: "recoverable", phase: "failed", detail: "进程在回合中途退出（网络中断后没有再起来）" },
+    { class: "authFailed", phase: "failed", detail: "API Error: 403 Request not allowed" },
+  ];
+  return kids.map((s, i) => ({
+    sessionId: s.id,
+    effectiveId: s.id,
+    spawnedBy: coordinatorId,
+    step: i === 0 ? "P4" : undefined,
+    workspace: s.workspacePath,
+    source: "claude",
+    ...(shapes[i] ?? { class: "done", phase: "done", detail: "最后一回合正常结束" }),
+  }));
 }

@@ -278,6 +278,32 @@ pub(crate) fn accept_tasks(
     Ok(state.backend.accept_tasks(&session_ids))
 }
 
+/// A task coordinator's sub-tasks classified for recovery. Probes every
+/// sub-task's transcript tail, so it runs on the blocking pool.
+#[tauri::command]
+pub(crate) async fn list_subtask_recovery(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::subtask_recovery::SubtaskStatus>, String> {
+    let backend = state.backend.clone();
+    crate::gui::blocking::run_blocking(move || backend.list_subtask_recovery(&session_id)).await
+}
+
+/// Resume the chosen sub-tasks (恢复中断的子任务). Answers one outcome per id;
+/// refusals ride in the outcome, not as an error.
+#[tauri::command]
+pub(crate) async fn resume_subtasks(
+    session_ids: Vec<String>,
+    prompt: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::subtask_recovery::ResumeOutcome>, String> {
+    let backend = state.backend.clone();
+    crate::gui::blocking::run_blocking(move || {
+        backend.resume_subtasks(&session_ids, prompt.as_deref())
+    })
+    .await
+}
+
 /// Reopen tasks (改回进行中 / 撤销验收): clear the outcome across each named
 /// task's relay chain without relaunching it. Returns how many tasks.
 #[tauri::command(async)]

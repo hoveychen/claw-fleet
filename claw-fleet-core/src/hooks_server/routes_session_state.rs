@@ -53,6 +53,61 @@ pub(crate) fn route_tasks_reopen(
     );
 }
 
+/// A coordinator's sub-tasks, each probed and classified for recovery: see
+/// `subtask_recovery::children_of`.
+pub(crate) fn route_subtasks_recovery(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) =
+        match serde_json::from_slice::<crate::subtask_recovery::SubtaskListRequest>(&body_bytes) {
+            Ok(req) => (
+                200,
+                serde_json::to_value(crate::subtask_recovery::children_of(&req.session_id))
+                    .unwrap_or_default(),
+            ),
+            Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),
+        };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
+/// Resume the named sub-tasks, one guarded `resume_child` each; answers the
+/// per-id outcomes (refusals included) rather than failing the batch.
+pub(crate) fn route_subtasks_resume(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let (status, body) = match serde_json::from_slice::<
+        crate::subtask_recovery::ResumeChildrenRequest,
+    >(&body_bytes)
+    {
+        Ok(req) => (
+            200,
+            serde_json::to_value(crate::subtask_recovery::resume_children(
+                &req.session_ids,
+                req.prompt.as_deref(),
+            ))
+            .unwrap_or_default(),
+        ),
+        Err(e) => (400, serde_json::json!({ "error": format!("bad request: {e}") })),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
 pub(crate) fn route_session_mark(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

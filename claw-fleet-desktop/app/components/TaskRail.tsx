@@ -16,6 +16,7 @@ import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
+import { SubtaskRecoveryBlock } from "./SubtaskRecovery";
 import styles from "./TaskRail.module.css";
 
 function ArtifactGlyph({ mime }: { mime: string }) {
@@ -302,6 +303,18 @@ export function TaskRail({
           </h3>
           {waiting}
         </section>
+      )}
+
+      {/* Above the steps and sub-tasks: while a sub-task is dead mid-turn,
+          recovering it is the one thing to do on this task. */}
+      {row && subtasks.length > 0 && (
+        <SubtaskRecoveryBlock
+          coordinatorId={row.tip.id}
+          titleOf={(id) => {
+            const st = subtasks.find((x) => x.hops.some((h) => h.id === id));
+            return st ? sessionTitle(st.tip, untitled) : null;
+          }}
+        />
       )}
 
       {linked && stepsSection}

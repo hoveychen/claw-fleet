@@ -291,6 +291,11 @@ pub const SOURCES_CLAUDE_ACCOUNT: &str = "/sources/claude/account";
 pub const SOURCES_CONFIG: &str = "/sources_config";
 pub const SPAWN_SESSION: &str = "/spawn_session";
 pub const STOP: &str = "/stop";
+/// A coordinator's sub-tasks classified for recovery
+/// (`subtask_recovery::children_of`), and the batch resume behind the task
+/// page's "recover interrupted sub-tasks" action. Both POST a JSON body.
+pub const SUBTASKS_RECOVERY: &str = "/subtasks/recovery";
+pub const SUBTASKS_RESUME: &str = "/subtasks/resume";
 pub const TAIL: &str = "/tail";
 pub const TASK_PLANS: &str = "/task_plans";
 pub const TASKS_ACCEPT: &str = "/tasks/accept";
