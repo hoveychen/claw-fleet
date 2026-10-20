@@ -731,11 +731,30 @@ pub fn plans_attended_by_others(main_root: &str, me: &str) -> HashSet<String> {
     }
     let blocks = load_workspace_blocks(ws);
     let successors = crate::handoff::successor_index();
+    let predecessors: HashMap<&str, &str> =
+        successors.iter().map(|(from, to)| (to.as_str(), from.as_str())).collect();
+    let line_root = |sid: &str| {
+        let mut cur = sid;
+        for _ in 0..64 {
+            match predecessors.get(cur) {
+                Some(prev) => cur = prev,
+                None => break,
+            }
+        }
+        Some(cur.to_string())
+    };
     attended_by_others(
         &records,
         &blocks,
         plan_snooze::now_ms(),
         &|sid| successors.get(sid).cloned(),
+        &|sid| {
+            crate::task_model::assignment_with(
+                sid,
+                &line_root,
+                &crate::task_model::note_assignment,
+            )
+        },
         &gather_coverage,
         me,
     )
@@ -745,14 +764,27 @@ pub fn plans_attended_by_others(main_root: &str, me: &str) -> HashSet<String> {
 /// claimants plus, for a live-edge plan, the reviver's wider view (descendant
 /// claimants, a borrowed ancestor claim) — the same two sources
 /// [`resolve_attendance`] merges.
+///
+/// A sub-task's focus on the plan it was dispatched one step of (`assignment`,
+/// [`crate::task_model::assignment`]) is not a claim: it is working that step,
+/// not that plan's tree. Counted, it made the plan and — through the borrowed
+/// claim — its unstarted child plans look taken, so the main conversation
+/// walking those children was let go with one of them still undone.
 pub fn attended_by_others(
     records: &[(String, TaskProgressRecord)],
     blocks: &[pt::SourcedBlock],
     now: u64,
     successor: &dyn Fn(&str) -> Option<String>,
+    assignment: &dyn Fn(&str) -> Option<(String, String)>,
     coverage: &dyn Fn(&HashSet<String>) -> Coverage,
     me: &str,
 ) -> HashSet<String> {
+    let records: Vec<(String, TaskProgressRecord)> = records
+        .iter()
+        .filter(|(sid, r)| assignment(sid).is_none_or(|(plan, _)| plan != r.plan_id))
+        .cloned()
+        .collect();
+    let records = records.as_slice();
     let mut owners: HashMap<String, Vec<String>> = HashMap::new();
     for (plan, (o, _, _)) in direct_claims(records, successor) {
         owners.entry(plan).or_default().extend(o);
@@ -1871,14 +1903,14 @@ mod tests {
             ("A".to_string(), rec("/w", "a", now - H)),
             ("B".to_string(), rec("/w", "b", now - H)),
         ];
-        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["A", "B"]), "A");
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["A", "B"]), "A");
         assert_eq!(got, HashSet::from(["b".to_string()]));
         // B asking: its own claim on `b` is not "someone else", and A's claim
         // on the finished `a` counts but is harmless.
-        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["A", "B"]), "B");
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["A", "B"]), "B");
         assert!(!got.contains("b"), "{got:?}");
         // A dead claimant covers nothing.
-        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["A"]), "A");
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["A"]), "A");
         assert!(got.is_empty(), "{got:?}");
     }
 
@@ -1896,11 +1928,72 @@ mod tests {
             ("M".to_string(), rec("/w", "par", now - H)),
             ("A".to_string(), rec("/w", "a", now - H)),
         ];
-        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["M", "A"]), "A");
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["M", "A"]), "A");
         assert!(got.contains("b"), "{got:?}");
         // The main conversation itself asking finds nobody else on `b`.
-        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["M", "A"]), "M");
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["M", "A"]), "M");
         assert!(!got.contains("b"), "{got:?}");
+    }
+
+    /// Main conversation M walks child plans `a` and `b` of `par`; a live
+    /// sub-task S dispatched to step P2 of `par` has its focus on `par`. S is
+    /// working a step, not `par`'s tree: neither `par` nor the unstarted `b`
+    /// is someone else's, so M, done with `a`, is sent on to `b`.
+    #[test]
+    fn a_step_subtask_on_the_parent_does_not_claim_its_children() {
+        let now = 100 * 24 * H;
+        let blocks = vec![
+            block("par", None, "**Plan:** p\n\n- [x] **P1** — x\n- [ ] **P2** — s's step\n"),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), PENDING),
+        ];
+        let records = vec![
+            ("M".to_string(), rec("/w", "a", now - H)),
+            ("S".to_string(), rec("/w", "par", now - H)),
+        ];
+        let assigned = |sid: &str| (sid == "S").then(|| ("par".to_string(), "P2".to_string()));
+        let got =
+            attended_by_others(&records, &blocks, now, &|_| None, &assigned, &alive(&["M", "S"]), "M");
+        assert!(got.is_empty(), "{got:?}");
+        let t = pt::next_plan_in_tree_avoiding(&blocks, "a", &|id| got.contains(id)).unwrap();
+        assert_eq!(t.plan_id, "b");
+        // Before the fix (no assignment known) S's focus claimed `par` and,
+        // through the borrowed claim, `b` — and M was let go.
+        let old =
+            attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["M", "S"]), "M");
+        assert!(old.contains("b") && old.contains("par"), "{old:?}");
+        // A handoff successor of S carries the same assignment, read off the
+        // line root, so its focus is no claim either.
+        let records = vec![
+            ("M".to_string(), rec("/w", "a", now - H)),
+            ("S2".to_string(), rec("/w", "par", now - H)),
+        ];
+        let notes = |sid: &str| (sid == "S").then(|| ("par".to_string(), "P2".to_string()));
+        let via_line = |sid: &str| {
+            crate::task_model::assignment_with(sid, &|_| Some("S".to_string()), &notes)
+        };
+        let got =
+            attended_by_others(&records, &blocks, now, &|_| None, &via_line, &alive(&["M", "S2"]), "M");
+        assert!(got.is_empty(), "{got:?}");
+    }
+
+    /// Regression guard: M alone, with a dead claimant on `par`, still goes on
+    /// to `b`.
+    #[test]
+    fn a_dead_claimant_on_the_parent_does_not_hold_the_main_conversation() {
+        let now = 100 * 24 * H;
+        let blocks = vec![
+            block("par", None, "**Plan:** p\n\n- [x] **P1** — x\n- [ ] **P4** — tail\n"),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), PENDING),
+        ];
+        let records = vec![
+            ("M".to_string(), rec("/w", "a", now - H)),
+            ("D".to_string(), rec("/w", "par", now - H)),
+        ];
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &|_| None, &alive(&["M"]), "M");
+        let t = pt::next_plan_in_tree_avoiding(&blocks, "a", &|id| got.contains(id)).unwrap();
+        assert_eq!(t.plan_id, "b");
     }
 
     #[test]

@@ -75,8 +75,8 @@ pub fn gate_reason_in(
 /// plan: each touches the launch-note and claim stores, and the `Stop` hook
 /// runs every turn.
 pub struct GateSession<'a> {
-    /// The spawner's plan and step this sub-task was dispatched to
-    /// (`LaunchSpec::spawned_for_plan` / `spawned_for_step`).
+    /// The spawner's plan and step this sub-task's line was dispatched to
+    /// ([`crate::task_model::assignment`]).
     pub assignment: &'a dyn Fn() -> Option<(String, String)>,
     /// How a backtrack for this session is scoped ([`pt::BacktrackScope`]).
     pub backtrack: &'a dyn Fn() -> pt::BacktrackScope,
@@ -88,8 +88,9 @@ pub struct GateSession<'a> {
 ///   spawner's plan it sits in still has other steps open — those belong to
 ///   the spawner and its other sub-tasks.
 /// - The backtrack is scoped by `session.backtrack`: a sub-task is never sent
-///   elsewhere in the tree, and nobody is sent onto a plan another live
-///   session is on. When that leaves no target, the turn may end.
+///   out of its own root plan's subtree ([`pt::next_plan_for_subtask`]), and
+///   nobody is sent onto a plan another live session is on. When that leaves
+///   no target, the turn may end.
 pub fn gate_reason_scoped(
     cwd: &Path,
     focus: Option<&TaskProgressRecord>,
@@ -188,10 +189,9 @@ pub fn gate_reason(cwd: &Path, session_id: &str, stop_hook_active: bool) -> Opti
         stop_hook_active,
         has_registered_exit(session_id),
         &GateSession {
-            assignment: &|| {
-                let spec = crate::launch_spec::get(session_id)?;
-                Some((spec.spawned_for_plan?, spec.spawned_for_step?))
-            },
+            // Read off the relay chain's first hop: a handoff successor's own
+            // launch note carries no assignment.
+            assignment: &|| crate::task_model::assignment(session_id),
             backtrack: &|| pt::BacktrackScope::for_session(cwd, Some(session_id)),
         },
     )
@@ -521,7 +521,21 @@ mod tests {
         claimed: &'static [&'static str],
         assignment: Option<(&str, &str)>,
     ) -> Option<String> {
+        scoped_created(root, plan, subtask, claimed, assignment, &[])
+    }
+
+    /// [`scoped`] plus the plans the sub-task's line created.
+    fn scoped_created(
+        root: &Path,
+        plan: &str,
+        subtask: bool,
+        claimed: &'static [&'static str],
+        assignment: Option<(&str, &str)>,
+        created: &[&str],
+    ) -> Option<String> {
         let assignment = assignment.map(|(p, s)| (p.to_string(), s.to_string()));
+        let created: std::collections::HashSet<String> =
+            created.iter().map(|s| s.to_string()).collect();
         gate_reason_scoped(
             root,
             Some(&focus(plan, 200)),
@@ -531,11 +545,132 @@ mod tests {
             &GateSession {
                 assignment: &|| assignment.clone(),
                 backtrack: &|| pt::BacktrackScope {
-                    subtask,
+                    subtask: subtask.then(|| pt::SubtaskScope {
+                        assignment: assignment.clone(),
+                        created: created.clone(),
+                    }),
                     claimed_elsewhere: Box::new(|id| claimed.contains(&id)),
                 },
             },
         )
+    }
+
+    /// A sub-task that split its own work into a plan tree (`own` with
+    /// children `c1`, `c2`) and finished `c1` walks on to `c2`, like a main
+    /// conversation would, instead of being let go halfway.
+    #[test]
+    fn a_subtask_walks_the_tree_it_created() {
+        const OWN_TREE: &str = "\
+<!-- fleet:prd:begin id=\"own\" v=\"2\" -->
+
+**Plan:** sub-task's own parent
+
+- [ ] **P9** — wrap up
+
+<!-- fleet:prd:end id=\"own\" -->
+
+<!-- fleet:prd:begin id=\"c1\" v=\"2\" parent=\"own\" -->
+
+**Plan:** child 1
+
+- [x] **P1** — c1 work
+
+<!-- fleet:prd:end id=\"c1\" -->
+
+<!-- fleet:prd:begin id=\"c2\" v=\"2\" parent=\"own\" -->
+
+**Plan:** child 2
+
+- [ ] **P1** — c2 work
+
+<!-- fleet:prd:end id=\"c2\" -->
+";
+        let (_t, root) = ws(OWN_TREE);
+        let own = ["own", "c1", "c2"];
+        let reason = scoped_created(&root, "c1", true, &[], None, &own).expect("c2 still open");
+        assert!(reason.contains("plan `c2`"), "{reason}");
+        // `c2` done: the root's own box is next.
+        let rest = OWN_TREE.replace("- [ ] **P1** — c2 work", "- [x] **P1** — c2 work");
+        let (_t, root) = ws(&rest);
+        let reason = scoped_created(&root, "c2", true, &[], None, &own).expect("own P9 open");
+        assert!(reason.contains("**P9** — wrap up"), "{reason}");
+        // A child another live session is on is skipped as for anyone else.
+        let (_t, root) = ws(OWN_TREE);
+        assert_eq!(scoped_created(&root, "c1", true, &["c2"], None, &own), None);
+    }
+
+    /// A sub-task put on a plan the spawner wrote (`a` under `par`, none of
+    /// them created by it) is not handed that plan's sibling or parent, even
+    /// when it created a child plan of its own elsewhere.
+    #[test]
+    fn a_subtask_never_climbs_into_plans_it_did_not_create() {
+        let (_t, root) = ws(SPLIT);
+        assert_eq!(scoped_created(&root, "a", true, &[], None, &["elsewhere"]), None);
+        // Even `a` itself being its own does not open up the spawner's `par`.
+        assert_eq!(scoped_created(&root, "a", true, &[], None, &["a"]), None);
+    }
+
+    /// The spawner's plan with a child plan the sub-task wrote for its step.
+    const STEP_CHILD: &str = "\
+<!-- fleet:prd:begin id=\"par\" v=\"2\" -->
+
+**Plan:** spawner's plan
+
+- [x] **P1** — one
+- [ ] **P2** — sub-task's step
+- [ ] **P3** — spawner's own
+
+<!-- fleet:prd:end id=\"par\" -->
+
+<!-- fleet:prd:begin id=\"s\" v=\"2\" parent=\"par\" -->
+
+**Plan:** sub-task's breakdown of P2
+
+- [x] **P1** — done
+
+<!-- fleet:prd:end id=\"s\" -->
+
+<!-- fleet:prd:begin id=\"other\" v=\"2\" parent=\"par\" -->
+
+**Plan:** the spawner's other child
+
+- [ ] **P1** — not the sub-task's
+
+<!-- fleet:prd:end id=\"other\" -->
+";
+
+    /// A sub-task dispatched to `par` P2 that finished its own child plan `s`
+    /// is pointed back at P2 — not at `par`'s other child or P3 — and let go
+    /// once P2 is ticked.
+    #[test]
+    fn a_step_subtask_returns_to_its_step_and_no_further() {
+        let (_t, root) = ws(STEP_CHILD);
+        let reason = scoped_created(&root, "s", true, &[], Some(("par", "P2")), &["s"])
+            .expect("assigned step still open");
+        assert!(reason.contains("plan `par`"), "{reason}");
+        assert!(reason.contains("**P2** — sub-task's step"), "{reason}");
+        assert!(!reason.contains("not the sub-task's"), "{reason}");
+        let ticked = STEP_CHILD.replace("- [ ] **P2**", "- [x] **P2**");
+        let (_t, root) = ws(&ticked);
+        assert_eq!(scoped_created(&root, "s", true, &[], Some(("par", "P2")), &["s"]), None);
+        // Focused on `par` itself with P2 ticked: released by the step rule.
+        assert_eq!(scoped_created(&root, "par", true, &[], Some(("par", "P2")), &["s"]), None);
+    }
+
+    /// The handoff successor of a step sub-task inherits the assignment (it is
+    /// read off the relay line's first hop, [`crate::task_model::assignment`]),
+    /// so it too is let go once the step is ticked.
+    #[test]
+    fn a_step_subtask_successor_is_released_once_the_step_is_ticked() {
+        let (_t, root) = ws(&STEP_CHILD.replace("- [ ] **P2**", "- [x] **P2**"));
+        let notes = |sid: &str| (sid == "S").then(|| ("par".to_string(), "P2".to_string()));
+        let line_root = |_: &str| Some("S".to_string());
+        let inherited = crate::task_model::assignment_with("S2", &line_root, &notes);
+        assert_eq!(inherited, Some(("par".to_string(), "P2".to_string())));
+        let inherited = inherited.as_ref().map(|(p, s)| (p.as_str(), s.as_str()));
+        assert_eq!(scoped(&root, "par", true, &[], inherited), None);
+        // Without the line lookup the successor had no assignment and was held.
+        assert!(scoped(&root, "par", true, &[], None).is_some());
     }
 
     /// The reported bug: the session that finished `a` was sent to sibling
