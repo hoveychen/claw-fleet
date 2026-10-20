@@ -5,11 +5,11 @@
 // The developer panes (token, notes, workflow, handoff, …) stay behind the ⋮
 // sheet — they describe the session, not the task.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, FolderOpen, GitFork, WifiOff } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
-import type { SessionInfo, SubtaskStep, WikiDoc } from "../types";
+import type { SessionInfo, SubtaskStep, TaskPlanDetail, WikiDoc } from "../types";
 import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
 import { taskLibrary } from "../library";
 import { LibraryList, useLibrary } from "./LibraryList";
@@ -102,6 +102,45 @@ export function subtaskStepLinks(session: SessionInfo): Map<string, SubtaskStep>
   return new Map((session.taskSummary?.subtaskSteps ?? []).map((l) => [l.taskId, l]));
 }
 
+/** Key of one plan step, as `doneStepKeys` and the sub-task pane use it. */
+function stepKey(planId: string, step: string): string {
+  return `${planId}\u0000${step}`;
+}
+
+/** The checked-off steps across a task's plans, keyed by `stepKey`. */
+export function doneStepKeys(plans: readonly TaskPlanDetail[]): Set<string> {
+  const out = new Set<string>();
+  for (const p of plans) {
+    if (!p.id) continue;
+    for (const item of p.items) {
+      const step = item.done ? stepIdOf(item.text) : null;
+      if (step) out.add(stepKey(p.id, step));
+    }
+  }
+  return out;
+}
+
+/** The task's checked-off steps, fetched once per open of the sub-task pane.
+ *  Empty until it lands or when the request fails: a failed sub-task then
+ *  just keeps its red reading. */
+function useDoneSteps(client: FleetTransport | null, workspacePath: string | null, sessionId: string | null) {
+  const [done, setDone] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!client || !workspacePath || !sessionId) return;
+    let cancelled = false;
+    client
+      .request<TaskPlanDetail[]>("task_plans", { workspacePath, sessionId })
+      .then((plans) => {
+        if (!cancelled) setDone(doneStepKeys(plans ?? []));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, workspacePath, sessionId]);
+  return done;
+}
+
 /** The sub-tasks dispatched for one step of `planId`. */
 export function subtasksForStep(
   rows: SubtaskRows,
@@ -170,6 +209,7 @@ export function SubtasksPane({
   onOpenSessionId,
   client = null,
   coordinatorId = null,
+  workspacePath = null,
 }: {
   rows: SubtaskRows;
   links?: Map<string, SubtaskStep>;
@@ -178,7 +218,12 @@ export function SubtasksPane({
    *  mid-turn. */
   client?: FleetTransport | null;
   coordinatorId?: string | null;
+  /** With `client` and `coordinatorId`, lets the pane read which plan steps
+   *  are checked off, so a failed sub-task whose step is done reads as taken
+   *  over. */
+  workspacePath?: string | null;
 }) {
+  const doneSteps = useDoneSteps(client, workspacePath, coordinatorId);
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -193,15 +238,14 @@ export function SubtasksPane({
     const r = rows.find((x) => x.hops.some((h) => h.id === id));
     return r ? taskTitle(r.tip, t("未命名任务")) : null;
   };
-  // This tab has no plan items, so whether a step is checked off is unknown
-  // here; only a later sub-task on the same step marks one as taken over.
-  const stepKey = (r: SubtaskRows[number]) => {
+  const keyOf = (r: SubtaskRows[number]) => {
     const l = r.tip.taskId ? links?.get(r.tip.taskId) : undefined;
-    return l ? `${l.planId}\u0000${l.step}` : null;
+    return l ? stepKey(l.planId, l.step) : null;
   };
   const outcomeOf = (r: SubtaskRows[number]) => {
-    const key = stepKey(r);
-    return outcomeOnStep(r, false, key ? rows.filter((x) => stepKey(x) === key) : [r]);
+    const key = keyOf(r);
+    if (!key) return outcomeOnStep(r, false, [r]);
+    return outcomeOnStep(r, doneSteps.has(key), rows.filter((x) => keyOf(x) === key));
   };
   return (
     <>
