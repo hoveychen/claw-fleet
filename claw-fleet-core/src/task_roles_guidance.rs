@@ -317,19 +317,26 @@ pub(crate) fn role_reminder_for(
     locale: &str,
 ) -> Option<String> {
     let parent = graph.place(sid).parent_task_id?;
+    Some(subtask_role_line(&parent, user_title, locale))
+}
+
+/// The sub-task role line for a session whose task's main conversation is
+/// `parent`. Split out so a new codex thread, which has no id to look up yet,
+/// can be given the same line on its first prompt.
+pub(crate) fn subtask_role_line(parent: &str, user_title: &str, locale: &str) -> String {
     if locale == "zh" {
         let title = if user_title.is_empty() { "老板" } else { user_title };
-        return Some(format!(
+        return format!(
             "你的角色：子任务（所属任务的主对话 {parent}）。按「任务、子任务与汇报」一节：一张卡都不发、不设 `taskComplete`，\
              结果写进最终回复由主对话来取；要澄清的事也写进最终回复交给主对话，不直接问{title}。"
-        ));
+        );
     }
     let title = if user_title.is_empty() { "Boss" } else { user_title };
-    Some(format!(
+    format!(
         "Your role: sub-task (of the task whose main conversation is {parent}). Per \"Tasks, Sub-tasks And Who Reports\": \
          raise no card at all and never set `taskComplete`; your final reply is the result, which the main conversation \
          collects. Anything needing clarification goes in that reply for the main conversation to settle; do not ask {title} directly."
-    ))
+    )
 }
 
 #[cfg(test)]

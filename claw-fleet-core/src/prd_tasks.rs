@@ -2168,8 +2168,33 @@ pub fn render_fresh_session_reminder(cwd: &Path, fresh: &FreshSession) -> Option
     let graph = crate::task_model::TaskGraph::load();
     let flow_off = crate::task_workflow_guidance::flow_block_off(cwd);
     let workflow = fresh_session_workflow(&graph, fresh, &title, &locale).filter(|_| !flow_off);
-    let lead = workflow.into_iter().collect();
+    let lead = [fresh_session_role(&graph, fresh, &title, &locale), workflow]
+        .into_iter()
+        .flatten()
+        .collect();
     wrap_reminder(lead, render_plans_reminder_body(cwd, None))
+}
+
+/// The role line a new thread's later turns would get from
+/// [`crate::task_roles_guidance::render_role_reminder`]: present only for a
+/// sub-task, naming the task it answers to. Without it a codex sub-task —
+/// often a single `exec` turn — reads its standing guidance as a main
+/// conversation's and raises cards nobody but the server refuses.
+fn fresh_session_role(
+    graph: &crate::task_model::TaskGraph,
+    fresh: &FreshSession,
+    title: &str,
+    locale: &str,
+) -> Option<String> {
+    let task = match (fresh.continues, fresh.spawned_by) {
+        (Some(predecessor), _) => graph.place(predecessor).parent_task_id?,
+        (None, Some(parent)) => {
+            let place = graph.place(parent);
+            place.parent_task_id.unwrap_or(place.task_id)
+        }
+        (None, None) => return None,
+    };
+    Some(crate::task_roles_guidance::subtask_role_line(&task, title, locale))
 }
 
 fn fresh_session_workflow(
@@ -3077,6 +3102,59 @@ trailing notes outside\n";
             orphan.as_deref().is_none_or(|s| !s.contains("fleet__task action=set")),
             "{orphan:?}"
         );
+    }
+
+    /// A new thread spawned as a sub-task gets the sub-task role line on its
+    /// first prompt — also for a general or unprofiled task, where no
+    /// workflow block rides along — and a main conversation gets none.
+    #[test]
+    fn fresh_sub_task_gets_its_role_line() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        set("gen-t", Some(TaskType::General), Some("做 Z"), None, ProfileSetter::Agent).unwrap();
+        let graph = crate::task_model::TaskGraph::new(
+            vec![vec!["gen-t".to_string()], vec!["main-a".to_string(), "main-b".to_string()]],
+            vec![
+                ("gen-sub".to_string(), "gen-t".to_string()),
+                ("sub-hop".to_string(), "gen-t".to_string()),
+            ],
+        );
+        let role = |fresh: FreshSession| fresh_session_role(&graph, &fresh, "", "zh");
+
+        for parent in ["gen-t", "gen-sub", "unprofiled"] {
+            let line = role(FreshSession {
+                spawned_by: Some(parent),
+                ..Default::default()
+            })
+            .expect("a spawned thread is a sub-task");
+            assert!(line.contains("你的角色：子任务") && line.contains("一张卡都不发"), "{line}");
+        }
+        let via_sub = role(FreshSession {
+            spawned_by: Some("gen-sub"),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(via_sub.contains("gen-t"), "names the task, not the spawning sub-task: {via_sub}");
+
+        let relay = role(FreshSession {
+            continues: Some("sub-hop"),
+            ..Default::default()
+        });
+        assert!(relay.is_some_and(|l| l.contains("gen-t")), "a sub-task's successor stays a sub-task");
+        for main in [
+            FreshSession::default(),
+            FreshSession {
+                continues: Some("main-b"),
+                ..Default::default()
+            },
+            FreshSession {
+                preset_type: Some(TaskType::Dev),
+                ..Default::default()
+            },
+        ] {
+            assert!(role(main).is_none(), "{main:?}");
+        }
     }
 
     /// A codex handoff successor's first prompt follows its predecessor's
