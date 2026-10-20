@@ -46,6 +46,7 @@
 //! answer it — see [`dsh_token_breakdown`], which reads the `session/list`
 //! projections `@deepseek-ai/dsh-token-meter` publishes.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -1113,6 +1114,95 @@ pub(crate) fn session_running(session_id: &str) -> Result<Option<bool>, String> 
         .map(|item| item.get("running").and_then(Value::as_bool).unwrap_or(false)))
 }
 
+/// Where each dsh session keeps its log directory
+/// (`<dsh home>/sessions/<encoded cwd>/<session id>/`), indexed by session id
+/// and stamped with when the index was built. Rebuilt on a miss, at most once
+/// per [`LOG_INDEX_MIN_AGE`], so sessions without a log do not rescan the tree.
+static LOG_INDEX: OnceLock<Mutex<(Option<std::time::Instant>, HashMap<String, PathBuf>)>> =
+    OnceLock::new();
+const LOG_INDEX_MIN_AGE: Duration = Duration::from_secs(30);
+
+/// `(log path, mtime, len)` → verdict, so an unchanged log is decoded once.
+type LogVerdictCache =
+    HashMap<String, (PathBuf, std::time::SystemTime, u64, crate::session_probe::TailVerdict)>;
+static LOG_VERDICTS: OnceLock<Mutex<LogVerdictCache>> = OnceLock::new();
+
+fn session_log_dir(session_id: &str) -> Option<PathBuf> {
+    let index = LOG_INDEX.get_or_init(Default::default);
+    let mut index = lock(index);
+    if let Some(dir) = index.1.get(session_id) {
+        return Some(dir.clone());
+    }
+    if index.0.is_some_and(|built| built.elapsed() < LOG_INDEX_MIN_AGE) {
+        return None;
+    }
+    let root = crate::session::get_dsh_dir()?.join("sessions");
+    let mut map = HashMap::new();
+    for cwd in std::fs::read_dir(&root).ok()?.flatten() {
+        for dir in std::fs::read_dir(cwd.path()).into_iter().flatten().flatten() {
+            if let Some(name) = dir.file_name().to_str() {
+                if name.starts_with("session-") {
+                    map.insert(name.to_string(), dir.path());
+                }
+            }
+        }
+    }
+    *index = (Some(std::time::Instant::now()), map);
+    index.1.get(session_id).cloned()
+}
+
+/// The newest-format log in a session directory: dsh migrates a log forward
+/// (`session.v3.jsonl.zstd` → `session.v4.jsonl.zstd`) and leaves the old one.
+fn newest_log_in(dir: &std::path::Path) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            let v: u32 = name.strip_prefix("session.v")?.strip_suffix(".jsonl.zstd")?.parse().ok()?;
+            Some((v, e.path()))
+        })
+        .max_by_key(|(v, _)| *v)
+        .map(|(_, p)| p)
+}
+
+/// How a dsh session's last turn ended, read off its on-disk log, with the
+/// log's mtime (epoch ms). `None` when the session has no readable log.
+///
+/// The roster carries no turn outcome (none of the `session/list`
+/// projections records `turn/end`'s reason), so this is the one place Fleet
+/// decodes dsh's private log. It only reads the `turn/*` lines, and caches the
+/// verdict per `(path, mtime, len)`: a stopped session's log is decoded once.
+/// Measured 2026-10-20 on this machine: the largest log (720 KB zstd, 4.1 MB
+/// plain) decodes in ~16 ms.
+pub(crate) fn session_log_verdict(session_id: &str) -> Option<(crate::session_probe::TailVerdict, u64)> {
+    let path = newest_log_in(&session_log_dir(session_id)?)?;
+    let meta = std::fs::metadata(&path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let mtime_ms = mtime.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+    let cache = LOG_VERDICTS.get_or_init(Default::default);
+    if let Some((p, m, l, v)) = lock(cache).get(session_id) {
+        if *p == path && *m == mtime && *l == meta.len() {
+            return Some((v.clone(), mtime_ms));
+        }
+    }
+    let mut raw = Vec::new();
+    {
+        use std::io::Read as _;
+        let file = std::fs::File::open(&path).ok()?;
+        zstd::Decoder::new(file).ok()?.read_to_end(&mut raw).ok()?;
+    }
+    let content = String::from_utf8_lossy(&raw);
+    let lines: Vec<Value> = content
+        .lines()
+        .filter(|l| l.starts_with(r#"{"type":"turn/"#))
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let verdict = crate::session_probe::dsh_tail_verdict(&lines);
+    lock(cache).insert(session_id.to_string(), (path, mtime, meta.len(), verdict.clone()));
+    Some((verdict, mtime_ms))
+}
+
 pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     let id = item.get("sessionId").and_then(Value::as_str)?.to_string();
     let workspace_path = item
@@ -1156,6 +1246,13 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
 
     let selection = roster_selection(&projections);
     let subagent = roster_subagent(item, &projections);
+    // Only for the sessions the task page labels (Fleet's own, stopped): a
+    // running session's log changes every event, and the roster also lists
+    // hundreds of sessions nobody asked Fleet about.
+    let last_turn_end = (fleet_spawned && !running)
+        .then(|| session_log_verdict(&id))
+        .flatten()
+        .and_then(|(v, _)| crate::session_probe::turn_end_of(&v));
 
     Some(SessionInfo {
         // The roster *does* name a route, in `modelSelection` — it just took
@@ -1205,6 +1302,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         parent_session_id: subagent.as_ref().and_then(|s| s.parent_session_id.clone()),
         agent_type: subagent.as_ref().and_then(|s| s.agent_type.clone()),
         agent_description: subagent.as_ref().and_then(|s| s.agent_description.clone()),
+        last_turn_end,
         ..Default::default()
     })
 }

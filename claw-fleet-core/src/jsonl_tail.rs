@@ -19,13 +19,25 @@ const CHUNK_SIZE: usize = 64 * 1024;
 /// Lines that fail to parse are silently skipped, matching the existing
 /// `get_messages` behavior. Returned values preserve file order (oldest first).
 pub fn read_tail_lines_as_json(path: &Path, n: usize) -> std::io::Result<Vec<Value>> {
+    read_tail_lines_filtered(path, n, |_| true).map(|(lines, _)| lines)
+}
+
+/// [`read_tail_lines_as_json`], JSON-parsing only the lines `keep` accepts —
+/// parsing dominates the cost when the caller wants a few small records out of
+/// a tail of large ones. Also returns how many non-empty lines the tail held
+/// before filtering, so a caller can tell a short file from a full window.
+pub fn read_tail_lines_filtered(
+    path: &Path,
+    n: usize,
+    keep: impl Fn(&str) -> bool,
+) -> std::io::Result<(Vec<Value>, usize)> {
     if n == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
     let mut file = File::open(path)?;
     let file_size = file.metadata()?.len();
     if file_size == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
 
     // Read backward until we have collected at least n+1 newlines (so we can
@@ -72,11 +84,16 @@ pub fn read_tail_lines_as_json(path: &Path, n: usize) -> std::io::Result<Vec<Val
         let drop = lines.len() - n;
         lines.drain(..drop);
     }
-    Ok(lines
-        .into_iter()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect())
+    lines.retain(|l| !l.trim().is_empty());
+    let seen = lines.len();
+    Ok((
+        lines
+            .into_iter()
+            .filter(|l| keep(l))
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect(),
+        seen,
+    ))
 }
 
 /// Parse a *forward* incremental tail buffer read from a saved byte offset to

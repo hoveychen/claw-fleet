@@ -276,6 +276,12 @@ pub fn gather(target_id: &str) -> Facts {
         }
     }
     f.source = source;
+    if f.source.as_deref() == Some("dsh") && f.dsh_running == Some(false) {
+        if let Some((tail, mtime_ms)) = crate::dsh_source::session_log_verdict(&effective) {
+            f.tail = Some(tail);
+            f.tail_mtime_ms = Some(mtime_ms);
+        }
+    }
 
     if f.source.as_deref() != Some("dsh") {
         f.proc_alive = crate::parked::session_alive(&effective);
@@ -296,19 +302,56 @@ pub fn gather(target_id: &str) -> Facts {
 }
 
 fn read_tail_verdict(path: &Path, source: Option<&str>) -> TailVerdict {
-    let is_plain = path.extension().and_then(|e| e.to_str()) == Some("jsonl");
-    let lines: Vec<Value> = if is_plain {
-        crate::jsonl_tail::read_tail_lines_as_json(path, TAIL_LINES).unwrap_or_default()
-    } else {
-        // Compressed (archived codex rollout): no seeking, read it whole.
+    if source == Some("codex") {
+        return codex_file_verdict(path);
+    }
+    let lines = crate::jsonl_tail::read_tail_lines_as_json(path, TAIL_LINES).unwrap_or_default();
+    claude_tail_verdict(&lines)
+}
+
+/// How the last turn of the Codex rollout at `path` ended.
+///
+/// Reads the tail window first; only when no turn boundary is in it and the
+/// window may have been cut short does it fall back to the whole file, so a
+/// long turn whose `task_started` scrolled out still reads as in flight. That
+/// makes the answer identical to [`codex_tail_verdict`] over the full parse,
+/// which the scan computes for rollouts it has already read in full.
+pub(crate) fn codex_file_verdict(path: &Path) -> TailVerdict {
+    let read_all = || -> Vec<Value> {
         crate::codex_source::read_session_content(path)
-            .map(|c| c.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+            .map(|c| {
+                c.lines()
+                    .filter(|l| is_codex_event_line(l))
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect()
+            })
             .unwrap_or_default()
     };
-    match source {
-        Some("codex") => codex_tail_verdict(&lines),
-        _ => claude_tail_verdict(&lines),
+    let is_plain = path.extension().and_then(|e| e.to_str()) == Some("jsonl");
+    if !is_plain {
+        // Compressed (archived rollout): no seeking, read it whole.
+        return codex_tail_verdict(&read_all());
     }
+    let (tail, seen) =
+        crate::jsonl_tail::read_tail_lines_filtered(path, TAIL_LINES, is_codex_event_line)
+            .unwrap_or_default();
+    if let Some(v) = codex_boundary_verdict(&tail) {
+        return v;
+    }
+    // Fewer lines than asked for: the tail already was the whole file.
+    if seen < TAIL_LINES {
+        return codex_tail_verdict(&tail);
+    }
+    codex_tail_verdict(&read_all())
+}
+
+/// Whether a raw rollout line is an `event_msg` record — the only kind
+/// [`codex_tail_verdict`] looks at. Checked on the line's head, where Codex
+/// writes `timestamp` / `ordinal` / `type`, so the large `response_item`
+/// lines are never JSON-parsed. A false positive only costs a parse.
+fn is_codex_event_line(line: &str) -> bool {
+    let head = &line.as_bytes()[..line.len().min(160)];
+    head.windows(18).any(|w| w == br#""type":"event_msg""#)
 }
 
 /// Text Claude Code writes as the user turn when a request is cut off.
@@ -378,52 +421,116 @@ fn api_error_text(v: &Value, kind: Option<&str>) -> String {
     }
 }
 
-/// How the last turn of a Codex rollout tail ended.
+/// How the last turn of a Codex rollout ended, given its parsed lines (the
+/// whole rollout, or a tail of it).
 ///
-/// A turn whose start scrolled out of the tail with no boundary after it reads
-/// as [`TailVerdict::Ended`]: Codex often ends a turn without writing
-/// `task_complete` at all, and Fleet's own status pipeline likewise treats a
-/// boundary-less rollout with a dead process as finished
-/// (`clamp_dead_session_status`).
+/// A tail with events but no turn boundary reads as [`TailVerdict::Ended`]:
+/// older Codex builds could end a turn without writing `task_complete`, and
+/// Fleet's own status pipeline likewise treats a boundary-less rollout with a
+/// dead process as finished (`clamp_dead_session_status`). Current builds write
+/// `task_complete` on every turn, so over a whole rollout this only applies to
+/// such old files; [`codex_file_verdict`] reads the whole file before falling
+/// back to it.
 pub fn codex_tail_verdict(lines: &[Value]) -> TailVerdict {
-    let mut saw_event = false;
-    for v in lines.iter().rev() {
-        if v["type"].as_str() != Some("event_msg") {
-            continue;
-        }
-        saw_event = true;
-        let p = &v["payload"];
-        let err_text = |e: &Value| {
-            let msg = e["message"].as_str().unwrap_or_default().trim().to_string();
-            let info = e["codex_error_info"].as_str().unwrap_or_default();
-            match (msg.is_empty(), info.is_empty()) {
-                (false, false) => format!("{info}: {msg}"),
-                (false, true) => msg,
-                (true, false) => info.to_string(),
-                (true, true) => "error".to_string(),
-            }
-        };
-        match p["type"].as_str() {
-            Some("task_complete") | Some("turn_complete") => {
-                return match p.get("error").filter(|e| !e.is_null()) {
-                    Some(e) => TailVerdict::Fatal(err_text(e)),
-                    None => TailVerdict::Ended,
-                };
-            }
-            Some("turn_aborted") => return TailVerdict::Interrupted,
-            Some("error") | Some("stream_error") => {
-                let e = p.get("error").unwrap_or(p);
-                return TailVerdict::Fatal(err_text(e));
-            }
-            Some("task_started") | Some("turn_started") => return TailVerdict::InFlight,
-            _ => {}
-        }
+    if let Some(v) = codex_boundary_verdict(lines) {
+        return v;
     }
-    if saw_event {
+    if lines.iter().any(|v| v["type"].as_str() == Some("event_msg")) {
         TailVerdict::Ended
     } else {
         TailVerdict::Empty
     }
+}
+
+/// The verdict of the newest turn-boundary event in `lines`, if there is one.
+fn codex_boundary_verdict(lines: &[Value]) -> Option<TailVerdict> {
+    for v in lines.iter().rev() {
+        if v["type"].as_str() != Some("event_msg") {
+            continue;
+        }
+        let p = &v["payload"];
+        match p["type"].as_str() {
+            Some("task_complete") | Some("turn_complete") => {
+                return Some(match p.get("error").filter(|e| !e.is_null()) {
+                    Some(e) => codex_error_verdict(e),
+                    None => TailVerdict::Ended,
+                });
+            }
+            Some("turn_aborted") => return Some(TailVerdict::Interrupted),
+            Some("error") | Some("stream_error") => {
+                return Some(codex_error_verdict(p.get("error").unwrap_or(p)));
+            }
+            Some("task_started") | Some("turn_started") => return Some(TailVerdict::InFlight),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Classify a Codex turn error (`{message, codex_error_info}`). Capacity and
+/// dropped-stream errors are transient — the same request goes through on a
+/// retry — so they read as [`TailVerdict::ServerError`]; everything else is
+/// fatal, with the text kept for [`crate::subtask_recovery::is_account_error`].
+fn codex_error_verdict(e: &Value) -> TailVerdict {
+    let msg = e["message"].as_str().unwrap_or_default().trim().to_string();
+    let info = e["codex_error_info"].as_str().unwrap_or_default();
+    let transient = info == "server_overloaded"
+        || msg.starts_with("stream disconnected before completion");
+    if transient {
+        return TailVerdict::ServerError;
+    }
+    TailVerdict::Fatal(match (msg.is_empty(), info.is_empty()) {
+        (false, false) => format!("{info}: {msg}"),
+        (false, true) => msg,
+        (true, false) => info.to_string(),
+        (true, true) => "error".to_string(),
+    })
+}
+
+/// How the last turn of a dsh session log ended. dsh closes every turn with a
+/// `turn/end` whose `data.reason.kind` says why; a trailing `turn/start` is a
+/// turn still open (or one whose server died before the restart repaired it).
+///
+/// `interrupted` is not the user: dsh writes it when it reopens a log whose
+/// tail turn was cut off by a crash or server restart (`interruptedTurnClosers`)
+/// — the process-died-mid-turn case. The user's cancel is `aborted`.
+pub fn dsh_tail_verdict(lines: &[Value]) -> TailVerdict {
+    for v in lines.iter().rev() {
+        match v["type"].as_str() {
+            Some("turn/start") => return TailVerdict::InFlight,
+            Some("turn/end") => {}
+            _ => continue,
+        }
+        let reason = &v["data"]["reason"];
+        return match reason["kind"].as_str() {
+            Some("aborted") => TailVerdict::Interrupted,
+            Some("interrupted") => TailVerdict::InFlight,
+            Some("error") => {
+                let e = &reason["error"];
+                let code = e["code"].as_str().unwrap_or_default();
+                match code {
+                    "RATE_LIMIT" => TailVerdict::RateLimited,
+                    "SERVER" | "TRANSPORT" | "TIMEOUT" | "LLM_STREAM_IDLE_TIMEOUT"
+                    | "STREAM_CLOSED" => {
+                        TailVerdict::ServerError
+                    }
+                    _ => {
+                        let msg = e["message"].as_str().unwrap_or_default().trim();
+                        let msg = crate::process_util::truncate_chars(msg, 200);
+                        TailVerdict::Fatal(match (code.is_empty(), msg.is_empty()) {
+                            (false, false) => format!("{code}: {msg}"),
+                            (false, true) => code.to_string(),
+                            (true, _) => msg,
+                        })
+                    }
+                }
+            }
+            // `completed`, `max-tokens`, and the kinds that are not failures
+            // (`blocked`, `forked`) or not yet known.
+            _ => TailVerdict::Ended,
+        };
+    }
+    TailVerdict::Empty
 }
 
 fn verdict(f: &Facts, phase: Phase, detail: impl Into<String>) -> Probe {
@@ -475,10 +582,15 @@ pub fn classify(f: &Facts, now: u64) -> Probe {
     }
 
     if f.source.as_deref() == Some("dsh") {
-        return match f.dsh_running {
-            Some(true) => verdict(f, Phase::Running, "回合进行中"),
-            _ => verdict(f, Phase::Done, "回合已结束"),
-        };
+        // Every dsh session shares one server, so the roster's `running` bit
+        // stands in for process liveness; a stopped session's log says how its
+        // last turn ended. No readable log keeps the old reading (done).
+        if f.dsh_running == Some(true) {
+            return verdict(f, Phase::Running, "回合进行中");
+        }
+        if matches!(f.tail, None | Some(TailVerdict::Empty)) {
+            return verdict(f, Phase::Done, "回合已结束");
+        }
     }
 
     let quiet_ms = f.tail_mtime_ms.map(|m| now.saturating_sub(m)).unwrap_or(u64::MAX);
@@ -672,5 +784,142 @@ mod tests {
         assert_eq!(classify(&f, NOW).phase, Phase::Running);
         f.dsh_running = Some(false);
         assert_eq!(classify(&f, NOW).phase, Phase::Done);
+
+        // A stopped dsh session whose log says the turn died reads like any
+        // other dead mid-turn session: blocked inside the grace window, failed
+        // after it.
+        f.tail = Some(TailVerdict::InFlight);
+        f.tail_mtime_ms = Some(NOW - 1000);
+        assert_eq!(classify(&f, NOW).phase, Phase::Blocked);
+        f.tail_mtime_ms = Some(NOW - FAIL_GRACE_MS);
+        assert_eq!(classify(&f, NOW).phase, Phase::Failed);
+        f.tail = Some(TailVerdict::Ended);
+        assert_eq!(classify(&f, NOW).phase, Phase::Done);
+        f.dsh_running = Some(true);
+        f.tail = Some(TailVerdict::InFlight);
+        assert_eq!(classify(&f, NOW).phase, Phase::Running);
+    }
+
+    // Real-shaped Codex rollout lines (copied from ~/.codex/sessions, trimmed).
+    fn cx_started() -> Value {
+        json!({"timestamp":"2026-10-17T05:13:14.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"01a14847-4b12","model_context_window":258400}})
+    }
+    fn cx_call() -> Value {
+        json!({"timestamp":"2026-10-17T05:13:20.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_1"}})
+    }
+    fn cx_tokens() -> Value {
+        json!({"timestamp":"2026-10-17T05:13:21.000Z","type":"event_msg","payload":{"type":"token_count","info":null}})
+    }
+    fn cx_complete(error: Value) -> Value {
+        json!({"timestamp":"2026-10-17T05:14:00.000Z","ordinal":232,"type":"event_msg","payload":{"type":"task_complete","turn_id":"01a14847-4b12","last_agent_message":null,"error":error,"started_at":1792228704,"completed_at":1792228720,"duration_ms":3850}})
+    }
+
+    #[test]
+    fn codex_turn_end_from_real_shaped_rollouts() {
+        use crate::session::TurnEnd;
+        let end = |lines: &[Value]| turn_end_of(&codex_tail_verdict(lines));
+        // Clean end.
+        assert_eq!(
+            end(&[cx_started(), cx_call(), cx_tokens(), cx_complete(Value::Null)]),
+            Some(TurnEnd::Clean)
+        );
+        // Aborted turn (Esc / SIGINT / Fleet interrupt).
+        let aborted = json!({"timestamp":"2026-10-17T09:18:40.000Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"01a14927-c04a","reason":"interrupted","started_at":1792228704,"completed_at":1792228720,"duration_ms":16228}});
+        assert_eq!(end(&[cx_started(), cx_call(), aborted]), Some(TurnEnd::Interrupted));
+        // Process died mid-turn: started, tool calls, no boundary after.
+        assert_eq!(
+            end(&[cx_complete(Value::Null), cx_started(), cx_call(), cx_tokens()]),
+            Some(TurnEnd::MidTurn)
+        );
+        // Server error: model at capacity is transient.
+        let overloaded = json!({"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"});
+        assert_eq!(codex_tail_verdict(&[cx_started(), cx_complete(overloaded.clone())]), TailVerdict::ServerError);
+        assert_eq!(end(&[cx_started(), cx_complete(overloaded)]), Some(TurnEnd::MidTurn));
+        let dropped = json!({"message":"stream disconnected before completion: Transport error: network error: error decoding response body","codex_error_info":"other"});
+        assert_eq!(end(&[cx_started(), cx_complete(dropped)]), Some(TurnEnd::MidTurn));
+        // Auth errors.
+        let revoked = json!({"message":"Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.","codex_error_info":"unauthorized"});
+        assert_eq!(end(&[cx_started(), cx_complete(revoked)]), Some(TurnEnd::AuthFailed));
+        let credits = json!({"message":"Your workspace is out of credits. Ask your workspace owner to refill in order to continue.","codex_error_info":"usage_limit_exceeded"});
+        assert_eq!(end(&[cx_started(), cx_complete(credits)]), Some(TurnEnd::AuthFailed));
+        // Any other permanent error.
+        let env = json!({"message":"Missing environment variable: `PROBE_KEY_NOT_SET`.","codex_error_info":"other"});
+        assert_eq!(end(&[cx_started(), cx_complete(env)]), Some(TurnEnd::Failed));
+    }
+
+    /// A rollout line as Codex serializes it: `timestamp`, `type`, `payload`,
+    /// in that order (`json!` would sort the keys and bury `type`).
+    fn cx_line(v: &Value) -> String {
+        format!(r#"{{"timestamp":{},"type":{},"payload":{}}}"#, v["timestamp"], v["type"], v["payload"])
+    }
+
+    #[test]
+    fn codex_file_verdict_sees_a_turn_start_past_the_tail_window() {
+        use std::io::Write as _;
+        let mut f = tempfile::Builder::new().suffix(".jsonl").tempfile().unwrap();
+        let mut write = |v: &Value| writeln!(f, "{}", cx_line(v)).unwrap();
+        write(&cx_complete(Value::Null));
+        write(&cx_started());
+        for _ in 0..TAIL_LINES + 50 {
+            write(&cx_call());
+        }
+        // The tail alone has events but no boundary — it would read as Ended.
+        let tail = crate::jsonl_tail::read_tail_lines_as_json(f.path(), TAIL_LINES).unwrap();
+        assert_eq!(tail.len(), TAIL_LINES);
+        assert_eq!(codex_boundary_verdict(&tail), None);
+        assert_eq!(codex_file_verdict(f.path()), TailVerdict::InFlight);
+
+        // A short file is read whole by the tail read.
+        let mut short = tempfile::Builder::new().suffix(".jsonl").tempfile().unwrap();
+        writeln!(short, "{}", cx_line(&cx_started())).unwrap();
+        writeln!(short, "{}", cx_line(&cx_complete(Value::Null))).unwrap();
+        assert_eq!(codex_file_verdict(short.path()), TailVerdict::Ended);
+    }
+
+    #[test]
+    fn dsh_turn_end_from_real_shaped_logs() {
+        use crate::session::TurnEnd;
+        let start = json!({"type":"turn/start","seq":40,"time":1789311190000u64,"data":{"turn":2}});
+        let step = json!({"type":"step/end","seq":49,"time":1789311199755u64,"data":{"turn":2,"step":6}});
+        let end_with = |reason: Value| json!({"type":"turn/end","seq":50,"time":1789311199756u64,"data":{"turn":2,"reason":reason}});
+        let v = |reason: Value| dsh_tail_verdict(&[start.clone(), step.clone(), end_with(reason)]);
+        let te = |reason: Value| turn_end_of(&v(reason));
+
+        assert_eq!(te(json!({"kind":"completed"})), Some(TurnEnd::Clean));
+        assert_eq!(te(json!({"kind":"aborted","reason":{"kind":"user"}})), Some(TurnEnd::Interrupted));
+        // Crash / restart recovery closes the open turn as `interrupted`.
+        assert_eq!(te(json!({"kind":"interrupted"})), Some(TurnEnd::MidTurn));
+        assert_eq!(
+            te(json!({"kind":"error","error":{"message":"DeepSeek API request to https://api.deepseek.com failed","code":"TRANSPORT"}})),
+            Some(TurnEnd::MidTurn)
+        );
+        assert_eq!(v(json!({"kind":"error","error":{"message":"slow down","code":"RATE_LIMIT"}})), TailVerdict::RateLimited);
+        assert_eq!(
+            v(json!({"kind":"error","error":{"message":"SSE stream ended without [DONE]","code":"STREAM_CLOSED"}})),
+            TailVerdict::ServerError
+        );
+        assert_eq!(
+            te(json!({"kind":"error","error":{"message":"llm-deepseek: no API key for provider route deepseek-official","code":"MISSING_CREDENTIAL"}})),
+            Some(TurnEnd::AuthFailed)
+        );
+        assert_eq!(
+            te(json!({"kind":"error","error":{"message":"invalid api key","code":"AUTH"}})),
+            Some(TurnEnd::AuthFailed)
+        );
+        assert_eq!(
+            te(json!({"kind":"error","error":{"message":"balance exhausted","code":"ACCOUNT_QUOTA"}})),
+            Some(TurnEnd::AuthFailed)
+        );
+        assert_eq!(
+            v(json!({"kind":"error","error":{"message":"Cannot read properties of undefined (reading 'length')","code":"UNKNOWN"}})),
+            TailVerdict::Fatal("UNKNOWN: Cannot read properties of undefined (reading 'length')".into())
+        );
+        assert_eq!(
+            te(json!({"kind":"error","error":{"message":"Cannot read properties of undefined (reading 'length')","code":"UNKNOWN"}})),
+            Some(TurnEnd::Failed)
+        );
+        // An open turn, and a log with no turns.
+        assert_eq!(dsh_tail_verdict(&[end_with(json!({"kind":"completed"})), start.clone(), step]), TailVerdict::InFlight);
+        assert_eq!(dsh_tail_verdict(&[json!({"type":"session/end-seed","seq":51,"data":{}})]), TailVerdict::Empty);
     }
 }
