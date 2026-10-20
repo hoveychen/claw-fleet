@@ -67,9 +67,6 @@ pub(crate) fn cmd_prd_context() {
     } else {
         claw_fleet_core::prd_tasks::render_active_plans_reminder(&cwd, session_id.as_deref())
     };
-    let Some(reminder) = reminder else {
-        return;
-    };
 
     // Nothing to say when the copy from the previous prompt is byte-identical
     // and still in front of the model — see `prd_context_dedup`. No
@@ -79,11 +76,22 @@ pub(crate) fn cmd_prd_context() {
         .as_ref()
         .and_then(|v| v.get("transcript_path").and_then(|t| t.as_str()))
         .map(PathBuf::from);
-    if let Some(transcript) = transcript {
-        if !claw_fleet_core::prd_context_dedup::claude_needs_injection(&transcript, &reminder) {
-            return;
-        }
+    let reminder = reminder.filter(|r| {
+        transcript
+            .as_deref()
+            .map_or(true, |t| claw_fleet_core::prd_context_dedup::claude_needs_injection(t, r))
+    });
+
+    // The task nudge goes in every turn, after the reminder and outside its
+    // dedup (`prd_tasks::render_task_nudge`).
+    let nudge = (!plans_off)
+        .then(|| claw_fleet_core::prd_tasks::render_task_nudge(&cwd, session_id.as_deref()))
+        .flatten();
+    let parts: Vec<String> = reminder.into_iter().chain(nudge).collect();
+    if parts.is_empty() {
+        return;
     }
+    let reminder = parts.join("\n\n");
 
     let out = serde_json::json!({
         "hookSpecificOutput": {

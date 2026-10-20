@@ -1061,15 +1061,25 @@ fn maybe_prepend_active_plans(
     // With PRD off the plans stay out, but a sub-task's role line does not:
     // it belongs to the task-roles rules, and a sub-task that never hears it
     // raises report cards as if it were the coordinator.
-    let reminder = if crate::control_plane_prefs::is_disabled(
-        crate::control_plane_prefs::Feature::PrdDiscipline,
-    ) {
-        crate::task_roles_guidance::render_role_only_reminder(session_id)
+    let prd_off =
+        crate::control_plane_prefs::is_disabled(crate::control_plane_prefs::Feature::PrdDiscipline);
+    let (reminder, nudge) = if prd_off {
+        (crate::task_roles_guidance::render_role_only_reminder(session_id), None)
     } else {
-        crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id)
+        let ws = Path::new(workspace_path);
+        (
+            crate::prd_tasks::render_active_plans_reminder(ws, session_id),
+            crate::prd_tasks::render_task_nudge(ws, session_id),
+        )
+    };
+    // The task nudge sits between the reminder and the prompt on every turn,
+    // whether or not the reminder itself was deduplicated away.
+    let prompt = match nudge {
+        Some(nudge) => format!("{nudge}\n\n{prompt}"),
+        None => prompt.to_string(),
     };
     let rollout = session_id.and_then(crate::codex_source::find_codex_rollout);
-    prepend_reminder(reminder.as_deref(), rollout.as_deref(), prompt)
+    prepend_reminder(reminder.as_deref(), rollout.as_deref(), &prompt)
 }
 
 /// Prepend the recent-sessions block — what this repository has been worked on
