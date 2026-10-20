@@ -253,6 +253,44 @@ pub enum NoteView {
 /// originally ask?" — the chain's hop 1 is the origin of the work, which is not
 /// necessarily the plan the current hop happens to be executing.
 pub fn render_chain(chain: &HandoffChain, viewer: Option<&str>, notes: NoteView) -> String {
+    render_chain_inner(chain, viewer, notes, None)
+}
+
+/// [`render_chain`] for the `show` entry points (`fleet__handoff action=show`,
+/// `fleet handoff show`): the profile of the task the chain belongs to goes
+/// right under the header, so the reader sees what kind of work this is and
+/// the task's finish line before the hops.
+pub fn render_chain_for_show(chain: &HandoffChain, viewer: Option<&str>) -> String {
+    let head = chain.session_ids().into_iter().next().unwrap_or_default();
+    let profile = crate::task_profile::view_for_session(&head);
+    render_chain_inner(chain, viewer, NoteView::Full, Some((&head, &profile)))
+}
+
+/// The task-profile block of [`render_chain_for_show`]. `head` is the chain's
+/// first hop: when the profile's task differs, the chain is a sub-task line
+/// and the profile is its parent task's.
+fn render_profile_block(head: &str, p: &crate::task_profile::TaskProfile) -> String {
+    let whose = if p.task_id == head {
+        format!("任务 {}", p.task_id)
+    } else {
+        format!("本链是子任务，所属任务 {}", p.task_id)
+    };
+    if p.updated == 0 {
+        return format!("\n任务画像（{whose}）：未设置（类型按 general 处理）\n");
+    }
+    format!(
+        "\n任务画像（{whose}）：类型 {}，目标：{}\n",
+        p.task_type.as_str(),
+        p.goal.as_deref().unwrap_or("（未设置）")
+    )
+}
+
+fn render_chain_inner(
+    chain: &HandoffChain,
+    viewer: Option<&str>,
+    notes: NoteView,
+    profile: Option<(&str, &crate::task_profile::TaskProfile)>,
+) -> String {
     let ids = chain.session_ids();
     let mut out = format!(
         "接力链 {}（{} 棒，plan={}，workspace={}）\n",
@@ -261,6 +299,9 @@ pub fn render_chain(chain: &HandoffChain, viewer: Option<&str>, notes: NoteView)
         chain.plan_id.as_deref().unwrap_or("-"),
         chain.workspace_path
     );
+    if let Some((head, p)) = profile {
+        out.push_str(&render_profile_block(head, p));
+    }
     // The finish line goes above the hops: a reader who came here to answer
     // "is this chain done?" should not have to reconstruct it from 26 notes.
     if let Some(goal) = chain.goal.as_deref() {
@@ -1395,6 +1436,47 @@ mod tests {
         let chain = chain_containing_in(&cdir, "s2").unwrap();
         assert_eq!(chain.goal, None);
         assert!(chain.goal_history.is_empty());
+    }
+
+    #[test]
+    fn show_rendering_puts_the_task_profile_under_the_header() {
+        use crate::task_profile::{TaskProfile, TaskType};
+        let chain = HandoffChain {
+            chain_id: "c1".into(),
+            workspace_path: "/ws".into(),
+            plan_id: None,
+            goal: None,
+            goal_history: vec![],
+            links: vec![HandoffLink {
+                from_session_id: "s1".into(),
+                to_session_id: "s2".into(),
+                note: "n".into(),
+                plan_id: None,
+                next_task: None,
+                handed_at: 1,
+            }],
+        };
+        let set = TaskProfile {
+            task_id: "s1".into(),
+            task_type: TaskType::Dev,
+            goal: Some("合入 main".into()),
+            updated: 5,
+            ..Default::default()
+        };
+        let out = render_chain_inner(&chain, None, NoteView::Full, Some(("s1", &set)));
+        let line = "任务画像（任务 s1）：类型 dev，目标：合入 main";
+        assert!(out.contains(line), "{out}");
+        assert!(out.find(line) < out.find("第 1 棒"), "profile goes above the hops: {out}");
+
+        let parent = TaskProfile { task_id: "top".into(), ..set.clone() };
+        let out = render_chain_inner(&chain, None, NoteView::Full, Some(("s1", &parent)));
+        assert!(out.contains("任务画像（本链是子任务，所属任务 top）：类型 dev"), "{out}");
+
+        let unset = TaskProfile { task_id: "s1".into(), ..Default::default() };
+        let out = render_chain_inner(&chain, None, NoteView::Full, Some(("s1", &unset)));
+        assert!(out.contains("任务画像（任务 s1）：未设置（类型按 general 处理）"), "{out}");
+
+        assert!(!render_chain(&chain, None, NoteView::Full).contains("任务画像"));
     }
 
     #[test]

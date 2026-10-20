@@ -832,8 +832,9 @@ fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
             route.switch_note(),
             resp.pid,
         ),
-        // Codex mints its own rollout id; the scanner picks the session up once
-        // the rollout file appears.
+        // Only when Codex printed no `thread.started` within the launcher's
+        // timeout (`codex_launch::spawn_new_codex_session`); the scanner still
+        // picks the session up once its rollout file appears.
         None => format!(
             "ok: session started in {ws_name} ({workspace}), model={}{}, pid {}。",
             route.model.as_deref().unwrap_or("<CLI 默认>"),
@@ -977,8 +978,10 @@ fn handle_task_split(args: &Value, sid: &str) -> Result<String, String> {
     )?;
     let ws_name = crate::wiki::workspace_name_of(&workspace);
     let Some(new_sid) = resp.session_id.as_deref() else {
-        // Codex mints its own rollout id, so there is nothing to key the
-        // launch note or the profile on yet; the new task sets its own
+        // Codex reports its thread id from its first stdout event; this is
+        // only the fallback where that never arrived within the launcher's
+        // timeout (`codex_launch::spawn_new_codex_session`). Nothing to key
+        // the launch note or the profile on, so the new task sets its own
         // profile on its first turn.
         return Ok(format!(
             "ok: new task started in {ws_name} ({workspace}), pid {}. Its session id is not \
@@ -1187,7 +1190,7 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 // Notes in full: this action *is* the "read the whole chain"
                 // entry point, so clipping here would leave no way to reach the
                 // predecessors' briefings.
-                Some(c) => Ok(handoff::render_chain(&c, Some(&target), handoff::NoteView::Full)),
+                Some(c) => Ok(handoff::render_chain_for_show(&c, Some(&target))),
                 None => Err(format!(
                     "session {target} is not on any relay chain (it was not handed off to, and \
                      has not handed off yet)"

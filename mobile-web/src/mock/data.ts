@@ -98,6 +98,8 @@ export const MOCK_SESSIONS: SessionInfo[] = [
         goal: "JWT issuer 校验修好并合进 main，旧 token 仍能通过",
         setBy: "agent",
       },
+      // Split off the ledger refactor task (`fleet__task action=split`).
+      splitFrom: { taskId: "sess-codex-refactor", title: "Extract the settlement ledger into its own module" },
     },
   },
   {

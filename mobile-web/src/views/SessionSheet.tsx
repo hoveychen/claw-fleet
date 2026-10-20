@@ -97,6 +97,18 @@ interface CopyRow {
   text: string;
 }
 
+/** The newest main-line hop of task `taskId` among `sessions` — the hop the
+ *  boss would want to land on — or the task id itself (its first hop) when
+ *  none of its hops is scanned. */
+function taskTip(sessions: SessionInfo[], taskId: string): string {
+  let tip: SessionInfo | undefined;
+  for (const s of sessions) {
+    if (s.taskId !== taskId || s.parentTaskId) continue;
+    if (!tip || (s.createdAtMs ?? 0) > (tip.createdAtMs ?? 0)) tip = s;
+  }
+  return tip?.id ?? taskId;
+}
+
 export function SessionSheet({
   session,
   family,
@@ -372,6 +384,14 @@ export function SessionSheet({
                 sessionId={session.id}
                 profile={session.taskSummary.profile}
                 client={client}
+                splitFrom={session.taskSummary.splitFrom}
+                onOpenTask={
+                  onOpenSessionId &&
+                  ((taskId) => {
+                    onClose();
+                    onOpenSessionId(taskTip(sessions, taskId));
+                  })
+                }
               />
             )}
 

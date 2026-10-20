@@ -165,3 +165,36 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* "Split from <task>" — trails the goal line and links to the source task. */
+.split_from {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: 40%;
+  margin-left: auto;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.split_from_label {
+  flex: 0 0 auto;
+}
+
+.split_from_title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-accent);
+}
+
+.split_from:hover .split_from_title {
+  text-decoration: underline;
+}

@@ -354,11 +354,14 @@ startedAtMs: number,
 lastActivityMs: number, 
 costUsd: number, 
 subtaskSteps?: Array<SubtaskStep>, 
-profile?: TaskProfileBrief | null, };
+profile?: TaskProfileBrief | null, 
+splitFrom?: SplitFromRef | null, };
 
 export type SubtaskStep = { 
 taskId: string, planId: string, 
 step: string, };
+
+export type SplitFromRef = { taskId: string, title?: string | null, };
 
 export type TaskType = "dev" | "research" | "general";
 

@@ -154,6 +154,7 @@ fn build_bundle() -> String {
         claw_fleet_core::handoff::SessionHandoffInfo,
         claw_fleet_core::task_model::TaskSummary,
         claw_fleet_core::task_model::SubtaskStep,
+        claw_fleet_core::task_model::SplitFromRef,
         claw_fleet_core::task_profile::TaskType,
         claw_fleet_core::task_profile::ProfileSetter,
         claw_fleet_core::task_profile::GoalChange,

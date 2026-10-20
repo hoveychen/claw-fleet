@@ -1248,4 +1248,6 @@ const DICT: Record<string, string> = {
   "为什么改目标": "Why change the goal",
   "会记进目标历史": "Recorded in the goal history",
   "改目标要写一句理由": "Changing the goal needs a reason",
+  "拆自": "Split from",
+  "（未命名任务）": "(untitled task)",
 };

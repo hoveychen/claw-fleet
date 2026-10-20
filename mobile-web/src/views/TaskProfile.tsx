@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
-import type { TaskProfile, TaskProfileBrief, TaskType } from "../generated/types";
+import type { SplitFromRef, TaskProfile, TaskProfileBrief, TaskType } from "../generated/types";
 import type { FleetTransport } from "../transport";
 import { Spinner } from "./loading";
 import styles from "./TaskProfile.module.css";
@@ -43,9 +43,15 @@ export function TaskProfileSection({
   sessionId,
   profile,
   client,
+  splitFrom,
+  onOpenTask,
 }: {
   sessionId: string;
   profile: TaskProfileBrief | null | undefined;
+  /** The task this one was split off from (`fleet__task action=split`). */
+  splitFrom?: SplitFromRef | null;
+  /** Open the source task; omitted, the "split from" line is plain text. */
+  onOpenTask?: (taskId: string) => void;
   /** `null` when the device is unreachable: the readout stays, editing hides. */
   client: FleetTransport | null;
 }) {
@@ -114,6 +120,18 @@ export function TaskProfileSection({
         <div className={saved?.goal ? styles.goal : styles.goalEmpty}>
           {saved?.goal || t("还没定目标")}
         </div>
+        {splitFrom && (
+          <button
+            type="button"
+            className={styles.splitFrom}
+            data-testid="task-split-from"
+            disabled={!onOpenTask}
+            onClick={() => onOpenTask?.(splitFrom.taskId)}
+          >
+            <span className={styles.splitFromLabel}>{t("拆自")}</span>
+            <span className={styles.splitFromTitle}>{splitFrom.title || t("（未命名任务）")}</span>
+          </button>
+        )}
       </div>
     );
   }

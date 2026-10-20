@@ -164,3 +164,35 @@
 .cancelBtn:disabled {
   opacity: 0.6;
 }
+
+/* "Split from <task>" under the goal; taps through to the source task. */
+.splitFrom {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 13px;
+  text-align: left;
+}
+
+.splitFromLabel {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+}
+
+.splitFromTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-accent);
+}
+
+.splitFrom:disabled .splitFromTitle {
+  color: var(--color-text-secondary);
+}
