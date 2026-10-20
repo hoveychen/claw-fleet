@@ -183,6 +183,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 
 - `--note` 强制。`--plan/--next` 让 Fleet 把后继者自动归属到该计划和 P。`--model/--effort` 可选，不传就继承当前会话。
 - **`--note` 是整条链共用的交接文档，不是一次性留言。**每一棒在上一版上改写出新一版，旧版本全部留存。第一棒从零写；之后每一棒都以开场收到的那一版为底稿：与{title}对齐过的结论、踩过的坑原样保留（确已失效的写明为什么再删），进度、在飞的事和下一步按实际情况重写。你没带过去的内容，后面每一棒都看不到。上下文压缩后要找回当前版本，`fleet__handoff` 传 `action="show"`，末一版就是。
+- **长步骤的耗时和瓶颈也写进 `--note`**：哪一步实测跑了多久、吞吐多少、瓶颈在哪（GPU / CPU / IO / 网络）、做过哪些预检和优化、判过哪些不值得磨以及理由（见下文「长任务开跑前先预检墙钟」）。后面的棒拿到数字就能直接决定，不用重测；值得跨链留存的（比如某个训练脚本的基准吞吐）再写进 wiki。
 - **第一棒交接时用 `--goal` 写下这条链的目标**——一句话的「什么做完了这条链才算完」。你是在回合*末尾*登记的，所以哪怕这活是聊到一半才定下来的，此刻你也已经知道{title}要什么了。它会被每轮注入到后继者眼前，并成为**收工的判据**：计划树全勾了、只要 goal 没达成，就不该把决策卡标成 `taskComplete: true`。
 - **目标变了是正常的**（{title}中途改路线、或原目标已不成立），改就是了——但要用 `--goal <新目标> --goal-reason <为什么>` 显式改，并在卡里告诉{title}。没有理由的改动会被拒：那条规则挡的不是「目标变了」，而是把链的目标**悄悄缩成你手上那个 plan**，然后宣布达成。纯探索、本来就没有终点的链，不写 goal 也完全可以。
 - 登记后**干净地结束回合**（先按 Rule 3 提交 worktree 进度）。Stop hook 消费登记并 spawn 后继者，开场 prompt 就是你的便条。
@@ -235,6 +236,17 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 
 `sleep 45; <真正的检查命令>` **不**算空转——一次 round trip 换一次真观察，随便用。被禁的只有零信息量的那种。
 
+### 长任务开跑前先预检墙钟
+
+你感受不到墙钟时间：一个后台任务跑 20 分钟还是 3 小时，对你的注意力成本一样，验收又只看跑没跑通。但{title}等的是物理时间，机器烧的是真资源；接力链里磨刀的收益还常常落在后面几棒身上，你这一棒看不到。Rule 6 和「信息够了就动手」反对的是规划和汇报上的排场，**不是**执行效率上的投入——profile、确认 GPU 吃满、串行改并行、缓存中间结果，都是该做的活，不是多事。
+
+- **触发**：预计墙钟超过约 15 分钟的任务（训练、批量生成、长脚本、大构建、大批量数据处理）启动之前。
+- **先做三件事**：① 估耗时——小样本跑一下按比例外推，别拍脑袋；② 看一眼硬件利用率（`nvidia-smi`、`top`、`iostat` 之类），GPU / CPU / IO 有没有吃满、卡在哪；③ 有明显的并行、缓存或减量验证空间（先在一小份数据上跑通再上全量、加大 batch、多进程、复用上一步的产物）就先做，再开跑。
+- **判断不值得磨，写一句理由**（「只跑这一次、预计 18 分钟、改造要半小时」），写进汇报或 handoff note，不要默默跳过。
+- **值不值得磨由你这个主会话判断，不派出去。**它要拿整个计划来衡量：后面还有几棒、这一步要重复几次、{title}是不是正在等结果；而且这个判断本身很便宜。
+- **吃上下文的测量可以派子代理去做**（读长日志、采样利用率、小规模 benchmark、比较几种并行方案），但它必须交回硬数字，见 Rule 7。
+- 预检结论和实测耗时、瓶颈写进 handoff `--note`（见上文），下一棒不必重测。
+
 ## Rule 6 —— 需求保真：别把不存在的需求写进计划
 
 长程计划最贵的失败不是做得慢，而是做歪：计划里混进了{title}从没要求的需求，实现又和这些幻觉需求强耦合。
@@ -254,6 +266,7 @@ Claude Code 的 harness 默认是「除非用户、CLAUDE.md 或 skill 要求，
 - **依赖允许的部分，尽量派满。**别为了「一件一件来比较稳」把本可并行的工作排成队。多份互不相干的文件调查、多个独立模块的改动、一批需要分别验证的假设，都该同时开。注意**多个 agent 必须在同一条消息里发出才是真并发**，分几条消息发就退化成串行了。
 - **但简单的事自己做。**并行是有税的：切分输入、写清 prompt、读回报告、交叉验证结论，这些成本基本固定。一次 grep、读两三个文件、改一处调用点——自己做几秒就完了，派出去反而更慢，而且多一层转述就多一层失真。**当这笔税接近甚至超过活本身时，并发就是在拿质量和速度换热闹。**
 - 一句话判据：**这块活值不值得一个独立的上下文？**要翻很多文件才能回答、而回答完只需留下一个结论、过程细节不必进主线的，适合派出去；一两步就做完的，或者你必须亲眼看到原始内容才能往下判断的，自己做。
+- **派去做性能测量的子代理必须交回硬数字**：实测吞吐、硬件利用率、预计墙钟，以及一两个优化点各自的预期收益和改造成本。「看起来没问题」「利用率正常」这类结论不收——子代理会合理化地放过问题，也会悄悄退回更省事的做法（没真跑 benchmark、按经验估一个数）。把这个回报格式写进派活的 prompt；数字回来后自己抽查一个再用。
 
 ## worktree 工作流的推荐工具
 
@@ -416,6 +429,7 @@ fleet handoff --note "<the chain's handoff brief: conclusions aligned with {titl
 
 - `--note` is mandatory. `--plan/--next` let Fleet attribute the successor to that plan and P. `--model/--effort` are optional and otherwise inherited.
 - **`--note` is the chain's shared handoff brief, not a one-off message.** Every baton revises the previous version into a new one, and all versions are kept. Baton 1 writes it from scratch; every later baton starts from the version it opened with: conclusions aligned with {title} and known traps carry over verbatim (delete one only when it no longer holds, and say why), while progress, in-flight work and the next step are rewritten to match reality. Whatever you do not carry forward, no later baton will see. After a compaction, recover the current version with `fleet__handoff` `action="show"` — it is the last one.
+- **Put long steps' timings and bottlenecks in the `--note` too**: how long a step actually took, its throughput, where the bottleneck is (GPU / CPU / IO / network), what preflight and optimisation you did, and what you judged not worth it and why (see "Preflight the wall clock before a long run" below). A later baton holding the numbers can decide straight away instead of measuring again; anything worth keeping beyond this chain (a training script's baseline throughput, say) also goes in the wiki.
 - **On the first baton, state the chain's goal with `--goal`** — one sentence of "this chain is done when …". You register at the *end* of your turn, so even when the work only took shape mid-conversation you already know what {title} settled on. It is injected in front of every later baton and becomes **the test for finishing**: with the goal unmet, a fully ticked plan tree is still not grounds for `taskComplete: true`.
 - **A goal changing is normal** ({title} changes course, or the original no longer holds) — just change it explicitly with `--goal <new> --goal-reason <why>`, and tell {title} on a card. A change with no reason is refused: the rule does not forbid the goal moving, it forbids **quietly shrinking it down to the plan in your hands** and then declaring victory. A purely exploratory chain with no finish line can leave the goal unset.
 - Then **end the turn cleanly** (commit worktree progress first, per Rule 3). The Stop hook consumes the registration and spawns a successor whose opening prompt is your note.
@@ -468,6 +482,17 @@ Always pass `--title <a few words>` when creating a `fleet loop` or `fleet sched
 
 `sleep 45; <the real check command>` is **not** a spin — one round trip buys one real observation. Only the zero-information kind is banned.
 
+### Preflight the wall clock before a long run
+
+You do not feel wall-clock time: a background task running 20 minutes or 3 hours costs your attention the same, and acceptance only asks whether it ran. But {title} waits in physical time and the machine burns real resources, and in a relay the payoff of sharpening the axe often lands on later batons, out of your sight. Rule 6 and "act once you know enough" push back on ceremony in planning and reporting, **not** on investment in execution efficiency — profiling, confirming the GPU is saturated, turning serial work parallel, caching intermediate results are part of the job, not overreach.
+
+- **Trigger**: before starting anything expected to take more than about 15 minutes of wall clock (training, batch generation, a long script, a big build, bulk data processing).
+- **Do three things first**: (1) estimate the duration — run a small sample and extrapolate, do not guess; (2) look at hardware utilisation (`nvidia-smi`, `top`, `iostat` and the like): is the GPU / CPU / IO saturated, and where is it stuck; (3) if there is obvious room for parallelism, caching or a reduced validation run (prove it on a small slice before the full set, a larger batch, more processes, reusing a previous step's output), do that before the real run.
+- **If you judge it not worth it, write one sentence of why** ("runs once, ~18 minutes, the change would take half an hour") in the report or the handoff note — do not skip it silently.
+- **Whether it is worth it is your call as the main session; do not delegate it.** It has to be weighed against the whole plan — how many batons remain, how many times this step repeats, whether {title} is waiting on the result — and the judgement itself is cheap.
+- **Context-heavy measurement can go to a subagent** (reading long logs, sampling utilisation, a small benchmark, comparing parallel schemes), but it must come back with hard numbers — see Rule 7.
+- Put the preflight conclusion and the measured timings and bottleneck in the handoff `--note` (see above) so the next baton does not measure again.
+
 ## Rule 6 — Requirement fidelity: never write a requirement nobody asked for
 
 The most expensive failure in a long plan is not slowness, it is building the wrong thing: requirements {title} never asked for slip into the plan, and the implementation couples itself to those hallucinated requirements.
@@ -487,6 +512,7 @@ Claude Code's harness ships a default that says "do not use the Agent tool, work
 - **Where the dependencies allow it, fan out fully.** Do not queue parallelisable work just because one-at-a-time feels safer. Several unrelated file investigations, edits to independent modules, a batch of hypotheses that each need checking — start them all at once. Note that **agents are only actually concurrent when they go out in the same message**; spread across several messages they degrade back into a serial chain.
 - **But do the simple things yourself.** Parallelism is taxed: splitting the input, writing a clear prompt, reading the report back, cross-checking the conclusion — that cost is roughly fixed. One grep, reading two or three files, changing a single call site — doing it yourself takes seconds, delegating it is slower, and every extra layer of retelling loses fidelity. **When the tax approaches the size of the job, fanning out trades quality and speed for the appearance of activity.**
 - The one-line test: **is this chunk worth its own context?** Work that takes many files to answer, leaves behind a single conclusion, and whose intermediate detail does not belong in the main thread is a good delegation. Work that takes one or two steps, or where you must see the raw content yourself to judge what comes next, is not.
+- **A subagent sent to measure performance must come back with hard numbers**: measured throughput, hardware utilisation, the projected wall clock, and for one or two optimisations the expected gain and the cost of making the change. "Looks fine" or "utilisation is normal" is not an answer — subagents rationalise problems away and quietly fall back to the easier route (estimating from experience instead of running the benchmark). Write that return format into the prompt you dispatch, and spot-check one of the numbers yourself before using them.
 
 ## Recommended tooling for the worktree workflow
 
@@ -679,6 +705,46 @@ mod tests {
                 g.contains("--progress"),
                 "[{locale}] watch guidance must mention --progress"
             );
+        }
+    }
+
+    /// Fleet sessions shipped long runs the moment they worked, blind to wall
+    /// clock and resource use: the model does not feel time passing, and a
+    /// relay pushes the payoff of optimising onto later batons. The guidance
+    /// has to trigger a preflight before long runs, keep the worth-it call in
+    /// the main session, demand hard numbers from measuring subagents and put
+    /// timings in the handoff note — in both locales.
+    #[test]
+    fn wallclock_preflight_is_taught_in_both_locales() {
+        let cases = [
+            (
+                "zh",
+                [
+                    "### 长任务开跑前先预检墙钟",
+                    "预计墙钟超过约 15 分钟",
+                    "写一句理由",
+                    "由你这个主会话判断，不派出去",
+                    "必须交回硬数字",
+                    "长步骤的耗时和瓶颈也写进 `--note`",
+                ],
+            ),
+            (
+                "en",
+                [
+                    "### Preflight the wall clock before a long run",
+                    "more than about 15 minutes of wall clock",
+                    "write one sentence of why",
+                    "your call as the main session; do not delegate it",
+                    "must come back with hard numbers",
+                    "Put long steps' timings and bottlenecks in the `--note`",
+                ],
+            ),
+        ];
+        for (locale, needles) in cases {
+            let g = render_guidance("Boss", locale);
+            for needle in needles {
+                assert!(g.contains(needle), "[{locale}] missing {needle:?}");
+            }
         }
     }
 
