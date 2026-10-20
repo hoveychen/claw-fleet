@@ -2603,6 +2603,7 @@
     "recover_lead": "These sub-tasks stopped mid-turn. The ticked ones are resumed and continue from where they stopped.",
     "recover_lead_done": "Results:",
     "recover_step": "Step {{n}}",
+    "recover_via": "Spawned by \"{{title}}\"",
     "recover_ok": "Resumed",
     "recover_confirm": "Resume {{count}}",
     "recover_close": "Close",

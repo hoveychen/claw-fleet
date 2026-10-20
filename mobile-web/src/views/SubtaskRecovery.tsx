@@ -179,6 +179,7 @@ function RecoverSheet({
                     </span>
                     <span className={styles.rowDetail}>
                       {!selectable && label && `${t(label)} · `}
+                      {s.via && `${t("由「{0}」派出", titleOf(s.via) ?? shortId(s.via))} · `}
                       {s.detail}
                     </span>
                     {res && (

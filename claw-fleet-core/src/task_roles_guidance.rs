@@ -407,6 +407,7 @@ mod tests {
             session_id: id.to_string(),
             effective_id: id.to_string(),
             spawned_by: "coord".to_string(),
+            via: None,
             step: Some("P2".to_string()),
             workspace: None,
             source: Some("claude".to_string()),

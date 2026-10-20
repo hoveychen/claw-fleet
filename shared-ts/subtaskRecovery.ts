@@ -22,6 +22,9 @@ export interface SubtaskStatus {
   /** The live end of the sub-task's own relay chain — what a resume targets. */
   effectiveId: string;
   spawnedBy: string;
+  /** Below the first level: the `sessionId` of the listed sub-task this one
+   *  descends from (it was spawned by a sub-task, not the main conversation). */
+  via?: string;
   step?: string;
   workspace?: string;
   source?: string;
