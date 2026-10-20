@@ -1,0 +1,185 @@
+/* 子任务 pane's recovery banner and its confirm dialog (ConfirmDialog's shape). */
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md, 14px);
+  background: var(--color-warning-soft);
+  font-family: var(--font-sans);
+}
+
+.note {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-warning);
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 9px;
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: var(--t-ui);
+  font-weight: 600;
+}
+.trigger:active {
+  opacity: 0.78;
+}
+
+.overlay {
+  composes: overlay_enter from "../motion.module.css";
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  padding-bottom: calc(24px + var(--safe-bottom));
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  composes: modal_enter from "../motion.module.css";
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 400px);
+  max-height: calc(100dvh - 64px);
+  padding: 20px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 14px;
+  background: var(--color-bg-card);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  font-family: var(--font-sans);
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: var(--t-ui);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lead {
+  margin: 0 0 12px;
+  font-size: var(--t-aux, 12px);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--color-border);
+}
+
+.rowLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+}
+.rowLabel input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+}
+
+.row[data-disabled] .rowLabel {
+  opacity: 0.6;
+}
+
+.rowBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rowTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--t-ui);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.step {
+  flex-shrink: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+}
+
+.rowDetail,
+.result {
+  font-size: var(--t-aux, 12px);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.result[data-ok="true"] {
+  color: var(--color-success);
+}
+.result[data-ok="false"] {
+  color: var(--color-error);
+}
+
+.error {
+  margin: 10px 0 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-error);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.cancel,
+.confirm {
+  min-width: 72px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: var(--t-ui);
+  font-weight: 600;
+}
+
+.cancel {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
+.confirm {
+  color: #fff;
+  background: var(--color-accent);
+}
+.confirm:disabled,
+.cancel:disabled {
+  opacity: 0.55;
+}
+
+.cancel:active,
+.confirm:active {
+  opacity: 0.78;
+}

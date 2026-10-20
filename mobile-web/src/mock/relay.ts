@@ -477,6 +477,23 @@ export class MockRelayClient extends RelayClient {
         if (!detail) throw new Error("repo root not found");
         return detail;
       }
+      // Sub-task recovery: a coordinator's first sub-task died mid-turn, the
+      // second failed on auth, the rest finished.
+      case "subtasks_recovery":
+        return mockSubtaskRecovery(String(params?.sessionId ?? ""));
+      case "subtasks_resume": {
+        const known = new Map(
+          MOCK_SESSIONS.filter((s) => s.parentTaskId)
+            .flatMap((s) => mockSubtaskRecovery(String(s.parentTaskId)))
+            .map((s) => [s.sessionId, s]),
+        );
+        return ((params?.sessionIds as string[]) ?? []).map((id) =>
+          known.get(id)?.class === "recoverable"
+            ? { sessionId: id, ok: true, message: `ok: resumed ${id.slice(0, 8)}` }
+            : { sessionId: id, ok: false, message: `refused to resume ${id.slice(0, 8)}: its last turn ended cleanly` },
+        );
+      }
+
       // Write methods: acknowledge without doing anything. The UI's optimistic
       // update is what we're exercising, not the desktop's side of it.
       case "session_mark":
@@ -545,4 +562,22 @@ export class MockRelayClient extends RelayClient {
         return [];
     }
   }
+}
+
+function mockSubtaskRecovery(coordinatorId: string) {
+  const coord = MOCK_SESSIONS.find((s) => s.id === coordinatorId);
+  const taskId = coord?.taskId ?? coordinatorId;
+  const shapes = [
+    { class: "recoverable", phase: "failed", detail: "进程在回合中途退出（网络中断后没有再起来）" },
+    { class: "authFailed", phase: "failed", detail: "API Error: 403 Request not allowed" },
+  ];
+  return MOCK_SESSIONS.filter((s) => s.parentTaskId === taskId).map((s, i) => ({
+    sessionId: s.id,
+    effectiveId: s.id,
+    spawnedBy: coordinatorId,
+    step: i === 0 ? "P2" : undefined,
+    workspace: s.workspacePath,
+    source: "claude",
+    ...(shapes[i] ?? { class: "done", phase: "done", detail: "最后一回合正常结束" }),
+  }));
 }

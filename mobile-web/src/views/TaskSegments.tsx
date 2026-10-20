@@ -16,6 +16,7 @@ import { LibraryList, useLibrary } from "./LibraryList";
 import { isWakingSticky, statusTone, subtaskStateLabel, timeAgo } from "./TasksView";
 import { EmptyState } from "./EmptyState";
 import { SkeletonList } from "./loading";
+import { SubtaskRecoveryBanner } from "./SubtaskRecovery";
 import styles from "./TaskSegments.module.css";
 
 export type TaskSegment = "chat" | "subtasks" | "steps" | "library";
@@ -151,10 +152,16 @@ export function SubtasksPane({
   rows,
   links,
   onOpenSessionId,
+  client = null,
+  coordinatorId = null,
 }: {
   rows: SubtaskRows;
   links?: Map<string, SubtaskStep>;
   onOpenSessionId: (id: string) => void;
+  /** With both set, the pane offers 恢复中断的子任务 when a sub-task died
+   *  mid-turn. */
+  client?: FleetTransport | null;
+  coordinatorId?: string | null;
 }) {
   if (rows.length === 0) {
     return (
@@ -166,7 +173,13 @@ export function SubtasksPane({
       />
     );
   }
+  const titleOf = (id: string) => {
+    const r = rows.find((x) => x.hops.some((h) => h.id === id));
+    return r ? taskTitle(r.tip, t("未命名任务")) : null;
+  };
   return (
+    <>
+    <SubtaskRecoveryBanner client={client} coordinatorId={coordinatorId} titleOf={titleOf} />
     <div className={styles.card}>
       {rows.map((r) => (
         <button
@@ -192,6 +205,7 @@ export function SubtasksPane({
         </button>
       ))}
     </div>
+    </>
   );
 }
 

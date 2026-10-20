@@ -1308,6 +1308,18 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     pick: "accepted",
   }),
 
+  list_subtask_recovery: (a) => ({
+    method: "POST",
+    path: "/subtasks/recovery",
+    body: { sessionId: a.sessionId },
+  }),
+
+  resume_subtasks: (a) => ({
+    method: "POST",
+    path: "/subtasks/resume",
+    body: { sessionIds: a.sessionIds, prompt: a.prompt },
+  }),
+
   reopen_tasks: (a) => ({
     method: "POST",
     path: "/tasks/reopen",

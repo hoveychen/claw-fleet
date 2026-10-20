@@ -326,6 +326,65 @@ pub fn resume_child(child_id: &str, prompt: Option<&str>) -> Result<String, Stri
     Ok(format!("ok: resumed {short}{via}; it was: {}", st.detail))
 }
 
+/// Body of the list call every client makes (`sessionId` = any hop of the
+/// coordinator's chain).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtaskListRequest {
+    pub session_id: String,
+}
+
+/// Body of the batch resume every client makes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeChildrenRequest {
+    pub session_ids: Vec<String>,
+    /// Falls back to [`DEFAULT_RESUME_PROMPT`] when absent or blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+}
+
+/// What happened to one id of a [`resume_children`] batch.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeOutcome {
+    pub session_id: String,
+    pub ok: bool,
+    /// [`resume_child`]'s `ok: …` report, or its refusal / error.
+    pub message: String,
+}
+
+/// Resume a batch of sub-tasks — the manual "recover interrupted sub-tasks"
+/// action. Each id goes through [`resume_child`] on its own, so a refusal on
+/// one never blocks the rest. Blank and repeated ids are dropped; order is
+/// kept.
+pub fn resume_children(session_ids: &[String], prompt: Option<&str>) -> Vec<ResumeOutcome> {
+    resume_children_with(session_ids, |id| resume_child(id, prompt))
+}
+
+fn resume_children_with(
+    session_ids: &[String],
+    mut resume: impl FnMut(&str) -> Result<String, String>,
+) -> Vec<ResumeOutcome> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    session_ids
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty() && seen.insert(id))
+        .map(|id| {
+            let (ok, message) = match resume(id) {
+                Ok(m) => (true, m),
+                Err(m) => (false, m),
+            };
+            ResumeOutcome {
+                session_id: id.to_string(),
+                ok,
+                message,
+            }
+        })
+        .collect()
+}
+
 fn short_id(id: &str) -> &str {
     let id = id.strip_prefix("session-").unwrap_or(id);
     id.get(..8).unwrap_or(id)
@@ -524,5 +583,50 @@ mod tests {
         assert_eq!(v["effectiveId"], "a");
         let back: SubtaskStatus = serde_json::from_value(v).unwrap();
         assert_eq!(back, st);
+    }
+
+    #[test]
+    fn batch_resume_reports_each_id_and_skips_blank_and_repeats() {
+        let ids = vec![s("a"), s(" "), s("b"), s("a"), s(""), s(" c ")];
+        let mut called = Vec::new();
+        let got = resume_children_with(&ids, |id| {
+            called.push(id.to_string());
+            if id == "b" {
+                Err(format!("refused to resume {id}: done"))
+            } else {
+                Ok(format!("ok: resumed {id}"))
+            }
+        });
+        assert_eq!(called, vec![s("a"), s("b"), s("c")]);
+        assert_eq!(
+            got,
+            vec![
+                ResumeOutcome { session_id: s("a"), ok: true, message: s("ok: resumed a") },
+                ResumeOutcome {
+                    session_id: s("b"),
+                    ok: false,
+                    message: s("refused to resume b: done")
+                },
+                ResumeOutcome { session_id: s("c"), ok: true, message: s("ok: resumed c") },
+            ]
+        );
+    }
+
+    #[test]
+    fn requests_read_camel_case_and_prompt_is_optional() {
+        let r: ResumeChildrenRequest =
+            serde_json::from_value(serde_json::json!({"sessionIds": ["a"]})).unwrap();
+        assert_eq!(r.session_ids, vec![s("a")]);
+        assert_eq!(r.prompt, None);
+        let l: SubtaskListRequest =
+            serde_json::from_value(serde_json::json!({"sessionId": "c1"})).unwrap();
+        assert_eq!(l.session_id, "c1");
+        let v = serde_json::to_value(ResumeOutcome {
+            session_id: s("a"),
+            ok: false,
+            message: s("x"),
+        })
+        .unwrap();
+        assert_eq!(v, serde_json::json!({"sessionId": "a", "ok": false, "message": "x"}));
     }
 }

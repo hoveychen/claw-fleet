@@ -2593,6 +2593,25 @@ impl LocalBackend {
         n
     }
 
+    /// A task coordinator's sub-tasks, each probed and classified for the
+    /// task page's "recover interrupted sub-tasks" action.
+    pub fn list_subtask_recovery(
+        &self,
+        session_id: &str,
+    ) -> Vec<claw_fleet_core::subtask_recovery::SubtaskStatus> {
+        claw_fleet_core::subtask_recovery::children_of(session_id)
+    }
+
+    /// Resume the chosen sub-tasks; each id is re-probed and refused unless it
+    /// is still recoverable.
+    pub fn resume_subtasks(
+        &self,
+        session_ids: &[String],
+        prompt: Option<&str>,
+    ) -> Vec<claw_fleet_core::subtask_recovery::ResumeOutcome> {
+        claw_fleet_core::subtask_recovery::resume_children(session_ids, prompt)
+    }
+
     pub fn set_session_title(
         &self,
         session_id: String,

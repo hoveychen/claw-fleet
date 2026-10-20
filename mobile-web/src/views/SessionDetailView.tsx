@@ -2067,6 +2067,8 @@ export function SessionDetailView({
               rows={subtaskRows}
               links={subtaskStepLinks(session)}
               onOpenSessionId={onOpenSessionId}
+              client={client}
+              coordinatorId={session.id}
             />
           )}
           {segment === "steps" && (
