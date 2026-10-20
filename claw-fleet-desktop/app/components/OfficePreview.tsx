@@ -36,6 +36,7 @@ import {
   SLIDE_RATIO,
   type ParsedSheet,
 } from "../officeRender";
+import { useAuxMaximized } from "./AuxDocBar";
 import { SkeletonCard, SkeletonList } from "./loading";
 import styles from "./OfficePreview.module.css";
 
@@ -71,6 +72,14 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
   const hostRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // docx only enlarges inside a maximized card; read through a ref so the
+  // render effect below does not re-run (and refetch) when it toggles.
+  const maximized = useAuxMaximized();
+  const maximizedRef = useRef(maximized);
+  maximizedRef.current = maximized;
+  const fitDocxRef = useRef<() => void>(() => {});
+
+  useEffect(() => fitDocxRef.current(), [maximized]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -93,17 +102,21 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
       deck = await renderPptxInto(blob!, host, fitDeckWidth(host), startSlide);
     };
     // docx pages are fixed-width boxes (A4 ≈ 794px), so a maximized card only
-    // grew the gray desk around them. Scale them up to the room instead —
-    // never down, so the rail keeps its readable 1:1 page and side-scroll.
+    // grew the gray desk around them. Scale them up to the room there —
+    // never down, and never outside the overlay, so the rail and the Library
+    // page keep their 1:1 page.
     let pageWidth = 0;
     const fitDocx = () => {
       const wrapper = host.querySelector<HTMLElement>(".docx-wrapper");
       if (!wrapper || pageWidth === 0) return;
       const pad = parseFloat(getComputedStyle(wrapper).paddingLeft) || 0;
       const room = host.clientWidth - 2 * pad;
-      const scale = Math.min(MAX_DOCX_SCALE, Math.max(1, room / pageWidth));
+      const scale = maximizedRef.current
+        ? Math.min(MAX_DOCX_SCALE, Math.max(1, room / pageWidth))
+        : 1;
       wrapper.style.zoom = scale === 1 ? "" : String(scale);
     };
+    fitDocxRef.current = fitDocx;
     const observer =
       mode === "docx" && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(fitDocx)
