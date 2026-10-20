@@ -3029,7 +3029,7 @@ trailing notes outside\n";
         let goal = dev.goal_block.expect("dev goal");
         assert!(goal.starts_with("本任务目标：修好 X（类型：开发）"), "{goal}");
         assert!(goal.contains("fleet__task action=split"), "drift line: {goal}");
-        assert!(dev.workflow.expect("dev workflow").contains("本任务的流程：开发"));
+        assert!(dev.workflow.is_none(), "dev has no workflow block since the ablation");
 
         let res = lead("res-t");
         assert!(res.goal_block.unwrap().contains("（类型：研究）"));

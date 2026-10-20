@@ -1,4 +1,4 @@
-//! Per-task-type workflow blocks — how a `dev` or `research` task is run.
+//! Per-task-type workflow blocks — how a `research` task is run.
 //!
 //! The task's type lives in its profile ([`crate::task_profile`]), settled when
 //! the boss approves a kickoff card ([`crate::task_kickoff`]). That is too late
@@ -11,7 +11,11 @@
 //! [`crate::prd_context_dedup`] skips re-injecting an unchanged reminder, so
 //! anything that varies per turn here would re-send the whole block every turn.
 //!
-//! `general` gets no block — the behaviour before task types existed.
+//! `general` and `dev` get no block. A dev block existed until 2026-10-20 and
+//! was dropped after the ablation (wiki `experiments/task-type-flow-block-ablation`):
+//! its worktree/commit pointer repeated PRD discipline (4/4 with and without
+//! it), and its extra asks — an independent check before delivery, evidence
+//! in the report — were 0/4 in both arms.
 //!
 //! The research lead block is the whole research layer (design
 //! `design/task-type-harness` v2 §3 option B, §4): a main conversation's
@@ -21,10 +25,6 @@
 //! nudge that bypasses the dedup, and the sub-task block, which a research
 //! task's sub-task also gets in its launch-time system prompt
 //! ([`crate::claude_launch`]).
-//!
-//! The dev block deliberately does not restate the worktree / commit / cadence
-//! rules: those already stand in the PRD discipline guidance, and the block
-//! only points at them and adds what that guidance lacks.
 
 use crate::task_profile::TaskType;
 
@@ -39,7 +39,7 @@ pub enum Role {
 
 /// The workflow block for a task of `task_type`, worded for `role`. `title` is
 /// what the agent calls the user; `locale` other than `zh` gets English.
-/// `None` for `general`.
+/// `None` for `general` and `dev`.
 pub fn render_block(task_type: TaskType, role: Role, title: &str, locale: &str) -> Option<String> {
     let zh = locale == "zh";
     let title = match (title.trim().is_empty(), zh) {
@@ -48,15 +48,11 @@ pub fn render_block(task_type: TaskType, role: Role, title: &str, locale: &str) 
         (false, _) => title.trim(),
     };
     let text = match (task_type, role, zh) {
-        (TaskType::General, _, _) => return None,
+        (TaskType::General | TaskType::Dev, _, _) => return None,
         (TaskType::Research, Role::Lead, true) => research_lead_zh(title),
         (TaskType::Research, Role::Lead, false) => research_lead_en(title),
         (TaskType::Research, Role::Subtask, true) => RESEARCH_SUBTASK_ZH.to_string(),
         (TaskType::Research, Role::Subtask, false) => RESEARCH_SUBTASK_EN.to_string(),
-        (TaskType::Dev, Role::Lead, true) => dev_lead_zh(title),
-        (TaskType::Dev, Role::Lead, false) => dev_lead_en(title),
-        (TaskType::Dev, Role::Subtask, true) => DEV_SUBTASK_ZH.to_string(),
-        (TaskType::Dev, Role::Subtask, false) => DEV_SUBTASK_EN.to_string(),
     };
     Some(text)
 }
@@ -214,33 +210,6 @@ pub fn research_next_line(step: &ResearchStep, locale: &str) -> String {
     }
 }
 
-fn dev_lead_zh(title: &str) -> String {
-    format!(
-        "## 本任务的流程：开发\n\
-提交纪律、worktree、计划节奏照 PRD 纪律 Rule 1/3/4 执行，此处只补三条：\n\
-- **交付前独立核验**：多步 exec 计划在最终汇报前，派一个干净上下文的核验子任务，拿{title}的原始症状和验收标准去证伪你的改动，而不是复述你的结论。\n\
-- **接力后先冒烟**：后继者动手前，先把已勾掉的步骤的验收命令跑一遍，确认没被破坏。\n\
-- **汇报附证据**：贴测试输出、截图或命令结果，不只说「已通过」。"
-    )
-}
-
-fn dev_lead_en(title: &str) -> String {
-    format!(
-        "## This task's workflow: dev\n\
-Commit discipline, worktrees and plan cadence follow PRD discipline Rules 1/3/4; this adds three things:\n\
-- **Independent check before delivery**: before the final report of a multi-step exec plan, spawn a verification sub-task with a clean context that tries to refute your change against {title}'s original symptom and acceptance criteria — not one that restates your conclusion.\n\
-- **Smoke-test after a relay**: before a successor changes anything, it reruns the acceptance commands of the steps already ticked.\n\
-- **Report with evidence**: paste test output, screenshots or command results, not just \"passes\"."
-    )
-}
-
-const DEV_SUBTASK_ZH: &str = "## 本任务的流程：开发（你是子任务）\n\
-- 最终回复附证据：测试输出、截图或命令结果，以及合并的 commit。\n\
-- 接着前一棒做时，先把已勾掉步骤的验收命令跑一遍再动手。";
-
-const DEV_SUBTASK_EN: &str = "## This task's workflow: dev (you are a sub-task)\n\
-- Back your final reply with evidence: test output, screenshots or command results, and the merge commit.\n\
-- When continuing someone else's work, rerun the acceptance commands of the ticked steps before changing anything.";
 
 #[cfg(test)]
 mod tests {
@@ -266,10 +235,12 @@ mod tests {
     }
 
     #[test]
-    fn general_has_no_block() {
+    fn general_and_dev_have_no_block() {
         for locale in LOCALES {
             for role in ROLES {
-                assert!(render_block(TaskType::General, role, "", locale).is_none());
+                for t in [TaskType::General, TaskType::Dev] {
+                    assert!(render_block(t, role, "", locale).is_none(), "{t:?}");
+                }
             }
         }
     }
@@ -332,23 +303,10 @@ mod tests {
     }
 
     #[test]
-    fn dev_lead_points_at_existing_rules_and_adds_three() {
-        let zh = render_block(TaskType::Dev, Role::Lead, "", "zh").unwrap();
-        assert!(zh.contains("Rule 1/3/4"));
-        for needle in ["独立核验", "冒烟", "证据"] {
-            assert!(zh.contains(needle), "zh dev block lacks {needle}");
-        }
-        // Points at the worktree rule, does not restate it.
-        assert!(!zh.contains("git worktree add"));
-    }
-
-    #[test]
     fn subtask_blocks_never_ask_for_cards() {
         for locale in LOCALES {
-            for t in [TaskType::Dev, TaskType::Research] {
-                let b = render_block(t, Role::Subtask, "", locale).unwrap();
-                assert!(!b.contains("计划卡") && !b.contains("plan card"), "{b}");
-            }
+            let b = render_block(TaskType::Research, Role::Subtask, "", locale).unwrap();
+            assert!(!b.contains("计划卡") && !b.contains("plan card"), "{b}");
         }
         let r = render_block(TaskType::Research, Role::Subtask, "", "zh").unwrap();
         assert!(r.contains("不必交 commit") && r.contains("没查到什么"));
@@ -363,7 +321,7 @@ mod tests {
     fn blocks_stay_within_budget() {
         for locale in LOCALES {
             for role in ROLES {
-                for t in [TaskType::Dev, TaskType::Research] {
+                for t in [TaskType::Research] {
                     let b = render_block(t, role, "老板", locale).unwrap();
                     // The research lead is the whole research layer (design
                     // v2 §4), not an add-on, so it gets a larger allowance.
