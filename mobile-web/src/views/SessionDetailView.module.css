@@ -875,8 +875,9 @@
   opacity: 0.75;
 }
 
-/* Boundary below a prepended relay leg: the interrupt rule's shape in the
-   accent colour, with air around it — it is a change of session. */
+/* Heading opening each relay leg once earlier legs are prepended: the
+   interrupt rule's shape in the accent colour, with air around it — it is a
+   change of session. */
 .legRule {
   display: flex;
   align-items: center;
@@ -895,7 +896,7 @@
 }
 
 /* Wraps instead of truncating: on a phone a long title would otherwise eat
-   the hand-off time, which is half of what the rule is for. */
+   the start time, which is half of what the rule is for. */
 .legRuleLabel {
   max-width: 78%;
   text-align: center;

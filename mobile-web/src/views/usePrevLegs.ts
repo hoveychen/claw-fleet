@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FleetTransport } from "../transport";
 import type { HandoffChain, RawMessage, SessionInfo } from "../types";
-import { nextLeg, type LoadedLeg } from "../../../shared-ts/prevLeg";
+import { legTitle, nextLeg, type LoadedLeg } from "../../../shared-ts/prevLeg";
 
 /** Raw lines fetched per page of a prepended leg — the same steps the
  *  current leg's own "加载更早的消息" uses. */
@@ -13,8 +13,6 @@ export interface PrevLeg extends LoadedLeg<RawMessage> {
   jsonlPath: string;
   agentSource?: string | null;
   n: number;
-  /** The last tail came back full, so lines before it may exist. */
-  hasEarlier: boolean;
 }
 
 /**
@@ -23,7 +21,7 @@ export interface PrevLeg extends LoadedLeg<RawMessage> {
  * predecessor; once that leg is paged to its start, offer the one before it.
  *
  * Legs are kept nearest-first, as loaded; the caller renders them oldest-first
- * above the current transcript (see `stitchLegs`). They are display-only — the
+ * above the current transcript, each opened by its heading (see `stitchLegs`). They are display-only — the
  * tail poller, composer and optimistic echo never see them, and nothing here
  * polls: a predecessor leg has finished by definition.
  */
@@ -65,12 +63,12 @@ export function usePrevLegs(
   const top = legs.length > 0 ? legs[legs.length - 1] : null;
   const topId = top ? top.sessionId : session.id;
   const topHop = top ? top.hop : hop;
-  const topFullyLoaded = top ? !top.hasEarlier : currentFullyLoaded;
+  const topFullyLoaded = top ? top.fullyLoaded : currentFullyLoaded;
   const next = nextLeg({ links: chain?.links ?? null, topId, topHop, topFullyLoaded, sessions });
 
   const loadPrev = useCallback(async () => {
     if (!client || !next || loading) return;
-    const { link, pred, hop: legHop } = next;
+    const { pred, hop: legHop } = next;
     const mine = epoch.current;
     setLoading(true);
     try {
@@ -84,13 +82,14 @@ export function usePrevLegs(
         {
           sessionId: pred.id,
           hop: legHop,
-          title: pred.titleOverride || pred.aiTitle || `${pred.id.slice(0, 8)}…`,
-          handedAt: link.handedAt,
+          title: legTitle(pred),
+          createdAtMs: pred.createdAtMs,
           jsonlPath: pred.jsonlPath,
           agentSource: pred.agentSource,
           messages: rows,
           n: LEG_TAIL_INITIAL,
-          hasEarlier: rows.length >= LEG_TAIL_INITIAL,
+          // A short tail means the transcript has no lines before it.
+          fullyLoaded: rows.length < LEG_TAIL_INITIAL,
         },
       ]);
     } catch {
@@ -102,7 +101,7 @@ export function usePrevLegs(
 
   /** Page the topmost prepended leg one step further back. */
   const loadEarlierTop = useCallback(async () => {
-    if (!client || !top || !top.hasEarlier || loading) return;
+    if (!client || !top || top.fullyLoaded || loading) return;
     const mine = epoch.current;
     const n = top.n + LEG_TAIL_STEP;
     setLoading(true);
@@ -111,7 +110,7 @@ export function usePrevLegs(
       if (epoch.current !== mine) return;
       setLegs((prev) =>
         prev.map((l) =>
-          l.sessionId === top.sessionId ? { ...l, messages: rows, n, hasEarlier: rows.length >= n } : l,
+          l.sessionId === top.sessionId ? { ...l, messages: rows, n, fullyLoaded: rows.length < n } : l,
         ),
       );
     } catch {
@@ -127,6 +126,6 @@ export function usePrevLegs(
     /** "加载第 N 棒", when the leg on top is complete and has a predecessor. */
     offer: next ? { hop: next.hop, onLoad: loadPrev } : null,
     /** Paging for the topmost prepended leg, while it has earlier lines. */
-    earlier: top && top.hasEarlier ? loadEarlierTop : null,
+    earlier: top && !top.fullyLoaded ? loadEarlierTop : null,
   };
 }

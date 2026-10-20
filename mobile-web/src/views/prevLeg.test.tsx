@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PrevLegBlock } from "./SessionDetailView";
+import { LegRule, PrevLegBlock } from "./SessionDetailView";
 import type { PrevLeg } from "./usePrevLegs";
 import type { RawMessage } from "../types";
-import { nextLeg } from "../../../shared-ts/prevLeg";
+import { legHeading, nextLeg } from "../../../shared-ts/prevLeg";
 
 const LINKS = [
   { fromSessionId: "s1", toSessionId: "s2", handedAt: 1000 },
@@ -43,23 +43,35 @@ describe("PrevLegBlock", () => {
     sessionId: "s2",
     hop: 2,
     title: "修 CI",
-    handedAt: Date.UTC(2026, 9, 20, 8, 30),
+    createdAtMs: Date.UTC(2026, 9, 20, 7),
+    fullyLoaded: true,
     jsonlPath: "/t/s2.jsonl",
     messages: [msg("user", "p1", "old prompt"), msg("assistant", "p2", "old answer")],
     n: 120,
-    hasEarlier: false,
   };
 
   const html = renderToStaticMarkup(
     <PrevLegBlock leg={leg} client={null} expandedThinking={new Set()} onToggleThinking={() => {}} />,
   );
 
-  it("renders the leg's rows followed by a divider naming it", () => {
+  it("opens the leg's rows with a heading naming it", () => {
     expect(html).toContain("old answer");
-    expect(html).toContain('data-testid="leg-divider"');
+    expect(html).toContain('data-testid="leg-heading"');
     // The suite runs without a DOM, so whichever language the runner's locale picks.
-    expect(html).toMatch(/第 2 棒 · 修 CI · .+ 交棒|Leg 2 · 修 CI · handed off .+/);
-    expect(html.indexOf("old answer")).toBeLessThan(html.indexOf("leg-divider"));
+    expect(html).toMatch(/第 2 棒 · 修 CI · .+ 开始|Leg 2 · 修 CI · started .+/);
+    expect(html).not.toContain("data-current");
+    expect(html.indexOf("leg-heading")).toBeLessThan(html.indexOf("old prompt"));
+  });
+
+  it("dates the heading by the leg's first message once it is loaded to it", () => {
+    expect(legHeading(leg, false).startedAt).toBe(Date.UTC(2026, 9, 20, 8));
+    expect(legHeading({ ...leg, fullyLoaded: false }, false).startedAt).toBe(Date.UTC(2026, 9, 20, 7));
+  });
+
+  it("marks the current leg's heading as current", () => {
+    const cur = renderToStaticMarkup(<LegRule info={legHeading({ ...leg, hop: 3, title: "接着修" }, true)} />);
+    expect(cur).toContain('data-current="true"');
+    expect(cur).toMatch(/第 3 棒（当前）· 接着修 · .+ 开始|Leg 3 \(current\) · 接着修 · started .+/);
   });
 
   it("stamps no selection anchors, so no side question forks over another leg", () => {
