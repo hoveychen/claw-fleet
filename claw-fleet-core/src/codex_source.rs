@@ -7320,6 +7320,10 @@ impl AgentSource for CodexSource {
             spec.model.as_deref(),
             spec.effort.as_deref(),
             &spec.images,
+            &crate::prd_tasks::FreshSession {
+                spawned_by: spec.spawned_by.as_deref(),
+                preset_type: crate::codex_launch::split_preset(),
+            },
         )
     }
 

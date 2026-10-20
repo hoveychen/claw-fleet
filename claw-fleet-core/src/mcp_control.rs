@@ -962,20 +962,28 @@ fn handle_task_split(args: &Value, sid: &str) -> Result<String, String> {
         &ctx.workspace,
     )?;
     let route = crate::agent_source::route_launch(&ctx, None, None)?;
-    let resp = crate::agent_source::spawn_session(
-        &route.agent_source,
-        &crate::agent_source::SpawnSpec {
-            workspace_path: workspace.clone(),
-            prompt,
-            model: route.model.clone(),
-            effort: route.effort.clone(),
-            permission_mode: None,
-            session_id: None,
-            entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
-            images: Vec::new(),
-            spawned_by: None,
-        },
-    )?;
+    // The profile below is written once the new id is back; a codex thread's
+    // first prompt is rendered before that, so it is handed the type here. A
+    // goal-only split still files a profile (of the default type), so it too
+    // must not be told to report one.
+    let has_goal = goal.as_deref().is_some_and(|g| !g.trim().is_empty());
+    let preset = task_type.or(has_goal.then(tp::TaskType::default));
+    let resp = crate::codex_launch::with_split_preset(preset, || {
+        crate::agent_source::spawn_session(
+            &route.agent_source,
+            &crate::agent_source::SpawnSpec {
+                workspace_path: workspace.clone(),
+                prompt,
+                model: route.model.clone(),
+                effort: route.effort.clone(),
+                permission_mode: None,
+                session_id: None,
+                entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
+                images: Vec::new(),
+                spawned_by: None,
+            },
+        )
+    })?;
     let ws_name = crate::wiki::workspace_name_of(&workspace);
     let Some(new_sid) = resp.session_id.as_deref() else {
         // Codex reports its thread id from its first stdout event; this is
