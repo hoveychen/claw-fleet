@@ -365,6 +365,79 @@ fn launch_is_subtask(args: &[String]) -> bool {
 /// logged, rather than failing the spawn — a session without Fleet's hooks is
 /// degraded, a session that never starts is lost.
 pub fn fleet_launch_args_for(existing: &[String], workspace_path: &str) -> Vec<String> {
+    if let Some(args) = delegate_to_newer_binary(existing, workspace_path) {
+        return args;
+    }
+    fleet_launch_args_local(existing, workspace_path)
+}
+
+/// Set on the delegated child so it never delegates again.
+const DELEGATED_ENV: &str = "FLEET_LAUNCH_ARGS_DELEGATED";
+
+/// Render the launch through the `fleet` binary on disk when it is newer than
+/// this process. The launch files are shared by every Fleet process, and a
+/// long-lived one that outlived an upgrade (a watch/loop timer, a handoff
+/// relay, an old session's MCP server) would otherwise rewrite them from its
+/// own stale compiled-in rules. Seen 2026-10-20: a watch timer armed before
+/// the upgrade resumed its session with a permission allow list that predated
+/// `fleet__task`, while the MCP server — started from the new binary —
+/// advertised the tool, so every call raised a permission card.
+fn delegate_to_newer_binary(existing: &[String], workspace_path: &str) -> Option<Vec<String>> {
+    if std::env::var_os(DELEGATED_ENV).is_some() {
+        return None;
+    }
+    let bin = crate::fleet_cli::resolve_fleet_binary()?;
+    let started = crate::session::process_start_time(std::process::id())?;
+    delegate_if_newer(&bin, started, existing, workspace_path)
+}
+
+fn delegate_if_newer(
+    bin: &Path,
+    started_secs: u64,
+    existing: &[String],
+    workspace_path: &str,
+) -> Option<Vec<String>> {
+    let modified = fs::metadata(bin)
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    if modified <= started_secs {
+        return None;
+    }
+    let out = crate::process_util::command(bin)
+        .arg("launch-args")
+        .arg("--workspace")
+        .arg(workspace_path)
+        .arg("--")
+        .args(existing)
+        .env(DELEGATED_ENV, "1")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => match serde_json::from_slice::<Vec<String>>(&o.stdout) {
+            Ok(args) => Some(args),
+            Err(e) => {
+                crate::log_debug(&format!("claude_launch: delegated launch-args output unreadable: {e}"));
+                None
+            }
+        },
+        Ok(o) => {
+            crate::log_debug(&format!("claude_launch: delegated launch-args exited {}", o.status));
+            None
+        }
+        Err(e) => {
+            crate::log_debug(&format!("claude_launch: delegating launch-args failed: {e}"));
+            None
+        }
+    }
+}
+
+/// [`fleet_launch_args_for`] rendered by this process's own build, never
+/// delegated. The `fleet launch-args` command calls this.
+pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec<String> {
     let chat = crate::chat_workspace::is_chat_workspace(workspace_path);
     let isolated = chat || excludes_user_settings(existing);
     let subtask = !chat && launch_is_subtask(existing);
@@ -806,5 +879,61 @@ mod tests {
         reconcile_guidance("Boss", "en").unwrap();
         let args = launch_args_with(&[], Some(BIN), &none());
         assert!(value_after(&args, "--append-system-prompt-file").is_none());
+    }
+
+    /// A stand-in `fleet` that records its argv and answers with `reply`.
+    #[cfg(unix)]
+    fn stand_in(dir: &Path, reply: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("fleet-stand-in");
+        let log = dir.join("argv");
+        fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '%s' '{reply}'\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_process_older_than_the_binary_on_disk_takes_the_binarys_launch_args() {
+        let h = Home::new("delegate");
+        let bin = stand_in(&h.dir, r#"["--settings","/fresh/settings.json"]"#);
+        let existing = vec!["--resume".to_string(), "abc".to_string()];
+
+        let args = delegate_if_newer(&bin, now_secs() - 3600, &existing, "/ws").unwrap();
+
+        assert_eq!(args, vec!["--settings", "/fresh/settings.json"]);
+        let argv = fs::read_to_string(h.dir.join("argv")).unwrap();
+        assert_eq!(argv, "launch-args\n--workspace\n/ws\n--\n--resume\nabc\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_process_not_older_than_the_binary_renders_its_own_launch() {
+        let h = Home::new("no-delegate");
+        let bin = stand_in(&h.dir, r#"["--settings","/fresh/settings.json"]"#);
+        assert!(delegate_if_newer(&bin, now_secs() + 60, &[], "/ws").is_none());
+        assert!(!h.dir.join("argv").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_delegated_output_falls_back_to_the_local_render() {
+        let h = Home::new("delegate-garbage");
+        let bin = stand_in(&h.dir, "error: unrecognized subcommand");
+        assert!(delegate_if_newer(&bin, now_secs() - 3600, &[], "/ws").is_none());
     }
 }
