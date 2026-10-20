@@ -7,7 +7,7 @@
 //! byte-identical output and cannot drift.
 
 use crate::commands::session::{read_fleet_session_id, resolve_session_id};
-use crate::{HistoryCommands, NotesCommands};
+use crate::{HistoryCommands, NotesCommands, TaskCommands};
 use serde_json::{json, Value};
 
 fn run(tool: &str, args: Value, session: Option<&str>) {
@@ -50,6 +50,29 @@ pub(crate) fn cmd_notes(action: NotesCommands, session: Option<&str>) {
         }),
     };
     run("fleet__notes", args, session);
+}
+
+/// `fleet task` — CLI face of `fleet__task`, same output as the MCP tool.
+pub(crate) fn cmd_task(action: TaskCommands, session: Option<&str>) {
+    let args = match action {
+        TaskCommands::Set {
+            task_type,
+            goal,
+            goal_reason,
+        } => json!({"action":"set","type":task_type,"goal":goal,"goalReason":goal_reason}),
+        TaskCommands::Get => json!({"action":"get"}),
+        TaskCommands::Split {
+            prompt,
+            title,
+            task_type,
+            goal,
+            workspace,
+        } => json!({
+            "action":"split","prompt":prompt,"title":title,"type":task_type,
+            "goal":goal,"workspace":workspace
+        }),
+    };
+    run("fleet__task", args, session);
 }
 
 /// `fleet notes-hint` — the `SessionStart` hook entrypoint. Claude Code sends

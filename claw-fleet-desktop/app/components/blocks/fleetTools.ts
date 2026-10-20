@@ -43,6 +43,7 @@ export const FLEET_CONTROL_TOOLS = [
   "notes",
   "history",
   "job",
+  "task",
 ] as const;
 
 export type FleetTool = (typeof FLEET_CONTROL_TOOLS)[number];
@@ -63,7 +64,7 @@ export function isFleetTool(name: string): FleetTool | null {
 /**
  * i18n key for a Fleet MCP tool's human-readable label, keyed by the tail
  * segment of its wire name (`mcp__fleet__fleet__<tail>`). Covers every one of
- * the thirteen control tools plus the four non-control ones (`ask`,
+ * the fourteen control tools plus the four non-control ones (`ask`,
  * `render_a2ui`, `set_session_title`, `image`, `image_edit`). Used to relabel
  * the raw `mcp__fleet__fleet__…` id wherever it would otherwise leak verbatim —
  * e.g. the ToolSearch "loading tools" summary, where a tool is just a string in
@@ -86,6 +87,7 @@ export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
   notes: "detail.fleet_tool.notes",
   history: "detail.fleet_tool.history",
   job: "detail.fleet_tool.job",
+  task: "detail.fleet_tool.task",
   set_session_title: "detail.fleet_tool.set_session_title",
   image: "detail.fleet_tool.image",
   image_edit: "detail.fleet_tool.image_edit",
@@ -406,7 +408,7 @@ function isJsonRecordAction(tool: FleetTool, action: string): boolean {
 }
 
 /**
- * The six tools whose returns the Rust side already formats for the eye
+ * The seven tools whose returns the Rust side already formats for the eye
  * (`mcp_inspect.rs` agent tables, `render_note_files`, `render_history_hits`,
  * `job::render`,
  * the artifact listing) rather than as parseable records. Their read actions go
@@ -421,6 +423,7 @@ const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
   inspect: [],
   history: [],
   job: ["stop"],
+  task: ["set", "split"],
   notes: ["write", "edit", "append"],
   artifact: ["add", "delete"],
   control: ["stop", "interrupt", "resume"],

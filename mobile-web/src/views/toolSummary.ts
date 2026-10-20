@@ -57,6 +57,7 @@ const FLEET_TOOL_LABELS: Record<string, string> = {
   notes: "笔记",
   history: "历史",
   job: "作业",
+  task: "任务画像",
   set_session_title: "设置标题",
   image: "生成图片",
   image_edit: "修改图片",

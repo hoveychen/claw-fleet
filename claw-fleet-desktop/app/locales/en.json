@@ -28,7 +28,8 @@
       "control": "Signal",
       "notes": "Notes",
       "history": "History",
-      "job": "Job"
+      "job": "Job",
+      "task": "Task"
     },
     "param": {
       "plan_id": "Step list",
@@ -87,7 +88,8 @@
       "cwd": "Directory",
       "wake": "Wake on finish",
       "tail": "Tail lines",
-      "step": "Step"
+      "step": "Step",
+      "type": "Task type"
     },
     "param_for": {
       "handoff": {
@@ -193,6 +195,11 @@
         "status": "Job status {{id}}",
         "stop": "Stop job {{id}}",
         "list": "List jobs"
+      },
+      "task": {
+        "set": "Define task {{type}}",
+        "get": "Read task profile",
+        "split": "Split off new task {{title}}"
       }
     },
     "rec": {
@@ -1918,7 +1925,8 @@
       "job": "Job",
       "image": "Image",
       "image_edit": "Image edit",
-      "permission_prompt": "Permission prompt"
+      "permission_prompt": "Permission prompt",
+      "task": "Task"
     },
     "tool_patch_add": "Creating {{path}}",
     "tool_patch_update": "Editing {{path}}",

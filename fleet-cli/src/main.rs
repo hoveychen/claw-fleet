@@ -122,6 +122,18 @@ enum Commands {
         #[command(subcommand)]
         action: HistoryCommands,
     },
+    /// Define this conversation's task (type + goal), read it, or split an
+    /// unrelated request into a new top-level task. CLI face of the
+    /// `fleet__task` MCP tool.
+    Task {
+        #[command(subcommand)]
+        action: TaskCommands,
+        /// The session these commands act for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); a dsh agent
+        /// must pass its own session id.
+        #[arg(long, global = true)]
+        session: Option<String>,
+    },
     /// Run a long shell command as a Fleet-hosted job that survives your turn
     /// and subagent, then wait on it by id. CLI face of the `fleet__job` MCP tool.
     Job {
@@ -992,6 +1004,40 @@ pub(crate) enum JobCommands {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum TaskCommands {
+    /// Set the task's type and/or goal (first turn; again only when it changes).
+    Set {
+        /// dev | research | general
+        #[arg(long = "type")]
+        task_type: Option<String>,
+        /// One sentence of "the work is done when ...".
+        #[arg(long)]
+        goal: Option<String>,
+        /// Why you are replacing a goal the task already has.
+        #[arg(long = "goal-reason")]
+        goal_reason: Option<String>,
+    },
+    /// Print the profile of the task this session belongs to.
+    Get,
+    /// Start a NEW top-level task for a request unrelated to this task's goal.
+    Split {
+        /// The new task's complete brief.
+        #[arg(long)]
+        prompt: String,
+        #[arg(long)]
+        title: Option<String>,
+        /// dev | research | general
+        #[arg(long = "type")]
+        task_type: Option<String>,
+        #[arg(long)]
+        goal: Option<String>,
+        /// Project directory for the new task (defaults to this session's).
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum NotesCommands {
     /// Create or replace a note file (virtual path, e.g. `checkpoint.md`).
     Write {
@@ -1464,6 +1510,7 @@ fn main() {
         Commands::Job { action } => commands::job::cmd_job(action),
         Commands::Notes { action, session } => commands::notes::cmd_notes(action, session.as_deref()),
         Commands::History { action } => commands::notes::cmd_history(action),
+        Commands::Task { action, session } => commands::notes::cmd_task(action, session.as_deref()),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),
         Commands::Report { date, backfill, regenerate, lessons, drift, drift_chain, json, lang } => {

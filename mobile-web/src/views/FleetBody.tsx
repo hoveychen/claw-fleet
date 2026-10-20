@@ -145,6 +145,12 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "stop": return t("停止作业 {0}", id);
       case "list": return t("列出作业");
     }
+  } else if (tool === "task") {
+    switch (action) {
+      case "set": return t("定义任务 {0}", str(input, "type"));
+      case "get": return t("查看任务画像");
+      case "split": return t("拆出新任务 {0}", str(input, "title"));
+    }
   }
   return action || tool;
 }

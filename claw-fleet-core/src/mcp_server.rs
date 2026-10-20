@@ -440,6 +440,13 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
             return Ok(refusal);
         }
     }
+    if name == "fleet__task" && crate::mcp_control::arg(&args, "action").as_deref() == Some("set") {
+        if let Some(refusal) =
+            refuse_if_subagent(name, crate::mcp_control::TASK_SET_EFFECT, &args)
+        {
+            return Ok(refusal);
+        }
+    }
     let sid = current_session_id();
     let session_id = (!sid.is_empty()).then_some(sid.as_str());
     let cwd = resolve_workspace_cwd();
