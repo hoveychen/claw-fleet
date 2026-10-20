@@ -236,6 +236,33 @@
   rotate: 0deg;
 }
 
+/* Project section's "N done" line: the fold its done rows hide behind. */
+.doneFold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--t-ui, 14px);
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.doneFold:active {
+  background: var(--color-bg-card-hover);
+}
+
+.doneFoldChevron {
+  rotate: -90deg;
+  transition: rotate var(--motion-fast) var(--ease-out);
+}
+
+.doneFoldChevron[data-open="true"] {
+  rotate: 0deg;
+}
+
 /* A task row: dot · two lines · time or accept · chevron. */
 .row {
   display: flex;
