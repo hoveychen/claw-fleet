@@ -904,8 +904,78 @@ fn handle_task(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let task_id = tp::owning_task_id(sid);
             Ok(tp::render(&task_id, tp::read(&task_id).as_ref()))
         }
+        "split" => handle_task_split(args, sid),
         other => Err(format!("unknown fleet__task action `{other}` (set / get / split)")),
     }
+}
+
+/// `fleet__task action=split`: start a NEW top-level task for a request whose
+/// goal is unrelated to the current one. Same launch path as the desktop's
+/// "new session" button (`spawned_by: None`), so the task model files it as
+/// its own task rather than a sub-task; the launch note records where it came
+/// from, and the new task's profile is pre-written from `type` / `goal`.
+fn handle_task_split(args: &Value, sid: &str) -> Result<String, String> {
+    use crate::task_profile as tp;
+    let prompt = req(args, "prompt")?;
+    let task_type = task_type_arg(args)?;
+    let goal = arg(args, "goal");
+    let place = tp::place_of(sid);
+    if place.parent_task_id.is_some() {
+        return Err("this session is a sub-task: only the task's main conversation can split \
+             off a new task. Put the unrelated request in your final reply instead."
+            .to_string());
+    }
+    let from_task = place.task_id;
+    let ctx = crate::session::inherit_launch_context(Some(sid));
+    let workspace = crate::session_launch::resolve_workspace_override(
+        workspace_arg(args)?.as_deref(),
+        &ctx.workspace,
+    )?;
+    let route = crate::agent_source::route_launch(&ctx, None, None)?;
+    let resp = crate::agent_source::spawn_session(
+        &route.agent_source,
+        &crate::agent_source::SpawnSpec {
+            workspace_path: workspace.clone(),
+            prompt,
+            model: route.model.clone(),
+            effort: route.effort.clone(),
+            permission_mode: None,
+            session_id: None,
+            entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
+            images: Vec::new(),
+            spawned_by: None,
+        },
+    )?;
+    let ws_name = crate::wiki::workspace_name_of(&workspace);
+    let Some(new_sid) = resp.session_id.as_deref() else {
+        // Codex mints its own rollout id, so there is nothing to key the
+        // launch note or the profile on yet; the new task sets its own
+        // profile on its first turn.
+        return Ok(format!(
+            "ok: new task started in {ws_name} ({workspace}), pid {}. Its session id is not \
+             known yet, so its type/goal were not pre-set — it will declare them itself.",
+            resp.pid
+        ));
+    };
+    crate::launch_spec::note_split_from(new_sid, &from_task);
+    if let Some(title) = arg(args, "title") {
+        let _ = crate::session_title::set_title(new_sid, &workspace, Some(title));
+    }
+    let profile_note = if task_type.is_some() || goal.is_some() {
+        match tp::set(new_sid, task_type, goal.as_deref(), None, tp::ProfileSetter::Agent) {
+            Ok(p) => format!(
+                " type={}, goal={}.",
+                p.task_type.as_str(),
+                p.goal.as_deref().unwrap_or("-")
+            ),
+            Err(e) => format!(" (profile not pre-set: {e})"),
+        }
+    } else {
+        String::new()
+    };
+    Ok(format!(
+        "ok: new task {new_sid} split off task {from_task}, started in {ws_name} ({workspace}).{profile_note}"
+    ))
 }
 
 // ── plan ─────────────────────────────────────────────────────────────────────

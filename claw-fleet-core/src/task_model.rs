@@ -62,10 +62,7 @@ impl TaskGraph {
     /// Read both edge sets off disk (cached readers on both sides).
     pub fn load() -> Self {
         let chains = crate::handoff::list_chains().into_iter().map(|c| c.session_ids());
-        let spawned = crate::launch_spec::registry()
-            .into_iter()
-            .filter_map(|(id, spec)| spec.spawned_by_session_id.map(|p| (id, p)));
-        Self::new(chains, spawned)
+        Self::new(chains, spawn_edges(crate::launch_spec::registry()))
     }
 
     /// Every spawn edge as `(child, spawner)`, so a caller that already loaded
@@ -115,6 +112,17 @@ impl TaskGraph {
             task_id: own,
         }
     }
+}
+
+/// Sub-task edges `(child, spawner)` from launch notes. Only
+/// `spawned_by_session_id` makes one: a task split off another
+/// (`split_from_task`) is a top-level task of its own.
+fn spawn_edges(
+    notes: impl IntoIterator<Item = (String, crate::launch_spec::LaunchSpec)>,
+) -> impl Iterator<Item = (String, String)> {
+    notes
+        .into_iter()
+        .filter_map(|(id, spec)| spec.spawned_by_session_id.map(|p| (id, p)))
 }
 
 /// What a task row shows besides its title and state: stamped on every hop of
@@ -490,6 +498,24 @@ mod tests {
     fn spawn_cycle_terminates() {
         let g = TaskGraph::new(vec![], vec![edge("a", "b"), edge("b", "a")]);
         assert_eq!(g.place("a"), place("a", Some("b")));
+    }
+
+    #[test]
+    fn a_split_task_is_top_level_while_a_spawn_is_a_subtask() {
+        use crate::launch_spec::LaunchSpec;
+        let notes = vec![
+            (
+                "split".to_string(),
+                LaunchSpec { split_from_task: Some("a1".into()), ..Default::default() },
+            ),
+            (
+                "sub".to_string(),
+                LaunchSpec { spawned_by_session_id: Some("a1".into()), ..Default::default() },
+            ),
+        ];
+        let g = TaskGraph::new(vec![], spawn_edges(notes));
+        assert_eq!(g.place("split"), place("split", None));
+        assert_eq!(g.place("sub"), place("sub", Some("a1")));
     }
 
     #[test]

@@ -94,6 +94,12 @@ pub struct LaunchSpec {
     pub spawned_for_plan: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawned_for_step: Option<String>,
+    /// The task this one was split off from (`fleet__task action=split`):
+    /// the boss's request had drifted to an unrelated goal, so it became a new
+    /// top-level task instead of a sub-task. Provenance only — unlike
+    /// [`Self::spawned_by_session_id`] it puts no edge in the task model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_from_task: Option<String>,
     /// When Fleet first spawned the session (epoch ms).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
@@ -299,6 +305,14 @@ pub fn note_spawned_for(session_id: &str, plan_id: &str, step: &str) {
     let mut spec = get(session_id).unwrap_or_default();
     spec.spawned_for_plan = Some(plan_id.to_string());
     spec.spawned_for_step = Some(step.to_string());
+    write(session_id, &spec);
+}
+
+/// Record that `session_id` was split off from task `task_id`. Creates the
+/// note when the spawn path did not write one.
+pub fn note_split_from(session_id: &str, task_id: &str) {
+    let mut spec = get(session_id).unwrap_or_default();
+    spec.split_from_task = Some(task_id.to_string());
     write(session_id, &spec);
 }
 
