@@ -66,10 +66,10 @@ pub fn type_label(task_type: TaskType, locale: &str) -> &'static str {
     match (task_type, locale == "zh") {
         (TaskType::Dev, true) => "开发",
         (TaskType::Research, true) => "研究",
-        (TaskType::General, true) => "通用",
+        (TaskType::General, true) => "未定",
         (TaskType::Dev, false) => "dev",
         (TaskType::Research, false) => "research",
-        (TaskType::General, false) => "general",
+        (TaskType::General, false) => "undecided",
     }
 }
 

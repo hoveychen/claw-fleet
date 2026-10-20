@@ -3011,7 +3011,7 @@ trailing notes outside\n";
         assert!(res.workflow.expect("research workflow").contains("知识台账"));
 
         let gen = lead("gen-t");
-        assert!(gen.goal_block.unwrap().contains("（类型：通用）"));
+        assert!(gen.goal_block.unwrap().contains("（类型：未定）"));
         assert!(gen.workflow.is_none(), "general keeps today's behaviour");
 
         let none = lead("nobody");

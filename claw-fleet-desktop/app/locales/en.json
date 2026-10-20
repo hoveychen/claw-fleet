@@ -206,7 +206,7 @@
       },
       "task": {
         "kickoff": "Kickoff card {{question}}",
-        "set": "Define task {{type}}",
+        "set": "Set task goal",
         "get": "Read task profile",
         "split": "Split off new task {{title}}"
       }

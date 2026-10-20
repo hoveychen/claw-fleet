@@ -340,7 +340,7 @@ const DICT: Record<string, string> = {
   "作业状态 {0}": "Job status {0}",
   "停止作业 {0}": "Stop job {0}",
   列出作业: "List jobs",
-  "定义任务 {0}": "Define task {0}",
+  "设定任务目标": "Set task goal",
   查看任务画像: "Read task profile",
   "拆出新任务 {0}": "Split off new task {0}",
   "发开工卡 {0}": "Kickoff card {0}",
