@@ -106,6 +106,9 @@
         "sessions": "Tasks",
         "mode": "Fire when"
       },
+      "job": {
+        "note": "Doing"
+      },
       "artifact": {
         "note": "Note"
       }

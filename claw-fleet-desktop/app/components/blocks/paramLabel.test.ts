@@ -35,10 +35,11 @@ describe("paramLabel", () => {
   // The bug this exists for: `fleet.param` is keyed by param name alone, so the
   // one entry for `note` (written for a handoff briefing) captioned an
   // artifact's blurb and a watch's subject the same way.
-  it("gives the three tools that take a `note` three different labels", () => {
+  it("gives the tools that take a `note` different labels", () => {
     expect(paramLabel(t, "handoff", "note")).toBe("交接便条");
     expect(paramLabel(t, "watch", "note")).toBe("在等什么");
     expect(paramLabel(t, "artifact", "note")).toBe("说明");
+    expect(paramLabel(t, "job", "note")).toBe("在做什么");
   });
 
   it("falls back to the flat table when a tool has no override", () => {
@@ -50,11 +51,12 @@ describe("paramLabel", () => {
     expect(paramLabel(t, "control", "brand_new_param")).toBe("brand_new_param");
   });
 
-  it("resolves the same three overrides in English", () => {
+  it("resolves the same overrides in English", () => {
     const te = translator(en);
     expect(paramLabel(te, "handoff", "note")).toBe("Briefing");
     expect(paramLabel(te, "watch", "note")).toBe("Waiting for");
     expect(paramLabel(te, "artifact", "note")).toBe("Note");
+    expect(paramLabel(te, "job", "note")).toBe("Doing");
   });
 });
 
