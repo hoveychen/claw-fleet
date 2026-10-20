@@ -1308,6 +1308,17 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     pick: "accepted",
   }),
 
+  set_task_profile: (a) => ({
+    method: "POST",
+    path: "/task_profile/set",
+    body: {
+      sessionId: a.sessionId,
+      type: a.taskType ?? undefined,
+      goal: a.goal ?? undefined,
+      goalReason: a.goalReason ?? undefined,
+    },
+  }),
+
   list_subtask_recovery: (a) => ({
     method: "POST",
     path: "/subtasks/recovery",

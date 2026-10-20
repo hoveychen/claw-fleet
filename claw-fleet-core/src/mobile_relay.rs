@@ -2234,6 +2234,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "session_mark"
             | "accept_tasks"
             | "reopen_tasks"
+            | "task_profile_set"
             | "subtasks_resume"
             | "set_resume_settings"
             | "session_explain_ask"
@@ -2597,6 +2598,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop" => serve_stop(params),
         "session_mark" => serve_session_mark(params),
         "accept_tasks" => serve_accept_tasks(params),
+        "task_profile_get" => serve_task_profile_get(params),
+        "task_profile_set" => serve_task_profile_set(params),
         "reopen_tasks" => serve_reopen_tasks(params),
         "subtasks_recovery" => serve_subtasks_recovery(params),
         // Wakes sessions; a resend of a lost reply replays the first per-id
@@ -3944,6 +3947,20 @@ fn serve_accept_tasks(params: &Value) -> Result<Value, String> {
     Ok(json!({ "ok": true, "accepted": accepted }))
 }
 
+fn serve_task_profile_get(params: &Value) -> Result<Value, String> {
+    let req: crate::task_profile::TaskProfileQuery = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad task_profile_get params: {e}"))?;
+    serde_json::to_value(crate::task_profile::view_for_session(&req.session_id))
+        .map_err(|e| e.to_string())
+}
+
+fn serve_task_profile_set(params: &Value) -> Result<Value, String> {
+    let req: crate::task_profile::SetTaskProfileRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad task_profile_set params: {e}"))?;
+    let p = crate::task_profile::set_by_boss(&req)?;
+    serde_json::to_value(p).map_err(|e| e.to_string())
+}
+
 fn serve_reopen_tasks(params: &Value) -> Result<Value, String> {
     let req: crate::task_model::AcceptTasksRequest = serde_json::from_value(params.clone())
         .map_err(|e| format!("bad reopen_tasks params: {e}"))?;
@@ -5039,6 +5056,7 @@ mod tests {
             "session_mark",
             "accept_tasks",
             "reopen_tasks",
+            "task_profile_set",
             "subtasks_resume",
             "set_resume_settings",
             "session_explain_ask",
@@ -6389,6 +6407,28 @@ mod tests {
                     "{id}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn request_task_profile_set_then_get_round_trips_and_refuses_a_silent_goal_change() {
+        with_temp_home(|| {
+            let data = request_ok("task_profile_get", json!({"sessionId": "t1"}));
+            assert_eq!(data["taskId"], "t1");
+            assert_eq!(data["type"], "general");
+            let data = request_ok(
+                "task_profile_set",
+                json!({"sessionId": "t1", "type": "research", "goal": "答清 X"}),
+            );
+            assert_eq!((data["type"].as_str(), data["setBy"].as_str()), (Some("research"), Some("boss")));
+            let data = request_ok("task_profile_get", json!({"sessionId": "t1"}));
+            assert_eq!(data["goal"], "答清 X");
+            assert!(serve_request("task_profile_set", &json!({"sessionId": "t1", "goal": "别的"})).is_err());
+            let data = request_ok(
+                "task_profile_set",
+                json!({"sessionId": "t1", "goal": "别的", "goalReason": "老板改了"}),
+            );
+            assert_eq!(data["goal"], "别的");
         });
     }
 

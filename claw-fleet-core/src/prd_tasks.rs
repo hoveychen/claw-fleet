@@ -1866,18 +1866,39 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
 /// prompt because the opening prompt is the first thing a compaction summarises
 /// away — and a 26-hop chain is exactly where the objective gets lost. Costs one
 /// line against the reminder's 12 KB ceiling.
+///
+/// The goal comes from the task profile (`task_profile`) when this session is
+/// a task's main line and the profile has one, else from the relay chain —
+/// chains recorded before task profiles existed keep rendering as before. A
+/// main-line session that has not relayed yet still gets the block once its
+/// profile carries a goal.
 fn render_chain_goal_block(session_id: Option<&str>) -> Option<String> {
     let sid = session_id?;
-    let chain = crate::handoff::chain_containing(sid)?;
-    let goal = chain.goal.as_deref()?;
-    let hop = chain.hop_of(sid)?;
-    Some(format!(
-        "本链目标（你是第 {hop}/{len} 棒）：{goal}\n\
+    let chain = crate::handoff::chain_containing(sid);
+    let goal = crate::task_profile::effective_chain_goal(
+        sid,
+        chain.as_ref().and_then(|c| c.goal.as_deref()),
+    )?;
+    let position = chain.as_ref().and_then(|c| {
+        c.hop_of(sid)
+            .map(|hop| (hop, c.session_ids().len()))
+    });
+    Some(render_goal_lines(&goal, position))
+}
+
+/// Body of [`render_chain_goal_block`]; `position` is `(hop, chain length)`
+/// when the session sits on a relay chain.
+fn render_goal_lines(goal: &str, position: Option<(u32, usize)>) -> String {
+    let head = match position {
+        Some((hop, len)) => format!("本链目标（你是第 {hop}/{len} 棒）：{goal}"),
+        None => format!("本任务目标：{goal}"),
+    };
+    format!(
+        "{head}\n\
          这是收工的判据——**不是**你手上这个 plan 做完。计划树全勾了，只要这件事没达成，\
          就不要把决策卡标成 `taskComplete: true`。目标真的变了（老板改了路线、或这件事已经\
-         不成立），用 `fleet__handoff` 的 `goal` + `goalReason` 显式改，并在卡里告诉老板。",
-        len = chain.session_ids().len(),
-    ))
+         不成立），用 `fleet__task` 的 `goal` + `goalReason` 显式改，并在卡里告诉老板。"
+    )
 }
 
 fn render_plans_reminder_body(cwd: &Path, session_id: Option<&str>) -> Option<String> {
@@ -2384,6 +2405,47 @@ trailing notes outside\n";
             render_chain_goal_block(Some("s1")).is_some(),
             "hop 1 sees it too"
         );
+    }
+
+    /// The task profile's goal is the finish line once it exists: it beats
+    /// the chain's own goal, and a main-line session that never relayed still
+    /// sees it.
+    #[test]
+    fn the_task_profile_goal_wins_over_the_chain_goal() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        let cdir = crate::session::get_fleet_dir()
+            .unwrap()
+            .join("handoffs")
+            .join("chain");
+        std::fs::create_dir_all(&cdir).unwrap();
+        let chain = crate::handoff::HandoffChain {
+            chain_id: "c1".into(),
+            workspace_path: "/ws".into(),
+            plan_id: None,
+            goal: Some("旧的链目标".into()),
+            goal_history: Vec::new(),
+            links: vec![crate::handoff::HandoffLink {
+                from_session_id: "t1".into(),
+                to_session_id: "t2".into(),
+                note: "n".into(),
+                plan_id: None,
+                next_task: None,
+                handed_at: 0,
+            }],
+        };
+        std::fs::write(cdir.join("c1.json"), serde_json::to_string(&chain).unwrap()).unwrap();
+        let by = crate::task_profile::ProfileSetter::Boss;
+        crate::task_profile::set("t1", None, Some("画像里的目标"), None, by).unwrap();
+        crate::task_profile::set("solo", None, Some("单会话的目标"), None, by).unwrap();
+
+        let out = render_chain_goal_block(Some("t2")).expect("goal block");
+        assert!(out.contains("本链目标（你是第 2/2 棒）：画像里的目标"), "{out}");
+        assert!(!out.contains("旧的链目标"), "{out}");
+
+        let out = render_chain_goal_block(Some("solo")).expect("no chain, profile goal");
+        assert!(out.starts_with("本任务目标：单会话的目标"), "{out}");
+        assert!(render_chain_goal_block(Some("nobody")).is_none());
     }
 
     #[test]

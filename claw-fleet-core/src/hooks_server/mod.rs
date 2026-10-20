@@ -1749,6 +1749,8 @@ fn handle_request(
             // ── Accept tasks from the task list (验收 / 全部验收) ─────────────
             crate::routes::TASKS_ACCEPT => route_tasks_accept(ctx, request, json_header),
             crate::routes::TASKS_REOPEN => route_tasks_reopen(ctx, request, json_header),
+            crate::routes::TASK_PROFILE_GET => route_task_profile_get(ctx, request, json_header),
+            crate::routes::TASK_PROFILE_SET => route_task_profile_set(ctx, request, json_header),
 
             // ── Sub-task recovery (恢复中断的子任务) ───────────────────────────
             crate::routes::SUBTASKS_RECOVERY => {

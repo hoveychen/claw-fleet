@@ -39,6 +39,7 @@ import { useChatWorkspaces } from "../useChatWorkspace";
 import { mentionPreview } from "../sessionMention";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { AgentSourceIcon } from "./AgentSourceIcon";
+import { TaskTypeChip } from "./TaskProfile";
 import { compactDuration, watchRowToken } from "../../../shared-ts/watchProgress";
 import { WatchRing } from "./WatchRing";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
@@ -699,6 +700,7 @@ export function TasksView({
             <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
               <AgentSourceIcon source={tip.agentSource} />
             </span>
+            <TaskTypeChip profile={tip.taskSummary?.profile} />
             {watchToken && (
               <span
                 className={styles.watch}

@@ -353,11 +353,25 @@ subtasksActive: number,
 startedAtMs: number, 
 lastActivityMs: number, 
 costUsd: number, 
-subtaskSteps?: Array<SubtaskStep>, };
+subtaskSteps?: Array<SubtaskStep>, 
+profile?: TaskProfileBrief | null, };
 
 export type SubtaskStep = { 
 taskId: string, planId: string, 
 step: string, };
+
+export type TaskType = "dev" | "research" | "general";
+
+export type ProfileSetter = "agent" | "boss";
+
+export type GoalChange = { from?: string | null, to: string, reason?: string | null, 
+at: number, by: ProfileSetter, };
+
+export type TaskProfile = { taskId: string, type: TaskType, goal?: string | null, 
+goalHistory?: Array<GoalChange>, setBy: ProfileSetter, 
+updated: number, };
+
+export type TaskProfileBrief = { type: TaskType, goal?: string | null, setBy: ProfileSetter, };
 
 export type DecisionTaskRef = { 
 taskId: string, taskTitle?: string | null, 

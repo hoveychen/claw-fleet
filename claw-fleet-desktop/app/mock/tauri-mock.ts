@@ -367,6 +367,28 @@ async function handleIPC(
       return tasks.size;
     }
 
+    case "set_task_profile": {
+      // Mirror core `task_profile::set_by_boss` on the task's summary.
+      const sid = String(args.sessionId ?? "");
+      const taskId = currentSessions.find((s) => s.id === sid)?.taskId ?? sid;
+      let profile = null as null | { type: string; goal?: string | null; setBy: string };
+      currentSessions = currentSessions.map((s) => {
+        if (s.taskId !== taskId || !s.taskSummary) return s;
+        const prev = s.taskSummary.profile;
+        if (args.goal && prev?.goal && args.goal !== prev.goal && !args.goalReason) {
+          throw new Error("the goal is already set — pass a reason to change it");
+        }
+        profile = {
+          type: (args.taskType as string) ?? prev?.type ?? "general",
+          goal: (args.goal as string) ?? prev?.goal ?? null,
+          setBy: "boss",
+        };
+        return { ...s, taskSummary: { ...s.taskSummary, profile } } as typeof s;
+      });
+      emit("sessions-updated", currentSessions);
+      return { taskId, goalHistory: [], updated: Date.now(), ...(profile ?? { type: "general", setBy: "boss" }) };
+    }
+
     case "list_subtask_recovery":
       return mockSubtaskRecovery(args.sessionId as string);
 

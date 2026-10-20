@@ -22,6 +22,8 @@ const LEGACY_ISSUER_QUESTION_EN =
 
 const EN: Record<string, string> = {
   "审计 issuer 读取点": "Audit where the issuer is read",
+  "JWT issuer 校验修好并合进 main，旧 token 仍能通过":
+    "JWT issuer validation fixed and merged to main, with old tokens still accepted",
   "把 dsh 计价改成逐次调用账本": "Bill dsh per call from a ledger",
   "跨天会话的花费现在分到两天了。": "Sessions that span midnight now split their cost across both days.",
   "等 v2.4 回归矩阵全绿": "Wait for the v2.4 regression matrix to go green",

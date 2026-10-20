@@ -23,6 +23,7 @@ import {
 } from "./homeRows";
 import { AgentSourceIcon } from "./SessionCard";
 import { WatchRing } from "./WatchRing";
+import { TaskTypeChip } from "./TaskProfileBar";
 import styles from "./TaskList.module.css";
 
 /** The dot a state wears, in the row and its section heading. Tokens only:
@@ -174,6 +175,13 @@ function RowMark({
 /** How far along the task's first watch is, in one token (`watchRowToken`,
  *  shared with the phone). The note is not repeated: the wait reason after
  *  it on the line already says what is being waited on. */
+/** The task's profile, from whichever main hop carries the summary. */
+function rowProfile(row: HomeRow) {
+  if (row.kind !== "task") return null;
+  const sum = row.tip.taskSummary ?? row.hops.find((h) => h.taskSummary)?.taskSummary;
+  return sum?.profile ?? null;
+}
+
 export function RowWatch({ row, now }: { row: HomeRow; now: number }) {
   const { t } = useTranslation();
   const w = rowWatches(row)[0];
@@ -286,6 +294,7 @@ const TaskListRow = memo(function TaskListRow({
         <span className={styles.title} title={row.title}>
           {row.title}
         </span>
+        {row.kind === "task" && <TaskTypeChip profile={rowProfile(row)} />}
         {subagents + subtasks > 0 && (
           <span
             className={styles.subagents}

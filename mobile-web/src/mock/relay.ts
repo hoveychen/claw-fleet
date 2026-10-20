@@ -511,6 +511,18 @@ export class MockRelayClient extends RelayClient {
       case "enqueue_message":
         return { ok: true, delivery: "injected" };
 
+      // Echo the edit back as the stored profile, the shape the host replies with.
+      case "task_profile_set": {
+        const p = (params ?? {}) as { type?: string; goal?: string };
+        const base = MOCK_SESSIONS.find((s) => s.id === "sess-api-main")?.taskSummary?.profile;
+        return {
+          taskId: "sess-api-main",
+          type: p.type ?? base?.type ?? "general",
+          goal: p.goal ?? base?.goal ?? null,
+          setBy: "boss",
+        };
+      }
+
       // ── Terminal ────────────────────────────────────────────────────────────
       // A mock pty: the first proc_output yields one screen of prompt, then no new bytes.
       // Good enough for screenshots and to verify layout (key row, tabs, exit bar) works.

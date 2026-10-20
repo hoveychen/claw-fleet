@@ -31,7 +31,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Names of the control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 13] = [
+pub const CONTROL_TOOL_NAMES: [&str; 14] = [
     "fleet__spawn",
     "fleet__plan",
     "fleet__handoff",
@@ -45,6 +45,7 @@ pub const CONTROL_TOOL_NAMES: [&str; 13] = [
     "fleet__notes",
     "fleet__history",
     "fleet__job",
+    "fleet__task",
 ];
 
 /// True when `name` is one of the control tools this module owns.
@@ -109,6 +110,7 @@ pub fn control_tool_defs() -> Vec<Value> {
         notes_tool_def(),
         history_tool_def(),
         job_tool_def(),
+        task_tool_def(),
     ]
 }
 
@@ -203,6 +205,27 @@ fn handoff_tool_def() -> Value {
                 "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."},
                 "goal": {"type": "string", "description": "What this whole relay chain is for — one sentence of \"the work is done when …\". Set it on the FIRST hop: you are registering at the end of your turn, so you already know what the boss settled on even if it only emerged mid-conversation. Later hops inherit it and are judged against it rather than against the plan they happen to hold. Omit (or repeat the same text) to leave it alone."},
                 "goalReason": {"type": "string", "description": "Why you are replacing a goal the chain already has. Required for a change, refused as unnecessary for setting the first one. Changing course is fine — the boss does it; silently narrowing the chain's objective down to your current plan is what this makes impossible. Tell the boss you changed it."}
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn task_tool_def() -> Value {
+    json!({
+        "name": "fleet__task",
+        "description": "Define the task this conversation is working on: its type (dev / research / general — picks the workflow Fleet guides you through) and its goal (one sentence of \"the work is done when …\"). Call `set` once on your FIRST turn, before ending it; call it again only when the type or goal really changes — a goal change needs `goalReason`. Only the task's main conversation may `set`; a sub-task can `get`. When the boss asks for something unrelated to the current goal, `split` it into a NEW top-level task instead of mixing two goals in one. Actions: set (type and/or goal; goalReason when replacing a goal), get, split (prompt required — the new task's full brief; title/type/goal/workspace optional).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["set", "get", "split"]},
+                "type": {"type": "string", "enum": ["dev", "research", "general"], "description": "set/split: the task's type. dev = changes code; research = produces knowledge (a report, findings, a recommendation); general = anything else."},
+                "goal": {"type": "string", "description": "set/split: one sentence of \"the work is done when …\"."},
+                "goalReason": {"type": "string", "description": "set only: why you are replacing a goal the task already has. Required for a change; tell the boss you changed it."},
+                "prompt": {"type": "string", "description": "split only: the new task's complete brief, including whatever context it needs from this conversation. Required for split."},
+                "title": {"type": "string", "description": "split only: a short title for the new task."},
+                "workspace": workspace_arg_schema("the new task runs in (split only)")
             },
             "required": ["action"],
             "additionalProperties": false
@@ -374,6 +397,7 @@ pub fn handle(
         "fleet__notes" => handle_notes(args, session_id),
         "fleet__history" => handle_history(args, session_id),
         "fleet__job" => handle_job(args, session_id, cwd),
+        "fleet__task" => handle_task(args, session_id),
         other => Err(format!("unknown control tool: {other}")),
     }
 }
@@ -838,6 +862,121 @@ fn workspace_arg_schema(what: &str) -> Value {
              `~/foo` and bare relative paths resolve against $HOME; the directory must already exist."
         )
     })
+}
+
+// ── task ─────────────────────────────────────────────────────────────────────
+
+/// What a subagent's `fleet__task action=set` would do to its parent;
+/// `mcp_server` refuses that one action for subagents with this clause.
+pub const TASK_SET_EFFECT: &str = "redefined your PARENT session's task (type/goal)";
+
+fn task_type_arg(args: &Value) -> Result<Option<crate::task_profile::TaskType>, String> {
+    match arg(args, "type").filter(|t| !t.trim().is_empty()) {
+        None => Ok(None),
+        Some(t) => crate::task_profile::TaskType::parse(&t)
+            .map(Some)
+            .ok_or_else(|| format!("unknown task type `{t}` — use dev, research or general")),
+    }
+}
+
+fn handle_task(args: &Value, sid: Option<&str>) -> Result<String, String> {
+    use crate::task_profile as tp;
+    let action = action_of(args)?;
+    let sid = sid.ok_or(NO_SESSION_ID)?;
+    match action.as_str() {
+        "set" => {
+            let p = tp::set_for_session(
+                sid,
+                task_type_arg(args)?,
+                arg(args, "goal").as_deref(),
+                arg(args, "goalReason").as_deref(),
+                tp::ProfileSetter::Agent,
+            )?;
+            // One line: the clients render a mutate's return as a single
+            // confirmation row.
+            Ok(format!(
+                "ok: task {} saved (type={}, goal={})",
+                p.task_id,
+                p.task_type.as_str(),
+                p.goal.as_deref().unwrap_or("-"),
+            ))
+        }
+        "get" => {
+            let task_id = tp::owning_task_id(sid);
+            Ok(tp::render(&task_id, tp::read(&task_id).as_ref()))
+        }
+        "split" => handle_task_split(args, sid),
+        other => Err(format!("unknown fleet__task action `{other}` (set / get / split)")),
+    }
+}
+
+/// `fleet__task action=split`: start a NEW top-level task for a request whose
+/// goal is unrelated to the current one. Same launch path as the desktop's
+/// "new session" button (`spawned_by: None`), so the task model files it as
+/// its own task rather than a sub-task; the launch note records where it came
+/// from, and the new task's profile is pre-written from `type` / `goal`.
+fn handle_task_split(args: &Value, sid: &str) -> Result<String, String> {
+    use crate::task_profile as tp;
+    let prompt = req(args, "prompt")?;
+    let task_type = task_type_arg(args)?;
+    let goal = arg(args, "goal");
+    let place = tp::place_of(sid);
+    if place.parent_task_id.is_some() {
+        return Err("this session is a sub-task: only the task's main conversation can split \
+             off a new task. Put the unrelated request in your final reply instead."
+            .to_string());
+    }
+    let from_task = place.task_id;
+    let ctx = crate::session::inherit_launch_context(Some(sid));
+    let workspace = crate::session_launch::resolve_workspace_override(
+        workspace_arg(args)?.as_deref(),
+        &ctx.workspace,
+    )?;
+    let route = crate::agent_source::route_launch(&ctx, None, None)?;
+    let resp = crate::agent_source::spawn_session(
+        &route.agent_source,
+        &crate::agent_source::SpawnSpec {
+            workspace_path: workspace.clone(),
+            prompt,
+            model: route.model.clone(),
+            effort: route.effort.clone(),
+            permission_mode: None,
+            session_id: None,
+            entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
+            images: Vec::new(),
+            spawned_by: None,
+        },
+    )?;
+    let ws_name = crate::wiki::workspace_name_of(&workspace);
+    let Some(new_sid) = resp.session_id.as_deref() else {
+        // Codex mints its own rollout id, so there is nothing to key the
+        // launch note or the profile on yet; the new task sets its own
+        // profile on its first turn.
+        return Ok(format!(
+            "ok: new task started in {ws_name} ({workspace}), pid {}. Its session id is not \
+             known yet, so its type/goal were not pre-set — it will declare them itself.",
+            resp.pid
+        ));
+    };
+    crate::launch_spec::note_split_from(new_sid, &from_task);
+    if let Some(title) = arg(args, "title") {
+        let _ = crate::session_title::set_title(new_sid, &workspace, Some(title));
+    }
+    let profile_note = if task_type.is_some() || goal.is_some() {
+        match tp::set(new_sid, task_type, goal.as_deref(), None, tp::ProfileSetter::Agent) {
+            Ok(p) => format!(
+                " type={}, goal={}.",
+                p.task_type.as_str(),
+                p.goal.as_deref().unwrap_or("-")
+            ),
+            Err(e) => format!(" (profile not pre-set: {e})"),
+        }
+    } else {
+        String::new()
+    };
+    Ok(format!(
+        "ok: new task {new_sid} split off task {from_task}, started in {ws_name} ({workspace}).{profile_note}"
+    ))
 }
 
 // ── plan ─────────────────────────────────────────────────────────────────────
@@ -2150,7 +2289,7 @@ mod tests {
     /// A new tool added to CONTROL_TOOL_NAMES fails here until someone decides.
     #[test]
     fn parent_scoped_control_tools_are_classified() {
-        const SESSION_AGNOSTIC: [&str; 8] = [
+        const SESSION_AGNOSTIC: [&str; 9] = [
             // `fleet__spawn` reads the caller's id only to inherit model /
             // effort / workspace; it writes nothing against that session, so a
             // subagent calling it starts a *new* session rather than disturbing
@@ -2165,6 +2304,9 @@ mod tests {
             // Runs commands; only its `wake` flag writes against the session,
             // and that one flag is refused for subagents in mcp_server.
             "fleet__job",
+            // Reads the caller's task; only `set` writes it, and that one
+            // action is refused for subagents in mcp_server.
+            "fleet__task",
         ];
         for name in CONTROL_TOOL_NAMES {
             let parent_scoped = parent_scoped_effect(name).is_some();

@@ -298,6 +298,11 @@ pub const SUBTASKS_RECOVERY: &str = "/subtasks/recovery";
 pub const SUBTASKS_RESUME: &str = "/subtasks/resume";
 pub const TAIL: &str = "/tail";
 pub const TASK_PLANS: &str = "/task_plans";
+/// The task profile (type + goal) of the task a session belongs to: read, and
+/// the boss's rewrite. Both POST a JSON body (`task_profile::TaskProfileQuery`
+/// / `SetTaskProfileRequest`).
+pub const TASK_PROFILE_GET: &str = "/task_profile/get";
+pub const TASK_PROFILE_SET: &str = "/task_profile/set";
 pub const TASKS_ACCEPT: &str = "/tasks/accept";
 pub const TASKS_REOPEN: &str = "/tasks/reopen";
 pub const TEST_DECISION_END_TO_END: &str = "/test_decision_end_to_end";

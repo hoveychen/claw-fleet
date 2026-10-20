@@ -391,7 +391,12 @@ pub fn register(
     }
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
-    register_in(
+    // A task's goal lives in its profile (`task_profile`); the relay's goal is
+    // checked against it too, then mirrored into it once registration holds.
+    if let Some(g) = goal {
+        crate::task_profile::sync_handoff_goal(session_id, g, goal_reason, true)?;
+    }
+    let rec = register_in(
         &pdir,
         &cdir,
         session_id,
@@ -406,15 +411,22 @@ pub fn register(
         goal_reason,
         agent_source,
         now_ms(),
-    )
+    )?;
+    if let Some(g) = goal {
+        if let Err(e) = crate::task_profile::sync_handoff_goal(session_id, g, goal_reason, false) {
+            crate::log_debug(&format!("handoff: mirror goal into task profile: {e}"));
+        }
+    }
+    Ok(rec)
 }
 
 /// Refuse a goal change that arrives without a reason.
 ///
-/// `current` is what the chain already carries. Setting one for the first time
+/// `current` is what the chain (or task profile, see [`crate::task_profile`])
+/// already carries. Setting one for the first time
 /// needs no reason (nothing is being revised) and neither does restating the
 /// same one; replacing a different, non-empty objective does.
-fn check_goal_change(
+pub(crate) fn check_goal_change(
     current: Option<&str>,
     goal: &str,
     reason: Option<&str>,
@@ -430,8 +442,8 @@ fn check_goal_change(
         return Ok(());
     }
     Err(format!(
-        "this chain's goal is already \"{current}\" and you are changing it to \"{goal}\" \
-         without saying why. Changing course is allowed — silently narrowing the chain's \
+        "the goal is already \"{current}\" and you are changing it to \"{goal}\" \
+         without saying why. Changing course is allowed — silently narrowing the task's \
          objective down to the plan in front of you is what this refuses. Pass a reason \
          alongside the new goal, and tell the boss you changed it."
     ))

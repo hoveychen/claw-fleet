@@ -113,7 +113,7 @@ pub fn refusal_text(hop: u32, chain_len: u32, goal: Option<&str>, first_note: &s
          {how_to_check}\
          - **确认已完成** → 把这张卡原样再发一次，`taskComplete` 保持 true，本会话不会再拦第二次。\n\
          - **没完成** → 把 `taskComplete` 改成 false，并在卡里点名还剩什么、下一步该干哪件。\n\
-         - **目标本身已经不成立**（老板改了路线）→ 用 `fleet__handoff` 的 `goal` + `goalReason` \
+         - **目标本身已经不成立**（老板改了路线）→ 用 `fleet__task` 的 `goal` + `goalReason` \
          显式改掉它，别拿一张成功卡把旧目标糊过去。",
         hop = hop,
         chain_len = chain_len,
@@ -145,10 +145,11 @@ pub fn refusal_for(session_id: &str, task_complete: bool) -> Option<String> {
         .map(|l| l.note.as_str())
         .unwrap_or_default();
     mark_nudged(session_id);
+    let goal = crate::task_profile::effective_chain_goal(session_id, chain.goal.as_deref());
     Some(refusal_text(
         hop,
         chain.session_ids().len() as u32,
-        chain.goal.as_deref(),
+        goal.as_deref(),
         first_note,
     ))
 }

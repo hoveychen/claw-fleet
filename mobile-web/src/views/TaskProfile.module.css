@@ -1,0 +1,166 @@
+/* Task type chip (task rows, sheet) and the type + goal readout / editor. */
+
+.chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-secondary);
+  font-size: var(--t-meta, 11px);
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.chip[data-type="dev"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.chip[data-type="research"] {
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+.readout {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+}
+
+.readoutHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.byBoss {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+}
+
+.editBtn {
+  margin-left: auto;
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.goal,
+.goalEmpty {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.goalEmpty {
+  color: var(--color-text-dim);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: var(--t-meta, 11px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.seg {
+  display: flex;
+  gap: 6px;
+}
+
+.segBtn {
+  flex: 1;
+  min-height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-input);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.segBtn[data-on] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  /* 16px keeps iOS Safari from zooming the page on focus. */
+  font-size: 16px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--color-error);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancelBtn,
+.saveBtn {
+  min-width: 72px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.cancelBtn {
+  border: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+.saveBtn {
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.saveBtn:disabled,
+.cancelBtn:disabled {
+  opacity: 0.6;
+}
