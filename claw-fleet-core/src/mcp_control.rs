@@ -163,21 +163,22 @@ fn history_tool_def() -> Value {
 fn plan_tool_def() -> Value {
     json!({
         "name": "fleet__plan",
-        "description": "Manage this workspace's TASKS.md PRD plans (the durable macro plan) and record which session works which plan/P. Use this instead of the `fleet plan` CLI. Actions: check/uncheck (tick a P's checkbox), create (new plan block), add (append a task), resume (claim focus on an existing plan), migrate (v1→v2), list, get, snooze (tell Fleet's orphan reviver to leave a genuinely blocked plan alone for `duration`, with a `reason` the boss will read), unsnooze.",
+        "description": "Manage this workspace's TASKS.md PRD plans (the durable macro plan) and record which session works which plan/P. Use this instead of the `fleet plan` CLI. Actions: check/uncheck (tick a P's checkbox), create (new plan block), add (append a task), resume (claim focus on an existing plan), replan (replace the plan's still-pending P-tasks with `tasks`, recording `reason`; ticked ones stay — for when findings make the old split wrong, the normal move in a research plan), stop (research plans only: end the plan early by recording `reason` — budget spent, saturation, or question answered; it then counts as complete), migrate (v1→v2), list, get, snooze (tell Fleet's orphan reviver to leave a genuinely blocked plan alone for `duration`, with a `reason` the boss will read), unsnooze.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["check", "uncheck", "create", "add", "resume", "migrate", "list", "get", "snooze", "unsnooze"]},
-                "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/get/snooze/unsnooze."},
+                "action": {"type": "string", "enum": ["check", "uncheck", "create", "add", "resume", "replan", "stop", "migrate", "list", "get", "snooze", "unsnooze"]},
+                "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/replan/stop/get/snooze/unsnooze."},
                 "task": {"type": "string", "description": "P-task id like \"P2\". Required for check/uncheck/add; optional for resume."},
                 "title": {"type": "string", "description": "Plan title. Required for create."},
                 "parent": {"type": "string", "description": "Parent plan id (create only). Usually unnecessary: a plan authored while you are executing another plan already defaults to being that plan's child, and Fleet points you back at the parent once this plan completes. Pass this only to attach it somewhere other than the plan you are currently on."},
                 "root": {"type": "boolean", "description": "Start a new top-level tree instead of attaching to the plan you are currently executing (create only). Needs root_reason whenever you are on a plan; with no plan in flight it is the default anyway and this flag is a no-op."},
                 "root_reason": {"type": "string", "description": "Why this work does not belong under the plan you are currently executing (create only). Required alongside root while you are on a plan, so leaving its tree costs a moment's thought instead of being the path of least resistance. Never valid with parent."},
-                "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
+                "kind": {"type": "string", "enum": ["exec", "explore", "research"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation; `research` produces knowledge itself (a wiki report with conclusions, evidence, confidence), needs no child plans or worktree, may be replanned as findings arrive and stopped once the answer is good enough."},
                 "text": {"type": "string", "description": "Task text. Required for add."},
+                "tasks": {"type": "array", "items": {"type": "string"}, "description": "replan only: the new P-task texts, in order, without `**Pn**` labels — Fleet numbers them on from the last ticked P."},
                 "duration": {"type": "string", "description": "snooze only: how long, one unit — `30m`, `8h`, `3d` (max 14d). Pick the time by which the blocker could plausibly clear."},
-                "reason": {"type": "string", "description": "snooze only: what the plan is blocked on (waiting for the boss's decision, a login, a deploy window, a real device...). Shown to the boss."},
+                "reason": {"type": "string", "description": "Required for snooze/replan/stop and recorded where the boss reads it. snooze: what the plan is blocked on (the boss's decision, a login, a deploy window, a real device...). replan: what finding made the old P-tasks wrong. stop: why the research is done — budget spent, saturation (the last round produced no new finding), or the question is answered."},
                 "workspace": workspace_arg_schema("whose TASKS.md to act on")
             },
             "required": ["action"],
@@ -887,6 +888,17 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
             sid,
         )
         .map(render_plan_outcome),
+        "replan" => {
+            let tasks: Vec<String> = args
+                .get("tasks")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            po::replan(cwd, &req(args, "plan_id")?, &tasks, &req(args, "reason")?, sid)
+                .map(render_plan_outcome)
+        }
+        "stop" => po::stop(cwd, &req(args, "plan_id")?, &req(args, "reason")?, sid)
+            .map(render_plan_outcome),
         "migrate" => po::migrate(cwd, None).map(render_plan_outcome),
         "snooze" => po::snooze(
             cwd,
