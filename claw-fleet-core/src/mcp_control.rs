@@ -956,11 +956,23 @@ fn render_task_set(
     // `set` is refused for sub-tasks, so the reader is always the lead.
     let block = type_arg
         .filter(|t| prev_type != Some(*t))
+        .filter(|_| !wf::flow_block_off(&session_workspace()))
         .and_then(|t| wf::render_block(t, wf::Role::Lead, title, locale));
     match block {
         Some(block) => format!("{confirm}\n\n{block}"),
         None => confirm,
     }
+}
+
+/// The calling agent's workspace, resolved like `mcp_server`'s
+/// `resolve_workspace_cwd`: `CLAUDE_PROJECT_DIR`, else the inherited cwd.
+fn session_workspace() -> std::path::PathBuf {
+    std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 /// `fleet__task action=split`: start a NEW top-level task for a request whose

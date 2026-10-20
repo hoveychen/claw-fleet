@@ -136,6 +136,34 @@ pub fn self_report_line(locale: &str) -> &'static str {
     }
 }
 
+/// Experiment switch for the task-type ablation: workspaces listed in
+/// `~/.fleet/experiments/no-flow-block.txt` (one path per line, `#` comments)
+/// get no workflow block, while the self-report line still reaches them, so
+/// the block is the only difference between the two arms. A listed path also
+/// covers everything below it (its `.worktrees/*`). No file = nobody affected.
+pub const FLOW_BLOCK_OFF_FILE: &str = "experiments/no-flow-block.txt";
+
+pub fn flow_block_off(cwd: &std::path::Path) -> bool {
+    crate::session::get_fleet_dir()
+        .and_then(|d| std::fs::read_to_string(d.join(FLOW_BLOCK_OFF_FILE)).ok())
+        .is_some_and(|list| listed_in(&list, cwd))
+}
+
+fn listed_in(list: &str, cwd: &std::path::Path) -> bool {
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let cwd = canon(cwd);
+    list.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .any(|l| cwd.starts_with(canon(std::path::Path::new(l))))
+}
+
+/// Whether `text` is the self-report nudge (either locale) rather than a
+/// workflow block — the one piece [`flow_block_off`] must leave in place.
+pub fn is_self_report_line(text: &str) -> bool {
+    text == self_report_line("zh") || text == self_report_line("en")
+}
+
 fn research_lead_zh(title: &str) -> String {
     format!(
         "## 本任务的流程：研究\n\
@@ -202,6 +230,24 @@ mod tests {
 
     const LOCALES: [&str; 2] = ["zh", "en"];
     const ROLES: [Role; 2] = [Role::Lead, Role::Subtask];
+
+    #[test]
+    fn flow_block_off_list_matches_workspace_and_below() {
+        let ws = tempfile::tempdir().unwrap();
+        let wt = ws.path().join(".worktrees/x");
+        std::fs::create_dir_all(&wt).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let list = format!("# ablation control arm\n\n  {}  \n", ws.path().display());
+        assert!(listed_in(&list, ws.path()));
+        assert!(listed_in(&list, &wt));
+        assert!(!listed_in(&list, other.path()));
+        assert!(!listed_in("", ws.path()));
+        // A sibling sharing a name prefix is not "below" the listed path.
+        let sib = std::path::PathBuf::from(format!("{}-2", ws.path().display()));
+        assert!(!listed_in(&list, &sib));
+        assert!(is_self_report_line(self_report_line("zh")));
+        assert!(!is_self_report_line(&render_block(TaskType::Dev, Role::Lead, "", "zh").unwrap()));
+    }
 
     #[test]
     fn general_has_no_block() {

@@ -2044,10 +2044,12 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
         let (title, locale) = crate::claude_launch::guidance_voice();
         task_lead_for(&crate::task_model::TaskGraph::load(), sid, &title, &locale)
     });
+    let flow_off = crate::task_workflow_guidance::flow_block_off(cwd);
     let lead: Vec<String> = [
         crate::task_roles_guidance::render_role_reminder(session_id),
         task.as_ref().and_then(|t| t.goal_block.clone()),
-        task.and_then(|t| t.workflow),
+        task.and_then(|t| t.workflow)
+            .filter(|w| !flow_off || crate::task_workflow_guidance::is_self_report_line(w)),
     ]
     .into_iter()
     .flatten()
