@@ -474,7 +474,12 @@ pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec
     let isolated = chat || excludes_user_settings(existing);
     let parent_task = (!chat).then(|| launch_subtask_parent(existing)).flatten();
     let subtask = parent_task.is_some();
-    let subtask_layer = parent_task.as_deref().and_then(subtask_layer_for);
+    // The task-type ablation switches the layer off with the rest of the
+    // workflow block.
+    let subtask_layer = parent_task
+        .as_deref()
+        .and_then(subtask_layer_for)
+        .filter(|_| !crate::task_workflow_guidance::flow_block_off(Path::new(workspace_path)));
     let shape = Shape {
         global: if isolated {
             GlobalCarriers::default()

@@ -2235,6 +2235,10 @@ fn workflow_for(
 /// ([`crate::prd_context_dedup`]).
 pub fn render_task_nudge(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     let sid = session_id?;
+    // Part of the workflow block for the task-type ablation's purposes.
+    if crate::task_workflow_guidance::flow_block_off(cwd) {
+        return None;
+    }
     let (_, locale) = crate::claude_launch::guidance_voice();
     task_nudge_for(&crate::task_model::TaskGraph::load(), cwd, sid, &locale)
 }
@@ -3277,6 +3281,13 @@ trailing notes outside\n";
         );
         assert!(task_nudge_for(&graph, &ws, "res-sub", "zh").is_none());
         assert!(task_nudge_for(&graph, &ws, "res-main", "zh").is_some());
+
+        // The task-type ablation's no-block arm gets no nudge either.
+        let fleet_dir = crate::session::get_fleet_dir().unwrap();
+        let list = fleet_dir.join(crate::task_workflow_guidance::FLOW_BLOCK_OFF_FILE);
+        std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+        std::fs::write(&list, format!("{}\n", ws.display())).unwrap();
+        assert!(render_task_nudge(&ws, Some("res-main")).is_none());
     }
 
     #[test]
