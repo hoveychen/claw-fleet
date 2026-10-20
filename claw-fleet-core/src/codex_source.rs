@@ -7314,6 +7314,7 @@ impl AgentSource for CodexSource {
         // Codex mints its own thread id (no --session-id) and has no entrypoint
         // env; session_id/entrypoint on the spec are ignored here. The
         // permission_mode → sandbox/approval mapping is a later milestone.
+        let continues = crate::codex_launch::continuation();
         crate::codex_launch::spawn_new_codex_session(
             &spec.workspace_path,
             &spec.prompt,
@@ -7323,6 +7324,7 @@ impl AgentSource for CodexSource {
             &crate::prd_tasks::FreshSession {
                 spawned_by: spec.spawned_by.as_deref(),
                 preset_type: crate::codex_launch::split_preset(),
+                continues: continues.as_deref(),
             },
         )
     }
