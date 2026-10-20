@@ -114,6 +114,17 @@ impl TaskGraph {
     }
 }
 
+/// Whether `session_id` is a sub-task: it was dispatched to a step of another
+/// session's plan, or its line rolls up under another task. The launch note is
+/// read first; the graph (every relay chain and launch note) only when it
+/// says nothing.
+pub fn is_subtask(session_id: &str) -> bool {
+    if crate::launch_spec::get(session_id).is_some_and(|s| s.spawned_for_plan.is_some()) {
+        return true;
+    }
+    TaskGraph::load().place(session_id).parent_task_id.is_some()
+}
+
 /// Sub-task edges `(child, spawner)` from launch notes. Only
 /// `spawned_by_session_id` makes one: a task split off another
 /// (`split_from_task`) is a top-level task of its own.

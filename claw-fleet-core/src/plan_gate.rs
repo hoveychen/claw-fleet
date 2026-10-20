@@ -47,12 +47,56 @@ use crate::task_progress::TaskProgressRecord;
 /// P-task, or when it is complete but its tree still has a pending plan in
 /// [`pt::next_plan_in_tree`] order (the backtrack case — now enforced rather
 /// than suggested).
+///
+/// This is the main-conversation form: no sub-task assignment, and the
+/// backtrack avoids nothing. [`gate_reason_scoped`] takes both.
 pub fn gate_reason_in(
     cwd: &Path,
     focus: Option<&TaskProgressRecord>,
     turn_start: Option<u64>,
     stop_hook_active: bool,
     has_registered_exit: bool,
+) -> Option<String> {
+    gate_reason_scoped(
+        cwd,
+        focus,
+        turn_start,
+        stop_hook_active,
+        has_registered_exit,
+        &GateSession {
+            assignment: &|| None,
+            backtrack: &pt::BacktrackScope::unscoped,
+        },
+    )
+}
+
+/// What the gate needs to know about the session beyond its focus record.
+/// Both are read lazily, once the hatches have let the stop through to the
+/// plan: each touches the launch-note and claim stores, and the `Stop` hook
+/// runs every turn.
+pub struct GateSession<'a> {
+    /// The spawner's plan and step this sub-task was dispatched to
+    /// (`LaunchSpec::spawned_for_plan` / `spawned_for_step`).
+    pub assignment: &'a dyn Fn() -> Option<(String, String)>,
+    /// How a backtrack for this session is scoped ([`pt::BacktrackScope`]).
+    pub backtrack: &'a dyn Fn() -> pt::BacktrackScope,
+}
+
+/// [`gate_reason_in`] for a specific session. On top of the escape hatches:
+///
+/// - A sub-task whose assigned step is ticked may stop, even though the
+///   spawner's plan it sits in still has other steps open — those belong to
+///   the spawner and its other sub-tasks.
+/// - The backtrack is scoped by `session.backtrack`: a sub-task is never sent
+///   elsewhere in the tree, and nobody is sent onto a plan another live
+///   session is on. When that leaves no target, the turn may end.
+pub fn gate_reason_scoped(
+    cwd: &Path,
+    focus: Option<&TaskProgressRecord>,
+    turn_start: Option<u64>,
+    stop_hook_active: bool,
+    has_registered_exit: bool,
+    session: &GateSession<'_>,
 ) -> Option<String> {
     if stop_hook_active || has_registered_exit {
         return None;
@@ -72,6 +116,16 @@ pub fn gate_reason_in(
     let body = block.body;
 
     if pt::has_open_work(&body, block.kind) {
+        if let Some((plan, step)) = (session.assignment)() {
+            let label = format!("**{step}**");
+            if plan == plan_id
+                && pt::parse_task_items(&body)
+                    .iter()
+                    .any(|it| it.done && it.text.contains(&label))
+            {
+                return None;
+            }
+        }
         // A research plan may legitimately end early; name that exit too, or
         // the gate pushes the agent to tick boxes that no longer mean anything.
         let research_exit = if block.kind == pt::PlanKind::Research {
@@ -102,7 +156,7 @@ pub fn gate_reason_in(
 
     // Focused plan is done — climb. This is the case the old advisory backtrack
     // could never enforce.
-    let target = pt::resolve_backtrack_target(cwd, plan_id)?;
+    let target = pt::resolve_backtrack_target_scoped(cwd, plan_id, &(session.backtrack)())?;
     let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
     Some(format!(
         "⤴ Fleet 计划门:plan `{plan_id}` 已全部完成,但这棵计划树还没走完,本 turn 不能结束。\n\n\
@@ -127,12 +181,19 @@ pub fn gate_reason(cwd: &Path, session_id: &str, stop_hook_active: bool) -> Opti
     }
     let focus = crate::task_progress::read(session_id);
     let turn_start = crate::idle::read_turn_start(session_id);
-    gate_reason_in(
+    gate_reason_scoped(
         cwd,
         focus.as_ref(),
         turn_start,
         stop_hook_active,
         has_registered_exit(session_id),
+        &GateSession {
+            assignment: &|| {
+                let spec = crate::launch_spec::get(session_id)?;
+                Some((spec.spawned_for_plan?, spec.spawned_for_step?))
+            },
+            backtrack: &|| pt::BacktrackScope::for_session(cwd, Some(session_id)),
+        },
     )
 }
 
@@ -420,6 +481,111 @@ mod tests {
         let reason = gate_reason_in(&root, Some(&focus("mine", 200)), Some(100), false, false)
             .expect("exec plan with open box ⇒ gate fires");
         assert!(!reason.contains("action=stop"), "{reason}");
+    }
+
+    /// A parent plan the main conversation split into two child plans, one
+    /// per sub-task: `a` is finished, `b` is still open.
+    const SPLIT: &str = "\
+<!-- fleet:prd:begin id=\"par\" v=\"2\" -->
+
+**Plan:** Parent
+
+- [x] **P1** — split the work
+- [ ] **P4** — integrate
+
+<!-- fleet:prd:end id=\"par\" -->
+
+<!-- fleet:prd:begin id=\"a\" v=\"2\" parent=\"par\" -->
+
+**Plan:** Child A
+
+- [x] **P1** — a's work
+
+<!-- fleet:prd:end id=\"a\" -->
+
+<!-- fleet:prd:begin id=\"b\" v=\"2\" parent=\"par\" -->
+
+**Plan:** Child B
+
+- [ ] **P1** — b's work
+
+<!-- fleet:prd:end id=\"b\" -->
+";
+
+    /// [`gate_reason_scoped`] with a fresh focus on `plan`, a sub-task flag, the
+    /// plans other live sessions are on, and an optional step assignment.
+    fn scoped(
+        root: &Path,
+        plan: &str,
+        subtask: bool,
+        claimed: &'static [&'static str],
+        assignment: Option<(&str, &str)>,
+    ) -> Option<String> {
+        let assignment = assignment.map(|(p, s)| (p.to_string(), s.to_string()));
+        gate_reason_scoped(
+            root,
+            Some(&focus(plan, 200)),
+            Some(100),
+            false,
+            false,
+            &GateSession {
+                assignment: &|| assignment.clone(),
+                backtrack: &|| pt::BacktrackScope {
+                    subtask,
+                    claimed_elsewhere: Box::new(|id| claimed.contains(&id)),
+                },
+            },
+        )
+    }
+
+    /// The reported bug: the session that finished `a` was sent to sibling
+    /// `b`, which another live session is working, and could not end its
+    /// turn. Skipping `b` leaves nothing (the parent waits for `b`), so the
+    /// turn ends.
+    #[test]
+    fn releases_when_the_sibling_is_claimed_by_another_live_session() {
+        let (_t, root) = ws(SPLIT);
+        assert_eq!(scoped(&root, "a", false, &["b"], None), None);
+    }
+
+    /// A sub-task that finished the plan it was put on is released, even with
+    /// an unclaimed sibling still open: the main conversation that spawned it
+    /// decides what comes next.
+    #[test]
+    fn releases_a_subtask_that_finished_its_plan() {
+        let (_t, root) = ws(SPLIT);
+        assert_eq!(scoped(&root, "a", true, &[], None), None);
+    }
+
+    /// A sub-task dispatched to one step of the spawner's plan may stop once
+    /// that step is ticked, though the plan's other steps are still open; an
+    /// unticked assigned step still holds it.
+    #[test]
+    fn releases_a_subtask_once_its_assigned_step_is_ticked() {
+        let (_t, root) = ws(ONE_PENDING);
+        assert_eq!(scoped(&root, "mine", true, &[], Some(("mine", "P1"))), None);
+        assert!(
+            scoped(&root, "mine", true, &[], Some(("mine", "P2"))).is_some(),
+            "assigned step still open ⇒ gate fires"
+        );
+        assert!(
+            scoped(&root, "mine", true, &[], Some(("other", "P1"))).is_some(),
+            "assignment in another plan says nothing about this one"
+        );
+    }
+
+    /// Regression: a main conversation walking its own tree alone still
+    /// backtracks in tree order — the unclaimed sibling comes next.
+    #[test]
+    fn main_conversation_still_backtracks_to_an_unclaimed_sibling() {
+        let (_t, root) = ws(SPLIT);
+        let reason = scoped(&root, "a", false, &[], None).expect("unclaimed sibling ⇒ climb");
+        assert!(reason.contains("plan `b`"), "{reason}");
+        assert!(reason.contains("**P1** — b's work"), "{reason}");
+        // The unscoped entry point agrees.
+        let plain = gate_reason_in(&root, Some(&focus("a", 200)), Some(100), false, false)
+            .expect("unscoped ⇒ climb");
+        assert!(plain.contains("plan `b`"), "{plain}");
     }
 
     /// A focus record naming a plan that exists in no TASKS.md here (another

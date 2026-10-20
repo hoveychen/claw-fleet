@@ -100,7 +100,8 @@ pub fn mutate_checkbox(
 /// AND its tree still has a pending plan, re-attribute `session_id`'s focus to
 /// that plan and return a directive
 /// telling the agent to keep going there. Returns `None` when the plan still has
-/// pending tasks or there is nowhere to backtrack to.
+/// pending tasks, when the session is a sub-task, or when nothing is left to
+/// backtrack to once plans other live sessions are on are skipped.
 fn backtrack_on_completion(
     cwd: &Path,
     plan_id: &str,
@@ -111,7 +112,10 @@ fn backtrack_on_completion(
     if pt::has_open_work(&block.body, block.kind) {
         return None; // not fully complete yet
     }
-    let target = pt::resolve_backtrack_target(cwd, plan_id)?;
+    // A sub-task is released here, and a plan another live session is on is
+    // never handed to this one (see [`pt::BacktrackScope`]).
+    let scope = pt::BacktrackScope::for_session(cwd, session_id);
+    let target = pt::resolve_backtrack_target_scoped(cwd, plan_id, &scope)?;
     // Re-point focus at the ancestor so the desktop card follows immediately,
     // without waiting for the agent to run `fleet plan resume` itself.
     let mut warnings = Vec::new();
