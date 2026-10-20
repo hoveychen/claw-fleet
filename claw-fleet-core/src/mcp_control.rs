@@ -885,21 +885,17 @@ fn handle_task(args: &Value, sid: Option<&str>) -> Result<String, String> {
     let sid = sid.ok_or(NO_SESSION_ID)?;
     match action.as_str() {
         "set" => {
+            let type_arg = task_type_arg(args)?;
+            let prev_type = tp::for_session(sid).map(|p| p.task_type);
             let p = tp::set_for_session(
                 sid,
-                task_type_arg(args)?,
+                type_arg,
                 arg(args, "goal").as_deref(),
                 arg(args, "goalReason").as_deref(),
                 tp::ProfileSetter::Agent,
             )?;
-            // One line: the clients render a mutate's return as a single
-            // confirmation row.
-            Ok(format!(
-                "ok: task {} saved (type={}, goal={})",
-                p.task_id,
-                p.task_type.as_str(),
-                p.goal.as_deref().unwrap_or("-"),
-            ))
+            let (title, locale) = crate::claude_launch::guidance_voice();
+            Ok(render_task_set(&p, prev_type, type_arg, &title, &locale))
         }
         "get" => {
             let task_id = tp::owning_task_id(sid);
@@ -907,6 +903,38 @@ fn handle_task(args: &Value, sid: Option<&str>) -> Result<String, String> {
         }
         "split" => handle_task_split(args, sid),
         other => Err(format!("unknown fleet__task action `{other}` (set / get / split)")),
+    }
+}
+
+/// The return of `fleet__task action=set`. The first line is the confirmation
+/// the desktop and mobile cards show (they keep only that line for `set`).
+///
+/// When the call sets the type to something new, the type's workflow block
+/// follows: the per-turn injection only carries it from the next turn on, so
+/// without this a first-turn `set` left the rest of that turn — the whole of a
+/// one-turn task — running without the workflow. A goal-only `set`, or one
+/// repeating the current type, adds nothing: the block is already in view.
+fn render_task_set(
+    p: &crate::task_profile::TaskProfile,
+    prev_type: Option<crate::task_profile::TaskType>,
+    type_arg: Option<crate::task_profile::TaskType>,
+    title: &str,
+    locale: &str,
+) -> String {
+    use crate::task_workflow_guidance as wf;
+    let confirm = format!(
+        "ok: task {} saved (type={}, goal={})",
+        p.task_id,
+        p.task_type.as_str(),
+        p.goal.as_deref().unwrap_or("-"),
+    );
+    // `set` is refused for sub-tasks, so the reader is always the lead.
+    let block = type_arg
+        .filter(|t| prev_type != Some(*t))
+        .and_then(|t| wf::render_block(t, wf::Role::Lead, title, locale));
+    match block {
+        Some(block) => format!("{confirm}\n\n{block}"),
+        None => confirm,
     }
 }
 
@@ -1834,6 +1862,42 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_set_return_carries_workflow_block_when_type_changes() {
+        use crate::task_profile::{TaskProfile, TaskType};
+        let profile = |t: TaskType| TaskProfile {
+            task_id: "t1".to_string(),
+            task_type: t,
+            goal: Some("answer X".to_string()),
+            ..Default::default()
+        };
+        let confirm = "ok: task t1 saved (type=research, goal=answer X)";
+
+        // First set to research: confirm line first, then the research block.
+        let out = render_task_set(&profile(TaskType::Research), None, Some(TaskType::Research), "", "zh");
+        assert_eq!(out.lines().next(), Some(confirm), "{out}");
+        assert!(out.contains("## 本任务的流程：研究"), "{out}");
+        assert!(out.contains("开工先发计划卡"), "{out}");
+        // English voice renders the English block.
+        let en = render_task_set(&profile(TaskType::Research), None, Some(TaskType::Research), "", "en");
+        assert!(en.contains("This task's workflow: research"), "{en}");
+
+        // Switching dev -> research also attaches it.
+        let out = render_task_set(&profile(TaskType::Research), Some(TaskType::Dev), Some(TaskType::Research), "", "zh");
+        assert!(out.contains("## 本任务的流程：研究"), "{out}");
+
+        // Same type again, or a goal-only set: the confirm line alone.
+        let same = render_task_set(&profile(TaskType::Research), Some(TaskType::Research), Some(TaskType::Research), "", "zh");
+        assert_eq!(same, confirm);
+        let goal_only = render_task_set(&profile(TaskType::Research), None, None, "", "zh");
+        assert_eq!(goal_only, confirm);
+
+        // general has no workflow block.
+        let general = render_task_set(&profile(TaskType::General), None, Some(TaskType::General), "", "zh");
+        assert_eq!(general, "ok: task t1 saved (type=general, goal=answer X)");
+        assert!(!general.contains("本任务的流程"), "{general}");
+    }
 
     #[test]
     fn control_tool_defs_are_the_six_named_groups() {

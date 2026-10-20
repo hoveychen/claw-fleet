@@ -485,6 +485,11 @@ export function classifyResult(
   if (tool === "notes" && action === "read") {
     return { kind: "wiki-cat", body: content };
   }
+  // `task set` follows its confirmation line with the task type's workflow
+  // block, which is addressed to the agent; the card keeps the confirmation.
+  if (tool === "task" && action === "set") {
+    return { kind: "confirm", text: text.split("\n")[0] };
+  }
   const mutates = PROSE_TOOL_MUTATES[tool];
   if (mutates) {
     return mutates.includes(action) ? { kind: "confirm", text } : { kind: "raw", text };
