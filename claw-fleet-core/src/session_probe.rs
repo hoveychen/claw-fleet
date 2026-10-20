@@ -104,6 +104,28 @@ pub enum TailVerdict {
     Empty,
 }
 
+/// Fold a tail verdict into the coarse [`TurnEnd`] carried on `SessionInfo`,
+/// along the same lines [`crate::subtask_recovery::class_of`] splits a failed
+/// sub-task: transient failures read as mid-turn (recoverable), account errors
+/// as auth failures.
+///
+/// [`TurnEnd`]: crate::session::TurnEnd
+pub fn turn_end_of(v: &TailVerdict) -> Option<crate::session::TurnEnd> {
+    use crate::session::TurnEnd;
+    Some(match v {
+        TailVerdict::Ended => TurnEnd::Clean,
+        TailVerdict::InFlight | TailVerdict::RateLimited | TailVerdict::ServerError => {
+            TurnEnd::MidTurn
+        }
+        TailVerdict::Interrupted => TurnEnd::Interrupted,
+        TailVerdict::Fatal(e) if crate::subtask_recovery::is_account_error(e) => {
+            TurnEnd::AuthFailed
+        }
+        TailVerdict::Fatal(_) => TurnEnd::Failed,
+        TailVerdict::Empty => return None,
+    })
+}
+
 /// Everything the classifier needs, gathered from disk / the dsh server.
 /// Split out so [`classify`] is a pure function with tests.
 #[derive(Clone, Debug, Default)]
@@ -541,6 +563,23 @@ mod tests {
             claude_tail_verdict(&[err("authentication_failed")]),
             TailVerdict::Fatal("authentication_failed: boom".into())
         );
+    }
+
+    #[test]
+    fn turn_end_matches_the_recovery_split() {
+        use crate::session::TurnEnd;
+        let f = |v: TailVerdict| turn_end_of(&v);
+        assert_eq!(f(TailVerdict::Ended), Some(TurnEnd::Clean));
+        assert_eq!(f(TailVerdict::InFlight), Some(TurnEnd::MidTurn));
+        assert_eq!(f(TailVerdict::ServerError), Some(TurnEnd::MidTurn));
+        assert_eq!(f(TailVerdict::RateLimited), Some(TurnEnd::MidTurn));
+        assert_eq!(f(TailVerdict::Interrupted), Some(TurnEnd::Interrupted));
+        assert_eq!(
+            f(TailVerdict::Fatal("authentication_failed: boom".into())),
+            Some(TurnEnd::AuthFailed)
+        );
+        assert_eq!(f(TailVerdict::Fatal("invalid_request: too long".into())), Some(TurnEnd::Failed));
+        assert_eq!(f(TailVerdict::Empty), None);
     }
 
     #[test]

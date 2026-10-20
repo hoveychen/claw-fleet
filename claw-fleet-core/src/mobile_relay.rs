@@ -1123,6 +1123,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // the rest under it.
     "taskId",
     "parentTaskId",
+    // How a stopped sub-task's last turn ended: only a clean end reads as
+    // "reported back"; one that died mid-turn or was interrupted says so.
+    // One short string, absent on codex / dsh rows.
+    "lastTurnEnd",
     // Task row data (current step, wait reason, sub-task counts, spend), on
     // main-conversation hops of a top-level task only.
     "taskSummary",

@@ -1160,6 +1160,8 @@ const DICT: Record<string, string> = {
   // ── Task model: task list ──
   "待验收": "Ready to accept",
   "已回报": "Reported back",
+  中途断了: "Stopped mid-turn",
+  鉴权失败: "Auth failed",
   "等待中": "Waiting",
   "来自子任务 {0} · 需要你决定": "From sub-task {0} · needs your call",
   "需要你决定": "Needs your call",

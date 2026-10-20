@@ -16,8 +16,26 @@ import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
+import { subtaskOutcome, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
 import { SubtaskRecoveryBlock } from "./SubtaskRecovery";
 import styles from "./TaskRail.module.css";
+
+/** Dot colour of a stopped sub-task: only a clean report back is green. */
+const OUTCOME_DOT: Record<SubtaskOutcome, string> = {
+  reported: STATE_DOT.review,
+  midTurn: "var(--color-warning)",
+  interrupted: "var(--color-text-dim)",
+  authFailed: "var(--color-error)",
+  failed: "var(--color-error)",
+};
+
+const OUTCOME_LABEL: Record<SubtaskOutcome, [string, string]> = {
+  reported: ["home.subtask_reported", "Reported back"],
+  midTurn: ["home.subtask_mid_turn", "Stopped mid-turn"],
+  interrupted: ["home.subtask_interrupted", "Interrupted by hand"],
+  authFailed: ["home.subtask_auth_failed", "Auth failed"],
+  failed: ["home.subtask_failed", "Permanent error"],
+};
 
 function ArtifactGlyph({ mime }: { mime: string }) {
   if (mime.startsWith("image/")) return <ImageIcon size={14} strokeWidth={1.8} />;
@@ -220,6 +238,7 @@ export function TaskRail({
   const subtaskButton = (st: SubtaskRow) => {
     const plan = st.tip.taskPlan;
     const open = st.hops.some((h) => h.id === openSessionId);
+    const outcome = subtaskOutcome(st.state, st.tip.lastTurnEnd);
     return (
       <button
         key={st.key}
@@ -228,13 +247,17 @@ export function TaskRail({
         onClick={() => onOpenSession(st.tip.id)}
         aria-current={open || undefined}
       >
-        <span className={styles.dot} style={{ background: STATE_DOT[st.state] }} />
+        <span
+          className={styles.dot}
+          style={{ background: outcome ? OUTCOME_DOT[outcome] : STATE_DOT[st.state] }}
+        />
         <span className={styles.item_title}>{sessionTitle(st.tip, untitled)}</span>
         <span className={styles.item_meta}>
           {/* A stopped sub-task reports to the main conversation, not
-              to the boss, so "review" is not something to accept. */}
-          {st.state === "review"
-            ? t("home.subtask_reported", "Reported back")
+              to the boss, so "review" is not something to accept — and
+              a stop that was not a clean end says how it stopped. */}
+          {outcome
+            ? t(OUTCOME_LABEL[outcome][0], OUTCOME_LABEL[outcome][1])
             : t(`home.section_${st.state}`)}
         </span>
         {plan && plan.total > 0 && (

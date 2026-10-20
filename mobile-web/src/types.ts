@@ -17,6 +17,7 @@ export type { Connector as CmdConnector } from "./generated/types";
 // but does not create local bindings, so import the ones used unqualified here.
 import type {
   SessionStatus,
+  TurnEnd,
   SessionMark,
   TaskOutcome,
   TodoSummary,
@@ -101,6 +102,9 @@ export interface SessionInfo {
   /** On a `stuck` session, the tool whose tool_result never arrived and when
    *  its batch was issued — "stuck" alone does not say whether to interrupt. */
   stuckTool?: { name: string; sinceMs?: number | null } | null;
+  /** How the last turn ended (core `TurnEnd`): a stopped sub-task reads
+   *  "reported back" only on a clean end. Absent on codex / dsh rows. */
+  lastTurnEnd?: TurnEnd | null;
   isSubagent: boolean;
   /** Subagent drill-down: on a subagent row (id `agent-<uuid>`, isSubagent),
    *  the owning main session's id — the phone attaches the subagent under it and

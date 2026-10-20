@@ -4796,6 +4796,7 @@ mod tests {
             proc_alive: false,
             pending_tool_batch: false,
             awaiting_model: false,
+            last_turn_end: None,
             stuck_tool: None,
             pending_messages: Vec::new(),
             last_skill: None,

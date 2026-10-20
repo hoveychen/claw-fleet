@@ -2622,6 +2622,10 @@
     "rail_developer": "Developer view",
     "rail_main": "Main conversation",
     "subtask_reported": "Reported back",
+    "subtask_mid_turn": "Stopped mid-turn",
+    "subtask_interrupted": "Interrupted by hand",
+    "subtask_auth_failed": "Auth failed",
+    "subtask_failed": "Permanent error",
     "elapsed": "Running {{span}}"
   },
   "history": {

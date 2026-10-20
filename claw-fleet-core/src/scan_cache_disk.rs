@@ -38,7 +38,9 @@ const CACHE_FILE_NAME: &str = "session-cache.json";
 // v5: `ide_name` dropped from `SessionInfo`; the IDE lock scan is gone.
 // v6: `awaiting_model` added; a v5 entry would serve `false` for a live
 // session whose transcript stopped mid-turn until it next wrote a line.
-const CACHE_VERSION: u32 = 6;
+// v7: `last_turn_end` added; a v6 entry would serve `None` and a sub-task that
+// died mid-turn would keep reading as reported back.
+const CACHE_VERSION: u32 = 7;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -151,6 +153,7 @@ mod tests {
             proc_alive: false,
             pending_tool_batch: false,
             awaiting_model: false,
+            last_turn_end: None,
             stuck_tool: None,
             current_tool: None,
             last_skill: None,
