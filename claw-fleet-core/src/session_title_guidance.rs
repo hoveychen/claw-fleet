@@ -17,6 +17,10 @@
 //! - [`Harness::Codex`] — codex defers MCP tools, so the call must be made with
 //!   the fully-qualified direct-call shape inside the outer `exec`.
 //!
+//! The Claude section also carries the first-turn task-profile self-report
+//! (`fleet__task action=set`, worded in [`crate::task_workflow_guidance`]):
+//! it has the same deadline, and the design put the two side by side.
+//!
 //! **dsh is deliberately absent.** A dsh session has no Fleet MCP server at all
 //! (see [`crate::dsh_guidance`]), so `fleet__set_session_title` does not exist
 //! there; its titles come from Fleet's own LLM titler instead. Adding dsh here
@@ -69,9 +73,10 @@ pub fn render_session_title_section(user_title: &str, locale: &str, harness: Har
 一样要认得出来。如果对话主题后来发生了实质变化，再调用一次换成新标题；\
 否则不要每轮都改名。\n\
 \n\
-{tail}\n",
+{tail}{self_report}\n",
             title = user_title,
             tail = tail(user_title, locale, harness),
+            self_report = self_report(locale, harness),
         )
     } else {
         format!(
@@ -90,10 +95,25 @@ questions — a short session still has to be recognisable in the list. If the \
 topic later changes materially, call it again with the new title; otherwise do \
 not rename on every turn.\n\
 \n\
-{tail}\n",
+{tail}{self_report}\n",
             title = user_title,
             tail = tail(user_title, locale, harness),
+            self_report = self_report(locale, harness),
         )
+    }
+}
+
+/// The first-turn task-profile paragraph, Claude only: codex's block has no
+/// byte budget left for it, so codex gets the rule from the per-turn
+/// injection instead ([`crate::task_workflow_guidance::self_report_line`]),
+/// which it follows better than standing guidance anyway.
+fn self_report(locale: &str, harness: Harness) -> String {
+    match harness {
+        Harness::Claude => format!(
+            "\n\n{}",
+            crate::task_workflow_guidance::render_self_report(locale)
+        ),
+        Harness::Codex => String::new(),
     }
 }
 
@@ -316,6 +336,19 @@ mod tests {
                     .contains("await tools.")
             );
         }
+    }
+
+    /// The task-profile self-report rides next to the title rule for Claude;
+    /// codex gets it per turn instead (no budget left in its block).
+    #[test]
+    fn claude_variant_asks_for_the_first_turn_task_profile() {
+        for locale in ["en", "zh"] {
+            let claude = render_session_title_section("Boss", locale, Harness::Claude);
+            assert!(claude.contains("`fleet__task action=set`"), "{locale}: {claude}");
+            let codex = render_session_title_section("Boss", locale, Harness::Codex);
+            assert!(!codex.contains("fleet__task"), "{locale}: {codex}");
+        }
+        assert!(render_session_title_section("老板", "zh", Harness::Claude).contains("没把握就选 general"));
     }
 
     #[test]

@@ -394,6 +394,25 @@ mod tests {
             "the cursor-focus rendering must be recognised: {focused}"
         );
 
+        // Lead section only (a task profile, no TASKS.md): the workflow block
+        // must dedupe as well.
+        crate::task_profile::set(
+            "lead-only-session",
+            Some(crate::task_profile::TaskType::Research),
+            Some("answer a question"),
+            None,
+            crate::task_profile::ProfileSetter::Agent,
+        )
+        .expect("write profile");
+        let bare = tempfile::tempdir().expect("tempdir");
+        let lead_only =
+            crate::prd_tasks::render_active_plans_reminder(bare.path(), Some("lead-only-session"))
+                .expect("the lead section renders alone");
+        assert!(
+            is_plan_reminder(&lead_only),
+            "the lead-only rendering must be recognised: {lead_only}"
+        );
+
         unsafe {
             match prev {
                 Some(v) => std::env::set_var("FLEET_HOME", v),

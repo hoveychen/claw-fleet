@@ -1836,19 +1836,29 @@ pub const PLAN_REMINDER_MARK: &str = "Fleet PRD Discipline mode";
 /// nothing to inject (no TASKS.md anywhere, or a clean file with no active plan
 /// and no structural problem) — callers then no-op.
 pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Option<String> {
-    // The chain goal and, for a sub-task, its role line ride together above
-    // the plans: both say what this session answers to.
+    // The role line, the goal and the task type's workflow ride together
+    // above the plans: all of them say what this session answers to.
+    let task = session_id.map(|sid| {
+        let (title, locale) = crate::claude_launch::guidance_voice();
+        task_lead_for(&crate::task_model::TaskGraph::load(), sid, &title, &locale)
+    });
     let lead: Vec<String> = [
         crate::task_roles_guidance::render_role_reminder(session_id),
-        render_chain_goal_block(session_id),
+        task.as_ref().and_then(|t| t.goal_block.clone()),
+        task.and_then(|t| t.workflow),
     ]
     .into_iter()
     .flatten()
     .collect();
-    let goal = (!lead.is_empty()).then(|| lead.join("\n\n"));
+    let goal = (!lead.is_empty()).then(|| cap_lead(&lead.join("\n\n")));
     match (goal, render_plans_reminder_body(cwd, session_id)) {
         (None, body) => body,
-        (Some(g), None) => Some(format!("<system-reminder>\n{g}\n</system-reminder>")),
+        // The trailing mark lets `prd_context_dedup` recognise a lead-only
+        // reminder too; without it a workflow block (~2 KB) would be re-sent
+        // every turn in a workspace with no active plan.
+        (Some(g), None) => Some(format!(
+            "<system-reminder>\n{g}\n\n(re-injected by {PLAN_REMINDER_MARK} when it changes)\n</system-reminder>"
+        )),
         // Above the plans, not below: the finish line is what the next task is
         // measured against, and a reader who stops early should hit it first.
         (Some(g), Some(body)) => Some(body.replacen(
@@ -1859,45 +1869,108 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
     }
 }
 
-/// The chain-goal line injected above the plans, for a session on a relay chain
-/// whose chain has a stated objective.
-///
-/// Sits in the per-turn injection rather than only in the successor's opening
-/// prompt because the opening prompt is the first thing a compaction summarises
-/// away — and a 26-hop chain is exactly where the objective gets lost. Costs one
-/// line against the reminder's 12 KB ceiling.
-///
-/// The goal comes from the task profile (`task_profile`) when this session is
-/// a task's main line and the profile has one, else from the relay chain —
-/// chains recorded before task profiles existed keep rendering as before. A
-/// main-line session that has not relayed yet still gets the block once its
-/// profile carries a goal.
+/// The goal block alone, as the reminder would render it in Chinese.
+#[cfg(test)]
 fn render_chain_goal_block(session_id: Option<&str>) -> Option<String> {
-    let sid = session_id?;
-    let chain = crate::handoff::chain_containing(sid);
-    let goal = crate::task_profile::effective_chain_goal(
-        sid,
-        chain.as_ref().and_then(|c| c.goal.as_deref()),
-    )?;
-    let position = chain.as_ref().and_then(|c| {
-        c.hop_of(sid)
-            .map(|hop| (hop, c.session_ids().len()))
-    });
-    Some(render_goal_lines(&goal, position))
+    task_lead_for(&crate::task_model::TaskGraph::load(), session_id?, "", "zh").goal_block
 }
 
-/// Body of [`render_chain_goal_block`]; `position` is `(hop, chain length)`
-/// when the session sits on a relay chain.
-fn render_goal_lines(goal: &str, position: Option<(u32, usize)>) -> String {
+/// The task-level part of the lead section: the goal line (with the task's
+/// type and, for a main conversation, the goal-drift test) and the workflow
+/// block for the task's type.
+///
+/// The goal sits in the per-turn injection rather than only in a successor's
+/// opening prompt because the opening prompt is the first thing a compaction
+/// summarises away — and a 26-hop chain is exactly where the objective gets
+/// lost. It comes from the task profile when this session is a task's main
+/// line and the profile has one, else from the relay chain — chains recorded
+/// before task profiles existed keep rendering as before.
+struct TaskLead {
+    goal_block: Option<String>,
+    workflow: Option<String>,
+}
+
+/// Resolve [`TaskLead`] for `sid`. A sub-task reads the profile of the task it
+/// belongs to for the workflow, but its goal line stays its own chain's — the
+/// task's goal is the main conversation's finish line, not the sub-task's.
+fn task_lead_for(
+    graph: &crate::task_model::TaskGraph,
+    sid: &str,
+    title: &str,
+    locale: &str,
+) -> TaskLead {
+    use crate::task_workflow_guidance as wf;
+    let place = graph.place(sid);
+    let is_subtask = place.parent_task_id.is_some();
+    let profile = crate::task_profile::read(place.parent_task_id.as_deref().unwrap_or(&place.task_id));
+    let task_type = profile.as_ref().map(|p| p.task_type).unwrap_or_default();
+
+    let chain = crate::handoff::chain_containing(sid);
+    let profile_goal = (!is_subtask)
+        .then(|| profile.as_ref().and_then(|p| p.goal.clone()))
+        .flatten()
+        .filter(|g| !g.trim().is_empty());
+    let goal = profile_goal.or_else(|| chain.as_ref().and_then(|c| c.goal.clone()));
+    let goal_block = goal.map(|goal| {
+        let position = chain
+            .as_ref()
+            .and_then(|c| c.hop_of(sid).map(|hop| (hop, c.session_ids().len())));
+        let label = profile.as_ref().map(|_| wf::type_label(task_type, locale));
+        let mut block = render_goal_lines(&goal, position, label);
+        if !is_subtask {
+            block.push('\n');
+            block.push_str(&wf::drift_line(title, locale));
+        }
+        block
+    });
+    let role = if is_subtask { wf::Role::Subtask } else { wf::Role::Lead };
+    // No profile yet: a main conversation is nudged to report one instead.
+    let workflow = if profile.is_none() && !is_subtask {
+        Some(wf::self_report_line(locale).to_string())
+    } else {
+        wf::render_block(task_type, role, title, locale)
+    };
+    TaskLead {
+        goal_block,
+        workflow,
+    }
+}
+
+/// Body of the goal block; `position` is `(hop, chain length)` when the
+/// session sits on a relay chain, `type_label` the task's type when it has a
+/// profile.
+fn render_goal_lines(goal: &str, position: Option<(u32, usize)>, type_label: Option<&str>) -> String {
+    let kind = type_label.map(|t| format!("（类型：{t}）")).unwrap_or_default();
     let head = match position {
-        Some((hop, len)) => format!("本链目标（你是第 {hop}/{len} 棒）：{goal}"),
-        None => format!("本任务目标：{goal}"),
+        Some((hop, len)) => format!("本链目标（你是第 {hop}/{len} 棒）：{goal}{kind}"),
+        None => format!("本任务目标：{goal}{kind}"),
     };
     format!(
         "{head}\n\
          这是收工的判据——**不是**你手上这个 plan 做完。计划树全勾了，只要这件事没达成，\
          就不要把决策卡标成 `taskComplete: true`。目标真的变了（老板改了路线、或这件事已经\
          不成立），用 `fleet__task` 的 `goal` + `goalReason` 显式改，并在卡里告诉老板。"
+    )
+}
+
+/// Ceiling for the lead section (role line, recovery list, goal, workflow),
+/// which sits outside [`BODY_CAP_BYTES`]. A workflow block is ~1.8 KB and the
+/// goal block ~0.8 KB; the rest is headroom for a long recovery list.
+const LEAD_CAP_BYTES: usize = 4 * 1024;
+
+/// Truncate an oversized lead section on a char boundary, saying so.
+fn cap_lead(lead: &str) -> String {
+    if lead.len() <= LEAD_CAP_BYTES {
+        return lead.to_string();
+    }
+    let mut end = LEAD_CAP_BYTES;
+    while end > 0 && !lead.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n…(task section truncated at {} KB)",
+        &lead[..end],
+        LEAD_CAP_BYTES / 1024
     )
 }
 
@@ -2398,8 +2471,9 @@ trailing notes outside\n";
             "names the flag it governs: {out}"
         );
 
-        // A session on no chain gets nothing extra.
-        assert!(render_active_plans_reminder(&ws, Some("stranger")).is_none());
+        // A session on no chain gets no goal — only the profile nudge.
+        let stranger = render_active_plans_reminder(&ws, Some("stranger")).expect("nudge");
+        assert!(!stranger.contains("本链目标") && stranger.contains("fleet__task action=set"));
         // Neither does a chain with no stated goal.
         assert!(
             render_chain_goal_block(Some("s1")).is_some(),
@@ -2446,6 +2520,82 @@ trailing notes outside\n";
         let out = render_chain_goal_block(Some("solo")).expect("no chain, profile goal");
         assert!(out.starts_with("本任务目标：单会话的目标"), "{out}");
         assert!(render_chain_goal_block(Some("nobody")).is_none());
+    }
+
+    /// The workflow block follows the task's type: dev and research get their
+    /// own, general and a missing profile get none, and a sub-task reads the
+    /// type of the task it belongs to but gets the sub-task wording and no
+    /// drift line (it cannot split a task).
+    #[test]
+    fn task_lead_injects_the_workflow_for_the_task_type() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        let by = ProfileSetter::Agent;
+        set("dev-t", Some(TaskType::Dev), Some("修好 X"), None, by).unwrap();
+        set("res-t", Some(TaskType::Research), Some("弄清 Y"), None, by).unwrap();
+        set("gen-t", Some(TaskType::General), Some("聊聊 Z"), None, by).unwrap();
+        let graph = crate::task_model::TaskGraph::new(
+            Vec::<Vec<String>>::new(),
+            vec![("sub-1".to_string(), "res-t".to_string())],
+        );
+        let lead = |sid: &str| task_lead_for(&graph, sid, "", "zh");
+
+        let dev = lead("dev-t");
+        let goal = dev.goal_block.expect("dev goal");
+        assert!(goal.starts_with("本任务目标：修好 X（类型：开发）"), "{goal}");
+        assert!(goal.contains("fleet__task action=split"), "drift line: {goal}");
+        assert!(dev.workflow.expect("dev workflow").contains("本任务的流程：开发"));
+
+        let res = lead("res-t");
+        assert!(res.goal_block.unwrap().contains("（类型：研究）"));
+        assert!(res.workflow.expect("research workflow").contains("知识台账"));
+
+        let gen = lead("gen-t");
+        assert!(gen.goal_block.unwrap().contains("（类型：通用）"));
+        assert!(gen.workflow.is_none(), "general keeps today's behaviour");
+
+        let none = lead("nobody");
+        assert!(none.goal_block.is_none());
+        let nudge = none.workflow.expect("an unprofiled main conversation is nudged");
+        assert!(nudge.contains("fleet__task action=set"), "{nudge}");
+
+        let sub = lead("sub-1");
+        assert!(sub.goal_block.is_none(), "the task goal is not the sub-task's finish line");
+        let wf = sub.workflow.expect("sub-task inherits the task's type");
+        assert!(wf.contains("你是子任务") && wf.contains("没查到什么"), "{wf}");
+        assert!(!wf.contains("计划卡"), "{wf}");
+    }
+
+    /// `prd_context_dedup` skips an unchanged reminder, so the same profile
+    /// must render byte-identical twice.
+    #[test]
+    fn task_lead_renders_byte_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        crate::task_profile::set(
+            "res-t",
+            Some(crate::task_profile::TaskType::Research),
+            Some("弄清 Y"),
+            None,
+            crate::task_profile::ProfileSetter::Agent,
+        )
+        .unwrap();
+        let ws = dir.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let a = render_active_plans_reminder(&ws, Some("res-t")).expect("lead alone injects");
+        let b = render_active_plans_reminder(&ws, Some("res-t")).unwrap();
+        assert_eq!(a, b);
+        assert!(a.contains("弄清 Y") && a.len() <= LEAD_CAP_BYTES + 128, "{a}");
+    }
+
+    #[test]
+    fn cap_lead_cuts_on_a_char_boundary_and_says_so() {
+        let long = "研".repeat(LEAD_CAP_BYTES);
+        let out = cap_lead(&long);
+        assert!(out.ends_with("truncated at 4 KB)"), "{out}");
+        assert!(out.len() <= LEAD_CAP_BYTES + 64);
+        assert_eq!(cap_lead("short"), "short");
     }
 
     #[test]
