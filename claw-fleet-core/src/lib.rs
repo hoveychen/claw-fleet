@@ -77,6 +77,7 @@ pub mod host_identity;
 pub mod idle;
 pub mod idle_spin;
 pub mod commit_trailer;
+pub mod reward_hack;
 pub mod image_api;
 pub mod interaction_mode;
 pub mod interaction_mode_diagnostics;

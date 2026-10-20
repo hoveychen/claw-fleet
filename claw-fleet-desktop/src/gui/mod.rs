@@ -1681,6 +1681,8 @@ pub fn run() {
             set_session_mark,
             accept_tasks,
             reopen_tasks,
+            list_subtask_recovery,
+            resume_subtasks,
             set_session_title,
             host_features,
             list_workspace_procs,

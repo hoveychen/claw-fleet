@@ -2230,6 +2230,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "session_mark"
             | "accept_tasks"
             | "reopen_tasks"
+            | "subtasks_resume"
             | "set_resume_settings"
             | "session_explain_ask"
             | "upload_attachment"
@@ -2593,6 +2594,10 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "session_mark" => serve_session_mark(params),
         "accept_tasks" => serve_accept_tasks(params),
         "reopen_tasks" => serve_reopen_tasks(params),
+        "subtasks_recovery" => serve_subtasks_recovery(params),
+        // Wakes sessions; a resend of a lost reply replays the first per-id
+        // outcomes instead of showing every id as refused (now Running).
+        "subtasks_resume" => idempotent_write(method, params, || serve_subtasks_resume(params)),
         "set_resume_settings" => serve_set_resume_settings(params),
         // Forks a session and spends money; a lost reply must not fork twice.
         "session_explain_ask" => {
@@ -3942,6 +3947,24 @@ fn serve_reopen_tasks(params: &Value) -> Result<Value, String> {
     Ok(json!({ "ok": true, "reopened": reopened }))
 }
 
+fn serve_subtasks_recovery(params: &Value) -> Result<Value, String> {
+    let req: crate::subtask_recovery::SubtaskListRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad subtasks_recovery params: {e}"))?;
+    serde_json::to_value(crate::subtask_recovery::children_of(&req.session_id))
+        .map_err(|e| e.to_string())
+}
+
+fn serve_subtasks_resume(params: &Value) -> Result<Value, String> {
+    let req: crate::subtask_recovery::ResumeChildrenRequest =
+        serde_json::from_value(params.clone())
+            .map_err(|e| format!("bad subtasks_resume params: {e}"))?;
+    serde_json::to_value(crate::subtask_recovery::resume_children(
+        &req.session_ids,
+        req.prompt.as_deref(),
+    ))
+    .map_err(|e| e.to_string())
+}
+
 fn serve_session_mark(params: &Value) -> Result<Value, String> {
     let req: crate::session_mark::SetSessionMarkRequest = serde_json::from_value(params.clone())
         .map_err(|e| format!("bad session_mark params: {e}"))?;
@@ -5012,6 +5035,7 @@ mod tests {
             "session_mark",
             "accept_tasks",
             "reopen_tasks",
+            "subtasks_resume",
             "set_resume_settings",
             "session_explain_ask",
             "upload_attachment",
@@ -5019,7 +5043,7 @@ mod tests {
         ] {
             assert!(is_ackable_method(m), "{m} should be ackable");
         }
-        for m in ["pending_snapshot", "tail", "tail_delta", "wiki_list", ""] {
+        for m in ["pending_snapshot", "tail", "tail_delta", "wiki_list", "subtasks_recovery", ""] {
             assert!(!is_ackable_method(m), "{m} should not be ackable");
         }
     }
@@ -6361,6 +6385,23 @@ mod tests {
                     "{id}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn request_subtasks_recovery_and_resume_answer_per_id() {
+        with_temp_home(|| {
+            // No launch specs on record: nothing spawned, nothing to list.
+            let data = request_ok("subtasks_recovery", json!({"sessionId": "coord"}));
+            assert_eq!(data, json!([]));
+            // An unknown id is refused per id rather than failing the batch.
+            let data = request_ok("subtasks_resume", json!({"sessionIds": ["nope", "", "nope"]}));
+            let rows = data.as_array().expect("array of outcomes");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0]["sessionId"], "nope");
+            assert_eq!(rows[0]["ok"], false);
+            assert!(!rows[0]["message"].as_str().unwrap_or("").is_empty());
+            assert!(serve_request("subtasks_recovery", &json!({})).is_err());
         });
     }
 

@@ -83,6 +83,23 @@ pub(crate) fn cmd_guard() {
         return;
     }
 
+    // A commit whose diff games verification (skipped tests, rewritten
+    // expectations, silenced lints) instead of fixing the problem. A fast
+    // model judges the diff; denied once per identical diff, fails open.
+    if let Some(reason) = claw_fleet_core::reward_hack::decide(
+        hook_input.tool_name.as_deref(),
+        hook_input
+            .tool_input
+            .as_ref()
+            .and_then(|v| v.get("command"))
+            .and_then(|c| c.as_str()),
+        hook_input.session_id.as_deref(),
+        hook_input.cwd.as_deref(),
+    ) {
+        println!("{}", deny_hook_output(&reason));
+        return;
+    }
+
     // Classify the command.
     match guard::classify_hook_input(&hook_input) {
         GuardClassification::Allow => {

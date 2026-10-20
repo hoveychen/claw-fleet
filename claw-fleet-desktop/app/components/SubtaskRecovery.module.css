@@ -1,0 +1,189 @@
+/* The rail's "recover interrupted sub-tasks" block and its confirm list. The
+   block borrows the rail's section rhythm; the dialog follows ConfirmDialog. */
+.block {
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--color-warning);
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.trigger:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.overlay {
+  composes: overlay_enter from "./motion.module.css";
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-modal-overlay);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  composes: modal_enter from "./motion.module.css";
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  max-width: 480px;
+  width: 100%;
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-modal);
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
+.row {
+  border-top: 1px solid var(--color-border);
+}
+.row:first-child {
+  border-top: none;
+}
+
+.row_label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.row_label input {
+  margin-top: 2px;
+  accent-color: var(--color-accent);
+}
+
+.row_disabled .row_label {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.row_body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.row_title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.step {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.row_detail {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.result {
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.result_ok {
+  color: var(--color-success);
+}
+.result_err {
+  color: var(--color-error);
+}
+
+.error {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.btn {
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.btn:hover:not(:disabled) {
+  background: var(--color-bg-modal-hover);
+}
+
+.btn_primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}
+.btn_primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}

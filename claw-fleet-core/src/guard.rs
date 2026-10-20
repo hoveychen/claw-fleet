@@ -312,6 +312,7 @@ mod tests {
         let input = HookInput {
             session_id: None,
             transcript_path: None,
+            cwd: None,
             tool_name: Some("Bash".into()),
             tool_input: Some(serde_json::json!({ "command": "ls; echo ===; pwd" })),
         };
@@ -331,6 +332,7 @@ mod tests {
         let input = HookInput {
             session_id: None,
             transcript_path: None,
+            cwd: None,
             tool_name: Some("Bash".into()),
             // A description is present, so only the zsh hint is eligible.
             tool_input: Some(
@@ -381,6 +383,7 @@ mod tests {
         HookInput {
             session_id: None,
             transcript_path: None,
+            cwd: None,
             tool_name: Some("Bash".into()),
             tool_input: Some(serde_json::json!({ "command": command })),
         }
@@ -500,6 +503,7 @@ mod tests {
         HookInput {
             session_id: Some("sess-1".into()),
             transcript_path: None,
+            cwd: None,
             tool_name: Some("Bash".into()),
             tool_input: Some(input),
         }
@@ -524,6 +528,7 @@ mod tests {
         let input = HookInput {
             session_id: Some("s".into()),
             transcript_path: None,
+            cwd: None,
             tool_name: Some("Read".into()),
             tool_input: Some(serde_json::json!({ "file_path": "/x" })),
         };
@@ -645,6 +650,9 @@ pub struct HookInput {
     pub transcript_path: Option<String>,
     pub tool_name: Option<String>,
     pub tool_input: Option<serde_json::Value>,
+    /// Working directory of the session at the time of the call.
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 /// Result of classifying the hook input.

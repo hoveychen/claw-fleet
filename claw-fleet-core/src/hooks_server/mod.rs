@@ -1750,6 +1750,12 @@ fn handle_request(
             crate::routes::TASKS_ACCEPT => route_tasks_accept(ctx, request, json_header),
             crate::routes::TASKS_REOPEN => route_tasks_reopen(ctx, request, json_header),
 
+            // ── Sub-task recovery (恢复中断的子任务) ───────────────────────────
+            crate::routes::SUBTASKS_RECOVERY => {
+                route_subtasks_recovery(ctx, request, json_header)
+            }
+            crate::routes::SUBTASKS_RESUME => route_subtasks_resume(ctx, request, json_header),
+
             // ── Session mark (manual done/pending review state) ──────────────
             crate::routes::SESSION_MARK => {
                 route_session_mark(ctx, request, &query, json_header, path)
