@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { HandoffChain, RawMessage, SessionInfo } from "./types";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useSessionsStore } from "./store";
 import {
-  predecessorLink,
+  nextLeg,
   prependedCount,
   stitchLegs,
   type LoadedLeg,
@@ -82,11 +82,13 @@ export function usePrevLegs(current: CurrentLeg) {
   const topHop = top ? top.hop : hop;
   const topFullyLoaded = top ? top.fullyLoaded : current.fullyLoaded;
 
-  const link = chain && topId ? predecessorLink(chain.links, topId) : null;
-  const pred = link ? sessions.find((s) => s.id === link.fromSessionId) ?? null : null;
+  const next = topId
+    ? nextLeg({ links: chain?.links ?? null, topId, topHop, topFullyLoaded, sessions })
+    : null;
 
   const loadPrev = useCallback(async () => {
-    if (!link || !pred || loading) return;
+    if (!next || loading) return;
+    const { link, pred, hop: legHop } = next;
     const mine = epoch.current;
     setLoading(true);
     try {
@@ -99,7 +101,7 @@ export function usePrevLegs(current: CurrentLeg) {
         ...prev,
         {
           sessionId: pred.id,
-          hop: topHop - 1,
+          hop: legHop,
           title: pred.titleOverride || pred.aiTitle || `${pred.id.slice(0, 8)}…`,
           handedAt: link.handedAt,
           jsonlPath: pred.jsonlPath,
@@ -113,7 +115,7 @@ export function usePrevLegs(current: CurrentLeg) {
     } finally {
       if (epoch.current === mine) setLoading(false);
     }
-  }, [link, pred, loading, topHop]);
+  }, [next?.link, next?.pred, next?.hop, loading]);
 
   /** Page the topmost prepended leg one step further back. */
   const loadEarlierTop = useCallback(async () => {
@@ -159,10 +161,7 @@ export function usePrevLegs(current: CurrentLeg) {
     return m;
   }, [legs]);
 
-  const offer: PrevLegOffer | null =
-    topFullyLoaded && link && pred && topHop > 1
-      ? { hop: topHop - 1, loading, onLoad: loadPrev }
-      : null;
+  const offer: PrevLegOffer | null = next ? { hop: next.hop, loading, onLoad: loadPrev } : null;
 
   return {
     messages,

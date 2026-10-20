@@ -31,6 +31,26 @@ export function predecessorLink<L extends LegLinkShape>(
   return links.find((l) => l.toSessionId === sessionId) ?? null;
 }
 
+/** The leg a "load leg N" control would prepend next, or null when none is
+ *  on offer: the topmost loaded leg (the current one when nothing is
+ *  prepended) must reach its first message, the chain must name its
+ *  predecessor, and that session must be in this client's scan — its
+ *  transcript path comes from there. */
+export function nextLeg<S extends { id: string }, L extends LegLinkShape>(args: {
+  links: readonly L[] | null;
+  topId: string;
+  topHop: number;
+  topFullyLoaded: boolean;
+  sessions: readonly S[];
+}): { link: L; pred: S; hop: number } | null {
+  const { links, topId, topHop, topFullyLoaded, sessions } = args;
+  if (!links || !topFullyLoaded || topHop <= 1) return null;
+  const link = predecessorLink(links, topId);
+  if (!link) return null;
+  const pred = sessions.find((s) => s.id === link.fromSessionId);
+  return pred ? { link, pred, hop: topHop - 1 } : null;
+}
+
 /** What a divider row says about the leg directly above it. */
 export interface LegDividerInfo {
   /** 1-based hop of the leg above the divider. */

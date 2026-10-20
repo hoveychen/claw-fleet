@@ -580,6 +580,8 @@ const DICT: Record<string, string> = {
   "消息加载失败：{0}": "Failed to load messages: {0}",
   加载失败: "Load failed",
   加载更早的消息: "Load earlier messages",
+  "加载第 {0} 棒": "Load leg {0}",
+  "第 {0} 棒 · {1} · {2} 交棒": "Leg {0} · {1} · handed off {2}",
   "[图片]": "[image]",
   思考: "Thinking",
   "正在思考…": "Thinking…",

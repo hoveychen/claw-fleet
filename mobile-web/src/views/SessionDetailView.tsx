@@ -109,6 +109,8 @@ import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
 import { buildStatusPills, type DetailPane, type PillTarget } from "./sessionStatusPills";
 import { filterMainRows } from "./mainRows";
+import { usePrevLegs, type PrevLeg } from "./usePrevLegs";
+import { legDividerRow, type LegDividerInfo } from "../../../shared-ts/prevLeg";
 import { SelectionAskBar } from "./SelectionAskBar";
 import { SessionExplainsTab } from "./SessionExplainsTab";
 import { useSessionExplains } from "./useSessionExplains";
@@ -1157,6 +1159,9 @@ interface MessageRowProps {
    *  in). Absent for a transcript with no live session; the card then renders
    *  its classification without buttons it could not honour. */
   session?: { id: string; workspacePath: string; agentSource?: string | null } | null;
+  /** A row of a prepended relay leg: display only. No selection anchors (so
+   *  no side question forks this session over another leg's prose). */
+  readOnly?: boolean;
 }
 
 /** Content equality for the per-row tool metadata — reference equality would
@@ -1211,6 +1216,7 @@ const MessageRow = memo(function MessageRow({
   client,
   jsonlPath,
   session,
+  readOnly = false,
 }: MessageRowProps) {
   if (isNoResponseFiller(msg)) return null;
   // A turn Claude Code failed out of — an expired token, a quota, a 529. It
@@ -1338,9 +1344,9 @@ const MessageRow = memo(function MessageRow({
     // last as its durable anchor (positions shift as older history loads).
     <div
       className={styles.assistantRow}
-      data-role="assistant"
-      data-msg-idx={msgIdx}
-      data-msg-uuid={(msg as { uuid?: string }).uuid}
+      data-role={readOnly ? undefined : "assistant"}
+      data-msg-idx={readOnly ? undefined : msgIdx}
+      data-msg-uuid={readOnly ? undefined : (msg as { uuid?: string }).uuid}
     >
       <AssistantBlocks
         blocks={blocks}
@@ -1374,8 +1380,128 @@ const MessageRow = memo(function MessageRow({
   prev.onToggleThinking === next.onToggleThinking &&
   prev.client === next.client &&
   prev.jsonlPath === next.jsonlPath &&
+  prev.readOnly === next.readOnly &&
   toolMetaEqual(prev.toolMeta, next.toolMeta) &&
   JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
+
+/** The boundary below a prepended relay leg: which leg the rows above came
+ *  from, and when it handed the baton on. */
+function LegRule({ info }: { info: LegDividerInfo }) {
+  const when = new Date(info.handedAt).toLocaleString(dateLocale(), {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return (
+    <div className={styles.legRule} data-testid="leg-divider">
+      <span className={styles.legRuleLabel}>{t("第 {0} 棒 · {1} · {2} 交棒", info.hop, info.title, when)}</span>
+    </div>
+  );
+}
+
+/**
+ * One prepended relay leg, rendered with the same rows as the live transcript
+ * but read-only: no selection anchors, no failed-turn buttons, nothing live.
+ * Its own tool metadata and image loader point at its own transcript.
+ */
+export function PrevLegBlock({
+  leg,
+  client,
+  expandedThinking,
+  onToggleThinking,
+}: {
+  leg: PrevLeg;
+  client: FleetTransport | null;
+  expandedThinking: Set<string>;
+  onToggleThinking: (key: string) => void;
+}) {
+  const rows = useMemo(
+    () => settlePending(filterMainRows(leg.messages.filter(isRenderableRow), leg.jsonlPath), false),
+    [leg.messages, leg.jsonlPath],
+  );
+  const toolMeta = useMemo(() => collectToolMeta(leg.messages), [leg.messages]);
+  const resultIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const msg of leg.messages) {
+      for (const b of blocksOf(msg)) {
+        if (b.type === "tool_result" && b.tool_use_id) ids.add(b.tool_use_id);
+      }
+    }
+    return ids;
+  }, [leg.messages]);
+  const turnUsage = useMemo(() => turnUsageByIndex(rows), [rows]);
+  const detailPath = detailPathForSession(leg.agentSource, leg.jsonlPath);
+  const loadImage = useMemo(
+    () =>
+      client ? (addr: TranscriptImageAddr) => fetchTranscriptImage(client, leg.jsonlPath, addr) : null,
+    [client, leg.jsonlPath],
+  );
+  const metaFor = (msg: RawMessage): Map<string, ToolMeta> | undefined => {
+    let m: Map<string, ToolMeta> | undefined;
+    for (const b of blocksOf(msg)) {
+      if (b.type === "tool_use" && b.id) {
+        const meta = toolMeta.get(b.id);
+        if (meta) (m ??= new Map()).set(b.id, meta);
+      }
+    }
+    return m;
+  };
+  const keyOf = (msg: RawMessage, i: number) => `leg:${leg.sessionId}:${rowKeyOf(msg, i)}`;
+  const units = groupWorkRuns(groupMetaRuns(rows));
+  return (
+    <TranscriptImageContext.Provider value={loadImage}>
+      {units.map((unit) => {
+        if (unit.kind === "work-group") {
+          return (
+            <WorkRunBand
+              key={keyOf(unit.msgs[0], unit.startLocal)}
+              msgs={unit.msgs}
+              baseIndex={unit.startLocal}
+              expandedThinking={expandedThinking}
+              onToggleThinking={onToggleThinking}
+              live={false}
+              tail={false}
+              toolMeta={toolMeta}
+              resultIds={resultIds}
+              client={client}
+              jsonlPath={detailPath}
+            />
+          );
+        }
+        if (unit.kind === "meta-group") {
+          const segments = unit.msgs.map(userText).filter(Boolean);
+          if (segments.length === 0) return null;
+          const last = unit.msgs[unit.msgs.length - 1];
+          return (
+            <div key={keyOf(unit.msgs[0], unit.startLocal)} className={styles.assistantRow}>
+              <MetaFoldCard segments={segments} />
+              <div className={styles.rowTime}>{fmtTime(last.timestamp)}</div>
+            </div>
+          );
+        }
+        const key = keyOf(unit.msg, unit.startLocal);
+        return (
+          <MessageRow
+            key={key}
+            msg={unit.msg}
+            rowKey={key}
+            msgIdx={unit.startLocal}
+            expandedThinking={expandedThinking}
+            onToggleThinking={onToggleThinking}
+            toolMeta={metaFor(unit.msg)}
+            turnUsage={turnUsage.get(unit.startLocal)}
+            client={client}
+            jsonlPath={detailPath}
+            session={null}
+            readOnly
+          />
+        );
+      })}
+      <LegRule info={legDividerRow(leg)._fleetLegDivider} />
+    </TranscriptImageContext.Provider>
+  );
+}
 
 export function SessionDetailView({
   session,
@@ -1529,6 +1655,22 @@ export function SessionDetailView({
     if (!syncingLatest) setLoadingMore(false);
   }, [syncingLatest]);
   const showSyncBar = useDelayedFlag(syncingLatest);
+  // Earlier relay legs the reader chose to prepend (display-only; the poller,
+  // composer and optimistic echo never see them).
+  const prevLegs = usePrevLegs(client, session, sessions, messages !== null && !hasEarlier);
+  /** Distance from the bottom saved before a prepend, so the rows the reader
+   *  was looking at stay put when a leg lands above them. */
+  const prependAnchor = useRef<number | null>(null);
+  const anchorBeforePrepend = useCallback(() => {
+    const el = scrollRef.current;
+    stickToBottom.current = false;
+    if (el) prependAnchor.current = el.scrollHeight - el.scrollTop;
+  }, []);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && prependAnchor.current !== null) el.scrollTop = el.scrollHeight - prependAnchor.current;
+    prependAnchor.current = null;
+  }, [prevLegs.legs]);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -2134,6 +2276,30 @@ export function SessionDetailView({
             {t("加载更早的消息")}
           </button>
         )}
+        {messages !== null && !hasEarlier && (prevLegs.earlier || prevLegs.offer) && (
+          <button
+            className={styles.loadMore}
+            disabled={prevLegs.loading}
+            aria-busy={prevLegs.loading || undefined}
+            data-testid={prevLegs.earlier ? undefined : "load-prev-leg"}
+            onClick={() => {
+              anchorBeforePrepend();
+              void (prevLegs.earlier ?? prevLegs.offer!.onLoad)();
+            }}
+          >
+            {prevLegs.loading && <Spinner size={12} />}
+            {prevLegs.earlier ? t("加载更早的消息") : t("加载第 {0} 棒", prevLegs.offer!.hop)}
+          </button>
+        )}
+        {[...prevLegs.legs].reverse().map((leg) => (
+          <PrevLegBlock
+            key={leg.sessionId}
+            leg={leg}
+            client={client}
+            expandedThinking={expandedThinking}
+            onToggleThinking={toggleThinking}
+          />
+        ))}
         <TranscriptImageContext.Provider value={loadTranscriptImage}>
         {(() => {
           const units = groupWorkRuns(groupMetaRuns(mainRows));
