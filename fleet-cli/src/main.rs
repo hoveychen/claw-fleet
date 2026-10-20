@@ -253,6 +253,18 @@ enum Commands {
     /// [internal] MCP server — exposes `fleet__ask` over stdio JSON-RPC
     #[command(hide = true)]
     Mcp,
+    /// [internal] Write this build's claude launch files and print the launch
+    /// args as a JSON array. A Fleet process that outlived an upgrade asks the
+    /// binary on disk for these instead of rendering its own stale rules.
+    #[command(name = "launch-args", hide = true)]
+    LaunchArgs {
+        /// Workspace the session runs in
+        #[arg(long)]
+        workspace: String,
+        /// The argv the caller already built
+        #[arg(last = true, allow_hyphen_values = true)]
+        existing: Vec<String>,
+    },
     /// Agent Client Protocol agent over stdio — point an ACP editor at this
     ///
     /// Register it as an agent in Zed, JetBrains, VS Code, Neovim, Emacs or any
@@ -1560,6 +1572,10 @@ fn main() {
         },
         Commands::Elicitation => commands::guard::cmd_elicitation(),
         Commands::Mcp => commands::guard::cmd_mcp(),
+        Commands::LaunchArgs { workspace, existing } => {
+            let args = claw_fleet_core::claude_launch::fleet_launch_args_local(&existing, &workspace);
+            println!("{}", serde_json::to_string(&args).unwrap_or_else(|_| "[]".into()));
+        }
         Commands::Acp { url, token } => {
             commands::acp::cmd_acp(url.as_deref(), token.as_deref())
         }
