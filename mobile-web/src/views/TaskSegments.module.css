@@ -105,7 +105,8 @@
   background: var(--color-warning);
 }
 
-.dot[data-outcome="interrupted"] {
+.dot[data-outcome="interrupted"],
+.dot[data-outcome="takenOver"] {
   background: var(--color-text-dim);
 }
 

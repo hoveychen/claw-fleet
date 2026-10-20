@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { applyFrozenOrder, statusTone, subtaskStateLabel } from "./TasksView";
 import type { SessionInfo } from "../types";
+import { subtaskOutcome, type TurnEnd } from "../../../shared-ts/subtaskOutcome";
+import type { TaskState } from "../../../shared-ts/taskState";
 
 describe("statusTone quiet-alive", () => {
   const row = (over: Partial<SessionInfo>) =>
@@ -110,19 +112,25 @@ describe("applyFrozenOrder", () => {
 
 describe("subtaskStateLabel", () => {
   // The test runner resolves to English (no zh browser locale).
+  const label = (state: TaskState, end: TurnEnd | undefined) =>
+    subtaskStateLabel(state, subtaskOutcome(state, end));
   it("says reported back only for a clean end", () => {
-    expect(subtaskStateLabel("review", "clean")).toBe("Reported back");
+    expect(label("review", "clean")).toBe("Reported back");
     // codex / dsh rows carry no reading: keep the old wording.
-    expect(subtaskStateLabel("review", undefined)).toBe("Reported back");
-    expect(subtaskStateLabel("review", "midTurn")).toBe("Stopped mid-turn");
-    expect(subtaskStateLabel("review", "interrupted")).toBe("Interrupted by hand");
-    expect(subtaskStateLabel("review", "authFailed")).toBe("Auth failed");
-    expect(subtaskStateLabel("review", "failed")).toBe("Permanent error");
+    expect(label("review", undefined)).toBe("Reported back");
+    expect(label("review", "midTurn")).toBe("Stopped mid-turn");
+    expect(label("review", "interrupted")).toBe("Interrupted by hand");
+    expect(label("review", "authFailed")).toBe("Auth failed");
+    expect(label("review", "failed")).toBe("Permanent error");
+  });
+
+  it("names a failure some later work took over", () => {
+    expect(subtaskStateLabel("review", "takenOver")).toBe("Taken over");
   });
 
   it("leaves non-stopped states to the task state label", () => {
     // A running row's tail is mid-turn by definition; that is not a failure.
-    expect(subtaskStateLabel("running", "midTurn")).toBe("In progress");
-    expect(subtaskStateLabel("done", "midTurn")).toBe("Done");
+    expect(label("running", "midTurn")).toBe("In progress");
+    expect(label("done", "midTurn")).toBe("Done");
   });
 });

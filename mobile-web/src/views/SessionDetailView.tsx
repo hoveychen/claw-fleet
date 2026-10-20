@@ -2075,9 +2075,10 @@ export function SessionDetailView({
             <TaskPlansTab
               session={session}
               client={client}
-              underStep={(planId, text) => (
+              underStep={(planId, text, done) => (
                 <StepSubtasks
                   rows={subtasksForStep(subtaskRows, subtaskStepLinks(session), planId, text)}
+                  stepDone={done}
                   onOpenSessionId={onOpenSessionId}
                 />
               )}

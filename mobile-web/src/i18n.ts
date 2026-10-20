@@ -1193,6 +1193,7 @@ const DICT: Record<string, string> = {
   "账号/鉴权失败，恢复也会再失败": "Account / auth failure — a resume would fail again",
   被手动中断: "Interrupted by hand",
   永久错误: "Permanent error",
+  已被接手: "Taken over",
   已唤醒: "Resumed",
   "唤醒中…": "Resuming…",
   "唤醒 {0} 个": "Resume {0}",
