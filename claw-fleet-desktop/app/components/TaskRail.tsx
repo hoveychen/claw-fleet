@@ -16,7 +16,7 @@ import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
-import { subtaskOutcome, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
+import { subtaskCountsAsFinished, subtaskOutcome, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
 import { SubtaskRecoveryBlock } from "./SubtaskRecovery";
 import styles from "./TaskRail.module.css";
 
