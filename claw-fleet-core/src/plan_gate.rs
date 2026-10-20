@@ -28,8 +28,12 @@ use crate::task_progress::TaskProgressRecord;
 /// 1. `stop_hook_active` — we already blocked once this turn and the agent has
 ///    been told. Blocking again fights its judgement (and Claude Code force-stops
 ///    after 8 rounds anyway). Same rule `bg_guard` uses.
-/// 2. `has_pending_handoff` — the agent registered a relay. Ending the turn is
-///    exactly how a handoff fires; blocking it would strand the successor.
+/// 2. `has_registered_exit` — the agent took one of the legitimate exits the
+///    refusal text and Rule 4 name: a registered relay (ending the turn is
+///    exactly how a handoff fires), an armed watch (it resumes the session
+///    when its condition or target sessions settle), or a decision card still
+///    waiting for the boss's answer. Blocking any of these forces a pointless
+///    second stop, and nudges the agent toward busy-work while it waits.
 /// 3. A focus record not touched *this turn* — `focus.updated` before
 ///    `turn_start` means the session has run no `fleet plan` command since the
 ///    current user prompt arrived, so it isn't executing that plan right now.
@@ -48,9 +52,9 @@ pub fn gate_reason_in(
     focus: Option<&TaskProgressRecord>,
     turn_start: Option<u64>,
     stop_hook_active: bool,
-    has_pending_handoff: bool,
+    has_registered_exit: bool,
 ) -> Option<String> {
-    if stop_hook_active || has_pending_handoff {
+    if stop_hook_active || has_registered_exit {
         return None;
     }
     let rec = focus?;
@@ -78,7 +82,8 @@ pub fn gate_reason_in(
              如果你确实该停下,用对应的正当出口,而不是直接结束 turn:\n\
              • 需要老板拍板 → 出决策卡问他(真正的工作方向问题,不是进度汇报)\n\
              • 上下文快满了 → `fleet handoff --note \"...\" --plan {plan_id} --next <P>` 登记接力\n\
-             • 在等外部条件(CI/构建/部署) → `fleet watch create --until '...'`\n\
+             • 在等外部条件(CI/构建/部署) → `fleet watch create --until '...'`;\
+             在等派出去的子任务 → `fleet watch create --sessions <id,...>`\n\
              • 这个 plan 真的被外部阻塞(等账号/等资源) → 说明阻塞点并请示老板改派"
         ));
     }
@@ -110,14 +115,28 @@ pub fn gate_reason(cwd: &Path, session_id: &str, stop_hook_active: bool) -> Opti
     }
     let focus = crate::task_progress::read(session_id);
     let turn_start = crate::idle::read_turn_start(session_id);
-    let has_pending_handoff = crate::handoff::read_pending(session_id).is_some();
     gate_reason_in(
         cwd,
         focus.as_ref(),
         turn_start,
         stop_hook_active,
-        has_pending_handoff,
+        has_registered_exit(session_id),
     )
+}
+
+/// Whether `session_id` has a legitimate reason to end the turn with plan work
+/// left: a registered handoff, a live watch it owns, or an unanswered decision
+/// card. Cheapest check first — each is a small directory scan at most, and
+/// the `Stop` hook runs every turn. Scheduled `fleet schedule` / `fleet loop`
+/// runs are deliberately not counted: they spawn fresh sessions rather than
+/// resuming this one, and the guidance does not name them as an exit.
+fn has_registered_exit(session_id: &str) -> bool {
+    if crate::handoff::read_pending(session_id).is_some() {
+        return true;
+    }
+    crate::watch::session_has_live_watch(session_id)
+        || crate::parked::has_parked_for_session(session_id)
+        || crate::codex_source::session_has_pending_decision(session_id)
 }
 
 #[cfg(test)]
@@ -191,6 +210,8 @@ mod tests {
     }
 
     /// Hatch 2: a registered handoff — ending the turn is how it fires.
+    /// (The watch and pending-card exits feed the same flag; see
+    /// `watch::tests::live_watch_*` for the watch read.)
     #[test]
     fn releases_when_a_handoff_is_registered() {
         let (_t, root) = ws(ONE_PENDING);
