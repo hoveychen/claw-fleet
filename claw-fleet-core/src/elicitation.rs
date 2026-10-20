@@ -60,8 +60,10 @@ pub struct ElicitationRequest {
     /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub parked: bool,
-    /// Raised by [`crate::turn_completion_card`] because the session finished a
-    /// turn and is waiting for input — not by an agent asking a question.
+    /// Raised by Fleet because the session finished a turn and is waiting for
+    /// input — not by an agent asking a question. Nothing raises these any
+    /// more (the turn-completion card was removed 2026-10-20); the flag stays
+    /// so cards already on disk keep parsing and keep their terminal button.
     ///
     /// Only these cards carry the terminal button: the session is idle, so
     /// "the boss is done with this task" is a verdict they can actually make.
