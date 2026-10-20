@@ -107,8 +107,8 @@ fn backtrack_on_completion(
     content: &str,
     session_id: Option<&str>,
 ) -> Option<(String, Vec<String>)> {
-    let body = pt::plan_body(content, plan_id)?;
-    if body.lines().any(pt::is_pending_task_line) {
+    let block = pt::plan_block(content, plan_id)?;
+    if pt::has_open_work(&block.body, block.kind) {
         return None; // not fully complete yet
     }
     let target = pt::resolve_backtrack_target(cwd, plan_id)?;
@@ -219,6 +219,9 @@ fn create_in(
     let warnings = record_focus(cwd, plan_id, &updated, session_id);
     let kindness = match kind {
         pt::PlanKind::Explore => " [explore — 交付物是 exec 子 plan,不是代码改动]",
+        pt::PlanKind::Research => {
+            " [research — 交付物是 wiki 报告(结论/证据/置信度),可用 replan 重拆、stop 记理由收尾]"
+        }
         pt::PlanKind::Exec => "",
     };
     let message = match parent {
@@ -384,6 +387,62 @@ pub fn add(cwd: &Path, plan_id: &str, task: &str, text: &str) -> Result<PlanOutc
     let updated = pt::add_task(&content, plan_id, task, text)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(PlanOutcome::ok())
+}
+
+/// End research plan `plan_id` early by recording why (budget spent,
+/// saturation, question answered). The plan then counts as complete for the
+/// plan gate, the backtrack, the reviver and the injection, so the result
+/// carries the same "where the tree continues" directive a final `check` does.
+pub fn stop(
+    cwd: &Path,
+    plan_id: &str,
+    reason: &str,
+    session_id: Option<&str>,
+) -> Result<PlanOutcome, String> {
+    let path = pt::find_plan_source(cwd, plan_id)
+        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let updated = pt::record_stop(&content, plan_id, reason)?;
+    std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
+    let mut warnings = record_focus(cwd, plan_id, &updated, session_id);
+    if let Some((msg, mut w)) = backtrack_on_completion(cwd, plan_id, &updated, session_id) {
+        warnings.append(&mut w);
+        return Ok(PlanOutcome { message: msg, warnings });
+    }
+    Ok(PlanOutcome {
+        message: format!(
+            "ok — research plan '{plan_id}' 已记录停止理由,视为完成。\
+             收尾前确认报告已 `fleet__wiki publish`,并写明结论、证据、置信度和没覆盖什么。"
+        ),
+        warnings,
+    })
+}
+
+/// Replace the pending P-tasks of `plan_id` with `tasks`, recording `reason`.
+/// Ticked tasks are left untouched. Claims focus like `check` does: the
+/// session rewriting the road ahead is the one about to walk it.
+pub fn replan(
+    cwd: &Path,
+    plan_id: &str,
+    tasks: &[String],
+    reason: &str,
+    session_id: Option<&str>,
+) -> Result<PlanOutcome, String> {
+    let path = pt::find_plan_source(cwd, plan_id)
+        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let updated = pt::replan(&content, plan_id, tasks, reason)?;
+    std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
+    let warnings = record_focus(cwd, plan_id, &updated, session_id);
+    let next = pt::plan_body(&updated, plan_id)
+        .and_then(|b| pt::first_pending_task(&b))
+        .unwrap_or_default();
+    Ok(PlanOutcome {
+        message: format!("ok — plan '{plan_id}' 已重拆,下一个是:{next}"),
+        warnings,
+    })
 }
 
 /// Upgrade a TASKS.md from the v1 (unmarked) to the v2 (`id="..."`) sentinel

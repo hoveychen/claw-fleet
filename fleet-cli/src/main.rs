@@ -1106,8 +1106,30 @@ pub(crate) enum PlanCommands {
         /// investigates, and its deliverable is the exec child plans it spawns
         /// rather than edits of its own. Keeping the two apart stops an
         /// exploration's findings from silently redefining the implementation.
-        #[arg(long, value_parser = ["exec", "explore"], default_value = "exec")]
+        /// `research` produces knowledge itself (a wiki report): no child plans
+        /// required, replan as findings arrive, stop once the answer suffices.
+        #[arg(long, value_parser = ["exec", "explore", "research"], default_value = "exec")]
         kind: String,
+    },
+    /// Replace a plan's still-pending P-tasks with new ones, recording why.
+    /// Ticked P-tasks are kept as they are.
+    Replan {
+        plan_id: String,
+        /// New P-task text; repeat for each task, in order, without `**Pn**`
+        /// labels (they are numbered on from the last ticked P).
+        #[arg(long = "task", required = true)]
+        tasks: Vec<String>,
+        /// What finding made the old P-tasks wrong.
+        #[arg(long)]
+        reason: String,
+    },
+    /// End a research plan before every box is ticked by recording why:
+    /// budget spent, saturation, or the question is answered. Research plans
+    /// only; the plan then counts as complete.
+    Stop {
+        plan_id: String,
+        #[arg(long)]
+        reason: String,
     },
     /// Append a pending task to a plan.
     Add {

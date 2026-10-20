@@ -1,11 +1,23 @@
-import { useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { MoreHorizontal, X } from "lucide-react";
+import { Maximize2, Minimize2, MoreHorizontal, X } from "lucide-react";
 
 import type { AuxDocKind } from "../detailAux";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./AuxDocBar.module.css";
-import { Presence } from "./Presence";
+import { EXIT_MS, Presence } from "./Presence";
 import { SkeletonNumber, Spinner } from "./loading";
 
 /**
@@ -54,27 +66,122 @@ export function AuxPane({
   className: string;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [anchor, setAnchor] = useState<ContextMenuAnchor | null>(null);
-  return (
-    <div
-      className={className}
-      onContextMenu={(e) => {
-        // A text field inside a reader keeps its native Copy/Paste menu, the
-        // same carve-out the app-wide handler makes.
-        if ((e.target as Element | null)?.closest?.("input, textarea, [contenteditable]")) return;
-        if (menuItems.length === 0) return;
-        e.preventDefault();
+  // "closing" keeps the overlay mounted for its exit animation, with the card
+  // still inside it, before the card moves back into the rail.
+  const [maxState, setMaxState] = useState<"off" | "on" | "closing">("off");
+  const maximized = maxState !== "off";
+
+  // The card's DOM lives in one detached host node that is *moved* between the
+  // rail slot and the overlay frame, rather than rendered in two places. Moving
+  // the node keeps every reader's React state (a wiki's picked version, a file
+  // already read, a scrolled body) — swapping the render site would remount
+  // the reader and refetch. `display: contents` keeps the host out of the
+  // pane's flex layout.
+  const [host] = useState(() => {
+    const el = document.createElement("div");
+    el.style.display = "contents";
+    return el;
+  });
+  const slotRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const target = maximized ? frameRef.current : slotRef.current;
+    if (target && host.parentNode !== target) target.appendChild(host);
+  }, [maximized, host]);
+
+  useEffect(() => () => host.remove(), [host]);
+
+  const close = useCallback(() => {
+    setMaxState((s) => (s === "on" ? "closing" : s));
+  }, []);
+
+  useEffect(() => {
+    if (maxState !== "closing") return;
+    const timer = setTimeout(() => setMaxState("off"), EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [maxState]);
+
+  useEffect(() => {
+    if (maxState !== "on") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
         e.stopPropagation();
-        setAnchor({ x: e.clientX, y: e.clientY });
-      }}
-    >
-      {children}
-      <Presence when={Boolean(anchor)}>{anchor && (
-        <ContextMenu anchor={anchor} items={menuItems} onClose={() => setAnchor(null)} />
-      )}</Presence>
-    </div>
+        close();
+      }
+    };
+    // Capture phase, so Esc restores the card before anything behind the
+    // overlay (the detail pane, the rail) treats it as its own dismiss.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [maxState, close]);
+
+  const maximize = useMemo<AuxMaximize>(
+    () => ({
+      maximized,
+      toggle: () => (maxState === "on" ? close() : setMaxState("on")),
+    }),
+    [maximized, maxState, close],
+  );
+
+  const onContextMenu = (e: ReactMouseEvent) => {
+    // A text field inside a reader keeps its native Copy/Paste menu, the
+    // same carve-out the app-wide handler makes.
+    if ((e.target as Element | null)?.closest?.("input, textarea, [contenteditable]")) return;
+    if (menuItems.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchor({ x: e.clientX, y: e.clientY });
+  };
+
+  return (
+    <AuxMaximizeContext.Provider value={maximize}>
+      <div ref={slotRef} className={className} onContextMenu={onContextMenu}>
+        {/* React events bubble along the React tree, so right-clicks inside the
+            portal still reach this div's handler wherever the host sits. */}
+        {createPortal(children, host)}
+        {maximized && (
+          <div className={styles.max_placeholder}>
+            {t("detail.aux_maximized_here", "正在放大窗口中查看")}
+          </div>
+        )}
+        <Presence when={Boolean(anchor)}>{anchor && (
+          <ContextMenu anchor={anchor} items={menuItems} onClose={() => setAnchor(null)} />
+        )}</Presence>
+      </div>
+      {maximized &&
+        // Portalled to body: the rail sits under transformed ancestors that
+        // would otherwise trap a `position: fixed` overlay (see ImageLightbox).
+        createPortal(
+          <div
+            className={styles.max_overlay}
+            data-exiting={maxState === "closing" || undefined}
+            onClick={close}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              ref={frameRef}
+              className={`${className} ${styles.max_frame}`}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>,
+          document.body,
+        )}
+    </AuxMaximizeContext.Provider>
   );
 }
+
+/** The pane's maximize switch, read by the bar so every reader gets the button
+ *  without each one wiring it. Absent outside an `AuxPane`. */
+interface AuxMaximize {
+  maximized: boolean;
+  toggle: () => void;
+}
+
+const AuxMaximizeContext = createContext<AuxMaximize | null>(null);
 
 /** One fact on the density line. `strong` lifts the value the reader scans for
  *  (a size, a version) out of the surrounding context. */
@@ -134,6 +241,7 @@ export function AuxDocBar({
   onClose?: () => void;
 }) {
   const { t } = useTranslation();
+  const maximize = useContext(AuxMaximizeContext);
   const moreRef = useRef<HTMLButtonElement>(null);
   const [menuAnchor, setMenuAnchor] = useState<ContextMenuAnchor | null>(null);
 
@@ -155,13 +263,19 @@ export function AuxDocBar({
       <button
         type="button"
         className={styles.subject}
-        onClick={onCollapse}
+        // In the overlay, the header press restores rather than collapsing the
+        // card out from under the reader.
+        onClick={maximize?.maximized ? maximize.toggle : onCollapse}
         // Without a collapse there is nothing to press; a button that looks
         // pressable and answers nothing is worse than plain text.
-        disabled={!onCollapse}
+        disabled={!onCollapse && !maximize?.maximized}
         title={titleHint ?? title}
         aria-label={
-          onCollapse ? t("detail.aux_collapse_card", "收起此卡") : undefined
+          maximize?.maximized
+            ? t("detail.aux_restore", "还原")
+            : onCollapse
+              ? t("detail.aux_collapse_card", "收起此卡")
+              : undefined
         }
       >
         <span className={styles.icon} data-kind={kind} aria-hidden="true">
@@ -201,6 +315,32 @@ export function AuxDocBar({
             {a.busy ? <Spinner size={12} /> : a.icon}
           </button>
         ))}
+        {/* Outside the MAX_BAR_ACTIONS cut: reading the thing comfortably is
+            the one action every card has, whatever its kind. */}
+        {maximize && (
+          <button
+            type="button"
+            className={styles.act}
+            onClick={maximize.toggle}
+            title={
+              maximize.maximized
+                ? t("detail.aux_restore", "还原")
+                : t("detail.aux_maximize", "放大查看")
+            }
+            aria-label={
+              maximize.maximized
+                ? t("detail.aux_restore", "还原")
+                : t("detail.aux_maximize", "放大查看")
+            }
+            aria-pressed={maximize.maximized}
+          >
+            {maximize.maximized ? (
+              <Minimize2 size={13} strokeWidth={1.8} />
+            ) : (
+              <Maximize2 size={13} strokeWidth={1.8} />
+            )}
+          </button>
+        )}
         {menuItems.length > 0 && (
           <button
             ref={moreRef}

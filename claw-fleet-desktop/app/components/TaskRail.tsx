@@ -16,7 +16,7 @@ import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
 import { STATE_DOT } from "./TaskList";
-import { subtaskOutcome, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
+import { subtaskCountsAsFinished, subtaskOutcome, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
 import { SubtaskRecoveryBlock } from "./SubtaskRecovery";
 import styles from "./TaskRail.module.css";
 
@@ -222,7 +222,7 @@ export function TaskRail({
   const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
   const subtasks = row?.subtasks ?? [];
   const doneSubtasks = subtasks.filter(
-    (st) => st.state === "review" || st.state === "done",
+    (st) => subtaskCountsAsFinished(st.state, st.tip.lastTurnEnd),
   ).length;
   const doneSteps = steps?.filter((s) => s.done).length ?? 0;
   const current = steps?.findIndex((s) => !s.done) ?? -1;

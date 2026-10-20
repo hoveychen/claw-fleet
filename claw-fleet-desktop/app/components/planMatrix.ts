@@ -17,8 +17,10 @@ export function nodeKey(node: PlanNode): string {
   return `${node.source ?? ""}:${node.id}`;
 }
 
-/** P-tasks left in this plan alone. */
+/** P-tasks left in this plan alone. A stopped research plan has none: its
+ *  unticked boxes are no longer work. */
 export function pendingOf(node: PlanNode): number {
+  if (node.stopReason) return 0;
   return Math.max(0, node.total - node.done);
 }
 

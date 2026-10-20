@@ -279,7 +279,7 @@ pub fn collect_views(
             if let Some(p) = b.parent.as_deref() {
                 parent.insert(id, p);
             }
-            if b.body.lines().any(pt::is_pending_task_line) {
+            if pt::has_open_work(&b.body, b.kind) {
                 pending.insert(id);
             }
         }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { subtaskOutcome } from "../../shared-ts/subtaskOutcome";
+import { subtaskCountsAsFinished, subtaskOutcome } from "../../shared-ts/subtaskOutcome";
 import en from "./locales/en.json";
 import zh from "./locales/zh.json";
 
@@ -25,5 +25,29 @@ describe("subtaskOutcome", () => {
       expect((zh.home as Record<string, string>)[k]).toBeTruthy();
       expect((en.home as Record<string, string>)[k]).toBeTruthy();
     }
+  });
+});
+
+describe("subtaskCountsAsFinished", () => {
+  it("counts done and cleanly reported sub-tasks", () => {
+    expect(subtaskCountsAsFinished("done", "midTurn")).toBe(true);
+    expect(subtaskCountsAsFinished("review", "clean")).toBe(true);
+  });
+
+  it("keeps the old reading when the signal is missing", () => {
+    expect(subtaskCountsAsFinished("review", null)).toBe(true);
+    expect(subtaskCountsAsFinished("review", undefined)).toBe(true);
+  });
+
+  it("does not count a stopped sub-task that did not end clean", () => {
+    for (const e of ["midTurn", "interrupted", "authFailed", "failed"] as const) {
+      expect(subtaskCountsAsFinished("review", e)).toBe(false);
+    }
+  });
+
+  it("does not count a sub-task that is still moving", () => {
+    expect(subtaskCountsAsFinished("running", "clean")).toBe(false);
+    expect(subtaskCountsAsFinished("waiting", null)).toBe(false);
+    expect(subtaskCountsAsFinished("needsYou", null)).toBe(false);
   });
 });
