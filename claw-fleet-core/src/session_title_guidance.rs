@@ -17,9 +17,10 @@
 //! - [`Harness::Codex`] — codex defers MCP tools, so the call must be made with
 //!   the fully-qualified direct-call shape inside the outer `exec`.
 //!
-//! The Claude section also carries the one-line kickoff rule (the task's type
-//! is settled by a kickoff card, `fleet__task action=kickoff`, never by the
-//! agent labelling it). It replaced a first-turn self-report that sat here.
+//! The kickoff rule (the task's type is settled by a kickoff card,
+//! `fleet__task action=kickoff`) used to trail this section; it now lives in
+//! the interaction-mode guidance next to the other card rules
+//! ([`crate::interaction_mode`]), so it is stated exactly once.
 //!
 //! **dsh is deliberately absent.** A dsh session has no Fleet MCP server at all
 //! (see [`crate::dsh_guidance`]), so `fleet__set_session_title` does not exist
@@ -73,10 +74,9 @@ pub fn render_session_title_section(user_title: &str, locale: &str, harness: Har
 一样要认得出来。如果对话主题后来发生了实质变化，再调用一次换成新标题；\
 否则不要每轮都改名。\n\
 \n\
-{tail}{kickoff}\n",
+{tail}\n",
             title = user_title,
             tail = tail(user_title, locale, harness),
-            kickoff = kickoff_rule(user_title, locale, harness),
         )
     } else {
         format!(
@@ -95,33 +95,10 @@ questions — a short session still has to be recognisable in the list. If the \
 topic later changes materially, call it again with the new title; otherwise do \
 not rename on every turn.\n\
 \n\
-{tail}{kickoff}\n",
+{tail}\n",
             title = user_title,
             tail = tail(user_title, locale, harness),
-            kickoff = kickoff_rule(user_title, locale, harness),
         )
-    }
-}
-
-/// The kickoff rule, Claude only: `kickoff` is not wired for codex or dsh yet.
-/// The task stays undecided while the conversation is still working out what
-/// the job is; once it is clear and research is about to start, the agent
-/// raises a kickoff card and the boss's 开工 settles the type.
-fn kickoff_rule(user_title: &str, locale: &str, harness: Harness) -> String {
-    match (harness, locale == "zh") {
-        (Harness::Codex, _) => String::new(),
-        (Harness::Claude, true) => format!(
-            "\n\n**任务类型不由你贴**：先和{user_title}聊清楚；准备动手研究（查资料、派子任务、跑实验）之前，\
-用 `fleet__task action=kickoff` 发开工卡（研究问题、子问题、预算、停止条件、交付形式），\
-{user_title}点「开工」才定型。`goal` 照旧可以随时用 `fleet__task action=set` 写。子任务不调用。"
-        ),
-        (Harness::Claude, false) => format!(
-            "\n\n**You do not label the task's type**: talk it through with {user_title} first; before \
-you start researching (looking things up, spawning sub-tasks, running experiments), raise a kickoff \
-card with `fleet__task action=kickoff` (the question, sub-questions, budget, stop condition, \
-deliverable) — the type is settled only when {user_title} presses Start. You can still write the \
-`goal` any time with `fleet__task action=set`. Sub-tasks do not call it."
-        ),
     }
 }
 
@@ -131,14 +108,19 @@ deliverable) — the type is settled only when {user_title} presses Start. You c
 fn tail(user_title: &str, locale: &str, harness: Harness) -> String {
     match (locale == "zh", harness) {
         (true, Harness::Claude) => format!(
-            "Fleet 启动的会话从第 1 轮起就注册好了这个工具，按名直接调用即可，\
-无需 `ToolSearch` 预加载。它是非阻塞的：若调用返回未注册／未知工具错误，\
+            "Fleet 启动的会话从第 1 轮起就注册好了这个工具，通常可以按名直接调用；\
+若它出现在 deferred 清单里（只列名字、没有 schema），首次调用前先用 `ToolSearch` \
+以 `select:mcp__fleet__fleet__set_session_title` 加载——被延迟不等于缺席。\
+它是非阻塞的：若调用返回未注册／未知工具错误，\
 说明本会话不是 Fleet 起的，直接继续手上的活，不要重试、也不要为此打断{title}。",
             title = user_title,
         ),
         (false, Harness::Claude) => format!(
-            "In a Fleet-launched session this tool is registered from turn 1 — call it \
-by name, no `ToolSearch` preload needed. It is non-blocking. If the call \
+            "In a Fleet-launched session this tool is registered from turn 1 and can \
+usually be called by name; if it shows up in the deferred list (name only, no \
+schema), load it first with `ToolSearch` using \
+`select:mcp__fleet__fleet__set_session_title` — deferred does not mean absent. \
+It is non-blocking. If the call \
 returns a not-registered / unknown-tool error, this session was not spawned by \
 Fleet: continue the task without retrying or interrupting {title}.",
             title = user_title,
@@ -346,20 +328,30 @@ mod tests {
         }
     }
 
-    /// The kickoff rule rides next to the title rule for Claude only (kickoff
-    /// is not wired for codex yet), and the first-turn self-report it replaced
-    /// is gone.
+    /// The kickoff rule lives in the interaction-mode section; the title
+    /// section must not repeat it, and the first-turn self-report it replaced
+    /// stays gone.
     #[test]
-    fn claude_variant_points_at_kickoff_not_a_self_report() {
+    fn title_section_does_not_carry_the_kickoff_rule() {
         for locale in ["en", "zh"] {
-            let claude = render_session_title_section("Boss", locale, Harness::Claude);
-            assert!(claude.contains("`fleet__task action=kickoff`"), "{locale}: {claude}");
-            assert!(!claude.contains("没把握就选 general") && !claude.contains("unsure"), "{claude}");
-            let codex = render_session_title_section("Boss", locale, Harness::Codex);
-            assert!(!codex.contains("fleet__task"), "{locale}: {codex}");
+            for harness in [Harness::Claude, Harness::Codex] {
+                let s = render_session_title_section("Boss", locale, harness);
+                assert!(!s.contains("fleet__task"), "{locale}/{harness:?}: {s}");
+                assert!(!s.contains("开工") && !s.contains("kickoff"), "{locale}/{harness:?}: {s}");
+                assert!(!s.contains("没把握就选 general"), "{s}");
+            }
         }
-        let zh = render_session_title_section("老板", "zh", Harness::Claude);
-        assert!(zh.contains("老板点「开工」才定型"), "{zh}");
+    }
+
+    /// A deferred listing must be answered with a ToolSearch preload, never
+    /// with "not needed" — CC 2.1.284 does defer Fleet MCP tools.
+    #[test]
+    fn claude_tail_teaches_the_toolsearch_fallback() {
+        for locale in ["en", "zh"] {
+            let s = render_session_title_section("Boss", locale, Harness::Claude);
+            assert!(s.contains("select:mcp__fleet__fleet__set_session_title"), "{locale}: {s}");
+            assert!(!s.contains("无需 `ToolSearch` 预加载") && !s.contains("no `ToolSearch` preload needed"), "{s}");
+        }
     }
 
     #[test]
