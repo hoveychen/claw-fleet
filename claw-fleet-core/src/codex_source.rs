@@ -18,7 +18,7 @@
 //!   - `event_msg`      — events: user_message, agent_message, turn_complete, token_count, etc.
 //!   - `compacted`      — context compaction marker.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -1781,6 +1781,8 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
     }
     let age_secs = (now_secs as f64 - last_activity_ms as f64 / 1000.0).max(0.0);
 
+    // Set when the active-row branch below parsed the whole rollout anyway.
+    let mut fresh_turn_end: Option<Option<crate::session::TurnEnd>> = None;
     // For recently active sessions, read the rollout file for precise status.
     let (
         status,
@@ -1815,6 +1817,7 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
                         .lines()
                         .filter_map(|l| serde_json::from_str(l).ok())
                         .collect();
+                    fresh_turn_end = Some(codex_last_turn_end(&rollout_path, Some(&all_parsed)));
 
                     let last_n_start = all_parsed.len().saturating_sub(100);
                     let last_n = &all_parsed[last_n_start..];
@@ -1986,6 +1989,9 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
         )
     };
 
+    let last_turn_end =
+        fresh_turn_end.unwrap_or_else(|| codex_last_turn_end(&rollout_path, None));
+
     // Reuse the shared helper so codex sessions collapse `.worktrees/<task-id>`
     // to the repo name (and get the chat-workspace rename) identically to the
     // Claude path — see session::workspace_name.
@@ -2091,7 +2097,7 @@ fn build_session_from_sqlite(thread: &SqliteThread) -> Option<SessionInfo> {
         proc_alive,
         pending_tool_batch: false,
         awaiting_model: false,
-        last_turn_end: None,
+        last_turn_end,
         stuck_tool: None,
         current_tool: None,
         last_skill: None,
@@ -2151,6 +2157,26 @@ pub fn codex_stale_rollout_paths(sessions: &[crate::session::SessionInfo]) -> Ve
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn last_turn_end_is_cached_per_file_state() {
+        use crate::session::TurnEnd;
+        use std::io::Write as _;
+        let mut f = tempfile::Builder::new().suffix(".jsonl").tempfile().unwrap();
+        writeln!(f, r#"{{"type":"event_msg","payload":{{"type":"task_started"}}}}"#).unwrap();
+        f.flush().unwrap();
+        assert_eq!(super::codex_last_turn_end(f.path(), None), Some(TurnEnd::MidTurn));
+        // The row's own full parse wins over the cache and refreshes it.
+        let parsed = [serde_json::json!({"type":"event_msg","payload":{"type":"task_complete"}})];
+        assert_eq!(super::codex_last_turn_end(f.path(), Some(&parsed)), Some(TurnEnd::Clean));
+        // Unchanged file: served from the cache, not re-read.
+        assert_eq!(super::codex_last_turn_end(f.path(), None), Some(TurnEnd::Clean));
+        // The file grew: re-read.
+        writeln!(f, r#"{{"type":"event_msg","payload":{{"type":"turn_aborted"}}}}"#).unwrap();
+        f.flush().unwrap();
+        assert_eq!(super::codex_last_turn_end(f.path(), None), Some(TurnEnd::Interrupted));
+        assert_eq!(super::codex_last_turn_end(std::path::Path::new("/nonexistent/r.jsonl"), None), None);
+    }
     use super::{
         build_session_from_sqlite, clamp_dead_session_status, codex_account_email_from_auth_json,
         codex_cost_and_input, codex_last_turn_incomplete, codex_out_of_credits,
@@ -5619,6 +5645,47 @@ pub fn interrupt_stalled_codex_turn(stall: &StalledCodexTurn) -> Result<(), Stri
     .map(|_| ())
 }
 
+/// How each rollout's last turn ended, keyed by path and stamped with the
+/// file's `(mtime, len)` when it was read. An unchanged rollout has an
+/// unchanged outcome, so a row past the scan's 10-minute rollout window reuses
+/// its verdict instead of re-reading the tail every scan — and keeps it, rather
+/// than flipping to "unknown" once the window closes.
+type TurnEndCache = HashMap<PathBuf, (SystemTime, u64, Option<crate::session::TurnEnd>)>;
+static TURN_END_CACHE: std::sync::LazyLock<std::sync::Mutex<TurnEndCache>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Entries kept before the cache is reset; far above the number of rollouts a
+/// 7-day scan visits, it only bounds a long-lived process.
+const TURN_END_CACHE_CAP: usize = 4096;
+
+/// `last_turn_end` for the rollout at `path`. `parsed` is the whole rollout
+/// when the caller already read it (the active-row path); otherwise a cache
+/// miss reads it via [`crate::session_probe::codex_file_verdict`] — the same
+/// verdict the sub-task probe reaches.
+fn codex_last_turn_end(path: &Path, parsed: Option<&[Value]>) -> Option<crate::session::TurnEnd> {
+    let meta = fs::metadata(path).ok()?;
+    let key = (meta.modified().ok()?, meta.len());
+    if parsed.is_none() {
+        if let Some((m, l, end)) = TURN_END_CACHE.lock().ok()?.get(path) {
+            if (*m, *l) == key {
+                return *end;
+            }
+        }
+    }
+    let verdict = match parsed {
+        Some(lines) => crate::session_probe::codex_tail_verdict(lines),
+        None => crate::session_probe::codex_file_verdict(path),
+    };
+    let end = crate::session_probe::turn_end_of(&verdict);
+    if let Ok(mut cache) = TURN_END_CACHE.lock() {
+        if cache.len() >= TURN_END_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(path.to_path_buf(), (key.0, key.1, end));
+    }
+    end
+}
+
 /// The session's live pid, precise whenever there is one: it is the process
 /// Fleet spawned for exactly this thread.
 fn resolve_pid(thread_id: &str) -> (Option<u32>, bool) {
@@ -5848,7 +5915,7 @@ fn parse_codex_session(rollout_path: &Path) -> Option<SessionInfo> {
         proc_alive,
         pending_tool_batch: false,
         awaiting_model: false,
-        last_turn_end: None,
+        last_turn_end: codex_last_turn_end(rollout_path, Some(&all_parsed)),
         stuck_tool: None,
         current_tool: None,
         last_skill: None,
@@ -8121,3 +8188,4 @@ impl CodexSource {
         sessions
     }
 }
+

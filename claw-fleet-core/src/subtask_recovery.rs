@@ -96,7 +96,8 @@ pub struct SubtaskStatus {
 
 /// Map one probe onto a recovery decision. Pure, so every row is testable.
 ///
-/// - `tail`: the transcript-tail verdict the probe read (absent for dsh).
+/// - `tail`: the transcript-tail verdict the probe read (for dsh, only once
+///   the session has stopped and its log was readable).
 /// - `remote_lost`: the workspace's remote side is disconnected.
 /// - `closed`: the sub-task's task carries a terminal outcome.
 pub fn class_of(
@@ -137,7 +138,8 @@ pub fn class_of(
 /// Whether a fatal API error text is about credentials or the account rather
 /// than the request. Matches Claude Code's `error` enums (`authentication_failed`,
 /// `oauth_org_not_allowed`, `billing_error`) and Codex's `codex_error_info`
-/// (`usage_limit_exceeded`), plus the message texts seen in real transcripts
+/// (`usage_limit_exceeded`), dsh's failure codes (`AUTH`, `QUOTA`,
+/// `ACCOUNT_QUOTA`, `MISSING_CREDENTIAL`), plus the message texts seen in real transcripts
 /// ("Request not allowed" is the 403).
 pub(crate) fn is_account_error(e: &str) -> bool {
     let e = e.to_ascii_lowercase();
@@ -154,10 +156,15 @@ pub(crate) fn is_account_error(e: &str) -> bool {
         "billing",
         "credit",
         "usage_limit",
+        "quota",
+        "credential",
         "subscription",
     ]
     .iter()
     .any(|k| e.contains(k))
+        // dsh's `AUTH` failure code (see `session_probe::dsh_tail_verdict`).
+        || e.starts_with("auth:")
+        || e == "auth"
 }
 
 /// The sub-task ids spawned by any hop of `chain`, given every spawn edge
@@ -1071,5 +1078,26 @@ mod tests {
             v,
             serde_json::json!({"sessionId": "a", "ok": false, "message": "x"})
         );
+    }
+
+    /// The task page's label (`SessionInfo::last_turn_end`, from
+    /// `session_probe::turn_end_of`) and the recovery class of a failed
+    /// sub-task must agree on every tail verdict.
+    #[test]
+    fn failed_class_agrees_with_the_turn_end_label() {
+        use crate::session::TurnEnd;
+        for tail in all_tails().into_iter().flatten() {
+            let class = class_of(Phase::Failed, Some(&tail), false, false);
+            let label = crate::session_probe::turn_end_of(&tail);
+            let expected = match label {
+                Some(TurnEnd::Clean) => RecoveryClass::Done,
+                Some(TurnEnd::MidTurn) => RecoveryClass::Recoverable,
+                Some(TurnEnd::Interrupted) => RecoveryClass::UserInterrupted,
+                Some(TurnEnd::AuthFailed) => RecoveryClass::AuthFailed,
+                Some(TurnEnd::Failed) => RecoveryClass::Failed,
+                None => RecoveryClass::Unknown,
+            };
+            assert_eq!(class, expected, "tail {tail:?} labelled {label:?}");
+        }
     }
 }
