@@ -1996,7 +1996,13 @@ export function SessionDetail({
                     </>
                     )}
                   </div>
-                  {task && <TaskProfileBar sessionId={task.tip.id} profile={taskSum?.profile} />}
+                  {task && (
+                    <TaskProfileBar
+                      sessionId={task.tip.id}
+                      profile={taskSum?.profile}
+                      splitFrom={taskSum?.splitFrom}
+                    />
+                  )}
                   </div>
                   {/* Toolbar. The rail's switch leads it — this is the control
                       for the column beside the conversation, and nothing else.

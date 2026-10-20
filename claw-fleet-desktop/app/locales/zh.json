@@ -3195,6 +3195,9 @@
     "reason_required": "改目标须填写理由",
     "save": "保存",
     "cancel": "取消",
-    "set_by_boss": "老板改写"
+    "set_by_boss": "老板改写",
+    "split_from": "拆自",
+    "split_from_untitled": "（未命名任务）",
+    "split_from_open": "打开来源任务"
   }
 }

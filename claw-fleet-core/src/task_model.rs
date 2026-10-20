@@ -163,6 +163,22 @@ pub struct TaskSummary {
     /// The task's type and goal (`task_profile`), when one was set.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub profile: Option<crate::task_profile::TaskProfileBrief>,
+    /// The task this one was split off from (`fleet__task action=split`),
+    /// with that task's display title so a client can link back to it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub split_from: Option<SplitFromRef>,
+}
+
+/// Where a split-off task came from: the source task's id (its first hop's
+/// session id) and its title as of this scan. `title` is `None` when the
+/// source task is no longer in the scanned sessions.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct SplitFromRef {
+    pub task_id: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
 }
 
 /// One sub-task's step link: which plan step it was dispatched to work on.
@@ -200,6 +216,7 @@ fn stamp_summaries(
     focus: impl Fn(&str) -> Option<crate::task_progress::TaskProgressRecord>,
     spawn_step: impl Fn(&str) -> Option<(String, String)>,
     profile: impl Fn(&str) -> Option<crate::task_profile::TaskProfileBrief>,
+    split_from: impl Fn(&str) -> Option<String>,
 ) {
     let mut by_task: HashMap<String, TaskSummary> = HashMap::new();
     let mut sub_lines: HashMap<String, HashSet<String>> = HashMap::new();
@@ -273,6 +290,11 @@ fn stamp_summaries(
             .map(|(task_id, (plan_id, step))| SubtaskStep { task_id, plan_id, step })
             .collect();
         sum.profile = profile(top);
+        // The split note sits on the new task's first hop, whose id is the task id.
+        sum.split_from = split_from(top).map(|from| SplitFromRef {
+            title: line_title(sessions, &from, true),
+            task_id: from,
+        });
     }
 
     for s in sessions.iter_mut() {
@@ -296,6 +318,7 @@ pub fn enrich_summaries(sessions: &mut [SessionInfo]) {
             Some((spec.spawned_for_plan.clone()?, spec.spawned_for_step.clone()?))
         },
         |task| profiles.get(task).map(Into::into),
+        |task| notes.get(task)?.split_from_task.clone(),
     );
 }
 
@@ -601,7 +624,7 @@ mod tests {
                 goal: Some("g".into()),
                 set_by: crate::task_profile::ProfileSetter::Agent,
             })
-        });
+        }, |_| None);
         let sum = rows[0].task_summary.clone().expect("main hop carries it");
         assert_eq!(rows[1].task_summary.as_ref(), Some(&sum));
         assert!(rows[2].task_summary.is_none() && rows[4].task_summary.is_none());
@@ -624,6 +647,39 @@ mod tests {
             vec![SubtaskStep { task_id: "b1".into(), plan_id: "p".into(), step: "P2".into() }],
             "the b-line links once; c was spawned without a step"
         );
+    }
+
+    #[test]
+    fn split_off_task_links_back_to_its_source_by_title() {
+        let g = TaskGraph::new(vec![ids(&["a1", "a2"])], vec![]);
+        let titled = |id: &str, title: Option<&str>| SessionInfo {
+            id: id.into(),
+            ai_title: title.map(Into::into),
+            ..Default::default()
+        };
+        let mut rows = vec![
+            titled("a1", Some("old title")),
+            titled("a2", Some("Refactor auth")),
+            titled("s", Some("Write docs")),
+            titled("orphan", None),
+        ];
+        stamp(&g, &mut rows);
+        stamp_summaries(&mut rows, |_| None, |_| None, |_| None, |task| match task {
+            "s" => Some("a1".to_string()),
+            "orphan" => Some("gone".to_string()),
+            _ => None,
+        });
+        assert_eq!(
+            rows[2].task_summary.as_ref().and_then(|s| s.split_from.clone()),
+            Some(SplitFromRef { task_id: "a1".into(), title: Some("Refactor auth".into()) }),
+            "the source's title is its newest hop's"
+        );
+        assert_eq!(
+            rows[3].task_summary.as_ref().and_then(|s| s.split_from.clone()),
+            Some(SplitFromRef { task_id: "gone".into(), title: None }),
+            "a source no longer scanned still links by id"
+        );
+        assert_eq!(rows[0].task_summary.as_ref().and_then(|s| s.split_from.clone()), None);
     }
 
     #[test]

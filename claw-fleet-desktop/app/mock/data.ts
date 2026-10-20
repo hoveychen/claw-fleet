@@ -645,6 +645,8 @@ const BILLING_TASK_SUMMARY = {
     goal: "Usage-based billing live behind usage_billing_v2 with zero invoice drift",
     setBy: "agent" as const,
   },
+  // Split off the auth task when the boss's ask drifted to billing.
+  splitFrom: { taskId: "sess-api-main", title: "Fix JWT token validation in auth middleware" },
 };
 
 const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [

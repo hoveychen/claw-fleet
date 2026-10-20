@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import type { TaskProfile, TaskProfileBrief, TaskType } from "../generated/types";
+import type { SplitFromRef, TaskProfile, TaskProfileBrief, TaskType } from "../generated/types";
+import { useSessionsStore, useUIStore } from "../store";
 import styles from "./TaskProfileBar.module.css";
 
 const TYPES: TaskType[] = ["dev", "research", "general"];
@@ -22,6 +23,35 @@ export function TaskTypeChip({ profile }: { profile: TaskProfileBrief | null | u
   );
 }
 
+/** The newest main-line hop of task `taskId` in the live scan, or the task id
+ *  itself (its first hop) when none of its hops is scanned. */
+function taskTip(taskId: string): string {
+  let tip: { id: string; createdAtMs: number } | undefined;
+  for (const s of useSessionsStore.getState().sessions) {
+    if (s.taskId !== taskId || s.parentTaskId) continue;
+    if (!tip || s.createdAtMs > tip.createdAtMs) tip = s;
+  }
+  return tip?.id ?? taskId;
+}
+
+/** "Split from <task>": opens the source task on the Tasks page. */
+export function SplitFromLink({ splitFrom }: { splitFrom: SplitFromRef }) {
+  const { t } = useTranslation();
+  const title = splitFrom.title || t("task_profile.split_from_untitled");
+  return (
+    <button
+      type="button"
+      className={styles.split_from}
+      data-testid="task-split-from"
+      title={t("task_profile.split_from_open")}
+      onClick={() => useUIStore.getState().requestOpenTask(taskTip(splitFrom.taskId))}
+    >
+      <span className={styles.split_from_label}>{t("task_profile.split_from")}</span>
+      <span className={styles.split_from_title}>{title}</span>
+    </button>
+  );
+}
+
 /**
  * The task page's type + goal line, with an inline editor for the boss.
  * Mirrors core `task_profile::set_by_boss`: replacing an existing goal needs a
@@ -31,9 +61,12 @@ export function TaskTypeChip({ profile }: { profile: TaskProfileBrief | null | u
 export function TaskProfileBar({
   sessionId,
   profile,
+  splitFrom,
 }: {
   sessionId: string;
   profile: TaskProfileBrief | null | undefined;
+  /** The task this one was split off from (`fleet__task action=split`). */
+  splitFrom?: SplitFromRef | null;
 }) {
   const { t } = useTranslation();
   // The last saved value shows at once; the next scan's summary catches up.
@@ -96,6 +129,7 @@ export function TaskProfileBar({
         <button type="button" className={styles.edit_btn} onClick={startEdit}>
           {t("task_profile.edit")}
         </button>
+        {splitFrom && <SplitFromLink splitFrom={splitFrom} />}
       </div>
     );
   }

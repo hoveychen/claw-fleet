@@ -3204,6 +3204,9 @@
     "reason_required": "Changing the goal needs a reason",
     "save": "Save",
     "cancel": "Cancel",
-    "set_by_boss": "set by you"
+    "set_by_boss": "set by you",
+    "split_from": "Split from",
+    "split_from_untitled": "(untitled task)",
+    "split_from_open": "Open the source task"
   }
 }
