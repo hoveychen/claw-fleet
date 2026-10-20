@@ -92,8 +92,22 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
       host.replaceChildren();
       deck = await renderPptxInto(blob!, host, fitDeckWidth(host), startSlide);
     };
+    // docx pages are fixed-width boxes (A4 ≈ 794px), so a maximized card only
+    // grew the gray desk around them. Scale them up to the room instead —
+    // never down, so the rail keeps its readable 1:1 page and side-scroll.
+    let pageWidth = 0;
+    const fitDocx = () => {
+      const wrapper = host.querySelector<HTMLElement>(".docx-wrapper");
+      if (!wrapper || pageWidth === 0) return;
+      const pad = parseFloat(getComputedStyle(wrapper).paddingLeft) || 0;
+      const room = host.clientWidth - 2 * pad;
+      const scale = Math.min(MAX_DOCX_SCALE, Math.max(1, room / pageWidth));
+      wrapper.style.zoom = scale === 1 ? "" : String(scale);
+    };
     const observer =
-      mode === "pptx" && typeof ResizeObserver !== "undefined"
+      mode === "docx" && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(fitDocx)
+        : mode === "pptx" && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => {
             const moved =
               Math.abs(host.clientWidth - painted.w) >= 24 ||
@@ -115,6 +129,10 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
       if (!alive) return;
       if (mode === "docx") {
         await renderDocxInto(blob, host);
+        // Measured once, before any zoom, so later fits scale from 1:1.
+        const pages = host.querySelectorAll<HTMLElement>("section.docx");
+        pageWidth = Math.max(0, ...Array.from(pages, (p) => p.offsetWidth));
+        fitDocx();
       } else {
         await paintDeck(0);
       }
@@ -164,6 +182,10 @@ function fitDeckWidth(host: HTMLElement): number {
   if (height < 200) return width;
   return Math.max(320, Math.min(width, Math.floor((height - PAGER_HEIGHT) / SLIDE_RATIO)));
 }
+
+/** How far a docx page may be enlarged to fill a maximized card: past this
+ *  the text gets poster-sized rather than more readable. */
+const MAX_DOCX_SCALE = 1.75;
 
 /** Height of pptx-preview's pagination row under the slide. */
 const PAGER_HEIGHT = 56;
