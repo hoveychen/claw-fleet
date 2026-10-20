@@ -236,7 +236,14 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
             }))
         }
         "tools/list" => {
-            let tools = tools_list_result(session_is_fleet_owned(), client_has_native_image_gen());
+            let tools = tools_list_result(
+                listing_is_fleet_owned(
+                    session_is_fleet_owned(),
+                    launch_token_env().as_deref(),
+                    crate::codex_launch::launch_token_is_pending,
+                ),
+                client_has_native_image_gen(),
+            );
             let subtask =
                 crate::task_roles_guidance::session_has_subtask_role(&current_session_id());
             Ok(if subtask { without_card_tools(tools) } else { tools })
@@ -505,6 +512,30 @@ fn session_is_fleet_owned() -> bool {
     !sid.is_empty() && crate::launch_spec::was_fleet_spawned(&sid)
 }
 
+/// The `FLEET_CODEX_LAUNCH_TOKEN` this process carries, if any. Only Fleet's
+/// Codex spawn sets it; [`crate::codex_launch::launch_token_is_pending`] checks
+/// that it names a launch still in flight.
+fn launch_token_env() -> Option<String> {
+    std::env::var(crate::codex_launch::FLEET_CODEX_LAUNCH_TOKEN_ENV)
+        .ok()
+        .filter(|t| !t.is_empty())
+}
+
+/// Whether `tools/list` advertises the control tools. A new Codex session lists
+/// its tools before `thread.started`, when its session id cannot be resolved
+/// yet, and keeps that list for its whole first process — so a live Fleet
+/// launch token counts as Fleet-owned here. The call itself is still gated on
+/// the resolved id ([`handle_control_tool_call`]), by which time the token
+/// resolves. Without an id or a live token (a hand-launched claude/codex) the
+/// control tools stay hidden.
+fn listing_is_fleet_owned(
+    sid_owned: bool,
+    launch_token: Option<&str>,
+    token_pending: impl Fn(&str) -> bool,
+) -> bool {
+    sid_owned || launch_token.is_some_and(token_pending)
+}
+
 /// Bridge a control-tool `tools/call` to [`crate::mcp_control::handle`]. Resolves
 /// the session id and workspace cwd the same way the UI handlers do, then maps
 /// its `Ok(text)` / `Err(text)` onto the MCP tool-result envelope. Defense in
@@ -512,6 +543,12 @@ fn session_is_fleet_owned() -> bool {
 /// is refused unless the session is Fleet-owned.
 fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpcError> {
     if !session_is_fleet_owned() {
+        if launch_token_env().is_some_and(|t| crate::codex_launch::launch_token_is_pending(&t)) {
+            return Ok(tool_error(format!(
+                "{name}: Fleet launched this Codex session but has not recorded its \
+                 session id yet (launch token not resolved). Retry in a few seconds."
+            )));
+        }
         return Ok(tool_error(format!(
             "{name} is only available in Fleet-launched sessions; use the `fleet` CLI instead."
         )));
@@ -2125,6 +2162,42 @@ mod tests {
         for notice in [&finished, &abandoned] {
             assert!(notice.contains("Stop"), "notice must say to stop: {notice}");
         }
+    }
+
+    fn advertises_control_tools(fleet_owned: bool) -> bool {
+        let result = tools_list_result(fleet_owned, false);
+        let names: Vec<&str> = result["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        crate::mcp_control::CONTROL_TOOL_NAMES
+            .iter()
+            .all(|n| names.contains(n))
+    }
+
+    #[test]
+    fn unresolved_launch_token_lists_control_tools() {
+        // New codex session: tools/list runs before `thread.started`, so the id
+        // does not resolve yet, but Fleet's live launch token is present.
+        let owned = listing_is_fleet_owned(false, Some("tok-new"), |t| t == "tok-new");
+        assert!(owned);
+        assert!(advertises_control_tools(owned), "fleet__task etc. must be listed");
+    }
+
+    #[test]
+    fn no_token_and_no_id_hides_control_tools() {
+        let owned = listing_is_fleet_owned(false, None, |_| true);
+        assert!(!owned);
+        assert!(!advertises_control_tools(owned));
+    }
+
+    #[test]
+    fn stale_launch_token_hides_control_tools() {
+        // A token whose launch is over (or that Fleet never minted) is not enough.
+        assert!(!listing_is_fleet_owned(false, Some("tok-old"), |_| false));
+        assert!(listing_is_fleet_owned(true, None, |_| false));
     }
 
     #[test]

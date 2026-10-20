@@ -204,6 +204,27 @@ fn codex_live_dir() -> Option<std::path::PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("codex-live"))
 }
 
+/// True when `token` is a launch token Fleet minted for a Codex spawn whose turn
+/// is still in flight: the spawn path creates `codex-live/<token>.jsonl` before
+/// the child exists (see [`open_codex_stdout_sink`]) and the reaper removes it
+/// when the turn ends.
+///
+/// This is the only Fleet-owned signal a new Codex session has during its first
+/// seconds. Codex calls the MCP `tools/list` while it is still starting up, before
+/// `thread.started` — so neither the token→thread note nor the thread's launch
+/// spec exists yet (observed 2026-10-20: spawn at +0s, thread minted at +8.5s,
+/// and the tool list fixed for the whole process before that).
+pub fn launch_token_is_pending(token: &str) -> bool {
+    codex_live_dir().is_some_and(|dir| launch_token_is_pending_in(&dir, token))
+}
+
+fn launch_token_is_pending_in(live_dir: &std::path::Path, token: &str) -> bool {
+    if token.is_empty() || token.contains('/') || token.contains('\\') || token.contains("..") {
+        return false;
+    }
+    live_dir.join(format!("{token}.jsonl")).is_file()
+}
+
 /// Create (truncating) a per-launch stdout sink file for a Codex child and
 /// return `(write_handle, path)`. `key` is a filesystem-safe id known *before*
 /// spawn — the launch token for a new spawn, the thread id for a resume.
@@ -1731,6 +1752,17 @@ pub fn resume_codex_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_token_is_pending_only_while_its_sink_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!launch_token_is_pending_in(dir.path(), "tok-live"));
+        std::fs::write(dir.path().join("tok-live.jsonl"), "").unwrap();
+        assert!(launch_token_is_pending_in(dir.path(), "tok-live"));
+        assert!(!launch_token_is_pending_in(dir.path(), "tok-other"));
+        assert!(!launch_token_is_pending_in(dir.path(), ""));
+        assert!(!launch_token_is_pending_in(dir.path(), "../tok-live"));
+    }
 
     #[test]
     fn recent_sessions_block_preserves_prompt_when_scan_times_out() {
