@@ -268,6 +268,9 @@ const TaskListRow = memo(function TaskListRow({
     (abandoned ? t("home.detail_abandoned") : "");
   const time = rowTime(row, t, now);
   const hasWatch = rowWatches(row).length > 0;
+  const profile = rowProfile(row);
+  // The goal also rides the title, since undecided tasks carry no type chip.
+  const titleTip = profile?.goal ? `${row.title}\n${profile.goal}` : row.title;
   return (
     <div
       role="button"
@@ -291,10 +294,10 @@ const TaskListRow = memo(function TaskListRow({
             <AgentSourceIcon source={source} />
           </span>
         )}
-        <span className={styles.title} title={row.title}>
+        <span className={styles.title} title={titleTip}>
           {row.title}
         </span>
-        {row.kind === "task" && <TaskTypeChip profile={rowProfile(row)} />}
+        {row.kind === "task" && <TaskTypeChip profile={profile} />}
         {subagents + subtasks > 0 && (
           <span
             className={styles.subagents}
