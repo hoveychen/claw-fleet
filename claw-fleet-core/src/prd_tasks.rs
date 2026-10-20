@@ -1192,11 +1192,79 @@ pub struct BacktrackTarget {
 /// the main checkout. Completed plans are kept in the merge (`active_only` =
 /// false) so the walk can climb past a finished parent to a pending grandparent.
 pub fn resolve_backtrack_target(cwd: &Path, completed_plan: &str) -> Option<BacktrackTarget> {
+    resolve_backtrack_target_scoped(cwd, completed_plan, &BacktrackScope::unscoped())
+}
+
+/// Who a backtrack is computed for, and what it has to steer around.
+///
+/// Both rules come from one failure, seen twice: a main conversation split a
+/// parent plan into child plans and spawned sub-task A and B on two of them.
+/// When A ticked its plan's last box the walk sent it to B's sibling plan, and
+/// the plan gate then refused to let A end its turn — B was trapped the same
+/// way.
+pub struct BacktrackScope {
+    /// The session is a sub-task ([`crate::task_model::is_subtask`]). Its
+    /// assignment ends with the plan it was put on, so it is never walked to
+    /// another plan of the tree; the main conversation that spawned it decides
+    /// what happens next.
+    pub subtask: bool,
+    /// Whether another live session is on this plan
+    /// ([`crate::plan_revive::plans_attended_by_others`]). Such a plan and its
+    /// subtree are never chosen, and the walk does not climb past it.
+    pub claimed_elsewhere: Box<dyn Fn(&str) -> bool>,
+}
+
+impl BacktrackScope {
+    /// The tree-order walk with nothing to avoid.
+    pub fn unscoped() -> Self {
+        Self {
+            subtask: false,
+            claimed_elsewhere: Box::new(|_| false),
+        }
+    }
+
+    /// Scope for a real session, read from the live stores. The claim set is
+    /// computed on first use only: it scans every launch note, watch and
+    /// pending card, and most walks end before they need it.
+    pub fn for_session(cwd: &Path, session_id: Option<&str>) -> Self {
+        let Some(me) = session_id.map(str::to_string) else {
+            return Self::unscoped();
+        };
+        let ws = discover_main_checkout_root(cwd)
+            .unwrap_or_else(|| cwd.to_path_buf())
+            .to_string_lossy()
+            .into_owned();
+        let claimed = std::cell::OnceCell::new();
+        Self {
+            subtask: crate::task_model::is_subtask(&me),
+            claimed_elsewhere: Box::new(move |id| {
+                claimed
+                    .get_or_init(|| crate::plan_revive::plans_attended_by_others(&ws, &me))
+                    .contains(id)
+            }),
+        }
+    }
+}
+
+/// [`resolve_backtrack_target`] for the session described by `scope`: `None`
+/// for a sub-task, and plans another live session is on are skipped. When
+/// skipping leaves nothing, there is no backtrack — the turn may end.
+pub fn resolve_backtrack_target_scoped(
+    cwd: &Path,
+    completed_plan: &str,
+    scope: &BacktrackScope,
+) -> Option<BacktrackTarget> {
+    if scope.subtask {
+        return None;
+    }
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     let (raw, _) = collect_from_sources(&sources, false);
     let blocks = dedup_blocks_keep_latest_mtime(raw);
-    next_plan_in_tree(&blocks, completed_plan)
+    // The plain walk first: when the tree is done there is no need to pay for
+    // the claim scan.
+    next_plan_in_tree(&blocks, completed_plan)?;
+    next_plan_in_tree_avoiding(&blocks, completed_plan, &*scope.claimed_elsewhere)
 }
 
 /// The single definition of "what comes next" in a plan tree, shared by the
@@ -1215,6 +1283,19 @@ pub fn resolve_backtrack_target(cwd: &Path, completed_plan: &str) -> Option<Back
 /// itself still has pending tasks, when the whole tree is done, or on a parent
 /// cycle.
 pub fn next_plan_in_tree(blocks: &[SourcedBlock], finished: &str) -> Option<BacktrackTarget> {
+    next_plan_in_tree_avoiding(blocks, finished, &|_| false)
+}
+
+/// [`next_plan_in_tree`] treating every plan `avoid` names as someone else's:
+/// it is never the target and its subtree is not descended into. While it is
+/// pending it still holds its parent back (a later sibling may be chosen, the
+/// parent may not), and the climb stops at an avoided ancestor — whoever is on
+/// it owns the rest of that subtree.
+pub fn next_plan_in_tree_avoiding(
+    blocks: &[SourcedBlock],
+    finished: &str,
+    avoid: &dyn Fn(&str) -> bool,
+) -> Option<BacktrackTarget> {
     let mut parent: HashMap<&str, &str> = HashMap::new();
     let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut body: HashMap<&str, &str> = HashMap::new();
@@ -1246,25 +1327,40 @@ pub fn next_plan_in_tree(blocks: &[SourcedBlock], finished: &str) -> Option<Back
                     cs.iter().any(|c| subtree_pending(c, children, pending, depth + 1))
                 }))
     }
+    // The deepest pending plan under `id`, children before their parent. A
+    // pending child subtree that is avoided (or holds only avoided work) is
+    // skipped in favour of its later siblings, but it still holds the parent
+    // back: the parent comes after all of its children.
     fn descend<'a>(
         id: &'a str,
         children: &HashMap<&'a str, Vec<&'a str>>,
         pending: &HashSet<&str>,
+        avoid: &dyn Fn(&str) -> bool,
         depth: u32,
     ) -> Option<&'a str> {
         if depth >= 64 {
             return None;
         }
+        let mut held_back = false;
         for c in children.get(id).into_iter().flatten() {
-            if subtree_pending(c, children, pending, depth + 1) {
-                return descend(c, children, pending, depth + 1);
+            if !subtree_pending(c, children, pending, depth + 1) {
+                continue;
             }
+            if !avoid(c) {
+                if let Some(t) = descend(c, children, pending, avoid, depth + 1) {
+                    return Some(t);
+                }
+            }
+            held_back = true;
         }
-        pending.contains(id).then_some(id)
+        (!held_back && pending.contains(id) && !avoid(id)).then_some(id)
     }
     let mut cursor = finished;
     for _ in 0..64 {
-        if let Some(t) = descend(cursor, &children, &pending, 0) {
+        if cursor != finished && avoid(cursor) {
+            return None;
+        }
+        if let Some(t) = descend(cursor, &children, &pending, avoid, 0) {
             return Some(BacktrackTarget {
                 plan_id: t.to_string(),
                 next_task: body.get(t).and_then(|b| first_pending_task(b)),
@@ -1793,7 +1889,9 @@ pub fn resolve_current_task(
 /// `session_id`'s attributed plan is now fully complete and its tree still has
 /// a pending plan ([`next_plan_in_tree`]) — the same condition `plan check`
 /// acts on, re-checked here every prompt in case focus was left on a completed
-/// child (hand-edited box, handoff successor, etc.). `None` in every other case.
+/// child (hand-edited box, handoff successor, etc.). Scoped like `plan check`
+/// ([`BacktrackScope::for_session`]): never for a sub-task, never onto a plan
+/// another live session is on. `None` in every other case.
 fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     let sid = session_id?;
     let rec = crate::task_progress::read(sid)?;
@@ -1804,7 +1902,8 @@ fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     if has_open_work(&block.body, block.kind) {
         return None;
     }
-    let target = resolve_backtrack_target(cwd, focused)?;
+    let target =
+        resolve_backtrack_target_scoped(cwd, focused, &BacktrackScope::for_session(cwd, Some(sid)))?;
     let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
     Some(format!(
         "⤴ 回溯提醒:你当前归属的 plan `{focused}` 已全部完成,但它所在的计划树还没走完。\
@@ -3511,6 +3610,47 @@ trailing notes outside\n";
         assert_eq!(next_plan_in_tree(&blocks, "child").unwrap().plan_id, "sib");
         // Same for a finished plan whose own child is still open.
         assert_eq!(next_plan_in_tree(&blocks, "par").unwrap().plan_id, "sib");
+    }
+
+    /// A sibling another live session is on is not handed to the session that
+    /// just finished, and while it is open the parent's own boxes wait too —
+    /// the parent comes after all of its children.
+    #[test]
+    fn avoiding_a_claimed_sibling_leaves_no_target_and_holds_the_parent_back() {
+        let blocks = [
+            sbp("par", "- [ ] **P4** — parent tail\n", None),
+            sbp("a", "- [x] **P1** — a\n", Some("par")),
+            sbp("b", "- [ ] **P1** — b\n", Some("par")),
+        ];
+        assert_eq!(next_plan_in_tree_avoiding(&blocks, "a", &|id| id == "b"), None);
+        // Unscoped, the order is unchanged.
+        assert_eq!(next_plan_in_tree(&blocks, "a").unwrap().plan_id, "b");
+    }
+
+    /// A later unclaimed sibling is still reachable past a claimed one.
+    #[test]
+    fn avoiding_a_claimed_sibling_moves_on_to_the_next_unclaimed_one() {
+        let blocks = [
+            sbp("par", "- [ ] **P4** — parent tail\n", None),
+            sbp("a", "- [x] **P1** — a\n", Some("par")),
+            sbp("b", "- [ ] **P1** — b\n", Some("par")),
+            sbp("c", "- [ ] **P1** — c\n", Some("par")),
+        ];
+        let t = next_plan_in_tree_avoiding(&blocks, "a", &|id| id == "b").unwrap();
+        assert_eq!(t.plan_id, "c");
+    }
+
+    /// An ancestor another live session is on owns the rest of its subtree:
+    /// the climb stops there instead of handing out its open work.
+    #[test]
+    fn avoiding_stops_the_climb_at_a_claimed_ancestor() {
+        let blocks = [
+            sbp("gp", "- [ ] **P2** — g\n", None),
+            sbp("par", "- [ ] **P3** — p\n", Some("gp")),
+            sbp("a", "- [x] **P1** — a\n", Some("par")),
+        ];
+        assert_eq!(next_plan_in_tree_avoiding(&blocks, "a", &|id| id == "par"), None);
+        assert_eq!(next_plan_in_tree(&blocks, "a").unwrap().plan_id, "par");
     }
 
     #[test]

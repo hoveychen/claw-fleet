@@ -711,6 +711,70 @@ pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> Wor
     )
 }
 
+/// Plans of the workspace rooted at `main_root` that a session other than `me`
+/// is on right now — the reviver's "covered" ([`Coverage::covering`]) with `me`
+/// left out of each plan's owners. The tree-order backtrack skips these so a
+/// session that finishes its plan is not sent onto a sibling another session
+/// is already working ([`crate::prd_tasks::BacktrackScope`]).
+pub fn plans_attended_by_others(main_root: &str, me: &str) -> HashSet<String> {
+    let ws = main_root.trim_end_matches('/');
+    let records: Vec<(String, TaskProgressRecord)> = crate::task_progress::all_records()
+        .into_iter()
+        .filter(|(_, r)| in_workspace(&r.workspace_path, ws))
+        .map(|(sid, mut r)| {
+            r.workspace_path = ws.to_string();
+            (sid, r)
+        })
+        .collect();
+    if records.iter().all(|(sid, _)| sid == me) {
+        return HashSet::new();
+    }
+    let blocks = load_workspace_blocks(ws);
+    let successors = crate::handoff::successor_index();
+    attended_by_others(
+        &records,
+        &blocks,
+        plan_snooze::now_ms(),
+        &|sid| successors.get(sid).cloned(),
+        &gather_coverage,
+        me,
+    )
+}
+
+/// Pure core of [`plans_attended_by_others`]. A plan's owners are its direct
+/// claimants plus, for a live-edge plan, the reviver's wider view (descendant
+/// claimants, a borrowed ancestor claim) — the same two sources
+/// [`resolve_attendance`] merges.
+pub fn attended_by_others(
+    records: &[(String, TaskProgressRecord)],
+    blocks: &[pt::SourcedBlock],
+    now: u64,
+    successor: &dyn Fn(&str) -> Option<String>,
+    coverage: &dyn Fn(&HashSet<String>) -> Coverage,
+    me: &str,
+) -> HashSet<String> {
+    let mut owners: HashMap<String, Vec<String>> = HashMap::new();
+    for (plan, (o, _, _)) in direct_claims(records, successor) {
+        owners.entry(plan).or_default().extend(o);
+    }
+    for v in collect_views(records, now, successor, &|_| None, &|_| blocks.to_vec()) {
+        owners.entry(v.plan_id).or_default().extend(v.owners);
+    }
+    for o in owners.values_mut() {
+        o.retain(|sid| sid != me);
+    }
+    let all: HashSet<String> = owners.values().flatten().cloned().collect();
+    if all.is_empty() {
+        return HashSet::new();
+    }
+    let cov = coverage(&all);
+    owners
+        .into_iter()
+        .filter(|(_, o)| cov.covering(o).is_some())
+        .map(|(plan, _)| plan)
+        .collect()
+}
+
 /// Gather [`Coverage`] for `owners` from the real stores.
 pub(crate) fn gather_coverage(owners: &HashSet<String>) -> Coverage {
     let now = plan_snooze::now_ms();
@@ -1782,6 +1846,61 @@ mod tests {
         now: u64,
     ) -> Vec<PlanView> {
         collect_views(records, now, &|_| None, &|_| None, &|_| blocks.clone())
+    }
+
+    /// Coverage in which exactly `alive` are running.
+    fn alive(ids: &'static [&'static str]) -> impl Fn(&HashSet<String>) -> Coverage {
+        move |_| Coverage {
+            alive: ids.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The backtrack's claim view: a plan counts when a live session other
+    /// than the asking one is on it, directly or through the reviver's
+    /// borrowed-ancestor view; the asker's own claim never does.
+    #[test]
+    fn attended_by_others_counts_live_claimants_except_me() {
+        let now = 100 * 24 * H;
+        let blocks = vec![
+            block("par", None, PENDING),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), PENDING),
+        ];
+        let records = vec![
+            ("A".to_string(), rec("/w", "a", now - H)),
+            ("B".to_string(), rec("/w", "b", now - H)),
+        ];
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["A", "B"]), "A");
+        assert_eq!(got, HashSet::from(["b".to_string()]));
+        // B asking: its own claim on `b` is not "someone else", and A's claim
+        // on the finished `a` counts but is harmless.
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["A", "B"]), "B");
+        assert!(!got.contains("b"), "{got:?}");
+        // A dead claimant covers nothing.
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["A"]), "A");
+        assert!(got.is_empty(), "{got:?}");
+    }
+
+    /// A child plan nobody claimed yet borrows its parent's claimant, as the
+    /// reviver does: a live main conversation on the parent covers it.
+    #[test]
+    fn attended_by_others_sees_an_unclaimed_child_through_its_parent() {
+        let now = 100 * 24 * H;
+        let blocks = vec![
+            block("par", None, DONE),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), PENDING),
+        ];
+        let records = vec![
+            ("M".to_string(), rec("/w", "par", now - H)),
+            ("A".to_string(), rec("/w", "a", now - H)),
+        ];
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["M", "A"]), "A");
+        assert!(got.contains("b"), "{got:?}");
+        // The main conversation itself asking finds nobody else on `b`.
+        let got = attended_by_others(&records, &blocks, now, &|_| None, &alive(&["M", "A"]), "M");
+        assert!(!got.contains("b"), "{got:?}");
     }
 
     #[test]
