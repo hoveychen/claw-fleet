@@ -31,7 +31,7 @@ import {
   stickyWaking,
 } from "../../shared-ts/wakeLatch";
 import { memberDisplayStatus } from "../../shared-ts/memberStatus";
-import type { LegDividerInfo } from "../../shared-ts/prevLeg";
+import type { LegHeadingInfo } from "../../shared-ts/prevLeg";
 
 export { memberDisplayStatus };
 
@@ -463,9 +463,9 @@ export interface RawMessage {
    *  on expand via the `get_tool_result_full` command, keyed by its
    *  `tool_use_id`. Absent on messages that shipped whole. */
   _fleetTruncated?: boolean;
-  /** Frontend-only: this row is the synthetic boundary below a prepended
-   *  relay leg (`shared-ts/prevLeg.ts`), never a transcript record. */
-  _fleetLegDivider?: LegDividerInfo;
+  /** Frontend-only: this row is the synthetic heading opening a relay leg
+   *  in a stitched view (`shared-ts/prevLeg.ts`), never a transcript record. */
+  _fleetLegHeading?: LegHeadingInfo;
 }
 
 // ── Decision panel types (frontend UI state, extensible) ────────────────────

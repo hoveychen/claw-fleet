@@ -110,7 +110,7 @@ import { StatusRail } from "./StatusRail";
 import { buildStatusPills, type DetailPane, type PillTarget } from "./sessionStatusPills";
 import { filterMainRows } from "./mainRows";
 import { usePrevLegs, type PrevLeg } from "./usePrevLegs";
-import { legDividerRow, type LegDividerInfo } from "../../../shared-ts/prevLeg";
+import { legHeading, legTitle, type LegHeadingInfo } from "../../../shared-ts/prevLeg";
 import { SelectionAskBar } from "./SelectionAskBar";
 import { SessionExplainsTab } from "./SessionExplainsTab";
 import { useSessionExplains } from "./useSessionExplains";
@@ -1384,18 +1384,23 @@ const MessageRow = memo(function MessageRow({
   toolMetaEqual(prev.toolMeta, next.toolMeta) &&
   JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
 
-/** The boundary below a prepended relay leg: which leg the rows above came
- *  from, and when it handed the baton on. */
-function LegRule({ info }: { info: LegDividerInfo }) {
-  const when = new Date(info.handedAt).toLocaleString(dateLocale(), {
+/** The heading opening a relay leg once earlier legs are prepended: which leg
+ *  the rows below belong to, and when it started — read top-down like
+ *  chapter headings. */
+export function LegRule({ info }: { info: LegHeadingInfo }) {
+  const when = new Date(info.startedAt).toLocaleString(dateLocale(), {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
   return (
-    <div className={styles.legRule} data-testid="leg-divider">
-      <span className={styles.legRuleLabel}>{t("第 {0} 棒 · {1} · {2} 交棒", info.hop, info.title, when)}</span>
+    <div className={styles.legRule} data-testid="leg-heading" data-current={info.current || undefined}>
+      <span className={styles.legRuleLabel}>
+        {info.current
+          ? t("第 {0} 棒（当前）· {1} · {2} 开始", info.hop, info.title, when)
+          : t("第 {0} 棒 · {1} · {2} 开始", info.hop, info.title, when)}
+      </span>
     </div>
   );
 }
@@ -1451,6 +1456,7 @@ export function PrevLegBlock({
   const units = groupWorkRuns(groupMetaRuns(rows));
   return (
     <TranscriptImageContext.Provider value={loadImage}>
+      <LegRule info={legHeading(leg, false)} />
       {units.map((unit) => {
         if (unit.kind === "work-group") {
           return (
@@ -1498,7 +1504,6 @@ export function PrevLegBlock({
           />
         );
       })}
-      <LegRule info={legDividerRow(leg)._fleetLegDivider} />
     </TranscriptImageContext.Provider>
   );
 }
@@ -2300,6 +2305,21 @@ export function SessionDetailView({
             onToggleThinking={toggleThinking}
           />
         ))}
+        {prevLegs.legs.length > 0 && messages !== null && (
+          <LegRule
+            info={legHeading(
+              {
+                hop: session.handoff?.hop ?? 0,
+                sessionId: session.id,
+                title: legTitle(session),
+                createdAtMs: session.createdAtMs,
+                fullyLoaded: !hasEarlier,
+                messages,
+              },
+              true,
+            )}
+          />
+        )}
         <TranscriptImageContext.Provider value={loadTranscriptImage}>
         {(() => {
           const units = groupWorkRuns(groupMetaRuns(mainRows));

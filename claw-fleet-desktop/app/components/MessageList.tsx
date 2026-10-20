@@ -47,7 +47,7 @@ import { InFlightToolsContext, inFlightToolIds } from "./blocks/inFlightTools";
 import { Skeleton, Spinner } from "./loading";
 import styles from "./MessageList.module.css";
 import { Presence } from "./Presence";
-import { legDividerOf, type LegDividerInfo } from "../../../shared-ts/prevLeg";
+import { legHeadingOf, type LegHeadingInfo } from "../../../shared-ts/prevLeg";
 import type { PrevLegOffer } from "../usePrevLegs";
 
 // ── First-load placeholder ───────────────────────────────────────────────────
@@ -449,18 +449,18 @@ function DaySeparator({ isoDay }: { isoDay: string }) {
 }
 
 /**
- * The boundary below a prepended relay leg: which leg the rows above belong
- * to, and when it handed the baton to the leg below.
+ * The heading opening a relay leg in a stitched view: which leg the rows
+ * below belong to, and when it started. Read top-down like chapter headings.
  */
-function LegDivider({ info }: { info: LegDividerInfo }) {
+function LegHeading({ info }: { info: LegHeadingInfo }) {
   const { t, i18n } = useTranslation();
   return (
-    <div className={styles.leg_sep} data-testid="leg-divider">
+    <div className={styles.leg_sep} data-testid="leg-heading" data-current={info.current || undefined}>
       <span className={styles.leg_sep_label} title={info.sessionId}>
-        {t("detail.prev_leg_divider", {
+        {t(info.current ? "detail.leg_heading_current" : "detail.leg_heading", {
           hop: info.hop,
           title: info.title,
-          time: new Date(info.handedAt).toLocaleString(i18n.language, {
+          time: new Date(info.startedAt).toLocaleString(i18n.language, {
             month: "short",
             day: "numeric",
             hour: "2-digit",
@@ -1031,12 +1031,12 @@ export function MessageList({
             </Fragment>
           );
         }
-        const divider = legDividerOf(unit.msg);
-        if (divider) {
+        const heading = legHeadingOf(unit.msg);
+        if (heading) {
           return (
             <Fragment key={unit.msg.uuid ?? globalStart}>
               {showDay && <DaySeparator isoDay={today} />}
-              <LegDivider info={divider} />
+              <LegHeading info={heading} />
             </Fragment>
           );
         }

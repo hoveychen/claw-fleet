@@ -7,6 +7,7 @@ import i18n from "../i18n";
 import { MessageList } from "./MessageList";
 import type { RawMessage } from "../types";
 import {
+  legStartedAt,
   predecessorLink,
   prependedCount,
   stitchLegs,
@@ -59,24 +60,47 @@ function render(props: Partial<Parameters<typeof MessageList>[0]> & { messages: 
 const prevButton = () => container!.querySelector('[data-testid="load-prev-leg"]');
 
 describe("stitchLegs", () => {
+  const T0 = Date.UTC(2026, 9, 20, 8);
   const leg = (sessionId: string, hop: number, messages: string[]): LoadedLeg<string> => ({
     sessionId,
     hop,
     title: sessionId,
-    handedAt: Date.UTC(2026, 9, 20, 8),
+    createdAtMs: T0 + hop,
+    fullyLoaded: false,
+    messages,
+  });
+  const current = (messages: string[]) => ({
+    sessionId: "s4",
+    hop: 4,
+    title: "s4",
+    createdAtMs: T0 + 4,
+    fullyLoaded: true,
     messages,
   });
 
   it("returns the current list untouched when nothing is prepended", () => {
-    const current = ["c1"];
-    expect(stitchLegs([], current)).toBe(current);
+    const cur = current(["c1"]);
+    expect(stitchLegs([], cur)).toBe(cur.messages);
+    expect(prependedCount([])).toBe(0);
   });
 
-  it("puts the oldest leg on top, a divider below each prepended leg", () => {
-    const out = stitchLegs([leg("s3", 3, ["b1", "b2"]), leg("s2", 2, ["a1"])], ["c1"]);
-    const shape = out.map((m) => (typeof m === "string" ? m : `|${m._fleetLegDivider.hop}|`));
-    expect(shape).toEqual(["a1", "|2|", "b1", "b2", "|3|", "c1"]);
-    expect(prependedCount([leg("s3", 3, ["b1", "b2"]), leg("s2", 2, ["a1"])])).toBe(5);
+  it("opens every leg with a heading, oldest on top, the current one marked", () => {
+    const legs = [leg("s3", 3, ["b1", "b2"]), leg("s2", 2, ["a1"])];
+    const out = stitchLegs(legs, current(["c1"]));
+    const shape = out.map((m) =>
+      typeof m === "string" ? m : `|${m._fleetLegHeading.hop}${m._fleetLegHeading.current ? "*" : ""}|`,
+    );
+    expect(shape).toEqual(["|2|", "a1", "|3|", "b1", "b2", "|4*|", "c1"]);
+    expect(prependedCount(legs)).toBe(6);
+  });
+
+  it("dates a leg by its first message once loaded to it, by creation time before", () => {
+    const rec = (ts: string) => ({ timestamp: ts });
+    expect(legStartedAt({ messages: [{}, rec("2026-10-20T09:00:00.000Z")], fullyLoaded: true, createdAtMs: 7 })).toBe(
+      Date.UTC(2026, 9, 20, 9),
+    );
+    expect(legStartedAt({ messages: [rec("2026-10-20T09:00:00.000Z")], fullyLoaded: false, createdAtMs: 7 })).toBe(7);
+    expect(legStartedAt({ messages: [{}], fullyLoaded: true, createdAtMs: 7 })).toBe(7);
   });
 
   it("names the predecessor by the link whose successor is the open leg", () => {
@@ -110,24 +134,60 @@ describe("load previous relay leg", () => {
     expect(onLoad).toHaveBeenCalledTimes(1);
   });
 
-  it("draws a divider naming the prepended leg instead of a bubble", () => {
-    const messages = stitchLegs(
+  const twoLegs = (): RawMessage[] =>
+    stitchLegs(
       [
         {
           sessionId: "s3",
           hop: 3,
           title: "修 CI",
-          handedAt: Date.UTC(2026, 9, 20, 8),
+          createdAtMs: Date.UTC(2026, 9, 20, 7),
+          fullyLoaded: true,
           messages: [user("p1", "old prompt"), reply("p2", "old answer")],
         },
       ],
-      [user("u1", "current prompt")],
+      {
+        sessionId: "s4",
+        hop: 4,
+        title: "接着修",
+        createdAtMs: Date.UTC(2026, 9, 20, 9),
+        fullyLoaded: true,
+        messages: [user("u1", "current prompt")],
+      },
     ) as RawMessage[];
-    render({ messages, fullyLoaded: true, readOnlyPrefix: 3 });
-    const divider = container!.querySelector('[data-testid="leg-divider"]');
-    expect(divider?.textContent).toMatch(/^第 3 棒 · 修 CI · .+ 交棒$/);
+
+  it("heads each leg at its start, the current leg marked as current", () => {
+    render({ messages: twoLegs(), fullyLoaded: true, readOnlyPrefix: 4 });
+    const headings = [...container!.querySelectorAll('[data-testid="leg-heading"]')];
+    expect(headings.map((h) => h.textContent)).toEqual([
+      expect.stringMatching(/^第 3 棒 · 修 CI · .+ 开始$/),
+      expect.stringMatching(/^第 4 棒（当前）· 接着修 · .+ 开始$/),
+    ]);
+    expect(headings[1].getAttribute("data-current")).toBe("true");
     const text = container!.textContent ?? "";
-    expect(text.indexOf("old answer")).toBeLessThan(text.indexOf("第 3 棒"));
-    expect(text.indexOf("第 3 棒")).toBeLessThan(text.indexOf("current prompt"));
+    expect(text.indexOf("第 3 棒")).toBeLessThan(text.indexOf("old prompt"));
+    expect(text.indexOf("old answer")).toBeLessThan(text.indexOf("第 4 棒（当前）"));
+    expect(text.indexOf("第 4 棒（当前）")).toBeLessThan(text.indexOf("current prompt"));
+  });
+
+  it("formats the heading in English with the active locale", async () => {
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    try {
+      render({ messages: twoLegs(), fullyLoaded: true, readOnlyPrefix: 4 });
+      const headings = [...container!.querySelectorAll('[data-testid="leg-heading"]')];
+      expect(headings[0].textContent).toMatch(/^Leg 3 · 修 CI · started Oct 20, .+$/);
+      expect(headings[1].textContent).toMatch(/^Leg 4 \(current\) · 接着修 · started .+$/);
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage("zh");
+      });
+    }
+  });
+
+  it("shows no heading while nothing is prepended", () => {
+    render({ messages: [user("u1", "hi")], fullyLoaded: true });
+    expect(container!.querySelector('[data-testid="leg-heading"]')).toBeNull();
   });
 });

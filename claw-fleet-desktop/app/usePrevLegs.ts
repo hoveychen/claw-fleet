@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { HandoffChain, RawMessage, SessionInfo } from "./types";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useSessionsStore } from "./store";
 import {
+  legTitle,
   nextLeg,
   prependedCount,
   stitchLegs,
@@ -88,7 +89,7 @@ export function usePrevLegs(current: CurrentLeg) {
 
   const loadPrev = useCallback(async () => {
     if (!next || loading) return;
-    const { link, pred, hop: legHop } = next;
+    const { pred, hop: legHop } = next;
     const mine = epoch.current;
     setLoading(true);
     try {
@@ -102,8 +103,8 @@ export function usePrevLegs(current: CurrentLeg) {
         {
           sessionId: pred.id,
           hop: legHop,
-          title: pred.titleOverride || pred.aiTitle || `${pred.id.slice(0, 8)}…`,
-          handedAt: link.handedAt,
+          title: legTitle(pred),
+          createdAtMs: pred.createdAtMs,
           jsonlPath: pred.jsonlPath,
           messages: msgs,
           tail: INITIAL_TAIL,
@@ -141,9 +142,19 @@ export function usePrevLegs(current: CurrentLeg) {
     }
   }, [top, loading]);
 
+  const currentTitle = session ? legTitle(session) : "";
+  const createdAtMs = session?.createdAtMs ?? 0;
   const messages = useMemo(
-    () => stitchLegs(legs, current.messages) as RawMessage[],
-    [legs, current.messages],
+    () =>
+      stitchLegs(legs, {
+        hop,
+        sessionId: sessionId ?? "",
+        title: currentTitle,
+        createdAtMs,
+        fullyLoaded: current.fullyLoaded,
+        messages: current.messages,
+      }) as RawMessage[],
+    [legs, current.messages, current.fullyLoaded, hop, sessionId, currentTitle, createdAtMs],
   );
 
   // A prepended leg's truncated tool output lives in *its* transcript.

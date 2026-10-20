@@ -267,9 +267,10 @@
   padding: 2px 10px;
 }
 
-/* Relay-leg boundary below a prepended leg. Same hairline-and-label shape as
-   the interrupt marker, but in the accent colour and with more air: it is a
-   change of session, which a reader paging back must not miss. */
+/* Heading opening each relay leg once earlier legs are prepended. Same
+   hairline-and-label shape as the interrupt marker, but in the accent colour
+   and with more air: it is a change of session, which a reader paging back
+   must not miss. */
 .leg_sep {
   display: flex;
   align-items: center;
@@ -287,11 +288,13 @@
   opacity: 0.45;
 }
 
+/* Wraps instead of truncating: in a narrow pane a long title would otherwise
+   eat the start time, which is half of what the heading is for. */
 .leg_sep_label {
-  max-width: 70%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 78%;
+  text-align: center;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
   font-size: var(--t-meta, 10px);
   font-weight: 600;
   letter-spacing: 0.03em;
