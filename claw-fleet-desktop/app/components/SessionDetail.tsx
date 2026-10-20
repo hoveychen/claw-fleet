@@ -11,6 +11,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
+import { usePrevLegs } from "../usePrevLegs";
 import { CalendarClock, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, PendingDecision, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
@@ -561,6 +562,15 @@ export function SessionDetail({
       : [...timelineMessages, ...pendingOptimistic.map(optimisticToMessage)],
     [timelineMessages, pendingOptimistic],
   );
+  // Earlier relay legs the reader chose to prepend. Display-only: everything
+  // above that acts on this session keeps reading `displayedMessages`.
+  const prevLegs = usePrevLegs({
+    session: liveSession,
+    messages: displayedMessages,
+    fullyLoaded,
+    loadEarlier,
+    isLoadingEarlier,
+  });
   const inlineFleetAsk = useMemo(
     () => inlinePendingFleetAsk(liveSession, pendingDecisions, decisionRecords),
     [liveSession, pendingDecisions, decisionRecords],
@@ -2091,7 +2101,7 @@ export function SessionDetail({
                       owns the render window this button used to duplicate. */}
                   <AgentNavProvider nav={agentNav}>
                     <MessageList
-                      messages={displayedMessages}
+                      messages={prevLegs.messages}
                       isLoading={isLoading}
                       stalled={loadStalled}
                       loadError={loadError}
@@ -2101,9 +2111,12 @@ export function SessionDetail({
                       liveThinking={shownLiveThinking}
                       decisionRecords={decisionRecords}
                       decisionRecordsLoading={decisionsReadFor !== liveSession?.id}
-                      onLoadEarlier={loadEarlier}
-                      fullyLoaded={fullyLoaded}
-                      isLoadingEarlier={isLoadingEarlier}
+                      onLoadEarlier={prevLegs.loadEarlier}
+                      fullyLoaded={prevLegs.fullyLoaded}
+                      isLoadingEarlier={prevLegs.isLoadingEarlier}
+                      prevLeg={prevLegs.offer}
+                      readOnlyPrefix={prevLegs.readOnlyPrefix}
+                      toolResultPaths={prevLegs.toolResultPaths}
                       paths={pathLinks}
                       // Use the live-refreshed session (same source every other
                       // jsonlPath consumer here uses); `session` is the possibly-

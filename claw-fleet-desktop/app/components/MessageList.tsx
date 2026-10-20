@@ -47,6 +47,8 @@ import { InFlightToolsContext, inFlightToolIds } from "./blocks/inFlightTools";
 import { Skeleton, Spinner } from "./loading";
 import styles from "./MessageList.module.css";
 import { Presence } from "./Presence";
+import { legDividerOf, type LegDividerInfo } from "../../../shared-ts/prevLeg";
+import type { PrevLegOffer } from "../usePrevLegs";
 
 // ── First-load placeholder ───────────────────────────────────────────────────
 
@@ -446,6 +448,30 @@ function DaySeparator({ isoDay }: { isoDay: string }) {
   );
 }
 
+/**
+ * The boundary below a prepended relay leg: which leg the rows above belong
+ * to, and when it handed the baton to the leg below.
+ */
+function LegDivider({ info }: { info: LegDividerInfo }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.leg_sep} data-testid="leg-divider">
+      <span className={styles.leg_sep_label} title={info.sessionId}>
+        {t("detail.prev_leg_divider", {
+          hop: info.hop,
+          title: info.title,
+          time: new Date(info.handedAt).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        })}
+      </span>
+    </div>
+  );
+}
+
 // ── Waiting for input indicator ───────────────────────────────────────────────
 
 function WaitingIndicator() {
@@ -535,6 +561,15 @@ interface Props {
    *  / sign in). Omit — an InspectModal, an imported transcript — and the card
    *  still renders, without buttons it could not honour. */
   apiErrorCtx?: ApiErrorContext | null;
+  /** "Load leg N": shown at the top once `messages` reaches its start and an
+   *  earlier relay leg exists. Clicking prepends that leg (see usePrevLegs). */
+  prevLeg?: PrevLegOffer | null;
+  /** Leading entries of `messages` that belong to prepended relay legs. They
+   *  are display-only: no failed-turn buttons act from them on this session. */
+  readOnlyPrefix?: number;
+  /** Transcript of a prepended leg's truncated tool output, by tool_use_id;
+   *  everything else falls back to `jsonlPath`. */
+  toolResultPaths?: Map<string, string>;
 }
 
 /** Messages revealed per click, and the initial size of the render window. */
@@ -560,6 +595,9 @@ export function MessageList({
   paths,
   jsonlPath,
   apiErrorCtx,
+  prevLeg = null,
+  readOnlyPrefix = 0,
+  toolResultPaths,
 }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -605,15 +643,23 @@ export function MessageList({
     return {
       truncatedIds,
       fetchFull: (toolUseId: string) =>
-        invoke<FullToolResult>("get_tool_result_full", { jsonlPath, toolUseId }),
+        invoke<FullToolResult>("get_tool_result_full", {
+          jsonlPath: toolResultPaths?.get(toolUseId) ?? jsonlPath,
+          toolUseId,
+        }),
     };
-  }, [jsonlPath, truncatedIds]);
+  }, [jsonlPath, truncatedIds, toolResultPaths]);
 
   // Only records that actually occupy a row. Excluding the 32% of user records
   // that carry nothing but tool results keeps the render window honest (a
   // "100 message" window used to show ~67 rows) and stops a day separator from
   // landing above an invisible message.
   const displayMsgs = useMemo(() => messages.filter(isRenderableRow), [messages]);
+  // Rows above this index come from prepended relay legs.
+  const readOnlyRows = useMemo(
+    () => (readOnlyPrefix > 0 ? messages.slice(0, readOnlyPrefix).filter(isRenderableRow).length : 0),
+    [messages, readOnlyPrefix],
+  );
 
   // One `↑ ↓ · model · time` line per turn, on its final assistant row.
   const turnUsage = useMemo(() => turnUsageByRow(displayMsgs), [displayMsgs]);
@@ -739,6 +785,15 @@ export function MessageList({
     anchorScroll();
     setVisibleCount((v) => v + PAGE_SIZE);
   }, [canReveal, canFetch, onLoadEarlier, isLoadingEarlier, anchorScroll]);
+
+  /** Prepend the previous relay leg, keeping the viewport where it was. */
+  const showPrevLeg = !canReveal && !canFetch && !!prevLeg;
+  const loadPrevLeg = useCallback(async () => {
+    if (!prevLeg || prevLeg.loading || scrollAnchor.current) return;
+    await prevLeg.onLoad();
+    anchorScroll();
+    setVisibleCount((v) => v + PAGE_SIZE);
+  }, [prevLeg, anchorScroll]);
 
   /** Scroll a rendered row into the middle of the viewport, if it is mounted. */
   const scrollToRow = useCallback((msgIdx: number) => {
@@ -901,6 +956,24 @@ export function MessageList({
           )}
         </button>
       )}
+      {showPrevLeg && prevLeg && (
+        <button
+          className={styles.load_earlier}
+          onClick={loadPrevLeg}
+          disabled={prevLeg.loading}
+          aria-busy={prevLeg.loading || undefined}
+          data-testid="load-prev-leg"
+        >
+          {prevLeg.loading ? (
+            <span className={styles.load_earlier_busy}>
+              <Spinner size={12} />
+              {t("detail.loading_prev_leg", { hop: prevLeg.hop })}
+            </span>
+          ) : (
+            `↑ ${t("detail.load_prev_leg", { hop: prevLeg.hop })}`
+          )}
+        </button>
+      )}
       {renderUnits.map((unit, unitIdx) => {
         const i = unit.startLocal;
         // A separator opens each new day, and also the top of the window — a
@@ -958,6 +1031,15 @@ export function MessageList({
             </Fragment>
           );
         }
+        const divider = legDividerOf(unit.msg);
+        if (divider) {
+          return (
+            <Fragment key={unit.msg.uuid ?? globalStart}>
+              {showDay && <DaySeparator isoDay={today} />}
+              <LegDivider info={divider} />
+            </Fragment>
+          );
+        }
         return (
           <Fragment key={unit.msg.uuid ?? globalStart}>
             {showDay && <DaySeparator isoDay={today} />}
@@ -972,7 +1054,7 @@ export function MessageList({
               isActiveMatch={globalStart === searchMatchIndex}
               paths={paths}
               turnUsage={turnUsage.get(globalStart) ?? null}
-              apiErrorCtx={apiErrorCtx}
+              apiErrorCtx={globalStart < readOnlyRows ? null : apiErrorCtx}
             />
           </Fragment>
         );
