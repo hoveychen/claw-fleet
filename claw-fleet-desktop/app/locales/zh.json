@@ -106,6 +106,9 @@
         "sessions": "等待的任务",
         "mode": "触发条件"
       },
+      "job": {
+        "note": "在做什么"
+      },
       "artifact": {
         "note": "说明"
       }
