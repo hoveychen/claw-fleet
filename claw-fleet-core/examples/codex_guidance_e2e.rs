@@ -60,6 +60,7 @@ fn main() {
                 model.as_deref(),
                 effort.as_deref(),
                 &[],
+                &Default::default(),
             )
             .expect("spawn_new_codex_session");
             println!(
