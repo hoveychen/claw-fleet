@@ -32,6 +32,9 @@ pub const MAX_DIFF_BYTES: usize = 60 * 1024;
 /// Wall-clock budget for the whole model call, across every provider route.
 pub const MODEL_BUDGET: Duration = Duration::from_secs(30);
 
+/// Cap on a `-F` message file read into the prompt.
+const MESSAGE_FILE_CAP: usize = 8 * 1024;
+
 /// Denial fingerprints older than this are pruned.
 const FINGERPRINT_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 
@@ -52,12 +55,33 @@ pub struct CommitInvocation {
     pub all: bool,
     /// Inline message (`-m`, `--message`), best effort.
     pub message: Option<String>,
+    /// `-F` / `--file`: message file, relative to [`Self::dir`]; `-` is stdin.
+    pub message_file: Option<String>,
+    /// Pathspecs. Without `-i` git commits exactly these paths' working-tree
+    /// state and leaves the rest of the index out.
+    pub paths: Vec<String>,
+    /// `-i` / `--include`: the paths are staged on top of the existing index.
+    pub include: bool,
 }
 
 const SEPARATORS: &[&str] = &["&&", "||", ";", "|", "&"];
 
 /// Short `git commit` options that consume an argument.
 const SHORT_WITH_ARG: &[char] = &['m', 'F', 'c', 'C', 't'];
+
+/// Long `git commit` options whose argument may come as the next token.
+const LONG_WITH_ARG: &[&str] = &[
+    "--author",
+    "--date",
+    "--template",
+    "--reuse-message",
+    "--reedit-message",
+    "--fixup",
+    "--squash",
+    "--cleanup",
+    "--trailer",
+    "--pathspec-from-file",
+];
 
 /// Parse the first `git … commit` in `command`. `None` when there is none.
 pub fn parse_commit(command: &str) -> Option<CommitInvocation> {
@@ -122,20 +146,30 @@ pub fn parse_commit(command: &str) -> Option<CommitInvocation> {
         while let Some(tok) = it.next() {
             let t = tok.as_str();
             if t == "--" {
+                inv.paths.extend(it.by_ref().cloned());
                 break;
             } else if t == "--all" {
                 inv.all = true;
+            } else if t == "--include" {
+                inv.include = true;
             } else if t == "--message" {
                 inv.message = it.next().cloned();
             } else if let Some(m) = t.strip_prefix("--message=") {
                 inv.message = Some(m.to_string());
+            } else if t == "--file" {
+                inv.message_file = it.next().cloned();
+            } else if let Some(f) = t.strip_prefix("--file=") {
+                inv.message_file = Some(f.to_string());
+            } else if LONG_WITH_ARG.contains(&t) {
+                // Consumed so its argument is not taken for a pathspec.
+                it.next();
             } else if t.starts_with("--") {
-                // Long options with a separate argument that could be mistaken
-                // for a flag cluster are rare enough to ignore.
             } else if let Some(cluster) = t.strip_prefix('-') {
                 for (i, c) in cluster.char_indices() {
                     if c == 'a' {
                         inv.all = true;
+                    } else if c == 'i' {
+                        inv.include = true;
                     } else if SHORT_WITH_ARG.contains(&c) {
                         let rest = &cluster[i + c.len_utf8()..];
                         let arg = if rest.is_empty() {
@@ -143,12 +177,16 @@ pub fn parse_commit(command: &str) -> Option<CommitInvocation> {
                         } else {
                             Some(rest.to_string())
                         };
-                        if c == 'm' {
-                            inv.message = arg;
+                        match c {
+                            'm' => inv.message = arg,
+                            'F' => inv.message_file = arg,
+                            _ => {}
                         }
                         break;
                     }
                 }
+            } else {
+                inv.paths.push(tok.clone());
             }
         }
         inv.message = inv.message.map(|m| unwrap_heredoc(&m));
@@ -163,8 +201,9 @@ fn join_dir(base: Option<&str>, d: &str) -> String {
     // The shell expands `~` before `cd` / `git -C` see it; the token walk does
     // not, and a literal `~` dir makes git fail, which silently skips the check.
     let expanded = match d.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => crate::session::real_home_dir()
-            .map(|h| format!("{}{}", h.to_string_lossy(), rest)),
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            crate::session::real_home_dir().map(|h| format!("{}{}", h.to_string_lossy(), rest))
+        }
         _ => None,
     };
     let d = expanded.as_deref().unwrap_or(d);
@@ -192,52 +231,74 @@ fn unwrap_heredoc(msg: &str) -> String {
 
 // ── Diff collection ──────────────────────────────────────────────────────────
 
-/// `git` argument lists that print the diff `inv` would commit, in order of
-/// preference. With `-a`, `git diff HEAD` covers staged and tracked unstaged
-/// changes together; on a repo with no HEAD yet it fails and the staged diff
-/// is the fallback.
-pub fn diff_commands(inv: &CommitInvocation, base_dir: &Path) -> (PathBuf, Vec<Vec<String>>) {
+/// `git` argument lists that print the diff `inv` would commit. The outer list
+/// holds alternatives in order of preference; the first whose commands all
+/// succeed wins, and its commands' outputs are concatenated.
+///
+/// - `-a`: `git diff HEAD` (staged plus tracked unstaged), falling back to the
+///   staged diff on a repo with no HEAD yet.
+/// - pathspecs without `-i`: those paths' working tree against HEAD, nothing
+///   else from the index (git's `--only` default); staged-only fallback as above.
+/// - pathspecs with `-i`: the whole index plus the paths' unstaged changes.
+pub fn diff_commands(inv: &CommitInvocation, base_dir: &Path) -> (PathBuf, Vec<Vec<Vec<String>>>) {
     let dir = match &inv.dir {
         Some(d) => base_dir.join(d),
         None => base_dir.to_path_buf(),
     };
-    let common = ["diff", "--no-color", "--no-ext-diff"];
-    let staged: Vec<String> = common
-        .iter()
-        .map(|s| s.to_string())
-        .chain(["--cached".to_string()])
-        .collect();
-    let mut cmds = Vec::new();
-    if inv.all {
-        cmds.push(
-            common
-                .iter()
-                .map(|s| s.to_string())
-                .chain(["HEAD".to_string()])
-                .collect(),
-        );
-    }
-    cmds.push(staged);
-    (dir, cmds)
+    let diff = |extra: &[&str], paths: bool| -> Vec<String> {
+        let mut args: Vec<String> = ["diff", "--no-color", "--no-ext-diff"]
+            .iter()
+            .chain(extra)
+            .map(|s| s.to_string())
+            .collect();
+        if paths && !inv.paths.is_empty() {
+            args.push("--".to_string());
+            args.extend(inv.paths.iter().cloned());
+        }
+        args
+    };
+    let alternatives = if !inv.paths.is_empty() && inv.include {
+        vec![vec![diff(&["--cached"], false), diff(&[], true)]]
+    } else if !inv.paths.is_empty() || inv.all {
+        vec![vec![diff(&["HEAD"], true)], vec![diff(&["--cached"], true)]]
+    } else {
+        vec![vec![diff(&["--cached"], false)]]
+    };
+    (dir, alternatives)
 }
 
-/// Run the diff commands; the first that succeeds wins. `None` on any failure.
+/// Run the diff commands (see [`diff_commands`]). `None` on any failure.
 pub fn collect_diff(inv: &CommitInvocation, base_dir: &Path) -> Option<String> {
-    let (dir, cmds) = diff_commands(inv, base_dir);
-    for args in cmds {
-        let out = crate::process_util::command("git")
-            .arg("-C")
-            .arg(&dir)
-            .args(&args)
-            .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()?;
-        if out.status.success() {
-            return Some(String::from_utf8_lossy(&out.stdout).into_owned());
+    let (dir, alternatives) = diff_commands(inv, base_dir);
+    'alt: for group in alternatives {
+        let mut text = String::new();
+        for args in group {
+            let out = crate::process_util::command("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(&args)
+                .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .output()
+                .ok()?;
+            if !out.status.success() {
+                continue 'alt;
+            }
+            text.push_str(&String::from_utf8_lossy(&out.stdout));
         }
+        return Some(text);
     }
     None
+}
+
+/// Message from `-F <file>`, read relative to the commit's directory. `-`
+/// (stdin) and unreadable files give `None`; long files are cut.
+fn read_message_file(inv: &CommitInvocation, base_dir: &Path) -> Option<String> {
+    let f = inv.message_file.as_deref().filter(|f| *f != "-")?;
+    let (dir, _) = diff_commands(inv, base_dir);
+    let path = dir.join(join_dir(None, f));
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(truncate_utf8(&text, MESSAGE_FILE_CAP).0.to_string())
 }
 
 /// The commit's directory has a `MERGE_HEAD`, i.e. the commit concludes a merge.
@@ -443,7 +504,8 @@ pub fn decide_in(
             return None;
         }
     }
-    let prompt = build_prompt(&diff, inv.message.as_deref());
+    let message = inv.message.clone().or_else(|| read_message_file(&inv, cwd));
+    let prompt = build_prompt(&diff, message.as_deref());
     let raw = judge(&prompt)?;
     let findings = parse_verdict(&raw)?;
     if let Some(dir) = store {
@@ -563,7 +625,10 @@ mod tests {
         assert!(git(&["checkout", "-q", "-"]));
         std::fs::write(repo.join("a.txt"), "base\n").unwrap();
         assert!(git(&["commit", "-qam", "base"]));
-        assert!(!git(&["merge", "-q", "--no-ff", "side"]), "merge must conflict");
+        assert!(
+            !git(&["merge", "-q", "--no-ff", "side"]),
+            "merge must conflict"
+        );
         std::fs::write(repo.join("a.txt"), "resolved\n").unwrap();
         assert!(git(&["add", "a.txt"]));
 
@@ -602,21 +667,105 @@ mod tests {
     }
 
     #[test]
-    fn diff_commands_follow_all_flag() {
-        let (dir, cmds) = diff_commands(
-            &CommitInvocation {
-                dir: Some("sub".into()),
-                all: true,
-                message: None,
-            },
-            Path::new("/repo"),
-        );
+    fn diff_commands_follow_all_flag_and_pathspecs() {
+        let last = |cmd: &Vec<String>| cmd.last().unwrap().clone();
+        let inv = CommitInvocation {
+            dir: Some("sub".into()),
+            all: true,
+            ..Default::default()
+        };
+        let (dir, alts) = diff_commands(&inv, Path::new("/repo"));
         assert_eq!(dir, PathBuf::from("/repo/sub"));
-        assert_eq!(cmds.len(), 2);
-        assert_eq!(cmds[0].last().unwrap(), "HEAD");
-        assert_eq!(cmds[1].last().unwrap(), "--cached");
-        let (_, cmds) = diff_commands(&CommitInvocation::default(), Path::new("/repo"));
-        assert_eq!(cmds.len(), 1);
+        assert_eq!(alts.len(), 2);
+        assert_eq!(last(&alts[0][0]), "HEAD");
+        assert_eq!(last(&alts[1][0]), "--cached");
+
+        let (_, alts) = diff_commands(&CommitInvocation::default(), Path::new("/repo"));
+        assert_eq!(
+            alts,
+            vec![vec![vec![
+                "diff".to_string(),
+                "--no-color".into(),
+                "--no-ext-diff".into(),
+                "--cached".into()
+            ]]]
+        );
+
+        // Pathspecs (`--only`): HEAD against those paths only.
+        let inv = parse_commit("git commit -m x src/a.rs b.rs").unwrap();
+        let (_, alts) = diff_commands(&inv, Path::new("/repo"));
+        assert_eq!(alts[0][0][3..], ["HEAD", "--", "src/a.rs", "b.rs"]);
+
+        // `-i`: the whole index, then the paths' unstaged changes.
+        let inv = parse_commit("git commit -i -m x -- b.rs").unwrap();
+        let (_, alts) = diff_commands(&inv, Path::new("/repo"));
+        assert_eq!(alts.len(), 1);
+        assert_eq!(last(&alts[0][0]), "--cached");
+        assert_eq!(alts[0][1][3..], ["--", "b.rs"]);
+    }
+
+    #[test]
+    fn option_arguments_are_not_pathspecs() {
+        let inv = parse_commit(
+            "git commit --author 'A <a@a>' --date now -F msg.txt --cleanup strip -t tpl -m x",
+        )
+        .unwrap();
+        assert!(inv.paths.is_empty(), "{:?}", inv.paths);
+        assert_eq!(inv.message_file.as_deref(), Some("msg.txt"));
+        let inv = parse_commit("git commit --file=m.txt --include a.rs").unwrap();
+        assert_eq!(inv.message_file.as_deref(), Some("m.txt"));
+        assert!(inv.include);
+        assert_eq!(inv.paths, ["a.rs"]);
+        let inv = parse_commit("git commit -qF- a.rs").unwrap();
+        assert_eq!(inv.message_file.as_deref(), Some("-"));
+        assert_eq!(inv.paths, ["a.rs"]);
+    }
+
+    #[test]
+    fn pathspec_commit_judges_only_those_paths() {
+        let repo = scratch_repo("pathspec");
+        std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "b.txt"])
+            .status()
+            .unwrap()
+            .success());
+        // a.txt modified but unstaged; b.txt staged. `git commit a.txt`
+        // records a.txt's working tree and leaves b.txt out.
+        std::fs::write(repo.join("a.txt"), "edited\n").unwrap();
+        std::fs::write(repo.join("msg.txt"), "subject from file\n").unwrap();
+        let mut seen = String::new();
+        decide_in(
+            Some("Bash"),
+            Some("git commit -F msg.txt a.txt"),
+            "s",
+            &repo,
+            None,
+            |p| {
+                seen = p.to_string();
+                None
+            },
+        );
+        assert!(seen.contains("+edited"), "{seen}");
+        assert!(!seen.contains("b.txt"), "{seen}");
+        assert!(seen.contains("subject from file"), "{seen}");
+
+        let mut seen = String::new();
+        decide_in(
+            Some("Bash"),
+            Some("git commit -i -m x a.txt"),
+            "s",
+            &repo,
+            None,
+            |p| {
+                seen = p.to_string();
+                None
+            },
+        );
+        assert!(seen.contains("+edited") && seen.contains("b.txt"), "{seen}");
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]
