@@ -160,6 +160,14 @@ pub fn parse_commit(command: &str) -> Option<CommitInvocation> {
 }
 
 fn join_dir(base: Option<&str>, d: &str) -> String {
+    // The shell expands `~` before `cd` / `git -C` see it; the token walk does
+    // not, and a literal `~` dir makes git fail, which silently skips the check.
+    let expanded = match d.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => crate::session::real_home_dir()
+            .map(|h| format!("{}{}", h.to_string_lossy(), rest)),
+        _ => None,
+    };
+    let d = expanded.as_deref().unwrap_or(d);
     match base {
         Some(b) if !Path::new(d).is_absolute() => Path::new(b).join(d).to_string_lossy().into(),
         _ => d.to_string(),
@@ -230,6 +238,21 @@ pub fn collect_diff(inv: &CommitInvocation, base_dir: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// The commit's directory has a `MERGE_HEAD`, i.e. the commit concludes a merge.
+/// `MERGE_HEAD` is per worktree, so this is right inside linked worktrees too.
+fn merge_in_progress(inv: &CommitInvocation, base_dir: &Path) -> bool {
+    let (dir, _) = diff_commands(inv, base_dir);
+    crate::process_util::command("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// Cut `s` to at most `max` bytes on a char boundary. Returns the slice and
@@ -403,6 +426,12 @@ pub fn decide_in(
         return None;
     }
     let inv = parse_commit(command?)?;
+    if merge_in_progress(&inv, cwd) {
+        // Concluding a merge stages the whole merged branch, whose commits were
+        // each judged when they were made; re-judging it as one change costs a
+        // truncated diff, extra latency and false positives.
+        return None;
+    }
     let diff = collect_diff(&inv, cwd)?;
     if diff.trim().is_empty() {
         return None;
@@ -503,6 +532,51 @@ mod tests {
         // `-m` inside a message, and `-a` after `-m` text, must not flip `all`.
         let inv = parse_commit("git commit -m '-a is not a flag here'").unwrap();
         assert!(!inv.all);
+
+        // A leading `~` is expanded like the shell would; `~user` is left alone.
+        let home = crate::session::real_home_dir().unwrap();
+        let inv = parse_commit("cd ~/proj && git commit -m x").unwrap();
+        assert_eq!(
+            inv.dir.as_deref(),
+            Some(home.join("proj").to_string_lossy().as_ref())
+        );
+        let inv = parse_commit("git -C ~other/proj commit -m x").unwrap();
+        assert_eq!(inv.dir.as_deref(), Some("~other/proj"));
+    }
+
+    #[test]
+    fn concluding_a_merge_is_not_judged() {
+        let repo = scratch_repo("merge");
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        assert!(git(&["checkout", "-qb", "side"]));
+        std::fs::write(repo.join("a.txt"), "side\n").unwrap();
+        assert!(git(&["commit", "-qam", "side"]));
+        assert!(git(&["checkout", "-q", "-"]));
+        std::fs::write(repo.join("a.txt"), "base\n").unwrap();
+        assert!(git(&["commit", "-qam", "base"]));
+        assert!(!git(&["merge", "-q", "--no-ff", "side"]), "merge must conflict");
+        std::fs::write(repo.join("a.txt"), "resolved\n").unwrap();
+        assert!(git(&["add", "a.txt"]));
+
+        assert!(decide_in(
+            Some("Bash"),
+            Some("git commit --no-edit"),
+            "s",
+            &repo,
+            None,
+            |_| panic!("a merge conclusion must not be judged")
+        )
+        .is_none());
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]
