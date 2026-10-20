@@ -80,6 +80,14 @@ describe("classifyResult", () => {
     expect(r).toEqual({ kind: "confirm", text: "ok: checked P3 in m0-graybox" });
   });
 
+  it("keeps only the confirmation line of `task set`, dropping the workflow block", () => {
+    const text = "ok: task t1 saved (type=research, goal=g)\n\n## 本任务的流程：研究\n- 开工先发计划卡";
+    expect(classifyResult("task", "set", text, false)).toEqual({
+      kind: "confirm",
+      text: "ok: task t1 saved (type=research, goal=g)",
+    });
+  });
+
   it("classifies an errored call as `error`, keeping the message", () => {
     const r = classifyResult("plan", "check", "plan 'x' not found", true);
     expect(r).toEqual({ kind: "error", text: "plan 'x' not found" });
