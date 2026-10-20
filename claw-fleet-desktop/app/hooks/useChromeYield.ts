@@ -5,6 +5,9 @@ import { RAILS } from "../components/pageShellConfig";
 /** How much room the conversation needs before the layout starts giving up
  *  chrome for it. Below this a transcript is a column of two-word lines. */
 export const PROSE_MIN_PX = 420;
+/** How wide an open reader (doc, page, table) has to be before it reads as a
+ *  page rather than a column; below this SessionDetail folds its own rail. */
+export const READER_MIN_PX = 640;
 
 /**
  * Fold the app's chrome away while a wide reader is open in a pane too narrow

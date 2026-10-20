@@ -370,6 +370,7 @@ const DICT: Record<string, string> = {
   老板已回复: "Answered",
   "{0} 段": "{0} parts",
   "第 {0} 步": "step {0}",
+  "由「{0}」派出": "spawned by \"{0}\"",
   // ── Settings / More tab ──
   设置: "Settings",
   语言: "Language",

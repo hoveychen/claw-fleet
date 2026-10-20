@@ -2596,6 +2596,7 @@
     "recover_lead": "这些子任务在回合中途断了。勾选的会被唤醒，从中断处接着做。",
     "recover_lead_done": "恢复结果：",
     "recover_step": "第 {{n}} 步",
+    "recover_via": "由「{{title}}」派出",
     "recover_ok": "已唤醒",
     "recover_confirm": "唤醒 {{count}} 个",
     "recover_close": "关闭",
