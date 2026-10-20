@@ -236,7 +236,7 @@ fn task_tool_def() -> Value {
 fn job_tool_def() -> Value {
     json!({
         "name": "fleet__job",
-        "description": "Run a long shell command (a full test suite, a build, a render — anything that may take more than a few minutes) as a Fleet-hosted JOB, then wait on it by id. Use this instead of a foreground Bash that may hit its 600s cap, a background Bash / Monitor (killed when your turn ends — for a subagent, when it returns), or `nohup … &` + `ps | grep` + tail-the-log polling. A job runs detached under Fleet, survives your turn, your subagent and your session, and keeps a real exit code and a log. Typical use: `run`, keep working, then `wait` (blocks up to 540s per call; call it again while it reports running) — a subagent must not return while its job is still running. A top-level session that would rather end its turn can pass `wake: true` on run to be resumed when the job finishes. Actions: run (--command required; --cwd/--wake optional), wait (--id required; --timeout seconds, default and max 540), status (--id required), stop (--id required), list (this workspace's jobs). wait/status show the last `tail` lines of output (default 20).",
+        "description": "Run a long shell command (a full test suite, a build, a render — anything that may take more than a few minutes) as a Fleet-hosted JOB, then wait on it by id. Use this instead of a foreground Bash that may hit its 600s cap, a background Bash / Monitor (killed when your turn ends — for a subagent, when it returns), or `nohup … &` + `ps | grep` + tail-the-log polling. A job runs detached under Fleet, survives your turn, your subagent and your session, and keeps a real exit code and a log. Typical use: `run`, keep working, then `wait` (blocks up to 540s per call; call it again while it reports running) — a subagent must not return while its job is still running. A top-level session that would rather end its turn can pass `wake: true` on run to be resumed when the job finishes. Actions: run (--command required; --cwd/--wake/--note optional — give a note whenever you pass wake), wait (--id required; --timeout seconds, default and max 540), status (--id required), stop (--id required), list (this workspace's jobs). wait/status show the last `tail` lines of output (default 20).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -244,6 +244,7 @@ fn job_tool_def() -> Value {
                 "command": {"type": "string", "description": "Shell command line (run only). Runs under your login shell on a pty."},
                 "cwd": {"type": "string", "description": "Directory to run in (run only) — e.g. your plan's `.worktrees/<id>` checkout. Defaults to the session's workspace."},
                 "wake": {"type": "boolean", "description": "Resume THIS session with the job's result when it finishes, so you can end your turn now (run only; top-level sessions only — a subagent waits instead)."},
+                "note": {"type": "string", "description": "With wake: one short sentence, in the boss's language, of what the job is doing (e.g. \"整局 bot 长跑抓贴纸错位现场\"). It is what the boss sees on the task's waiting condition instead of the raw command — always pass it with wake."},
                 "id": {"type": "string", "description": "Job id. Required for wait/status/stop."},
                 "timeout": {"type": "integer", "description": "Seconds to block (wait only), max 540."},
                 "tail": {"type": "integer", "description": "Output lines to show (wait/status), default 20, max 200."}
@@ -582,9 +583,32 @@ fn handle_history(args: &Value, sid: Option<&str>) -> Result<String, String> {
 pub const JOB_WAKE_EFFECT: &str =
     "registered a watch that resumes your PARENT session when the job ends";
 
+/// Longest command prefix shown when a waking job carries no `note`.
+const JOB_WAKE_COMMAND_PREVIEW_CHARS: usize = 60;
+
+/// The wake watch's note — the line the boss reads on the task's waiting
+/// condition. The agent's own `note` when given; otherwise the command's first
+/// line, cut short, since a full command line is unreadable there.
+fn job_wake_note(note: Option<&str>, command: &str) -> String {
+    if let Some(n) = note.map(str::trim).filter(|n| !n.is_empty()) {
+        return n.to_string();
+    }
+    let first = command.trim().lines().next().unwrap_or("").trim();
+    let mut preview: String = first.chars().take(JOB_WAKE_COMMAND_PREVIEW_CHARS).collect();
+    if preview.len() < first.len() || command.trim().lines().nth(1).is_some() {
+        preview.push('…');
+    }
+    format!("job: {preview}")
+}
+
 /// `wake: true` on run: a watch on `fleet job done <id>` that resumes `sid`
 /// with the job's status and tail once it exits.
-fn register_job_wake(sid: Option<&str>, exe: &Path, rec: &crate::proc_runner::ProcRecord) -> Result<String, String> {
+fn register_job_wake(
+    sid: Option<&str>,
+    exe: &Path,
+    rec: &crate::proc_runner::ProcRecord,
+    note: Option<&str>,
+) -> Result<String, String> {
     use crate::watch;
     let sid = sid.ok_or("cannot resolve this session's id, so nothing could be woken; use action=wait instead")?;
     if sid.starts_with("agent-") {
@@ -597,7 +621,7 @@ fn register_job_wake(sid: Option<&str>, exe: &Path, rec: &crate::proc_runner::Pr
         &ctx.workspace,
         &format!("{fleet} job done {}", rec.id),
         Some(&format!("{fleet} job status {} --tail 40", rec.id)),
-        Some(&format!("job {} finished: {}", rec.id, rec.command)),
+        Some(&job_wake_note(note, &rec.command)),
         watch::DEFAULT_POLL_SECS,
         24 * 60 * 60,
         ctx.model.as_deref(),
@@ -632,7 +656,7 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
             let exe = std::env::current_exe().map_err(|e| format!("cannot locate fleet: {e}"))?;
             let rec = job::run(&exe, &dir.to_string_lossy(), &command)?;
             if flag(args, "wake") {
-                let wake = match register_job_wake(sid, &exe, &rec) {
+                let wake = match register_job_wake(sid, &exe, &rec, arg(args, "note").as_deref()) {
                     Ok(t) => t,
                     Err(e) => {
                         // Don't leave a job running that nobody was told about.
@@ -1865,6 +1889,20 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_wake_note_prefers_agent_note_and_shortens_command() {
+        assert_eq!(job_wake_note(Some("  整局 bot 长跑  "), "python3 run.py"), "整局 bot 长跑");
+        assert_eq!(job_wake_note(Some("   "), "make test"), "job: make test");
+        assert_eq!(job_wake_note(None, "make test"), "job: make test");
+        let long = format!("python3 {}", "x".repeat(200));
+        let note = job_wake_note(None, &long);
+        assert!(note.ends_with('…'), "{note}");
+        assert_eq!(note.chars().count(), "job: ".len() + JOB_WAKE_COMMAND_PREVIEW_CHARS + 1);
+        assert_eq!(job_wake_note(None, "cd a\nmake"), "job: cd a…");
+        // Multi-byte text must be cut on a char boundary, not a byte one.
+        assert!(job_wake_note(None, &"贴".repeat(100)).ends_with('…'));
+    }
 
     #[test]
     fn task_set_return_carries_workflow_block_when_type_changes() {
