@@ -26,3 +26,15 @@ export function subtaskOutcome(
   if (lastTurnEnd == null || lastTurnEnd === "clean") return "reported";
   return lastTurnEnd;
 }
+
+/** Whether a sub-task counts toward a task's "n/m finished" tally: it is done,
+ *  or it stopped having reported back. A stopped one that was cut off, killed
+ *  or failed (`lastTurnEnd` set and not "clean") stays in the total but is not
+ *  finished. A missing `lastTurnEnd` keeps the old reading. */
+export function subtaskCountsAsFinished(
+  state: TaskState,
+  lastTurnEnd: TurnEnd | null | undefined,
+): boolean {
+  if (state === "done") return true;
+  return subtaskOutcome(state, lastTurnEnd) === "reported";
+}

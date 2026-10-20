@@ -222,7 +222,7 @@ export function TaskRail({
   const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
   const subtasks = row?.subtasks ?? [];
   const doneSubtasks = subtasks.filter(
-    (st) => st.state === "review" || st.state === "done",
+    (st) => subtaskCountsAsFinished(st.state, st.tip.lastTurnEnd),
   ).length;
   const doneSteps = steps?.filter((s) => s.done).length ?? 0;
   const current = steps?.findIndex((s) => !s.done) ?? -1;
