@@ -1,0 +1,78 @@
+/* The clipping box the image zooms inside: fills whatever stage holds it, so
+   the fitted image is as large as the maximized card allows. */
+.stage {
+  position: relative;
+  flex: 1;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  /* Some hosts (the file preview) lay out by content height; this gives the
+     image room there, and is outgrown wherever the host already fills. */
+  min-height: 60vh;
+  overflow: hidden;
+}
+
+/* Fit the stage both ways, upscaling small images too: a 320px pixel-art
+   render is the case that most needs the room. Absolute so its size resolves
+   against the stage's used box, even where the stage's height comes from
+   min-height rather than a definite height. */
+.image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain;
+  user-select: none;
+  touch-action: none;
+  transform-origin: center;
+  /* object-fit leaves the letterbox transparent; the stage's own background
+     shows through instead of the image's fixed-light canvas. */
+  background: transparent !important;
+}
+
+.controls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  box-shadow: var(--shadow-modal);
+}
+
+.controls button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.controls button:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-bg-sunken);
+}
+
+.controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.zoom {
+  min-width: 40px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}

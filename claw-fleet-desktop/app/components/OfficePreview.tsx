@@ -33,6 +33,7 @@ import {
   readSheets,
   renderDocxInto,
   renderPptxInto,
+  SLIDE_RATIO,
   type ParsedSheet,
 } from "../officeRender";
 import { SkeletonCard, SkeletonList } from "./loading";
@@ -79,15 +80,43 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
     setError(null);
     host.replaceChildren();
 
+    // pptx paints at a fixed pixel width, so a deck rendered in the rail stays
+    // rail-sized when its card is maximized. Remember what it was painted at
+    // and repaint, on the same slide, once the host settles at a new width.
+    let blob: Blob | null = null;
+    let deck: { currentIndex: number } | null = null;
+    let painted = { w: 0, h: 0 };
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const paintDeck = async (startSlide: number) => {
+      painted = { w: host.clientWidth, h: host.clientHeight };
+      host.replaceChildren();
+      deck = await renderPptxInto(blob!, host, fitDeckWidth(host), startSlide);
+    };
+    const observer =
+      mode === "pptx" && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            const moved =
+              Math.abs(host.clientWidth - painted.w) >= 24 ||
+              Math.abs(host.clientHeight - painted.h) >= 24;
+            if (!deck || !moved) return;
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+              if (!alive || !deck) return;
+              const at = deck.currentIndex;
+              deck = null;
+              paintDeck(at).catch((e) => alive && setError(String(e)));
+            }, 150);
+          })
+        : null;
+    observer?.observe(host);
+
     (async () => {
-      const blob = await fetchBlob(url);
+      blob = await fetchBlob(url);
       if (!alive) return;
       if (mode === "docx") {
         await renderDocxInto(blob, host);
       } else {
-        // clientWidth is 0 if the stage hasn't laid out yet; 960 keeps a deck
-        // readable rather than collapsing it to nothing.
-        await renderPptxInto(blob, host, host.clientWidth || 960);
+        await paintDeck(0);
       }
     })()
       .then(() => {
@@ -101,6 +130,8 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
 
     return () => {
       alive = false;
+      observer?.disconnect();
+      clearTimeout(resizeTimer);
     };
   }, [mode, url]);
 
@@ -122,6 +153,20 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
     </div>
   );
 }
+
+/** Widest slide that also fits the host's height (slide plus the library's
+ *  pager row), so a maximized deck shows whole instead of scrolling. */
+function fitDeckWidth(host: HTMLElement): number {
+  // clientWidth is 0 if the stage hasn't laid out yet; 960 keeps a deck
+  // readable rather than collapsing it to nothing.
+  const width = host.clientWidth || 960;
+  const height = host.clientHeight;
+  if (height < 200) return width;
+  return Math.max(320, Math.min(width, Math.floor((height - PAGER_HEIGHT) / SLIDE_RATIO)));
+}
+
+/** Height of pptx-preview's pagination row under the slide. */
+const PAGER_HEIGHT = 56;
 
 function SheetPreview({ url }: { url: string }) {
   const { t } = useTranslation();
