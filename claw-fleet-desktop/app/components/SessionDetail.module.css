@@ -127,6 +127,12 @@
 }
 /* ...and the rail, which then holds that corner, clears the buttons from its
    top instead. Inline hosts sit below a chrome strip that already does. */
+/* Folded to make room for an open reader (see railYield in SessionDetail).
+   Hidden, not unmounted: the reader is portaled out of this rail. Two classes
+   so it outranks TaskRail's own `.rail { display: flex }`. */
+.root .task_rail_folded {
+  display: none;
+}
 .root:not(.inline) .task_rail {
   padding-top: max(10px, calc(var(--win-caption-inset-y) - var(--slab-gap, 0px)));
 }
