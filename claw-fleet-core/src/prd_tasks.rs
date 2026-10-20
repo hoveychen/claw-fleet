@@ -2218,6 +2218,105 @@ fn workflow_for(
     }
 }
 
+/// The per-turn task nudge: a one-line `<system-reminder>` that callers emit
+/// *after* [`render_active_plans_reminder`] on every turn, including the turns
+/// on which the dedup suppressed the reminder itself.
+///
+/// Today only a research task's main conversation gets one
+/// ([`crate::task_workflow_guidance::research_next_line`]). The full research
+/// block is sent once and then recedes up a long transcript — the v1 sampling
+/// found it acted on as often as it was seen, which was once — so the next
+/// step is restated every turn in a few dozen characters.
+///
+/// It stays out of the dedup by construction: it never carries
+/// [`PLAN_REMINDER_MARK`], so a turn that injected only the nudge is skipped
+/// when the dedup looks for the previous reminder, and a turn that injected
+/// both is compared on its leading `<system-reminder>` only
+/// ([`crate::prd_context_dedup`]).
+pub fn render_task_nudge(cwd: &Path, session_id: Option<&str>) -> Option<String> {
+    let sid = session_id?;
+    // Part of the workflow block for the task-type ablation's purposes.
+    if crate::task_workflow_guidance::flow_block_off(cwd) {
+        return None;
+    }
+    let (_, locale) = crate::claude_launch::guidance_voice();
+    task_nudge_for(&crate::task_model::TaskGraph::load(), cwd, sid, &locale)
+}
+
+fn task_nudge_for(
+    graph: &crate::task_model::TaskGraph,
+    cwd: &Path,
+    sid: &str,
+    locale: &str,
+) -> Option<String> {
+    let place = graph.place(sid);
+    // A sub-task has no research plan of its own to advance.
+    if place.parent_task_id.is_some() {
+        return None;
+    }
+    let profile = crate::task_profile::read(&place.task_id)?;
+    if profile.task_type != crate::task_profile::TaskType::Research {
+        return None;
+    }
+    let step = research_step(cwd, crate::task_progress::read(sid).as_ref());
+    let line = crate::task_workflow_guidance::research_next_line(&step, locale);
+    Some(format!("<system-reminder>\n{line}\n</system-reminder>"))
+}
+
+/// Where the session's research plan stands. The focus record names the plan
+/// the session is on; the research plan is that one or its nearest research
+/// ancestor (an exec child opened mid-research still answers to it).
+fn research_step(
+    cwd: &Path,
+    rec: Option<&crate::task_progress::TaskProgressRecord>,
+) -> crate::task_workflow_guidance::ResearchStep {
+    use crate::task_workflow_guidance::ResearchStep;
+    let Some(rec) = rec else {
+        return ResearchStep::NoPlan;
+    };
+    let main_root = discover_main_checkout_root(cwd);
+    if !same_workspace(main_root.as_deref().unwrap_or(cwd), &rec.workspace_path) {
+        return ResearchStep::NoPlan;
+    }
+    let sources = collect_task_sources(cwd, main_root.as_deref());
+    let (raw, _) = collect_from_sources(&sources, false);
+    research_step_in(&dedup_blocks_keep_latest_mtime(raw), &rec.plan_id)
+}
+
+/// Pure core of [`research_step`].
+fn research_step_in(
+    blocks: &[SourcedBlock],
+    focused: &str,
+) -> crate::task_workflow_guidance::ResearchStep {
+    use crate::task_workflow_guidance::ResearchStep;
+    let by_id: HashMap<&str, &SourcedBlock> = blocks
+        .iter()
+        .filter_map(|b| b.id.as_deref().map(|i| (i, b)))
+        .collect();
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut cursor = Some(focused);
+    while let Some(id) = cursor {
+        if !seen.insert(id) {
+            break;
+        }
+        let Some(block) = by_id.get(id) else {
+            break;
+        };
+        if block.kind == PlanKind::Research {
+            let plan_id = id.to_string();
+            return match has_open_work(&block.body, block.kind)
+                .then(|| first_pending_task(&block.body))
+                .flatten()
+            {
+                Some(task) => ResearchStep::Next { plan_id, task },
+                None => ResearchStep::Done { plan_id },
+            };
+        }
+        cursor = block.parent.as_deref();
+    }
+    ResearchStep::NoPlan
+}
+
 /// Put the lead section above the plans body, or wrap it alone when there is
 /// no plan to show.
 fn wrap_reminder(lead: Vec<String>, body: Option<String>) -> Option<String> {
@@ -3067,6 +3166,128 @@ trailing notes outside\n";
         let b = render_active_plans_reminder(&ws, Some("res-t")).unwrap();
         assert_eq!(a, b);
         assert!(a.contains("弄清 Y") && a.len() <= LEAD_CAP_BYTES + 128, "{a}");
+    }
+
+    fn sbk(id: &str, body: &str, parent: Option<&str>, kind: PlanKind) -> SourcedBlock {
+        SourcedBlock {
+            id: Some(id.to_string()),
+            body: body.to_string(),
+            source: PathBuf::from("/r/TASKS.md"),
+            mtime: UNIX_EPOCH,
+            parent: parent.map(|s| s.to_string()),
+            kind,
+        }
+    }
+
+    #[test]
+    fn research_step_follows_focus_up_to_the_research_plan() {
+        use crate::task_workflow_guidance::ResearchStep;
+        let blocks = [
+            sbk("q", "- [x] **P1** — 拆问题\n- [ ] **P2** — 对比三家\n", None, PlanKind::Research),
+            sbk("probe", "- [ ] **P1** — 写探针\n", Some("q"), PlanKind::Exec),
+            sbk("done", "- [x] **P1** — a\n", None, PlanKind::Research),
+            sbk("fix", "- [ ] **P1** — b\n", None, PlanKind::Exec),
+        ];
+        let next = ResearchStep::Next {
+            plan_id: "q".into(),
+            task: "**P2** — 对比三家".into(),
+        };
+        assert_eq!(research_step_in(&blocks, "q"), next);
+        // An exec child opened mid-research still answers to its research parent.
+        assert_eq!(research_step_in(&blocks, "probe"), next);
+        assert_eq!(
+            research_step_in(&blocks, "done"),
+            ResearchStep::Done { plan_id: "done".into() }
+        );
+        assert_eq!(research_step_in(&blocks, "fix"), ResearchStep::NoPlan);
+        assert_eq!(research_step_in(&blocks, "gone"), ResearchStep::NoPlan);
+    }
+
+    /// The acceptance shape for design v2 §3 option B: a kicked-off research
+    /// task's main conversation gets the full research layer once (deduped)
+    /// and the next-step line on every turn, the deduplicated one included.
+    #[test]
+    fn research_main_conversation_gets_layer_once_and_next_step_every_turn() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        set("res-main", Some(TaskType::Research), Some("弄清 HF 事件模型能否用于回测"), None, ProfileSetter::Agent).unwrap();
+        set("dev-main", Some(TaskType::Dev), Some("修好 X"), None, ProfileSetter::Agent).unwrap();
+        let ws = dir.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"hf-events\" v=\"2\" kind=\"research\" -->\n\n\
+**Plan:** HF 事件模型能否用于回测\n\n\
+- [x] **P1** — 数据源与覆盖期\n\
+- [ ] **P2** — 事件定义与前视偏差\n\
+- [ ] **P3** — 与现有因子的相关性\n\n\
+<!-- fleet:prd:end id=\"hf-events\" -->\n",
+        )
+        .unwrap();
+        crate::task_progress::set_current("res-main", &ws.to_string_lossy(), "hf-events", None).unwrap();
+        crate::claude_launch::reconcile_guidance("老板", "zh").unwrap();
+
+        let reminder = render_active_plans_reminder(&ws, Some("res-main")).expect("reminder");
+        let nudge = render_task_nudge(&ws, Some("res-main")).expect("nudge");
+        assert!(reminder.contains("## 本任务的流程：研究（已开工）"), "{reminder}");
+        assert!(nudge.contains("研究：下一步 **P2** — 事件定义与前视偏差"), "{nudge}");
+        if std::env::var_os("FLEET_PRINT_RESEARCH_INJECTION").is_some() {
+            println!("=== turn 1 ===\n{reminder}\n\n{nudge}\n=== turn 2 ===\n{nudge}");
+        }
+
+        // Turn 1 carried both; on turn 2 the dedup drops the reminder, the
+        // nudge still goes in, and turn 3 still dedupes against turn 1.
+        let attachment = |text: &str| {
+            serde_json::json!({
+                "type": "attachment",
+                "attachment": {"type": "hook_additional_context", "content": [text]},
+            })
+            .to_string()
+        };
+        let transcript = dir.path().join("t.jsonl");
+        std::fs::write(&transcript, format!("{}\n", attachment(&format!("{reminder}\n\n{nudge}")))).unwrap();
+        assert!(!crate::prd_context_dedup::claude_needs_injection(&transcript, &reminder));
+        std::fs::write(
+            &transcript,
+            format!(
+                "{}\n{}\n",
+                attachment(&format!("{reminder}\n\n{nudge}")),
+                attachment(&nudge)
+            ),
+        )
+        .unwrap();
+        assert!(!crate::prd_context_dedup::claude_needs_injection(&transcript, &reminder));
+        assert_eq!(render_task_nudge(&ws, Some("res-main")), Some(nudge.clone()));
+
+        // Ticking P2 moves the line on.
+        let tasks = std::fs::read_to_string(ws.join("TASKS.md")).unwrap();
+        std::fs::write(ws.join("TASKS.md"), tasks.replace("- [ ] **P2**", "- [x] **P2**")).unwrap();
+        let moved = render_task_nudge(&ws, Some("res-main")).unwrap();
+        assert!(moved.contains("下一步 **P3**"), "{moved}");
+
+        // A research task with no attributed plan is told to create one.
+        set("res-bare", Some(TaskType::Research), None, None, ProfileSetter::Agent).unwrap();
+        let bare = render_task_nudge(&ws, Some("res-bare")).unwrap();
+        assert!(bare.contains("kind=research"), "{bare}");
+
+        // Dev, unprofiled and sub-task sessions get no nudge.
+        assert!(render_task_nudge(&ws, Some("dev-main")).is_none());
+        assert!(render_task_nudge(&ws, Some("nobody")).is_none());
+        assert!(render_task_nudge(&ws, None).is_none());
+        let graph = crate::task_model::TaskGraph::new(
+            Vec::<Vec<String>>::new(),
+            vec![("res-sub".to_string(), "res-main".to_string())],
+        );
+        assert!(task_nudge_for(&graph, &ws, "res-sub", "zh").is_none());
+        assert!(task_nudge_for(&graph, &ws, "res-main", "zh").is_some());
+
+        // The task-type ablation's no-block arm gets no nudge either.
+        let fleet_dir = crate::session::get_fleet_dir().unwrap();
+        let list = fleet_dir.join(crate::task_workflow_guidance::FLOW_BLOCK_OFF_FILE);
+        std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+        std::fs::write(&list, format!("{}\n", ws.display())).unwrap();
+        assert!(render_task_nudge(&ws, Some("res-main")).is_none());
     }
 
     #[test]

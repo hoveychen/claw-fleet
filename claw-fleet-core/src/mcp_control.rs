@@ -1939,7 +1939,7 @@ mod tests {
         let out = render_task_set(&profile(TaskType::Research), None, Some(TaskType::Research), "", "zh");
         assert_eq!(out.lines().next(), Some(confirm), "{out}");
         assert!(out.contains("## 本任务的流程：研究"), "{out}");
-        assert!(out.contains("开工先发计划卡"), "{out}");
+        assert!(out.contains("知识台账"), "{out}");
         // English voice renders the English block.
         let en = render_task_set(&profile(TaskType::Research), None, Some(TaskType::Research), "", "en");
         assert!(en.contains("This task's workflow: research"), "{en}");
