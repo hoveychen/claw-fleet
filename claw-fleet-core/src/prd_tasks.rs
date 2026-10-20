@@ -2168,7 +2168,9 @@ pub struct FreshSession<'a> {
 pub fn render_fresh_session_reminder(cwd: &Path, fresh: &FreshSession) -> Option<String> {
     let (title, locale) = crate::claude_launch::guidance_voice();
     let graph = crate::task_model::TaskGraph::load();
-    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale);
+    let flow_off = crate::task_workflow_guidance::flow_block_off(cwd);
+    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale)
+        .filter(|w| !flow_off || crate::task_workflow_guidance::is_self_report_line(w));
     let lead = workflow.into_iter().collect();
     wrap_reminder(lead, render_plans_reminder_body(cwd, None))
 }
