@@ -65,7 +65,8 @@ function PlanBlock({ plan }: { plan: TaskPlanDetail }) {
 
   const total = plan.items.length;
   const done = plan.items.filter((it) => it.done).length;
-  const allDone = total > 0 && done === total;
+  // A stopped research plan is finished even with boxes left unticked.
+  const allDone = (total > 0 && done === total) || Boolean(plan.stopReason);
   // Prefer the human-readable `**Plan:**` title; fall back to the sentinel id,
   // then to the anonymous label.
   const title = plan.title ?? plan.id ?? t("detail.tasks_anonymous");
@@ -85,7 +86,12 @@ function PlanBlock({ plan }: { plan: TaskPlanDetail }) {
         >
           {allDone ? t("detail.tasks_status_done") : t("detail.tasks_status_active")}
         </span>
-        {plan.kind === "explore" && <span className={styles.kind}>explore</span>}
+        {plan.stopReason && (
+          <span className={styles.kind} title={plan.stopReason}>
+            {t("detail.tasks_stopped")}
+          </span>
+        )}
+        {plan.kind !== "exec" && <span className={styles.kind}>{plan.kind}</span>}
         {showId && <span className={styles.id}>{plan.id}</span>}
         {plan.source && (
           <span className={styles.source} title={plan.source}>

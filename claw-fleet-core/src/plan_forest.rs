@@ -38,6 +38,11 @@ pub struct PlanNode {
     pub source: Option<String>,
     pub kind: PlanKind,
     pub items: Vec<TaskItem>,
+    /// Why a research plan was ended before every box was ticked; such a plan
+    /// is complete. See [`pt::effective_stop_reason`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub stop_reason: Option<String>,
     pub done: u32,
     pub total: u32,
     /// Relay chains whose `plan_id` names this plan — the "relay chain n/N" the view
@@ -63,8 +68,12 @@ pub struct PlanNode {
 }
 
 impl PlanNode {
-    /// Pending top-level P-tasks in this plan alone (children excluded).
+    /// Pending top-level P-tasks in this plan alone (children excluded). Zero
+    /// for a stopped research plan: its unticked boxes are no longer work.
     pub fn pending(&self) -> u32 {
+        if self.stop_reason.is_some() {
+            return 0;
+        }
         self.total.saturating_sub(self.done)
     }
 }
@@ -163,6 +172,7 @@ pub fn build_from(
                 source: pt::display_source(&b.source, main_root, primary.as_deref()),
                 kind: b.kind,
                 items: pt::parse_task_items(&b.body),
+                stop_reason: pt::effective_stop_reason(&b.body, b.kind),
                 done,
                 total,
                 chains: chains_by_plan.remove(id).unwrap_or_default(),

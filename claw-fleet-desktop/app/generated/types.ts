@@ -319,7 +319,8 @@ export type TaskItem = { text: string, done: boolean, };
 export type TaskPlanDetail = { id: string | null, 
 title: string | null, 
 source: string | null, 
-kind: PlanKind, items: Array<TaskItem>, };
+kind: PlanKind, items: Array<TaskItem>, 
+stopReason?: string, };
 
 export type HandoffLink = { fromSessionId: string, toSessionId: string, note: string, planId?: string | null, nextTask?: string | null, 
 handedAt: number, };
@@ -359,7 +360,7 @@ export type DecisionTaskRef = {
 taskId: string, taskTitle?: string | null, 
 subtaskId?: string | null, subtaskTitle?: string | null, };
 
-export type PlanKind = "exec" | "explore";
+export type PlanKind = "exec" | "explore" | "research";
 
 export type PlanSnooze = { workspacePath: string, planId: string, 
 untilMs?: number | null, reason: string, 
@@ -383,7 +384,8 @@ export type ReviveOutlook = { "kind": "revive", at: number, } | { "kind": "askBo
 
 export type PlanNode = { 
 id: string, title: string | null, 
-source: string | null, kind: PlanKind, items: Array<TaskItem>, done: number, total: number, 
+source: string | null, kind: PlanKind, items: Array<TaskItem>, 
+stopReason?: string, done: number, total: number, 
 chains: Array<HandoffChain>, children: Array<PlanNode>, 
 orphanedParent: string | null, 
 snooze?: PlanSnooze | null, 

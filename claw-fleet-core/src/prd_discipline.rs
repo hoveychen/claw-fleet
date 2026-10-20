@@ -109,11 +109,13 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 
 > **工具列表里有 `fleet__plan` / `fleet__handoff` / `fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` 这些 MCP 工具时（Fleet 起的会话都有），一律优先用它们而不是 `fleet …` 命令行（传 `action` 参数，语义与 CLI 子命令一一对应）。远端（rca）会话里 Bash 跑 `fleet …` 会被路由到没有 fleet 的远端而 exit 127。**
 
-- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec]` —— 新建计划块并把本会话记为执行者。创建即开始。
+- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec|research]` —— 新建计划块并把本会话记为执行者。创建即开始。
   - **默认：你在执行某计划时新建的计划自动成为它的子计划**，一个 flag 都不用传。从一个计划里派生出来的计划，默认就是它的儿子。`--parent` 挂到别处；`--root` 另起顶层树，**手上有计划时必须同时给 `--root-reason`**（一句话说明这活为什么不属于当前计划），否则被拒。手上没计划时 root 本来就是默认，什么都不用传。
 - `fleet plan check <id> <P>` / `uncheck` —— 勾选/取消，并把焦点刷新到该计划。
 - `fleet plan resume <id> [P]` —— 接手一个你没创建、也没被交接给你的现存计划。
 - `fleet plan add <id> <P> --text "..."` / `migrate` / `list` / `get <id>`。
+- `fleet plan replan <id> --task "..." [--task "..."] --reason "..."` —— 用新的 P 列表替换计划里**尚未勾选**的 P，已勾的不动，理由记进计划块。
+- `fleet plan stop <id> --reason "..."` —— 仅限 research 计划：记下停止理由（预算用完 / 饱和 / 问题已答）后视为完成。
 - `fleet plan snooze <id> --for <8h|3d> --reason "..."` / `unsnooze <id>` —— **计划还有未完成的 P、却连续 30 分钟没有任何会话在负责它**（没有活进程、没挂 watch/schedule、没有等答复的卡、没登记接力），Fleet 会自动起一个新会话来接手。计划确实被卡住（等老板、等登录、等真机、等部署窗口）而又没法用 `fleet watch` 等时，停手前用 snooze 设静默期并写清卡在哪，reason 会显示给老板。
 
 ### explore 计划与 exec 计划
@@ -121,6 +123,8 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 `--kind` 说明这个计划的 P-task 是干什么用的。`exec`（缺省）会改代码；`explore` 产出的是理解，它的交付物是**派生出的 exec 子计划**，不是自己的代码改动。
 
 凡是以「先搞清楚……」开头、你还叫不出具体改动名字的工作都用 `--kind explore`，并且**不改生产代码**（一次性探针脚本可以）。调研完成后把结论变成一批 `--parent <explore-id>` 的子计划，让{title}在动手前逐条读到要做什么。把调研和实现塞进同一个计划，正是长程工作走歪的方式：P3 的发现会悄悄重新定义 P4 的含义，等有人察觉时实现已经和没人拍板过的需求耦合在一起了。
+
+`research` 的交付物是**知识本身**：一份 wiki 报告，每条结论带证据和置信度，并写明没覆盖什么；不必派生子计划，不改生产代码，也不需要 worktree。发现推翻了原拆分就 `replan`；答案够了（问题已答、最近一轮没有新结论、或预算用完）就 `stop` 记下理由收尾，不要为了勾框硬做剩下的 P。要据此改代码时，再开 exec 子计划。
 
 ### 子计划与回溯
 
@@ -332,11 +336,13 @@ Hand-editing TASKS.md still works (the file is the source of truth for checkboxe
 
 > **When the MCP tools `fleet__plan` / `fleet__handoff` / `fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` are in your tool list (every Fleet-spawned session has them), always prefer them over the `fleet …` CLI (pass `action`, one-to-one with the CLI subcommands). In a remote (rca) session, running `fleet …` through Bash is routed to a remote executor that has no fleet and fails with exit 127.**
 
-- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec]` — adds a plan block and records this session as its executor. Creating a plan is starting it.
+- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec|research]` — adds a plan block and records this session as its executor. Creating a plan is starting it.
   - **Default: a plan you author while executing another plan automatically becomes that plan's child.** No flag needed — a plan spawned out of a plan is by default its son. `--parent` attaches it elsewhere; `--root` starts a new top-level tree and **requires `--root-reason` whenever you are on a plan** (one sentence on why this work does not belong to the current plan), otherwise it is rejected. With no plan in flight, root is the default anyway and you pass nothing.
 - `fleet plan check <id> <P>` / `uncheck` — tick or untick, and refresh your focus onto that plan.
 - `fleet plan resume <id> [P]` — take over an existing plan you neither created nor were handed off into.
 - `fleet plan add <id> <P> --text "..."` / `migrate` / `list` / `get <id>`.
+- `fleet plan replan <id> --task "..." [--task "..."] --reason "..."` — replace the plan's **unticked** P-tasks with a new list; ticked ones stay, and the reason is recorded in the block.
+- `fleet plan stop <id> --reason "..."` — research plans only: record why the research ends (budget spent / saturation / question answered); the plan then counts as complete.
 - `fleet plan snooze <id> --for <8h|3d> --reason "..."` / `unsnooze <id>` — **when a plan has pending P-tasks but no session has been responsible for it for 30 minutes** (no live process, no watch/schedule, no card awaiting an answer, no registered handoff), Fleet wakes a fresh session to take it over. If the plan is genuinely blocked (waiting on the boss, a login, a real device, a deploy window) and a `fleet watch` cannot wait for it, snooze it before you stop and say what it is blocked on — the reason is shown to the boss.
 
 ### Explore plans vs exec plans
@@ -344,6 +350,8 @@ Hand-editing TASKS.md still works (the file is the source of truth for checkboxe
 `--kind` says what a plan's P-tasks are *for*. `exec` (the default) changes code. `explore` produces understanding, and its deliverable is **the exec child plans it spawns**, not code changes of its own.
 
 Any work that starts with "first figure out …", where you cannot yet name the concrete change, uses `--kind explore` and **does not touch production code** (throwaway probe scripts are fine). When the investigation lands, turn the findings into a batch of `--parent <explore-id>` children so {title} can read what is to be done before anyone builds it. Putting investigation and implementation in one plan is exactly how long-range work goes wrong: P3's findings quietly redefine what P4 means, and by the time anyone notices, the implementation is coupled to a requirement nobody signed off on.
+
+`research` delivers **the knowledge itself**: a wiki report in which every conclusion carries its evidence and a confidence, and which says what it did not cover. It needs no child plans, no production-code changes and no worktree. When findings break the original split, `replan`; when the answer is good enough (question answered, the last round produced nothing new, or the budget is spent), `stop` with that reason instead of grinding through boxes that no longer mean anything. If the findings call for code changes, open an exec child plan for them.
 
 ### Sub-plans and backtracking
 
