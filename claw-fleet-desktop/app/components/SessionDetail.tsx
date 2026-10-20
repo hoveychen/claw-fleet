@@ -46,6 +46,7 @@ import { ResumeComposer } from "./ResumeComposer";
 import { DecisionDock } from "./DecisionDock";
 import { collectReviewDocs, TaskRail, taskRailHasContent, useTaskArtifacts } from "./TaskRail";
 import { ReaderHostContext } from "./readerHost";
+import { useReaderOutsideDismiss } from "../hooks/useReaderOutsideDismiss";
 import type { TaskRow } from "./homeRows";
 import { formatSpan } from "./TaskList";
 import type { ExplorerEntry } from "./ExplorerPane";
@@ -1715,6 +1716,11 @@ export function SessionDetail({
      also what you expect a drawer entering from the right to do. */
   const railCovered = railShown && auxOpen && bodyRowW > 0 && bodyRowW < railFitW;
 
+  /* A click outside the open reader collapses it, which also brings back the
+     chrome it made yield (the session list most of all). */
+  const collapseReader = useCallback(() => setAux(collapseDoc), []);
+  useReaderOutsideDismiss(docExpanded, readerHost, collapseReader);
+
   /*
    * Escape closes the drawer, then collapses the expanded rail card.
    *
@@ -2016,6 +2022,7 @@ export function SessionDetail({
                       type="button"
                       className={`${styles.hero_tool} ${railShown ? styles.hero_tool_on : ""}`}
                       onClick={toggleRail}
+                      data-reader-keep
                       aria-pressed={railShown}
                       title={railShown ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
                       aria-label={railShown ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
