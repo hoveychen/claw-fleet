@@ -156,7 +156,15 @@ pub fn resume(
     let sid = session_id
         .ok_or("no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)")?;
     let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let step = current.as_deref().or(task).unwrap_or_default().to_string();
     crate::task_progress::set_current(sid, &ws.to_string_lossy(), plan_id, current)?;
+    crate::session_driver::retire_step_predecessors(
+        sid,
+        &ws.to_string_lossy(),
+        plan_id,
+        &step,
+        "plan_resume",
+    );
     Ok(PlanOutcome::ok())
 }
 

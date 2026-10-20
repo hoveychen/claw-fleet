@@ -227,6 +227,11 @@ fn status_of(child: &str, spawned_by: &str) -> SubtaskStatus {
     }
 }
 
+/// Probe `session_id` now and classify it the way the sub-task rail does.
+pub fn class_now(session_id: &str) -> RecoveryClass {
+    status_of(session_id, "").class
+}
+
 /// One row of [`descendants_from_edges`]: the spawned session, the hop that
 /// spawned it, and — below the first level — the `child` of the row it
 /// descends from.

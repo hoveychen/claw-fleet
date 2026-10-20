@@ -32,6 +32,8 @@
 //! intents that only wanted to restart the turn (`yield_to_turn`), since the new
 //! turn already does that.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 /// How long a fresh Running lease counts as live without its process being
@@ -709,6 +711,132 @@ fn live_end_with(session_id: &str, next: &dyn Fn(&str) -> Option<String>) -> Opt
     Some(current)
 }
 
+/// One session on record as working a plan step: from its focus record
+/// (`task_progress`) or from the step it was spawned for (launch note).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepHolder {
+    pub session_id: String,
+    pub workspace: String,
+    pub plan_id: String,
+    pub step: String,
+}
+
+/// `P3` from `P3`, `p3`, `**P3**` or a focus text like `**P3** — sync bt`.
+fn step_token(text: &str) -> Option<String> {
+    let t = text.trim().trim_start_matches('*');
+    let rest = t.strip_prefix(['P', 'p'])?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    (!digits.is_empty()).then(|| format!("P{digits}"))
+}
+
+/// Whether a session in `class` stopped mid-turn and nothing will bring it
+/// back by itself — the only kind a manual claim may retire. A clean `Done`
+/// handed its result back; `Running` / `Parked` / `Blocked` are still in play;
+/// `Unknown` and `Closed` are not ours to judge.
+fn retirable(class: crate::subtask_recovery::RecoveryClass) -> bool {
+    use crate::subtask_recovery::RecoveryClass as C;
+    matches!(class, C::Recoverable | C::AuthFailed | C::Failed | C::UserInterrupted)
+}
+
+/// Pure core of [`retire_step_predecessors`]: which `holders` of `plan_id`'s
+/// `step` in `workspace` `claimer` takes over from. A holder is skipped when
+/// it is on `claimer`'s own line (`claimer_line`: the claimer and its handoff
+/// hops), was spawned by that line (a coordinator re-claiming the step must
+/// not retire its own sub-tasks — its watch on them would follow the record
+/// back to itself), already has a successor, or is not [`retirable`]. `class`
+/// is probed last and only for the holders left, since it reads transcripts.
+#[allow(clippy::too_many_arguments)]
+pub fn step_predecessors(
+    claimer_line: &HashSet<String>,
+    workspace: &str,
+    plan_id: &str,
+    step: &str,
+    holders: &[StepHolder],
+    spawned_by: &dyn Fn(&str) -> Option<String>,
+    successor: &dyn Fn(&str) -> Option<String>,
+    class: &dyn Fn(&str) -> crate::subtask_recovery::RecoveryClass,
+) -> Vec<String> {
+    let Some(step) = step_token(step) else { return Vec::new() };
+    let ws = workspace.trim_end_matches('/');
+    let mut seen = HashSet::new();
+    holders
+        .iter()
+        .filter(|h| h.plan_id == plan_id && step_token(&h.step).as_deref() == Some(step.as_str()))
+        .filter(|h| crate::plan_revive::in_workspace(&h.workspace, ws))
+        .map(|h| h.session_id.as_str())
+        .filter(|id| seen.insert(*id))
+        .filter(|id| !claimer_line.contains(*id))
+        .filter(|id| !spawned_by(id).is_some_and(|p| claimer_line.contains(&p)))
+        .filter(|id| successor(id).is_none())
+        .filter(|id| retirable(class(id)))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every session on record as working some plan step, from the focus records
+/// and the launch notes' spawn assignments.
+fn step_holders() -> Vec<StepHolder> {
+    let focus = crate::task_progress::all_records().into_iter().filter_map(|(id, r)| {
+        Some(StepHolder {
+            session_id: id,
+            workspace: r.workspace_path,
+            plan_id: r.plan_id,
+            step: step_token(r.current_task.as_deref()?)?,
+        })
+    });
+    let spawned = crate::launch_spec::all().into_iter().filter_map(|(id, s)| {
+        Some(StepHolder {
+            session_id: id,
+            workspace: s.workspace?,
+            plan_id: s.spawned_for_plan?,
+            step: s.spawned_for_step?,
+        })
+    });
+    focus.chain(spawned).collect()
+}
+
+/// `claimer` has just claimed `plan_id`'s `step` by hand — a coordinator
+/// spawned it for that step, or it ran `fleet plan resume`. Retire every
+/// earlier holder of that step that died mid-turn (see [`step_predecessors`]),
+/// recording `claimer` as its successor under `mechanism`, so the UI warns
+/// before the boss resumes the old one next to its replacement (2026-10-20:
+/// af2ae7e3 / 4ea750b3 were resumed by hand next to the sessions spawned to
+/// replace them, because only a plan revive recorded the takeover). Returns
+/// the sessions retired.
+pub fn retire_step_predecessors(
+    claimer: &str,
+    workspace: &str,
+    plan_id: &str,
+    step: &str,
+    mechanism: &str,
+) -> Vec<String> {
+    let mut line: HashSet<String> = crate::handoff::chain_containing(claimer)
+        .map(|c| c.session_ids().into_iter().collect())
+        .unwrap_or_default();
+    line.insert(claimer.to_string());
+    // Focus records name the main checkout; the caller may be in a worktree.
+    let root = crate::prd_tasks::discover_main_checkout_root(std::path::Path::new(workspace))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| workspace.to_string());
+    let retired = step_predecessors(
+        &line,
+        &root,
+        plan_id,
+        step,
+        &step_holders(),
+        &crate::launch_spec::spawned_by_of,
+        &successor_of,
+        &crate::subtask_recovery::class_now,
+    );
+    for old in &retired {
+        record_takeover(old, claimer, mechanism);
+        crate::log_debug(&format!(
+            "[drive] {mechanism}: {claimer} took {plan_id} {step} over from {old}"
+        ));
+    }
+    retired
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,6 +862,84 @@ mod tests {
         record_takeover("old", "new", "plan_revive");
         assert_eq!(takeover_successor("old").as_deref(), Some("new"));
         assert_eq!(takeover_successor("new"), None);
+    }
+
+    fn holder(id: &str, plan: &str, step: &str) -> StepHolder {
+        StepHolder {
+            session_id: id.into(),
+            workspace: "/ws".into(),
+            plan_id: plan.into(),
+            step: step.into(),
+        }
+    }
+
+    fn predecessors(
+        claimer: &str,
+        step: &str,
+        holders: &[StepHolder],
+        spawned_by: &dyn Fn(&str) -> Option<String>,
+        class: &dyn Fn(&str) -> crate::subtask_recovery::RecoveryClass,
+    ) -> Vec<String> {
+        let line = HashSet::from([claimer.to_string()]);
+        step_predecessors(&line, "/ws", "plan", step, holders, spawned_by, &|_| None, class)
+    }
+
+    #[test]
+    fn a_mid_turn_dead_holder_of_the_same_step_is_retired() {
+        use crate::subtask_recovery::RecoveryClass as C;
+        let holders = [
+            holder("auth", "plan", "**P3** — sync bt"),
+            holder("crashed", "plan", "P3"),
+            holder("other-step", "plan", "**P4** — next"),
+            holder("other-plan", "elsewhere", "P3"),
+            holder("new", "plan", "P3"),
+        ];
+        let class = |id: &str| match id {
+            "auth" => C::AuthFailed,
+            _ => C::Recoverable,
+        };
+        assert_eq!(predecessors("new", "p3", &holders, &|_| None, &class), ["auth", "crashed"]);
+    }
+
+    #[test]
+    fn an_alive_holder_of_the_same_step_is_not_retired() {
+        use crate::subtask_recovery::RecoveryClass as C;
+        let holders = [holder("busy", "plan", "P3"), holder("parked", "plan", "P3")];
+        let class = |id: &str| if id == "busy" { C::Running } else { C::Parked };
+        assert!(predecessors("new", "P3", &holders, &|_| None, &class).is_empty());
+        let blocked = |_: &str| C::Blocked;
+        assert!(predecessors("new", "P3", &holders, &|_| None, &blocked).is_empty());
+    }
+
+    #[test]
+    fn a_coordinator_reclaiming_its_step_does_not_retire_its_sub_tasks() {
+        use crate::subtask_recovery::RecoveryClass as C;
+        // Sub-tasks that resumed the coordinator's own plan step: one handed its
+        // result back, one died mid-turn. Neither may point back at the
+        // coordinator, whose watch on them would then follow it to itself.
+        let holders = [holder("done-child", "plan", "P3"), holder("dead-child", "plan", "P3")];
+        let spawned_by = |_: &str| Some("coord".to_string());
+        let class = |id: &str| if id == "done-child" { C::Done } else { C::AuthFailed };
+        assert!(predecessors("coord", "P3", &holders, &spawned_by, &class).is_empty());
+        // Even outside that line, a cleanly finished holder is never retired.
+        assert!(predecessors("someone", "P3", &holders[..1], &|_| None, &class).is_empty());
+    }
+
+    #[test]
+    fn a_holder_that_already_has_a_successor_is_not_retired_again() {
+        use crate::subtask_recovery::RecoveryClass as C;
+        let line = HashSet::from(["new".to_string()]);
+        let got = step_predecessors(
+            &line,
+            "/ws/",
+            "plan",
+            "P3",
+            &[holder("old", "plan", "P3")],
+            &|_| None,
+            &|_| Some("earlier-replacement".into()),
+            &|_| C::AuthFailed,
+        );
+        assert!(got.is_empty());
     }
 
     fn pending(token: &str, class: DriverClass, yield_to_turn: bool) -> PendingIntent {

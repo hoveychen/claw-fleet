@@ -850,6 +850,14 @@ fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
     }
     if let (Some((plan_id, step)), Some(new_sid)) = (&for_step, resp.session_id.as_deref()) {
         crate::launch_spec::note_spawned_for(new_sid, plan_id, step);
+        // The new session replaces whoever died on this step before it.
+        crate::session_driver::retire_step_predecessors(
+            new_sid,
+            &ctx.workspace,
+            plan_id,
+            step,
+            "spawn_step",
+        );
     }
     let ws_name = crate::wiki::workspace_name_of(&workspace);
     Ok(match resp.session_id.as_deref() {
