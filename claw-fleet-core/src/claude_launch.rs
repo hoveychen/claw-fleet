@@ -41,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::control_plane_prefs::{is_enabled, Feature};
+use crate::task_profile::TaskType;
 
 const LAUNCH_DIR: &str = "claude-launch";
 const SETTINGS_FILE: &str = "settings.json";
@@ -155,10 +156,13 @@ impl GlobalCarriers {
 ///
 /// A sub-task gets the sub-task block in place of the interaction block: it
 /// talks to its coordinator, never to the user, so the card rules are noise.
+/// A sub-task of a typed task also gets that type's sub-task layer
+/// (`subtask_layer`, see [`Shape::subtask_layer`]) right after it.
 fn render_guidance_with(
     user_title: &str,
     locale: &str,
     subtask: bool,
+    subtask_layer: Option<TaskType>,
     include: impl Fn(Feature) -> bool,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -168,6 +172,14 @@ fn render_guidance_with(
         } else {
             crate::interaction_mode::render_guidance(user_title, locale)
         });
+    }
+    if let Some(t) = subtask_layer.filter(|_| subtask) {
+        parts.extend(crate::task_workflow_guidance::render_block(
+            t,
+            crate::task_workflow_guidance::Role::Subtask,
+            user_title,
+            locale,
+        ));
     }
     if include(Feature::PrdDiscipline) {
         parts.push(crate::prd_discipline::render_guidance(user_title, locale));
@@ -225,14 +237,19 @@ pub fn guidance_voice() -> (String, String) {
 
 /// The text handed to `--append-system-prompt-file`: lessons, then the
 /// concept guidance. `None` when there is nothing to add.
-fn system_prompt_text(global: &GlobalCarriers, subtask: bool) -> Option<String> {
+fn system_prompt_text(
+    global: &GlobalCarriers,
+    subtask: bool,
+    subtask_layer: Option<TaskType>,
+) -> Option<String> {
     let lessons = if global.lessons {
         String::new()
     } else {
         crate::lessons_store::managed_file_content().unwrap_or_default()
     };
     let (title, locale) = guidance_voice();
-    let guidance = render_guidance_with(&title, &locale, subtask, |f| global.wants(f));
+    let guidance =
+        render_guidance_with(&title, &locale, subtask, subtask_layer, |f| global.wants(f));
     let text = join_sections(vec![lessons, guidance]);
     (!text.is_empty()).then_some(text)
 }
@@ -319,9 +336,15 @@ struct Shape {
     /// differs from its coordinator's, so it gets its own prefix for the same
     /// reason.
     file_prefix: &'static str,
-    /// The session is a sub-task (see [`launch_is_subtask`]): sub-task
+    /// The session is a sub-task (see [`launch_subtask_parent`]): sub-task
     /// guidance, and the native `AskUserQuestion` disallowed.
     subtask: bool,
+    /// The type of the task a sub-task belongs to, when that type has a
+    /// sub-task layer for its system prompt (see [`subtask_layer_for`]). A
+    /// main conversation's type is settled mid-session, after its system
+    /// prompt froze, so only a sub-task — whose task is typed before it is
+    /// spawned — carries one; the main conversation gets its layer per turn.
+    subtask_layer: Option<TaskType>,
 }
 
 /// The session id a launch argv runs as, for picking its role. `--resume`
@@ -344,13 +367,22 @@ fn launch_session_id(args: &[String]) -> Option<&str> {
         .filter(|s| !s.trim().is_empty())
 }
 
-/// Whether the launch is a sub-task's. Works at first launch because the
-/// spawn path records the sub-task edge under a pre-assigned id before
-/// launching (`agent_source::spawn_session`), and for a relay successor
-/// because the chain link is recorded before its spawn.
-fn launch_is_subtask(args: &[String]) -> bool {
-    launch_session_id(args)
-        .is_some_and(|sid| crate::task_roles_guidance::subtask_parent(sid).is_some())
+/// The task a sub-task's launch belongs to; `None` when the launch is not a
+/// sub-task's. Works at first launch because the spawn path records the
+/// sub-task edge under a pre-assigned id before launching
+/// (`agent_source::spawn_session`), and for a relay successor because the
+/// chain link is recorded before its spawn.
+fn launch_subtask_parent(args: &[String]) -> Option<String> {
+    launch_session_id(args).and_then(crate::task_roles_guidance::subtask_parent)
+}
+
+/// The sub-task layer a sub-task of `task_id` gets in its system prompt. Only
+/// research has one so far; a dev task's sub-task layer stays per-turn until
+/// the dev layer is split out (design `design/task-type-harness` v2 §5).
+fn subtask_layer_for(task_id: &str) -> Option<TaskType> {
+    crate::task_profile::read(task_id)
+        .map(|p| p.task_type)
+        .filter(|t| *t == TaskType::Research)
 }
 
 /// The arguments that make a `claude` launch in `workspace_path` a Fleet
@@ -440,7 +472,14 @@ fn delegate_if_newer(
 pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec<String> {
     let chat = crate::chat_workspace::is_chat_workspace(workspace_path);
     let isolated = chat || excludes_user_settings(existing);
-    let subtask = !chat && launch_is_subtask(existing);
+    let parent_task = (!chat).then(|| launch_subtask_parent(existing)).flatten();
+    let subtask = parent_task.is_some();
+    // The task-type ablation switches the layer off with the rest of the
+    // workflow block.
+    let subtask_layer = parent_task
+        .as_deref()
+        .and_then(subtask_layer_for)
+        .filter(|_| !crate::task_workflow_guidance::flow_block_off(Path::new(workspace_path)));
     let shape = Shape {
         global: if isolated {
             GlobalCarriers::default()
@@ -448,16 +487,26 @@ pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec
             GlobalCarriers::probe()
         },
         system_prompt: !chat,
-        file_prefix: match (isolated, subtask) {
-            (false, false) => "",
-            (true, false) => "isolated-",
-            (false, true) => "subtask-",
-            (true, true) => "isolated-subtask-",
-        },
+        file_prefix: file_prefix(isolated, subtask, subtask_layer),
         subtask,
+        subtask_layer,
     };
     let fleet_bin = crate::hooks::resolve_fleet_binary();
     launch_args_shaped(existing, fleet_bin.as_deref(), &shape)
+}
+
+/// One launch-file prefix per distinct file content, so two launches starting
+/// at once never overwrite each other's file between write and read.
+fn file_prefix(isolated: bool, subtask: bool, layer: Option<TaskType>) -> &'static str {
+    let research = subtask && layer == Some(TaskType::Research);
+    match (isolated, subtask, research) {
+        (false, false, _) => "",
+        (true, false, _) => "isolated-",
+        (false, true, false) => "subtask-",
+        (true, true, false) => "isolated-subtask-",
+        (false, true, true) => "subtask-research-",
+        (true, true, true) => "isolated-subtask-research-",
+    }
 }
 
 #[cfg(test)]
@@ -471,6 +520,7 @@ fn launch_args_with(
         system_prompt: true,
         file_prefix: "",
         subtask: false,
+        subtask_layer: None,
     };
     launch_args_shaped(existing, fleet_bin, &shape)
 }
@@ -509,7 +559,7 @@ fn launch_args_shaped(existing: &[String], fleet_bin: Option<&str>, shape: &Shap
 
     if let Some(text) = shape
         .system_prompt
-        .then(|| system_prompt_text(global, shape.subtask))
+        .then(|| system_prompt_text(global, shape.subtask, shape.subtask_layer))
         .flatten()
     {
         emit("--append-system-prompt-file", SYSTEM_PROMPT_FILE, text);
@@ -724,6 +774,7 @@ mod tests {
             system_prompt: true,
             file_prefix: "subtask-",
             subtask: true,
+            subtask_layer: None,
         };
         let args = launch_args_shaped(&[], Some(BIN), &shape);
         let path = value_after(&args, "--append-system-prompt-file").unwrap();
@@ -737,6 +788,90 @@ mod tests {
         // The coordinator keeps the card rules and its asking tool.
         let main = launch_args_with(&[], Some(BIN), &none());
         assert!(value_after(&main, "--disallowedTools").is_none());
+    }
+
+    #[test]
+    fn a_research_subtask_gets_the_research_layer_in_its_own_file() {
+        let _h = Home::new("research-sub");
+        reconcile_guidance("老板", "zh").unwrap();
+        let layer = Some(TaskType::Research);
+        let shape = Shape {
+            global: none(),
+            system_prompt: true,
+            file_prefix: file_prefix(false, true, layer),
+            subtask: true,
+            subtask_layer: layer,
+        };
+        let args = launch_args_shaped(&[], Some(BIN), &shape);
+        let path = value_after(&args, "--append-system-prompt-file").unwrap();
+        assert!(
+            path.ends_with(&format!("subtask-research-{SYSTEM_PROMPT_FILE}")),
+            "{path}"
+        );
+        let text = fs::read_to_string(path).unwrap();
+        if std::env::var_os("FLEET_PRINT_RESEARCH_INJECTION").is_some() {
+            println!("=== {path} ===\n{text}");
+        }
+        let sub = crate::interaction_mode::render_subtask_guidance("老板", "zh");
+        let research = crate::task_workflow_guidance::render_block(
+            TaskType::Research,
+            crate::task_workflow_guidance::Role::Subtask,
+            "老板",
+            "zh",
+        )
+        .unwrap();
+        assert!(text.contains(research.trim_end()), "{text}");
+        assert!(text.find(sub.trim_end()) < text.find(research.trim_end()));
+
+        // A plain sub-task's file is a different one and carries no layer.
+        let plain = Shape {
+            global: none(),
+            system_prompt: true,
+            file_prefix: file_prefix(false, true, None),
+            subtask: true,
+            subtask_layer: None,
+        };
+        let args = launch_args_shaped(&[], Some(BIN), &plain);
+        let plain_path = value_after(&args, "--append-system-prompt-file").unwrap();
+        assert_ne!(plain_path, path);
+        assert!(!fs::read_to_string(plain_path).unwrap().contains(research.trim_end()));
+    }
+
+    #[test]
+    fn every_launch_shape_writes_its_own_files() {
+        let mut seen = std::collections::HashSet::new();
+        for isolated in [false, true] {
+            for (subtask, layer) in [(false, None), (true, None), (true, Some(TaskType::Research))] {
+                assert!(
+                    seen.insert(file_prefix(isolated, subtask, layer)),
+                    "shared prefix for isolated={isolated} subtask={subtask} layer={layer:?}"
+                );
+            }
+        }
+        // A layer only means something on a sub-task.
+        assert_eq!(file_prefix(false, false, Some(TaskType::Research)), "");
+    }
+
+    #[test]
+    fn only_a_research_task_gives_its_subtasks_a_layer() {
+        let _h = Home::new("layer-type");
+        for (t, want) in [
+            (TaskType::Research, Some(TaskType::Research)),
+            (TaskType::Dev, None),
+            (TaskType::General, None),
+        ] {
+            let task = format!("task-{t:?}");
+            crate::task_profile::set(
+                &task,
+                Some(t),
+                None,
+                None,
+                crate::task_profile::ProfileSetter::Agent,
+            )
+            .unwrap();
+            assert_eq!(subtask_layer_for(&task), want);
+        }
+        assert_eq!(subtask_layer_for("no-profile"), None);
     }
 
     #[test]

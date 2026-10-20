@@ -504,13 +504,14 @@ pub(crate) fn cmd_elicitation() {
             elicitation::cleanup(&request_id);
             // Fleet-owned session: keep the question alive as a parked card and
             // SIGINT the turn that asked it, so the agent can't answer its own
-            // question. The CLI may well be gone before this deny is read — the
+            // question. The interrupt waits for this deny to be recorded; the
             // parked card, already on disk, is what carries the state forward.
-            if claw_fleet_core::parked::park_and_stop(
+            if park_and_stop_from_hook(
                 &request_id,
                 claw_fleet_core::parked::ParkedKind::Elicitation,
                 &req.session_id,
                 &req,
+                &input,
             ) {
                 println!("{}", deny_hook_output(claw_fleet_core::parked::STOP_NOTICE));
                 return;
@@ -522,6 +523,32 @@ pub(crate) fn cmd_elicitation() {
             );
         }
     }
+}
+
+/// Park a timed-out hook card and cut the turn once Claude Code has recorded
+/// the deny verdict this hook is about to print — interrupting first made the
+/// transcript read "the user doesn't want to proceed with this tool use".
+/// `hook_stdin` is the raw hook payload; its `tool_use_id` is what the deferred
+/// interrupt waits for.
+fn park_and_stop_from_hook(
+    id: &str,
+    kind: claw_fleet_core::parked::ParkedKind,
+    session_id: &str,
+    request: &impl serde::Serialize,
+    hook_stdin: &str,
+) -> bool {
+    let tool_use_id = serde_json::from_str::<serde_json::Value>(hook_stdin)
+        .ok()
+        .and_then(|v| v.get("tool_use_id")?.as_str().map(str::to_string));
+    let exe = std::env::current_exe().unwrap_or_else(|_| "fleet".into());
+    claw_fleet_core::parked::park_and_stop_detached(
+        id,
+        kind,
+        session_id,
+        request,
+        tool_use_id.as_deref(),
+        &exe,
+    )
 }
 
 /// A `PreToolUse` deny verdict — the shape Claude Code reads off a hook's
@@ -803,11 +830,12 @@ pub(crate) fn cmd_plan_approval() {
             // Fleet-owned session: the plan stays on the Decision Panel as a
             // parked card and this turn is cut short, rather than the agent
             // taking a timeout-deny as licence to start executing the plan.
-            if claw_fleet_core::parked::park_and_stop(
+            if park_and_stop_from_hook(
                 &request_id,
                 claw_fleet_core::parked::ParkedKind::PlanApproval,
                 &req.session_id,
                 &req,
+                &input,
             ) {
                 println!("{}", deny_hook_output(claw_fleet_core::parked::STOP_NOTICE));
                 return;

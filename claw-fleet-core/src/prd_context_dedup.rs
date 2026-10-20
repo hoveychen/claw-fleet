@@ -140,7 +140,22 @@ fn claude_injected_reminder(value: &Value) -> Option<String> {
     };
     // Other Fleet hooks (notes hint, guard) use the same record type; only a
     // plan reminder can answer for a plan reminder.
-    is_plan_reminder(&text).then_some(text)
+    leading_plan_reminder(&text).map(str::to_string)
+}
+
+/// The plan reminder at the head of `text`, cut at its closing tag.
+///
+/// What follows it is the per-turn task nudge
+/// ([`crate::prd_tasks::render_task_nudge`]), which callers append on every
+/// turn and is never part of the comparison. A turn that carried the nudge
+/// alone has no plan reminder at its head and yields `None`, so the scan
+/// walks on past it to the copy that is really in context.
+fn leading_plan_reminder(text: &str) -> Option<&str> {
+    let prefix = match text.find(REMINDER_CLOSE) {
+        Some(i) => &text[..i + REMINDER_CLOSE.len()],
+        None => text,
+    };
+    is_plan_reminder(prefix).then_some(prefix)
 }
 
 /// Whether the reminder must be prepended to this Codex turn's prompt, given
@@ -170,7 +185,7 @@ fn probe_codex(rollout_path: &Path) -> Option<Probe> {
 /// Codex has no side channel for context, so the reminder rides at the head of
 /// the user message (`<system-reminder>…</system-reminder>\n\n<prompt>`) —
 /// see `codex_launch::maybe_prepend_active_plans`. Only that prefix is
-/// compared; the prompt after it differs every turn by construction.
+/// compared; the task nudge and the prompt after it are not part of it.
 fn codex_injected_reminder(value: &Value) -> Option<String> {
     let payload = value.get("payload")?;
     if payload.get("type").and_then(Value::as_str) != Some("message")
@@ -184,9 +199,8 @@ fn codex_injected_reminder(value: &Value) -> Option<String> {
         .iter()
         .filter_map(|part| part.get("text").and_then(Value::as_str))
         .collect();
-    let end = text.find(REMINDER_CLOSE)? + REMINDER_CLOSE.len();
-    let prefix = &text[..end];
-    is_plan_reminder(prefix).then(|| prefix.to_string())
+    text.find(REMINDER_CLOSE)?;
+    leading_plan_reminder(&text).map(str::to_string)
 }
 
 const REMINDER_OPEN: &str = "<system-reminder>";
@@ -302,6 +316,47 @@ mod tests {
         ));
         let (_dir, path) = write(&[claude_user("first prompt")]);
         assert!(claude_needs_injection(&path, &reminder("x")));
+    }
+
+    fn nudge(line: &str) -> String {
+        format!("{REMINDER_OPEN}\n{line}\n{REMINDER_CLOSE}")
+    }
+
+    /// The task nudge rides after the reminder on every turn. It must neither
+    /// break the comparison when it follows a reminder nor stand in for one
+    /// when it was injected alone.
+    #[test]
+    fn claude_sees_through_the_trailing_task_nudge() {
+        let text = reminder("1 active plan");
+        let both = format!("{text}\n\n{}", nudge("研究：下一步 **P2** — x"));
+        let (_dir, path) = write(&[claude_attachment(&both), claude_user("go on")]);
+        assert!(!claude_needs_injection(&path, &text));
+
+        // Next turn: the reminder was skipped, only the nudge went in. The
+        // reminder from the turn before is still the one in context.
+        let (_dir2, path2) = write(&[
+            claude_attachment(&both),
+            claude_user("go on"),
+            claude_attachment(&nudge("研究：下一步 **P2** — x")),
+            claude_user("and on"),
+        ]);
+        assert!(!claude_needs_injection(&path2, &text));
+        assert!(claude_needs_injection(&path2, &reminder("2 active plans")));
+
+        // A nudge alone is never evidence of a reminder.
+        let (_dir3, path3) = write(&[claude_attachment(&nudge("研究：下一步 **P1** — y"))]);
+        assert!(claude_needs_injection(&path3, &text));
+    }
+
+    #[test]
+    fn codex_sees_through_the_trailing_task_nudge() {
+        let text = reminder("1 active plan");
+        let n = nudge("Research: next is **P2** — x");
+        let (_dir, path) = write(&[
+            codex_user(&format!("{text}\n\n{n}\n\nfirst prompt")),
+            codex_user(&format!("{n}\n\nsecond prompt")),
+        ]);
+        assert!(!codex_needs_injection(&path, &text));
     }
 
     #[test]

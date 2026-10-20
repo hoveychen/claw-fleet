@@ -305,6 +305,8 @@ revises the version it opened with into the next one. Keep conclusions aligned \
 with the user and known gotchas (drop one only when it no longer holds, and say \
 why); rewrite progress and the next step. What you do not carry forward, no \
 later baton sees.\n\
+- Put long steps' measured timings and bottleneck in the note too (see Rule \
+6), so later batons need not re-measure.\n\
 - Commit worktree progress first, run the `fleet handoff` command, wait for \
 `ok: handoff registered`, then end the turn. **Narrating a handoff in prose \
 does nothing** — only the actual command spawns a successor. Never use \
@@ -360,6 +362,16 @@ cheap `limit:0` probe every 12h that only spawns an LLM when it detects new \
 data). A schedule polls per `--poll` within `--timeout` then abandons; a loop \
 skips the tick (no iteration consumed). Do NOT default to an LLM session every \
 tick.\n\
+\n\
+### Before a long run: preflight the wall clock\n\
+\n\
+You do not feel wall-clock time; the boss does. Before anything expected to \
+take more than about 15 minutes (training, batch generation, a long script, a \
+big build): estimate the duration from a small sample, check utilisation \
+(`nvidia-smi`, `top`, `iostat`), and take any obvious parallelism, caching or \
+reduced-run win first. If it is not worth it, write one sentence of why in your \
+report or handoff note. Weigh it against the whole plan: batons left, repeats, \
+whether the boss is waiting.\n\
 \n\
 ## Rule 7 — One-line summary comment atop every `exec`\n\
 \n\
@@ -1043,6 +1055,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prd_block_teaches_wallclock_preflight() {
+        for locale in ["zh", "en"] {
+            let g = render_codex_prd_block("Boss", locale);
+            for needle in [
+                "### Before a long run: preflight the wall clock",
+                "more than about 15 minutes",
+                "write one sentence of why",
+                "Put long steps' measured timings",
+            ] {
+                assert!(g.contains(needle), "[{locale}] missing {needle:?}");
+            }
+        }
+    }
+
+    #[test]
     fn prd_block_carries_worktree_and_rhythm() {
         let g = render_codex_prd_block("Boss", "en");
         assert!(
@@ -1237,13 +1264,15 @@ mod tests {
         // task-roles section landed at 31_552: the blocks now reach codex as
         // `developer_instructions` (see `launch_guidance_path`), not through
         // AGENTS.md, so 32 KiB is a size guard rather than a hard cut-off.
+        // Raised to 33_000 when the wall-clock preflight section landed at
+        // ~32.5K (main already sat ~120 bytes under 32_000).
         let prd = render_codex_prd_block("老板", "zh");
         let ix = render_codex_interaction_block("老板", "zh");
         let wiki = render_codex_wiki_block("zh");
         let model = render_codex_model_block("zh");
         let total = prd.len() + ix.len() + wiki.len() + model.len();
         assert!(
-            total < 32_000,
+            total < 33_000,
             "prd+interaction+wiki+model = {total} must stay well under 32 KiB \
 (prd {}, ix {}, wiki {}, model {})",
             prd.len(),

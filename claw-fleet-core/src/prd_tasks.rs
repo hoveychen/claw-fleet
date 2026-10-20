@@ -1209,9 +1209,14 @@ pub struct BacktrackScope {
     /// conversation that spawned it decides what happens next.
     pub subtask: Option<SubtaskScope>,
     /// Whether another live session is on this plan
-    /// ([`crate::plan_revive::plans_attended_by_others`]). Such a plan and its
-    /// subtree are never chosen, and the walk does not climb past it.
+    /// ([`crate::plan_revive::held_by_others`]). Such a plan and its subtree
+    /// are never chosen, and the walk does not climb past it.
     pub claimed_elsewhere: Box<dyn Fn(&str) -> bool>,
+    /// Whether a live sub-task was dispatched to this `(plan, step)`
+    /// ([`crate::plan_revive::HeldByOthers::steps`]). The main conversation's
+    /// walk reads such a step as taken: it is never the next task, and a plan
+    /// whose open steps are all taken is not chosen.
+    pub held_step: Box<dyn Fn(&str, &str) -> bool>,
 }
 
 /// What bounds a sub-task's backtrack.
@@ -1231,6 +1236,7 @@ impl BacktrackScope {
         Self {
             subtask: None,
             claimed_elsewhere: Box::new(|_| false),
+            held_step: Box::new(|_, _| false),
         }
     }
 
@@ -1245,17 +1251,22 @@ impl BacktrackScope {
             .unwrap_or_else(|| cwd.to_path_buf())
             .to_string_lossy()
             .into_owned();
-        let claimed = std::cell::OnceCell::new();
         let subtask = crate::task_model::is_subtask(&me).then(|| SubtaskScope {
             assignment: crate::task_model::assignment(&me),
             created: crate::task_model::plans_created_by_line(&me),
         });
+        let held = std::rc::Rc::new(std::cell::OnceCell::new());
+        let load = move || crate::plan_revive::held_by_others(&ws, &me);
+        let load = std::rc::Rc::new(load);
+        let (held2, load2) = (held.clone(), load.clone());
         Self {
             subtask,
-            claimed_elsewhere: Box::new(move |id| {
-                claimed
-                    .get_or_init(|| crate::plan_revive::plans_attended_by_others(&ws, &me))
-                    .contains(id)
+            claimed_elsewhere: Box::new(move |id| held.get_or_init(|| load()).plans.contains(id)),
+            held_step: Box::new(move |plan, step| {
+                held2
+                    .get_or_init(|| load2())
+                    .steps
+                    .contains(&(plan.to_string(), step.to_string()))
             }),
         }
     }
@@ -1287,7 +1298,48 @@ pub fn resolve_backtrack_target_scoped(
     // The plain walk first: when the tree is done there is no need to pay for
     // the claim scan.
     next_plan_in_tree(&blocks, completed_plan)?;
+    let blocks = without_held_steps(blocks, &*scope.held_step);
     next_plan_in_tree_avoiding(&blocks, completed_plan, &*scope.claimed_elsewhere)
+}
+
+/// `blocks` with every open step `held` names ticked, so a walk over them
+/// neither offers that step nor counts it as work left in its plan.
+pub fn without_held_steps(
+    blocks: Vec<SourcedBlock>,
+    held: &dyn Fn(&str, &str) -> bool,
+) -> Vec<SourcedBlock> {
+    blocks
+        .into_iter()
+        .map(|mut b| {
+            let Some(id) = b.id.clone() else { return b };
+            if !b.body.lines().any(|l| {
+                is_pending_task_line(l) && p_label(&checkbox_text(l)).is_some_and(|p| held(&id, p))
+            }) {
+                return b;
+            }
+            let mut body: String = b
+                .body
+                .lines()
+                .map(|l| {
+                    let taken = is_pending_task_line(l)
+                        && p_label(&checkbox_text(l)).is_some_and(|p| held(&id, p));
+                    if taken { l.replacen("- [ ]", "- [x]", 1) } else { l.to_string() }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if b.body.ends_with('\n') {
+                body.push('\n');
+            }
+            b.body = body;
+            b
+        })
+        .collect()
+}
+
+/// The `Pn` of a task text that starts with `**Pn**`.
+fn p_label(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("**")?;
+    rest.split_once("**").map(|(label, _)| label.trim()).filter(|l| !l.is_empty())
 }
 
 /// The backtrack for a sub-task that just finished `finished`: the ordinary
@@ -1298,7 +1350,11 @@ pub fn resolve_backtrack_target_scoped(
 /// sub-task's line created itself (`created`) — `finished` itself when its
 /// parent is someone else's. So a sub-task that split its work into child
 /// plans walks all of them, while one put on a plan the spawner wrote is not
-/// handed that plan's siblings.
+/// handed that plan's siblings. When that root is the line's own plan hung
+/// under someone else's, every plan the line hung under that same parent is
+/// walked with it (the parent standing in as an empty root), so a sub-task
+/// that split its step into `s1` and `s2` under the spawner's plan is not let
+/// go after `s1`.
 ///
 /// Dispatched to step `S` of the spawner's plan `P` (`assignment`), only `S`
 /// is its work in `P`: the climb never enters `P`, and once the root's subtree
@@ -1330,12 +1386,30 @@ pub fn next_plan_for_subtask(
             _ => break,
         }
     }
-    // The root's subtree, with the root cut loose from its parent.
-    let mut members: HashSet<&str> = HashSet::from([root]);
+    // A root the line created under someone else's plan is one of possibly
+    // several siblings it hung there (`plan create` defaults the parent to the
+    // focused plan, and a dispatched sub-task's focus is the spawner's plan).
+    // Those siblings are one piece of work: the walk runs under that plan as a
+    // stand-in root that has no work of its own and keeps only the line's
+    // children, so finishing one leads to the next and none of the outside
+    // plan's own steps or other children are handed out.
+    let boundary = parent
+        .get(root)
+        .copied()
+        .filter(|_| created(root))
+        .filter(|b| blocks.iter().any(|x| x.id.as_deref() == Some(*b)));
+    let mut members: HashSet<&str> = match boundary {
+        Some(b) => std::iter::once(b)
+            .chain(parent.iter().filter(|(c, p)| **p == b && created(c)).map(|(c, _)| *c))
+            .collect(),
+        None => HashSet::from([root]),
+    };
+    let top = boundary.unwrap_or(root);
+    // The subtree under `top`, with `top` cut loose from its parent.
     loop {
         let before = members.len();
         for (c, p) in &parent {
-            if members.contains(p) {
+            if Some(*p) != boundary && members.contains(p) {
                 members.insert(c);
             }
         }
@@ -1346,12 +1420,18 @@ pub fn next_plan_for_subtask(
     let subtree: Vec<SourcedBlock> = blocks
         .iter()
         .filter(|b| b.id.as_deref().is_some_and(|id| members.contains(id)))
-        .map(|b| SourcedBlock {
-            parent: if b.id.as_deref() == Some(root) { None } else { b.parent.clone() },
-            ..b.clone()
+        .map(|b| {
+            let is_top = b.id.as_deref() == Some(top);
+            SourcedBlock {
+                parent: if is_top { None } else { b.parent.clone() },
+                body: if boundary.is_some() && is_top { String::new() } else { b.body.clone() },
+                ..b.clone()
+            }
         })
         .collect();
-    if let Some(t) = next_plan_in_tree_avoiding(&subtree, finished, avoid) {
+    // Whoever else is on the outside plan does not own the line's children.
+    let avoid = |id: &str| Some(id) != boundary && avoid(id);
+    if let Some(t) = next_plan_in_tree_avoiding(&subtree, finished, &avoid) {
         return Some(t);
     }
     // Back to the assigned step, once nothing in the root's subtree is open.
@@ -2044,10 +2124,11 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
         let (title, locale) = crate::claude_launch::guidance_voice();
         task_lead_for(&crate::task_model::TaskGraph::load(), sid, &title, &locale)
     });
+    let flow_off = crate::task_workflow_guidance::flow_block_off(cwd);
     let lead: Vec<String> = [
         crate::task_roles_guidance::render_role_reminder(session_id),
         task.as_ref().and_then(|t| t.goal_block.clone()),
-        task.and_then(|t| t.workflow),
+        task.and_then(|t| t.workflow).filter(|_| !flow_off),
     ]
     .into_iter()
     .flatten()
@@ -2070,6 +2151,11 @@ pub struct FreshSession<'a> {
     /// The type a split will write into the new task's profile once the
     /// thread id is known.
     pub preset_type: Option<crate::task_profile::TaskType>,
+    /// The session this one relays from (`fleet handoff`). A successor joins
+    /// its predecessor's task, so it is rendered from the predecessor's place
+    /// — sub-task or main conversation, profiled or not — instead of as a new
+    /// task. Takes precedence over the two fields above.
+    pub continues: Option<&'a str>,
 }
 
 /// [`render_active_plans_reminder`] for a session whose id does not exist yet
@@ -2080,7 +2166,8 @@ pub struct FreshSession<'a> {
 pub fn render_fresh_session_reminder(cwd: &Path, fresh: &FreshSession) -> Option<String> {
     let (title, locale) = crate::claude_launch::guidance_voice();
     let graph = crate::task_model::TaskGraph::load();
-    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale);
+    let flow_off = crate::task_workflow_guidance::flow_block_off(cwd);
+    let workflow = fresh_session_workflow(&graph, fresh, &title, &locale).filter(|_| !flow_off);
     let lead = workflow.into_iter().collect();
     wrap_reminder(lead, render_plans_reminder_body(cwd, None))
 }
@@ -2091,6 +2178,15 @@ fn fresh_session_workflow(
     title: &str,
     locale: &str,
 ) -> Option<String> {
+    if let Some(predecessor) = fresh.continues {
+        // Same lookup `task_lead_for` does for an id that exists: the
+        // predecessor's place is the successor's place.
+        let place = graph.place(predecessor);
+        let is_subtask = place.parent_task_id.is_some();
+        let task = place.parent_task_id.unwrap_or(place.task_id);
+        let task_type = crate::task_profile::read(&task).map(|p| p.task_type);
+        return workflow_for(task_type, is_subtask, title, locale);
+    }
     match fresh.spawned_by {
         Some(parent) => {
             let place = graph.place(parent);
@@ -2114,6 +2210,105 @@ fn workflow_for(
     use crate::task_workflow_guidance as wf;
     let role = if is_subtask { wf::Role::Subtask } else { wf::Role::Lead };
     wf::render_block(task_type.unwrap_or_default(), role, title, locale)
+}
+
+/// The per-turn task nudge: a one-line `<system-reminder>` that callers emit
+/// *after* [`render_active_plans_reminder`] on every turn, including the turns
+/// on which the dedup suppressed the reminder itself.
+///
+/// Today only a research task's main conversation gets one
+/// ([`crate::task_workflow_guidance::research_next_line`]). The full research
+/// block is sent once and then recedes up a long transcript — the v1 sampling
+/// found it acted on as often as it was seen, which was once — so the next
+/// step is restated every turn in a few dozen characters.
+///
+/// It stays out of the dedup by construction: it never carries
+/// [`PLAN_REMINDER_MARK`], so a turn that injected only the nudge is skipped
+/// when the dedup looks for the previous reminder, and a turn that injected
+/// both is compared on its leading `<system-reminder>` only
+/// ([`crate::prd_context_dedup`]).
+pub fn render_task_nudge(cwd: &Path, session_id: Option<&str>) -> Option<String> {
+    let sid = session_id?;
+    // Part of the workflow block for the task-type ablation's purposes.
+    if crate::task_workflow_guidance::flow_block_off(cwd) {
+        return None;
+    }
+    let (_, locale) = crate::claude_launch::guidance_voice();
+    task_nudge_for(&crate::task_model::TaskGraph::load(), cwd, sid, &locale)
+}
+
+fn task_nudge_for(
+    graph: &crate::task_model::TaskGraph,
+    cwd: &Path,
+    sid: &str,
+    locale: &str,
+) -> Option<String> {
+    let place = graph.place(sid);
+    // A sub-task has no research plan of its own to advance.
+    if place.parent_task_id.is_some() {
+        return None;
+    }
+    let profile = crate::task_profile::read(&place.task_id)?;
+    if profile.task_type != crate::task_profile::TaskType::Research {
+        return None;
+    }
+    let step = research_step(cwd, crate::task_progress::read(sid).as_ref());
+    let line = crate::task_workflow_guidance::research_next_line(&step, locale);
+    Some(format!("<system-reminder>\n{line}\n</system-reminder>"))
+}
+
+/// Where the session's research plan stands. The focus record names the plan
+/// the session is on; the research plan is that one or its nearest research
+/// ancestor (an exec child opened mid-research still answers to it).
+fn research_step(
+    cwd: &Path,
+    rec: Option<&crate::task_progress::TaskProgressRecord>,
+) -> crate::task_workflow_guidance::ResearchStep {
+    use crate::task_workflow_guidance::ResearchStep;
+    let Some(rec) = rec else {
+        return ResearchStep::NoPlan;
+    };
+    let main_root = discover_main_checkout_root(cwd);
+    if !same_workspace(main_root.as_deref().unwrap_or(cwd), &rec.workspace_path) {
+        return ResearchStep::NoPlan;
+    }
+    let sources = collect_task_sources(cwd, main_root.as_deref());
+    let (raw, _) = collect_from_sources(&sources, false);
+    research_step_in(&dedup_blocks_keep_latest_mtime(raw), &rec.plan_id)
+}
+
+/// Pure core of [`research_step`].
+fn research_step_in(
+    blocks: &[SourcedBlock],
+    focused: &str,
+) -> crate::task_workflow_guidance::ResearchStep {
+    use crate::task_workflow_guidance::ResearchStep;
+    let by_id: HashMap<&str, &SourcedBlock> = blocks
+        .iter()
+        .filter_map(|b| b.id.as_deref().map(|i| (i, b)))
+        .collect();
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut cursor = Some(focused);
+    while let Some(id) = cursor {
+        if !seen.insert(id) {
+            break;
+        }
+        let Some(block) = by_id.get(id) else {
+            break;
+        };
+        if block.kind == PlanKind::Research {
+            let plan_id = id.to_string();
+            return match has_open_work(&block.body, block.kind)
+                .then(|| first_pending_task(&block.body))
+                .flatten()
+            {
+                Some(task) => ResearchStep::Next { plan_id, task },
+                None => ResearchStep::Done { plan_id },
+            };
+        }
+        cursor = block.parent.as_deref();
+    }
+    ResearchStep::NoPlan
 }
 
 /// Put the lead section above the plans body, or wrap it alone when there is
@@ -2884,6 +3079,48 @@ trailing notes outside\n";
         );
     }
 
+    /// A codex handoff successor's first prompt follows its predecessor's
+    /// task: a profiled main-conversation chain gets that type's lead
+    /// workflow, a sub-task chain gets the sub-task wording, and an undecided
+    /// main-conversation chain gets nothing.
+    #[test]
+    fn fresh_session_workflow_for_a_relay_follows_the_predecessor() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        set("lead-1", Some(TaskType::Research), Some("弄清 Y"), None, ProfileSetter::Boss).unwrap();
+        set("res-t", Some(TaskType::Research), Some("弄清 Z"), None, ProfileSetter::Boss).unwrap();
+        let graph = crate::task_model::TaskGraph::new(
+            vec![
+                vec!["lead-1".to_string(), "lead-2".to_string()],
+                vec!["sub-a".to_string(), "sub-b".to_string()],
+                vec!["solo-1".to_string(), "solo-2".to_string()],
+            ],
+            vec![("sub-a".to_string(), "res-t".to_string())],
+        );
+        let relay = |predecessor: &str| {
+            fresh_session_workflow(
+                &graph,
+                &FreshSession {
+                    continues: Some(predecessor),
+                    ..Default::default()
+                },
+                "",
+                "zh",
+            )
+        };
+
+        let lead = relay("lead-2").expect("the task's research workflow");
+        assert!(lead.contains("知识台账") && !lead.contains("你是子任务"), "{lead}");
+        assert!(!lead.contains("fleet__task action=set"), "{lead}");
+
+        let sub = relay("sub-b").expect("sub-task inherits the task's type");
+        assert!(sub.contains("你是子任务") && sub.contains("没查到什么"), "{sub}");
+        assert!(!sub.contains("fleet__task action=set"), "{sub}");
+
+        assert!(relay("solo-2").is_none(), "an undecided main chain is not nudged");
+    }
+
     /// The end-to-end shape of the above: a workspace with no TASKS.md gets a
     /// lead-only reminder for a fresh session whose type is known, and nothing
     /// for an undecided one.
@@ -2924,6 +3161,128 @@ trailing notes outside\n";
         let b = render_active_plans_reminder(&ws, Some("res-t")).unwrap();
         assert_eq!(a, b);
         assert!(a.contains("弄清 Y") && a.len() <= LEAD_CAP_BYTES + 128, "{a}");
+    }
+
+    fn sbk(id: &str, body: &str, parent: Option<&str>, kind: PlanKind) -> SourcedBlock {
+        SourcedBlock {
+            id: Some(id.to_string()),
+            body: body.to_string(),
+            source: PathBuf::from("/r/TASKS.md"),
+            mtime: UNIX_EPOCH,
+            parent: parent.map(|s| s.to_string()),
+            kind,
+        }
+    }
+
+    #[test]
+    fn research_step_follows_focus_up_to_the_research_plan() {
+        use crate::task_workflow_guidance::ResearchStep;
+        let blocks = [
+            sbk("q", "- [x] **P1** — 拆问题\n- [ ] **P2** — 对比三家\n", None, PlanKind::Research),
+            sbk("probe", "- [ ] **P1** — 写探针\n", Some("q"), PlanKind::Exec),
+            sbk("done", "- [x] **P1** — a\n", None, PlanKind::Research),
+            sbk("fix", "- [ ] **P1** — b\n", None, PlanKind::Exec),
+        ];
+        let next = ResearchStep::Next {
+            plan_id: "q".into(),
+            task: "**P2** — 对比三家".into(),
+        };
+        assert_eq!(research_step_in(&blocks, "q"), next);
+        // An exec child opened mid-research still answers to its research parent.
+        assert_eq!(research_step_in(&blocks, "probe"), next);
+        assert_eq!(
+            research_step_in(&blocks, "done"),
+            ResearchStep::Done { plan_id: "done".into() }
+        );
+        assert_eq!(research_step_in(&blocks, "fix"), ResearchStep::NoPlan);
+        assert_eq!(research_step_in(&blocks, "gone"), ResearchStep::NoPlan);
+    }
+
+    /// The acceptance shape for design v2 §3 option B: a kicked-off research
+    /// task's main conversation gets the full research layer once (deduped)
+    /// and the next-step line on every turn, the deduplicated one included.
+    #[test]
+    fn research_main_conversation_gets_layer_once_and_next_step_every_turn() {
+        use crate::task_profile::{set, ProfileSetter, TaskType};
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        set("res-main", Some(TaskType::Research), Some("弄清 HF 事件模型能否用于回测"), None, ProfileSetter::Agent).unwrap();
+        set("dev-main", Some(TaskType::Dev), Some("修好 X"), None, ProfileSetter::Agent).unwrap();
+        let ws = dir.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"hf-events\" v=\"2\" kind=\"research\" -->\n\n\
+**Plan:** HF 事件模型能否用于回测\n\n\
+- [x] **P1** — 数据源与覆盖期\n\
+- [ ] **P2** — 事件定义与前视偏差\n\
+- [ ] **P3** — 与现有因子的相关性\n\n\
+<!-- fleet:prd:end id=\"hf-events\" -->\n",
+        )
+        .unwrap();
+        crate::task_progress::set_current("res-main", &ws.to_string_lossy(), "hf-events", None).unwrap();
+        crate::claude_launch::reconcile_guidance("老板", "zh").unwrap();
+
+        let reminder = render_active_plans_reminder(&ws, Some("res-main")).expect("reminder");
+        let nudge = render_task_nudge(&ws, Some("res-main")).expect("nudge");
+        assert!(reminder.contains("## 本任务的流程：研究（已开工）"), "{reminder}");
+        assert!(nudge.contains("研究：下一步 **P2** — 事件定义与前视偏差"), "{nudge}");
+        if std::env::var_os("FLEET_PRINT_RESEARCH_INJECTION").is_some() {
+            println!("=== turn 1 ===\n{reminder}\n\n{nudge}\n=== turn 2 ===\n{nudge}");
+        }
+
+        // Turn 1 carried both; on turn 2 the dedup drops the reminder, the
+        // nudge still goes in, and turn 3 still dedupes against turn 1.
+        let attachment = |text: &str| {
+            serde_json::json!({
+                "type": "attachment",
+                "attachment": {"type": "hook_additional_context", "content": [text]},
+            })
+            .to_string()
+        };
+        let transcript = dir.path().join("t.jsonl");
+        std::fs::write(&transcript, format!("{}\n", attachment(&format!("{reminder}\n\n{nudge}")))).unwrap();
+        assert!(!crate::prd_context_dedup::claude_needs_injection(&transcript, &reminder));
+        std::fs::write(
+            &transcript,
+            format!(
+                "{}\n{}\n",
+                attachment(&format!("{reminder}\n\n{nudge}")),
+                attachment(&nudge)
+            ),
+        )
+        .unwrap();
+        assert!(!crate::prd_context_dedup::claude_needs_injection(&transcript, &reminder));
+        assert_eq!(render_task_nudge(&ws, Some("res-main")), Some(nudge.clone()));
+
+        // Ticking P2 moves the line on.
+        let tasks = std::fs::read_to_string(ws.join("TASKS.md")).unwrap();
+        std::fs::write(ws.join("TASKS.md"), tasks.replace("- [ ] **P2**", "- [x] **P2**")).unwrap();
+        let moved = render_task_nudge(&ws, Some("res-main")).unwrap();
+        assert!(moved.contains("下一步 **P3**"), "{moved}");
+
+        // A research task with no attributed plan is told to create one.
+        set("res-bare", Some(TaskType::Research), None, None, ProfileSetter::Agent).unwrap();
+        let bare = render_task_nudge(&ws, Some("res-bare")).unwrap();
+        assert!(bare.contains("kind=research"), "{bare}");
+
+        // Dev, unprofiled and sub-task sessions get no nudge.
+        assert!(render_task_nudge(&ws, Some("dev-main")).is_none());
+        assert!(render_task_nudge(&ws, Some("nobody")).is_none());
+        assert!(render_task_nudge(&ws, None).is_none());
+        let graph = crate::task_model::TaskGraph::new(
+            Vec::<Vec<String>>::new(),
+            vec![("res-sub".to_string(), "res-main".to_string())],
+        );
+        assert!(task_nudge_for(&graph, &ws, "res-sub", "zh").is_none());
+        assert!(task_nudge_for(&graph, &ws, "res-main", "zh").is_some());
+
+        // The task-type ablation's no-block arm gets no nudge either.
+        let fleet_dir = crate::session::get_fleet_dir().unwrap();
+        let list = fleet_dir.join(crate::task_workflow_guidance::FLOW_BLOCK_OFF_FILE);
+        std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+        std::fs::write(&list, format!("{}\n", ws.display())).unwrap();
+        assert!(render_task_nudge(&ws, Some("res-main")).is_none());
     }
 
     #[test]

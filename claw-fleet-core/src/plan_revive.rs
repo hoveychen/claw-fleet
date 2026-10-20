@@ -711,12 +711,13 @@ pub fn workspace_attendance(main_root: &str, blocks: &[pt::SourcedBlock]) -> Wor
     )
 }
 
-/// Plans of the workspace rooted at `main_root` that a session other than `me`
-/// is on right now — the reviver's "covered" ([`Coverage::covering`]) with `me`
-/// left out of each plan's owners. The tree-order backtrack skips these so a
-/// session that finishes its plan is not sent onto a sibling another session
-/// is already working ([`crate::prd_tasks::BacktrackScope`]).
-pub fn plans_attended_by_others(main_root: &str, me: &str) -> HashSet<String> {
+/// What sessions other than `me` hold in the workspace rooted at `main_root`
+/// right now — the reviver's "covered" ([`Coverage::covering`]) with `me` left
+/// out of each plan's owners, plus the steps live sub-tasks were dispatched
+/// to ([`held_by_others_in`]). The tree-order backtrack skips these so a
+/// session that finishes its plan is not sent onto a sibling, or a step,
+/// another session is already working ([`crate::prd_tasks::BacktrackScope`]).
+pub fn held_by_others(main_root: &str, me: &str) -> HeldByOthers {
     let ws = main_root.trim_end_matches('/');
     let records: Vec<(String, TaskProgressRecord)> = crate::task_progress::all_records()
         .into_iter()
@@ -727,7 +728,7 @@ pub fn plans_attended_by_others(main_root: &str, me: &str) -> HashSet<String> {
         })
         .collect();
     if records.iter().all(|(sid, _)| sid == me) {
-        return HashSet::new();
+        return HeldByOthers::default();
     }
     let blocks = load_workspace_blocks(ws);
     let successors = crate::handoff::successor_index();
@@ -743,7 +744,7 @@ pub fn plans_attended_by_others(main_root: &str, me: &str) -> HashSet<String> {
         }
         Some(cur.to_string())
     };
-    attended_by_others(
+    held_by_others_in(
         &records,
         &blocks,
         plan_snooze::now_ms(),
@@ -779,6 +780,56 @@ pub fn attended_by_others(
     coverage: &dyn Fn(&HashSet<String>) -> Coverage,
     me: &str,
 ) -> HashSet<String> {
+    held_by_others_in(records, blocks, now, successor, assignment, coverage, me).plans
+}
+
+/// What other live sessions hold: whole plans, and single steps of a plan.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HeldByOthers {
+    /// Plans another live session is on ([`attended_by_others`]).
+    pub plans: HashSet<String>,
+    /// `(plan, step)` pairs a live sub-task was dispatched to
+    /// ([`crate::task_model::assignment`]).
+    pub steps: HashSet<(String, String)>,
+}
+
+/// [`attended_by_others`] plus what live step sub-tasks hold.
+///
+/// A sub-task dispatched to step `S` of plan `P` does not claim `P`, but it
+/// does hold `S`: without that, a main conversation that finished its other
+/// work was pointed at `S` while the sub-task was on it. When `S`'s text
+/// names a child plan of `P` (`P2 — run child plan b`), the sub-task holds
+/// that plan too, even if it never moved its focus onto it — otherwise the
+/// main conversation was sent into the very plan the sub-task was executing.
+pub fn held_by_others_in(
+    records: &[(String, TaskProgressRecord)],
+    blocks: &[pt::SourcedBlock],
+    now: u64,
+    successor: &dyn Fn(&str) -> Option<String>,
+    assignment: &dyn Fn(&str) -> Option<(String, String)>,
+    coverage: &dyn Fn(&HashSet<String>) -> Coverage,
+    me: &str,
+) -> HeldByOthers {
+    // Step holders and the sessions their line has reached since.
+    let mut holders: Vec<((String, String), Vec<String>)> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for (sid, _) in records {
+        if !seen.insert(sid.as_str()) {
+            continue;
+        }
+        let Some(step) = assignment(sid) else { continue };
+        let mut line = vec![sid.clone()];
+        for _ in 0..64 {
+            match successor(line.last().map(String::as_str).unwrap_or_default()) {
+                Some(next) if !line.contains(&next) => line.push(next),
+                _ => break,
+            }
+        }
+        line.retain(|s| s != me);
+        if !line.is_empty() {
+            holders.push((step, line));
+        }
+    }
     let records: Vec<(String, TaskProgressRecord)> = records
         .iter()
         .filter(|(sid, r)| assignment(sid).is_none_or(|(plan, _)| plan != r.plan_id))
@@ -795,15 +846,73 @@ pub fn attended_by_others(
     for o in owners.values_mut() {
         o.retain(|sid| sid != me);
     }
-    let all: HashSet<String> = owners.values().flatten().cloned().collect();
+    let all: HashSet<String> = owners
+        .values()
+        .flatten()
+        .chain(holders.iter().flat_map(|(_, line)| line))
+        .cloned()
+        .collect();
     if all.is_empty() {
-        return HashSet::new();
+        return HeldByOthers::default();
     }
     let cov = coverage(&all);
-    owners
-        .into_iter()
-        .filter(|(_, o)| cov.covering(o).is_some())
-        .map(|(plan, _)| plan)
+    let mut held = HeldByOthers {
+        plans: owners
+            .into_iter()
+            .filter(|(_, o)| cov.covering(o).is_some())
+            .map(|(plan, _)| plan)
+            .collect(),
+        steps: HashSet::new(),
+    };
+    for ((plan, step), line) in holders {
+        if cov.covering(&line).is_none() {
+            continue;
+        }
+        held.plans.extend(plans_named_by_step(blocks, &plan, &step));
+        held.steps.insert((plan, step));
+    }
+    held
+}
+
+/// Child plans of `plan` (at any depth) whose id appears as a word in the
+/// still-open text of `plan`'s step `step`.
+fn plans_named_by_step(blocks: &[pt::SourcedBlock], plan: &str, step: &str) -> Vec<String> {
+    let label = format!("**{step}**");
+    let Some(text) = blocks
+        .iter()
+        .find(|b| b.id.as_deref() == Some(plan))
+        .and_then(|b| {
+            pt::parse_task_items(&b.body)
+                .into_iter()
+                .find(|it| !it.done && it.text.contains(&label))
+        })
+        .map(|it| it.text)
+    else {
+        return Vec::new();
+    };
+    let words: HashSet<&str> = text
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let parent: HashMap<&str, &str> = blocks
+        .iter()
+        .filter_map(|b| Some((b.id.as_deref()?, b.parent.as_deref()?)))
+        .collect();
+    let under_plan = |id: &str| {
+        let mut cur = id;
+        for _ in 0..64 {
+            match parent.get(cur) {
+                Some(p) if *p == plan => return true,
+                Some(p) => cur = p,
+                None => return false,
+            }
+        }
+        false
+    };
+    parent
+        .keys()
+        .filter(|id| words.contains(*id) && under_plan(id))
+        .map(|id| id.to_string())
         .collect()
 }
 
@@ -1975,6 +2084,92 @@ mod tests {
         let got =
             attended_by_others(&records, &blocks, now, &|_| None, &via_line, &alive(&["M", "S2"]), "M");
         assert!(got.is_empty(), "{got:?}");
+    }
+
+    /// M walks `par`'s child plans while a live sub-task S works `par` P2 with
+    /// its focus on `par`. Once M has finished `a` and `b`, the only open box
+    /// left is S's step: M is not pointed at it and may end its turn (it has
+    /// the watch on S to wait with). Before, M was sent to `par` P2.
+    #[test]
+    fn the_main_conversation_is_not_sent_to_a_step_a_live_subtask_is_on() {
+        let now = 100 * 24 * H;
+        let blocks = vec![
+            block("par", None, "**Plan:** p\n\n- [x] **P1** — x\n- [ ] **P2** — s's step\n"),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), DONE),
+        ];
+        let records = vec![
+            ("M".to_string(), rec("/w", "b", now - H)),
+            ("S".to_string(), rec("/w", "par", now - H)),
+        ];
+        let assigned = |sid: &str| (sid == "S").then(|| ("par".to_string(), "P2".to_string()));
+        let held =
+            held_by_others_in(&records, &blocks, now, &|_| None, &assigned, &alive(&["M", "S"]), "M");
+        assert_eq!(held.steps, HashSet::from([("par".to_string(), "P2".to_string())]));
+        assert!(held.plans.is_empty(), "{held:?}");
+        let walked = pt::without_held_steps(blocks.clone(), &|p, s| {
+            held.steps.contains(&(p.to_string(), s.to_string()))
+        });
+        assert_eq!(pt::next_plan_in_tree_avoiding(&walked, "b", &|id| held.plans.contains(id)), None);
+        // What M got before.
+        let old = pt::next_plan_in_tree_avoiding(&blocks, "b", &|id| held.plans.contains(id)).unwrap();
+        assert_eq!(old.plan_id, "par");
+        // Another open step of `par` is still M's to do.
+        let blocks = vec![
+            block("par", None, "**Plan:** p\n\n- [ ] **P2** — s's step\n- [ ] **P3** — mine\n"),
+            block("b", Some("par"), DONE),
+        ];
+        let walked = pt::without_held_steps(blocks, &|p, s| p == "par" && s == "P2");
+        let t = pt::next_plan_in_tree_avoiding(&walked, "b", &|_| false).unwrap();
+        assert_eq!(t.next_task.as_deref(), Some("**P3** — mine"));
+        // A dead S holds nothing.
+        let held = held_by_others_in(&records, &[], now, &|_| None, &assigned, &alive(&["M"]), "M");
+        assert_eq!(held, HeldByOthers::default());
+        // S asking about itself holds nothing either.
+        let held =
+            held_by_others_in(&records, &[], now, &|_| None, &assigned, &alive(&["M", "S"]), "S");
+        assert!(held.steps.is_empty(), "{held:?}");
+    }
+
+    /// S's step is "run child plan `b`" and S kept its focus on `par` instead
+    /// of resuming `b`. M, done with `a`, is not sent into `b`; a child plan
+    /// the step does not name is still M's.
+    #[test]
+    fn the_main_conversation_does_not_walk_into_the_plan_a_subtasks_step_names() {
+        let now = 100 * 24 * H;
+        let blocks = vec![
+            block("par", None, "**Plan:** p\n\n- [ ] **P2** — 执行子计划 `b`\n"),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), PENDING),
+            block("c", Some("par"), PENDING),
+        ];
+        let records = vec![
+            ("M".to_string(), rec("/w", "a", now - H)),
+            ("S".to_string(), rec("/w", "par", now - H)),
+        ];
+        let assigned = |sid: &str| (sid == "S").then(|| ("par".to_string(), "P2".to_string()));
+        let held =
+            held_by_others_in(&records, &blocks, now, &|_| None, &assigned, &alive(&["M", "S"]), "M");
+        assert_eq!(held.plans, HashSet::from(["b".to_string()]));
+        let t = pt::next_plan_in_tree_avoiding(&blocks, "a", &|id| held.plans.contains(id)).unwrap();
+        assert_eq!(t.plan_id, "c");
+        // With `c` done too, nothing is left for M.
+        let blocks = vec![
+            block("par", None, "**Plan:** p\n\n- [ ] **P2** — 执行子计划 `b`\n"),
+            block("a", Some("par"), DONE),
+            block("b", Some("par"), PENDING),
+        ];
+        let held =
+            held_by_others_in(&records, &blocks, now, &|_| None, &assigned, &alive(&["M", "S"]), "M");
+        let walked = pt::without_held_steps(blocks, &|p, s| {
+            held.steps.contains(&(p.to_string(), s.to_string()))
+        });
+        assert_eq!(pt::next_plan_in_tree_avoiding(&walked, "a", &|id| held.plans.contains(id)), None);
+        // A handoff successor of S that is alive keeps the hold.
+        let succ = |sid: &str| (sid == "S").then(|| "S2".to_string());
+        let held =
+            held_by_others_in(&records, &[], now, &succ, &assigned, &alive(&["M", "S2"]), "M");
+        assert!(held.steps.contains(&("par".to_string(), "P2".to_string())), "{held:?}");
     }
 
     /// Regression guard: M alone, with a dead claimant on `par`, still goes on

@@ -338,14 +338,14 @@ fn plan_body_lines(k: &ResearchKickoff, zh: bool) -> Vec<String> {
     if zh {
         lines.push("**知识台账**".into());
         lines.push(String::new());
-        lines.push("| 结论 | 证据指针 | 类型（数据/文献/推断） | 置信度 | 状态（证实/证伪/不确定） |".into());
+        lines.push("| 结论 | 证据指针 | 类型（数据/文献/推断） | 置信度（高/中/低） | 状态（证实/证伪/不确定） |".into());
         lines.push("|---|---|---|---|---|".into());
         lines.push(String::new());
         lines.push("开放问题 / 矛盾 / 走不通的路：".into());
     } else {
         lines.push("**Findings ledger**".into());
         lines.push(String::new());
-        lines.push("| Conclusion | Evidence pointer | Type (data/literature/inference) | Confidence | Status (confirmed/refuted/uncertain) |".into());
+        lines.push("| Conclusion | Evidence pointer | Type (data/literature/inference) | Confidence (high/medium/low) | Status (confirmed/refuted/uncertain) |".into());
         lines.push("|---|---|---|---|---|".into());
         lines.push(String::new());
         lines.push("Open questions / contradictions / dead ends:".into());
@@ -454,7 +454,11 @@ pub fn apply_start(
     for w in created.warnings {
         out.push_str(&format!("\nwarning: {w}"));
     }
-    if let Some(block) = wf::render_block(TaskType::Research, wf::Role::Lead, title, locale) {
+    // The task-type ablation's control arm gets no workflow block here either.
+    let block = (!wf::flow_block_off(cwd))
+        .then(|| wf::render_block(TaskType::Research, wf::Role::Lead, title, locale))
+        .flatten();
+    if let Some(block) = block {
         out.push_str("\n\n");
         out.push_str(&block);
     }

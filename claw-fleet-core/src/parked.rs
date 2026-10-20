@@ -410,19 +410,36 @@ pub fn discard(id: &str) -> Result<(), String> {
 /// caller must then fall back to the historical delete-the-request-and-error
 /// behaviour, which is still the only safe thing to do to someone's terminal.
 ///
-/// Ordering is load-bearing. The parked file is written *before* the SIGINT,
-/// because the SIGINT takes the caller's own parent (`claude`) down with it:
-/// once the CLI exits, the tool result / hook verdict this function's caller is
-/// about to print has nobody left to read it, and the caller may itself be
-/// swept up if the interrupt escalates to a tree kill. Everything that must
-/// survive has to be on disk by then. [`STOP_NOTICE`] is the belt to that
-/// braces — it only gets read in the case where the signal did not land.
+/// Ordering is load-bearing. The parked file is written *before* anything else,
+/// because the SIGINT takes the caller's own parent (`claude`) down with it and
+/// the caller may itself be swept up if the interrupt escalates to a tree kill.
+/// Everything that must survive has to be on disk by then.
+///
+/// The SIGINT itself is deferred ([`interrupt_after_result`]): the caller first
+/// returns [`STOP_NOTICE`] as the tool result, and the turn is cut only once the
+/// CLI has recorded it. Signalling first (the old order) meant the notice was
+/// never read — Claude Code logged the interrupted call as "The user doesn't
+/// want to proceed with this tool use. The tool use was rejected", so the
+/// transcript blamed the boss for what was a timeout (session 68393c2c,
+/// 2026-10-19). `tool_use_id` is the call's `_meta["claudecode/toolUseId"]`;
+/// without it (Codex) the interrupt fires after a short fixed delay.
 pub fn park_and_stop(
     id: &str,
     kind: ParkedKind,
     session_id: &str,
     request: &impl Serialize,
+    tool_use_id: Option<&str>,
 ) -> bool {
+    if !park_for_stop(id, kind, session_id, request) {
+        return false;
+    }
+    interrupt_after_result(session_id, tool_use_id);
+    true
+}
+
+/// The parking half of [`park_and_stop`]: `false` when the session is not
+/// Fleet-owned or the card could not be written.
+fn park_for_stop(id: &str, kind: ParkedKind, session_id: &str, request: &impl Serialize) -> bool {
     let Some(workspace) = parkable_workspace(session_id) else {
         return false;
     };
@@ -450,10 +467,179 @@ pub fn park_and_stop(
         return false;
     }
     crate::log_debug(&format!(
-        "parked: card {id} ({kind:?}) parked for session {session_id}; interrupting the turn"
+        "parked: card {id} ({kind:?}) parked for session {session_id}; interrupting the turn once the stop notice is recorded"
     ));
-    interrupt_session(session_id);
     true
+}
+
+/// Upper bound on waiting for the CLI to record the stop notice before the
+/// interrupt fires anyway. Claude Code appends a tool result within
+/// milliseconds; this only matters when the transcript cannot be found or read.
+const RESULT_RECORDED_BUDGET: Duration = Duration::from_secs(5);
+
+/// Delay before the interrupt when there is no tool-use id to look for (Codex):
+/// enough for the client to take in the result, too short for the agent to act
+/// on anything else.
+const BLIND_INTERRUPT_DELAY: Duration = Duration::from_secs(2);
+
+/// [`park_and_stop`] for a hook CLI, which prints its verdict and exits: a
+/// thread of its own would die with it, and Claude Code records the verdict
+/// only after the hook has exited. The wait-then-interrupt runs instead in a
+/// detached `fleet parked-interrupt` child (`exe` is the running `fleet`
+/// binary). If that child cannot be started, the turn is interrupted right
+/// away, as before.
+pub fn park_and_stop_detached(
+    id: &str,
+    kind: ParkedKind,
+    session_id: &str,
+    request: &impl Serialize,
+    tool_use_id: Option<&str>,
+    exe: &std::path::Path,
+) -> bool {
+    if !park_for_stop(id, kind, session_id, request) {
+        return false;
+    }
+    let watch = ResultWatch::begin(session_id, tool_use_id);
+    if let Err(e) = spawn_interrupter(exe, &watch) {
+        crate::log_debug(&format!(
+            "parked: deferred interrupter for {session_id} failed to start ({e}); interrupting now"
+        ));
+        interrupt_session(session_id);
+    }
+    true
+}
+
+/// Where to look for the tool result that must land before the interrupt.
+/// Taken in the producer *before* it hands the result over, so the wait scans
+/// only what the CLI appends from then on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultWatch {
+    pub session_id: String,
+    pub tool_use_id: Option<String>,
+    /// The transcript and its length at [`ResultWatch::begin`].
+    pub transcript: Option<(PathBuf, u64)>,
+}
+
+impl ResultWatch {
+    pub fn begin(session_id: &str, tool_use_id: Option<&str>) -> Self {
+        let tool_use_id = tool_use_id.filter(|s| !s.is_empty()).map(str::to_string);
+        let transcript = tool_use_id
+            .as_ref()
+            .and_then(|_| crate::session::find_session_jsonl(session_id))
+            .map(|p| {
+                let start = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                (p, start)
+            });
+        Self {
+            session_id: session_id.to_string(),
+            tool_use_id,
+            transcript,
+        }
+    }
+
+    /// The `fleet parked-interrupt` arguments that hand this watch to a child.
+    pub fn to_args(&self) -> Vec<String> {
+        let mut args = vec![
+            "parked-interrupt".to_string(),
+            "--session".to_string(),
+            self.session_id.clone(),
+        ];
+        if let Some(id) = &self.tool_use_id {
+            args.extend(["--tool-use-id".to_string(), id.clone()]);
+        }
+        if let Some((path, start)) = &self.transcript {
+            args.extend([
+                "--transcript".to_string(),
+                path.display().to_string(),
+                "--from".to_string(),
+                start.to_string(),
+            ]);
+        }
+        args
+    }
+
+    /// Block until the tool result is recorded (or the budget runs out), then
+    /// SIGINT the session. A session that ended its turn by itself meanwhile
+    /// has no live pid, and [`interrupt_session`] does nothing.
+    pub fn interrupt_once_recorded(&self) {
+        match (self.tool_use_id.as_deref(), &self.transcript) {
+            (Some(id), Some((path, start))) => {
+                let started = Instant::now();
+                while started.elapsed() < RESULT_RECORDED_BUDGET {
+                    if appended_tool_result(path, *start, id) || !session_alive(&self.session_id)
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            _ => std::thread::sleep(BLIND_INTERRUPT_DELAY),
+        }
+        interrupt_session(&self.session_id);
+    }
+}
+
+#[cfg(unix)]
+fn spawn_interrupter(exe: &std::path::Path, watch: &ResultWatch) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(watch.to_args())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // Own session: out of the CLI's process group and tree, so the interrupt
+    // it sends (and the tree sweep after it) cannot take it down mid-wait, and
+    // Claude Code is not left holding a pipe to it.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    cmd.spawn().map(|_| ())
+}
+
+#[cfg(not(unix))]
+fn spawn_interrupter(exe: &std::path::Path, watch: &ResultWatch) -> std::io::Result<()> {
+    std::process::Command::new(exe)
+        .args(watch.to_args())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+}
+
+/// In-process form of the deferred interrupt, for the long-lived `fleet mcp`
+/// server: a detached thread, so the caller can return the result first.
+fn interrupt_after_result(session_id: &str, tool_use_id: Option<&str>) {
+    let watch = ResultWatch::begin(session_id, tool_use_id);
+    std::thread::spawn(move || watch.interrupt_once_recorded());
+}
+
+/// Whether the bytes appended to `path` after offset `start` hold the tool
+/// result for `tool_use_id`. Only a `tool_result` block carries the id under a
+/// `tool_use_id` key — the `tool_use` row it answers keys it as `id`.
+fn appended_tool_result(path: &std::path::Path, start: u64, tool_use_id: &str) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = fs::File::open(path) else {
+        return false;
+    };
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return false;
+    }
+    let mut tail = Vec::new();
+    if f.read_to_end(&mut tail).is_err() {
+        return false;
+    }
+    contains_tool_result(&tail, tool_use_id)
+}
+
+fn contains_tool_result(bytes: &[u8], tool_use_id: &str) -> bool {
+    let needle = format!("\"tool_use_id\":\"{tool_use_id}\"");
+    bytes
+        .windows(needle.len())
+        .any(|w| w == needle.as_bytes())
 }
 
 // ── Interrupting the session ─────────────────────────────────────────────────
@@ -828,8 +1014,16 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
         }
     }
     out.push_str("\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。");
+    out.push_str(RESUME_PROMPT_INTERRUPT_NOTE);
     out
 }
+
+/// Older builds interrupted the turn before the stop notice could be returned,
+/// so their transcripts record the timed-out call as rejected by the user (or,
+/// when Claude Code's own MCP idle timeout fired first, as an MCP error). Say
+/// so, lest the agent read a rebuke into it — that rejection text even invites
+/// it to save "the correction" to memory.
+const RESUME_PROMPT_INTERRUPT_NOTE: &str = "\n\n（上一轮记录里那次决策卡调用如果显示为「用户拒绝了这个工具」「Request interrupted by user」或 MCP 超时报错，那是 Fleet 因等待超时中断本轮造成的，不是老板拒绝或纠正了你，不要据此调整做法，也不要写进 memory。）";
 
 /// `answers` is a flat map on every ask-shaped channel: question text → picked
 /// option label, and form-field name → value, in the same map. Pair each entry
@@ -1212,6 +1406,38 @@ mod tests {
         // An answered question is rendered once, under its question — never a
         // second time as a bare `【<question text>】<answer>` k/v line.
         assert!(!prompt.contains("【要不要保留向后兼容？】"), "{prompt}");
+        // The interrupted call reads as a user rejection in older transcripts;
+        // the prompt must say it was Fleet's timeout, and stay recognisable to
+        // `fleet_event::classify` by its unchanged header.
+        assert!(prompt.contains("不是老板拒绝或纠正了你"), "{prompt}");
+        assert!(prompt.starts_with(RESUME_PROMPT_HEADER), "{prompt}");
+    }
+
+    /// The deferred interrupt waits for the stop notice's `tool_result` row, so
+    /// it must not mistake the `tool_use` row it answers for it.
+    #[test]
+    fn tool_result_match_ignores_the_tool_use_row() {
+        let tool_use = br#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_A","name":"mcp__fleet__fleet__ask"}]}}"#;
+        let result = br#"{"type":"user","message":{"content":[{"type":"tool_result","content":"stop","is_error":true,"tool_use_id":"toolu_A"}]}}"#;
+        assert!(!contains_tool_result(tool_use, "toolu_A"));
+        assert!(contains_tool_result(result, "toolu_A"));
+        assert!(!contains_tool_result(result, "toolu_B"));
+    }
+
+    #[test]
+    fn appended_tool_result_scans_only_past_the_offset() {
+        let dir = std::env::temp_dir().join(format!("parked-tail-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let old = "{\"tool_use_id\":\"toolu_old\"}\n";
+        fs::write(&path, old).unwrap();
+        let start = old.len() as u64;
+        assert!(!appended_tool_result(&path, start, "toolu_old"));
+        assert!(!appended_tool_result(&path, start, "toolu_new"));
+        let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut f, b"{\"tool_use_id\":\"toolu_new\"}\n").unwrap();
+        assert!(appended_tool_result(&path, start, "toolu_new"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

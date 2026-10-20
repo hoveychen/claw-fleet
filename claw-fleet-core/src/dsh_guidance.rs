@@ -308,6 +308,8 @@ revises the version it opened with into the next one. Keep conclusions aligned \
 with the user and known gotchas (drop one only when it no longer holds, and say \
 why); rewrite progress and the next step. What you do not carry forward, no \
 later baton sees.\n\
+- Put long steps' measured timings and bottleneck in the note too (see Rule \
+6), so later batons need not re-measure.\n\
 - Commit worktree progress first, run the `fleet handoff` command, wait for \
 `ok: handoff registered`, then end the turn. **Narrating a handoff in prose \
 does nothing** — only the actual command spawns a successor.\n\
@@ -371,7 +373,17 @@ of the prompt.\n\
 - Both also take an optional `--until <shell cmd>` \
 as a **cheap non-LLM gate** — a probe run each tick (or once due) that spawns \
 the paid LLM session only when it exits 0. Poll often, pay for an LLM only \
-when there is real work. Do NOT default to an LLM session every tick.",
+when there is real work. Do NOT default to an LLM session every tick.\n\
+\n\
+### Before a long run: preflight the wall clock\n\
+\n\
+You do not feel wall-clock time; the boss does. Before anything expected to \
+take more than about 15 minutes (training, batch generation, a long script, a \
+big build): estimate the duration from a small sample, check utilisation \
+(`nvidia-smi`, `top`, `iostat`), and take any obvious parallelism, caching or \
+reduced-run win first. If it is not worth it, write one sentence of why in your \
+report or handoff note. Weigh it against the whole plan: batons left, repeats, \
+whether the boss is waiting.",
         title = title,
         prd_lang = prd_lang,
     )
@@ -1144,6 +1156,21 @@ mod tests {
         let g = render_dsh_interaction_block("Boss", "zh");
         assert!(g.contains("fleet task set --goal") && g.contains("fleet task split"), "{g}");
         assert!(!g.contains("--type"), "agents no longer label the type: {g}");
+    }
+
+    #[test]
+    fn prd_block_teaches_wallclock_preflight() {
+        for locale in ["zh", "en"] {
+            let g = render_dsh_prd_block("Boss", locale);
+            for needle in [
+                "### Before a long run: preflight the wall clock",
+                "more than about 15 minutes",
+                "write one sentence of why",
+                "Put long steps' measured timings",
+            ] {
+                assert!(g.contains(needle), "[{locale}] missing {needle:?}");
+            }
+        }
     }
 
     #[test]
