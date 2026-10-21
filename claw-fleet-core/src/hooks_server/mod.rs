@@ -68,6 +68,7 @@ mod routes_explorer;
 mod routes_guard;
 mod routes_hooks;
 mod routes_interaction;
+mod routes_library;
 mod routes_llm;
 mod routes_memory;
 mod routes_mobile;
@@ -91,6 +92,7 @@ use routes_explorer::*;
 use routes_guard::*;
 use routes_hooks::*;
 use routes_interaction::*;
+use routes_library::*;
 use routes_llm::*;
 use routes_memory::*;
 use routes_mobile::*;
@@ -1361,6 +1363,36 @@ fn handle_request(
                 if request.method() == &tiny_http::Method::Post =>
             {
                 route_artifact_folder_rename(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_TREE => route_library_tree(ctx, request, &query, json_header, path),
+
+            crate::routes::LIBRARY_FOLDER_CREATE
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_folder_create(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_FOLDER_DESCRIBE
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_folder_describe(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_FOLDER_DELETE
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_folder_delete(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_FOLDER_RENAME
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_folder_rename(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_MOVE if request.method() == &tiny_http::Method::Post => {
+                route_library_move(ctx, request, &query, json_header, path)
             }
 
             crate::routes::WIKI_DOCS => route_wiki_docs(ctx, request, &query, json_header, path),

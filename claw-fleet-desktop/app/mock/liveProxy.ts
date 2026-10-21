@@ -986,6 +986,43 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { workspace_path: a.workspacePath, from: a.from, to: a.to },
   }),
 
+  library_tree: (a) => ({
+    method: "GET",
+    path: "/library_tree",
+    query: a.workspace ? { workspace: q(a.workspace) } : undefined,
+  }),
+
+  library_create_folder: (a) => ({
+    method: "POST",
+    path: "/library_folder_create",
+    body: { workspace_path: a.workspacePath, path: a.path, description: a.description ?? null },
+  }),
+
+  library_describe_folder: (a) => ({
+    method: "POST",
+    path: "/library_folder_describe",
+    body: { workspace_path: a.workspacePath, path: a.path, description: a.description },
+  }),
+
+  library_delete_folder: (a) => ({
+    method: "POST",
+    path: "/library_folder_delete",
+    empty: true,
+    body: { workspace_path: a.workspacePath, path: a.path },
+  }),
+
+  library_rename_folder: (a) => ({
+    method: "POST",
+    path: "/library_folder_rename",
+    body: { workspace_path: a.workspacePath, from: a.from, to: a.to },
+  }),
+
+  library_move_item: (a) => ({
+    method: "POST",
+    path: "/library_move",
+    body: { kind: a.kind, id: a.id, folder: a.folder },
+  }),
+
   list_wiki_docs: () => ({
     method: "GET",
     path: "/wiki_docs",

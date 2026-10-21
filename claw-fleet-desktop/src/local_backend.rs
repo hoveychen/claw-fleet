@@ -2979,6 +2979,53 @@ impl LocalBackend {
         crate::artifacts::rename_folder(std::path::Path::new(workspace_path), from, to)
     }
 
+    pub fn library_tree(
+        &self,
+        workspace: Option<&str>,
+    ) -> Result<Vec<crate::library::LibraryProject>, String> {
+        crate::library::tree(workspace)
+    }
+
+    pub fn library_create_folder(
+        &self,
+        workspace_path: &str,
+        path: &str,
+        description: Option<&str>,
+    ) -> Result<crate::library::LibraryFolder, String> {
+        crate::library::create_folder(workspace_path, path, description)
+    }
+
+    pub fn library_describe_folder(
+        &self,
+        workspace_path: &str,
+        path: &str,
+        description: &str,
+    ) -> Result<crate::library::LibraryFolder, String> {
+        crate::library::describe_folder(workspace_path, path, description)
+    }
+
+    pub fn library_delete_folder(&self, workspace_path: &str, path: &str) -> Result<(), String> {
+        crate::library::delete_folder(workspace_path, path)
+    }
+
+    pub fn library_rename_folder(
+        &self,
+        workspace_path: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<crate::library::FolderRename, String> {
+        crate::library::rename_folder(workspace_path, from, to)
+    }
+
+    pub fn library_move_item(
+        &self,
+        kind: &str,
+        id: &str,
+        folder: &str,
+    ) -> Result<crate::library::LibraryItem, String> {
+        crate::library::move_item(kind, id, folder)
+    }
+
     pub fn read_artifact_bytes(
         &self,
         id: &str,
