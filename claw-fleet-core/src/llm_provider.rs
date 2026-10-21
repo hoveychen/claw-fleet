@@ -366,7 +366,7 @@ impl LlmProvider for ClaudeCliProvider {
 
 /// Parse Claude Code's `--output-format json` response into a `Completion`.
 /// Returns `None` on malformed JSON or when the run reported an error.
-fn parse_claude_json_response(raw: &str) -> Option<Completion> {
+pub(crate) fn parse_claude_json_response(raw: &str) -> Option<Completion> {
     let v: serde_json::Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(e) => {
@@ -1136,20 +1136,31 @@ pub fn complete_routed(
     timeout: Duration,
     scenario: &str,
 ) -> Option<String> {
+    complete_routed_usage(config, slot, prompt, timeout, scenario).map(|(text, _)| text)
+}
+
+/// [`complete_routed`] that also returns the usage entry it logged.
+pub fn complete_routed_usage(
+    config: &LlmConfig,
+    slot: ModelSlot,
+    prompt: &str,
+    timeout: Duration,
+    scenario: &str,
+) -> Option<(String, crate::llm_usage::FleetLlmUsageEntry)> {
     for route in provider_routes(config, slot, &config.provider) {
         log_debug(&format!(
             "[llm:route] scenario={scenario} provider={} model={}",
             route.provider.name(),
             route.model
         ));
-        if let Some(text) = crate::llm_usage::complete_accounted(
+        if let Some(done) = crate::llm_usage::complete_accounted_usage(
             route.provider.as_ref(),
             prompt,
             &route.model,
             timeout,
             scenario,
         ) {
-            return Some(text);
+            return Some(done);
         }
     }
     None

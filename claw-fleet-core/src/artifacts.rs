@@ -16,6 +16,8 @@
 //!   meta.json                    # Artifact metadata
 //!   blob/<name>                  # the CURRENT version, under its original name
 //!   versions/<version-id>/<name> # superseded versions ("v1", "v2", …)
+//!   text.txt                     # text extracted from the blob, when an
+//!                                # ingester produced some (library uploads)
 //! ```
 //!
 //! The `blob/` level exists so a deliverable that happens to be called
@@ -157,6 +159,32 @@ pub struct Artifact {
     /// fields, so no caller ever has to handle the empty case.
     #[serde(default)]
     pub versions: Vec<ArtifactVersion>,
+    /// A few sentences on what the file is. The library's upload organizer
+    /// writes one for every file it files; empty for agent-added artifacts.
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Set when the artifact came in through a library upload batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ArtifactOrigin>,
+}
+
+/// Where an uploaded artifact came from, so its batch can show it, undo it,
+/// and recognize the same bytes uploaded again.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactOrigin {
+    pub batch_id: String,
+    pub item_id: String,
+    /// The file's path inside what was uploaded — `合同/施工合同.docx`, or
+    /// `说明书.zip/洗碗机.pdf` for an archive member.
+    pub rel_path: String,
+    /// sha256 of the bytes, lowercase hex.
+    pub content_hash: String,
+    /// How its text was obtained (`pdf`, `docx`, `vision`, `none`, …).
+    #[serde(default)]
+    pub text_method: String,
 }
 
 /// One ingest of an artifact.
@@ -559,6 +587,9 @@ pub fn add_in(
             hardlinked,
         }],
         source_path,
+        summary: String::new(),
+        tags: Vec::new(),
+        origin: None,
     };
     write_meta(&dir, &artifact)?;
     Ok(artifact)
@@ -1049,6 +1080,46 @@ pub fn delete_in(root: &Path, id: &str) -> Result<(), String> {
     fs::remove_dir_all(&dir).map_err(|e| format!("delete artifact '{id}': {e}"))
 }
 
+/// One read-modify-write of an artifact's metadata. For ingesters that set
+/// fields [`update_in`] does not cover (summary, tags, origin). `path` is
+/// normalized after `f` runs, so a bad folder fails the write rather than
+/// landing on disk.
+pub(crate) fn edit_in(
+    root: &Path,
+    id: &str,
+    f: impl FnOnce(&mut Artifact),
+) -> Result<Artifact, String> {
+    let dir = artifact_dir(root, id)?;
+    let mut artifact = read_meta(&dir)?;
+    f(&mut artifact);
+    artifact.path = normalize_dir_path(&artifact.path)?;
+    if artifact.title.trim().is_empty() {
+        artifact.title = artifact.name.clone();
+    }
+    write_meta(&dir, &artifact)?;
+    artifact.drifted = has_drifted(root, &artifact);
+    Ok(artifact)
+}
+
+fn text_path(root: &Path, id: &str) -> Result<PathBuf, String> {
+    Ok(artifact_dir(root, id)?.join("text.txt"))
+}
+
+/// Store the text an ingester extracted from the artifact's bytes, for search.
+pub fn write_text_in(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let path = text_path(root, id)?;
+    if !path.parent().is_some_and(Path::exists) {
+        return Err(format!("artifact '{id}' not found"));
+    }
+    crate::atomic_json::write_atomic(&path, text.as_bytes())
+        .map_err(|e| format!("write extracted text of '{id}': {e}"))
+}
+
+/// The text extracted from an artifact at ingest, if any was stored.
+pub fn read_text_in(root: &Path, id: &str) -> Option<String> {
+    fs::read_to_string(text_path(root, id).ok()?).ok()
+}
+
 // ── Folder export ────────────────────────────────────────────────────────────
 
 /// What a folder export produced.
@@ -1411,6 +1482,42 @@ mod tests {
         let p = dir.join(name);
         fs::write(&p, body).unwrap();
         p
+    }
+
+    #[test]
+    fn upload_metadata_and_extracted_text_round_trip() {
+        let root = store();
+        let src_dir = store();
+        let src = write_file(src_dir.path(), "receipt.jpg", b"jpeg bytes");
+        let a = add_in(root.path(), &src, None, None, src_dir.path(), None).unwrap();
+        // An artifact stored before these fields existed reads with defaults.
+        assert!(a.summary.is_empty() && a.tags.is_empty() && a.origin.is_none());
+
+        let edited = edit_in(root.path(), &a.id, |x| {
+            x.summary = "Tile receipt, ¥3,486.00".into();
+            x.tags = vec!["receipt".into()];
+            x.path = " 发票/2026/ ".into();
+            x.origin = Some(ArtifactOrigin {
+                batch_id: "b1".into(),
+                item_id: "i001".into(),
+                rel_path: "photos/receipt.jpg".into(),
+                content_hash: "ab".into(),
+                text_method: "vision".into(),
+            });
+        })
+        .unwrap();
+        assert_eq!(edited.path, "发票/2026");
+        let back = get_in(root.path(), &a.id).unwrap();
+        assert_eq!(back.summary, "Tile receipt, ¥3,486.00");
+        assert_eq!(back.origin.unwrap().rel_path, "photos/receipt.jpg");
+        assert!(edit_in(root.path(), &a.id, |x| x.path = "a/../b".into()).is_err());
+
+        assert_eq!(read_text_in(root.path(), &a.id), None);
+        write_text_in(root.path(), &a.id, "合计 3486.00").unwrap();
+        assert_eq!(read_text_in(root.path(), &a.id).as_deref(), Some("合计 3486.00"));
+        // The sidecar is not mistaken for anything else in the store.
+        assert_eq!(list_in(root.path()).len(), 1);
+        assert!(write_text_in(root.path(), "nope", "x").is_err());
     }
 
     #[test]
