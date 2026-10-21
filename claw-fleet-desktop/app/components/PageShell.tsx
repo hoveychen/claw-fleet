@@ -59,6 +59,11 @@ interface Props {
    *  the selection alone — a page whose main container also holds the list
    *  (Wiki's grid) fades its own inner pane with useFadeOnChange instead. */
   detailKey?: string | number | null;
+  /** Draw the section's pages as a switch in place of the title (default).
+   *  The 资料 page turns it off: its content column's type filter already
+   *  splits documents from artifacts, and a second switch beside it read as
+   *  the same control twice. */
+  sectionSwitch?: boolean;
 }
 
 /** A page's segment label in its section switch. Literal `t()` calls, so the
@@ -157,6 +162,7 @@ export function PageShell({
   afterBody,
   className,
   detailKey,
+  sectionSwitch = true,
 }: Props) {
   const rail = RAILS[view];
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed[view]);
@@ -190,7 +196,8 @@ export function PageShell({
         ? "none"
         : "rail";
   const inColumn = headerIn === "rail" || headerIn === "main";
-  const sectionTabs = useSectionTabs(view);
+  const tabs = useSectionTabs(view);
+  const sectionTabs = sectionSwitch ? tabs : null;
 
   const header = (
     <>

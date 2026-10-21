@@ -10,6 +10,7 @@ import {
   libraryTypeGroup,
   orderLibraryProjects,
   typeCounts,
+  visibleTypeGroups,
 } from "../../shared-ts/libraryBrowse";
 import { buildLibraryTree, type LibraryEntry, type LibraryProjectTree } from "../../shared-ts/libraryTree";
 
@@ -60,9 +61,9 @@ describe("libraryBrowse", () => {
   ]);
   const view = buildLibraryTree(p);
 
-  it("groups wiki docs with document-like artifacts", () => {
+  it("keeps wiki docs apart from document-like artifacts", () => {
     expect(libraryTypeGroup({ kind: "doc", artifactKind: "" })).toBe("doc");
-    expect(libraryTypeGroup({ kind: "artifact", artifactKind: "pdf" })).toBe("doc");
+    expect(libraryTypeGroup({ kind: "artifact", artifactKind: "pdf" })).toBe("text");
     expect(libraryTypeGroup({ kind: "artifact", artifactKind: "image" })).toBe("image");
     expect(libraryTypeGroup({ kind: "artifact", artifactKind: "archive" })).toBe("other");
   });
@@ -83,8 +84,21 @@ describe("libraryBrowse", () => {
     const rows = folderListing(findLibraryFolder(view.folders, "a")!);
     expect(filterListing(rows, null, "newest").map((r) => r.entry.id)).toEqual(["ax1", "ax2", "a1"]);
     expect(filterListing(rows, null, "oldest").map((r) => r.entry.id)).toEqual(["a1", "ax2", "ax1"]);
-    expect(filterListing(rows, "doc", "newest").map((r) => r.entry.id)).toEqual(["ax2", "a1"]);
-    expect(typeCounts(rows)).toEqual({ doc: 2, image: 1 });
+    expect(filterListing(rows, "doc", "newest").map((r) => r.entry.id)).toEqual(["a1"]);
+    expect(filterListing(rows, "artifact", "newest").map((r) => r.entry.id)).toEqual(["ax1", "ax2"]);
+    expect(filterListing(rows, "text", "newest").map((r) => r.entry.id)).toEqual(["ax2"]);
+    expect(typeCounts(rows)).toEqual({ doc: 1, artifact: 2, text: 1, image: 1 });
+  });
+
+  it("draws only the chips that narrow the listing", () => {
+    // Docs and two artifact kinds: both rows.
+    expect(visibleTypeGroups({ doc: 1, artifact: 2, text: 1, image: 1 })).toEqual(["doc", "artifact", "text", "image"]);
+    // Docs only: 全部 already is "only docs".
+    expect(visibleTypeGroups({ doc: 70 })).toEqual([]);
+    // Docs and one artifact kind: the kind chip would equal 产出.
+    expect(visibleTypeGroups({ doc: 1, artifact: 3, image: 3 })).toEqual(["doc", "artifact"]);
+    // Artifacts only, two kinds.
+    expect(visibleTypeGroups({ artifact: 74, image: 65, video: 9 })).toEqual(["image", "video"]);
   });
 
   it("builds overview cards with the newest items beneath each folder", () => {

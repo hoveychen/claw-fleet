@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -104,6 +104,31 @@ export function LibraryFolderRail({
   const { t } = useTranslation();
   const [creating, setCreating] = useState(false);
   const rootBusy = ctx.busy === libraryDropKey(ctx.project, "") && !creating;
+
+  // Keep the open project on screen. With thirty-odd projects the one the page
+  // reopens on (or the one picked low in the list, whose predecessor folds
+  // above it) can sit out of view; when its row and folder tree are not wholly
+  // visible, scroll its row to the top of the rail. Only when the open project
+  // changes — a reload under a folder edit must not move the rail.
+  const openRef = useRef<HTMLDivElement>(null);
+  const scrolledFor = useRef<string | null>(null);
+  const hasView = view !== null;
+  useLayoutEffect(() => {
+    const el = openRef.current;
+    if (!el || !hasView || scrolledFor.current === active) return;
+    const first = scrolledFor.current === null;
+    scrolledFor.current = active;
+    const scroller = scrollParent(el);
+    if (!scroller) return;
+    const box = scroller.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.top >= box.top && r.bottom <= box.bottom) return;
+    scroller.scrollTo({
+      top: scroller.scrollTop + r.top - box.top - 4,
+      behavior: first ? "auto" : "smooth",
+    });
+  }, [active, hasView]);
+
   return (
     <>
       {projects.map((p) => {
@@ -112,6 +137,7 @@ export function LibraryFolderRail({
         return (
           <div
             key={p.workspacePath}
+            ref={open ? openRef : undefined}
             className={`${styles.rail_project}${open ? ` ${styles.rail_project_open}` : ""}${drop ? ` ${styles.project_drop}` : ""}`}
             {...{ [UPLOAD_ATTR]: p.workspacePath }}
           >
@@ -203,6 +229,15 @@ export function LibraryFolderRail({
       })}
     </>
   );
+}
+
+/** The nearest ancestor that scrolls vertically. */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
 }
 
 /** Whether `path` is `folder` or one of its ancestors. */
