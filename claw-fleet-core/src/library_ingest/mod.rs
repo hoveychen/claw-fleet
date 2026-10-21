@@ -781,7 +781,11 @@ fn stage(roots: &Roots, id: &str) -> Result<(), String> {
             .unwrap_or_else(|| src.clone());
         stager.add_path(path, &name);
     }
-    for inc in &batch.incoming {
+    // Sorted, so which of two identical files counts as the original does not
+    // depend on the order a browser happened to send them in.
+    let mut incoming: Vec<&IncomingFile> = batch.incoming.iter().collect();
+    incoming.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    for inc in incoming {
         if inc.rel_path.split('/').any(archive::is_junk) {
             stager.skipped_junk += 1;
             continue;
@@ -1116,6 +1120,11 @@ fn apply_verdict(roots: &Roots, id: &str, dir: &Path, verdict: Option<Verdict>, 
                 if let Some(t) = &v.text {
                     i.text_method = "vision".to_string();
                     i.text_chars = t.chars().count();
+                }
+                // The extractor's "no text layer" kind of note is why this
+                // file went to vision; once vision read it, it is not news.
+                if i.needs_vision {
+                    i.error = None;
                 }
             }
             None => {

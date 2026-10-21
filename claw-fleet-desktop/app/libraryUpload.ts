@@ -134,3 +134,14 @@ export function rejectedReasonKey(reason: string): { key: string; params?: Recor
   if (reason.includes("too large")) return { key: "library.reject_large" };
   return { key: "" };
 }
+
+/** i18n key for a per-item note core wrote in English, or "" to show it raw. */
+export function itemNoteKey(note: string): string {
+  if (note.includes("could not read it")) return "library.note_vision_failed";
+  if (note.includes("could not classify")) return "library.note_classify_failed";
+  if (note.includes("encrypted pdf")) return "library.note_encrypted";
+  if (note.includes("garbled")) return "library.note_garbled";
+  if (note.includes("cut at") || note.includes("too large")) return "library.note_truncated";
+  if (note.includes("not supported") || note.includes("no text layer")) return "library.note_no_text";
+  return "";
+}

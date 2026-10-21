@@ -23,7 +23,7 @@ import {
   type IngestItem,
 } from "../../../shared-ts/libraryIngest";
 import type { LibraryFolderRec } from "../../../shared-ts/libraryTree";
-import { rejectedReasonKey } from "../libraryUpload";
+import { itemNoteKey, rejectedReasonKey } from "../libraryUpload";
 import { Spinner } from "./loading";
 import { timeAgo } from "./timeAgo";
 import styles from "./LibraryBatch.module.css";
@@ -232,7 +232,7 @@ export function BatchDetail({
         <div className={styles.head_title}>
           <Upload size={16} strokeWidth={1.6} />
           <span>{t("library.batch_title", "上传整理")}</span>
-          <span className={styles.chip} data-status={batch.status}>
+          <span className={styles.chip} data-status={batch.status} data-batch-status={batch.status}>
             {running && <Spinner size={10} />}
             {t(`library.batch_status_${batch.status}`)}
           </span>
@@ -271,7 +271,7 @@ export function BatchDetail({
         </div>
       </header>
 
-      <div className={styles.body}>
+      <div className={styles.body} data-batch-body>
         {grouped.pending.length > 0 && (
           <section className={styles.group}>
             <h4 className={styles.group_head}>
@@ -335,7 +335,9 @@ export function BatchDetail({
             {grouped.failed.map((it) => (
               <div key={it.id} className={styles.line}>
                 <span className={styles.line_path}>{it.relPath}</span>
-                <span className={styles.line_note}>{it.error}</span>
+                <span className={styles.line_note} title={it.error ?? ""}>
+                  {it.error && itemNoteKey(it.error) ? t(itemNoteKey(it.error)) : it.error}
+                </span>
               </div>
             ))}
             {batch.rejected.map((r) => {
@@ -398,7 +400,11 @@ function ItemCard({
         {item.relPath}
       </div>
       {item.summary && <div className={styles.item_summary}>{item.summary}</div>}
-      {item.error && <div className={styles.item_note}>{item.error}</div>}
+      {item.error && (
+        <div className={styles.item_note} title={item.error}>
+          {itemNoteKey(item.error) ? t(itemNoteKey(item.error)) : item.error}
+        </div>
+      )}
       <div className={styles.item_foot}>
         {item.tags.map((tag) => (
           <span key={tag} className={styles.tag}>

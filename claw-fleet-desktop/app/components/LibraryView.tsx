@@ -56,6 +56,7 @@ import {
   type PickKind,
   type WebUploadFile,
 } from "../libraryUpload";
+import { isWebBuild } from "../hostEnv";
 import type { RegisteredProject } from "../projectList";
 import type { AuxCardTail } from "./auxDocMenu";
 import { ArtifactTabPane } from "./ArtifactTabPane";
@@ -86,12 +87,6 @@ const DROP_ATTR = "data-library-drop";
 /** A project branch carries its key here: files dropped from the OS onto it
  *  are uploaded into that project. */
 const UPLOAD_ATTR = "data-library-upload";
-
-/** A real Tauri webview (OS drops arrive as paths) rather than a browser tab
- *  (drops arrive as bytes). Same probe ChatComposer uses. */
-function isTauriHost(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 function uploadTargetAt(el: Element | null): string | null {
   return el?.closest(`[${UPLOAD_ATTR}]`)?.getAttribute(UPLOAD_ATTR) ?? null;
@@ -268,7 +263,7 @@ export function LibraryView() {
   );
   const onUpload = useCallback(
     (p: string, kind: PickKind) => {
-      if (isTauriHost()) {
+      if (!isWebBuild()) {
         pickLocalPaths(kind)
           .then((paths) => uploadPaths(p, paths))
           .catch((e) => setError(String(e)));
@@ -300,7 +295,7 @@ export function LibraryView() {
   const noTargetRef = useRef(noTargetMsg);
   noTargetRef.current = noTargetMsg;
   useEffect(() => {
-    if (!isTauriHost()) return;
+    if (isWebBuild()) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
     const targetAt = (pos: { x: number; y: number }) => {
@@ -340,12 +335,12 @@ export function LibraryView() {
     };
   }, []);
   const onWebDragOver = (e: React.DragEvent) => {
-    if (isTauriHost() || !e.dataTransfer.types.includes("Files")) return;
+    if (!isWebBuild() || !e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     setDropProject(uploadTargetAt(e.target as Element) || fallbackTarget || null);
   };
   const onWebDrop = (e: React.DragEvent) => {
-    if (isTauriHost() || !e.dataTransfer.types.includes("Files")) return;
+    if (!isWebBuild() || !e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     const target = uploadTargetAt(e.target as Element) || fallbackTarget;
     setDropProject(null);

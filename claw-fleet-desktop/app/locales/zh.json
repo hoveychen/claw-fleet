@@ -3195,7 +3195,13 @@
     "read_by_vision": "AI 看图识别",
     "undone_badge": "已撤销",
     "move_to": "移到…",
-    "undo_item": "撤销"
+    "undo_item": "撤销",
+    "note_vision_failed": "AI 没能看懂这个文件，已放进未归档",
+    "note_classify_failed": "AI 没能给它分类，已放进未归档",
+    "note_encrypted": "加密的 PDF，读不到内容",
+    "note_garbled": "PDF 的文字层是乱码",
+    "note_truncated": "内容太长，只读取了前一部分",
+    "note_no_text": "读不出文字，只按文件名归档"
   },
   "nav_tab_projects": "项目",
   "routines": {

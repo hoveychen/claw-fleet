@@ -162,6 +162,7 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
     assert_eq!((r.status, r.folder.as_deref()), (ItemStatus::Filed, Some("票据")));
     assert_eq!(r.text_method, "vision");
     assert_eq!(r.title, "建材收据 ¥3,486.00");
+    assert_eq!(r.error, None, "a note about the missing text layer is moot once vision read it");
     let d = e.item(&b, "收据-副本.jpg");
     assert_eq!(d.status, ItemStatus::Duplicate);
     assert_eq!(d.duplicate_of.as_ref().unwrap().id, r.id);

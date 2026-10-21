@@ -538,10 +538,11 @@ fn run_vision(bin: &str, dir: &Path, prompt: &str, model: &str) -> Result<CallOu
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // HOME is inherited, as for every other Fleet completion
+    // (`ClaudeCliProvider`): the call needs the user's Claude login and
+    // nothing else from their home. `spawn_home_dir()` would follow
+    // `FLEET_HOME`, which an isolated Fleet sets to a home with no login.
     crate::session_launch::strip_inherited_agent_env(&mut cmd);
-    if let Some(home) = crate::session_launch::spawn_home_dir() {
-        cmd.env("HOME", home);
-    }
     let started = Instant::now();
     let child = cmd.spawn().map_err(|e| format!("spawn claude: {e}"))?;
     let pid = child.id();
@@ -632,7 +633,7 @@ mod tests {
 
     #[test]
     fn verdicts_map_folders_onto_the_schema_and_unknown_ones_to_unfiled() {
-        let raw = r#"```json
+        let raw = r##"```json
 [
  {"id":"i0001","folder":"/合同/","title":"华居装饰施工合同","summary":"总价 265,000 元。","tags":["合同","#装修","合同"]},
  {"id":"i0002","folder":"收据","title":"瓷砖收据","summary":"合计 ¥3,486.00","tags":"收据，瓷砖、2026"},
@@ -640,7 +641,7 @@ mod tests {
  {"id":"i0004","folder":"design notes","title":"Kitchen notes","summary":"y"},
  {"id":"zzz","folder":"合同","title":"stray","summary":"not asked for"}
 ]
-```"#;
+```"##;
         let v = parse_verdicts(raw, &schema(), &ids(&["i0001", "i0002", "i0003", "i0004", "i0005"]));
         assert_eq!(v.len(), 4, "i0005 missing, zzz not asked for");
         assert_eq!(v[0].folder.as_deref(), Some("合同"));

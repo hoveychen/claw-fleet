@@ -3204,7 +3204,13 @@
     "read_by_vision": "Read by AI vision",
     "undone_badge": "Undone",
     "move_to": "Move to…",
-    "undo_item": "Undo"
+    "undo_item": "Undo",
+    "note_vision_failed": "AI could not read this file — left unfiled",
+    "note_classify_failed": "AI could not file it — left unfiled",
+    "note_encrypted": "Encrypted PDF — contents unreadable",
+    "note_garbled": "The PDF's text layer is garbled",
+    "note_truncated": "Too long — only the first part was read",
+    "note_no_text": "No readable text — filed by name only"
   },
   "nav_tab_projects": "Projects",
   "routines": {

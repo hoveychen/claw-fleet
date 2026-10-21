@@ -10,7 +10,7 @@ import {
   type IngestBatchSummary,
   type IngestItem,
 } from "../../shared-ts/libraryIngest";
-import { rejectedReasonKey } from "./libraryUpload";
+import { itemNoteKey, rejectedReasonKey } from "./libraryUpload";
 
 function summary(patch: Partial<IngestBatchSummary>): IngestBatchSummary {
   return {
@@ -122,5 +122,15 @@ describe("library upload batches", () => {
     expect(rejectedReasonKey("over the 1000-file limit for one upload").key).toBe("library.reject_count");
     expect(rejectedReasonKey("over the size limit for one upload").key).toBe("library.reject_total");
     expect(rejectedReasonKey("something new").key).toBe("");
+  });
+
+  it("maps core's per-item notes onto locale keys", () => {
+    expect(itemNoteKey("the AI could not read it (claude timed out after 240s); left unfiled")).toBe(
+      "library.note_vision_failed",
+    );
+    expect(itemNoteKey("the AI could not classify it; left unfiled")).toBe("library.note_classify_failed");
+    expect(itemNoteKey("legacy .doc not supported")).toBe("library.note_no_text");
+    expect(itemNoteKey("sheet Sheet1 cut at 2000 rows")).toBe("library.note_truncated");
+    expect(itemNoteKey("something else")).toBe("");
   });
 });
