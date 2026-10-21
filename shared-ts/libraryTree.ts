@@ -11,6 +11,8 @@ export interface LibraryFolderRec {
   workspacePath: string;
   path: string;
   description: string;
+  /** Readable ASCII slug segment for this folder's own name; "" = derived. */
+  key?: string;
   wikiPrefix: string;
   createdMs: number;
   updatedMs: number;
