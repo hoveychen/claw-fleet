@@ -1775,6 +1775,7 @@ pub fn run() {
             delete_artifact_folder,
             rename_artifact_folder,
             library_tree,
+            library_folder_items,
             library_search,
             library_create_folder,
             library_describe_folder,

@@ -334,3 +334,19 @@ fn project_language_is_the_majority_of_the_projects_items() {
     // A project with nothing indexed goes by the extra texts alone.
     assert_eq!(idx.project_language("/elsewhere", &many_en), classify::Language::English);
 }
+
+#[test]
+fn artifact_hits_carry_the_file_facts_a_thumbnail_needs() {
+    let e = env();
+    e.publish("misc/plain", "Plain receipt doc", "a receipt");
+    let a = e.add_file("receipt.csv", b"receipt,1\n", Some("Receipt sheet"));
+
+    let hits = e.find("receipt");
+    let art = hits.iter().find(|h| h.kind == ITEM_ARTIFACT).expect("artifact hit");
+    assert_eq!(
+        (art.id.as_str(), art.name.as_str(), art.mime.as_str(), art.size_bytes),
+        (a.id.as_str(), "receipt.csv", a.mime.as_str(), a.size_bytes)
+    );
+    let doc = hits.iter().find(|h| h.kind == ITEM_DOC).expect("doc hit");
+    assert!(doc.name.is_empty() && doc.size_bytes == 0, "docs carry no file facts");
+}

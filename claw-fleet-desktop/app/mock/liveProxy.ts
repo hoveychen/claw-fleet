@@ -995,7 +995,16 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   library_tree: (a) => ({
     method: "GET",
     path: "/library_tree",
-    query: a.workspace ? { workspace: q(a.workspace) } : undefined,
+    query: {
+      ...(a.workspace ? { workspace: q(a.workspace) } : {}),
+      ...(a.outline ? { outline: "1", ...(a.recent != null ? { recent: q(a.recent) } : {}) } : {}),
+    },
+  }),
+
+  library_folder_items: (a) => ({
+    method: "GET",
+    path: "/library_folder_items",
+    query: { workspace: q(a.workspacePath), folder: q(a.folder ?? "") },
   }),
 
   library_create_folder: (a) => ({

@@ -3283,8 +3283,6 @@
     "group_audio": "Audio",
     "group_other": "Other",
     "group_all": "All",
-    "manage_pages": "Management pages",
-    "manage_pages_hint": "Documents and outputs pages: bulk actions, zipped export, storage usage",
     "overview": "Overview",
     "overview_stats": "{{items}} items · {{folders}} folders · {{unfiled}} unfiled",
     "overview_empty": "Nothing in this project yet. Click Upload or drop files here — AI reads them, writes a summary and files them.",

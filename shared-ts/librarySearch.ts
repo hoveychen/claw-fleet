@@ -24,6 +24,11 @@ export interface LibraryHit {
   updatedMs: number;
   /** The artifact's coarse kind; empty for docs. */
   artifactKind: string;
+  /** The artifact's file name, mime and size (absent for docs), so a hit can
+   *  draw its thumbnail without its folder being loaded. */
+  name?: string;
+  mime?: string;
+  sizeBytes?: number;
   /** bm25, lower is better. */
   rank: number;
 }

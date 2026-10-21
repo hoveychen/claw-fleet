@@ -136,6 +136,35 @@ export function mockLibraryTree() {
     .sort((a, b) => a.workspaceName.localeCompare(b.workspaceName));
 }
 
+/** `library_tree` with `outline: true`: folders, per-folder counts and the
+ *  newest `recent` items of each, without summary or tags — mirrors
+ *  `claw_fleet_core::library::outline_in`. */
+export function mockLibraryOutline(args: Record<string, unknown>) {
+  const recent = typeof args.recent === "number" ? args.recent : 3;
+  return mockLibraryTree().map((p) => {
+    const counts: Record<string, number> = {};
+    const items = [];
+    for (const item of p.items) {
+      const key = item.folder ?? "";
+      counts[key] = (counts[key] ?? 0) + 1;
+      if (counts[key] <= recent) items.push({ ...item, summary: undefined, tags: undefined });
+    }
+    return { ...p, items, counts, lastMs: p.items[0]?.updatedMs ?? 0 };
+  });
+}
+
+/** `library_folder_items`: a folder's items and everything beneath it, or the
+ *  unfiled ones for `folder: ""`. */
+export function mockLibraryFolderItems(args: Record<string, unknown>) {
+  const ws = String(args.workspacePath ?? "");
+  const folder = String(args.folder ?? "").replace(/^\/+|\/+$/g, "");
+  const p = mockLibraryTree().find((x) => x.workspacePath === ws);
+  if (!p) return [];
+  return p.items.filter((i) =>
+    i.folder === null ? folder === "" : folder !== "" && (i.folder === folder || i.folder.startsWith(`${folder}/`)),
+  );
+}
+
 export function mockLibraryCreateFolder(args: Record<string, unknown>) {
   const workspacePath = String(args.workspacePath ?? "");
   const path = String(args.path ?? "").split("/").filter(Boolean).join("/");
@@ -592,6 +621,9 @@ export function mockLibrarySearch(args: Record<string, unknown>) {
         tags: m.tags,
         updatedMs: e.updatedMs,
         artifactKind: e.artifactKind,
+        name: e.kind === "artifact" ? (e as { name?: string }).name : undefined,
+        mime: e.kind === "artifact" ? (e as { mime?: string }).mime : undefined,
+        sizeBytes: e.kind === "artifact" ? (e as { sizeBytes?: number }).sizeBytes : undefined,
         rank: inTitle ? -10 : fromBody ? -2 : -1,
       });
     }

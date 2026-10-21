@@ -2986,6 +2986,22 @@ impl LocalBackend {
         crate::library::tree(workspace)
     }
 
+    pub fn library_outline(
+        &self,
+        workspace: Option<&str>,
+        recent: usize,
+    ) -> Result<Vec<crate::library::LibraryProject>, String> {
+        crate::library::outline(workspace, recent)
+    }
+
+    pub fn library_folder_items(
+        &self,
+        workspace_path: &str,
+        folder: &str,
+    ) -> Result<Vec<crate::library::LibraryItem>, String> {
+        crate::library::folder_items(workspace_path, folder)
+    }
+
     pub fn library_search(
         &self,
         query: &str,

@@ -25,9 +25,10 @@ import {
   filterListing,
   findLibraryFolder,
   folderCards,
-  folderListing,
   foldersAwaitingReview,
   LIBRARY_SOURCE_GROUPS,
+  listingOf,
+  projectTotals,
   typeCounts,
   visibleTypeGroups,
   type FolderListing,
@@ -129,6 +130,9 @@ export function LibraryContent(props: {
   project: LibraryProjectTree | null;
   view: LibraryTreeView | null;
   folder: string | null;
+  /** The open folder's items with summaries (`library_folder_items`); null
+   *  while they load. The tree itself is an outline. */
+  folderItems: LibraryEntry[] | null;
   /** A one-character query filters the listing on titles. */
   query: string;
   typeGroup: LibraryTypeGroup | null;
@@ -227,18 +231,19 @@ function Overview(props: Props & { project: LibraryProjectTree; view: LibraryTre
     return n;
   }, [view]);
   const unfiledRecent = view.unfiled.slice(0, 3);
+  const unfiled = view.unfiledTotal;
   return (
     <div className={styles.content_scroll} data-library-content="overview">
       <div className={styles.content_head}>
         <div className={styles.content_title_row}>
           <h2 className={styles.content_title}>{project.workspaceName}</h2>
-          <UploadVerbs verbs={verbs} showRefile={view.unfiled.length > 0} />
+          <UploadVerbs verbs={verbs} showRefile={unfiled > 0} />
         </div>
         <p className={styles.content_desc}>
           {t("library.overview_stats", "{{items}} 条资料 · {{folders}} 个目录 · 未归档 {{unfiled}} 条", {
-            items: project.items.length,
+            items: projectTotals(project).total,
             folders: folderTotal,
-            unfiled: view.unfiled.length,
+            unfiled,
           })}
         </p>
       </div>
@@ -279,7 +284,7 @@ function Overview(props: Props & { project: LibraryProjectTree; view: LibraryTre
         </section>
       )}
 
-      {cards.length === 0 && view.unfiled.length === 0 ? (
+      {cards.length === 0 && unfiled === 0 ? (
         <div className={styles.none}>
           {t("library.overview_empty", "这个项目还没有资料。点「上传」，或把文件拖到这里——AI 会读内容、写摘要、放进合适的目录。")}
         </div>
@@ -288,7 +293,7 @@ function Overview(props: Props & { project: LibraryProjectTree; view: LibraryTre
           {cards.map(({ node, recent }) => (
             <FolderCardView key={node.path} node={node} recent={recent} onOpen={() => onPickFolder(node.path)} />
           ))}
-          {view.unfiled.length > 0 && (
+          {unfiled > 0 && (
             <button
               type="button"
               className={styles.folder_card}
@@ -298,7 +303,7 @@ function Overview(props: Props & { project: LibraryProjectTree; view: LibraryTre
               <span className={styles.folder_card_head}>
                 <Inbox size={16} strokeWidth={1.5} />
                 <span className={styles.folder_card_name}>{t("library.unfiled", "未归档")}</span>
-                <span className={styles.count}>{view.unfiled.length}</span>
+                <span className={styles.count}>{unfiled}</span>
               </span>
               <span className={styles.folder_card_desc}>
                 {t("library.unfiled_desc", "不在任何目录里的资料，拖进文件夹即可归档")}
@@ -381,13 +386,16 @@ function RecentList({ entries }: { entries: LibraryEntry[] }) {
 
 function FolderContent(props: Props & { project: LibraryProjectTree; view: LibraryTreeView }) {
   const { t } = useTranslation();
-  const { project, view, folder, typeGroup, sort, verbs, onPickFolder } = props;
+  const { project, view, folder, folderItems, typeGroup, sort, verbs, onPickFolder } = props;
   const node = folder ? findLibraryFolder(view.folders, folder) : null;
   const rows = useMemo<FolderListing[]>(() => {
-    const all = node ? folderListing(node) : view.unfiled.map((entry) => ({ entry, sub: "" }));
+    const all = listingOf(folderItems ?? [], folder ?? "");
     const q = props.query.trim();
     return q ? all.filter((r) => libraryEntryMatches(r.entry, q)) : all;
-  }, [node, view, props.query]);
+  }, [folderItems, folder, props.query]);
+  const loading = folderItems === null;
+  // Until the listing arrives the outline's count stands in.
+  const total = loading ? (node ? node.total : view.unfiledTotal) : rows.length;
   const counts = useMemo(() => typeCounts(rows), [rows]);
   const chips = useMemo(() => visibleTypeGroups(counts), [counts]);
   // A filter with no chip here (its bucket emptied, or it would select
@@ -421,9 +429,9 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
         <div className={styles.content_title_row}>
           <h2 className={styles.content_title}>
             {label}
-            <span className={styles.content_count}>{rows.length}</span>
+            <span className={styles.content_count}>{total}</span>
           </h2>
-          <UploadVerbs verbs={verbs} showRefile={!node && view.unfiled.length > 0} />
+          <UploadVerbs verbs={verbs} showRefile={!node && view.unfiledTotal > 0} />
         </div>
         {description && <p className={styles.content_desc}>{description}</p>}
         {node && node.children.length > 0 && (
@@ -480,7 +488,9 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
           </div>
         )}
       </div>
-      {rows.length === 0 ? (
+      {loading ? (
+        <SkeletonList rows={Math.min(Math.max(total, 2), 6)} />
+      ) : rows.length === 0 ? (
         <div className={styles.none}>
           {node && node.children.length === 0
             ? t("library.folder_empty_hint", "这个目录还没有资料。把条目从别处拖到左栏的这个目录上，或上传文件。")
@@ -541,8 +551,8 @@ function SearchResults(props: Props) {
         <div className={`${styles.cards}${props.narrow ? ` ${styles.cards_narrow}` : ""}`}>
           {hits.map((h) => {
             const key = libraryEntryKey(h);
-            // The tree's entry carries the file facts a thumbnail needs; an
-            // indexed item the tree has not loaded yet still shows as text.
+            // The hit carries the file facts a thumbnail needs; a loaded
+            // entry is used when there is one.
             const known = entryByKey.get(key);
             const entry: LibraryEntry = known ?? {
               kind: h.kind === "doc" ? "doc" : "artifact",
@@ -553,6 +563,9 @@ function SearchResults(props: Props) {
               location: h.location,
               updatedMs: h.updatedMs,
               artifactKind: h.artifactKind,
+              name: h.name,
+              mime: h.mime,
+              sizeBytes: h.sizeBytes,
             };
             const folderText = h.folder || t("library.unfiled", "未归档");
             const where = searchAll ? `${props.projectName(h.workspacePath)} / ${folderText}` : folderText;
