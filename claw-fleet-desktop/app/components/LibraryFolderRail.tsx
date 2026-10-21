@@ -24,6 +24,7 @@ import {
   type LibraryProjectTree,
   type LibraryTreeView,
 } from "../../../shared-ts/libraryTree";
+import { projectTotals } from "../../../shared-ts/libraryBrowse";
 import { Spinner } from "./loading";
 import styles from "./LibraryView.module.css";
 
@@ -152,7 +153,7 @@ export function LibraryFolderRail({
                 {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 <FolderGit2 size={15} strokeWidth={1.5} />
                 <span className={styles.project_name}>{p.workspaceName}</span>
-                <span className={styles.count}>{p.items.length}</span>
+                <span className={styles.count}>{projectTotals(p).total}</span>
               </button>
               {open && (
                 <span className={styles.actions}>
@@ -205,7 +206,7 @@ export function LibraryFolderRail({
                     {t("library.no_folders_rail", "还没有目录。点上方 + 新建，或上传文件让 AI 起草一套。")}
                   </div>
                 )}
-                <UnfiledRow count={view.unfiled.length} ctx={ctx} />
+                <UnfiledRow count={view.unfiledTotal} ctx={ctx} />
                 {batchCount > 0 && (
                   <button
                     type="button"

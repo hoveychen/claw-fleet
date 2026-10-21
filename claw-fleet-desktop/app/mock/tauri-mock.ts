@@ -28,7 +28,9 @@ import {
   mockLibraryDeleteFolder,
   mockLibraryDescribeFolder,
   mockLibraryAcceptFolder,
+  mockLibraryFolderItems,
   mockLibraryMoveItem,
+  mockLibraryOutline,
   mockLibraryRenameFolder,
   mockLibrarySearch,
   mockLibraryTree,
@@ -765,7 +767,9 @@ async function handleIPC(
       return a;
     }
     case "library_tree":
-      return mockLibraryTree();
+      return args.outline ? mockLibraryOutline(args) : mockLibraryTree();
+    case "library_folder_items":
+      return mockLibraryFolderItems(args);
     case "library_search":
       return mockLibrarySearch(args);
     case "library_create_folder":

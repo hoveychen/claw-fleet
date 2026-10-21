@@ -59,7 +59,9 @@ pub(crate) fn route_library_search(
     );
 }
 
-/// `GET /library_tree[?workspace=…]` — every project's tree, or one project's.
+/// `GET /library_tree[?workspace=…][&outline=1&recent=N]` — every project's
+/// tree, or one project's; with `outline` only the folders, their counts and
+/// the newest `recent` items of each ([`crate::library::outline`]).
 pub(crate) fn route_library_tree(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -69,7 +71,30 @@ pub(crate) fn route_library_tree(
 ) {
     let workspace = decoded(query, "workspace");
     let ws = (!workspace.is_empty()).then_some(workspace.as_str());
+    if matches!(decoded(query, "outline").as_str(), "1" | "true") {
+        let recent = decoded(query, "recent")
+            .parse()
+            .unwrap_or(crate::library::OUTLINE_RECENT);
+        respond(request, json_header, crate::library::outline(ws, recent));
+        return;
+    }
     respond(request, json_header, crate::library::tree(ws));
+}
+
+/// `GET /library_folder_items?workspace=&folder=` — one folder's items and
+/// everything beneath it, with summaries and tags (`folder` empty = unfiled).
+pub(crate) fn route_library_folder_items(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    respond(
+        request,
+        json_header,
+        crate::library::folder_items(&decoded(query, "workspace"), &decoded(query, "folder")),
+    );
 }
 
 /// `POST /library_folder_create` — `{workspace_path, path, description?}`.

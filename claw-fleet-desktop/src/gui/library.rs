@@ -4,12 +4,34 @@
 
 use super::*;
 
+/// Every project's tree, or one project's. With `outline` only the folders,
+/// their counts and the newest `recent` items of each — the page opens a
+/// folder with `library_folder_items`.
 #[tauri::command(async)]
 pub(crate) fn library_tree(
     workspace: Option<String>,
+    outline: Option<bool>,
+    recent: Option<usize>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::library::LibraryProject>, String> {
+    if outline.unwrap_or(false) {
+        return state.backend.library_outline(
+            workspace.as_deref(),
+            recent.unwrap_or(claw_fleet_core::library::OUTLINE_RECENT),
+        );
+    }
     state.backend.library_tree(workspace.as_deref())
+}
+
+/// One folder's items and everything beneath it, with summaries and tags
+/// (`folder: ""` = the unfiled ones).
+#[tauri::command(async)]
+pub(crate) fn library_folder_items(
+    workspace_path: String,
+    folder: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::library::LibraryItem>, String> {
+    state.backend.library_folder_items(&workspace_path, &folder)
 }
 
 /// Full-text search over both stores, ranked; `workspace` scopes it to one

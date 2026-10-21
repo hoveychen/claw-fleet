@@ -1375,6 +1375,9 @@ fn handle_request(
             }
 
             crate::routes::LIBRARY_TREE => route_library_tree(ctx, request, &query, json_header, path),
+            crate::routes::LIBRARY_FOLDER_ITEMS => {
+                route_library_folder_items(ctx, request, &query, json_header, path)
+            }
             crate::routes::LIBRARY_SEARCH => {
                 route_library_search(ctx, request, &query, json_header, path)
             }
