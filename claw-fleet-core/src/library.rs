@@ -268,6 +268,10 @@ pub struct LibraryProject {
     /// where `items` is the count.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub counts: BTreeMap<String, usize>,
+    /// Set only by [`outline`]: the newest item's time, which an outline with
+    /// no items kept can no longer tell.
+    #[serde(default, skip_serializing_if = "is_zero_size")]
+    pub last_ms: u64,
 }
 
 /// What a folder rename re-filed.
@@ -875,6 +879,7 @@ pub fn tree_in(roots: &Roots, workspace: Option<&str>) -> Vec<LibraryProject> {
                 folders: Vec::new(),
                 items: Vec::new(),
                 counts: BTreeMap::new(),
+                last_ms: 0,
             });
     };
 
@@ -951,6 +956,7 @@ pub fn outline_in(roots: &Roots, workspace: Option<&str>, recent: usize) -> Vec<
     for p in &mut out {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         let items = std::mem::take(&mut p.items);
+        p.last_ms = items.iter().map(|i| i.updated_ms).max().unwrap_or(0);
         for mut item in items {
             let n = counts.entry(item.folder.clone().unwrap_or_default()).or_insert(0);
             *n += 1;
@@ -1843,6 +1849,8 @@ mod tests {
         assert_eq!(p.items.iter().filter(|i| i.folder.as_deref() == Some("发票")).count(), 2);
         assert!(p.items.iter().all(|i| i.summary.is_empty() && i.tags.is_empty()));
         assert_eq!(p.folders.len(), 2, "folders are carried whole");
+        let newest = e.project().items.iter().map(|i| i.updated_ms).max().unwrap();
+        assert_eq!(outline_in(&e.roots, Some(&e.ws()), 0)[0].last_ms, newest);
         // A full tree never carries counts.
         assert!(serde_json::to_value(e.project()).unwrap().get("counts").is_none());
 

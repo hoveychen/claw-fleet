@@ -1,29 +1,39 @@
-// 资料 tab: the library as one folder tree per project, the same tree the
-// desktop 资料 page draws. Without a project chosen it lists the projects;
-// with one it shows that project's folders, its unfiled bucket and its recent
-// uploads. A query of two or more characters searches the index (both stores,
-// bodies and AI summaries) instead.
+// 资料 tab: the desktop 资料 page's structure, one level per screen — the
+// project list, a project's overview (a card per folder), a folder's content
+// (cards with summary, tags and thumbnails, filtered by type and ordered by
+// time) and then the item itself. Each level is a history layer, so back (the
+// button, the gesture, the hardware key) climbs one level. A query of two or
+// more characters searches the index (both stores, bodies and AI summaries) in
+// the current project, or everywhere at the top.
+//
+// Nothing here pulls the whole library: the project list and the overview come
+// from an outline (counts plus the newest few items per folder), a folder's
+// items are fetched when it opens and an item's record when it is tapped.
 //
 // The phone can file things: move an item to another folder, keep / rename /
 // delete a folder an AI created, and upload — photographed receipts or picked
 // files — into a project, where the host's AI files them in one batch whose
 // summary can undo or move any item.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Library, Search, SearchX, Upload, WifiOff, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, History, Library, Search, SearchX, Upload, WifiOff } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { Artifact, SessionInfo, WikiDoc } from "../types";
 import { useDraft } from "../draft";
 import { useDelayedFlag } from "../useDelayedFlag";
+import { HistoryLayer } from "../useNavStack";
 import {
-  fetchLibraryTree,
+  fetchArtifactRecord,
+  fetchLibraryOutline,
+  fetchWikiDoc,
+  findLibraryFolder,
+  buildLibraryTree,
   isIngestRunning,
   libraryEntryKey,
   listIngestBatches,
   moveLibraryEntry,
   searchLibrary,
-  snippetRuns,
   uploadProjects,
   type IngestBatchSummary,
   type LibraryEntry,
@@ -32,27 +42,18 @@ import {
   type LibraryProjectTree,
   type UploadOutcome,
 } from "../libraryApi";
-import { useLibrary } from "./LibraryList";
 import { ArtifactDetail } from "./ArtifactsView";
 import { BatchRows, BatchView, BATCH_POLL_MS } from "./LibraryBatch";
-import { FolderSheet, ProjectList, ProjectTree, awaitingFolders, type EntryFilter } from "./LibraryTree";
+import { FolderSheet } from "./LibraryTree";
+import { FolderContent, ProjectOverview, ProjectRows, SearchCards, projectName } from "./LibraryBrowse";
 import { UploadSheet } from "./LibraryUpload";
 import { recentWorkspaceRows } from "./Composer";
+import { AppHeader } from "./AppHeader";
 import { EmptyState } from "./EmptyState";
 import { SkeletonList, Spinner } from "./loading";
 import { Presence } from "../Presence";
 import tasksStyles from "./TasksView.module.css";
-import listStyles from "./LibraryList.module.css";
 import styles from "./LibraryView.module.css";
-
-const TYPES: Array<[EntryFilter, string]> = [
-  ["all", "全部"],
-  ["doc", "文档"],
-  ["artifact", "产出"],
-];
-
-/** Recent uploads shown above a tree (or above the project list). */
-const BATCHES_SHOWN = 4;
 
 interface Props {
   client: FleetTransport | null;
@@ -91,25 +92,41 @@ function useLibrarySearch(client: FleetTransport | null, query: string, workspac
 }
 
 export function LibraryView({ client, sessions, onOpenDoc }: Props) {
-  const lib = useLibrary(client);
-  const refreshLib = lib.refresh;
-  const [type, setType] = useDraft<EntryFilter>("library:type", "all");
   const [project, setProject] = useDraft<string>("library:project", "");
+  /** The open folder of `project`; null = its overview, `""` = unfiled. */
+  const [folder, setFolder] = useState<string | null>(null);
   const [uploadProject, setUploadProject] = useDraft<string>("library:uploadProject", "");
   const [query, setQuery] = useState("");
 
-  const [tree, setTree] = useState<LibraryProjectTree[] | null>(null);
-  const [treeError, setTreeError] = useState<string | null>(null);
-  const loadTree = useCallback(async () => {
+  // Every project, light: folders and counts, no items.
+  const [projects, setProjects] = useState<LibraryProjectTree[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const loadProjects = useCallback(async () => {
     if (!client) return;
     try {
-      setTree(await fetchLibraryTree(client));
-      setTreeError(null);
+      setProjects(await fetchLibraryOutline(client, undefined, 0));
+      setListError(null);
     } catch (e) {
-      setTreeError(errText(e));
-      setTree((prev) => prev ?? []);
+      setListError(errText(e));
+      setProjects((prev) => prev ?? []);
     }
   }, [client]);
+
+  // The open project: its outline with the newest few items per folder.
+  const [current, setCurrent] = useState<LibraryProjectTree | null>(null);
+  const [currentError, setCurrentError] = useState<string | null>(null);
+  const loadCurrent = useCallback(async () => {
+    if (!client || !project) return;
+    try {
+      const got = await fetchLibraryOutline(client, project);
+      setCurrent(got.find((p) => p.workspacePath === project) ?? got[0] ?? emptyProject(project));
+      setCurrentError(null);
+    } catch (e) {
+      setCurrentError(errText(e));
+    }
+  }, [client, project]);
+  /** Bumped to make an open folder fetch its items again. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [batches, setBatches] = useState<IngestBatchSummary[]>([]);
   const loadBatches = useCallback(async () => {
@@ -117,13 +134,18 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
     try {
       setBatches(await listIngestBatches(client, project || undefined));
     } catch {
-      // The tree is what matters; a batch list that failed just stays as it was.
+      // The library is what matters; a batch list that failed just stays as it was.
     }
   }, [client, project]);
 
   useEffect(() => {
-    void loadTree();
-  }, [loadTree]);
+    void loadProjects();
+  }, [loadProjects]);
+  useEffect(() => {
+    setCurrent(null);
+    setFolder(null);
+    void loadCurrent();
+  }, [loadCurrent]);
   useEffect(() => {
     void loadBatches();
   }, [loadBatches]);
@@ -133,76 +155,62 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
     const timer = window.setInterval(() => void loadBatches(), BATCH_POLL_MS);
     return () => window.clearInterval(timer);
   }, [anyRunning, loadBatches]);
-  // A batch that just finished filed things: the tree has to show them.
-  const wasRunning = useRef(false);
-  useEffect(() => {
-    if (wasRunning.current && !anyRunning) {
-      void loadTree();
-      void refreshLib();
-    }
-    wasRunning.current = anyRunning;
-  }, [anyRunning, loadTree, refreshLib]);
 
   const refreshAll = useCallback(() => {
-    void loadTree();
+    void loadProjects();
+    void loadCurrent();
     void loadBatches();
-    void refreshLib();
-  }, [loadTree, loadBatches, refreshLib]);
+    setReloadKey((k) => k + 1);
+  }, [loadProjects, loadCurrent, loadBatches]);
+  // A batch that just finished filed things: every level has to show them.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !anyRunning) refreshAll();
+    wasRunning.current = anyRunning;
+  }, [anyRunning, refreshAll]);
 
   const { hits, searching } = useLibrarySearch(client, query, project);
   const showSearching = useDelayedFlag(query.trim().length >= 2 && searching);
 
-  const docs = useMemo(() => {
-    const m = new Map<string, WikiDoc>();
-    for (const it of lib.items ?? []) if (it.type === "doc") m.set(it.doc.slug, it.doc);
-    return m;
-  }, [lib.items]);
-  const artifacts = useMemo(() => {
-    const m = new Map<string, Artifact>();
-    for (const it of lib.items ?? []) if (it.type === "artifact") m.set(it.artifact.id, it.artifact);
-    return m;
-  }, [lib.items]);
-
-  const current = useMemo(
-    () => (project ? (tree ?? []).find((p) => p.workspacePath === project) ?? null : null),
-    [tree, project],
-  );
-  const projectFolders = useMemo(() => {
-    const m = new Map<string, LibraryFolderRec[]>();
-    for (const p of tree ?? []) m.set(p.workspacePath, p.folders);
-    return m;
-  }, [tree]);
-
   const uploadChoices = useMemo(
-    () => uploadProjects(tree ?? [], recentWorkspaceRows(sessions, null)),
-    [tree, sessions],
+    () => uploadProjects(projects ?? [], recentWorkspaceRows(sessions, null)),
+    [projects, sessions],
   );
 
-  const [openArtifact, setOpenArtifact] = useState<string | null>(null);
+  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const [openBatch, setOpenBatch] = useState<{ id: string; skipped?: UploadOutcome["skipped"] } | null>(null);
+  const [batchesOpen, setBatchesOpen] = useState(false);
   const [folderSheet, setFolderSheet] = useState<LibraryFolderRec | null>(null);
   const [uploading, setUploading] = useState(false);
   const [moving, setMoving] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const openEntry = (e: { kind: string; id: string }) => {
-    if (e.kind === "doc") {
-      const doc = docs.get(e.id);
-      if (doc) onOpenDoc(doc);
-      else void lib.refresh();
-    } else {
-      setOpenArtifact(e.id);
+  // An item's record is fetched when it is tapped, not listed up front.
+  const openEntry = async (e: { kind: string; id: string }) => {
+    if (!client || opening) return;
+    const key = libraryEntryKey(e);
+    setOpening(key);
+    setActionError(null);
+    try {
+      if (e.kind === "doc") onOpenDoc(await fetchWikiDoc(client, e.id));
+      else setArtifact(await fetchArtifactRecord(client, e.id));
+    } catch (err) {
+      setActionError(errText(err));
+    } finally {
+      setOpening(null);
     }
   };
 
-  const moveEntry = async (e: LibraryEntry, folder: string) => {
-    if (!client || (e.folder ?? "") === folder) return;
+  const moveEntry = async (e: LibraryEntry, to: string) => {
+    if (!client || (e.folder ?? "") === to) return;
     const key = libraryEntryKey(e);
     setMoving((prev) => new Set(prev).add(key));
     setActionError(null);
     try {
-      await moveLibraryEntry(client, e, folder);
-      await loadTree();
+      await moveLibraryEntry(client, e, to);
+      await loadCurrent();
+      setReloadKey((k) => k + 1);
     } catch (err) {
       setActionError(errText(err));
     } finally {
@@ -219,160 +227,168 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
     setUploading(true);
   };
 
-  const artifact = openArtifact ? artifacts.get(openArtifact) ?? null : null;
   const searchMode = query.trim().length >= 2;
-  const recent = batches.slice(0, BATCHES_SHOWN);
-  const review = current ? awaitingFolders(current).length : 0;
+  const projectLabel =
+    current?.workspaceName ||
+    (projects ?? []).find((p) => p.workspacePath === project)?.workspaceName ||
+    projectName(project);
+  const folderNode = useMemo(
+    () => (current && folder ? findLibraryFolder(buildLibraryTree(current).folders, folder) : null),
+    [current, folder],
+  );
+  const running = batches.filter((b) => isIngestRunning(b.status));
+  const error = listError || currentError || actionError;
+
+  const uploadButton = (
+    <button type="button" className={styles.uploadBtn} onClick={openUpload} disabled={!client} data-library-upload>
+      <Upload size={15} strokeWidth={2} />
+      {t("上传")}
+    </button>
+  );
+
+  const searchBox = (
+    <div className={tasksStyles.searchWrap}>
+      <span className={tasksStyles.searchIcon}>
+        <Search size={14} />
+      </span>
+      <input
+        className={tasksStyles.search}
+        type="search"
+        placeholder={project ? t("在 {0} 里搜索…", projectLabel) : t("搜索标题 / 正文 / 摘要…")}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      {showSearching && (
+        <span className={tasksStyles.searchSpinner}>
+          <Spinner size={12} label={t("搜索中…")} />
+        </span>
+      )}
+    </div>
+  );
+
+  const batchEntry = batches.length > 0 && (
+    <section className={styles.section}>
+      {running.length > 0 && <BatchRows batches={running} onOpen={(id) => setOpenBatch({ id })} />}
+      <button
+        type="button"
+        className={styles.batchToggle}
+        onClick={() => setBatchesOpen((v) => !v)}
+        aria-expanded={batchesOpen}
+        data-library-batches
+      >
+        <History size={15} strokeWidth={1.6} />
+        <span>{t("整理记录")}</span>
+        <span className={styles.batchCount}>{batches.length}</span>
+        <ChevronDown size={15} className={styles.batchCaret} data-open={batchesOpen} />
+      </button>
+      {batchesOpen && <BatchRows batches={batches} onOpen={(id) => setOpenBatch({ id })} />}
+    </section>
+  );
+
+  let body: ReactNode;
+  if (searchMode) {
+    body =
+      hits === null ? (
+        <SkeletonList rows={4} />
+      ) : hits.length === 0 ? (
+        <EmptyState compact icon={SearchX} title={t("没有匹配的资料")} />
+      ) : (
+        <SearchCards client={client} hits={hits} hideProject={!!project} onOpen={(h) => void openEntry(h)} />
+      );
+  } else if (project && folder !== null) {
+    body = current ? (
+      <FolderContent
+        client={client}
+        project={current}
+        path={folder}
+        reloadKey={reloadKey}
+        busy={moving}
+        onOpenFolder={setFolder}
+        onOpenEntry={(e) => void openEntry(e)}
+        onMoveEntry={(e, f) => void moveEntry(e, f)}
+      />
+    ) : (
+      <SkeletonList rows={5} avatar />
+    );
+  } else if (project) {
+    body = current ? (
+      <>
+        <ProjectOverview
+          project={current}
+          onOpenFolder={setFolder}
+          onOpenEntry={(e) => void openEntry(e)}
+          onFolderMenu={setFolderSheet}
+        />
+        {batchEntry}
+      </>
+    ) : (
+      <SkeletonList rows={6} />
+    );
+  } else if (projects === null) {
+    body = client ? <SkeletonList rows={8} avatar /> : <EmptyState icon={WifiOff} title={t("桌面端离线")} />;
+  } else if (projects.length === 0) {
+    body = (
+      <EmptyState
+        icon={Library}
+        title={t("还没有资料")}
+        description={t("Agent 发布的文档、存进产出库的文件和你上传的资料会出现在这里。")}
+      />
+    );
+  } else {
+    body = (
+      <>
+        {batchEntry}
+        <ProjectRows projects={projects} onOpen={setProject} />
+      </>
+    );
+  }
+
+  const leaveFolder = () => {
+    if (!folder) return setFolder(null);
+    // Climb one level: a subfolder returns to its parent folder.
+    const up = folder.includes("/") ? folder.slice(0, folder.lastIndexOf("/")) : null;
+    setFolder(up);
+  };
 
   return (
-    <div className={tasksStyles.wrapper}>
-      <div className={tasksStyles.pageHead}>
-        <h1 className={tasksStyles.pageTitle}>{t("资料")}</h1>
-        <label className={tasksStyles.scopeSelectWrap} data-on={!!project}>
-          <select
-            className={tasksStyles.scopeSelect}
-            value={project}
-            onChange={(e) => setProject(e.target.value)}
-            aria-label={t("全部项目")}
-          >
-            <option value="">{t("全部项目")}</option>
-            {(tree ?? []).map((p) => (
-              <option key={p.workspacePath} value={p.workspacePath}>
-                {p.workspaceName}
-              </option>
-            ))}
-            {project && !(tree ?? []).some((p) => p.workspacePath === project) && (
-              <option value={project}>{project.split(/[\\/]/).filter(Boolean).pop() ?? project}</option>
-            )}
-          </select>
-          <ChevronDown size={14} aria-hidden="true" />
-        </label>
-        {project && (
-          <button
-            className={tasksStyles.scopeClear}
-            onClick={() => setProject("")}
-            aria-label={t("显示全部项目")}
-          >
-            <X size={14} strokeWidth={2.2} />
-          </button>
-        )}
-        <button
-          type="button"
-          className={styles.uploadBtn}
-          onClick={openUpload}
-          disabled={!client}
-          data-library-upload
-        >
-          <Upload size={15} strokeWidth={2} />
-          {t("上传")}
-        </button>
-      </div>
-
-      <div className={tasksStyles.searchWrap}>
-        <span className={tasksStyles.searchIcon}>
-          <Search size={14} />
-        </span>
-        <input
-          className={tasksStyles.search}
-          type="search"
-          placeholder={t("搜索标题 / 正文 / 摘要…")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {showSearching && (
-          <span className={tasksStyles.searchSpinner}>
-            <Spinner size={12} label={t("搜索中…")} />
-          </span>
-        )}
-      </div>
-
-      {!searchMode && project && (
-        <div className={styles.types} role="tablist">
-          {TYPES.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={type === value}
-              className={styles.type}
-              data-active={type === value}
-              onClick={() => setType(value)}
-            >
-              {t(label)}
-            </button>
-          ))}
+    <div className={tasksStyles.wrapper} data-library-level={folder !== null ? "folder" : project ? "project" : "root"}>
+      {project && <HistoryLayer key={`p:${project}`} onBack={() => setProject("")} />}
+      {project && folder !== null && <HistoryLayer key={`f:${folder}`} onBack={leaveFolder} />}
+      {project ? (
+        <div className={styles.levelHead}>
+          <AppHeader
+            onBack={folder !== null ? leaveFolder : () => setProject("")}
+            title={folder === null ? projectLabel : folder === "" ? t("未归档") : (folderNode?.label ?? folder)}
+            titleAfter={
+              folder !== null ? (
+                <span className={styles.headCount}>
+                  {folder === "" ? (current ? buildLibraryTree(current).unfiledTotal : "") : (folderNode?.total ?? "")}
+                </span>
+              ) : undefined
+            }
+            sub={folder !== null ? projectLabel : undefined}
+            actions={uploadButton}
+            seamless
+          />
+        </div>
+      ) : (
+        <div className={tasksStyles.pageHead}>
+          <h1 className={tasksStyles.pageTitle}>{t("资料")}</h1>
+          {uploadButton}
         </div>
       )}
 
-      {(treeError || lib.error) && (
-        <div className={styles.error}>{t("资料加载失败：{0}", treeError || lib.error || "")}</div>
+      {searchBox}
+      {error && <div className={styles.error}>{t("资料加载失败：{0}", error)}</div>}
+      {opening && (
+        <div className={styles.opening}>
+          <Spinner size={12} /> {t("正在打开…")}
+        </div>
       )}
-      {actionError && <div className={styles.error}>{actionError}</div>}
-
-      {searchMode ? (
-        hits === null ? (
-          <SkeletonList rows={4} />
-        ) : hits.length === 0 ? (
-          <EmptyState compact icon={SearchX} title={t("没有匹配的资料")} />
-        ) : (
-          <SearchHits hits={hits} hideProject={!!project} onOpen={openEntry} />
-        )
-      ) : tree === null ? (
-        client ? (
-          <SkeletonList rows={8} avatar />
-        ) : (
-          <EmptyState icon={WifiOff} title={t("桌面端离线")} />
-        )
-      ) : (
-        <>
-          {recent.length > 0 && (
-            <section className={styles.section}>
-              <h2 className={styles.sectionHead}>{t("最近上传")}</h2>
-              <BatchRows batches={recent} onOpen={(id) => setOpenBatch({ id })} />
-            </section>
-          )}
-          {current ? (
-            <section className={styles.section}>
-              {review > 0 && (
-                <div className={styles.reviewBanner}>
-                  {t("AI 新建了 {0} 个目录，点目录右边的 ⋯ 可保留、改名或删除。", review)}
-                </div>
-              )}
-              <ProjectTree
-                key={current.workspacePath}
-                project={current}
-                filter={type}
-                docs={docs}
-                artifacts={artifacts}
-                busy={moving}
-                onOpenEntry={openEntry}
-                onMoveEntry={(e, f) => void moveEntry(e, f)}
-                onFolderMenu={setFolderSheet}
-              />
-            </section>
-          ) : project ? (
-            <EmptyState
-              compact
-              icon={Library}
-              title={t("这个项目还没有资料")}
-              description={t("拍张发票或选个文件上传，AI 会帮你归档。")}
-            />
-          ) : tree.length === 0 ? (
-            <EmptyState
-              icon={Library}
-              title={t("还没有资料")}
-              description={t("Agent 发布的文档、存进产出库的文件和你上传的资料会出现在这里。")}
-            />
-          ) : (
-            <ProjectList projects={tree} onOpen={setProject} />
-          )}
-        </>
-      )}
+      {body}
 
       <Presence when={!!artifact}>
-        {artifact && (
-          <ArtifactDetail artifact={artifact} client={client} onBack={() => setOpenArtifact(null)} />
-        )}
+        {artifact && <ArtifactDetail artifact={artifact} client={client} onBack={() => setArtifact(null)} />}
       </Presence>
       <Presence when={!!openBatch}>
         {openBatch && (
@@ -381,12 +397,14 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
             batchId={openBatch.id}
             skipped={openBatch.skipped}
             folders={
-              projectFolders.get(batches.find((b) => b.id === openBatch.id)?.workspacePath ?? project) ??
+              (projects ?? []).find(
+                (p) => p.workspacePath === (batches.find((b) => b.id === openBatch.id)?.workspacePath ?? project),
+              )?.folders ??
               current?.folders ??
               []
             }
             onChanged={refreshAll}
-            onOpenArtifact={(id) => setOpenArtifact(id)}
+            onOpenArtifact={(id) => void openEntry({ kind: "artifact", id })}
             onBack={() => {
               setOpenBatch(null);
               void loadBatches();
@@ -400,7 +418,10 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
             client={client}
             folder={folderSheet}
             onClose={() => setFolderSheet(null)}
-            onChanged={() => void loadTree()}
+            onChanged={() => {
+              void loadCurrent();
+              void loadProjects();
+            }}
           />
         )}
       </Presence>
@@ -425,54 +446,6 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
   );
 }
 
-function SearchHits({
-  hits,
-  hideProject,
-  onOpen,
-}: {
-  hits: LibraryHit[];
-  hideProject: boolean;
-  onOpen: (h: LibraryHit) => void;
-}) {
-  return (
-    <div className={listStyles.list} data-library-hits>
-      {hits.map((h) => {
-        const runs = snippetRuns(h.snippet || h.summary);
-        const where = h.folder || t("未归档");
-        return (
-          <button key={`${h.kind}:${h.id}`} type="button" className={listStyles.row} onClick={() => onOpen(h)}>
-            <span className={listStyles.body}>
-              <span className={listStyles.line1}>
-                <span className={listStyles.title}>{h.title}</span>
-                {!hideProject && h.project && <span className={listStyles.project}>{projectName(h.project)}</span>}
-              </span>
-              <span className={listStyles.line2}>
-                {[h.kind === "doc" ? t("文档") : t("产出"), where, h.field === "summary" ? t("摘要命中") : ""]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              {runs.length > 0 && (
-                <span className={listStyles.snippet}>
-                  {runs.map((r, i) => (r.mark ? <mark key={i} className={styles.mark}>{r.text}</mark> : <span key={i}>{r.text}</span>))}
-                </span>
-              )}
-              {h.tags.length > 0 && (
-                <span className={styles.hitTags}>
-                  {h.tags.map((tag) => (
-                    <span key={tag} className={styles.hitTag}>
-                      {tag}
-                    </span>
-                  ))}
-                </span>
-              )}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function projectName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+function emptyProject(workspacePath: string): LibraryProjectTree {
+  return { workspacePath, workspaceName: projectName(workspacePath), folders: [], items: [], counts: {} };
 }
