@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 
 import {
+  draftedFolders,
   groupIngestItems,
+  newFolderItems,
   ingestProgress,
   isIngestRunning,
   type IngestBatch,
@@ -242,16 +244,40 @@ export function BatchDetail({
           </button>
         </div>
         <div className={styles.stats}>{stats.join(" · ")}</div>
-        {batch.schemaDrafted && batch.createdFolders.length > 0 && (
+        {batch.schemaDrafted && draftedFolders(batch).length > 0 && (
           <div className={styles.notice}>
             <Sparkles size={13} strokeWidth={1.6} />
             <span>
               {t(
                 "library.schema_drafted",
                 "这个项目原来没有目录结构，AI 按项目内容新建了：{{folders}}。可以在左侧树里改名、改说明。",
-                { folders: batch.createdFolders.join("、") },
+                { folders: draftedFolders(batch).join("、") },
               )}
             </span>
+          </div>
+        )}
+        {(batch.newFolders ?? []).length > 0 && (
+          <div className={styles.new_folders} data-new-folders>
+            <div className={styles.new_folders_head}>
+              <Sparkles size={13} strokeWidth={1.6} />
+              {t("library.new_folders_head", "已有目录都不合适，AI 新建了 {{n}} 个目录（在左侧树里带标记，可保留、改名或删除）", {
+                n: (batch.newFolders ?? []).length,
+              })}
+            </div>
+            {(batch.newFolders ?? []).map((n) => (
+              <div key={n.path} className={styles.new_folder}>
+                <span className={styles.new_folder_path}>
+                  <FolderOpen size={12} strokeWidth={1.5} />
+                  {n.path}
+                  <span className={styles.group_count}>
+                    {t("library.new_folder_items", "{{n}} 个文件", { n: newFolderItems(batch, n.path) })}
+                  </span>
+                </span>
+                <span className={styles.new_folder_reason}>
+                  {t("library.new_folder_reason", "原因：{{reason}}", { reason: n.reason })}
+                </span>
+              </div>
+            ))}
           </div>
         )}
         {batch.error && <div className={styles.error}>{batch.error}</div>}

@@ -3015,6 +3015,14 @@ impl LocalBackend {
         crate::library::describe_folder(workspace_path, path, description)
     }
 
+    pub fn library_accept_folder(
+        &self,
+        workspace_path: &str,
+        path: &str,
+    ) -> Result<crate::library::LibraryFolder, String> {
+        crate::library::accept_folder(workspace_path, path)
+    }
+
     pub fn library_delete_folder(&self, workspace_path: &str, path: &str) -> Result<(), String> {
         crate::library::delete_folder(workspace_path, path)
     }

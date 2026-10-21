@@ -24,6 +24,7 @@ import {
   mockLibraryCreateFolder,
   mockLibraryDeleteFolder,
   mockLibraryDescribeFolder,
+  mockLibraryAcceptFolder,
   mockLibraryMoveItem,
   mockLibraryRenameFolder,
   mockLibrarySearch,
@@ -764,6 +765,8 @@ async function handleIPC(
       return mockLibraryCreateFolder(args);
     case "library_describe_folder":
       return mockLibraryDescribeFolder(args);
+    case "library_accept_folder":
+      return mockLibraryAcceptFolder(args);
     case "library_delete_folder":
       return mockLibraryDeleteFolder(args);
     case "library_rename_folder":

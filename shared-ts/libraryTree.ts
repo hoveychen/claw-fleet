@@ -16,6 +16,25 @@ export interface LibraryFolderRec {
   wikiPrefix: string;
   createdMs: number;
   updatedMs: number;
+  /** Set when an AI created the folder; mirrors `library::FolderOrigin`. */
+  origin?: LibraryFolderOrigin | null;
+}
+
+/** Who created an AI folder and why. Mirrors `library::FolderOrigin`. */
+export interface LibraryFolderOrigin {
+  /** `agent` (an agent filing a doc / artifact) or `upload` (the upload classifier). */
+  source: string;
+  reason: string;
+  sessionId?: string | null;
+  batchId?: string | null;
+  createdMs: number;
+  /** When the user kept it; null/absent = still awaiting review. */
+  acceptedMs?: number | null;
+}
+
+/** An AI-created folder the user has not yet accepted, renamed or deleted. */
+export function folderAwaitingReview(origin: LibraryFolderOrigin | null | undefined): boolean {
+  return !!origin && !origin.acceptedMs;
 }
 
 /** Mirrors `claw_fleet_core::library::LibraryItem`. */
@@ -51,6 +70,7 @@ export interface LibraryFolderNode {
   path: string;
   label: string;
   description: string;
+  origin: LibraryFolderOrigin | null;
   children: LibraryFolderNode[];
   /** Items filed directly in this folder, newest first. */
   items: LibraryEntry[];
@@ -111,6 +131,7 @@ export function buildLibraryTree(
       path: f.path,
       label: leaf(f.path),
       description: f.description ?? "",
+      origin: f.origin ?? null,
       children: [],
       items: [],
       total: 0,

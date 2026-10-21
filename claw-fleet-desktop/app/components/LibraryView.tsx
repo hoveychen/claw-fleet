@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   Archive,
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
   Film,
@@ -23,6 +24,7 @@ import {
   NotebookPen,
   Pencil,
   Presentation,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 
@@ -31,6 +33,7 @@ import { useWikiDocsStore } from "../hooks/useWikiDocs";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import {
   buildLibraryTree,
+  folderAwaitingReview,
   libraryDropKey,
   libraryDropTarget,
   libraryEntryKey,
@@ -139,6 +142,7 @@ interface TreeCtx {
   onRenameFolder: (project: string, from: string, to: string) => void;
   onDeleteFolder: (project: string, path: string, label: string) => void;
   onDescribeFolder: (project: string, path: string, description: string) => void;
+  onAcceptFolder: (project: string, path: string) => void;
   onOpenBatch: (batchId: string) => void;
 }
 
@@ -436,6 +440,14 @@ export function LibraryView() {
     [mutate],
   );
 
+  const onAcceptFolder = useCallback(
+    (p: string, path: string) =>
+      void mutate(libraryDropKey(p, path), () =>
+        invoke("library_accept_folder", { workspacePath: p, path }),
+      ),
+    [mutate],
+  );
+
   const moveEntry = useCallback(
     (entry: LibraryEntry, p: string, folder: string) => {
       if ((entry.folder ?? "") === folder) return;
@@ -514,6 +526,7 @@ export function LibraryView() {
     onRenameFolder,
     onDeleteFolder,
     onDescribeFolder,
+    onAcceptFolder,
     onOpenBatch: (id) => set({ selectedKey: ingestBatchKey(id) }),
   });
 
@@ -831,6 +844,21 @@ function ProjectBranch({
   );
 }
 
+/** Hover text of an AI-created folder's marker: who made it, when, and why. */
+function originTitle(
+  t: (k: string, d: string, o?: Record<string, unknown>) => string,
+  o: NonNullable<LibraryFolderNode["origin"]>,
+): string {
+  const who =
+    o.source === "upload"
+      ? t("library.ai_folder_by_upload", "上传整理时由 AI 新建（批次 {{id}}）", { id: o.batchId ?? "" })
+      : t("library.ai_folder_by_agent", "由 agent 归档时新建（会话 {{id}}）", { id: (o.sessionId ?? "").slice(0, 8) });
+  const when = o.createdMs ? new Date(o.createdMs).toLocaleString() : "";
+  return [who, when, o.reason ? t("library.ai_folder_reason", "原因：{{reason}}", { reason: o.reason }) : ""]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function FolderBranch({ node, depth, ctx }: { node: LibraryFolderNode; depth: number; ctx: TreeCtx }) {
   const { t } = useTranslation();
   // Folders start open while searching (so every hit is visible) and when
@@ -840,6 +868,7 @@ function FolderBranch({ node, depth, ctx }: { node: LibraryFolderNode; depth: nu
   const key = libraryDropKey(ctx.project, node.path);
   const open = expanded || ctx.searching;
   const rowBusy = ctx.busy === key;
+  const review = folderAwaitingReview(node.origin) ? node.origin : null;
 
   const commit = (value: string) => {
     const mode = editing;
@@ -879,12 +908,34 @@ function FolderBranch({ node, depth, ctx }: { node: LibraryFolderNode; depth: nu
           {open ? <FolderOpen size={15} strokeWidth={1.4} /> : <Folder size={15} strokeWidth={1.4} />}
           <span className={styles.folder_text}>
             <span className={styles.folder_label} title={node.path}>{node.label}</span>
+            {review && (
+              <span className={styles.ai_chip} title={originTitle(t, review)}>
+                <Sparkles size={10} strokeWidth={1.8} />
+                {review.source === "upload"
+                  ? t("library.ai_folder_upload", "上传新建")
+                  : t("library.ai_folder_agent", "AI 新建")}
+              </span>
+            )}
             {node.description && (
               <span className={styles.folder_desc} title={node.description}>{node.description}</span>
             )}
           </span>
           {rowBusy ? <Spinner size={12} /> : <span className={styles.count}>{node.total}</span>}
         </button>
+        {review && !rowBusy && (
+          // Out of the hover-only verbs on purpose: the marker asks for a
+          // decision, so the "keep it" answer sits next to it. Rename and
+          // delete (also answers) stay with the other verbs.
+          <button
+            type="button"
+            className={styles.ai_accept}
+            title={t("library.ai_folder_accept_hint", "保留这个文件夹（去掉标记）；不要就重命名或删除")}
+            onClick={() => ctx.onAcceptFolder(ctx.project, node.path)}
+          >
+            <Check size={11} strokeWidth={2} />
+            {t("library.ai_folder_accept", "保留")}
+          </button>
+        )}
         <span className={styles.actions}>
           <button
             type="button"

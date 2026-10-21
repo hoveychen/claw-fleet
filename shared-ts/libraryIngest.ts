@@ -66,9 +66,33 @@ export interface IngestBatch {
   skippedJunk: number;
   schemaDrafted: boolean;
   createdFolders: string[];
+  /** Folders the classifier added because nothing fit (absent on old batches). */
+  newFolders?: IngestNewFolder[];
   llmCalls: number;
   costUsd: number;
   error: string | null;
+}
+
+/** Mirrors `library_ingest::NewFolderNote`. */
+export interface IngestNewFolder {
+  path: string;
+  description: string;
+  reason: string;
+  /** In a summary: items filed there now. In a stored batch: count at filing time — use `newFolderItems`. */
+  items: number;
+  /** Paths creating it took (missing parents first, then the folder). */
+  created?: string[];
+}
+
+/** `createdFolders` minus what the classifier's new folders created: the drafted schema. */
+export function draftedFolders(batch: Pick<IngestBatch, "createdFolders" | "newFolders">): string[] {
+  const added = new Set((batch.newFolders ?? []).flatMap((n) => n.created ?? [n.path]));
+  return batch.createdFolders.filter((p) => !added.has(p));
+}
+
+/** Items of `batch` filed in `path` now (the user may have moved some out). */
+export function newFolderItems(batch: Pick<IngestBatch, "items">, path: string): number {
+  return batch.items.filter((i) => i.status === "filed" && i.folder === path).length;
 }
 
 /** Mirrors `library_ingest::BatchSummary`. */
@@ -91,6 +115,7 @@ export interface IngestBatchSummary {
   rejected: number;
   schemaDrafted: boolean;
   createdFolders: string[];
+  newFolders?: IngestNewFolder[];
   llmCalls: number;
   costUsd: number;
   error: string | null;

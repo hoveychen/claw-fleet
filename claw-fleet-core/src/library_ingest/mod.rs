@@ -162,6 +162,10 @@ pub struct NewFolderNote {
     /// Items of this batch filed in it.
     #[serde(default)]
     pub items: usize,
+    /// Every path creating it took (missing parents first, then the folder),
+    /// so a drafted schema's list can leave them out.
+    #[serde(default)]
+    pub created: Vec<String>,
 }
 
 /// Most folders one upload may add on its own. A batch that wants more is
@@ -1336,13 +1340,14 @@ fn create_proposed_folders(
             Ok((folder, created)) => {
                 if !created.is_empty() {
                     made += 1;
+                    created_paths.extend(created.iter().cloned());
                     notes.push(NewFolderNote {
                         path: folder.path.clone(),
                         description: folder.description.clone(),
                         reason: p.reason.clone(),
                         items: 0,
+                        created,
                     });
-                    created_paths.extend(created);
                 }
                 out.insert(p.path.clone(), Some(folder.path));
             }

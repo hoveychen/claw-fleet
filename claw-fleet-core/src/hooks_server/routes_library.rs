@@ -112,6 +112,25 @@ pub(crate) fn route_library_folder_describe(
     respond(request, json_header, result);
 }
 
+/// `POST /library_folder_accept` — `{workspace_path, path}`: the user keeps a
+/// folder an AI created, which clears its review marker.
+pub(crate) fn route_library_folder_accept(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        workspace_path: String,
+        path: String,
+    }
+    let result = parse_body::<Req>(&mut request, crate::routes::LIBRARY_FOLDER_ACCEPT)
+        .and_then(|r| crate::library::accept_folder(&r.workspace_path, &r.path));
+    respond(request, json_header, result);
+}
+
 /// `POST /library_folder_delete` — `{workspace_path, path}`; answers `{}`.
 /// Core refuses a folder that still holds anything.
 pub(crate) fn route_library_folder_delete(

@@ -285,6 +285,40 @@
   margin-top: var(--space-1);
 }
 
+/* An AI-created folder the user has not reviewed yet. */
+.ai_chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--font-size-2xs);
+  font-weight: 500;
+  align-self: center;
+}
+
+.ai_accept {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--font-size-2xs);
+  cursor: pointer;
+}
+
+.ai_accept:hover {
+  background: var(--color-accent-soft);
+}
+
 .count {
   color: var(--color-text-dim);
   font-size: var(--font-size-2xs);
