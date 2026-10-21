@@ -1451,14 +1451,20 @@ pub(crate) enum WikiCommands {
         #[arg(long)]
         version: Option<String>,
     },
-    /// Re-key a doc, which moves it between virtual directories. Version
-    /// history rides along. e.g. `fleet wiki mv overview arch/overview`
+    /// Move a doc into one of its project's library folders. Version history
+    /// rides along and the old slug keeps resolving. The target must be in the
+    /// schema: `fleet wiki mv overview arch/overview` (when `arch` is a
+    /// folder's prefix) or `fleet wiki mv overview --folder 架构`; a new folder
+    /// needs --new-folder --folder --description --reason.
     #[command(alias = "move")]
     Mv {
         /// Current slug
         from: String,
-        /// New slug — `/` separates virtual directories
-        to: String,
+        /// New slug; its directory must be a folder's prefix. With --folder,
+        /// only its last segment is used (default: the current name)
+        to: Option<String>,
+        #[command(flatten)]
+        filing: FilingFlags,
     },
     /// Retag docs whose workspace was recorded as a session scratchpad
     /// directory (published before scratchpad decoding existed)

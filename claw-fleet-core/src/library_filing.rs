@@ -32,6 +32,9 @@
 //!   `/artifact_add` route) and the upload pipeline, which files through its
 //!   own classifier: they call [`crate::wiki`] / [`crate::artifacts`]
 //!   directly. Only the agent channels go through here.
+//! - The user moving a doc in the library tree (`/wiki_move`, the desktop's
+//!   drag): only `fleet wiki mv` / `fleet__wiki mv` go through
+//!   [`move_wiki_in`].
 
 use std::path::Path;
 
@@ -256,6 +259,59 @@ pub fn publish_wiki_in(
     }
 }
 
+/// `fleet__wiki mv` under the filing rules: an agent may only move a doc into
+/// one of its project's schema folders. The target is `<folder prefix>/<name>`
+/// when a folder is named (`name` = basename of `to`, else of the current
+/// slug); without one, `to`'s directory must be exactly a folder's prefix.
+/// Moving a doc out of every folder (back to unfiled) is refused. The old slug
+/// keeps resolving through the redirect [`wiki::move_doc_in`] leaves.
+pub fn move_wiki_in(
+    roots: &Roots,
+    from: &str,
+    to: Option<&str>,
+    args: &FilingArgs,
+    session_id: Option<&str>,
+) -> Result<(WikiDoc, Filed), String> {
+    let doc = wiki::get_doc_in(&roots.wiki, &wiki::normalize_slug(from)?)?;
+    let to = to.map(wiki::normalize_slug).transpose()?;
+    let workspace = Path::new(&doc.workspace_path);
+    let project = project_of(workspace)?;
+
+    let mut args = args.clone();
+    if args.folder.is_none() && !args.new_folder {
+        let folders = library::list_folders_in(roots, &project)?;
+        let dir = to.as_deref().map(library::slug_dir).unwrap_or("");
+        if dir.is_empty() {
+            return Err(format!(
+                "Moving '{}' needs a destination folder; agents may not move docs out of the library folders. {}",
+                doc.slug,
+                refusal(&project, &folders, None)
+            ));
+        }
+        if !folders.iter().any(|f| f.wiki_prefix == dir) {
+            return Err(refusal(&project, &folders, Some(dir)));
+        }
+        args.folder = Some(dir.to_string());
+    }
+
+    let (folder, created) = resolve_in(roots, workspace, &args, session_id)?;
+    let name = wiki::slug_basename(to.as_deref().unwrap_or(&doc.slug)).to_string();
+    let target = wiki::normalize_slug(&format!("{}/{name}", folder.wiki_prefix))?;
+    if target == doc.slug {
+        return Ok((doc, Filed { folder: Some(folder.path.clone()), created: false, kept: true }));
+    }
+    match wiki::move_doc_in(&roots.wiki, &doc.slug, &target) {
+        Ok(moved) => Ok((
+            moved,
+            Filed { folder: Some(folder.path.clone()), created: !created.is_empty(), kept: false },
+        )),
+        Err(e) => {
+            roll_back(roots, &folder, &created);
+            Err(e)
+        }
+    }
+}
+
 /// `fleet__artifact add` under the filing rules.
 pub fn add_artifact_in(
     roots: &Roots,
@@ -332,6 +388,15 @@ pub fn add_artifact(
     session_id: Option<&str>,
 ) -> Result<(Artifact, Filed), String> {
     add_artifact_in(&Roots::home()?, source, title, note, workspace, args, session_id)
+}
+
+pub fn move_wiki(
+    from: &str,
+    to: Option<&str>,
+    args: &FilingArgs,
+    session_id: Option<&str>,
+) -> Result<(WikiDoc, Filed), String> {
+    move_wiki_in(&Roots::home()?, from, to, args, session_id)
 }
 
 pub fn folders_text(workspace: &Path) -> Result<String, String> {
@@ -524,5 +589,38 @@ mod tests {
         };
         assert!(publish_wiki_in(&e.roots, &bad, None, None, &e.ws, &args, None).is_err());
         assert!(!e.folders().iter().any(|f| f.path.starts_with("表格")), "parent taken back too");
+    }
+
+    #[test]
+    fn agent_mv_is_held_to_the_schema_and_leaves_the_old_slug_resolving() {
+        let e = env();
+        e.schema();
+        let src = e.file("memo.md", "# Memo");
+        let (doc, _) = publish_wiki_in(&e.roots, &src, None, None, &e.ws, &folder("调研"), None).unwrap();
+        assert_eq!(doc.slug, "research/memo");
+
+        // Out of every folder, or into a directory the schema lacks: refused.
+        let err = move_wiki_in(&e.roots, "research/memo", Some("memo"), &FilingArgs::default(), None).unwrap_err();
+        assert!(err.contains("may not move docs out"), "{err}");
+        let err = move_wiki_in(&e.roots, "research/memo", Some("misc/memo"), &FilingArgs::default(), None).unwrap_err();
+        assert!(err.contains("'misc' is not one of"), "{err}");
+        assert!(wiki::get_doc_in(&e.roots.wiki, "research/memo").unwrap().slug == "research/memo", "not moved");
+
+        // Into a folder's prefix, or by naming the folder.
+        let (moved, filed) = move_wiki_in(&e.roots, "research/memo", Some("invoices/memo-0920"), &FilingArgs::default(), None).unwrap();
+        assert_eq!((moved.slug.as_str(), filed.folder.as_deref()), ("invoices/memo-0920", Some("发票")));
+        let (moved, _) = move_wiki_in(&e.roots, "invoices/memo-0920", None, &folder("调研"), None).unwrap();
+        assert_eq!(moved.slug, "research/memo-0920");
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "research/memo").as_deref(), Some("research/memo-0920"));
+        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "invoices/memo-0920").unwrap().slug, "research/memo-0920");
+
+        // A new folder needs the same reason + description, and is marked.
+        let args = FilingArgs { folder: Some("合同".into()), new_folder: true, ..Default::default() };
+        assert!(move_wiki_in(&e.roots, "research/memo-0920", None, &args, None).is_err());
+        let args = FilingArgs { reason: Some("contracts".into()), description: Some("签过的合同".into()), ..args };
+        let (moved, filed) = move_wiki_in(&e.roots, "research/memo", None, &args, Some("s9")).unwrap();
+        assert_eq!(moved.slug, "hetong/memo-0920");
+        assert!(filed.created);
+        assert!(e.folders().iter().find(|f| f.path == "合同").unwrap().awaiting_review());
     }
 }

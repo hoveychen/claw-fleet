@@ -1403,7 +1403,8 @@ pub fn get_file_in(
 // ── Move ─────────────────────────────────────────────────────────────────────
 
 /// Re-key a doc: `from` → `to`. Renaming the key is how a doc changes virtual
-/// directory, so this backs both `fleet wiki mv` and the UI's drag-to-folder.
+/// directory, so this backs the UI's drag-to-folder and, behind the filing rules
+/// (`library_filing::move_wiki_in`), `fleet wiki mv`.
 /// Version history rides along untouched — the whole doc dir is renamed.
 pub fn move_doc(from: &str, to: &str) -> Result<WikiDoc, String> {
     move_doc_in(&wiki_dir_or_err()?, from, to)
