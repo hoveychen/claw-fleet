@@ -300,7 +300,7 @@ fn parent_of(path: &str) -> &str {
 }
 
 /// The directory part of a wiki slug (`""` for a doc at the root).
-fn slug_dir(slug: &str) -> &str {
+pub(crate) fn slug_dir(slug: &str) -> &str {
     parent_of(slug)
 }
 
@@ -467,7 +467,7 @@ pub fn list_folders_in(roots: &Roots, workspace: &str) -> Result<Vec<LibraryFold
 }
 
 /// Every project's schema folders.
-fn all_folders(roots: &Roots) -> Vec<LibraryFolder> {
+pub(crate) fn all_folders(roots: &Roots) -> Vec<LibraryFolder> {
     let Ok(entries) = fs::read_dir(projects_dir(roots)) else {
         return Vec::new();
     };
@@ -535,7 +535,7 @@ fn artifact_item(a: &Artifact, folder: Option<String>) -> LibraryItem {
 }
 
 /// The schema folder a doc is filed in, by its slug directory.
-fn doc_folder(folders: &[LibraryFolder], slug: &str) -> Option<String> {
+pub(crate) fn doc_folder(folders: &[LibraryFolder], slug: &str) -> Option<String> {
     let dir = slug_dir(slug);
     if dir.is_empty() {
         return None;
@@ -547,7 +547,7 @@ fn doc_folder(folders: &[LibraryFolder], slug: &str) -> Option<String> {
 }
 
 /// The schema folder an artifact is filed in, by its explicit `path`.
-fn artifact_folder(folders: &[LibraryFolder], artifact: &Artifact) -> Option<String> {
+pub(crate) fn artifact_folder(folders: &[LibraryFolder], artifact: &Artifact) -> Option<String> {
     if artifact.path.is_empty() {
         return None;
     }

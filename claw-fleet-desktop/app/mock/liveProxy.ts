@@ -986,6 +986,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { workspace_path: a.workspacePath, from: a.from, to: a.to },
   }),
 
+  library_search: (a) => ({
+    method: "GET",
+    path: "/library_search",
+    query: { q: q(a.query), workspace: q(a.workspace), kind: q(a.kind), limit: q(a.limit) },
+  }),
+
   library_tree: (a) => ({
     method: "GET",
     path: "/library_tree",

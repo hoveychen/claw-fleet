@@ -372,6 +372,10 @@ pub fn serve(opts: ServeOptions) {
     // stopped. A desktop running beside this serve may resume them too; the
     // per-batch worker lock lets only one of them run each batch.
     std::thread::spawn(crate::library_ingest::resume_interrupted);
+    // Library search index upkeep and background summaries. Running beside a
+    // desktop is safe: rows are claimed per item and the hourly budget is
+    // shared through the index DB.
+    crate::library_summary::spawn_worker();
 
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests
@@ -1371,6 +1375,9 @@ fn handle_request(
             }
 
             crate::routes::LIBRARY_TREE => route_library_tree(ctx, request, &query, json_header, path),
+            crate::routes::LIBRARY_SEARCH => {
+                route_library_search(ctx, request, &query, json_header, path)
+            }
 
             crate::routes::LIBRARY_FOLDER_CREATE
                 if request.method() == &tiny_http::Method::Post =>

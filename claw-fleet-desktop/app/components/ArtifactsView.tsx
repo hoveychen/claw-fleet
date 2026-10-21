@@ -89,6 +89,9 @@ export interface Artifact {
   currentVersion: string;
   /** Every ingest of this deliverable, newest first — always at least one. */
   versions: ArtifactVersion[];
+  /** The library's AI summary / tags; empty until one is written. */
+  summary?: string;
+  tags?: string[];
 }
 
 /** Mirrors `claw_fleet_core::artifacts::ArtifactVersion`. */

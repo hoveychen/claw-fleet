@@ -12,6 +12,21 @@ pub(crate) fn library_tree(
     state.backend.library_tree(workspace.as_deref())
 }
 
+/// Full-text search over both stores, ranked; `workspace` scopes it to one
+/// project.
+#[tauri::command(async)]
+pub(crate) fn library_search(
+    query: String,
+    workspace: Option<String>,
+    kind: Option<String>,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::library_index::LibraryHit>, String> {
+    state
+        .backend
+        .library_search(&query, workspace, kind, limit.unwrap_or(0))
+}
+
 #[tauri::command(async)]
 pub(crate) fn library_create_folder(
     workspace_path: String,

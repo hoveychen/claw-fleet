@@ -2986,6 +2986,17 @@ impl LocalBackend {
         crate::library::tree(workspace)
     }
 
+    pub fn library_search(
+        &self,
+        query: &str,
+        workspace: Option<String>,
+        kind: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<crate::library_index::LibraryHit>, String> {
+        let opts = crate::library_index::SearchOpts { workspace, kind, limit };
+        crate::library_index::search(query, &opts)
+    }
+
     pub fn library_create_folder(
         &self,
         workspace_path: &str,

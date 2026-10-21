@@ -1329,16 +1329,17 @@ pub(crate) enum WikiCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Full-text search over doc titles, slugs and the text of each doc's
-    /// current version. Scoped to the current workspace unless --all.
+    /// Ranked full-text search over wiki docs AND artifacts: titles, folders,
+    /// AI summaries, tags and body text (a doc's current version, an
+    /// artifact's extracted text). Scoped to the current workspace unless --all.
     #[command(alias = "grep")]
     Search {
-        /// Text to look for (case-insensitive)
+        /// Text to look for (case-insensitive; Chinese matches substrings)
         query: String,
         /// Filter by workspace path substring instead of the current workspace
         #[arg(long)]
         workspace: Option<String>,
-        /// Search docs from every workspace
+        /// Search every workspace
         #[arg(long, conflicts_with = "workspace")]
         all: bool,
         /// Output raw JSON

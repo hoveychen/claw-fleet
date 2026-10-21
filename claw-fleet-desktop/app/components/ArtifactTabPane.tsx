@@ -16,6 +16,7 @@ import { usePending } from "../hooks/usePending";
 import { useDelayedFlag } from "../hooks/useDelayedFlag";
 import { Skeleton, SkeletonCard, TopProgress } from "./loading";
 import { ArtifactStage, type Artifact } from "./ArtifactsView";
+import { LibrarySummary } from "./LibrarySummary";
 import { timeAgo } from "./timeAgo";
 import styles from "./TabPanes.module.css";
 
@@ -168,6 +169,7 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
         onClose={tail.onClose}
       />
       {error && <p className={styles.error_line}>{error}</p>}
+      <LibrarySummary summary={artifact.summary} tags={artifact.tags} />
       <div className={styles.body}>
         <ArtifactStage artifact={artifact} />
       </div>

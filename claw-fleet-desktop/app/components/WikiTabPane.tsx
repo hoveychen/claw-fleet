@@ -14,6 +14,7 @@ import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildWikiMenu, type AuxCardTail } from "./auxDocMenu";
 import { exportWikiDoc, WikiDocBody } from "./WikiView";
 import { printWikiDoc } from "./wikiPrint";
+import { LibrarySummary } from "./LibrarySummary";
 import { timeAgo } from "./timeAgo";
 import styles from "./TabPanes.module.css";
 import { Skeleton, SkeletonText } from "./loading";
@@ -168,6 +169,7 @@ export function WikiTabPane({
         onClose={tail.onClose}
       />
       {error && <p className={styles.error_line}>{error}</p>}
+      <LibrarySummary summary={doc.summary} tags={doc.tags} />
       {/* Kept as a select rather than folded into the menu: picking a version is
           a *state* of the reader, and a flat menu cannot show which one is in
           effect the way a closed select does. */}

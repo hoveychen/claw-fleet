@@ -80,6 +80,9 @@ export interface WikiDoc {
   updatedMs: number;
   currentVersion: string;
   versions: WikiVersion[];
+  /** The library's AI summary / tags (omitted until one is written). */
+  summary?: string;
+  tags?: string[];
 }
 
 interface WikiSearchHit {

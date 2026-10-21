@@ -64,7 +64,7 @@ pub struct DraftInput {
 }
 
 const MAX_TITLE_CHARS: usize = 120;
-const MAX_SUMMARY_CHARS: usize = 600;
+pub(crate) const MAX_SUMMARY_CHARS: usize = 600;
 const MAX_TAGS: usize = 5;
 const MAX_TAG_CHARS: usize = 24;
 /// Most characters of transcription kept from a vision answer.
@@ -72,7 +72,7 @@ pub const MAX_VISION_TEXT_CHARS: usize = 4000;
 /// Most folders a drafted schema may have.
 const MAX_DRAFT_FOLDERS: usize = 40;
 
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     let s = s.trim();
     if s.chars().count() <= max {
         return s.to_string();
@@ -104,7 +104,7 @@ fn folder_list(folders: &[LibraryFolder]) -> String {
         .join("\n")
 }
 
-const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
+pub(crate) const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
 content; use Simplified Chinese when the file has no readable text.";
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
@@ -276,7 +276,7 @@ fn str_field(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
-fn tags_field(v: &Value) -> Vec<String> {
+pub(crate) fn tags_field(v: &Value) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let raw: Vec<String> = match v.get("tags") {
         Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
@@ -460,11 +460,13 @@ pub const TEXT_TIMEOUT: Duration = Duration::from_secs(180);
 pub const VISION_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// A routed text completion (claude / codex / dsh), accounted under
-/// [`crate::llm_usage::SCENARIO_LIBRARY_INGEST`].
+/// [`crate::llm_usage::SCENARIO_LIBRARY_INGEST`]. Lean: the Claude route
+/// carries no Claude Code agent context (see
+/// [`crate::llm_provider::ClaudeCliProvider::lean`]).
 pub fn complete_text(slot: crate::llm_provider::ModelSlot, prompt: &str) -> Option<CallOutcome> {
     let config = crate::llm_provider::shared_config();
     with_llm_slot(|| {
-        crate::llm_provider::complete_routed_usage(
+        crate::llm_provider::complete_routed_usage_lean(
             &config,
             slot,
             prompt,
@@ -512,6 +514,11 @@ pub fn vision_args(prompt: &str, model: &str) -> Vec<String> {
         "--setting-sources",
         "project",
         "--strict-mcp-config",
+        // Claude Code's own system prompt is ~10K tokens of agent context a
+        // look-and-describe call never uses. Measured 2026-10-21 (Haiku, one
+        // image): $0.0264 → $0.0079 with this and thinking off.
+        "--system-prompt",
+        crate::llm_provider::LEAN_SYSTEM_PROMPT,
         "--max-turns",
         "4",
     ]
@@ -534,6 +541,7 @@ fn run_vision(bin: &str, dir: &Path, prompt: &str, model: &str) -> Result<CallOu
     use std::process::Stdio;
     let mut cmd = crate::process_util::command(bin);
     cmd.args(vision_args(prompt, model))
+        .envs(crate::llm_provider::lean_claude_env())
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -737,7 +745,7 @@ mod tests {
     fn the_vision_call_is_lean_and_read_only() {
         let a = vision_args("prompt", "haiku");
         let joined = a.join(" ");
-        for flag in ["--tools Read", "--allowedTools Read", "--setting-sources project", "--strict-mcp-config", "--no-session-persistence", "--output-format json"] {
+        for flag in ["--tools Read", "--allowedTools Read", "--setting-sources project", "--strict-mcp-config", "--no-session-persistence", "--output-format json", "--system-prompt"] {
             assert!(joined.contains(flag), "missing {flag}: {joined}");
         }
         assert!(!a.iter().any(|x| x == "--bare"), "--bare refuses OAuth logins");

@@ -37,6 +37,18 @@ impl WikiScope {
         }
     }
 
+    /// [`Self::admits`] for anything that records a workspace path.
+    fn admits_path(&self, workspace_path: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Substring(s) => {
+                workspace_path.contains(s.as_str())
+                    || wiki::workspace_name_of(workspace_path).contains(s.as_str())
+            }
+            Self::CurrentWorkspace(cwd) => wiki::workspace_contains(workspace_path, cwd),
+        }
+    }
+
     /// Line printed under an empty result, pointing at the wider scope.
     fn empty_hint(&self) -> String {
         match self {
@@ -126,23 +138,36 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
 
         WikiCommands::Search { query, workspace, all, json } => {
             let scope = WikiScope::new(workspace, all);
-            let by_slug: std::collections::HashMap<String, wiki::WikiDoc> =
-                wiki::list_docs().into_iter().map(|d| (d.slug.clone(), d)).collect();
-            let hits: Vec<_> = wiki::search_docs(&query)
-                .into_iter()
-                .filter(|h| by_slug.get(&h.slug).is_some_and(|d| scope.admits(d)))
-                .collect();
+            // Docs and artifacts, ranked together by the library index.
+            let opts = claw_fleet_core::library_index::SearchOpts {
+                workspace: match &scope {
+                    WikiScope::CurrentWorkspace(cwd) => Some(cwd.clone()),
+                    _ => None,
+                },
+                limit: 200,
+                ..Default::default()
+            };
+            let hits: Vec<_> = match claw_fleet_core::library_index::search(&query, &opts) {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("search failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+            .into_iter()
+            .filter(|h| scope.admits_path(&h.workspace_path))
+            .collect();
             if json {
                 println!("{}", serde_json::to_string_pretty(&hits).unwrap());
                 return;
             }
             if hits.is_empty() {
                 println!(
-                    "{}No doc matches '{}'. {}{}",
+                    "{}Nothing matches '{}'. {}{}",
                     c_dim(),
                     query,
                     match scope {
-                        WikiScope::All => "Nothing in the wiki mentions it.".to_string(),
+                        WikiScope::All => "Nothing in the wiki or the artifact store mentions it.".to_string(),
                         _ => "Widen the scope with --all.".to_string(),
                     },
                     c_reset()
@@ -150,26 +175,31 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
                 return;
             }
             println!(
-                "{}{:<36} {:<18} {:<8} MATCH{}",
+                "{}{:<9} {:<36} {:<18} {:<8} MATCH{}",
                 c_bold(),
-                "SLUG",
+                "KIND",
+                "SLUG / ID",
                 "WORKSPACE",
                 "FIELD",
                 c_reset()
             );
             for h in &hits {
-                // Every hit came from `by_slug`, so the lookup cannot miss.
-                let doc = &by_slug[&h.slug];
-                let matched = if h.snippet.is_empty() { &doc.title } else { &h.snippet };
+                let plain = h.snippet.replace("<mark>", "").replace("</mark>", "").replace('\n', " ");
+                let matched = if plain.is_empty() { h.title.clone() } else { plain };
                 println!(
-                    "{:<36} {:<18} {:<8} {}",
-                    truncate(&h.slug, 35),
-                    truncate(&doc.workspace_name, 17),
+                    "{:<9} {:<36} {:<18} {:<8} {}",
+                    h.kind,
+                    truncate(&h.id, 35),
+                    truncate(&wiki::workspace_name_of(&h.workspace_path), 17),
                     h.field,
-                    truncate(matched, 60),
+                    truncate(&matched, 60),
                 );
             }
-            println!("{}Read one with `fleet wiki cat <slug>`.{}", c_dim(), c_reset());
+            println!(
+                "{}Read a doc with `fleet wiki cat <slug>`, an artifact with `fleet artifact get <id>`.{}",
+                c_dim(),
+                c_reset()
+            );
         }
 
         WikiCommands::Show { slug, json } => match wiki::get_doc(&slug) {
