@@ -1659,6 +1659,7 @@ fn handle_request(
             | crate::routes::SCRATCHPAD_DIR
             | crate::routes::SCRATCHPAD_FILE
             | crate::routes::EXPLORER_EXTERNAL_FILE
+            | crate::routes::EXPLORER_EXTERNAL_DIR
             | crate::routes::EXPLORER_FIND
             | crate::routes::EXPLORER_SEARCH
             | crate::routes::EXPLORER_BYTES

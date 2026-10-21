@@ -50,7 +50,8 @@
 }
 
 /* The four families, told apart before anything is read. */
-.icon[data-kind="file"] {
+.icon[data-kind="file"],
+.icon[data-kind="dir"] {
   color: var(--color-info);
 }
 

@@ -1811,6 +1811,7 @@ pub fn run() {
             read_explorer_bytes,
             open_explorer_file,
             read_external_file,
+            list_external_dir,
             resolve_prose_path,
             list_scratchpad_dir,
             read_scratchpad_file,

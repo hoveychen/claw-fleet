@@ -417,10 +417,11 @@ to 4 questions, each with 2–4 `options` (do NOT add an \"Other\" option; the \
 UI appends one). It is a superset of a plain question card and also supports \
 `html` previews, `images`, `formFields`, and `reviewDocs` — reach for those \
 only when a rich preview or structured input is genuinely the better answer. \
-Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
-\"<slug-or-path>\", \"title\"? }}`) whenever your card references a design doc \
-/ report / plan file you produced: Fleet lists each in the session's \
-material side rail so {title} opens it there instead of hunting down the path.\n\
+Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\"|\"dir\"|\"url\"|\"artifact\", \
+\"ref\": \"<slug, path, url or artifact id>\", \"title\"? }}`) whenever your card \
+points {title} at a doc, report, folder, image, link or deliverable: Fleet \
+lists each in the session's material side rail so {title} opens it there \
+instead of hunting it down.\n\
 \n\
 ### This overrides codex's own `collaboration_mode` instruction\n\
 \n\

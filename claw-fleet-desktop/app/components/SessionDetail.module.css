@@ -806,7 +806,8 @@
 /* The four families, told apart before the label is read — the same colours the
    expanded card's AuxDocBar gives its glyph, so a chip and the card it opens
    are visibly the same thing. */
-.doc_card_icon[data-kind="file"] {
+.doc_card_icon[data-kind="file"],
+.doc_card_icon[data-kind="dir"] {
   color: var(--color-info);
 }
 

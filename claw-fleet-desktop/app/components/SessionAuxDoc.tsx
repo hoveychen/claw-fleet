@@ -1,5 +1,6 @@
 import type { AuxDoc } from "../detailAux";
 import { ArtifactTabPane } from "./ArtifactTabPane";
+import { DirTabPane } from "./DirTabPane";
 import type { AuxCardTail } from "./auxDocMenu";
 import { FileTabPane } from "./FileTabPane";
 import { WebTabPane } from "./WebTabPane";
@@ -39,6 +40,8 @@ export function SessionAuxDoc({
   switch (doc.kind) {
     case "file":
       return <FileTabPane doc={doc} tail={tail} workspacePath={workspacePath} />;
+    case "dir":
+      return <DirTabPane doc={doc} tail={tail} />;
     case "wiki":
       return <WikiTabPane doc={doc} tail={tail} onOpenSlug={onOpenWiki} />;
     case "web":

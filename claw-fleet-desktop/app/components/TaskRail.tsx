@@ -8,10 +8,21 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, CornerUpLeft, FileText, Image as ImageIcon, File } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  BookOpen,
+  CornerUpLeft,
+  FileText,
+  Folder,
+  Globe,
+  Image as ImageIcon,
+  File,
+  Package,
+} from "lucide-react";
 import { useUIStore } from "../store";
 import type { ReviewDoc, TaskItem } from "../types";
-import { auxDocLabel, docId } from "../detailAux";
+import { auxDocLabel, docId, type AuxDocKind } from "../detailAux";
+import { isRenderableImage } from "../userAttachments";
 import { useIngestOpen } from "./blocks/ingestOpenContext";
 import type { Artifact } from "./ArtifactsView";
 import { rowMemberIds, sessionTitle, stepText, type SubtaskRow, type TaskRow } from "./homeRows";
@@ -137,8 +148,29 @@ export function groupSubtasksByStep(
   return { byStep, loose };
 }
 
+/** The rail reader a review doc opens in; a `url` opens in the browser instead. */
+function reviewAuxKind(d: ReviewDoc): AuxDocKind {
+  return d.kind === "url" ? "web" : d.kind;
+}
+
 function reviewDocLabel(d: ReviewDoc): string {
-  return d.title?.trim() || auxDocLabel(d.kind, d.ref);
+  return d.title?.trim() || auxDocLabel(reviewAuxKind(d), d.ref);
+}
+
+function ReviewDocGlyph({ doc }: { doc: ReviewDoc }) {
+  const p = { size: 14, strokeWidth: 1.8 };
+  switch (doc.kind) {
+    case "wiki":
+      return <BookOpen {...p} />;
+    case "dir":
+      return <Folder {...p} />;
+    case "url":
+      return <Globe {...p} />;
+    case "artifact":
+      return <Package {...p} />;
+    case "file":
+      return isRenderableImage(doc.ref) ? <ImageIcon {...p} /> : <FileText {...p} />;
+  }
 }
 
 /** The review docs across a session's decision cards — pending ones first,
@@ -152,7 +184,7 @@ export function collectReviewDocs(
   for (const src of [pending, [...answered].reverse()]) {
     for (const card of src) {
       for (const d of card.reviewDocs ?? []) {
-        const id = docId(d.kind, d.ref);
+        const id = docId(reviewAuxKind(d), d.ref);
         if (seen.has(id)) continue;
         seen.add(id);
         out.push(d);
@@ -219,12 +251,27 @@ export function TaskRail({
     else requestArtifactNav(a.id);
   };
   const openReviewDoc = (d: ReviewDoc) => {
+    // A link is read in the browser; nothing is fetched into the rail.
+    if (d.kind === "url") {
+      openUrl(d.ref).catch((e) => console.error("openUrl failed:", d.ref, e));
+      return;
+    }
+    // A deliverable opens exactly like one in the artifact list below.
+    if (d.kind === "artifact" && (!ingest || ingest.expandedId === docId("artifact", d.ref))) {
+      requestArtifactNav(d.ref);
+      return;
+    }
     if (!ingest) return;
-    const id = docId(d.kind, d.ref);
-    if (ingest.expandedId === id) return;
-    ingest.open(d.kind, d.ref, reviewDocLabel(d));
+    const kind = reviewAuxKind(d);
+    if (ingest.expandedId === docId(kind, d.ref)) return;
+    ingest.open(kind, d.ref, reviewDocLabel(d));
   };
-  const materialCount = (artifacts?.length ?? 0) + reviewDocs.length;
+  // A deliverable a card named that the task's artifact list already shows
+  // would be listed twice; the list's row (with its real title) wins.
+  const listedDocs = reviewDocs.filter(
+    (d) => d.kind !== "artifact" || !(artifacts ?? []).some((a) => a.id === d.ref),
+  );
+  const materialCount = (artifacts?.length ?? 0) + listedDocs.length;
 
   const inSubtask = row != null && !row.hops.some((h) => h.id === openSessionId);
   const subtasks = row?.subtasks ?? [];
@@ -395,8 +442,8 @@ export function TaskRail({
             <span className={styles.count}>{materialCount}</span>
           </h3>
           <div className={styles.card}>
-            {reviewDocs.map((d) => {
-              const id = docId(d.kind, d.ref);
+            {listedDocs.map((d) => {
+              const id = docId(reviewAuxKind(d), d.ref);
               const open = ingest?.expandedId === id;
               return (
                 <button
@@ -408,11 +455,7 @@ export function TaskRail({
                   title={d.ref}
                 >
                   <span className={styles.item_icon}>
-                    {d.kind === "wiki" ? (
-                      <BookOpen size={14} strokeWidth={1.8} />
-                    ) : (
-                      <FileText size={14} strokeWidth={1.8} />
-                    )}
+                    <ReviewDocGlyph doc={d} />
                   </span>
                   <span className={styles.item_title}>{reviewDocLabel(d)}</span>
                 </button>

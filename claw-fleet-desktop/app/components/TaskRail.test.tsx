@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => new Promise(() => {})) }));
+const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 
 import "../i18n";
 import type { SessionInfo } from "../types";
@@ -142,6 +144,43 @@ describe("TaskRail", () => {
     expect(el.textContent).toContain("plan.md");
     act(() => el.querySelector<HTMLButtonElement>("button[title='/repo/docs/plan.md']")!.click());
     expect(open).toHaveBeenCalledWith("file", "/repo/docs/plan.md", "plan.md");
+  });
+
+  // Each kind opens where it can be read: a folder and an image in the rail's
+  // reader, a link in the browser, a deliverable like the artifact list's rows.
+  it("opens dir, image, url and artifact review docs each their own way", () => {
+    const nav = vi.fn();
+    useUIStore.setState({ requestArtifactNav: nav } as never);
+    const open = vi.fn();
+    const docs = [
+      { kind: "dir" as const, ref: "/repo/out/bench" },
+      { kind: "file" as const, ref: "/repo/out/chart.png", title: "Chart" },
+      { kind: "url" as const, ref: "https://example.com/status", title: "Status" },
+      { kind: "artifact" as const, ref: "20261021-101500", title: "Review deck" },
+    ];
+    const el = render({ reviewDocs: docs }, { open, expandedId: null });
+    const click = (title: string) =>
+      act(() => el.querySelector<HTMLButtonElement>(`button[title='${title}']`)!.click());
+
+    click("/repo/out/bench");
+    expect(open).toHaveBeenCalledWith("dir", "/repo/out/bench", "bench");
+    click("/repo/out/chart.png");
+    expect(open).toHaveBeenCalledWith("file", "/repo/out/chart.png", "Chart");
+    click("https://example.com/status");
+    expect(openUrl).toHaveBeenCalledWith("https://example.com/status");
+    expect(open).not.toHaveBeenCalledWith("web", expect.anything(), expect.anything());
+    click("20261021-101500");
+    expect(open).toHaveBeenCalledWith("artifact", "20261021-101500", "Review deck");
+    expect(nav).not.toHaveBeenCalled();
+  });
+
+  it("does not list an artifact review doc twice when the task already filed it", () => {
+    const art = { id: "a1", title: "Report", name: "r.md", mime: "text/markdown", note: "" } as Artifact;
+    const el = render(
+      { row: row(), artifacts: [art], reviewDocs: [{ kind: "artifact", ref: "a1", title: "Report" }] },
+      { open: vi.fn(), expandedId: null },
+    );
+    expect(el.querySelectorAll("button[title='Report']")).toHaveLength(1);
   });
 });
 

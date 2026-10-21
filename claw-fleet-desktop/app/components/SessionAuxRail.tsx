@@ -1,4 +1,4 @@
-import { FileText, Globe, NotebookText, Package } from "lucide-react";
+import { FileText, Folder, Globe, NotebookText, Package } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -30,6 +30,7 @@ import railStyles from "./TaskRail.module.css";
 
 const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
+  dir: Folder,
   wiki: NotebookText,
   web: Globe,
   // The same glyph the Outputs page uses for itself (its empty state).
@@ -182,6 +183,9 @@ export function SessionAuxRail({
         return workspacePath
           ? () => requestFileNav({ workspacePath, absPath: d.ref, line: null })
           : undefined;
+      // A folder's reader is the destination; there is no page beyond it.
+      case "dir":
+        return undefined;
       case "wiki":
         return () => revealSlugInWikiPage(d.ref);
       case "artifact":

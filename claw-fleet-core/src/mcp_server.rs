@@ -1460,7 +1460,7 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
 
     let workspace_name = project_dir_workspace_name();
 
-    // Optional review docs (`.md` files / wiki entries listed in the session's material rail).
+    // Optional review docs (files, folders, wiki entries, links, artifacts listed in the session's material rail).
     // A malformed array is non-fatal: drop it rather than failing the whole ask.
     let review_docs: Vec<crate::mcp_ipc::ReviewDoc> = args
         .get("reviewDocs")
