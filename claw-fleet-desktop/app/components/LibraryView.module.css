@@ -218,7 +218,8 @@
 }
 
 .folder_label {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  max-width: 70%;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: var(--font-size-xs);
@@ -244,19 +245,19 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Per-folder verbs, hidden until hover; `:focus-within` keeps them reachable
- * by keyboard. */
+/* Per-folder verbs, out of the layout until hover so they neither squeeze the
+ * folder name nor push the count column out of line with the unfiled rows.
+ * `:focus-within` keeps them reachable by keyboard. */
 .actions {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
-  opacity: 0;
 }
 
 .tree_row:hover .actions,
-.actions:focus-within {
-  opacity: 1;
+.tree_row:focus-within .actions {
+  display: flex;
 }
 
 .action {
