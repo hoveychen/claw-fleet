@@ -101,6 +101,13 @@ enum Commands {
         #[command(subcommand)]
         action: WikiCommands,
     },
+    /// The library (wiki docs + artifacts as one tree per project): full
+    /// summary backfill, re-filing a project's existing items into its folder
+    /// schema, and the per-project overview.
+    Library {
+        #[command(subcommand)]
+        action: LibraryCommands,
+    },
     /// Private incremental checkpoint notes for this session (survive context
     /// compaction and handoff relays). CLI face of the `fleet__notes` MCP tool.
     /// Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
@@ -1335,6 +1342,28 @@ pub(crate) enum ArtifactCommands {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum LibraryCommands {
+    /// Summarize every library item that has no AI summary yet (docs, text
+    /// artifacts, images), at a bounded concurrency and without the background
+    /// worker's hourly cap. Resumable: run it again after an interruption and it
+    /// continues, with its cost and failures carried over.
+    Backfill {
+        /// Only show how many items are due and the estimated cost.
+        #[arg(long)]
+        dry_run: bool,
+        /// Calls at once (at most 3).
+        #[arg(long, default_value_t = 3)]
+        concurrency: usize,
+        /// Stop after this many items (a smoke run; the next run resumes).
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum WikiCommands {
     /// Publish a .html file, a .md file, or a directory containing an HTML
     /// entry. Re-publishing an existing slug creates a new version (old
@@ -1599,6 +1628,7 @@ fn main() {
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
         Commands::Artifact { action } => commands::artifact::cmd_artifact(action),
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
+        Commands::Library { action } => commands::library::cmd_library(action),
         Commands::Job { action } => commands::job::cmd_job(action),
         Commands::Notes { action, session } => commands::notes::cmd_notes(action, session.as_deref()),
         Commands::History { action } => commands::notes::cmd_history(action),
