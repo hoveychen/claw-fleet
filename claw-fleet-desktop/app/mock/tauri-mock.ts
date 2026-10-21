@@ -16,6 +16,14 @@ import { DEMO_BOARD, RELAY_CHAINS, RELAY_PATH_TO_ID, RELAY_SESSIONS } from "./de
 import { RELAY_SCRIPTS } from "./demoScripts";
 import { LIVE_MODE, installLiveProxy, liveInvoke } from "./liveProxy";
 import {
+  mockLibraryCreateFolder,
+  mockLibraryDeleteFolder,
+  mockLibraryDescribeFolder,
+  mockLibraryMoveItem,
+  mockLibraryRenameFolder,
+  mockLibraryTree,
+} from "./library";
+import {
   MOCK_QA_DELAY_MS,
   MOCK_QA_MARKETPLACES,
   MOCK_QA_PLUGINS,
@@ -726,6 +734,18 @@ async function handleIPC(
       if (args.starred !== undefined && args.starred !== null) a.starred = args.starred as boolean;
       return a;
     }
+    case "library_tree":
+      return mockLibraryTree();
+    case "library_create_folder":
+      return mockLibraryCreateFolder(args);
+    case "library_describe_folder":
+      return mockLibraryDescribeFolder(args);
+    case "library_delete_folder":
+      return mockLibraryDeleteFolder(args);
+    case "library_rename_folder":
+      return mockLibraryRenameFolder(args);
+    case "library_move_item":
+      return mockLibraryMoveItem(args);
     case "list_wiki_docs":
       return MOCK_WIKI_DOCS;
     case "search_wiki_docs":

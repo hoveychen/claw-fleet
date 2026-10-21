@@ -237,10 +237,6 @@ fn parent_of(path: &str) -> &str {
     path.rfind('/').map(|i| &path[..i]).unwrap_or("")
 }
 
-fn leaf_of(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
-}
-
 /// The directory part of a wiki slug (`""` for a doc at the root).
 fn slug_dir(slug: &str) -> &str {
     parent_of(slug)
