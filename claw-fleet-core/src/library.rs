@@ -73,7 +73,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::artifacts::{self, Artifact};
+use crate::artifacts::{self, is_at_or_under, repath, Artifact};
 use crate::wiki::{self, WikiDoc};
 
 /// `LibraryItem::kind` of a wiki document.
@@ -240,18 +240,6 @@ fn parent_of(path: &str) -> &str {
 /// The directory part of a wiki slug (`""` for a doc at the root).
 fn slug_dir(slug: &str) -> &str {
     parent_of(slug)
-}
-
-fn is_at_or_under(path: &str, ancestor: &str) -> bool {
-    ancestor.is_empty() || path == ancestor || path.starts_with(&format!("{ancestor}/"))
-}
-
-fn repath(path: &str, from: &str, to: &str) -> Option<String> {
-    if path == from {
-        return Some(to.to_string());
-    }
-    let rest = path.strip_prefix(&format!("{from}/"))?;
-    Some(format!("{to}/{rest}"))
 }
 
 /// Every ancestor of `path` and `path` itself, shallowest first.

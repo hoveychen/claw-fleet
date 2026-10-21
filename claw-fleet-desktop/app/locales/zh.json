@@ -3129,9 +3129,20 @@
     "no_match": "没有符合筛选条件的资料",
     "search": "搜索标题 / 正文…",
     "project_all": "全部项目",
-    "load_failed": "产出加载失败：{{error}}",
     "pick_title": "选一份资料",
-    "pick_sub": "文档和产出放在一起；左边按类型和项目筛选。"
+    "pick_sub_tree": "文档和产出按项目的目录结构放在一起；拖动条目即可归档。",
+    "drag_hint": "拖动条目到文件夹即可归档",
+    "unfiled": "未归档",
+    "unfiled_desc": "不在任何目录里的资料，拖进文件夹即可归档",
+    "no_folders": "这个项目还没有目录结构。点右侧 + 新建文件夹。",
+    "folder_new": "新建文件夹",
+    "folder_new_sub": "新建子文件夹",
+    "folder_rename": "重命名",
+    "folder_describe": "编辑说明",
+    "folder_delete": "删除文件夹",
+    "folder_delete_confirm": "删除文件夹「{{name}}」？",
+    "folder_name_placeholder": "文件夹名",
+    "folder_desc_placeholder": "一句话说明这里放什么"
   },
   "nav_tab_projects": "项目",
   "routines": {

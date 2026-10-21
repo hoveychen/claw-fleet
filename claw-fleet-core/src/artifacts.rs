@@ -327,7 +327,7 @@ pub fn normalize_dir_path(raw: &str) -> Result<String, String> {
 /// True when `path` is `ancestor` itself or sits underneath it.
 ///
 /// The `/` matters: without it `docs` would also claim `docs-old`.
-fn is_at_or_under(path: &str, ancestor: &str) -> bool {
+pub(crate) fn is_at_or_under(path: &str, ancestor: &str) -> bool {
     if ancestor.is_empty() {
         return true;
     }
@@ -335,7 +335,7 @@ fn is_at_or_under(path: &str, ancestor: &str) -> bool {
 }
 
 /// Re-root `path` from under `from` to under `to`, or `None` if it isn't there.
-fn repath(path: &str, from: &str, to: &str) -> Option<String> {
+pub(crate) fn repath(path: &str, from: &str, to: &str) -> Option<String> {
     if path == from {
         return Some(to.to_string());
     }
