@@ -168,6 +168,9 @@ mermaid 别用 classDef/style 自定浅色填充配白字，配色交给默认�
 - **留给你和后面接手的会话的文字**（调研笔记、架构梳理、踩坑记录这类要被再读一遍的）→ 用
   `fleet__wiki` 的 `action="publish"`（CLI 等价 `fleet wiki publish`）存进**知识库**。它只认
   html/htmlDir/markdown，所以 PDF、xlsx 这类二进制**只能**走产出库。
+- 两个库都要求归档进一个**已有的目录**：先用 `action="folders"`（CLI `fleet wiki folders`）看有哪些
+  目录，把最贴切的传给 `folder`。确实没有合适的才新建：`new_folder=true` 加 `folder`、`description`
+  （这里放什么）和 `reason`（为什么现有的都不合适），新目录会标出来给老板审。
 
 拿不准就问一句：这份东西是递给人的，还是留给自己的？递 → 产出库，留 → 知识库。真是过目即弃的
 中间产物，两个都不用，留在临时目录就行。

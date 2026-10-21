@@ -17,22 +17,25 @@ pub(crate) fn cmd_artifact(action: ArtifactCommands) {
             note,
             workspace,
             json,
+            filing,
         } => {
             let workspace = workspace.unwrap_or_else(|| {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
-            match artifacts::add(
+            let filing = filing.args();
+            match claw_fleet_core::library_filing::add_artifact(
                 &path,
                 title.as_deref(),
                 note.as_deref(),
                 &workspace,
+                &filing,
                 // The env var Fleet-owned sessions carry, so an artifact added
                 // from inside a session is traceable back to it. Absent when a
                 // human runs this by hand, which is fine — the field is
                 // optional.
                 std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref(),
             ) {
-                Ok(a) => {
+                Ok((a, filed)) => {
                     if json {
                         println!("{}", serde_json::to_string_pretty(&a).unwrap());
                         return;
@@ -53,6 +56,7 @@ pub(crate) fn cmd_artifact(action: ArtifactCommands) {
                             "copy"
                         }
                     );
+                    println!("  {}", filed.describe(filing.reason.as_deref()));
                 }
                 Err(e) => {
                     eprintln!("error: {e}");
@@ -61,6 +65,7 @@ pub(crate) fn cmd_artifact(action: ArtifactCommands) {
             }
         }
 
+        ArtifactCommands::Folders { workspace } => crate::commands::wiki::print_folders(workspace),
         ArtifactCommands::List { all, json } => {
             let here = {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));

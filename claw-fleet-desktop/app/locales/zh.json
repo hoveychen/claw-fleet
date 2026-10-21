@@ -95,7 +95,10 @@
       "wake": "完成后唤醒",
       "tail": "尾部行数",
       "step": "步骤",
-      "type": "任务类型"
+      "type": "任务类型",
+      "folder": "目录",
+      "new_folder": "新建目录",
+      "description": "目录说明"
     },
     "param_for": {
       "handoff": {
@@ -166,13 +169,16 @@
         "list": "列出文档",
         "search": "搜索 {{query}}",
         "show": "查看 {{slug}} 的版本",
-        "mv": "移动 {{slug}}"
+        "mv": "移动 {{slug}}",
+        "folders": "列出资料目录"
       },
       "artifact": {
         "add": "存入产出 {{title}}",
         "list": "列出产出",
         "get": "查看产出 {{id}}",
-        "delete": "删除产出 {{id}}"
+        "delete": "删除产出 {{id}}",
+        "folders": "列出资料目录",
+        "search": "搜索产出 {{query}}"
       },
       "inspect": {
         "list": "列出在跑的 agent",
@@ -3209,7 +3215,19 @@
     "note_encrypted": "加密的 PDF，读不到内容",
     "note_garbled": "PDF 的文字层是乱码",
     "note_truncated": "内容太长，只读取了前一部分",
-    "note_no_text": "读不出文字，只按文件名归档"
+    "note_no_text": "读不出文字，只按文件名归档",
+    "ai_folder_upload": "上传新建",
+    "ai_folder_agent": "AI 新建",
+    "ai_folder_accept": "保留",
+    "ai_folder_accept_hint": "保留这个文件夹（去掉标记）；不要就重命名或删除",
+    "ai_folder_by_upload": "上传整理时由 AI 新建（批次 {{id}}）",
+    "ai_folder_by_agent": "由 agent 归档时新建（会话 {{id}}）",
+    "ai_folder_reason": "原因：{{reason}}",
+    "new_folders_head": "已有目录都不合适，AI 新建了 {{n}} 个目录（在左侧树里带标记，可保留、改名或删除）",
+    "new_folder_items": "{{n}} 个文件",
+    "new_folder_reason": "原因：{{reason}}",
+    "note_archive_kept": "Fleet 打不开这种压缩包，已整个存入；想逐个归档请解压后再上传",
+    "note_new_folder_capped": "AI 想为它新建目录，但这次上传新建的目录已达上限，先放在未归档"
   },
   "nav_tab_projects": "项目",
   "routines": {

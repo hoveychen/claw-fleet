@@ -186,6 +186,7 @@ pub const INTERRUPT_AGENT_SESSION: &str = "/interrupt_agent_session";
 pub const LIBRARY_TREE: &str = "/library_tree";
 pub const LIBRARY_FOLDER_CREATE: &str = "/library_folder_create";
 pub const LIBRARY_FOLDER_DESCRIBE: &str = "/library_folder_describe";
+pub const LIBRARY_FOLDER_ACCEPT: &str = "/library_folder_accept";
 pub const LIBRARY_FOLDER_DELETE: &str = "/library_folder_delete";
 pub const LIBRARY_FOLDER_RENAME: &str = "/library_folder_rename";
 pub const LIBRARY_MOVE: &str = "/library_move";

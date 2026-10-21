@@ -132,6 +132,17 @@ pub fn archive_kind(name: &str) -> Option<Result<ArchiveKind, &'static str>> {
         .map(|(_, fmt)| Err(*fmt))
 }
 
+/// The note an item gets when it is an archive Fleet does not open (rar, 7z,
+/// …): it is filed whole, by its name.
+pub fn unsupported_archive_note(name: &str) -> Option<String> {
+    match archive_kind(name) {
+        Some(Err(fmt)) => Some(format!(
+            "{fmt} archive stored as is — Fleet does not open {fmt}; extract it and upload the files to have them filed one by one"
+        )),
+        _ => None,
+    }
+}
+
 /// True for the OS and editor droppings nobody means to upload.
 pub fn is_junk(name: &str) -> bool {
     matches!(name, "__MACOSX" | "Thumbs.db" | "desktop.ini")
@@ -314,8 +325,10 @@ impl Stager {
         }
         match archive_kind(leaf) {
             Some(Ok(kind)) => self.expand_file(src, rel, kind, 1),
-            Some(Err(fmt)) => self.reject(rel, format!("unsupported archive format ({fmt}) — extract it and upload the files")),
-            None => match fs::File::open(src) {
+            // An archive Fleet cannot open is still a file the user meant to
+            // keep: stage it whole, as an opaque artifact (see
+            // `unsupported_archive_note`).
+            Some(Err(_)) | None => match fs::File::open(src) {
                 Ok(mut f) => self.stage_reader(rel, &mut f, None),
                 Err(e) => self.reject(rel, format!("cannot read: {e}")),
             },
@@ -403,7 +416,6 @@ impl Stager {
                 }
                 let _ = fs::remove_file(&tmp);
             }
-            Some(Err(fmt)) => self.reject(rel, format!("unsupported archive format ({fmt}) — extract it and upload the files")),
             _ => self.stage_reader(rel, reader, compressed),
         }
     }
@@ -683,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_archives_are_reported_not_dropped() {
+    fn unsupported_archives_are_kept_whole() {
         let t = t();
         fs::write(t.src.join("旧户型图.rar"), b"Rar!\x1a\x07\x00junk").unwrap();
         fs::write(t.src.join("backup.tar.xz"), b"x").unwrap();
@@ -692,10 +704,12 @@ mod tests {
         for n in ["旧户型图.rar", "backup.tar.xz", "report.docx"] {
             s.add_path(&t.src.join(n), n);
         }
-        // An Office file is a zip inside but a document to the user.
-        assert_eq!(rels(&s), ["report.docx"]);
-        let reasons: Vec<&str> = s.rejected.iter().map(|r| r.reason.as_str()).collect();
-        assert!(reasons[0].contains("(rar)") && reasons[1].contains("(tar.xz)"), "{reasons:?}");
+        // Not opened, not rejected: stored as the files they are. (An Office
+        // file is a zip inside but a document to the user.)
+        assert_eq!(rels(&s), ["旧户型图.rar", "backup.tar.xz", "report.docx"]);
+        assert!(s.rejected.is_empty(), "{:?}", s.rejected);
+        assert!(unsupported_archive_note("旧户型图.rar").unwrap().contains("rar"));
+        assert_eq!(unsupported_archive_note("report.docx"), None);
     }
 
     #[test]

@@ -99,8 +99,61 @@ const MAX_PREFIX_LEN: usize = wiki::MAX_SLUG_LEN - 32;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+/// [`FolderOrigin::source`] of a folder an agent created while filing a doc or
+/// an artifact.
+pub const ORIGIN_AGENT: &str = "agent";
+/// [`FolderOrigin::source`] of a folder an upload's classifier created.
+pub const ORIGIN_UPLOAD: &str = "upload";
+
+/// Who made a folder the user did not make, and why. A folder carrying one
+/// that is not yet [`accepted`](FolderOrigin::accepted_ms) is shown with a
+/// marker in the tree until the user accepts, renames or deletes it — the
+/// schema is the user's, and an AI growing it must be visible.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderOrigin {
+    /// [`ORIGIN_AGENT`] or [`ORIGIN_UPLOAD`].
+    pub source: String,
+    /// Why no existing folder fitted, in the creator's words.
+    #[serde(default)]
+    pub reason: String,
+    /// The agent session that created it.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// The upload batch that created it.
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub created_ms: u64,
+    /// When the user accepted it; `None` = still marked as AI-created.
+    #[serde(default)]
+    pub accepted_ms: Option<u64>,
+}
+
+impl FolderOrigin {
+    pub fn agent(session_id: Option<&str>, reason: &str) -> Self {
+        Self {
+            source: ORIGIN_AGENT.to_string(),
+            reason: reason.trim().to_string(),
+            session_id: session_id.filter(|s| !s.is_empty()).map(str::to_string),
+            created_ms: now_ms(),
+            ..Default::default()
+        }
+    }
+
+    pub fn upload(batch_id: &str, reason: &str) -> Self {
+        Self {
+            source: ORIGIN_UPLOAD.to_string(),
+            reason: reason.trim().to_string(),
+            batch_id: Some(batch_id.to_string()),
+            created_ms: now_ms(),
+            ..Default::default()
+        }
+    }
+}
+
 /// One folder of a project's schema.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryFolder {
     /// The project ([`project_key`]) the folder belongs to.
@@ -125,6 +178,17 @@ pub struct LibraryFolder {
     pub created_ms: u64,
     #[serde(default)]
     pub updated_ms: u64,
+    /// Set when an agent or an upload created the folder; `None` = the user
+    /// made it (or it predates origins).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<FolderOrigin>,
+}
+
+impl LibraryFolder {
+    /// Created by an AI and not yet accepted by the user.
+    pub fn awaiting_review(&self) -> bool {
+        self.origin.as_ref().is_some_and(|o| o.accepted_ms.is_none())
+    }
 }
 
 /// One wiki doc or artifact, placed in its project's tree.
@@ -257,6 +321,41 @@ pub fn normalize_key(raw: &str) -> Option<String> {
     let k: String = wiki::normalize_segment(raw).chars().take(MAX_KEY_LEN).collect();
     let k = k.trim_matches('-').to_string();
     (!k.is_empty()).then_some(k)
+}
+
+/// The key a folder gets when its creator named none: the pinyin of a CJK
+/// name (`发票` → `fapiao`, `2026 发票` → `2026-fapiao`), so docs filed there
+/// get slugs a person can read. Empty for a plain ASCII name, which
+/// [`segment_key`] already spells readably, and for a name with nothing
+/// pinyin can render.
+pub fn auto_key(segment: &str) -> String {
+    use pinyin::ToPinyin;
+    if segment.is_ascii() {
+        return String::new();
+    }
+    // A run of hanzi becomes one word of joined syllables (`fapiao`), a run of
+    // ASCII letters/digits stays a word, anything else separates words.
+    let mut words: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_is_hanzi = false;
+    for c in segment.chars() {
+        let (piece, hanzi) = match c.to_pinyin() {
+            Some(p) => (p.plain().to_string(), true),
+            None if c.is_ascii_alphanumeric() => (c.to_ascii_lowercase().to_string(), false),
+            None => (String::new(), false),
+        };
+        if piece.is_empty() || (!cur.is_empty() && hanzi != cur_is_hanzi) {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+        }
+        cur.push_str(&piece);
+        cur_is_hanzi = hanzi;
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    normalize_key(&words.join(" ")).unwrap_or_default()
 }
 
 fn leaf_of(path: &str) -> &str {
@@ -430,10 +529,9 @@ pub fn import_legacy_artifact_folders(roots: &Roots) {
                                 workspace_path: key.clone(),
                                 path: p,
                                 description: String::new(),
-                                key: String::new(),
-                                wiki_prefix: String::new(),
                                 created_ms: now,
                                 updated_ms: now,
+                                ..Default::default()
                             },
                         )?;
                     }
@@ -715,6 +813,36 @@ pub fn create_keyed_folder_in(
     description: Option<&str>,
     folder_key: Option<&str>,
 ) -> Result<LibraryFolder, String> {
+    create_folder_impl(roots, workspace, path, description, folder_key, None).map(|(f, _)| f)
+}
+
+/// [`create_keyed_folder_in`] for a folder an AI (an agent filing something,
+/// an upload's classifier) decided to add. Every folder the call creates —
+/// the leaf and any missing ancestor — carries `origin`, so the user sees all
+/// of it marked. Returns the folder and the paths the call created, parents
+/// first (empty when the folder already existed — it is returned untouched:
+/// its origin, key and description stay as they are).
+pub fn create_ai_folder_in(
+    roots: &Roots,
+    workspace: &str,
+    path: &str,
+    description: Option<&str>,
+    folder_key: Option<&str>,
+    origin: FolderOrigin,
+) -> Result<(LibraryFolder, Vec<String>), String> {
+    create_folder_impl(roots, workspace, path, description, folder_key, Some(origin))
+}
+
+/// The one place folders are created. Returns the leaf and the paths it had
+/// to create.
+fn create_folder_impl(
+    roots: &Roots,
+    workspace: &str,
+    path: &str,
+    description: Option<&str>,
+    folder_key: Option<&str>,
+    origin: Option<FolderOrigin>,
+) -> Result<(LibraryFolder, Vec<String>), String> {
     import_legacy_artifact_folders(roots);
     let path = checked_path(path)?;
     let key = checked_key(workspace)?;
@@ -722,31 +850,49 @@ pub fn create_keyed_folder_in(
     with_project_lock(roots, &key, || {
         let mut folders = project_folders(roots, &key);
         let now = now_ms();
+        let mut created = Vec::new();
         for p in prefixes(&path) {
             if folders.iter().any(|f| f.path == p) {
                 continue;
             }
+            let explicit = if p == path { leaf_key.clone() } else { String::new() };
+            let auto = auto_key(leaf_of(&p));
             let mut f = LibraryFolder {
                 workspace_path: key.clone(),
                 path: p.clone(),
-                description: String::new(),
-                key: if p == path { leaf_key.clone() } else { String::new() },
-                wiki_prefix: String::new(),
+                key: if explicit.is_empty() { auto.clone() } else { explicit.clone() },
                 created_ms: now,
                 updated_ms: now,
+                origin: origin.clone(),
+                ..Default::default()
             };
             folders.push(f.clone());
             f.wiki_prefix = prefix_in(&folders, &p);
             folders.pop();
+            if explicit.is_empty() && !auto.is_empty() {
+                // A pinyin key is a nicety, not a promise: two names can
+                // share a spelling (`公式` / `公示`). Fall back to the derived
+                // segment rather than refuse the folder.
+                if ensure_prefix_free(&folders, &p, &f.wiki_prefix, None).is_err() {
+                    f.key = String::new();
+                    folders.push(f.clone());
+                    f.wiki_prefix = prefix_in(&folders, &p);
+                    folders.pop();
+                }
+            }
             ensure_prefix_free(&folders, &p, &f.wiki_prefix, None)?;
             write_folder(roots, &f)?;
+            created.push(p.clone());
             folders.push(f);
         }
         let leaf = folders
             .iter_mut()
             .find(|f| f.path == path)
             .expect("created above");
-        if let Some(d) = description {
+        // An AI naming a folder that already exists files into it; it does
+        // not get to rewrite the user's description of it.
+        let may_describe = origin.is_none() || created.contains(&path);
+        if let Some(d) = description.filter(|_| may_describe) {
             let d = d.trim().to_string();
             if d != leaf.description {
                 leaf.description = d;
@@ -754,8 +900,62 @@ pub fn create_keyed_folder_in(
                 write_folder(roots, leaf)?;
             }
         }
-        Ok(leaf.clone())
+        Ok((leaf.clone(), created))
     })
+}
+
+/// Clear a folder's AI-created marker: the user looked at it and keeps it.
+/// The origin record itself stays, as history.
+pub fn accept_folder(workspace: &str, path: &str) -> Result<LibraryFolder, String> {
+    accept_folder_in(&Roots::home()?, workspace, path)
+}
+
+pub fn accept_folder_in(roots: &Roots, workspace: &str, path: &str) -> Result<LibraryFolder, String> {
+    import_legacy_artifact_folders(roots);
+    let path = artifacts::normalize_dir_path(path)?;
+    let key = checked_key(workspace)?;
+    with_project_lock(roots, &key, || {
+        let mut folder = project_folders(roots, &key)
+            .into_iter()
+            .find(|f| f.path == path)
+            .ok_or_else(|| format!("folder '{path}' not found"))?;
+        if let Some(o) = folder.origin.as_mut().filter(|o| o.accepted_ms.is_none()) {
+            o.accepted_ms = Some(now_ms());
+            write_folder(roots, &folder)?;
+        }
+        Ok(folder)
+    })
+}
+
+/// The schema folder an agent (or a CLI user) means by `raw`: its display
+/// path (`发票/2026`), its document prefix (`invoices/y2026`), either one
+/// case-insensitively, or — when exactly one folder matches — a bare leaf name
+/// or key (`2026`, `y2026`). `None` when nothing or more than one matches.
+pub fn resolve_folder<'a>(folders: &'a [LibraryFolder], raw: &str) -> Option<&'a LibraryFolder> {
+    let want = artifacts::normalize_dir_path(raw).ok()?;
+    if want.is_empty() {
+        return None;
+    }
+    if let Some(f) = folders.iter().find(|f| f.path == want || f.wiki_prefix == want) {
+        return Some(f);
+    }
+    let lower = want.to_lowercase();
+    if let Some(f) = folders
+        .iter()
+        .find(|f| f.path.to_lowercase() == lower || f.wiki_prefix.to_lowercase() == lower)
+    {
+        return Some(f);
+    }
+    if want.contains('/') {
+        return None;
+    }
+    let hits: Vec<&LibraryFolder> = folders
+        .iter()
+        .filter(|f| {
+            leaf_of(&f.path).to_lowercase() == lower || leaf_of(&f.wiki_prefix) == lower
+        })
+        .collect();
+    (hits.len() == 1).then(|| hits[0])
 }
 
 /// Replace a folder's one-line description.
@@ -933,6 +1133,13 @@ pub fn rename_folder_in(
             moved.path = next.clone();
             moved.wiki_prefix = prefix_in(&after, &next);
             moved.updated_ms = now;
+            // Renaming an AI-created folder is the user deciding what it is:
+            // that clears its marker, as accepting would.
+            if f.path == from {
+                if let Some(o) = moved.origin.as_mut().filter(|o| o.accepted_ms.is_none()) {
+                    o.accepted_ms = Some(now);
+                }
+            }
             write_folder(roots, &moved)?;
             have.insert(next);
         }
@@ -943,11 +1150,10 @@ pub fn rename_folder_in(
                     &LibraryFolder {
                         workspace_path: key.clone(),
                         path: p.clone(),
-                        description: String::new(),
-                        key: String::new(),
                         wiki_prefix: prefix_in(&after, &p),
                         created_ms: now,
                         updated_ms: now,
+                        ..Default::default()
                     },
                 )?;
             }
@@ -1156,6 +1362,15 @@ mod tests {
     }
 
     #[test]
+    fn auto_keys_spell_hanzi_in_pinyin() {
+        assert_eq!(auto_key("合同"), "hetong");
+        assert_eq!(auto_key("2026 发票"), "2026-fapiao");
+        assert_eq!(auto_key("发票2026"), "fapiao-2026");
+        assert_eq!(auto_key("design"), "", "ascii names keep segment_key");
+        assert_eq!(auto_key("✨"), "");
+    }
+
+    #[test]
     fn keyed_folders_give_cjk_names_readable_prefixes() {
         let e = env();
         assert_eq!(normalize_key(" Invoices 2026 ").as_deref(), Some("invoices-2026"));
@@ -1168,7 +1383,7 @@ mod tests {
         let prefix = |p: &str| folders.iter().find(|f| f.path == p).unwrap().wiki_prefix.clone();
         assert_eq!(prefix("发票"), "invoices");
         assert_eq!(prefix("发票/2026"), "invoices/y2026");
-        assert_eq!(prefix("发票/餐饮"), format!("invoices/{}", segment_key("餐饮")));
+        assert_eq!(prefix("发票/餐饮"), "invoices/canyin");
 
         // Docs file under the keyed prefix and are found there.
         let moved = move_item_in(&e.roots, ITEM_DOC, &e.doc("scan", &e.ws).slug, "发票/2026").unwrap();
@@ -1344,7 +1559,7 @@ mod tests {
 
         let moved = move_item_in(&e.roots, ITEM_DOC, "scan", "发票").unwrap();
         assert_eq!(moved.folder.as_deref(), Some("发票"));
-        assert_eq!(moved.id, format!("{}/scan", segment_key("发票")));
+        assert_eq!(moved.id, "fapiao/scan");
         let moved_a = move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "发票").unwrap();
         assert_eq!(moved_a.folder.as_deref(), Some("发票"));
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &a.id).unwrap().path, "发票");

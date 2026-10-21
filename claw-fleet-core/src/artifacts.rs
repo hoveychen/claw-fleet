@@ -599,6 +599,20 @@ pub fn add_in(
 /// before versions existed (see [`read_meta`]).
 pub const FIRST_VERSION: &str = "v1";
 
+/// The artifact that adding `source` from `workspace` would add a new version
+/// to (see the module docs on versions), if any.
+pub fn existing_deliverable_in(root: &Path, source: &Path, workspace: &Path) -> Option<Artifact> {
+    let name = crate::user_attachments::sanitize_name_with(
+        &source
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        "artifact.bin",
+    );
+    let workspace_path = crate::wiki::resolve_workspace_path(workspace);
+    find_same_deliverable(root, &workspace_path, &source.display().to_string(), &name)
+}
+
 /// The artifact this exact deliverable already has, if any.
 ///
 /// Keyed on workspace + source path + filename. The source path is what keeps

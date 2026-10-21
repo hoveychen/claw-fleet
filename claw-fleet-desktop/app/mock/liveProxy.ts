@@ -1010,6 +1010,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { workspace_path: a.workspacePath, path: a.path, description: a.description },
   }),
 
+  library_accept_folder: (a) => ({
+    method: "POST",
+    path: "/library_folder_accept",
+    body: { workspace_path: a.workspacePath, path: a.path },
+  }),
+
   library_delete_folder: (a) => ({
     method: "POST",
     path: "/library_folder_delete",

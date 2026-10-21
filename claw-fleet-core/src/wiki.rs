@@ -459,6 +459,17 @@ pub fn fix_scratchpad_workspaces_in(root: &Path) -> Vec<(String, String, String)
 
 // ── Publish ──────────────────────────────────────────────────────────────────
 
+/// The slug [`publish`] gives `source` when none is passed: the normalized
+/// file stem, or a directory's name.
+pub fn derived_slug(source: &Path) -> Result<String, String> {
+    let stem = if source.is_dir() {
+        source.file_name().and_then(|n| n.to_str()).unwrap_or("")
+    } else {
+        source.file_stem().and_then(|n| n.to_str()).unwrap_or("")
+    };
+    normalize_slug(stem)
+}
+
 /// Publish `source` (a `.md` file, an `.html`/`.htm` file, or a directory
 /// containing an HTML entry) into `~/.fleet/wiki/`. `slug`/`title` default
 /// from the source; `workspace` tags the doc with its origin.
@@ -512,14 +523,7 @@ pub fn publish_in(
     // Slug: explicit > normalized file stem / dir name.
     let slug = match slug {
         Some(s) => normalize_slug(s)?,
-        None => {
-            let stem = if meta.is_dir() {
-                source.file_name().and_then(|n| n.to_str()).unwrap_or("")
-            } else {
-                source.file_stem().and_then(|n| n.to_str()).unwrap_or("")
-            };
-            normalize_slug(stem)?
-        }
+        None => derived_slug(&source)?,
     };
 
     // Title: explicit > extracted from content > slug.

@@ -63,12 +63,20 @@ impl WikiScope {
 
 pub(crate) fn cmd_wiki(action: WikiCommands) {
     match action {
-        WikiCommands::Publish { path, slug, title, workspace, json } => {
+        WikiCommands::Publish { path, slug, title, workspace, json, filing } => {
             let workspace = workspace.unwrap_or_else(|| {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
-            match wiki::publish(&path, slug.as_deref(), title.as_deref(), &workspace) {
-                Ok(doc) => {
+            let filing = filing.args();
+            match claw_fleet_core::library_filing::publish_wiki(
+                &path,
+                slug.as_deref(),
+                title.as_deref(),
+                &workspace,
+                &filing,
+                std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref(),
+            ) {
+                Ok((doc, filed)) => {
                     if json {
                         println!("{}", serde_json::to_string_pretty(&doc).unwrap());
                         return;
@@ -92,6 +100,7 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
                             format_wiki_size(v.size_bytes)
                         );
                     }
+                    println!("  {}", filed.describe(filing.reason.as_deref()));
                     println!("{}View it in the Fleet app → 知识库 board.{}", c_dim(), c_reset());
                 }
                 Err(e) => {
@@ -100,6 +109,8 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
                 }
             }
         }
+
+        WikiCommands::Folders { workspace } => print_folders(workspace),
 
         WikiCommands::List { workspace, all, json } => {
             let scope = WikiScope::new(workspace, all);
@@ -349,5 +360,20 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
                 }
             }
         },
+    }
+}
+
+/// `fleet wiki folders` / `fleet artifact folders`: the project's library
+/// folders, as an agent files by them.
+pub(crate) fn print_folders(workspace: Option<std::path::PathBuf>) {
+    let workspace = workspace.unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
+    match claw_fleet_core::library_filing::folders_text(&workspace) {
+        Ok(text) => println!("{text}"),
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
     }
 }

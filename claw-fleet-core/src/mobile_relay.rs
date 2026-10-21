@@ -1622,7 +1622,9 @@ fn image_result_summary(block: &Map<String, Value>) -> Option<Value> {
 /// positive is one card that resolves to nothing, not a wrong one.
 fn ingest_summary(block: &Map<String, Value>) -> Option<Value> {
     let text = tool_result_text(block.get("content")?);
-    let text = text.trim();
+    // Only the first line is the sentence; what follows (where the item was
+    // filed, with a free-text reason) must not reach the anchors below.
+    let text = text.trim().lines().next().unwrap_or("").trim();
 
     if let Some(rest) = text.strip_prefix("Stored artifact ") {
         // `<id> — <title> (<kind>, <n> bytes)…`. The title is free text and may
@@ -8832,7 +8834,8 @@ mod tests {
 
         // A title with its own parenthesis: the LAST `(kind, n bytes)` wins.
         let slim = slim_tail_messages(vec![record(json!(
-            "Stored artifact a1 — Q3 报表 (最终版) (xlsx, 9 bytes), hard-linked."
+            "Stored artifact a1 — Q3 报表 (最终版) (xlsx, 9 bytes), hard-linked. It is now on the 产出 page.\n\
+             Filed in NEW folder '报表' (reason: none fits (really))."
         ))]);
         let g = &slim[0]["message"]["content"][0]["_ingest"];
         assert_eq!(g["title"], json!("Q3 报表 (最终版)"));
@@ -8840,7 +8843,7 @@ mod tests {
 
         // The array form of a tool_result body parses the same.
         let slim = slim_tail_messages(vec![record(json!([
-            { "type": "text", "text": "Published arch/overview (version v3, 3 total). title: 架构总览" }
+            { "type": "text", "text": "Published arch/overview (version v3, 3 total). title: 架构总览\nFiled in folder '架构'." }
         ]))]);
         let g = &slim[0]["message"]["content"][0]["_ingest"];
         assert_eq!(g["kind"], json!("wiki"));
@@ -8859,8 +8862,8 @@ mod tests {
     #[test]
     fn ingest_wording_matches_mcp_control() {
         let src = include_str!("mcp_control.rs");
-        assert!(src.contains("Stored artifact {} — {} ({}, {} bytes)"));
-        assert!(src.contains("Published {} (version {}, {} total). title: {}"));
+        assert!(src.contains("Stored artifact {} — {} ({}, {} bytes){}. It is now on the 产出 page.\\n{}"));
+        assert!(src.contains("Published {} (version {}, {} total). title: {}\\n{}"));
     }
 
     /// `toolUseResult` is stripped as a whole, but its stats survive as a tiny

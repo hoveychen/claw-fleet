@@ -1769,6 +1769,7 @@ pub fn run() {
             library_search,
             library_create_folder,
             library_describe_folder,
+            library_accept_folder,
             library_delete_folder,
             library_rename_folder,
             library_move_item,

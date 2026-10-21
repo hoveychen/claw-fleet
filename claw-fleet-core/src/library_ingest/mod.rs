@@ -52,7 +52,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::artifacts::{self, ArtifactOrigin};
-use crate::library::{self, LibraryFolder, Roots};
+use crate::library::{self, FolderOrigin, LibraryFolder, Roots};
 use crate::llm_provider::ModelSlot;
 
 use self::archive::{Limits, Rejected, Stager};
@@ -145,7 +145,33 @@ pub struct IngestItem {
     /// A converted copy the vision path reads instead (HEIC → JPEG).
     #[serde(default)]
     pub vision_file: Option<String>,
+    /// The folder the classifier proposed when no schema folder fit; filing
+    /// creates it (see [`MAX_NEW_FOLDERS_PER_BATCH`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_folder: Option<classify::ProposedFolder>,
 }
+
+/// A folder the classifier added during this batch, for the summary.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NewFolderNote {
+    pub path: String,
+    #[serde(default)]
+    pub description: String,
+    pub reason: String,
+    /// Items of this batch filed in it.
+    #[serde(default)]
+    pub items: usize,
+    /// Every path creating it took (missing parents first, then the folder),
+    /// so a drafted schema's list can leave them out.
+    #[serde(default)]
+    pub created: Vec<String>,
+}
+
+/// Most folders one upload may add on its own. A batch that wants more is
+/// better served by a schema the user reviews than by a spray of folders;
+/// files past the cap are left unfiled with a note.
+pub const MAX_NEW_FOLDERS_PER_BATCH: usize = 8;
 
 /// A file received over HTTP, waiting for staging.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -186,6 +212,10 @@ pub struct IngestBatch {
     /// Folders this batch created (undoing the batch removes the empty ones).
     #[serde(default)]
     pub created_folders: Vec<String>,
+    /// Folders the classifier added because nothing in the schema fit, with
+    /// its reasons (a subset of `created_folders`, minus a drafted schema).
+    #[serde(default)]
+    pub new_folders: Vec<NewFolderNote>,
     #[serde(default)]
     pub llm_calls: u32,
     #[serde(default)]
@@ -218,12 +248,30 @@ pub struct BatchSummary {
     pub rejected: usize,
     pub schema_drafted: bool,
     pub created_folders: Vec<String>,
+    #[serde(default)]
+    pub new_folders: Vec<NewFolderNote>,
     pub llm_calls: u32,
     pub cost_usd: f64,
     pub error: Option<String>,
 }
 
 impl IngestBatch {
+    /// [`Self::new_folders`] with item counts as they stand now (the user may
+    /// have moved items out since).
+    pub fn new_folder_notes(&self) -> Vec<NewFolderNote> {
+        self.new_folders
+            .iter()
+            .map(|n| NewFolderNote {
+                items: self
+                    .items
+                    .iter()
+                    .filter(|i| i.status == ItemStatus::Filed && i.folder.as_deref() == Some(n.path.as_str()))
+                    .count(),
+                ..n.clone()
+            })
+            .collect()
+    }
+
     pub fn summary(&self) -> BatchSummary {
         let count = |f: &dyn Fn(&IngestItem) -> bool| self.items.iter().filter(|i| f(i)).count();
         let past = |i: &IngestItem, s: ItemStatus| {
@@ -255,6 +303,7 @@ impl IngestBatch {
             rejected: self.rejected.len(),
             schema_drafted: self.schema_drafted,
             created_folders: self.created_folders.clone(),
+            new_folders: self.new_folder_notes(),
             llm_calls: self.llm_calls,
             cost_usd: self.cost_usd,
             error: self.error.clone(),
@@ -376,6 +425,7 @@ fn new_batch(roots: &Roots, workspace: &str, status: BatchStatus) -> Result<Inge
         skipped_junk: 0,
         schema_drafted: false,
         created_folders: Vec::new(),
+        new_folders: Vec::new(),
         llm_calls: 0,
         cost_usd: 0.0,
         error: None,
@@ -598,6 +648,7 @@ pub fn undo_batch_in(roots: &Roots, batch_id: &str) -> Result<IngestBatch, Strin
                 Err(_) => kept.push(path),
             }
         }
+        b.new_folders.retain(|n| kept.contains(&n.path));
         b.created_folders = kept;
         b.status = BatchStatus::Undone;
         Ok(b.clone())
@@ -843,6 +894,7 @@ fn stage(roots: &Roots, id: &str) -> Result<(), String> {
             error: None,
             staged,
             vision_file: None,
+            new_folder: None,
         });
     }
     let rejected = stager.rejected.clone();
@@ -929,8 +981,8 @@ fn extract_all(roots: &Roots, id: &str) -> Result<(), String> {
                         i.text_chars = got.text.chars().count();
                         i.needs_vision = needs_vision;
                         i.vision_file = vision_file.clone();
-                        if let Some(note) = &got.note {
-                            i.error = Some(note.clone());
+                        if let Some(note) = archive::unsupported_archive_note(&i.name).or_else(|| got.note.clone()) {
+                            i.error = Some(note);
                         }
                         i.status = ItemStatus::Extracted;
                     }
@@ -1114,6 +1166,7 @@ fn apply_verdict(roots: &Roots, id: &str, dir: &Path, verdict: Option<Verdict>, 
         match &verdict {
             Some(v) => {
                 i.folder = v.folder.clone();
+                i.new_folder = v.new_folder.clone();
                 i.title = if v.title.is_empty() { stem(&i.name) } else { v.title.clone() };
                 i.summary = v.summary.clone();
                 i.tags = v.tags.clone();
@@ -1129,6 +1182,7 @@ fn apply_verdict(roots: &Roots, id: &str, dir: &Path, verdict: Option<Verdict>, 
             }
             None => {
                 i.folder = None;
+                i.new_folder = None;
                 i.title = stem(&i.name);
                 i.error = Some(fallback_note.to_string());
             }
@@ -1237,9 +1291,90 @@ fn original_path(batch: &IngestBatch, rel: &str) -> String {
     format!("upload:{rel}")
 }
 
+/// Create the folders the classifier proposed, once per path and at most
+/// [`MAX_NEW_FOLDERS_PER_BATCH`], recording them on the batch. Returns, per
+/// proposed path, the folder items should be filed in (`None` = past the
+/// cap or could not be created: leave them unfiled).
+fn create_proposed_folders(
+    roots: &Roots,
+    batch: &IngestBatch,
+) -> Result<HashMap<String, Option<String>>, String> {
+    let mut out: HashMap<String, Option<String>> = HashMap::new();
+    let mut created_paths: Vec<String> = Vec::new();
+    let mut notes: Vec<NewFolderNote> = Vec::new();
+    let mut made = batch.new_folders.len();
+    for item in batch.items.iter().filter(|i| i.status == ItemStatus::Classified && i.folder.is_none()) {
+        let Some(p) = &item.new_folder else { continue };
+        if out.contains_key(&p.path) {
+            continue;
+        }
+        // A restart re-runs filing: a folder this batch already noted is
+        // simply used again.
+        if batch.new_folders.iter().any(|n| n.path == p.path) {
+            out.insert(p.path.clone(), Some(p.path.clone()));
+            continue;
+        }
+        if made >= MAX_NEW_FOLDERS_PER_BATCH {
+            out.insert(p.path.clone(), None);
+            continue;
+        }
+        let key = (!p.key.is_empty()).then_some(p.key.as_str());
+        let desc = (!p.description.is_empty()).then_some(p.description.as_str());
+        let create = |key: Option<&str>| {
+            library::create_ai_folder_in(
+                roots,
+                &batch.workspace_path,
+                &p.path,
+                desc,
+                key,
+                FolderOrigin::upload(&batch.id, &p.reason),
+            )
+        };
+        // The model's key may collide with a sibling's; the folder matters
+        // more than its spelling, so fall back to a derived key.
+        let made_now = match create(key) {
+            Err(_) if key.is_some() => create(None),
+            other => other,
+        };
+        match made_now {
+            Ok((folder, created)) => {
+                if !created.is_empty() {
+                    made += 1;
+                    created_paths.extend(created.iter().cloned());
+                    notes.push(NewFolderNote {
+                        path: folder.path.clone(),
+                        description: folder.description.clone(),
+                        reason: p.reason.clone(),
+                        items: 0,
+                        created,
+                    });
+                }
+                out.insert(p.path.clone(), Some(folder.path));
+            }
+            Err(e) => {
+                crate::log_debug(&format!("[library_ingest] new folder {} refused: {e}", p.path));
+                out.insert(p.path.clone(), None);
+            }
+        }
+    }
+    if !notes.is_empty() {
+        update(roots, &batch.id, |b| {
+            for p in &created_paths {
+                if !b.created_folders.contains(p) {
+                    b.created_folders.push(p.clone());
+                }
+            }
+            b.new_folders.extend(notes.iter().cloned());
+            Ok(())
+        })?;
+    }
+    Ok(out)
+}
+
 fn file_all(roots: &Roots, id: &str) -> Result<(), String> {
     let batch = load(roots, id)?;
     let dir = batch_dir(roots, id)?;
+    let proposed = create_proposed_folders(roots, &batch)?;
     let schema: Vec<String> = library::list_folders_in(roots, &batch.workspace_path)?
         .into_iter()
         .map(|f| f.path)
@@ -1256,7 +1391,13 @@ fn file_all(roots: &Roots, id: &str) -> Result<(), String> {
     // Sequential: artifact ids are minted per second and checked by
     // existence, so parallel adds would race for the same id.
     for item in batch.items.iter().filter(|i| i.status == ItemStatus::Classified) {
-        let folder = item.folder.clone().filter(|f| schema.contains(f));
+        let folder = item
+            .folder
+            .clone()
+            .or_else(|| item.new_folder.as_ref().and_then(|p| proposed.get(&p.path).cloned().flatten()))
+            .filter(|f| schema.contains(f));
+        let capped = item.folder.is_none()
+            && item.new_folder.as_ref().is_some_and(|p| matches!(proposed.get(&p.path), Some(None)));
         let result = match already.get(&item.id) {
             Some(existing) => Ok(existing.clone()),
             None => file_one(roots, &batch, &dir, item, folder.as_deref()),
@@ -1268,6 +1409,12 @@ fn file_all(roots: &Roots, id: &str) -> Result<(), String> {
                         i.status = ItemStatus::Filed;
                         i.artifact_id = Some(artifact.clone());
                         i.folder = folder.clone();
+                        if capped {
+                            i.error = Some(format!(
+                                "the AI proposed a new folder '{}', but this upload already added {MAX_NEW_FOLDERS_PER_BATCH}; left unfiled",
+                                i.new_folder.as_ref().map(|p| p.path.as_str()).unwrap_or("")
+                            ));
+                        }
                     }
                     Err(e) => {
                         i.status = ItemStatus::Failed;

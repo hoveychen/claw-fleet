@@ -51,6 +51,16 @@ pub(crate) fn library_describe_folder(
         .library_describe_folder(&workspace_path, &path, &description)
 }
 
+/// The user keeps a folder an AI created: clears its review marker.
+#[tauri::command(async)]
+pub(crate) fn library_accept_folder(
+    workspace_path: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library::LibraryFolder, String> {
+    state.backend.library_accept_folder(&workspace_path, &path)
+}
+
 /// Refused by core while any doc or artifact is still filed inside.
 #[tauri::command(async)]
 pub(crate) fn library_delete_folder(

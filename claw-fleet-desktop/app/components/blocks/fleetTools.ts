@@ -366,14 +366,23 @@ export function parseWikiSearch(text: string): WikiSearchItem[] {
  * title is whatever lies between the em dash and it.
  */
 export function parseArtifactAdd(text: string): ArtifactAdded | null {
-  const m = /^Stored artifact (\S+) — (.*) \(([^(),]+), (\d+) bytes\)/.exec(text.trim());
+  const m = /^Stored artifact (\S+) — (.*) \(([^(),]+), (\d+) bytes\)/.exec(firstLine(text));
   if (!m) return null;
   return { id: m[1], title: m[2], artifactKind: m[3], bytes: Number(m[4]) };
 }
 
+/**
+ * The result sentence of `artifact add` / `wiki publish`. A second line may
+ * follow saying which library folder the item was filed in (with a free-text
+ * reason that must not reach the anchors).
+ */
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0].trim();
+}
+
 /** `wiki publish` → `Published <slug> (version <v>, <n> total). title: <title>`. */
 export function parseWikiPublish(text: string): WikiPublished | null {
-  const m = /^Published (\S+) \(version (\S+), \d+ total\)\. title: (.*)$/.exec(text.trim());
+  const m = /^Published (\S+) \(version (\S+), \d+ total\)\. title: (.*)$/.exec(firstLine(text));
   if (!m) return null;
   return { slug: m[1], version: m[2], title: m[3] };
 }

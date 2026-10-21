@@ -13,6 +13,8 @@ struct FakeBrain {
     /// Ids the first classification call leaves out, to exercise the retry.
     skip_first: Vec<String>,
     no_draft: bool,
+    /// Propose a different new folder for every property-fee bill.
+    spray: bool,
 }
 
 const DRAFT: &str = r#"```json
@@ -56,10 +58,20 @@ impl Brain for FakeBrain {
             } else {
                 ""
             };
-            rows.push(serde_json::json!({
+            let mut row = serde_json::json!({
                 "id": id, "folder": folder, "title": format!("T:{rel}"),
                 "summary": format!("S:{rel}"), "tags": ["t"],
-            }));
+            });
+            // Property-fee bills fit no drafted folder: propose one (with a
+            // reason) under 票据, or one per file when told to spray.
+            if rel.contains("物业") {
+                let path = if self.spray { format!("杂项/{id}") } else { "票据/物业费".to_string() };
+                row["new_folder"] = serde_json::json!({
+                    "path": path, "key": "wuye", "description": "物业费账单",
+                    "reason": "没有放物业费的目录",
+                });
+            }
+            rows.push(row);
         }
         out(serde_json::to_string(&rows).unwrap())
     }
@@ -169,8 +181,12 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
     let z = e.item(&b, "说明书.zip/油烟机.txt");
     assert_eq!(z.folder.as_deref(), Some("资料"));
     assert_eq!(b.skipped_junk, 1);
-    assert_eq!(b.rejected.len(), 1);
-    assert!(b.rejected[0].reason.contains("rar"));
+    // The rar is not opened, but kept: filed whole with a note.
+    assert!(b.rejected.is_empty(), "{:?}", b.rejected);
+    let old = e.item(&b, "旧图.rar");
+    assert_eq!(old.status, ItemStatus::Filed);
+    assert!(old.error.as_deref().unwrap_or("").contains("rar archive stored as is"), "{:?}", old.error);
+    assert!(old.artifact_id.is_some());
 
     // One draft, one classification chunk, one image (the last two run in
     // parallel); the duplicate cost nothing.
@@ -200,7 +216,7 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
     assert!(!batch_dir(&e.roots, &b.id).unwrap().join("files").exists());
 
     let s = b.summary();
-    assert_eq!((s.total, s.filed, s.duplicates, s.rejected, s.unfiled), (4, 3, 1, 1, 0));
+    assert_eq!((s.total, s.filed, s.duplicates, s.rejected, s.unfiled), (5, 4, 1, 0, 1));
 }
 
 #[test]
@@ -384,4 +400,55 @@ fn undo_waits_for_the_batch_to_finish_and_ids_are_validated() {
     assert!(get_batch_in(&e.roots, "../x").is_err());
     assert!(queue_paths_in(&e.roots, &e.ws(), &["/definitely/not/here".into()]).is_err());
     assert!(queue_paths_in(&e.roots, "", &paths(&[&a])).is_err());
+}
+
+#[test]
+fn the_classifier_may_add_a_folder_with_a_reason_and_undo_takes_it_back() {
+    let e = env();
+    let c = e.file("合同.md", "# 合同".as_bytes());
+    let bill1 = e.file("物业-9月.md", "# 物业费 9 月".as_bytes());
+    let bill2 = e.file("物业-10月.md", "# 物业费 10 月".as_bytes());
+    let brain = FakeBrain::default();
+    let b = queue_paths_in(&e.roots, &e.ws(), &paths(&[&c, &bill1, &bill2])).unwrap();
+    run_worker(&e.roots, &b.id, &brain);
+    let b = get_batch_in(&e.roots, &b.id).unwrap();
+    assert_eq!(b.status, BatchStatus::Done, "{:?}", b.error);
+
+    // One folder for both bills, recorded with the batch and the reason.
+    let s = b.summary();
+    assert_eq!(s.new_folders.len(), 1, "{:?}", s.new_folders);
+    let note = &s.new_folders[0];
+    assert_eq!((note.path.as_str(), note.reason.as_str(), note.items), ("票据/物业费", "没有放物业费的目录", 2));
+    assert_eq!(note.description, "物业费账单");
+    assert!(b.created_folders.contains(&"票据/物业费".to_string()));
+    for rel in ["物业-9月.md", "物业-10月.md"] {
+        let it = e.item(&b, rel);
+        assert_eq!((it.status, it.folder.as_deref()), (ItemStatus::Filed, Some("票据/物业费")));
+    }
+    let f = library::list_folders_in(&e.roots, &e.ws()).unwrap().into_iter().find(|f| f.path == "票据/物业费").unwrap();
+    assert!(f.awaiting_review(), "an upload-made folder is marked for review");
+    let o = f.origin.unwrap();
+    assert_eq!((o.source.as_str(), o.batch_id.as_deref()), (library::ORIGIN_UPLOAD, Some(b.id.as_str())));
+    assert_eq!(f.wiki_prefix, "receipts/wuye");
+
+    // Undoing the batch removes it with the drafted schema.
+    let undone = undo_batch_in(&e.roots, &b.id).unwrap();
+    assert!(library::list_folders_in(&e.roots, &e.ws()).unwrap().is_empty());
+    assert!(undone.new_folders.is_empty());
+}
+
+#[test]
+fn an_upload_adds_at_most_a_few_folders_and_leaves_the_rest_unfiled() {
+    let e = env();
+    let bills: Vec<PathBuf> = (0..MAX_NEW_FOLDERS_PER_BATCH + 2)
+        .map(|n| e.file(&format!("物业-{n:02}.md"), format!("# 物业 {n}").as_bytes()))
+        .collect();
+    let brain = FakeBrain { spray: true, ..Default::default() };
+    let b = queue_paths_in(&e.roots, &e.ws(), &paths(&bills.iter().collect::<Vec<_>>())).unwrap();
+    run_worker(&e.roots, &b.id, &brain);
+    let b = get_batch_in(&e.roots, &b.id).unwrap();
+    assert_eq!(b.new_folders.len(), MAX_NEW_FOLDERS_PER_BATCH);
+    let unfiled: Vec<&IngestItem> = b.items.iter().filter(|i| i.folder.is_none()).collect();
+    assert_eq!(unfiled.len(), 2);
+    assert!(unfiled.iter().all(|i| i.status == ItemStatus::Filed && i.error.as_deref().unwrap_or("").contains("new folder")));
 }

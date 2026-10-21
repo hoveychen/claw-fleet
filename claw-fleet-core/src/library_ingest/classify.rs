@@ -39,12 +39,29 @@ pub struct FolderSpec {
     pub description: String,
 }
 
+/// A folder the model wants added because no schema folder fits a file.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposedFolder {
+    /// Normalized, at most two levels (`发票/2026-11`).
+    pub path: String,
+    /// The leaf's slug when the model gave one; empty = derive it.
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub description: String,
+    /// Why no existing folder fits — shown to the user.
+    pub reason: String,
+}
+
 /// What the model decided for one file.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Verdict {
     pub id: String,
     /// A schema folder path, or `None` when nothing fits.
     pub folder: Option<String>,
+    /// With `folder` `None`: the folder the model proposes instead.
+    pub new_folder: Option<ProposedFolder>,
     pub title: String,
     pub summary: String,
     pub tags: Vec<String>,
@@ -103,6 +120,16 @@ fn folder_list(folders: &[LibraryFolder]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// The escape hatch offered to the classifier when the project has a schema:
+/// propose a folder rather than leave a file that clearly belongs to a new
+/// group unfiled.
+const NEW_FOLDER_RULE: &str = "Prefer an existing folder. Only when none fits and the file clearly \
+belongs to a group this project will keep receiving, set \"folder\" to \"\" and propose one with \
+\"new_folder\": {\"path\": \"...\", \"key\": \"short-ascii-slug\", \"description\": \"one line on what \
+belongs there\", \"reason\": \"why no existing folder fits\"} — usually a subfolder extending an \
+existing one (a new year or month, a new counterparty), at most 2 levels deep, named in the \
+existing folders' language. Use the same new_folder path for every file that belongs there.";
 
 pub(crate) const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
 content; use Simplified Chinese when the file has no readable text.";
@@ -180,10 +207,11 @@ pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief]) -> String
 above, or \"\" when none fits; \"title\": a short descriptive title, not just the file name — \
 include the identifying facts (who, what, date, amount) when the file has them; \"summary\": 1 to \
 3 sentences on what it is and its key facts; \"tags\": 1 to 5 short keywords. The original path \
-is a hint (folder names the user chose) but decide by content. {LANGUAGE_RULE}\n\n\
+is a hint (folder names the user chose) but decide by content.{new_rule} {LANGUAGE_RULE}\n\n\
 Reply with a JSON array only:\n\
 [{{\"id\":\"{}\",\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"]}}]\n",
-        items.first().map(|i| i.id.as_str()).unwrap_or("i0000")
+        items.first().map(|i| i.id.as_str()).unwrap_or("i0000"),
+        new_rule = new_folder_rule(folders),
     ));
     p
 }
@@ -200,13 +228,22 @@ Return: \"folder\": exactly one folder path from the list, or \"\" when none fit
 short descriptive title with the identifying facts (who, what, date, amount) when visible; \
 \"summary\": 1 to 3 sentences on what it is and its key facts; \"tags\": 1 to 5 short keywords; \
 \"text\": the document's important visible text transcribed (names, numbers, dates, line items), \
-at most 1500 characters, or \"\" for a photo without text. {LANGUAGE_RULE}\n\n\
+at most 1500 characters, or \"\" for a photo without text.{new_rule} {LANGUAGE_RULE}\n\n\
 Reply with one JSON object only:\n\
 {{\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"text\":\"...\"}}\n",
         pdf_hint = if pdf { " (the first 3 pages are enough)" } else { "" },
         folders = folder_list(folders),
         rel = item.rel_path,
+        new_rule = new_folder_rule(folders),
     )
+}
+
+fn new_folder_rule(folders: &[LibraryFolder]) -> String {
+    if folders.is_empty() {
+        String::new()
+    } else {
+        format!(" {NEW_FOLDER_RULE}")
+    }
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
@@ -298,14 +335,43 @@ fn verdict_from(v: &Value, id: &str, folders: &[LibraryFolder]) -> Verdict {
         .and_then(Value::as_str)
         .map(|t| clip(t, MAX_VISION_TEXT_CHARS))
         .filter(|t| !t.is_empty());
+    let mut folder = match_folder(folders, &str_field(v, "folder"));
+    let mut new_folder = None;
+    if folder.is_none() && !folders.is_empty() {
+        if let Some(p) = v.get("new_folder").and_then(proposal_from) {
+            // A "new" folder the schema already has is just that folder.
+            match match_folder(folders, &p.path) {
+                Some(existing) => folder = Some(existing),
+                None => new_folder = Some(p),
+            }
+        }
+    }
     Verdict {
         id: id.to_string(),
-        folder: match_folder(folders, &str_field(v, "folder")),
+        folder,
+        new_folder,
         title: clip(&str_field(v, "title"), MAX_TITLE_CHARS),
         summary: clip(&str_field(v, "summary"), MAX_SUMMARY_CHARS),
         tags: tags_field(v),
         text,
     }
+}
+
+/// A `new_folder` answer, kept only with a path and a reason. Clipped to two
+/// levels like a drafted schema.
+fn proposal_from(v: &Value) -> Option<ProposedFolder> {
+    let path = norm_path(&str_field(v, "path"));
+    let reason = clip(&str_field(v, "reason"), 200);
+    if path.is_empty() || reason.is_empty() {
+        return None;
+    }
+    let segs: Vec<&str> = path.split('/').collect();
+    Some(ProposedFolder {
+        path: segs[..segs.len().min(2)].join("/"),
+        key: normalize_key(&str_field(v, "key")).unwrap_or_default(),
+        description: clip(&str_field(v, "description"), 200),
+        reason,
+    })
 }
 
 /// Verdicts for the ids in `expected`, in that order; ids the model skipped
@@ -614,6 +680,7 @@ mod tests {
             wiki_prefix: String::new(),
             created_ms: 0,
             updated_ms: 0,
+            ..Default::default()
         }
     }
 
@@ -774,5 +841,31 @@ mod tests {
             h.join().unwrap();
         }
         assert!(peak.load(Ordering::SeqCst) <= MAX_PARALLEL_CALLS);
+    }
+
+    #[test]
+    fn a_new_folder_proposal_needs_a_reason_and_maps_onto_an_existing_folder() {
+        let folders = vec![folder("票据", "发票"), folder("合同", "")];
+        let ids = vec!["i1".to_string(), "i2".to_string(), "i3".to_string()];
+        let text = r#"[
+          {"id":"i1","folder":"","title":"a","new_folder":{"path":"票据/物业费/2026","key":"Wu Ye","description":"物业费","reason":"none fits"}},
+          {"id":"i2","folder":"","title":"b","new_folder":{"path":"合同","reason":"dup"}},
+          {"id":"i3","folder":"","title":"c","new_folder":{"path":"杂项"}}
+        ]"#;
+        let v = parse_verdicts(text, &folders, &ids);
+        let p = v[0].new_folder.as_ref().unwrap();
+        assert_eq!((p.path.as_str(), p.key.as_str(), p.reason.as_str()), ("票据/物业费", "wu-ye", "none fits"));
+        assert_eq!(v[0].folder, None);
+        assert_eq!((v[1].folder.as_deref(), v[1].new_folder.is_none()), (Some("合同"), true));
+        assert!(v[2].new_folder.is_none(), "no reason, no folder");
+
+        // Without a schema there is nothing to extend: proposals are ignored
+        // and the prompts do not offer them.
+        let v = parse_verdicts(text, &[], &ids);
+        assert!(v.iter().all(|v| v.new_folder.is_none()));
+        let brief = ItemBrief { id: "i1".into(), ..Default::default() };
+        assert!(classify_prompt(&folders, std::slice::from_ref(&brief)).contains("\"new_folder\""));
+        assert!(vision_prompt(&folders, &brief, "a.jpg").contains("\"new_folder\""));
+        assert!(!classify_prompt(&[], std::slice::from_ref(&brief)).contains("new_folder"));
     }
 }

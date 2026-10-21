@@ -316,6 +316,8 @@ const DICT: Record<string, string> = {
   存入产出: "Stored a deliverable",
   发布到知识库: "Published to the wiki",
   列出产出: "List artifacts",
+  列出资料目录: "List library folders",
+  "搜索产出 {0}": "Search artifacts {0}",
   "查看产出 {0}": "Artifact {0}",
   "删除产出 {0}": "Deleted artifact {0}",
   "列出在跑的 agent": "List running agents",

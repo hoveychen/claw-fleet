@@ -335,18 +335,22 @@ fn schedule_tool_def() -> Value {
 fn wiki_tool_def() -> Value {
     json!({
         "name": "fleet__wiki",
-        "description": "Publish and browse docs in the Fleet wiki knowledge base — knowledge you are banking for yourself and for later sessions. The split against `fleet__artifact` is AUDIENCE, not file format: a doc you are handing to a person belongs in the artifact store even when it is html or markdown, and a doc later sessions will read back belongs here. Use this instead of the `fleet wiki` CLI. Actions: publish (--path required; --slug/--title optional), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug and --to required — rename a slug, e.g. into a virtual directory; versions move with it), list, search (--query required — ranked full-text over docs AND artifacts: titles, folders, AI summaries, tags and body text; each hit line says which). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
+        "description": "Publish and browse docs in the Fleet wiki knowledge base — knowledge you are banking for yourself and for later sessions. The split against `fleet__artifact` is AUDIENCE, not file format: a doc you are handing to a person belongs in the artifact store even when it is html or markdown, and a doc later sessions will read back belongs here. Use this instead of the `fleet wiki` CLI. Every doc is FILED in one of the project's library folders: run action=folders first to see them (path, doc prefix, what belongs there), then publish with folder=<path>. Without a folder, or with one the project does not have, publish is refused with that list. Only if no folder fits, create one with new_folder=true plus folder, description and reason — the user is shown every folder an agent creates. Re-publishing an existing slug keeps its folder and needs none. Actions: folders, publish (--path and --folder required; --slug/--title optional — the slug becomes <folder prefix>/<name>), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug and --to required — rename a slug, e.g. into a virtual directory; versions move with it), list, search (--query required — ranked full-text over docs AND artifacts: titles, folders, AI summaries, tags and body text; each hit line says which). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["publish", "cat", "show", "mv", "list", "search"]},
+                "action": {"type": "string", "enum": ["folders", "publish", "cat", "show", "mv", "list", "search"]},
                 "to": {"type": "string", "description": "New slug (mv only)."},
                 "all": {"type": "boolean", "description": "Reach every workspace instead of just this one (list/search only)."},
                 "path": {"type": "string", "description": "File or dir to publish. Required for publish."},
-                "slug": {"type": "string", "description": "Doc slug (virtual path with /). Required for cat; optional for publish."},
+                "slug": {"type": "string", "description": "Doc slug. Required for cat. For publish: an existing slug re-publishes in place; otherwise only its last segment is used, under the folder's prefix."},
                 "title": {"type": "string", "description": "Doc title (publish only)."},
                 "version": {"type": "string", "description": "Version id (cat only; defaults to current)."},
                 "file": {"type": "string", "description": "Relative file within a dir doc (cat only; defaults to entry)."},
+                "folder": {"type": "string", "description": "Library folder to file into: a path from action=folders (its doc prefix or a unique leaf name also work). Required for publish/add unless re-publishing an existing item."},
+                "new_folder": {"type": "boolean", "description": "Create `folder` because no existing folder fits. Needs description and reason; the user reviews it."},
+                "description": {"type": "string", "description": "With new_folder: one line on what belongs in the new folder — later agents file by it."},
+                "reason": {"type": "string", "description": "With new_folder: why none of the existing folders fits. Shown to the user."},
                 "query": {"type": "string", "description": "Search terms. Required for search."}
             },
             "required": ["action"],
@@ -358,14 +362,18 @@ fn wiki_tool_def() -> Value {
 fn artifact_tool_def() -> Value {
     json!({
         "name": "fleet__artifact",
-        "description": "Store a finished DELIVERABLE in the Fleet artifact library (the desktop's 产出 page) so the user can find it, preview it and hand it to someone. Use this instead of the `fleet artifact` CLI. This is for files whose point is to be given to a person — a PDF, a slide deck, a spreadsheet, a rendered video or image, an exported dataset, and equally an outward-facing html report or a markdown spec you are delivering. The split against `fleet__wiki` is AUDIENCE, not file format: there is no format filter here (`add` takes any single file), so pick by whether the thing is being handed over (here) or banked for later sessions to read back (`fleet__wiki`). NOT for source code — that lives in the repo. Add the artifact as soon as you produce it: the file is usually written inside a `.worktrees/<task-id>` checkout that gets deleted when the plan merges, and once that happens the deliverable is gone. Actions: add (--path required; --title/--note optional and worth filling in — they are what the user reads on the card), list, get (--id required), search (--query required — ranked full-text over titles, notes, AI summaries, tags and the files' extracted text; this workspace unless all:true), delete (--id required). `add` reads a path on the host serving this session.",
+        "description": "Store a finished DELIVERABLE in the Fleet artifact library (the desktop's 产出 page) so the user can find it, preview it and hand it to someone. Use this instead of the `fleet artifact` CLI. This is for files whose point is to be given to a person — a PDF, a slide deck, a spreadsheet, a rendered video or image, an exported dataset, and equally an outward-facing html report or a markdown spec you are delivering. The split against `fleet__wiki` is AUDIENCE, not file format: there is no format filter here (`add` takes any single file), so pick by whether the thing is being handed over (here) or banked for later sessions to read back (`fleet__wiki`). NOT for source code — that lives in the repo. Add the artifact as soon as you produce it: the file is usually written inside a `.worktrees/<task-id>` checkout that gets deleted when the plan merges, and once that happens the deliverable is gone. Every artifact is FILED in one of the project's library folders: run action=folders first to see them, then add with folder=<path>. Without a folder, or with one the project does not have, add is refused with that list. Only if no folder fits, create one with new_folder=true plus folder, description and reason — the user is shown every folder an agent creates. Adding the same file again makes a new version that keeps its folder. Actions: folders, add (--path and --folder required; --title/--note optional and worth filling in — they are what the user reads on the card), list, get (--id required), search (--query required — ranked full-text over titles, notes, AI summaries, tags and the files' extracted text; this workspace unless all:true), delete (--id required). `add` reads a path on the host serving this session.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["add", "list", "get", "search", "delete"]},
+                "action": {"type": "string", "enum": ["folders", "add", "list", "get", "search", "delete"]},
                 "path": {"type": "string", "description": "File to store. Required for add. One file, not a directory — zip a folder first."},
                 "title": {"type": "string", "description": "Display name on the card (add only). Defaults to the filename; a real title is much more useful."},
                 "note": {"type": "string", "description": "One line on what this is and who it is for (add only). Shown under the preview."},
+                "folder": {"type": "string", "description": "Library folder to file into: a path from action=folders (its doc prefix or a unique leaf name also work). Required for publish/add unless re-publishing an existing item."},
+                "new_folder": {"type": "boolean", "description": "Create `folder` because no existing folder fits. Needs description and reason; the user reviews it."},
+                "description": {"type": "string", "description": "With new_folder: one line on what belongs in the new folder — later agents file by it."},
+                "reason": {"type": "string", "description": "With new_folder: why none of the existing folders fits. Shown to the user."},
                 "id": {"type": "string", "description": "Artifact id. Required for get and delete."},
                 "query": {"type": "string", "description": "Search terms. Required for search."},
                 "all": {"type": "boolean", "description": "Reach every workspace's artifacts instead of just this one (list/search only)."}
@@ -396,7 +404,7 @@ pub fn handle(
         "fleet__watch" => handle_watch(args, session_id),
         "fleet__loop" => handle_loop(args, session_id),
         "fleet__schedule" => handle_schedule(args, session_id),
-        "fleet__wiki" => handle_wiki(args, cwd),
+        "fleet__wiki" => handle_wiki(args, session_id, cwd),
         "fleet__artifact" => handle_artifact(args, session_id, cwd),
         "fleet__inspect" => crate::mcp_inspect::handle_inspect(args, &action_of(args)?),
         "fleet__control" => crate::mcp_inspect::handle_control(args, &action_of(args)?),
@@ -1691,15 +1699,17 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
     match action.as_str() {
         "add" => {
             let path = req(args, "path")?;
-            let a = artifacts::add(
+            let filing = crate::library_filing::FilingArgs::from_json(args);
+            let (a, filed) = crate::library_filing::add_artifact(
                 Path::new(&path),
                 arg(args, "title").as_deref(),
                 arg(args, "note").as_deref(),
                 cwd,
+                &filing,
                 session_id,
             )?;
             Ok(format!(
-                "Stored artifact {} — {} ({}, {} bytes){}. It is now on the 产出 page.",
+                "Stored artifact {} — {} ({}, {} bytes){}. It is now on the 产出 page.\n{}",
                 a.id,
                 a.title,
                 a.kind,
@@ -1708,9 +1718,11 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
                     ", hard-linked"
                 } else {
                     ", copied"
-                }
+                },
+                filed.describe(filing.reason.as_deref())
             ))
         }
+        "folders" => crate::library_filing::folders_text(cwd),
         "list" => {
             let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
             let here = crate::wiki::resolve_workspace_path(cwd);
@@ -1830,26 +1842,31 @@ fn library_search_text(
     Ok(out.trim_end().to_string())
 }
 
-fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
+fn handle_wiki(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result<String, String> {
     use crate::wiki;
     let action = action_of(args)?;
     match action.as_str() {
         "publish" => {
             let path = req(args, "path")?;
-            let doc = wiki::publish(
+            let filing = crate::library_filing::FilingArgs::from_json(args);
+            let (doc, filed) = crate::library_filing::publish_wiki(
                 Path::new(&path),
                 arg(args, "slug").as_deref(),
                 arg(args, "title").as_deref(),
                 cwd,
+                &filing,
+                session_id,
             )?;
             Ok(format!(
-                "Published {} (version {}, {} total). title: {}",
+                "Published {} (version {}, {} total). title: {}\n{}",
                 doc.slug,
                 doc.current_version,
                 doc.versions.len(),
-                doc.title
+                doc.title,
+                filed.describe(filing.reason.as_deref())
             ))
         }
+        "folders" => crate::library_filing::folders_text(cwd),
         "show" => {
             let slug = req(args, "slug")?;
             let doc = wiki::get_doc(&slug)?;

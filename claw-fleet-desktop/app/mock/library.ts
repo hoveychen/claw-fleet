@@ -6,12 +6,14 @@
 // mock schema has no CJK folder names).
 
 import type { IngestBatch, IngestBatchSummary, IngestItem } from "../../../shared-ts/libraryIngest";
+import type { LibraryFolderOrigin } from "../../../shared-ts/libraryTree";
 import { MOCK_ARTIFACTS, MOCK_WIKI_DOCS } from "./data";
 
 interface MockFolder {
   workspacePath: string;
   path: string;
   description: string;
+  origin?: LibraryFolderOrigin | null;
 }
 
 const NOW = Date.now();
@@ -20,6 +22,30 @@ export const MOCK_LIBRARY_FOLDERS: MockFolder[] = [
   { workspacePath: "/Users/demo/workspace/claw-fleet", path: "arch", description: "架构说明与设计取舍" },
   { workspacePath: "/Users/demo/workspace/claw-fleet", path: "promo", description: "发布物料：宣传片、脚本、海报" },
   { workspacePath: "/Users/demo/workspace/claw-fleet", path: "reports", description: "" },
+  {
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    path: "promo/posters",
+    description: "海报与配图终稿",
+    origin: {
+      source: "upload",
+      reason: "promo 下只有脚本和视频，海报终稿没有合适的子目录",
+      batchId: "20261021-101500-a1b2c3",
+      createdMs: NOW - 39 * 60_000,
+      acceptedMs: null,
+    },
+  },
+  {
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    path: "benchmarks",
+    description: "性能测量与基准数据",
+    origin: {
+      source: "agent",
+      reason: "已有目录没有放性能测量结果的地方",
+      sessionId: "61913e68-349c-4d83-9978-30ea53e00208",
+      createdMs: NOW - 2 * 3600_000,
+      acceptedMs: null,
+    },
+  },
   { workspacePath: "/Users/demo/workspace/api-server", path: "guides", description: "运维手册" },
 ];
 
@@ -107,6 +133,15 @@ export function mockLibraryDescribeFolder(args: Record<string, unknown>) {
   );
   if (!f) throw new Error(`folder '${String(args.path)}' not found`);
   f.description = String(args.description ?? "").trim();
+  return folderRec(f);
+}
+
+export function mockLibraryAcceptFolder(args: Record<string, unknown>) {
+  const f = MOCK_LIBRARY_FOLDERS.find(
+    (x) => x.workspacePath === args.workspacePath && x.path === args.path,
+  );
+  if (!f) throw new Error(`folder '${String(args.path)}' not found`);
+  if (f.origin && !f.origin.acceptedMs) f.origin = { ...f.origin, acceptedMs: Date.now() };
   return folderRec(f);
 }
 
@@ -215,19 +250,32 @@ const MOCK_BATCHES: IngestBatch[] = [
     finishedMs: NOW - 38 * 60_000,
     items: [
       mockItem("i0001", "发布资料/launch-plan.docx", "promo", "Q4 发布计划", "发布节奏、渠道与负责人，10 月 28 日上线。", ["发布", "计划"], { textMethod: "docx" }),
-      mockItem("i0002", "发布资料/海报-终稿.png", "promo", "发布海报终稿", "竖版海报，主标题「一个人带一支 agent 舰队」。", ["海报"], { textMethod: "vision", needsVision: true }),
+      mockItem("i0002", "发布资料/海报-终稿.png", "promo/posters", "发布海报终稿", "竖版海报，主标题「一个人带一支 agent 舰队」。", ["海报"], { textMethod: "vision", needsVision: true }),
       mockItem("i0003", "arch-review.pdf", "arch", "架构评审纪要 2026-10-14", "评审了数据平面拆分与三端接线，结论：保留单 core。", ["架构", "评审"]),
       mockItem("i0004", "notes.txt", null, "零散笔记", "几条未分类的待办。", ["笔记"], { textMethod: "text" }),
+      mockItem("i0006", "旧素材.rar", null, "旧素材", "", [], {
+        textMethod: "none",
+        error: "rar archive stored as is — Fleet does not open rar; extract it and upload the files to have them filed one by one",
+      }),
       mockItem("i0005", "发布资料/海报-终稿 copy.png", null, "", "", [], {
         status: "duplicate",
         artifactId: null,
         duplicateOf: { kind: "item", id: "i0002", title: "发布资料/海报-终稿.png" },
       }),
     ],
-    rejected: [{ relPath: "旧素材.rar", reason: "unsupported archive format (rar) — extract it and upload the files" }],
+    rejected: [],
     skippedJunk: 2,
     schemaDrafted: false,
-    createdFolders: [],
+    createdFolders: ["promo/posters"],
+    newFolders: [
+      {
+        path: "promo/posters",
+        description: "海报与配图终稿",
+        reason: "promo 下只有脚本和视频，海报终稿没有合适的子目录",
+        items: 1,
+        created: ["promo/posters"],
+      },
+    ],
     llmCalls: 3,
     costUsd: 0.031,
     error: null,
@@ -255,6 +303,7 @@ function summaryOf(b: IngestBatch): IngestBatchSummary {
     rejected: b.rejected.length,
     schemaDrafted: b.schemaDrafted,
     createdFolders: b.createdFolders,
+    newFolders: (b.newFolders ?? []).map((n) => ({ ...n, items: b.items.filter((i) => i.status === "filed" && i.folder === n.path).length })),
     llmCalls: b.llmCalls,
     costUsd: b.costUsd,
     error: b.error,

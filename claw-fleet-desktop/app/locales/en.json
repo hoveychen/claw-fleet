@@ -95,7 +95,10 @@
       "wake": "Wake on finish",
       "tail": "Tail lines",
       "step": "Step",
-      "type": "Task type"
+      "type": "Task type",
+      "folder": "Folder",
+      "new_folder": "New folder",
+      "description": "Folder description"
     },
     "param_for": {
       "handoff": {
@@ -166,13 +169,16 @@
         "list": "List docs",
         "search": "Search {{query}}",
         "show": "View versions of {{slug}}",
-        "mv": "Move {{slug}}"
+        "mv": "Move {{slug}}",
+        "folders": "Listed library folders"
       },
       "artifact": {
         "add": "Stored artifact {{title}}",
         "list": "Listed artifacts",
         "get": "Artifact {{id}}",
-        "delete": "Deleted artifact {{id}}"
+        "delete": "Deleted artifact {{id}}",
+        "folders": "Listed library folders",
+        "search": "Searched artifacts {{query}}"
       },
       "inspect": {
         "list": "Listed running agents",
@@ -3218,7 +3224,19 @@
     "note_encrypted": "Encrypted PDF — contents unreadable",
     "note_garbled": "The PDF's text layer is garbled",
     "note_truncated": "Too long — only the first part was read",
-    "note_no_text": "No readable text — filed by name only"
+    "note_no_text": "No readable text — filed by name only",
+    "ai_folder_upload": "Added by upload",
+    "ai_folder_agent": "Added by AI",
+    "ai_folder_accept": "Keep",
+    "ai_folder_accept_hint": "Keep this folder (clears the marker); rename or delete it if you do not want it",
+    "ai_folder_by_upload": "Created by the AI while filing an upload (batch {{id}})",
+    "ai_folder_by_agent": "Created by an agent filing an item (session {{id}})",
+    "ai_folder_reason": "Reason: {{reason}}",
+    "new_folders_head": "No existing folder fit, so the AI added {{n}} folder(s) — marked in the tree; keep, rename or delete them",
+    "new_folder_items": "{{n}} file(s)",
+    "new_folder_reason": "Reason: {{reason}}",
+    "note_archive_kept": "Fleet cannot open this kind of archive, so it was stored whole; extract it and upload the files to file them one by one",
+    "note_new_folder_capped": "The AI wanted a new folder for it, but this upload already added the maximum; left unfiled"
   },
   "nav_tab_projects": "Projects",
   "routines": {

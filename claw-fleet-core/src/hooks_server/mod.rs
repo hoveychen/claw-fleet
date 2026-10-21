@@ -1391,6 +1391,12 @@ fn handle_request(
                 route_library_folder_describe(ctx, request, &query, json_header, path)
             }
 
+            crate::routes::LIBRARY_FOLDER_ACCEPT
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_folder_accept(ctx, request, &query, json_header, path)
+            }
+
             crate::routes::LIBRARY_FOLDER_DELETE
                 if request.method() == &tiny_http::Method::Post =>
             {
