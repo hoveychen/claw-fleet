@@ -146,6 +146,14 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 判据不是「纯文本能不能表达」（永远能），而是「更丰富的渲染对{title_zh}是不是更好的答案」：要 diff 表 / 截图网格用 `html`，要展示本地图片用 `images`，要结构化输入用 `formFields`，可以复合。视觉呈现本身就是{title_zh}所求时（一幅画、带样式的 diff、一张图表），大方用 `html`，别退回 ASCII。需要 tab / 模态框 / 视频 / 音频这类超出上述词汇的布局时，改调 `fleet__render_a2ui`（A2UI v0.9 消息树，顶层 `{{ \"messageTree\": … }}`，返回 `{{ actionName, actionContext }}`；Fleet 不校验这棵树，无效的树产出空卡）。\n\
 \n\
+### 提到的资料必须挂进 `reviewDocs`\n\
+\n\
+卡片顶层还有一个 `reviewDocs` 字段（整张卡一份，不属于某个问题）：`[{{ \"kind\": \"wiki\"|\"file\", \"ref\": \"<slug 或路径>\", \"title\"?: \"<标签>\" }}]`。列进去的每份资料会出现在会话旁的资料栏里，{title_zh}点一下就能读，读到的是磁盘上的当前内容。\n\
+\n\
+- **正文里只要让{title_zh}去读某份文档**——你写的调研报告、设计稿、计划、规格、wiki 页面——就把它挂进 `reviewDocs`。只在正文里写一句「详见 `docs/x.md`」「报告已发到 wiki `arch/foo`」，{title_zh}没有简单的办法找到它。\n\
+- `file` 的 `ref` 写相对你 cwd 的路径或绝对路径；`wiki` 写 slug。`title` 写一句人能看懂的名字（「CPU 采样报告」），不要写文件名。\n\
+- 图片不走 `reviewDocs`：正文说「看下面这几张图」时，图必须真的挂在 `images` 里。\n\
+\n\
 {task_roles}\n\
 \n\
 ## 何时不发卡（豁免）\n\
@@ -243,6 +251,14 @@ Each `label` must be a concrete next action or answer, not a meta-choice like \"
 - `formFields`: structured inputs (`text`/`textarea`/`number`/`select`/`radio`/`checkbox`/`date`/`datetime`/`time`/`range`); answers come back keyed by field `name`.\n\
 \n\
 The test is not \"could plain text express this?\" (it always can) but \"is the richer rendering a better answer for {title_en}?\": a diff table or screenshot grid wants `html`, a local image wants `images`, structured input wants `formFields`, and they compose. When the visual IS the deliverable — a drawing, a styled diff, a chart — reach for `html` rather than falling back to ASCII. For layouts beyond that vocabulary (tabs, modals, video, audio) call `fleet__render_a2ui` instead (an A2UI v0.9 message tree, top-level `{{ \"messageTree\": … }}`, returning `{{ actionName, actionContext }}`; Fleet does not validate the tree, and an invalid one yields an empty card).\n\
+\n\
+### Material you mention goes in `reviewDocs`\n\
+\n\
+The card also takes a top-level `reviewDocs` field (one per card, not per question): `[{{ \"kind\": \"wiki\"|\"file\", \"ref\": \"<slug or path>\", \"title\"?: \"<label>\" }}]`. Each entry is listed in the material rail beside the conversation, where {title_en} opens it with one click and reads its current on-disk content.\n\
+\n\
+- **Whenever your text asks {title_en} to read a document** — a research report, design doc, plan, spec or wiki page you produced — attach it in `reviewDocs`. A bare \"see `docs/x.md`\" or \"published to wiki `arch/foo`\" in the prose leaves {title_en} no easy way to find it.\n\
+- For `file`, `ref` is a path relative to your cwd or absolute; for `wiki`, it is the slug. Give `title` a human name (\"CPU sampling report\"), not the file name.\n\
+- Images do not go in `reviewDocs`: when your text says \"see the images below\", they must actually be attached via `images`.\n\
 \n\
 {task_roles}\n\
 \n\
