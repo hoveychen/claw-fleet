@@ -27,10 +27,12 @@ import type {
   LibraryProjectTree,
 } from "../../shared-ts/libraryTree";
 import type { LibraryHit } from "../../shared-ts/librarySearch";
+import type { Artifact, WikiDoc } from "./types";
 
 export * from "../../shared-ts/libraryTree";
 export * from "../../shared-ts/libraryIngest";
 export * from "../../shared-ts/librarySearch";
+export * from "../../shared-ts/libraryBrowse";
 
 /** Mirrors `library_arms::MAX_CHUNK_BYTES` (the host refuses a larger piece). */
 export const LIBRARY_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -52,6 +54,51 @@ export function fetchLibraryTree(
   workspace?: string,
 ): Promise<LibraryProjectTree[]> {
   return client.request<LibraryProjectTree[]>("library_tree", workspace ? { workspace } : {});
+}
+
+/**
+ * The tree without the bulk: folders, per-folder counts and the newest
+ * `recent` items of each folder, no summaries or tags. The full tree is ~1.4 MB
+ * on a real library; a folder's items come from `fetchFolderItems` when it is
+ * opened.
+ */
+export function fetchLibraryOutline(
+  client: FleetTransport,
+  workspace?: string,
+  recent?: number,
+): Promise<LibraryProjectTree[]> {
+  return client.request<LibraryProjectTree[]>("library_tree", {
+    outline: true,
+    ...(workspace ? { workspace } : {}),
+    ...(recent !== undefined ? { recent } : {}),
+  });
+}
+
+/** One folder's items and everything beneath it, with summaries and tags;
+ *  `folder` `""` = the unfiled ones. */
+export function fetchFolderItems(
+  client: FleetTransport,
+  workspacePath: string,
+  folder: string,
+): Promise<LibraryEntry[]> {
+  return client.request<LibraryEntry[]>("library_folder_items", { workspacePath, folder });
+}
+
+/** One wiki doc's record, to open it without pulling `wiki_list`. */
+export function fetchWikiDoc(client: FleetTransport, slug: string): Promise<WikiDoc> {
+  return client.request<WikiDoc>("wiki_doc", { slug });
+}
+
+/** One artifact's record, to open it without pulling `artifact_list`. */
+export function fetchArtifactRecord(client: FleetTransport, id: string): Promise<Artifact> {
+  return client.request<Artifact>("artifact_get", { id });
+}
+
+/** A list-sized JPEG of an image artifact as a data URL, re-encoded on the
+ *  host; null when it is not an image or will not decode. */
+export async function fetchLibraryThumb(client: FleetTransport, id: string): Promise<string | null> {
+  const { thumb } = await client.request<{ thumb: string | null }>("library_thumb", { id });
+  return thumb ?? null;
 }
 
 export function searchLibrary(

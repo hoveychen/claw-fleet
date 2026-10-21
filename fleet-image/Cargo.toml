@@ -11,4 +11,4 @@ publish = false
 # added here is compiled at release-grade optimization on every debug build, so
 # only genuinely hot pixel work belongs in it.
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

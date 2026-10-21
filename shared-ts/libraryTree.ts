@@ -65,7 +65,14 @@ export interface LibraryProjectTree {
   workspacePath: string;
   workspaceName: string;
   folders: LibraryFolderRec[];
+  /** In an outline (`library_tree` with `outline: true`) only the newest few
+   *  per folder, without summary or tags. */
   items: LibraryEntry[];
+  /** Outline only: items filed directly in each folder path, `""` = unfiled.
+   *  Absent from a full tree, where `items` is the count. */
+  counts?: Record<string, number>;
+  /** Outline only: the newest item's time (an outline may keep no items). */
+  lastMs?: number;
 }
 
 /** Mirrors `claw_fleet_core::library::FolderRename`. */
@@ -89,6 +96,8 @@ export interface LibraryFolderNode {
 export interface LibraryTreeView {
   folders: LibraryFolderNode[];
   unfiled: LibraryEntry[];
+  /** How many items are unfiled — more than `unfiled` holds in an outline. */
+  unfiledTotal: number;
   /** Items shown in total (folders + unfiled). */
   shown: number;
 }
@@ -128,7 +137,7 @@ export function libraryEntryMatches(e: LibraryEntry, query: string): boolean {
  * vanishing.
  */
 export function buildLibraryTree(
-  project: Pick<LibraryProjectTree, "folders" | "items">,
+  project: Pick<LibraryProjectTree, "folders" | "items" | "counts">,
   keep?: (e: LibraryEntry) => boolean,
 ): LibraryTreeView {
   const byPath = new Map<string, LibraryFolderNode>();
@@ -165,17 +174,24 @@ export function buildLibraryTree(
     a.label.localeCompare(b.label, undefined, { numeric: true });
   const byTime = (a: LibraryEntry, b: LibraryEntry) =>
     b.updatedMs - a.updatedMs || a.id.localeCompare(b.id);
+  // An outline carries only a few items per folder; its counts are the truth
+  // (a search filters the items at hand, so it counts those instead).
+  const counts = keep ? undefined : project.counts;
+  const direct = (path: string, held: number) => counts?.[path] ?? held;
   const finish = (nodes: LibraryFolderNode[]): LibraryFolderNode[] => {
     for (const n of nodes) {
       n.children = finish(n.children);
       n.items.sort(byTime);
-      n.total = n.items.length + n.children.reduce((s, c) => s + c.total, 0);
+      n.total = direct(n.path, n.items.length) + n.children.reduce((s, c) => s + c.total, 0);
     }
     const out = keep ? nodes.filter((n) => n.total > 0) : nodes;
     return out.sort(byLabel);
   };
   unfiled.sort(byTime);
-  return { folders: finish(roots), unfiled, shown };
+  const folders = finish(roots);
+  const unfiledTotal = direct("", unfiled.length);
+  if (counts) shown = Object.values(counts).reduce((a, b) => a + b, 0);
+  return { folders, unfiled, unfiledTotal, shown };
 }
 
 /**

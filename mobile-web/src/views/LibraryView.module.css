@@ -1,28 +1,3 @@
-/* Type filter: 全部 / 文档 / 产出, as chips under the search box. */
-.types {
-  display: flex;
-  gap: 6px;
-}
-
-.type {
-  padding: 5px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-card);
-  color: var(--color-text-secondary);
-  font-family: var(--font-sans);
-  font-size: var(--t-ui, 14px);
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
-}
-
-.type[data-active="true"] {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  font-weight: 600;
-}
-
 .error {
   padding: 8px 12px;
   border-radius: 8px;
@@ -61,40 +36,61 @@
   gap: 8px;
 }
 
-.sectionHead {
-  margin: 0;
-  padding: 0 2px;
+
+/* Project / folder levels sit under the detail-page header, inline in the tab. */
+.levelHead {
+  margin: -4px -12px 0;
+}
+
+.levelHead header {
+  padding-top: 6px;
+}
+
+.headCount {
   font-size: var(--t-aux, 12px);
-  font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
 }
 
-.reviewBanner {
-  padding: 9px 12px;
-  border-radius: 10px;
-  background: var(--color-accent-soft);
-  color: var(--color-text);
-  font-size: var(--t-aux, 12px);
-  line-height: 1.5;
-}
-
-.mark {
-  background: var(--color-accent-soft);
-  color: var(--color-text);
-  border-radius: 3px;
-  padding: 0 1px;
-}
-
-.hitTags {
+/* 整理记录: the upload batches, folded behind one row. */
+.batchToggle {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--r-md, 14px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--t-ui, 14px);
+  text-align: left;
 }
 
-.hitTag {
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--color-bg-input);
+.batchToggle svg:first-child {
   color: var(--color-text-secondary);
-  font-size: 11px;
+}
+
+.batchCount {
+  margin-left: auto;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
+
+.batchCaret {
+  color: var(--color-text-dim);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.batchCaret[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.opening {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
 }

@@ -54,10 +54,58 @@ fn to_value<T: serde::Serialize>(v: T) -> Result<Value, String> {
 
 // ── Tree, search ────────────────────────────────────────────────────────────
 
-/// Every project's tree, or one project's (`workspace`).
+/// Every project's tree, or one project's (`workspace`). With `outline: true`
+/// only the folders, their counts and the newest `recent` items of each
+/// (default [`crate::library::OUTLINE_RECENT`]) — see
+/// [`crate::library::outline`]; the phone opens a folder with
+/// `library_folder_items`.
 pub(super) fn serve_library_tree(params: &Value) -> Result<Value, String> {
     let ws = str_param(params, "workspace").filter(|s| !s.trim().is_empty());
+    if params.get("outline").and_then(Value::as_bool).unwrap_or(false) {
+        let recent = params
+            .get("recent")
+            .and_then(Value::as_u64)
+            .map_or(crate::library::OUTLINE_RECENT, |n| n as usize);
+        return to_value(crate::library::outline(ws, recent)?);
+    }
     to_value(crate::library::tree(ws)?)
+}
+
+/// One folder's items and everything beneath it, with summaries and tags
+/// (`folder: ""` = the unfiled ones).
+pub(super) fn serve_library_folder_items(params: &Value) -> Result<Value, String> {
+    to_value(crate::library::folder_items(
+        required(params, "workspacePath")?,
+        str_param(params, "folder").unwrap_or(""),
+    )?)
+}
+
+/// One wiki doc, so opening an item does not need the whole `wiki_list`.
+pub(super) fn serve_wiki_doc(params: &Value) -> Result<Value, String> {
+    to_value(crate::wiki::get_doc(required(params, "slug")?)?)
+}
+
+/// One artifact's record, so opening an item does not need the whole
+/// `artifact_list`.
+pub(super) fn serve_artifact_get(params: &Value) -> Result<Value, String> {
+    to_value(crate::artifacts::get(required(params, "id")?)?)
+}
+
+/// A list-sized JPEG of an image artifact, re-encoded here so a folder of
+/// photographed receipts costs the phone ~12 KB a card instead of each full
+/// photo. `{thumb: null}` for anything that is not an image or will not
+/// decode — the card keeps its icon.
+pub(super) fn serve_library_thumb(params: &Value) -> Result<Value, String> {
+    let a = crate::artifacts::get(required(params, "id")?)?;
+    if a.kind != "image" {
+        return Ok(json!({ "thumb": null }));
+    }
+    // Keyed on the version as well, so a re-published image is re-encoded.
+    let ident = format!("library-thumb:{}:{}:{}", a.id, a.current_version, a.size_bytes);
+    let thumb = super::tail_thumb_cached(&ident, &a.mime, || {
+        crate::artifacts::read_bytes(&a.id, None).ok().map(|b| b.bytes)
+    });
+    Ok(json!({ "thumb": thumb.map(|b64| format!("data:image/jpeg;base64,{b64}")) }))
 }
 
 /// Ranked hits across both stores, with `<mark>` snippets.
@@ -398,6 +446,59 @@ mod tests {
         sweep_stale_parts(&root);
         assert!(!dir.exists(), "an emptied batch dir goes too");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn outline_folder_items_open_and_thumb_arms_reach_core() {
+        with_home(|ws| {
+            let wsp = ws.to_string_lossy().to_string();
+            crate::library::create_folder(&wsp, "发票", None).unwrap();
+            let png = ws.join("receipt.png");
+            image::RgbImage::from_pixel(900, 600, image::Rgb([200, 120, 40]))
+                .save(&png)
+                .unwrap();
+            let shot = crate::artifacts::add(&png, None, None, ws, None).unwrap();
+            crate::library::move_item("artifact", &shot.id, "发票").unwrap();
+            let pdf = ws.join("loose.pdf");
+            fs::write(&pdf, b"%PDF-1.4").unwrap();
+            let loose = crate::artifacts::add(&pdf, None, None, ws, None).unwrap();
+
+            let outline = serve_request(
+                "library_tree",
+                &json!({ "workspace": wsp, "outline": true, "recent": 0 }),
+            )
+            .unwrap();
+            assert_eq!(outline[0]["counts"], json!({ "": 1, "发票": 1 }), "{outline}");
+            assert_eq!(outline[0]["items"], json!([]));
+
+            let items = serve_request(
+                "library_folder_items",
+                &json!({ "workspacePath": wsp, "folder": "发票" }),
+            )
+            .unwrap();
+            assert_eq!(items.as_array().unwrap().len(), 1);
+            assert_eq!(items[0]["id"], json!(shot.id));
+            assert!(serve_request("library_folder_items", &json!({ "folder": "发票" })).is_err());
+
+            let got = serve_request("artifact_get", &json!({ "id": loose.id })).unwrap();
+            assert_eq!(got["name"], "loose.pdf");
+            assert!(serve_request("wiki_doc", &json!({ "slug": "no/such" })).is_err());
+
+            let thumb = serve_request("library_thumb", &json!({ "id": shot.id })).unwrap();
+            let url = thumb["thumb"].as_str().expect("an image gets a thumbnail");
+            assert!(url.starts_with("data:image/jpeg;base64,"), "{url}");
+            assert!(url.len() < 30 * 1024, "thumbnail is list-sized: {}", url.len());
+            // A quarter of the images in a real library are GIFs; they thumb from the first frame.
+            let gif = ws.join("hit.gif");
+            image::RgbImage::from_pixel(640, 360, image::Rgb([30, 90, 200]))
+                .save(&gif)
+                .unwrap();
+            let anim = crate::artifacts::add(&gif, None, None, ws, None).unwrap();
+            let thumb = serve_request("library_thumb", &json!({ "id": anim.id })).unwrap();
+            assert!(thumb["thumb"].as_str().is_some_and(|u| u.starts_with("data:image/jpeg;base64,")), "{thumb}");
+            let none = serve_request("library_thumb", &json!({ "id": loose.id })).unwrap();
+            assert_eq!(none["thumb"], Value::Null);
+        });
     }
 
     #[test]

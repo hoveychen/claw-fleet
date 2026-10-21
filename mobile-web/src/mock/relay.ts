@@ -42,6 +42,17 @@ import {
   MOCK_WIKI_ENTRY_B64,
 } from "./data";
 
+import {
+  mockArtifactRecord,
+  mockFolderItems,
+  mockLibraryBlob,
+  mockLibraryOutline,
+  mockLibrarySearch,
+  mockLibraryThumb,
+  mockLibraryTree,
+  mockWikiDoc,
+} from "./library";
+
 import scenes from "../../../scripts/site/fixtures/scenes.json";
 import { localizeMock } from "./demoLocale";
 
@@ -374,9 +385,39 @@ export class MockRelayClient extends RelayClient {
           : null;
       case "artifact_list":
         return MOCK_ARTIFACTS;
+      // 资料: the desktop mock's library fixtures (see mock/library.ts).
+      case "library_tree": {
+        const ws = params?.workspace ? String(params.workspace) : undefined;
+        return params?.outline
+          ? mockLibraryOutline(ws, params?.recent === undefined ? 3 : Number(params.recent))
+          : mockLibraryTree(ws);
+      }
+      case "library_folder_items":
+        return mockFolderItems(String(params?.workspacePath ?? ""), String(params?.folder ?? ""));
+      case "library_search":
+        return mockLibrarySearch(String(params?.query ?? ""), params?.workspace ? String(params.workspace) : undefined);
+      case "library_thumb":
+        return mockLibraryThumb(String(params?.id ?? ""));
+      case "wiki_doc": {
+        const slug = String(params?.slug ?? "");
+        const doc = mockWikiDoc(slug) ?? MOCK_WIKI_DOCS.find((d) => d.slug === slug);
+        if (!doc) throw new Error(`no such doc: ${slug}`);
+        return doc;
+      }
+      case "artifact_get": {
+        const id = String(params?.id ?? "");
+        const a = mockArtifactRecord(id) ?? MOCK_ARTIFACTS.find((x) => x.id === id);
+        if (!a) throw new Error(`no such artifact: ${id}`);
+        return a;
+      }
       // A 1x1 red PNG, so the image preview path renders something real rather
       // than an empty <img> that looks the same as a broken blob URL.
       case "artifact_blob": {
+        const fixture = mockLibraryBlob(String(params?.id ?? ""));
+        if (fixture) {
+          const length = atob(fixture.base64).length;
+          return { ...fixture, offset: 0, length, totalSize: length };
+        }
         // Answers the ranged shape too, so the download path's loop terminates
         // here the same way it does against a real host. Without `totalSize` a
         // client cannot tell a chunk from a whole file, and demo mode would

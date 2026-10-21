@@ -1,7 +1,10 @@
 // 资料 (library) browsing: what the folder column, the content column and the
 // project overview show, computed from one project's nested tree
-// (`buildLibraryTree`). Pure functions so the desktop and — later — the phone
-// list, filter and summarise a folder the same way.
+// (`buildLibraryTree`). Pure functions so the desktop and the phone list,
+// filter and summarise a folder the same way. The phone builds its tree from
+// an outline (`library_tree` with `outline: true`: counts plus the newest few
+// per folder) and fetches a folder's items when it is opened
+// (`library_folder_items`, labelled with `listingOf`).
 
 import type { LibraryEntry, LibraryFolderNode, LibraryProjectTree, LibraryTreeView } from "./libraryTree";
 import { folderAwaitingReview } from "./libraryTree";
@@ -86,6 +89,30 @@ export function folderListing(node: LibraryFolderNode): FolderListing[] {
   return out;
 }
 
+/** A folder's items as fetched on their own (`library_folder_items`: the
+ *  folder and everything beneath it), labelled by subfolder the way
+ *  `folderListing` labels a tree node's. `folder` `""` is the unfiled bucket. */
+export function listingOf(items: LibraryEntry[], folder: string): FolderListing[] {
+  return items.map((entry) => {
+    const f = entry.folder ?? "";
+    const sub = folder && f.startsWith(`${folder}/`) ? f.slice(folder.length + 1) : "";
+    return { entry, sub };
+  });
+}
+
+/** How many items a project holds and how many are unfiled — from its counts
+ *  when it is an outline, from its items otherwise. */
+export function projectTotals(p: Pick<LibraryProjectTree, "items" | "counts">): {
+  total: number;
+  unfiled: number;
+} {
+  if (p.counts) {
+    const total = Object.values(p.counts).reduce((a, b) => a + b, 0);
+    return { total, unfiled: p.counts[""] ?? 0 };
+  }
+  return { total: p.items.length, unfiled: p.items.filter((i) => !i.folder).length };
+}
+
 export type LibrarySort = "newest" | "oldest";
 
 /** Apply the type filter (`null` = all) and the time order. */
@@ -156,7 +183,7 @@ export function foldersAwaitingReview(folders: LibraryFolderNode[]): LibraryFold
 
 /** Newest item time of a project; 0 when it has none. */
 function lastActivity(p: LibraryProjectTree): number {
-  let max = 0;
+  let max = p.lastMs ?? 0;
   for (const e of p.items) max = Math.max(max, e.updatedMs);
   return max;
 }
