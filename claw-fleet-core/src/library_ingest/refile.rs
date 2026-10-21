@@ -502,7 +502,7 @@ fn file_one(roots: &Roots, r: &RefileRef, folder: &LibraryFolder) -> Result<Stri
             let now = if library::slug_dir(&current) == folder.wiki_prefix {
                 current
             } else {
-                let target = library::free_slug(&roots.wiki, &folder.wiki_prefix, wiki::slug_basename(&current))?;
+                let target = library::free_slug(&roots.wiki, &folder.wiki_prefix, &current)?;
                 wiki::move_doc_in(&roots.wiki, &current, &target)?.slug
             };
             for slug in &r.keep_alive {
@@ -755,12 +755,12 @@ mod tests {
         let contract = e.item(&b, "施工合同 A");
         assert_eq!(contract.folder.as_deref(), Some("合同"));
         let r = contract.refile.as_ref().unwrap();
-        assert_eq!((r.id.as_str(), r.from.as_str()), ("contracts/contract-a", "misc/contract-a"));
+        assert_eq!((r.id.as_str(), r.from.as_str()), ("reno/contracts/contract-a", "misc/contract-a"));
         // The old slug still finds the doc, so `[[misc/contract-a]]` stays live.
-        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "misc/contract-a").as_deref(), Some("contracts/contract-a"));
-        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "misc/contract-a").unwrap().slug, "contracts/contract-a");
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "misc/contract-a").as_deref(), Some("reno/contracts/contract-a"));
+        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "misc/contract-a").unwrap().slug, "reno/contracts/contract-a");
 
-        assert_eq!(e.item(&b, "油烟机说明").refile.as_ref().unwrap().id, "refs/hood-notes");
+        assert_eq!(e.item(&b, "油烟机说明").refile.as_ref().unwrap().id, "reno/refs/hood-notes");
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &manual).unwrap().path, "资料");
         // A proposed folder is created, marked as made by re-filing.
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &invoice).unwrap().path, "票据");
@@ -791,13 +791,13 @@ mod tests {
         let it = e.item(&b, "施工合同 A");
         assert_eq!((it.status, it.refile.as_ref().unwrap().id.as_str()), (ItemStatus::Undone, "misc/contract-a"));
         assert_eq!(wiki::get_doc_in(&e.roots.wiki, "misc/contract-a").unwrap().slug, "misc/contract-a");
-        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "contracts/contract-a"), None);
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "reno/contracts/contract-a"), None);
         assert!(wiki::get_doc_in(&e.roots.wiki, "misc/contract-a").unwrap().aliases.is_empty());
 
         // Move one in the batch view, then undo the whole batch.
         let hood = e.item(&b, "油烟机说明").id.clone();
         let b = move_item_in(&e.roots, &b.id, &hood, "合同").unwrap();
-        assert_eq!(e.item(&b, "油烟机说明").refile.as_ref().unwrap().id, "contracts/hood-notes");
+        assert_eq!(e.item(&b, "油烟机说明").refile.as_ref().unwrap().id, "reno/contracts/hood-notes");
         let b = undo_batch_in(&e.roots, &b.id).unwrap();
         assert_eq!(b.status, BatchStatus::Undone);
         assert_eq!(wiki::get_doc_in(&e.roots.wiki, "hood-notes").unwrap().slug, "hood-notes");
@@ -811,6 +811,7 @@ mod tests {
     fn filed_items_are_left_alone_and_a_taken_slug_gets_a_suffix() {
         let e = env();
         library::create_keyed_folder_in(&e.roots, &e.ws(), "合同", Some("合同"), Some("contracts")).unwrap();
+        // Filed by a build from before namespacing: re-filing migrates it first.
         e.doc("contracts/contract-a", "施工合同（已归档）", "");
         e.doc("contract-a", "补充合同", "");
         let brain = RefileBrain::default();
@@ -818,8 +819,12 @@ mod tests {
         assert_eq!(b.items.len(), 1, "only the unfiled doc: {:#?}", b.items);
         assert!(!b.schema_drafted, "the project has a schema");
         assert_eq!(brain.prompts.lock().unwrap().len(), 1, "no draft call");
-        assert_eq!(b.items[0].refile.as_ref().unwrap().id, "contracts/contract-a-2");
-        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "contracts/contract-a").unwrap().title, "施工合同（已归档）");
+        assert_eq!(b.items[0].refile.as_ref().unwrap().id, "reno/contracts/contract-a-2");
+        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "reno/contracts/contract-a").unwrap().title, "施工合同（已归档）");
+        assert_eq!(
+            wiki::resolve_slug_in(&e.roots.wiki, "contracts/contract-a").as_deref(),
+            Some("reno/contracts/contract-a")
+        );
     }
 
     #[test]
@@ -835,5 +840,27 @@ mod tests {
         run_refile_in(&e.roots, &e.ws(), true, &RefileBrain::default()).unwrap();
         let r = &workspaces_in(&e.roots)[0];
         assert_eq!((r.unfiled, r.refile_status), (1, Some(BatchStatus::Done)));
+    }
+
+    #[test]
+    fn re_filing_after_an_undo_keeps_the_undone_batchs_slugs_resolving() {
+        let e = env();
+        e.seed();
+        let first = run_refile_in(&e.roots, &e.ws(), true, &RefileBrain::default()).unwrap();
+        // The first batch put the contract under 资料; agents may have quoted that slug since.
+        let contract = e.item(&first, "施工合同 A").id.clone();
+        let first = move_item_in(&e.roots, &first.id, &contract, "资料").unwrap();
+        assert_eq!(e.item(&first, "施工合同 A").refile.as_ref().unwrap().id, "reno/refs/contract-a");
+        undo_batch_in(&e.roots, &first.id).unwrap();
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "reno/refs/contract-a"), None, "undo takes the redirect away");
+
+        let second = run_refile_in(&e.roots, &e.ws(), true, &RefileBrain::default()).unwrap();
+        let r = e.item(&second, "施工合同 A").refile.clone().unwrap();
+        assert_eq!(r.id, "reno/contracts/contract-a");
+        assert_eq!(r.keep_alive, ["reno/refs/contract-a"]);
+        // Every slug the doc ever had resolves to where it is now.
+        for old in ["misc/contract-a", "reno/refs/contract-a"] {
+            assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, old).as_deref(), Some("reno/contracts/contract-a"), "{old}");
+        }
     }
 }

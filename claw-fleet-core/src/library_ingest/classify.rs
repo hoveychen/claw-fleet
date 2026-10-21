@@ -1014,4 +1014,46 @@ mod tests {
         assert!(vision_prompt(&folders, &brief, "a.jpg", Language::Chinese).contains("\"new_folder\""));
         assert!(!classify_prompt(&[], std::slice::from_ref(&brief), Language::Chinese).contains("new_folder"));
     }
+
+    #[test]
+    fn text_language_counts_cjk_against_latin_words() {
+        assert_eq!(text_language("施工合同，甲方陈某，乙方装修公司"), Some(Language::Chinese));
+        // Chinese technical prose full of identifiers is still Chinese.
+        assert_eq!(
+            text_language("用 cargo test 跑 library_filing 模块的单测，再看 wiki redirect 是否生效"),
+            Some(Language::Chinese)
+        );
+        assert_eq!(
+            text_language("A summary of the quarterly budget review and its open questions"),
+            Some(Language::English)
+        );
+        assert_eq!(text_language("IMG_1 jpg"), None, "too few words to tell");
+        assert_eq!(text_language("2026-10-21 · 42"), None);
+    }
+
+    #[test]
+    fn the_dominant_language_is_chinese_unless_english_wins_outright() {
+        let en = "This is a plain English note about the build";
+        let zh = "这是一份关于构建流程的中文笔记";
+        assert_eq!(dominant_language([en, en, zh]), Language::English);
+        assert_eq!(dominant_language([en, zh]), Language::Chinese, "a tie stays Chinese");
+        assert_eq!(dominant_language([zh, zh, en]), Language::Chinese);
+        assert_eq!(dominant_language(["", "IMG_1"]), Language::Chinese, "nothing to go by");
+    }
+
+    #[test]
+    fn prompts_pin_the_project_language_not_the_items() {
+        let brief = ItemBrief {
+            id: "i0001".into(),
+            rel_path: "report.md".into(),
+            size: 10,
+            excerpt: "An English report".into(),
+        };
+        let zh = classify_prompt(&schema(), std::slice::from_ref(&brief), Language::Chinese);
+        assert!(zh.contains(Language::Chinese.rule()));
+        assert!(!zh.contains(Language::English.rule()));
+        let en = vision_prompt(&schema(), &brief, "a.png", Language::English);
+        assert!(en.contains(Language::English.rule()));
+        assert!(!en.contains(Language::Chinese.rule()));
+    }
 }

@@ -1401,14 +1401,21 @@ pub fn move_item_in(
     }
 }
 
-/// A slug under `prefix` for a doc named `base` that nothing occupies — no
-/// doc and no redirect another doc left (taking that over would cut the other
-/// doc's old link).
-pub(crate) fn free_slug(wiki_root: &Path, prefix: &str, base: &str) -> Result<String, String> {
+/// A slug under `prefix` for the doc at `doc` (named `base` there) that
+/// nothing else occupies — no other doc and no redirect another doc left
+/// (taking that over would cut the other doc's old link). A redirect to `doc`
+/// itself, left by an earlier move of it, is free: the doc takes it back.
+pub(crate) fn free_slug(wiki_root: &Path, prefix: &str, doc: &str) -> Result<String, String> {
+    let base = wiki::slug_basename(doc);
+    let current = wiki::resolve_slug_in(wiki_root, doc);
     for n in 1..100 {
         let name = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
         let slug = wiki::normalize_slug(&format!("{prefix}/{name}"))?;
-        if !wiki_root.join(wiki::slug_to_dirname(&slug)).exists() {
+        let dir = wiki_root.join(wiki::slug_to_dirname(&slug));
+        let own_redirect = !dir.join("doc.json").exists()
+            && current.is_some()
+            && wiki::resolve_slug_in(wiki_root, &slug) == current;
+        if !dir.exists() || own_redirect {
             return Ok(slug);
         }
     }
@@ -1468,7 +1475,7 @@ pub fn migrate_namespaces_in(
                 to: String::new(),
                 error: None,
             };
-            match free_slug(&roots.wiki, &folder.wiki_prefix, wiki::slug_basename(&doc.slug)) {
+            match free_slug(&roots.wiki, &folder.wiki_prefix, &doc.slug) {
                 Ok(to) => {
                     m.to = to;
                     if !dry_run {
@@ -1708,14 +1715,14 @@ mod tests {
         create_folder_in(&e.roots, &e.ws(), "发票/餐饮", None).unwrap();
         let folders = list_folders_in(&e.roots, &e.ws()).unwrap();
         let prefix = |p: &str| folders.iter().find(|f| f.path == p).unwrap().wiki_prefix.clone();
-        assert_eq!(prefix("发票"), "invoices");
-        assert_eq!(prefix("发票/2026"), "invoices/y2026");
-        assert_eq!(prefix("发票/餐饮"), "invoices/canyin");
+        assert_eq!(prefix("发票"), "project/invoices");
+        assert_eq!(prefix("发票/2026"), "project/invoices/y2026");
+        assert_eq!(prefix("发票/餐饮"), "project/invoices/canyin");
 
         // Docs file under the keyed prefix and are found there.
         let moved = move_item_in(&e.roots, ITEM_DOC, &e.doc("scan", &e.ws).slug, "发票/2026").unwrap();
-        assert_eq!(moved.id, "invoices/y2026/scan");
-        assert_eq!(item(&e.project(), "invoices/y2026/scan").folder.as_deref(), Some("发票/2026"));
+        assert_eq!(moved.id, "project/invoices/y2026/scan");
+        assert_eq!(item(&e.project(), "project/invoices/y2026/scan").folder.as_deref(), Some("发票/2026"));
 
         // Creating an existing folder again never changes its key.
         create_keyed_folder_in(&e.roots, &e.ws(), "发票", None, Some("bills")).unwrap();
@@ -1730,21 +1737,21 @@ mod tests {
     fn rename_keeps_keys_so_docs_keep_their_slugs() {
         let e = env();
         create_keyed_folder_in(&e.roots, &e.ws(), "发票", None, Some("invoices")).unwrap();
-        e.doc("invoices/jd-0920", &e.ws);
+        e.doc("project/invoices/jd-0920", &e.ws);
         let r = rename_folder_in(&e.roots, &e.ws(), "发票", "报销发票").unwrap();
         // Same key, same prefix: nothing to re-key.
         assert_eq!(r.moved_docs, 0);
         let p = e.project();
         assert_eq!(p.folders[0].path, "报销发票");
         assert_eq!(p.folders[0].key, "invoices");
-        assert_eq!(item(&p, "invoices/jd-0920").folder.as_deref(), Some("报销发票"));
+        assert_eq!(item(&p, "project/invoices/jd-0920").folder.as_deref(), Some("报销发票"));
 
         // Re-nesting under a new parent moves the docs under the parent's prefix.
         create_keyed_folder_in(&e.roots, &e.ws(), "财务", None, Some("finance")).unwrap();
         let r = rename_folder_in(&e.roots, &e.ws(), "报销发票", "财务/报销发票").unwrap();
         assert_eq!(r.moved_docs, 1);
         assert_eq!(
-            item(&e.project(), "finance/invoices/jd-0920").folder.as_deref(),
+            item(&e.project(), "project/finance/invoices/jd-0920").folder.as_deref(),
             Some("财务/报销发票")
         );
     }
@@ -1753,7 +1760,7 @@ mod tests {
     fn a_folder_holds_both_a_doc_and_an_artifact_and_the_rest_is_unfiled() {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "reports", Some("Quarterly reports")).unwrap();
-        e.doc("reports/q3", &e.ws);
+        e.doc("project/reports/q3", &e.ws);
         e.doc("loose-note", &e.ws);
         e.doc("elsewhere/deep", &e.ws);
         let filed = e.artifact("q3.pdf", &e.ws);
@@ -1764,8 +1771,8 @@ mod tests {
         let p = e.project();
         assert_eq!(p.folders.len(), 1);
         assert_eq!(p.folders[0].description, "Quarterly reports");
-        assert_eq!(p.folders[0].wiki_prefix, "reports");
-        assert_eq!(item(&p, "reports/q3").folder.as_deref(), Some("reports"));
+        assert_eq!(p.folders[0].wiki_prefix, "project/reports");
+        assert_eq!(item(&p, "project/reports/q3").folder.as_deref(), Some("reports"));
         assert_eq!(item(&p, &filed.id).folder.as_deref(), Some("reports"));
         assert_eq!(item(&p, "loose-note").folder, None);
         assert_eq!(item(&p, &loose.id).folder, None);
@@ -1805,8 +1812,8 @@ mod tests {
         .unwrap();
 
         create_folder_in(&e.roots, &wt.display().to_string(), "notes", None).unwrap();
-        e.doc("notes/from-worktree", &wt);
-        e.doc("notes/from-main", &repo);
+        e.doc("repo/notes/from-worktree", &wt);
+        e.doc("repo/notes/from-main", &repo);
 
         let all = tree_in(&e.roots, Some(&repo.display().to_string()));
         assert_eq!(all.len(), 1);
@@ -1824,10 +1831,10 @@ mod tests {
         fs::create_dir_all(&other).unwrap();
         create_folder_in(&e.roots, &e.ws(), "a", None).unwrap();
         create_folder_in(&e.roots, &other.display().to_string(), "b", None).unwrap();
-        e.doc("a/one", &e.ws);
-        e.doc("b/two", &other);
-        // `a/` exists only in the first project's schema.
-        e.doc("a/three", &other);
+        e.doc("project/a/one", &e.ws);
+        e.doc("other/b/two", &other);
+        // `project/a/` exists only in the first project's schema.
+        e.doc("project/a/three", &other);
 
         let all = tree_in(&e.roots, None);
         assert_eq!(all.len(), 2);
@@ -1836,8 +1843,8 @@ mod tests {
             .find(|p| p.workspace_path == other.display().to_string())
             .unwrap();
         assert_eq!(theirs.folders.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["b"]);
-        assert_eq!(item(theirs, "a/three").folder, None);
-        assert_eq!(item(theirs, "b/two").folder.as_deref(), Some("b"));
+        assert_eq!(item(theirs, "project/a/three").folder, None);
+        assert_eq!(item(theirs, "other/b/two").folder.as_deref(), Some("b"));
     }
 
     #[test]
@@ -1886,7 +1893,7 @@ mod tests {
 
         let moved = move_item_in(&e.roots, ITEM_DOC, "scan", "发票").unwrap();
         assert_eq!(moved.folder.as_deref(), Some("发票"));
-        assert_eq!(moved.id, "fapiao/scan");
+        assert_eq!(moved.id, "project/fapiao/scan");
         let moved_a = move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "发票").unwrap();
         assert_eq!(moved_a.folder.as_deref(), Some("发票"));
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &a.id).unwrap().path, "发票");
@@ -1894,9 +1901,10 @@ mod tests {
         let p = e.project();
         assert!(p.items.iter().all(|i| i.folder.as_deref() == Some("发票")));
 
-        // Back out: the doc returns to the wiki root, the artifact's path clears.
+        // Back out: the doc stays in the project's namespace but in no folder,
+        // the artifact's path clears.
         let out = move_item_in(&e.roots, ITEM_DOC, &moved.id, "").unwrap();
-        assert_eq!((out.id.as_str(), out.folder), ("scan", None));
+        assert_eq!((out.id.as_str(), out.folder), ("project/scan", None));
         move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "").unwrap();
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &a.id).unwrap().path, "");
 
@@ -1908,10 +1916,10 @@ mod tests {
     fn delete_is_refused_while_anything_is_filed_and_takes_subfolders() {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "docs/2026", None).unwrap();
-        e.doc("docs/2026/plan", &e.ws);
+        e.doc("project/docs/2026/plan", &e.ws);
         let err = delete_folder_in(&e.roots, &e.ws(), "docs").unwrap_err();
         assert!(err.contains("1 item"), "{err}");
-        move_item_in(&e.roots, ITEM_DOC, "docs/2026/plan", "").unwrap();
+        move_item_in(&e.roots, ITEM_DOC, "project/docs/2026/plan", "").unwrap();
         delete_folder_in(&e.roots, &e.ws(), "docs").unwrap();
         assert!(list_folders_in(&e.roots, &e.ws()).unwrap().is_empty());
         assert!(delete_folder_in(&e.roots, &e.ws(), "docs").is_err());
@@ -1923,9 +1931,9 @@ mod tests {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "docs/2026", Some("this year")).unwrap();
         create_folder_in(&e.roots, &e.ws(), "docs-old", None).unwrap();
-        e.doc("docs/2026/plan", &e.ws);
-        e.doc("docs/top", &e.ws);
-        e.doc("docs-old/keep", &e.ws);
+        e.doc("project/docs/2026/plan", &e.ws);
+        e.doc("project/docs/top", &e.ws);
+        e.doc("project/docs-old/keep", &e.ws);
         let a = e.artifact("deck.pptx", &e.ws);
         move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "docs/2026").unwrap();
 
@@ -1938,9 +1946,9 @@ mod tests {
         let kept = p.folders.iter().find(|f| f.path == "交付/2026").unwrap();
         assert_eq!(kept.description, "this year");
         let k = segment_key("交付");
-        assert_eq!(item(&p, &format!("{k}/2026/plan")).folder.as_deref(), Some("交付/2026"));
-        assert_eq!(item(&p, &format!("{k}/top")).folder.as_deref(), Some("交付"));
-        assert_eq!(item(&p, "docs-old/keep").folder.as_deref(), Some("docs-old"));
+        assert_eq!(item(&p, &format!("project/{k}/2026/plan")).folder.as_deref(), Some("交付/2026"));
+        assert_eq!(item(&p, &format!("project/{k}/top")).folder.as_deref(), Some("交付"));
+        assert_eq!(item(&p, "project/docs-old/keep").folder.as_deref(), Some("docs-old"));
         assert_eq!(item(&p, &a.id).folder.as_deref(), Some("交付/2026"));
 
         assert!(rename_folder_in(&e.roots, &e.ws(), "交付", "交付/内层").is_err());
@@ -1958,24 +1966,25 @@ mod tests {
         let other = e.ws.parent().unwrap().join("other");
         fs::create_dir_all(&other).unwrap();
         create_folder_in(&e.roots, &e.ws(), "arch", None).unwrap();
-        e.doc("arch/mine", &e.ws);
-        e.doc("arch/theirs", &other);
+        e.doc("project/arch/mine", &e.ws);
+        // Another project's doc under this project's prefix is not this rename's to move.
+        e.doc("project/arch/theirs", &other);
         rename_folder_in(&e.roots, &e.ws(), "arch", "design").unwrap();
-        assert!(wiki::get_doc_in(&e.roots.wiki, "design/mine").is_ok());
-        assert!(wiki::get_doc_in(&e.roots.wiki, "arch/theirs").is_ok());
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/design/mine").is_ok());
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/arch/theirs").is_ok());
     }
 
     #[test]
     fn rename_that_would_collide_in_the_wiki_changes_nothing() {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "a", None).unwrap();
-        e.doc("a/x", &e.ws);
-        // Some other project already owns `b/x`.
+        e.doc("project/a/x", &e.ws);
+        // Some other project already owns `project/b/x`.
         let other = e.ws.parent().unwrap().join("other");
         fs::create_dir_all(&other).unwrap();
-        e.doc("b/x", &other);
+        e.doc("project/b/x", &other);
         assert!(rename_folder_in(&e.roots, &e.ws(), "a", "b").is_err());
-        assert!(wiki::get_doc_in(&e.roots.wiki, "a/x").is_ok());
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/a/x").is_ok());
         assert_eq!(list_folders_in(&e.roots, &e.ws()).unwrap()[0].path, "a");
     }
 
@@ -2066,5 +2075,86 @@ mod tests {
         assert_eq!(project_health("/definitely/not/here/project", 50), ProjectHealth::Missing);
         let home = dirs::home_dir().unwrap().display().to_string();
         assert_eq!(project_health(&home, 50), ProjectHealth::Home);
+    }
+
+    #[test]
+    fn folder_prefixes_start_with_the_projects_namespace() {
+        let e = env();
+        let f = create_folder_in(&e.roots, &e.ws(), "research/notes", None).unwrap();
+        assert_eq!(f.wiki_prefix, "project/research/notes");
+        assert_eq!(rel_prefix(&f), "research/notes");
+        e.doc("project/research/notes/memo", &e.ws);
+        assert_eq!(item(&e.project(), "project/research/notes/memo").folder.as_deref(), Some("research/notes"));
+        // A CJK project name is spelled in pinyin.
+        let cjk = e.ws.parent().unwrap().join("装修");
+        fs::create_dir_all(&cjk).unwrap();
+        let f = create_folder_in(&e.roots, &cjk.display().to_string(), "合同", None).unwrap();
+        assert_eq!(f.wiki_prefix, "zhuangxiu/hetong");
+    }
+
+    #[test]
+    fn same_named_projects_get_distinct_namespaces_that_never_change() {
+        let e = env();
+        let base = e.ws.parent().unwrap();
+        let a = base.join("work/app");
+        let b = base.join("side/app");
+        let c = base.join("side2/side/app");
+        for p in [&a, &b, &c] {
+            fs::create_dir_all(p).unwrap();
+        }
+        let key = |p: &Path| p.display().to_string();
+        assert_eq!(project_namespace_in(&e.roots, &key(&a)), "app");
+        assert_eq!(project_namespace_in(&e.roots, &key(&b)), "side-app");
+        // Name and parent-name both taken: the hashed spelling.
+        let third = project_namespace_in(&e.roots, &key(&c));
+        assert!(third.starts_with("app-") && third.len() == "app-".len() + 6, "{third}");
+        // Persisted: asking again (in any order) gives the same answers, so
+        // a project's docs never move because another project appeared.
+        assert_eq!(project_namespace_in(&e.roots, &key(&b)), "side-app");
+        assert_eq!(project_namespace_in(&e.roots, &key(&a)), "app");
+        assert_eq!(project_namespace_in(&e.roots, &key(&c)), third);
+    }
+
+    #[test]
+    fn worktrees_share_their_repos_namespace() {
+        let e = env();
+        let repo = e.ws.join("repo");
+        fs::create_dir_all(repo.join(".git/worktrees/feat")).unwrap();
+        let wt = repo.join(".worktrees/feat");
+        fs::create_dir_all(&wt).unwrap();
+        fs::write(wt.join(".git"), format!("gitdir: {}\n", repo.join(".git/worktrees/feat").display())).unwrap();
+        let f = create_folder_in(&e.roots, &wt.display().to_string(), "notes", None).unwrap();
+        assert_eq!(f.wiki_prefix, "repo/notes");
+        assert_eq!(
+            project_namespace_in(&e.roots, &project_key(&wt.display().to_string())),
+            project_namespace_in(&e.roots, &repo.display().to_string())
+        );
+    }
+
+    #[test]
+    fn migration_moves_un_namespaced_docs_and_leaves_redirects() {
+        let e = env();
+        create_folder_in(&e.roots, &e.ws(), "research", None).unwrap();
+        e.doc("research/memo", &e.ws);
+        e.doc("project/research/already", &e.ws);
+        e.doc("loose", &e.ws);
+        // Another project's `research/x` is not this project's to move.
+        let other = e.ws.parent().unwrap().join("other");
+        fs::create_dir_all(&other).unwrap();
+        e.doc("research/x", &other);
+
+        let plan = migrate_namespaces_in(&e.roots, None, true).unwrap();
+        assert_eq!(plan.len(), 1, "{plan:?}");
+        assert_eq!((plan[0].from.as_str(), plan[0].to.as_str()), ("research/memo", "project/research/memo"));
+        assert!(wiki::get_doc_in(&e.roots.wiki, "research/memo").unwrap().slug == "research/memo", "dry run moves nothing");
+
+        let done = migrate_namespaces_in(&e.roots, Some(&e.ws()), false).unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].error, None);
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "research/memo").as_deref(), Some("project/research/memo"));
+        assert_eq!(item(&e.project(), "project/research/memo").folder.as_deref(), Some("research"));
+        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "research/x").unwrap().slug, "research/x");
+        // Idempotent.
+        assert!(migrate_namespaces_in(&e.roots, None, false).unwrap().is_empty());
     }
 }

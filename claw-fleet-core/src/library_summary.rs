@@ -888,6 +888,11 @@ mod tests {
         assert!(parse_summary("no").is_none());
         let p = summary_prompt("T", "document", &"x".repeat(10_000), classify::Language::Chinese);
         assert!(p.contains("Title: T") && p.len() < 5_000);
+        assert!(p.contains(classify::Language::Chinese.rule()));
+        let en = summary_prompt("T", "document", "body", classify::Language::English);
+        assert!(en.contains(classify::Language::English.rule()) && !en.contains(classify::Language::Chinese.rule()));
+        let v = vision_summary_prompt("a.png", "T", classify::Language::English);
+        assert!(v.contains(classify::Language::English.rule()));
     }
 
     #[test]

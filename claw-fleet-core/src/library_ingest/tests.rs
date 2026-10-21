@@ -165,7 +165,7 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
         .into_iter()
         .map(|f| (f.path, f.wiki_prefix))
         .collect();
-    assert!(keys.contains(&("票据".into(), "receipts".into())), "{keys:?}");
+    assert!(keys.contains(&("票据".into(), "home-reno/receipts".into())), "{keys:?}");
 
     let c = e.item(&b, "装修/合同/施工合同.md");
     assert_eq!((c.status, c.folder.as_deref()), (ItemStatus::Filed, Some("合同")));
@@ -429,7 +429,7 @@ fn the_classifier_may_add_a_folder_with_a_reason_and_undo_takes_it_back() {
     assert!(f.awaiting_review(), "an upload-made folder is marked for review");
     let o = f.origin.unwrap();
     assert_eq!((o.source.as_str(), o.batch_id.as_deref()), (library::ORIGIN_UPLOAD, Some(b.id.as_str())));
-    assert_eq!(f.wiki_prefix, "receipts/wuye");
+    assert_eq!(f.wiki_prefix, "home-reno/receipts/wuye");
 
     // Undoing the batch removes it with the drafted schema.
     let undone = undo_batch_in(&e.roots, &b.id).unwrap();

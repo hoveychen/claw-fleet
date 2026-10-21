@@ -313,3 +313,24 @@ fn measure_real_store() {
     }
     println!("backfill {:?}", crate::library_summary::backfill_plan(&idx).unwrap());
 }
+
+#[test]
+fn project_language_is_the_majority_of_the_projects_items() {
+    let e = env();
+    let idx = e.index();
+    let key = e.ws.display().to_string();
+    e.publish("a", "构建笔记", "这是一份关于构建流程的中文笔记，记录了几次失败");
+    e.publish("b", "部署记录", "上线步骤与回滚预案，以及值班联系人");
+    e.publish("c", "Release notes", "A plain English changelog of the last release and its fixes");
+    idx.sync(&e.roots).unwrap();
+    assert_eq!(idx.project_language(&key, &[]), classify::Language::Chinese);
+
+    // An English item alone does not flip a Chinese project...
+    let one_en = vec!["Another English report about the quarterly budget review".to_string()];
+    assert_eq!(idx.project_language(&key, &one_en), classify::Language::Chinese);
+    // ...but a project that is mostly English is English, whatever one item says.
+    let many_en = vec![one_en[0].clone(); 3];
+    assert_eq!(idx.project_language(&key, &many_en), classify::Language::English);
+    // A project with nothing indexed goes by the extra texts alone.
+    assert_eq!(idx.project_language("/elsewhere", &many_en), classify::Language::English);
+}
