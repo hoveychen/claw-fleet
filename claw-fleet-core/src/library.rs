@@ -1365,6 +1365,15 @@ mod tests {
     }
 
     #[test]
+    fn auto_keys_spell_hanzi_in_pinyin() {
+        assert_eq!(auto_key("合同"), "hetong");
+        assert_eq!(auto_key("2026 发票"), "2026-fapiao");
+        assert_eq!(auto_key("发票2026"), "fapiao-2026");
+        assert_eq!(auto_key("design"), "", "ascii names keep segment_key");
+        assert_eq!(auto_key("✨"), "");
+    }
+
+    #[test]
     fn keyed_folders_give_cjk_names_readable_prefixes() {
         let e = env();
         assert_eq!(normalize_key(" Invoices 2026 ").as_deref(), Some("invoices-2026"));
@@ -1377,7 +1386,7 @@ mod tests {
         let prefix = |p: &str| folders.iter().find(|f| f.path == p).unwrap().wiki_prefix.clone();
         assert_eq!(prefix("发票"), "invoices");
         assert_eq!(prefix("发票/2026"), "invoices/y2026");
-        assert_eq!(prefix("发票/餐饮"), format!("invoices/{}", segment_key("餐饮")));
+        assert_eq!(prefix("发票/餐饮"), "invoices/canyin");
 
         // Docs file under the keyed prefix and are found there.
         let moved = move_item_in(&e.roots, ITEM_DOC, &e.doc("scan", &e.ws).slug, "发票/2026").unwrap();
@@ -1553,7 +1562,7 @@ mod tests {
 
         let moved = move_item_in(&e.roots, ITEM_DOC, "scan", "发票").unwrap();
         assert_eq!(moved.folder.as_deref(), Some("发票"));
-        assert_eq!(moved.id, format!("{}/scan", segment_key("发票")));
+        assert_eq!(moved.id, "fapiao/scan");
         let moved_a = move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "发票").unwrap();
         assert_eq!(moved_a.folder.as_deref(), Some("发票"));
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &a.id).unwrap().path, "发票");

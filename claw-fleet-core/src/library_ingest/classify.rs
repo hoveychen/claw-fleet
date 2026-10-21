@@ -614,6 +614,7 @@ mod tests {
             wiki_prefix: String::new(),
             created_ms: 0,
             updated_ms: 0,
+            ..Default::default()
         }
     }
 
