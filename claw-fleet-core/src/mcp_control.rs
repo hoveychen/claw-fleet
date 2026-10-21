@@ -343,7 +343,7 @@ fn wiki_tool_def() -> Value {
                 "to": {"type": "string", "description": "New slug (mv only)."},
                 "all": {"type": "boolean", "description": "Reach every workspace instead of just this one (list/search only)."},
                 "path": {"type": "string", "description": "File or dir to publish. Required for publish."},
-                "slug": {"type": "string", "description": "Doc slug (virtual path with /). Required for cat; optional for publish."},
+                "slug": {"type": "string", "description": "Doc slug. Required for cat. For publish: an existing slug re-publishes in place; otherwise only its last segment is used, under the folder's prefix."},
                 "title": {"type": "string", "description": "Doc title (publish only)."},
                 "version": {"type": "string", "description": "Version id (cat only; defaults to current)."},
                 "file": {"type": "string", "description": "Relative file within a dir doc (cat only; defaults to entry)."},

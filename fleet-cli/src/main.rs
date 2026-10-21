@@ -1342,9 +1342,9 @@ pub(crate) enum WikiCommands {
     Publish {
         /// Path to the .html file, .md file, or directory
         path: std::path::PathBuf,
-        /// Stable doc id (lowercase letters/digits/hyphens). `/` separates
-        /// virtual directories, e.g. `arch/overview`. Default: normalized
-        /// file/dir name.
+        /// Doc name (lowercase letters/digits/hyphens). A new doc lands at
+        /// `<folder prefix>/<last segment of this>`; naming an existing slug
+        /// re-publishes it in place. Default: normalized file/dir name.
         #[arg(long)]
         slug: Option<String>,
         /// Display title. Default: <title> tag / first `# ` heading / slug.
