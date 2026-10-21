@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Library, ScanText, Square } from "lucide-react";
+import { Library, ListChecks, ScanText, Square } from "lucide-react";
 
 import { useUIStore } from "../store";
 import { getItem, setItem } from "../storage";
@@ -87,6 +87,7 @@ export function LibraryView() {
   const showBatches = lib.batches;
   const typeGroup = lib.typeGroup as LibraryTypeGroup | null;
   const update = useUIStore((s) => s.updateMainViewState);
+  const setViewMode = useUIStore((s) => s.setViewMode);
   const set = useCallback((patch: Partial<typeof lib>) => update("library", patch), [update]);
 
   const fetchDocs = useWikiDocsStore((s) => s.fetch);
@@ -577,6 +578,22 @@ export function LibraryView() {
     <PageShell
       view="library"
       title={t("nav_section_library", "资料")}
+      sectionSwitch={false}
+      // The documents / artifacts pages keep what this page does not have
+      // (bulk select, zipped folder export, storage usage); their own switch
+      // leads back here.
+      actions={
+        <button
+          type="button"
+          className={styles.manage_btn}
+          onClick={() => setViewMode("wiki")}
+          title={t("library.manage_pages_hint", "文档页与产出页：批量操作、打包导出、存储用量")}
+          aria-label={t("library.manage_pages", "管理页")}
+          data-library-manage
+        >
+          <ListChecks size={14} strokeWidth={1.6} />
+        </button>
+      }
       count={current ? current.items.length : null}
       countLoading={projects === null}
       search={{

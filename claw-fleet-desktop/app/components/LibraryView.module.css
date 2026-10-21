@@ -568,6 +568,18 @@
   cursor: pointer;
 }
 
+.type_chip_slot {
+  display: contents;
+}
+
+.type_chip_sep {
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  margin: 0 var(--space-1);
+  background: var(--color-border-soft);
+}
+
 .type_chip:hover:not(:disabled) {
   background: var(--color-bg-row-hover);
 }
@@ -834,7 +846,25 @@
   gap: 3px;
 }
 
+.card_title_row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card_icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--color-text-secondary);
+}
+
+.card_icon[data-type="doc"] {
+  color: var(--color-accent);
+}
+
 .card_title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -862,12 +892,16 @@
   font-weight: 600;
 }
 
+/* One line of tags; the ones that do not fit fade out at the right edge
+ * instead of ending on a hard cut mid-word. */
 .card_tags {
   min-width: 0;
   display: flex;
   gap: 4px;
   margin-top: 4px;
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
 }
 
 .card_meta {
@@ -915,4 +949,22 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.manage_btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.manage_btn:hover {
+  border-color: var(--color-border-soft);
+  background: var(--color-bg-row-hover);
+  color: var(--color-text-secondary);
 }

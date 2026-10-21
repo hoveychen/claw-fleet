@@ -6,20 +6,38 @@
 import type { LibraryEntry, LibraryFolderNode, LibraryProjectTree, LibraryTreeView } from "./libraryTree";
 import { folderAwaitingReview } from "./libraryTree";
 
-/** The type filter's buckets. A wiki doc is a document; an artifact goes by
- *  its coarse kind (`claw_fleet_core::artifacts::kind_of`). */
-export type LibraryTypeGroup = "doc" | "image" | "video" | "sheet" | "slides" | "audio" | "other";
+/** The type filter's buckets. `doc` is a wiki document and `artifact` any
+ *  artifact — the split the page's old 全部 / 文档 / 产出 switch made; the rest
+ *  narrow artifacts by their coarse kind (`claw_fleet_core::artifacts::kind_of`),
+ *  with PDF / Word / plain text together as `text`. */
+export type LibraryTypeGroup =
+  | "doc"
+  | "artifact"
+  | "text"
+  | "image"
+  | "video"
+  | "sheet"
+  | "slides"
+  | "audio"
+  | "other";
 
-/** Filter chips in display order. */
-export const LIBRARY_TYPE_GROUPS: LibraryTypeGroup[] = ["doc", "image", "video", "sheet", "slides", "audio", "other"];
+/** The first filter row: which store an item comes from. */
+export const LIBRARY_SOURCE_GROUPS: LibraryTypeGroup[] = ["doc", "artifact"];
 
+/** Artifact kinds, in display order, after the source chips. */
+export const LIBRARY_KIND_GROUPS: LibraryTypeGroup[] = ["text", "image", "video", "sheet", "slides", "audio", "other"];
+
+/** Every chip in display order. */
+export const LIBRARY_TYPE_GROUPS: LibraryTypeGroup[] = [...LIBRARY_SOURCE_GROUPS, ...LIBRARY_KIND_GROUPS];
+
+/** The one kind bucket an entry falls in (never `artifact`, the aggregate). */
 export function libraryTypeGroup(e: Pick<LibraryEntry, "kind" | "artifactKind">): LibraryTypeGroup {
   if (e.kind === "doc") return "doc";
   switch (e.artifactKind) {
     case "doc":
     case "text":
     case "pdf":
-      return "doc";
+      return "text";
     case "image":
     case "video":
     case "sheet":
@@ -29,6 +47,11 @@ export function libraryTypeGroup(e: Pick<LibraryEntry, "kind" | "artifactKind">)
     default:
       return "other";
   }
+}
+
+/** Whether an entry passes the type filter `g`. */
+export function matchesTypeGroup(e: Pick<LibraryEntry, "kind" | "artifactKind">, g: LibraryTypeGroup): boolean {
+  return g === "artifact" ? e.kind !== "doc" : libraryTypeGroup(e) === g;
 }
 
 /** An entry as the content column lists it: `sub` is the subfolder (relative
@@ -71,21 +94,33 @@ export function filterListing(
   group: LibraryTypeGroup | null,
   sort: LibrarySort,
 ): FolderListing[] {
-  const kept = group ? rows.filter((r) => libraryTypeGroup(r.entry) === group) : [...rows];
+  const kept = group ? rows.filter((r) => matchesTypeGroup(r.entry, group)) : [...rows];
   const dir = sort === "oldest" ? -1 : 1;
   return kept.sort(
     (a, b) => dir * (b.entry.updatedMs - a.entry.updatedMs) || a.entry.id.localeCompare(b.entry.id),
   );
 }
 
-/** How many entries fall in each type bucket — the chips show only non-empty ones. */
+/** How many entries fall in each type bucket, `artifact` counting every
+ *  artifact — the chips show only non-empty ones. */
 export function typeCounts(rows: FolderListing[]): Partial<Record<LibraryTypeGroup, number>> {
   const out: Partial<Record<LibraryTypeGroup, number>> = {};
   for (const r of rows) {
     const g = libraryTypeGroup(r.entry);
     out[g] = (out[g] ?? 0) + 1;
+    if (r.entry.kind !== "doc") out.artifact = (out.artifact ?? 0) + 1;
   }
   return out;
+}
+
+/** The chips worth drawing for `counts`: the source chips only when the
+ *  listing mixes docs and artifacts, the kind chips only when its artifacts
+ *  are of more than one kind — a chip that selects everything again is noise. */
+export function visibleTypeGroups(counts: Partial<Record<LibraryTypeGroup, number>>): LibraryTypeGroup[] {
+  const docs = counts.doc ?? 0;
+  const artifacts = counts.artifact ?? 0;
+  const kinds = LIBRARY_KIND_GROUPS.filter((g) => counts[g]);
+  return [...(docs > 0 && artifacts > 0 ? LIBRARY_SOURCE_GROUPS : []), ...(kinds.length > 1 ? kinds : [])];
 }
 
 /** One card of the project overview. */

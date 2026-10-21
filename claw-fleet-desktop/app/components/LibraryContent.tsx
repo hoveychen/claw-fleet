@@ -27,8 +27,9 @@ import {
   folderCards,
   folderListing,
   foldersAwaitingReview,
-  LIBRARY_TYPE_GROUPS,
+  LIBRARY_SOURCE_GROUPS,
   typeCounts,
+  visibleTypeGroups,
   type FolderListing,
   type LibrarySort,
   type LibraryTypeGroup,
@@ -89,6 +90,8 @@ function kindLabel(t: TFunction, e: { kind: string; artifactKind: string }): str
 function groupLabel(t: TFunction, g: LibraryTypeGroup): string {
   switch (g) {
     case "doc": return t("library.group_doc", "文档");
+    case "artifact": return t("library.group_artifact", "产出");
+    case "text": return t("library.group_text", "文稿");
     case "image": return t("library.group_image", "图片");
     case "video": return t("library.group_video", "视频");
     case "sheet": return t("library.group_sheet", "表格");
@@ -386,8 +389,10 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
     return q ? all.filter((r) => libraryEntryMatches(r.entry, q)) : all;
   }, [node, view, props.query]);
   const counts = useMemo(() => typeCounts(rows), [rows]);
-  // A filter whose bucket emptied (an item moved away) falls back to all.
-  const group = typeGroup && counts[typeGroup] ? typeGroup : null;
+  const chips = useMemo(() => visibleTypeGroups(counts), [counts]);
+  // A filter with no chip here (its bucket emptied, or it would select
+  // everything) falls back to all.
+  const group = typeGroup && chips.includes(typeGroup) ? typeGroup : null;
   const shown = useMemo(() => filterListing(rows, group, sort), [rows, group, sort]);
 
   const crumbs = folder ? folder.split("/") : [];
@@ -444,18 +449,23 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
               >
                 {t("library.group_all", "全部")} <span className={styles.count}>{rows.length}</span>
               </button>
-              {LIBRARY_TYPE_GROUPS.filter((g) => counts[g]).map((g) => (
-                <button
-                  key={g}
-                  type="button"
-                  role="tab"
-                  aria-selected={group === g}
-                  className={`${styles.type_chip}${group === g ? ` ${styles.type_chip_on}` : ""}`}
-                  onClick={() => props.onTypeGroup(g)}
-                  data-library-type={g}
-                >
-                  {groupLabel(t, g)} <span className={styles.count}>{counts[g]}</span>
-                </button>
+              {chips.map((g, i) => (
+                <span key={g} className={styles.type_chip_slot}>
+                  {/* A hairline between the source chips and the kind chips. */}
+                  {i > 0 && LIBRARY_SOURCE_GROUPS.includes(chips[i - 1]) && !LIBRARY_SOURCE_GROUPS.includes(g) && (
+                    <span className={styles.type_chip_sep} aria-hidden />
+                  )}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={group === g}
+                    className={`${styles.type_chip}${group === g ? ` ${styles.type_chip_on}` : ""}`}
+                    onClick={() => props.onTypeGroup(g)}
+                    data-library-type={g}
+                  >
+                    {groupLabel(t, g)} <span className={styles.count}>{counts[g]}</span>
+                  </button>
+                </span>
               ))}
             </div>
             <select
@@ -620,6 +630,11 @@ function ItemCard({
   const active = ctx.selectedKey === key;
   const text = snippet ?? entry.summary ?? "";
   const tags = entry.tags ?? [];
+  // Only a picture earns the thumbnail well; everything else gets a small
+  // kind icon by its title, so a folder of documents is not a column of
+  // empty squares.
+  const media = thumbMediaOf(entry);
+  const Icon = iconOf(entry);
   return (
     <button
       type="button"
@@ -631,9 +646,16 @@ function ItemCard({
       data-library-item={key}
       {...ctx.entryDrag(entry)}
     >
-      <Thumb entry={entry} />
+      {media && <Thumb entry={entry} media={media} />}
       <span className={styles.card_body}>
-        <span className={styles.card_title}>{entry.title}</span>
+        <span className={styles.card_title_row}>
+          {!media && (
+            <span className={styles.card_icon} data-type={entry.kind}>
+              <Icon size={14} strokeWidth={1.6} />
+            </span>
+          )}
+          <span className={styles.card_title}>{entry.title}</span>
+        </span>
         {text ? (
           <span className={styles.card_summary}>
             {snippetRuns(text).map((r, i) => (r.mark ? <mark key={i}>{r.text}</mark> : <span key={i}>{r.text}</span>))}
@@ -664,30 +686,30 @@ function ItemCard({
   );
 }
 
-/** An image's own bytes or a video's poster frame; the kind icon otherwise,
- *  and whenever loading fails — a thumbnail is decoration. */
-function Thumb({ entry }: { entry: LibraryEntry }) {
+/** Which picture a card can show: an image's own bytes or a video's poster
+ *  frame; null for every other kind. */
+function thumbMediaOf(entry: LibraryEntry): "image" | "video" | null {
+  if (entry.kind !== "artifact" || !entry.name) return null;
+  if (entry.artifactKind === "image") return "image";
+  if (entry.artifactKind === "video" && thumbMode(entry.mime ?? "", entry.sizeBytes ?? 0) === "video") return "video";
+  return null;
+}
+
+/** The thumbnail well of a picture card; the kind icon shows through when
+ *  loading fails — a thumbnail is decoration. */
+function Thumb({ entry, media }: { entry: LibraryEntry; media: "image" | "video" }) {
   const [failed, setFailed] = useState(false);
   // Stable: ArtifactThumb re-runs its render effect when this changes.
   const onFail = useCallback(() => setFailed(true), []);
   const Icon = iconOf(entry);
-  const name = entry.name ?? "";
-  const media =
-    !failed && entry.kind === "artifact" && name
-      ? entry.artifactKind === "image"
-        ? "image"
-        : entry.artifactKind === "video" && thumbMode(entry.mime ?? "", entry.sizeBytes ?? 0) === "video"
-          ? "video"
-          : null
-      : null;
-  const url = media ? artifactBlobUrl(entry.id, name) : "";
+  const url = failed ? "" : artifactBlobUrl(entry.id, entry.name ?? "");
   return (
-    <span className={styles.thumb} data-type={entry.kind} data-media={media ?? undefined}>
+    <span className={styles.thumb} data-type={entry.kind} data-media={failed ? undefined : media}>
       <Icon size={18} strokeWidth={1.5} />
-      {media === "image" && (
+      {!failed && media === "image" && (
         <img src={url} alt="" loading="lazy" decoding="async" draggable={false} onError={onFail} />
       )}
-      {media === "video" && (
+      {!failed && media === "video" && (
         <ArtifactThumb
           id={entry.id}
           url={url}
