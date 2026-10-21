@@ -156,18 +156,18 @@ Only if none of these fits, create one: {NEW_FOLDER_HOW}",
 }
 
 /// The folder an agent's args name, creating it when they ask to. Returns the
-/// folder and whether this call created it.
+/// folder and the paths this call created (parents first; empty = existed).
 pub fn resolve_in(
     roots: &Roots,
     workspace: &Path,
     args: &FilingArgs,
     session_id: Option<&str>,
-) -> Result<(LibraryFolder, bool), String> {
+) -> Result<(LibraryFolder, Vec<String>), String> {
     let project = project_of(workspace)?;
     let folders = library::list_folders_in(roots, &project)?;
     let asked = args.folder.as_deref();
     if let Some(f) = asked.and_then(|a| library::resolve_folder(&folders, a)) {
-        return Ok((f.clone(), false));
+        return Ok((f.clone(), Vec::new()));
     }
     if !args.new_folder {
         return Err(refusal(&project, &folders, asked));
@@ -191,11 +191,11 @@ pub fn resolve_in(
     )
 }
 
-/// Take back a folder this call created when the filing itself failed, so a
-/// refused publish leaves no empty marked folder behind.
-fn roll_back(roots: &Roots, folder: &LibraryFolder, created: bool) {
-    if created {
-        let _ = library::delete_folder_in(roots, &folder.workspace_path, &folder.path);
+/// Take back the folders this call created when the filing itself failed, so
+/// a refused publish leaves no empty marked folder behind.
+fn roll_back(roots: &Roots, folder: &LibraryFolder, created: &[String]) {
+    for path in created.iter().rev() {
+        let _ = library::delete_folder_in(roots, &folder.workspace_path, path);
     }
 }
 
@@ -247,10 +247,10 @@ pub fn publish_wiki_in(
     match wiki::publish_in(&roots.wiki, source, Some(&target), title, workspace) {
         Ok(doc) => Ok((
             doc,
-            Filed { folder: Some(folder.path.clone()), created, kept: false },
+            Filed { folder: Some(folder.path.clone()), created: !created.is_empty(), kept: false },
         )),
         Err(e) => {
-            roll_back(roots, &folder, created);
+            roll_back(roots, &folder, &created);
             Err(e)
         }
     }
@@ -280,15 +280,15 @@ pub fn add_artifact_in(
     let added = match artifacts::add_in(&roots.artifacts, source, title, note, workspace, session_id) {
         Ok(a) => a,
         Err(e) => {
-            roll_back(roots, &folder, created);
+            roll_back(roots, &folder, &created);
             return Err(e);
         }
     };
     match artifacts::update_in(&roots.artifacts, &added.id, None, None, None, Some(&folder.path)) {
-        Ok(a) => Ok((a, Filed { folder: Some(folder.path.clone()), created, kept: false })),
+        Ok(a) => Ok((a, Filed { folder: Some(folder.path.clone()), created: !created.is_empty(), kept: false })),
         Err(e) => {
             let _ = artifacts::delete_in(&roots.artifacts, &added.id);
-            roll_back(roots, &folder, created);
+            roll_back(roots, &folder, &created);
             Err(e)
         }
     }
@@ -517,12 +517,12 @@ mod tests {
         e.schema();
         let bad = e.file("data.xlsx", "PK");
         let args = FilingArgs {
-            folder: Some("表格".into()),
+            folder: Some("表格/2026".into()),
             new_folder: true,
             reason: Some("r".into()),
             description: Some("d".into()),
         };
         assert!(publish_wiki_in(&e.roots, &bad, None, None, &e.ws, &args, None).is_err());
-        assert!(!e.folders().iter().any(|f| f.path == "表格"));
+        assert!(!e.folders().iter().any(|f| f.path.starts_with("表格")), "parent taken back too");
     }
 }

@@ -819,9 +819,9 @@ pub fn create_keyed_folder_in(
 /// [`create_keyed_folder_in`] for a folder an AI (an agent filing something,
 /// an upload's classifier) decided to add. Every folder the call creates —
 /// the leaf and any missing ancestor — carries `origin`, so the user sees all
-/// of it marked. Returns the folder and whether the leaf was new; a folder
-/// that already existed is returned untouched (its origin, key and
-/// description stay as they are).
+/// of it marked. Returns the folder and the paths the call created, parents
+/// first (empty when the folder already existed — it is returned untouched:
+/// its origin, key and description stay as they are).
 pub fn create_ai_folder_in(
     roots: &Roots,
     workspace: &str,
@@ -829,11 +829,8 @@ pub fn create_ai_folder_in(
     description: Option<&str>,
     folder_key: Option<&str>,
     origin: FolderOrigin,
-) -> Result<(LibraryFolder, bool), String> {
-    let (folder, created) =
-        create_folder_impl(roots, workspace, path, description, folder_key, Some(origin))?;
-    let new = created.contains(&folder.path);
-    Ok((folder, new))
+) -> Result<(LibraryFolder, Vec<String>), String> {
+    create_folder_impl(roots, workspace, path, description, folder_key, Some(origin))
 }
 
 /// The one place folders are created. Returns the leaf and the paths it had
