@@ -186,6 +186,20 @@ pub const LIBRARY_FOLDER_DESCRIBE: &str = "/library_folder_describe";
 pub const LIBRARY_FOLDER_DELETE: &str = "/library_folder_delete";
 pub const LIBRARY_FOLDER_RENAME: &str = "/library_folder_rename";
 pub const LIBRARY_MOVE: &str = "/library_move";
+/// 资料 uploads (`crate::library_ingest`). A browser upload is
+/// `LIBRARY_INGEST_CREATE` `{workspace_path}` → one `LIBRARY_INGEST_UPLOAD`
+/// per file (`?batch=&path=`, raw body) → `LIBRARY_INGEST_START` `{batch_id}`.
+/// `LIBRARY_INGEST_BATCHES` (`?workspace=`) lists summaries,
+/// `LIBRARY_INGEST_BATCH` (`?id=`) one batch with its items; undo / move /
+/// dismiss are POSTs with `{batch_id, item_id?, folder?}`.
+pub const LIBRARY_INGEST_CREATE: &str = "/library_ingest_create";
+pub const LIBRARY_INGEST_UPLOAD: &str = "/library_ingest_upload";
+pub const LIBRARY_INGEST_START: &str = "/library_ingest_start";
+pub const LIBRARY_INGEST_BATCHES: &str = "/library_ingest_batches";
+pub const LIBRARY_INGEST_BATCH: &str = "/library_ingest_batch";
+pub const LIBRARY_INGEST_UNDO: &str = "/library_ingest_undo";
+pub const LIBRARY_INGEST_MOVE: &str = "/library_ingest_move";
+pub const LIBRARY_INGEST_DISMISS: &str = "/library_ingest_dismiss";
 pub const LIST_CLAUDE_BINARIES: &str = "/list_claude_binaries";
 pub const LIVE_THINKING: &str = "/live_thinking";
 pub const LLM_CONFIG: &str = "/llm/config";

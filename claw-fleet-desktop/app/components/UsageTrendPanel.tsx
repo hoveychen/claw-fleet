@@ -40,6 +40,7 @@ const SCENARIOS = [
   "mascot_quips",
   "session_explain",
   "drift_check",
+  "library_ingest",
 ] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
@@ -53,6 +54,7 @@ const SCENARIO_COLORS: Record<Scenario, string> = {
   mascot_quips: "#a855f7",         // violet — cosmetic
   session_explain: "#0ea5e9",      // sky — user-initiated side questions
   drift_check: "#ec4899",          // pink — outsider read of relay chains
+  library_ingest: "#14b8a6",       // teal — filing uploaded files
 };
 
 type RangeKey = "7d" | "30d" | "all";

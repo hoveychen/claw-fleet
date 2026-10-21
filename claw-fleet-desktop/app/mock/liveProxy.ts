@@ -1023,6 +1023,59 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { kind: a.kind, id: a.id, folder: a.folder },
   }),
 
+  // Uploads. The desktop hands over local paths (`library_ingest_start_paths`,
+  // no route — a tab has no host paths); a tab creates a batch, streams each
+  // picked file's bytes into it, then starts it.
+  library_ingest_create: (a) => ({
+    method: "POST",
+    path: "/library_ingest_create",
+    body: { workspace_path: a.workspacePath },
+  }),
+
+  library_ingest_upload: (a) => ({
+    method: "POST",
+    path: "/library_ingest_upload",
+    query: { batch: q(a.batchId), path: q(a.path) },
+    rawBody: a.file as BodyInit,
+  }),
+
+  library_ingest_start: (a) => ({
+    method: "POST",
+    path: "/library_ingest_start",
+    body: { batch_id: a.batchId },
+  }),
+
+  library_ingest_batches: (a) => ({
+    method: "GET",
+    path: "/library_ingest_batches",
+    query: a.workspace ? { workspace: q(a.workspace) } : undefined,
+  }),
+
+  library_ingest_batch: (a) => ({
+    method: "GET",
+    path: "/library_ingest_batch",
+    query: { id: q(a.id) },
+  }),
+
+  library_ingest_undo: (a) => ({
+    method: "POST",
+    path: "/library_ingest_undo",
+    body: { batch_id: a.batchId, item_id: a.itemId ?? null },
+  }),
+
+  library_ingest_move: (a) => ({
+    method: "POST",
+    path: "/library_ingest_move",
+    body: { batch_id: a.batchId, item_id: a.itemId, folder: a.folder },
+  }),
+
+  library_ingest_dismiss: (a) => ({
+    method: "POST",
+    path: "/library_ingest_dismiss",
+    empty: true,
+    body: { batch_id: a.batchId },
+  }),
+
   list_wiki_docs: () => ({
     method: "GET",
     path: "/wiki_docs",

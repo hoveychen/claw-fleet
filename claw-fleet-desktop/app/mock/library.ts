@@ -5,6 +5,7 @@
 // unfiled. The wiki-prefix rule is simplified here (ASCII names only — the
 // mock schema has no CJK folder names).
 
+import type { IngestBatch, IngestBatchSummary, IngestItem } from "../../../shared-ts/libraryIngest";
 import { MOCK_ARTIFACTS, MOCK_WIKI_DOCS } from "./data";
 
 interface MockFolder {
@@ -163,5 +164,135 @@ export function mockLibraryMoveItem(args: Record<string, unknown>) {
     );
     if (hit) return hit;
   }
+  return null;
+}
+
+// ── Uploads ──────────────────────────────────────────────────────────────────
+// One finished batch for the demo project, so the batch row and the summary
+// render in `?mock`. Undo and move edit it in memory; a new upload is not
+// simulated (there is no classifier here).
+
+const DEMO_WS = "/Users/demo/workspace/claw-fleet";
+
+function mockItem(
+  id: string,
+  relPath: string,
+  folder: string | null,
+  title: string,
+  summary: string,
+  tags: string[],
+  extra: Partial<IngestItem> = {},
+): IngestItem {
+  return {
+    id,
+    relPath,
+    name: relPath.slice(relPath.lastIndexOf("/") + 1),
+    size: 48_000,
+    sha256: id.repeat(8),
+    status: "filed",
+    textMethod: "pdf",
+    textChars: 2400,
+    needsVision: false,
+    folder,
+    title,
+    summary,
+    tags,
+    artifactId: `mock-${id}`,
+    duplicateOf: null,
+    error: null,
+    ...extra,
+  };
+}
+
+const MOCK_BATCHES: IngestBatch[] = [
+  {
+    id: "20261021-101500-a1b2c3",
+    workspacePath: DEMO_WS,
+    workspaceName: "claw-fleet",
+    status: "done",
+    createdMs: NOW - 40 * 60_000,
+    updatedMs: NOW - 38 * 60_000,
+    finishedMs: NOW - 38 * 60_000,
+    items: [
+      mockItem("i0001", "发布资料/launch-plan.docx", "promo", "Q4 发布计划", "发布节奏、渠道与负责人，10 月 28 日上线。", ["发布", "计划"], { textMethod: "docx" }),
+      mockItem("i0002", "发布资料/海报-终稿.png", "promo", "发布海报终稿", "竖版海报，主标题「一个人带一支 agent 舰队」。", ["海报"], { textMethod: "vision", needsVision: true }),
+      mockItem("i0003", "arch-review.pdf", "arch", "架构评审纪要 2026-10-14", "评审了数据平面拆分与三端接线，结论：保留单 core。", ["架构", "评审"]),
+      mockItem("i0004", "notes.txt", null, "零散笔记", "几条未分类的待办。", ["笔记"], { textMethod: "text" }),
+      mockItem("i0005", "发布资料/海报-终稿 copy.png", null, "", "", [], {
+        status: "duplicate",
+        artifactId: null,
+        duplicateOf: { kind: "item", id: "i0002", title: "发布资料/海报-终稿.png" },
+      }),
+    ],
+    rejected: [{ relPath: "旧素材.rar", reason: "unsupported archive format (rar) — extract it and upload the files" }],
+    skippedJunk: 2,
+    schemaDrafted: false,
+    createdFolders: [],
+    llmCalls: 3,
+    costUsd: 0.031,
+    error: null,
+  },
+];
+
+function summaryOf(b: IngestBatch): IngestBatchSummary {
+  const n = (f: (i: IngestItem) => boolean) => b.items.filter(f).length;
+  return {
+    id: b.id,
+    workspacePath: b.workspacePath,
+    workspaceName: b.workspaceName,
+    status: b.status,
+    createdMs: b.createdMs,
+    updatedMs: b.updatedMs,
+    finishedMs: b.finishedMs,
+    total: b.items.length,
+    extracted: b.items.length,
+    classified: b.items.length,
+    filed: n((i) => i.status === "filed"),
+    unfiled: n((i) => i.status === "filed" && !i.folder),
+    duplicates: n((i) => i.status === "duplicate"),
+    failed: n((i) => i.status === "failed"),
+    undone: n((i) => i.status === "undone"),
+    rejected: b.rejected.length,
+    schemaDrafted: b.schemaDrafted,
+    createdFolders: b.createdFolders,
+    llmCalls: b.llmCalls,
+    costUsd: b.costUsd,
+    error: b.error,
+  };
+}
+
+function batchOrThrow(id: unknown): IngestBatch {
+  const b = MOCK_BATCHES.find((x) => x.id === id);
+  if (!b) throw new Error(`upload batch '${String(id)}' not found`);
+  return b;
+}
+
+export function mockIngestBatches(args: Record<string, unknown>) {
+  return MOCK_BATCHES.filter((b) => !args.workspace || b.workspacePath === args.workspace).map(summaryOf);
+}
+
+export function mockIngestBatch(args: Record<string, unknown>) {
+  return batchOrThrow(args.id);
+}
+
+export function mockIngestUndo(args: Record<string, unknown>) {
+  const b = batchOrThrow(args.batchId);
+  for (const it of b.items) {
+    if (it.status === "filed" && (!args.itemId || it.id === args.itemId)) it.status = "undone";
+  }
+  if (!args.itemId) b.status = "undone";
+  return b;
+}
+
+export function mockIngestMove(args: Record<string, unknown>) {
+  const b = batchOrThrow(args.batchId);
+  const it = b.items.find((i) => i.id === args.itemId);
+  if (it) it.folder = String(args.folder ?? "") || null;
+  return b;
+}
+
+export function mockIngestDismiss(args: Record<string, unknown>) {
+  const i = MOCK_BATCHES.findIndex((b) => b.id === args.batchId);
+  if (i >= 0) MOCK_BATCHES.splice(i, 1);
   return null;
 }

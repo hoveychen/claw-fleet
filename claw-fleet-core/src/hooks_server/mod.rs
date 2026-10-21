@@ -368,6 +368,11 @@ pub fn serve(opts: ServeOptions) {
         });
     }
 
+    // Library uploads interrupted by the last shutdown pick up where they
+    // stopped. A desktop running beside this serve may resume them too; the
+    // per-batch worker lock lets only one of them run each batch.
+    std::thread::spawn(crate::library_ingest::resume_interrupted);
+
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests
     // and pushes them to connected SSE clients.
@@ -1393,6 +1398,46 @@ fn handle_request(
 
             crate::routes::LIBRARY_MOVE if request.method() == &tiny_http::Method::Post => {
                 route_library_move(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_CREATE
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_ingest_create(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_UPLOAD
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_ingest_upload(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_START
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_ingest_start(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_BATCHES => {
+                route_library_ingest_batches(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_BATCH => {
+                route_library_ingest_batch(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_UNDO if request.method() == &tiny_http::Method::Post => {
+                route_library_ingest_undo(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_MOVE if request.method() == &tiny_http::Method::Post => {
+                route_library_ingest_move(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_INGEST_DISMISS
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_ingest_dismiss(ctx, request, &query, json_header, path)
             }
 
             crate::routes::WIKI_DOCS => route_wiki_docs(ctx, request, &query, json_header, path),

@@ -42,6 +42,9 @@ pub const SCENARIO_MASCOT_QUIPS: &str = "mascot_quips";
 pub const SCENARIO_SESSION_EXPLAIN: &str = "session_explain";
 /// The commit-time diff review run from `fleet guard` ([`crate::reward_hack`]).
 pub const SCENARIO_REWARD_HACK_CHECK: &str = "reward_hack_check";
+/// Drafting a folder schema for, and filing, files uploaded to the library
+/// ([`crate::library_ingest`]).
+pub const SCENARIO_LIBRARY_INGEST: &str = "library_ingest";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -224,6 +227,18 @@ pub fn complete_accounted(
     timeout: Duration,
     scenario: &str,
 ) -> Option<String> {
+    complete_accounted_usage(provider, prompt, model, timeout, scenario).map(|(text, _)| text)
+}
+
+/// [`complete_accounted`] that also hands back the entry it logged, for
+/// callers that report their own spend (a library upload batch shows its cost).
+pub fn complete_accounted_usage(
+    provider: &dyn LlmProvider,
+    prompt: &str,
+    model: &str,
+    timeout: Duration,
+    scenario: &str,
+) -> Option<(String, FleetLlmUsageEntry)> {
     let started = Instant::now();
     let completion = provider.complete(prompt, model, timeout)?;
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -271,7 +286,7 @@ pub fn complete_accounted(
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    append_usage_entry(&FleetLlmUsageEntry {
+    let entry = FleetLlmUsageEntry {
         timestamp_ms,
         scenario: scenario.to_string(),
         provider: provider.name().to_string(),
@@ -285,9 +300,10 @@ pub fn complete_accounted(
         cost_usd,
         token_accurate,
         cost_accurate,
-    });
+    };
+    append_usage_entry(&entry);
 
-    Some(completion.text)
+    Some((completion.text, entry))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

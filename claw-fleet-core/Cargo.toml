@@ -71,6 +71,19 @@ futures-util = { version = "0.3", default-features = false }
 # lockfile, so promoting it here from dev-dependencies adds no new crate — and
 # hand-rolling a parser for nested YAML would be strictly worse.
 serde_yaml = "0.9"
+# Library upload (`library_ingest`): reading the archives a user drops in and
+# pulling text out of what they hold. Read-only use; zip's default features
+# (AES, bzip2, lzma, xz, zstd, time) are all off — plain deflate covers what
+# Finder, Windows and every office suite write. tar without xattr support.
+# Office files are zip + XML, hence quick-xml (already in the lockfile).
+# encoding_rs (also already in the lockfile) decodes GBK text files and the
+# GBK file names that zips made on Chinese Windows carry.
+zip = { version = "2.4", default-features = false, features = ["deflate-flate2", "flate2"] }
+tar = { version = "0.4", default-features = false }
+quick-xml = "0.38"
+encoding_rs = "0.8"
+# PDF text layer. Scanned PDFs (no text layer) go to the multimodal path instead.
+pdf-extract = "0.12"
 
 # Rust→TypeScript type generation. Optional + feature-gated so a normal `cargo
 # build` never pulls the proc-macro: the `#[derive(TS)]` attrs are wrapped in

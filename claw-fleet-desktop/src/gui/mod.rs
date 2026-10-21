@@ -1431,6 +1431,8 @@ pub fn run() {
             // once (`task_migration`). Thousands of small writes on a first
             // run, so off the setup thread.
             std::thread::spawn(|| claw_fleet_core::task_migration::run_and_log("desktop"));
+            // Library uploads the last quit interrupted carry on.
+            std::thread::spawn(claw_fleet_core::library_ingest::resume_interrupted);
 
             // The idle hooks (Stop → `fleet session idle`, UserPromptSubmit →
             // `fleet session resume`) have no UI switch: the Stop hook is what
@@ -1767,6 +1769,12 @@ pub fn run() {
             library_delete_folder,
             library_rename_folder,
             library_move_item,
+            library_ingest_start_paths,
+            library_ingest_batches,
+            library_ingest_batch,
+            library_ingest_undo,
+            library_ingest_move,
+            library_ingest_dismiss,
             export_artifact,
             export_bytes,
             reveal_artifact,

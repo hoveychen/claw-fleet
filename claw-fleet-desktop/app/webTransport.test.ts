@@ -216,6 +216,10 @@ const KNOWN_WEB_GAPS = [
   // Same shape: writes to a path the user picks on the caller's filesystem.
   // The browser build downloads the blob instead (`downloadArtifact`).
   "export_artifact",
+  // Uploads *local paths* into the library — the desktop's drop and pickers.
+  // A tab has no host paths; its branch of the same upload control streams the
+  // picked files' bytes through `library_ingest_create/upload/start` instead.
+  "library_ingest_start_paths",
   // And the folder-at-a-time version of it: the browser build streams the
   // archive down as a download (`downloadFolderZip`) rather than asking a tab
   // for a destination path it cannot write to.

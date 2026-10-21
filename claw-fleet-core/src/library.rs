@@ -23,8 +23,15 @@
 //!   share a folder's name. It is still reported, as the item's `location`.
 //! - **Wiki docs** have no folder field — a folder is the slug's directory part
 //!   — and slugs are lowercase ASCII. So every folder also has a derived
-//!   [`LibraryFolder::wiki_prefix`]: one [`segment_key`] per path segment. A
-//!   doc is in `F` when its slug's directory equals `F`'s prefix.
+//!   [`LibraryFolder::wiki_prefix`]: one ASCII segment per path segment. A doc
+//!   is in `F` when its slug's directory equals `F`'s prefix.
+//!
+//!   Each segment comes from that folder's own [`LibraryFolder::key`] when it
+//!   has one (`发票` with key `invoices`), else from [`segment_key`] of its
+//!   name. Keys exist because a hash is the only thing `segment_key` can make
+//!   of a CJK name, and `f-1a2b3c/receipt-0915` is not a slug anyone can read.
+//!   The upload organizer writes a key for every folder it drafts; a folder
+//!   made by hand without one keeps the derived segment.
 //!
 //! An item whose folder is not in the schema is reported with `folder: None`
 //! and shows under the tree's "unfiled" bucket. Nothing here invents a folder
@@ -104,8 +111,14 @@ pub struct LibraryFolder {
     /// later, to the agents and the organizer that file into it.
     #[serde(default)]
     pub description: String,
-    /// Where wiki docs filed here live: [`wiki_prefix`] of `path`. Derived on
-    /// every read; the persisted copy is informational only.
+    /// Readable ASCII slug segment for this folder's own (last) path segment,
+    /// e.g. `invoices` for `发票`. Empty = derive it with [`segment_key`].
+    /// Set once at creation; a rename keeps it, so docs filed here keep their
+    /// slugs when the display name changes.
+    #[serde(default)]
+    pub key: String,
+    /// Where wiki docs filed here live: the parent's prefix plus this folder's
+    /// key. Derived on every read; the persisted copy is informational only.
     #[serde(default)]
     pub wiki_prefix: String,
     #[serde(default)]
@@ -224,13 +237,62 @@ pub fn segment_key(segment: &str) -> String {
     }
 }
 
-/// A folder path's wiki prefix: [`segment_key`] per segment.
+/// A folder path's wiki prefix when no folder on it has a key: [`segment_key`]
+/// per segment. [`prefix_in`] is the schema-aware version.
 pub fn wiki_prefix(path: &str) -> String {
     path.split('/')
         .filter(|s| !s.is_empty())
         .map(segment_key)
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Longest a folder key may be. Shorter than a slug segment allows, so a few
+/// nested keys still leave room for the doc's own name.
+pub const MAX_KEY_LEN: usize = 32;
+
+/// Canonical form of a proposed folder key, or `None` when nothing usable is
+/// left (`发票` → `None`, `Invoices 2026` → `invoices-2026`).
+pub fn normalize_key(raw: &str) -> Option<String> {
+    let k: String = wiki::normalize_segment(raw).chars().take(MAX_KEY_LEN).collect();
+    let k = k.trim_matches('-').to_string();
+    (!k.is_empty()).then_some(k)
+}
+
+fn leaf_of(path: &str) -> &str {
+    path.rfind('/').map(|i| &path[i + 1..]).unwrap_or(path)
+}
+
+/// `path`'s wiki prefix within `folders`: each segment is its folder's
+/// [`LibraryFolder::key`] when that folder is in the list and has one, else
+/// [`segment_key`] of the segment's name.
+pub fn prefix_in(folders: &[LibraryFolder], path: &str) -> String {
+    let by_path: HashMap<&str, &LibraryFolder> =
+        folders.iter().map(|f| (f.path.as_str(), f)).collect();
+    prefix_with(&by_path, path)
+}
+
+fn prefix_with(by_path: &HashMap<&str, &LibraryFolder>, path: &str) -> String {
+    prefixes(path)
+        .iter()
+        .map(|p| match by_path.get(p.as_str()).filter(|f| !f.key.is_empty()) {
+            Some(f) => f.key.clone(),
+            None => segment_key(leaf_of(p)),
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Fill in every folder's `wiki_prefix` from the list itself.
+fn assign_prefixes(folders: &mut [LibraryFolder]) {
+    let computed: Vec<String> = {
+        let by_path: HashMap<&str, &LibraryFolder> =
+            folders.iter().map(|f| (f.path.as_str(), f)).collect();
+        folders.iter().map(|f| prefix_with(&by_path, &f.path)).collect()
+    };
+    for (f, p) in folders.iter_mut().zip(computed) {
+        f.wiki_prefix = p;
+    }
 }
 
 fn parent_of(path: &str) -> &str {
@@ -296,13 +358,10 @@ fn read_folders_dir(project: &Path) -> Vec<LibraryFolder> {
         .filter_map(|p| fs::read_to_string(&p).ok())
         .filter_map(|raw| serde_json::from_str::<LibraryFolder>(&raw).ok())
         .filter(|f| !f.path.is_empty())
-        .map(|mut f| {
-            f.wiki_prefix = wiki_prefix(&f.path);
-            f
-        })
         .collect();
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out.dedup_by(|a, b| a.path == b.path);
+    assign_prefixes(&mut out);
     out
 }
 
@@ -318,9 +377,9 @@ fn project_folders(roots: &Roots, key: &str) -> Vec<LibraryFolder> {
 
 fn write_folder(roots: &Roots, folder: &LibraryFolder) -> Result<(), String> {
     let file = folder_file(&project_dir(roots, &folder.workspace_path), &folder.path);
-    let mut stored = folder.clone();
-    stored.wiki_prefix = wiki_prefix(&folder.path);
-    let body = serde_json::to_vec_pretty(&stored).map_err(|e| e.to_string())?;
+    // `wiki_prefix` is stored as the caller computed it — informational only,
+    // `read_folders_dir` derives it again from the keys.
+    let body = serde_json::to_vec_pretty(folder).map_err(|e| e.to_string())?;
     crate::atomic_json::write_atomic(&file, &body)
         .map_err(|e| format!("write folder '{}': {e}", folder.path))
 }
@@ -371,6 +430,7 @@ pub fn import_legacy_artifact_folders(roots: &Roots) {
                                 workspace_path: key.clone(),
                                 path: p,
                                 description: String::new(),
+                                key: String::new(),
                                 wiki_prefix: String::new(),
                                 created_ms: now,
                                 updated_ms: now,
@@ -599,14 +659,17 @@ fn checked_key(workspace: &str) -> Result<String, String> {
     }
 }
 
-/// Refuse a folder whose wiki prefix another folder already maps to — the two
-/// would silently share their documents.
+/// Refuse a folder whose wiki prefix (`prefix`) another folder already maps
+/// to — the two would silently share their documents.
 fn ensure_prefix_free(
     folders: &[LibraryFolder],
     path: &str,
+    prefix: &str,
     ignore_under: Option<&str>,
 ) -> Result<(), String> {
-    let prefix = wiki_prefix(path);
+    if prefix.len() > MAX_PREFIX_LEN {
+        return Err(format!("folder path '{path}' is too long"));
+    }
     if let Some(other) = folders.iter().find(|f| {
         f.path != path
             && f.wiki_prefix == prefix
@@ -638,9 +701,24 @@ pub fn create_folder_in(
     path: &str,
     description: Option<&str>,
 ) -> Result<LibraryFolder, String> {
+    create_keyed_folder_in(roots, workspace, path, description, None)
+}
+
+/// [`create_folder_in`] with a readable [`LibraryFolder::key`] for the leaf
+/// (normalized with [`normalize_key`]; ancestors it has to create get derived
+/// segments). The key only applies when the folder is new — an existing
+/// folder's key is never changed here, since that would move its documents.
+pub fn create_keyed_folder_in(
+    roots: &Roots,
+    workspace: &str,
+    path: &str,
+    description: Option<&str>,
+    folder_key: Option<&str>,
+) -> Result<LibraryFolder, String> {
     import_legacy_artifact_folders(roots);
     let path = checked_path(path)?;
     let key = checked_key(workspace)?;
+    let leaf_key = folder_key.and_then(normalize_key).unwrap_or_default();
     with_project_lock(roots, &key, || {
         let mut folders = project_folders(roots, &key);
         let now = now_ms();
@@ -648,15 +726,19 @@ pub fn create_folder_in(
             if folders.iter().any(|f| f.path == p) {
                 continue;
             }
-            ensure_prefix_free(&folders, &p, None)?;
-            let f = LibraryFolder {
+            let mut f = LibraryFolder {
                 workspace_path: key.clone(),
                 path: p.clone(),
                 description: String::new(),
-                wiki_prefix: wiki_prefix(&p),
+                key: if p == path { leaf_key.clone() } else { String::new() },
+                wiki_prefix: String::new(),
                 created_ms: now,
                 updated_ms: now,
             };
+            folders.push(f.clone());
+            f.wiki_prefix = prefix_in(&folders, &p);
+            folders.pop();
+            ensure_prefix_free(&folders, &p, &f.wiki_prefix, None)?;
             write_folder(roots, &f)?;
             folders.push(f);
         }
@@ -789,12 +871,24 @@ pub fn rename_folder_in(
             let next = repath(&f.path, &from, &to).expect("filtered under from");
             checked_path(&next)?;
         }
-        ensure_prefix_free(&folders, &to, Some(&from))?;
+        // The schema as it will be: moved folders keep their keys, so only
+        // segments without one (and new ancestors of `to`) change spelling.
+        let after: Vec<LibraryFolder> = folders
+            .iter()
+            .map(|f| match repath(&f.path, &from, &to) {
+                Some(next) => LibraryFolder {
+                    path: next,
+                    ..f.clone()
+                },
+                None => f.clone(),
+            })
+            .collect();
+        let old_prefix = prefix_in(&folders, &from);
+        let new_prefix = prefix_in(&after, &to);
+        ensure_prefix_free(&folders, &to, &new_prefix, Some(&from))?;
 
         // Plan the wiki re-keys before touching anything: they are the part
         // that can collide (slugs are global), and they can be rolled back.
-        let old_prefix = wiki_prefix(&from);
-        let new_prefix = wiki_prefix(&to);
         let mut doc_plan: Vec<(String, String)> = Vec::new();
         if old_prefix != new_prefix {
             let needle = format!("{old_prefix}/");
@@ -837,6 +931,7 @@ pub fn rename_folder_in(
             let next = repath(&f.path, &from, &to).expect("filtered under from");
             let mut moved = (*f).clone();
             moved.path = next.clone();
+            moved.wiki_prefix = prefix_in(&after, &next);
             moved.updated_ms = now;
             write_folder(roots, &moved)?;
             have.insert(next);
@@ -847,9 +942,10 @@ pub fn rename_folder_in(
                     roots,
                     &LibraryFolder {
                         workspace_path: key.clone(),
-                        path: p,
+                        path: p.clone(),
                         description: String::new(),
-                        wiki_prefix: String::new(),
+                        key: String::new(),
+                        wiki_prefix: prefix_in(&after, &p),
                         created_ms: now,
                         updated_ms: now,
                     },
@@ -1057,6 +1153,58 @@ mod tests {
         for k in [cjk, a, b] {
             assert_eq!(wiki::normalize_slug(&k).unwrap(), k);
         }
+    }
+
+    #[test]
+    fn keyed_folders_give_cjk_names_readable_prefixes() {
+        let e = env();
+        assert_eq!(normalize_key(" Invoices 2026 ").as_deref(), Some("invoices-2026"));
+        assert_eq!(normalize_key("发票"), None);
+        create_keyed_folder_in(&e.roots, &e.ws(), "发票", Some("invoices"), Some("Invoices")).unwrap();
+        create_keyed_folder_in(&e.roots, &e.ws(), "发票/2026", None, Some("y2026")).unwrap();
+        // A child without a key still sits under its parent's key.
+        create_folder_in(&e.roots, &e.ws(), "发票/餐饮", None).unwrap();
+        let folders = list_folders_in(&e.roots, &e.ws()).unwrap();
+        let prefix = |p: &str| folders.iter().find(|f| f.path == p).unwrap().wiki_prefix.clone();
+        assert_eq!(prefix("发票"), "invoices");
+        assert_eq!(prefix("发票/2026"), "invoices/y2026");
+        assert_eq!(prefix("发票/餐饮"), format!("invoices/{}", segment_key("餐饮")));
+
+        // Docs file under the keyed prefix and are found there.
+        let moved = move_item_in(&e.roots, ITEM_DOC, &e.doc("scan", &e.ws).slug, "发票/2026").unwrap();
+        assert_eq!(moved.id, "invoices/y2026/scan");
+        assert_eq!(item(&e.project(), "invoices/y2026/scan").folder.as_deref(), Some("发票/2026"));
+
+        // Creating an existing folder again never changes its key.
+        create_keyed_folder_in(&e.roots, &e.ws(), "发票", None, Some("bills")).unwrap();
+        assert_eq!(list_folders_in(&e.roots, &e.ws()).unwrap()[0].key, "invoices");
+
+        // A second folder asking for a key already taken is refused.
+        let err = create_keyed_folder_in(&e.roots, &e.ws(), "收据", None, Some("invoices")).unwrap_err();
+        assert!(err.contains("发票"), "{err}");
+    }
+
+    #[test]
+    fn rename_keeps_keys_so_docs_keep_their_slugs() {
+        let e = env();
+        create_keyed_folder_in(&e.roots, &e.ws(), "发票", None, Some("invoices")).unwrap();
+        e.doc("invoices/jd-0920", &e.ws);
+        let r = rename_folder_in(&e.roots, &e.ws(), "发票", "报销发票").unwrap();
+        // Same key, same prefix: nothing to re-key.
+        assert_eq!(r.moved_docs, 0);
+        let p = e.project();
+        assert_eq!(p.folders[0].path, "报销发票");
+        assert_eq!(p.folders[0].key, "invoices");
+        assert_eq!(item(&p, "invoices/jd-0920").folder.as_deref(), Some("报销发票"));
+
+        // Re-nesting under a new parent moves the docs under the parent's prefix.
+        create_keyed_folder_in(&e.roots, &e.ws(), "财务", None, Some("finance")).unwrap();
+        let r = rename_folder_in(&e.roots, &e.ws(), "报销发票", "财务/报销发票").unwrap();
+        assert_eq!(r.moved_docs, 1);
+        assert_eq!(
+            item(&e.project(), "finance/invoices/jd-0920").folder.as_deref(),
+            Some("财务/报销发票")
+        );
     }
 
     #[test]

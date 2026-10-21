@@ -16,6 +16,11 @@ import { DEMO_BOARD, RELAY_CHAINS, RELAY_PATH_TO_ID, RELAY_SESSIONS } from "./de
 import { RELAY_SCRIPTS } from "./demoScripts";
 import { LIVE_MODE, installLiveProxy, liveInvoke } from "./liveProxy";
 import {
+  mockIngestBatch,
+  mockIngestBatches,
+  mockIngestDismiss,
+  mockIngestMove,
+  mockIngestUndo,
   mockLibraryCreateFolder,
   mockLibraryDeleteFolder,
   mockLibraryDescribeFolder,
@@ -746,6 +751,16 @@ async function handleIPC(
       return mockLibraryRenameFolder(args);
     case "library_move_item":
       return mockLibraryMoveItem(args);
+    case "library_ingest_batches":
+      return mockIngestBatches(args);
+    case "library_ingest_batch":
+      return mockIngestBatch(args);
+    case "library_ingest_undo":
+      return mockIngestUndo(args);
+    case "library_ingest_move":
+      return mockIngestMove(args);
+    case "library_ingest_dismiss":
+      return mockIngestDismiss(args);
     case "list_wiki_docs":
       return MOCK_WIKI_DOCS;
     case "search_wiki_docs":

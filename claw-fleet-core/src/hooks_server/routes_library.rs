@@ -149,3 +149,141 @@ pub(crate) fn route_library_move(
         .and_then(|r| crate::library::move_item(&r.kind, &r.id, &r.folder));
     respond(request, json_header, result);
 }
+
+// ── Uploads (`crate::library_ingest`) ───────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct BatchReq {
+    batch_id: String,
+    #[serde(default)]
+    item_id: Option<String>,
+    #[serde(default)]
+    folder: Option<String>,
+}
+
+/// `POST /library_ingest_create` — `{workspace_path}`; answers the new
+/// (receiving) batch.
+pub(crate) fn route_library_ingest_create(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        workspace_path: String,
+    }
+    let result = parse_body::<Req>(&mut request, crate::routes::LIBRARY_INGEST_CREATE)
+        .and_then(|r| crate::library_ingest::create_batch(&r.workspace_path));
+    respond(request, json_header, result);
+}
+
+/// `POST /library_ingest_upload?batch=&path=` — the raw body is one file's
+/// bytes, streamed to disk; `path` is its path inside the upload. Answers
+/// `{"size": n}`.
+pub(crate) fn route_library_ingest_upload(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let batch = decoded(query, "batch");
+    let rel = decoded(query, "path");
+    let result = crate::library_ingest::receive_file(&batch, &rel, &mut request.as_reader())
+        .map(|size| serde_json::json!({ "size": size }));
+    respond(request, json_header, result);
+}
+
+/// `POST /library_ingest_start` — `{batch_id}`; closes the batch and files it
+/// in the background.
+pub(crate) fn route_library_ingest_start(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let result = parse_body::<BatchReq>(&mut request, crate::routes::LIBRARY_INGEST_START)
+        .and_then(|r| crate::library_ingest::start_batch(&r.batch_id));
+    respond(request, json_header, result);
+}
+
+/// `GET /library_ingest_batches[?workspace=]` — batch summaries, newest first.
+pub(crate) fn route_library_ingest_batches(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let workspace = decoded(query, "workspace");
+    let ws = (!workspace.is_empty()).then_some(workspace.as_str());
+    respond(request, json_header, crate::library_ingest::list_batches(ws));
+}
+
+/// `GET /library_ingest_batch?id=` — one batch with its items.
+pub(crate) fn route_library_ingest_batch(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let id = decoded(query, "id");
+    respond(request, json_header, crate::library_ingest::get_batch(&id));
+}
+
+/// `POST /library_ingest_undo` — `{batch_id, item_id?}`: one item, or the
+/// whole batch without `item_id`. Answers the batch.
+pub(crate) fn route_library_ingest_undo(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let result = parse_body::<BatchReq>(&mut request, crate::routes::LIBRARY_INGEST_UNDO).and_then(
+        |r| match r.item_id.as_deref().filter(|i| !i.is_empty()) {
+            Some(item) => crate::library_ingest::undo_item(&r.batch_id, item),
+            None => crate::library_ingest::undo_batch(&r.batch_id),
+        },
+    );
+    respond(request, json_header, result);
+}
+
+/// `POST /library_ingest_move` — `{batch_id, item_id, folder}`; `folder: ""`
+/// unfiles. Answers the batch.
+pub(crate) fn route_library_ingest_move(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let result = parse_body::<BatchReq>(&mut request, crate::routes::LIBRARY_INGEST_MOVE).and_then(
+        |r| {
+            crate::library_ingest::move_item(
+                &r.batch_id,
+                r.item_id.as_deref().unwrap_or(""),
+                r.folder.as_deref().unwrap_or(""),
+            )
+        },
+    );
+    respond(request, json_header, result);
+}
+
+/// `POST /library_ingest_dismiss` — `{batch_id}`; answers `{}`.
+pub(crate) fn route_library_ingest_dismiss(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let result = parse_body::<BatchReq>(&mut request, crate::routes::LIBRARY_INGEST_DISMISS)
+        .and_then(|r| crate::library_ingest::dismiss_batch(&r.batch_id))
+        .map(|()| serde_json::json!({}));
+    respond(request, json_header, result);
+}

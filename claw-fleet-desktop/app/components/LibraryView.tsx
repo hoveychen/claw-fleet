@@ -10,10 +10,12 @@ import {
   FileSpreadsheet,
   FileText,
   FileType,
+  FileUp,
   Folder,
   FolderGit2,
   FolderOpen,
   FolderPlus,
+  FolderUp,
   Image as ImageIcon,
   Inbox,
   Library,
@@ -37,9 +39,28 @@ import {
   type LibraryFolderNode,
   type LibraryProjectTree,
 } from "../../../shared-ts/libraryTree";
+import {
+  ingestBatchIdOf,
+  ingestBatchKey,
+  isIngestRunning,
+  type IngestBatch,
+  type IngestBatchSummary,
+} from "../../../shared-ts/libraryIngest";
 import type { AuxDoc } from "../detailAux";
+import {
+  filesFromDataTransfer,
+  pickBrowserFiles,
+  pickLocalPaths,
+  startLocalUpload,
+  uploadBrowserFiles,
+  type PickKind,
+  type WebUploadFile,
+} from "../libraryUpload";
+import { isWebBuild } from "../hostEnv";
+import type { RegisteredProject } from "../projectList";
 import type { AuxCardTail } from "./auxDocMenu";
 import { ArtifactTabPane } from "./ArtifactTabPane";
+import { BATCH_POLL_MS, BatchDetail, BatchRow } from "./LibraryBatch";
 import { WikiTabPane } from "./WikiTabPane";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
@@ -62,6 +83,14 @@ const ARTIFACT_ICON: Record<string, typeof FileText> = {
 /** Rows carrying this attribute are drop zones; the value is a
  *  `libraryDropKey(project, folder)` (`folder: ""` = the unfiled bucket). */
 const DROP_ATTR = "data-library-drop";
+
+/** A project branch carries its key here: files dropped from the OS onto it
+ *  are uploaded into that project. */
+const UPLOAD_ATTR = "data-library-upload";
+
+function uploadTargetAt(el: Element | null): string | null {
+  return el?.closest(`[${UPLOAD_ATTR}]`)?.getAttribute(UPLOAD_ATTR) ?? null;
+}
 
 /** Wiki bodies matched by a full-text search, so a doc whose title does not
  *  contain the query still passes it. Debounced; a query shorter than two
@@ -109,6 +138,7 @@ interface TreeCtx {
   onRenameFolder: (project: string, from: string, to: string) => void;
   onDeleteFolder: (project: string, path: string, label: string) => void;
   onDescribeFolder: (project: string, path: string, description: string) => void;
+  onOpenBatch: (batchId: string) => void;
 }
 
 /**
@@ -150,12 +180,178 @@ export function LibraryView() {
     void load();
   }, [load]);
 
+  // Registered projects that have no library yet: listed in the project
+  // picker so a first upload has somewhere explicit to go.
+  const [registered, setRegistered] = useState<RegisteredProject[]>([]);
+  useEffect(() => {
+    invoke<RegisteredProject[]>("list_projects")
+      .then((r) => setRegistered((r ?? []).filter((p) => !p.archivedAtMs)))
+      .catch(() => {});
+  }, []);
+  const allProjects = useMemo<LibraryProjectTree[]>(() => {
+    const tree = projects ?? [];
+    const extra = registered
+      .filter((r) => !tree.some((p) => p.workspacePath === r.path))
+      .map((r) => ({ workspacePath: r.path, workspaceName: r.name, folders: [], items: [] }))
+      .sort((a, b) => a.workspaceName.localeCompare(b.workspaceName));
+    return [...tree, ...extra];
+  }, [projects, registered]);
+
+  // ── Upload batches ────────────────────────────────────────────────────────
+  const [batches, setBatches] = useState<IngestBatchSummary[]>([]);
+  const [webUpload, setWebUpload] = useState<{ project: string; sent: number; total: number } | null>(null);
+  const batchSig = useRef<string | null>(null);
+  const loadBatches = useCallback(async () => {
+    try {
+      const list = (await invoke<IngestBatchSummary[]>("library_ingest_batches", { workspace: null })) ?? [];
+      setBatches(list);
+      // A batch that filed, finished or was undone changed the tree.
+      const sig = list.map((b) => `${b.id}:${b.status}:${b.filed}:${b.undone}`).join("|");
+      if (batchSig.current !== null && sig !== batchSig.current) {
+        void load();
+        void fetchDocs();
+      }
+      batchSig.current = sig;
+    } catch {
+      // The batch list is a companion to the tree; the tree still works.
+    }
+  }, [load, fetchDocs]);
+  useEffect(() => {
+    void loadBatches();
+  }, [loadBatches]);
+  const anyRunning = batches.some((b) => isIngestRunning(b.status));
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = window.setInterval(() => void loadBatches(), BATCH_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [anyRunning, loadBatches]);
+
+  const afterStart = useCallback(
+    (b: IngestBatch) => {
+      setError(null);
+      set({ selectedKey: ingestBatchKey(b.id) });
+      void loadBatches();
+    },
+    [set, loadBatches],
+  );
+  const uploadPaths = useCallback(
+    async (p: string, paths: string[]) => {
+      if (paths.length === 0) return;
+      try {
+        afterStart(await startLocalUpload(p, paths));
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [afterStart],
+  );
+  const uploadWebFiles = useCallback(
+    async (p: string, files: WebUploadFile[]) => {
+      if (files.length === 0) return;
+      setWebUpload({ project: p, sent: 0, total: files.length });
+      try {
+        afterStart(
+          await uploadBrowserFiles(p, files, (sent, total) => setWebUpload({ project: p, sent, total })),
+        );
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setWebUpload(null);
+      }
+    },
+    [afterStart],
+  );
+  const onUpload = useCallback(
+    (p: string, kind: PickKind) => {
+      if (!isWebBuild()) {
+        pickLocalPaths(kind)
+          .then((paths) => uploadPaths(p, paths))
+          .catch((e) => setError(String(e)));
+      } else {
+        // Synchronous from the click: the browser only opens a file dialog
+        // inside the user's activation window.
+        void pickBrowserFiles(kind).then((files) => uploadWebFiles(p, files));
+      }
+    },
+    [uploadPaths, uploadWebFiles],
+  );
+
   // A stored project key from before the tree (a string-derived repo root) may
   // name nothing core knows; fall back to every project rather than a blank.
   const activeProject = useMemo(
-    () => (projects ?? []).find((p) => p.workspacePath === project)?.workspacePath ?? "",
-    [projects, project],
+    () => allProjects.find((p) => p.workspacePath === project)?.workspacePath ?? "",
+    [allProjects, project],
   );
+
+  // ── Dropping files from the OS ────────────────────────────────────────────
+  // The target is the project branch under the pointer; with the page
+  // filtered to one project (or only one existing) anywhere on the list will
+  // do. Never a guess beyond that — the project must be explicit.
+  const [dropProject, setDropProject] = useState<string | null>(null);
+  const fallbackTarget = activeProject || (allProjects.length === 1 ? allProjects[0].workspacePath : "");
+  const dropRefs = useRef({ fallbackTarget, uploadPaths, uploadWebFiles });
+  dropRefs.current = { fallbackTarget, uploadPaths, uploadWebFiles };
+  const noTargetMsg = t("library.drop_pick_project", "拖到某个项目上再松开（或先在上方选定项目）");
+  const noTargetRef = useRef(noTargetMsg);
+  noTargetRef.current = noTargetMsg;
+  useEffect(() => {
+    if (isWebBuild()) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    const targetAt = (pos: { x: number; y: number }) => {
+      const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+      return (
+        uploadTargetAt(document.elementFromPoint(pos.x / dpr, pos.y / dpr)) ||
+        dropRefs.current.fallbackTarget ||
+        null
+      );
+    };
+    (async () => {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        const un = await getCurrentWebview().onDragDropEvent((event) => {
+          const p = event.payload;
+          if (p.type === "enter" || p.type === "over") {
+            setDropProject(targetAt(p.position));
+          } else if (p.type === "leave") {
+            setDropProject(null);
+          } else if (p.type === "drop") {
+            const target = targetAt(p.position);
+            setDropProject(null);
+            if (!p.paths?.length) return;
+            if (!target) setError(noTargetRef.current);
+            else void dropRefs.current.uploadPaths(target, p.paths);
+          }
+        });
+        if (disposed) un();
+        else unlisten = un;
+      } catch {
+        // Not a Tauri webview: the HTML5 handlers on the list take drops.
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+  const onWebDragOver = (e: React.DragEvent) => {
+    if (!isWebBuild() || !e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDropProject(uploadTargetAt(e.target as Element) || fallbackTarget || null);
+  };
+  const onWebDrop = (e: React.DragEvent) => {
+    if (!isWebBuild() || !e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    const target = uploadTargetAt(e.target as Element) || fallbackTarget;
+    setDropProject(null);
+    if (!target) {
+      setError(noTargetMsg);
+      return;
+    }
+    // Entries are read synchronously inside; the walk itself is async.
+    void filesFromDataTransfer(e.dataTransfer).then((files) => uploadWebFiles(target, files));
+  };
+
   const bodyHits = useWikiBodyHits(query);
   const q = query.trim();
   const views = useMemo(() => {
@@ -163,12 +359,19 @@ export function LibraryView() {
       ? (e: LibraryEntry) =>
           libraryEntryMatches(e, q) || (e.kind === "doc" && bodyHits.slugs.has(e.id))
       : undefined;
-    return (projects ?? [])
-      .filter((p) => !activeProject || p.workspacePath === activeProject)
+    // "All projects" lists those with a library; a picked project shows even
+    // when it has none yet, so there is somewhere to upload to.
+    return (activeProject ? allProjects.filter((p) => p.workspacePath === activeProject) : projects ?? [])
       .map((p) => ({ project: p, view: buildLibraryTree(p, keep) }))
       .filter(({ project: p, view }) => !q || view.shown > 0 || p.workspacePath === activeProject);
-  }, [projects, activeProject, q, bodyHits.slugs]);
+  }, [projects, allProjects, activeProject, q, bodyHits.slugs]);
   const shownCount = views.reduce((s, v) => s + v.view.shown, 0);
+
+  const batchId = ingestBatchIdOf(selectedKey);
+  const batchFolders = useMemo(() => {
+    const ws = batches.find((b) => b.id === batchId)?.workspacePath;
+    return (projects ?? []).find((p) => p.workspacePath === ws)?.folders ?? [];
+  }, [batches, batchId, projects]);
 
   const selected = useMemo(() => {
     for (const p of projects ?? []) {
@@ -309,16 +512,24 @@ export function LibraryView() {
     onRenameFolder,
     onDeleteFolder,
     onDescribeFolder,
+    onOpenBatch: (id) => set({ selectedKey: ingestBatchKey(id) }),
   });
 
   const list = (
-    <div className={styles.list}>
+    <div
+      className={styles.list}
+      onDragOver={onWebDragOver}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDropProject(null);
+      }}
+      onDrop={onWebDrop}
+    >
       {projects === null ? (
         <SkeletonList rows={8} />
       ) : views.length === 0 ? (
         <div className={styles.none}>
           {projects.length === 0
-            ? t("library.empty", "还没有资料。agent 发布的文档和交付的文件会出现在这里。")
+            ? t("library.empty_upload", "还没有资料。agent 发布的文档和交付的文件会出现在这里；也可以在上方选一个项目，直接上传文件。")
             : t("library.no_match", "没有符合筛选条件的资料")}
         </div>
       ) : (
@@ -330,6 +541,10 @@ export function LibraryView() {
             folders={view.folders}
             unfiled={view.unfiled}
             ctx={treeCtx(p.workspacePath)}
+            batches={batches.filter((b) => b.workspacePath === p.workspacePath)}
+            uploadActive={dropProject === p.workspacePath}
+            webUpload={webUpload?.project === p.workspacePath ? webUpload : null}
+            onUpload={(kind) => onUpload(p.workspacePath, kind)}
           />
         ))
       )}
@@ -357,13 +572,15 @@ export function LibraryView() {
             aria-label={t("library.project_all", "全部项目")}
           >
             <option value="">{t("library.project_all", "全部项目")}</option>
-            {(projects ?? []).map((p) => (
+            {allProjects.map((p) => (
               <option key={p.workspacePath} value={p.workspacePath}>
                 {p.workspaceName}
               </option>
             ))}
           </select>
-          <span className={styles.hint}>{t("library.drag_hint", "拖动条目到文件夹即可归档")}</span>
+          <span className={styles.hint}>
+            {t("library.drag_hint_upload", "把文件、文件夹或压缩包拖到项目上即可上传，AI 自动归档；拖动条目到文件夹可手动归档")}
+          </span>
         </div>
       }
       secondary={list}
@@ -375,18 +592,37 @@ export function LibraryView() {
           {dragging.entry.title}
         </div>
       )}
-      {selected ? (
+      {batchId ? (
+        <BatchDetail
+          key={batchId}
+          id={batchId}
+          folders={batchFolders}
+          onChanged={() => {
+            void load();
+            void loadBatches();
+          }}
+          onOpenArtifact={(id) => set({ selectedKey: `artifact:${id}` })}
+          onClose={() => set({ selectedKey: null })}
+        />
+      ) : selected ? (
         <LibraryDetail key={libraryEntryKey(selected)} item={selected} onClose={() => set({ selectedKey: null })} />
       ) : (
         <EmptyState
           icon={<Library size={28} strokeWidth={1.4} />}
           title={t("library.pick_title", "选一份资料")}
-          subtitle={t("library.pick_sub_tree", "文档和产出按项目的目录结构放在一起；拖动条目即可归档。")}
+          subtitle={t(
+            "library.pick_sub_upload",
+            "文档和产出按项目的目录结构放在一起。把文件拖到项目上即可上传，AI 会读内容、写摘要、放进合适的目录。",
+          )}
         />
       )}
     </PageShell>
   );
 }
+
+/** Batch rows shown under a project: every running one, then the most recent
+ *  finished ones (the rest stay reachable once dismissed ones go). */
+const RECENT_BATCHES = 3;
 
 function ProjectBranch({
   name,
@@ -394,19 +630,40 @@ function ProjectBranch({
   folders,
   unfiled,
   ctx,
+  batches,
+  uploadActive,
+  webUpload,
+  onUpload,
 }: {
   name: string;
   total: number;
   folders: LibraryFolderNode[];
   unfiled: LibraryEntry[];
   ctx: TreeCtx;
+  batches: IngestBatchSummary[];
+  uploadActive: boolean;
+  webUpload: { sent: number; total: number } | null;
+  onUpload: (kind: PickKind) => void;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [creating, setCreating] = useState(false);
   const rootBusy = ctx.busy === libraryDropKey(ctx.project, "") && !creating;
+  const running = batches.filter((b) => isIngestRunning(b.status));
+  const shownBatches = [
+    ...running,
+    ...batches.filter((b) => !isIngestRunning(b.status)).slice(0, Math.max(0, RECENT_BATCHES - running.length)),
+  ];
   return (
-    <div className={styles.project}>
+    <div
+      className={`${styles.project}${uploadActive ? ` ${styles.project_drop}` : ""}`}
+      {...{ [UPLOAD_ATTR]: ctx.project }}
+    >
+      {uploadActive && (
+        <div className={styles.drop_banner}>
+          {t("library.drop_here", "松开即上传到「{{name}}」", { name })}
+        </div>
+      )}
       <div className={styles.tree_row} style={{ paddingLeft: 4 }}>
         <button
           type="button"
@@ -435,6 +692,28 @@ function ProjectBranch({
             <FolderPlus size={13} strokeWidth={1.5} />
           </button>
         </span>
+        <span className={styles.upload_actions}>
+          <button
+            type="button"
+            className={styles.upload_btn}
+            title={t("library.upload_files_hint", "上传文件或压缩包，AI 自动归档")}
+            onClick={() => onUpload("files")}
+            disabled={webUpload !== null}
+          >
+            <FileUp size={13} strokeWidth={1.6} />
+            {t("library.upload_files", "上传")}
+          </button>
+          <button
+            type="button"
+            className={styles.upload_btn}
+            title={t("library.upload_folder", "上传文件夹")}
+            aria-label={t("library.upload_folder", "上传文件夹")}
+            onClick={() => onUpload("folder")}
+            disabled={webUpload !== null}
+          >
+            <FolderUp size={13} strokeWidth={1.6} />
+          </button>
+        </span>
       </div>
       {creating && (
         <InlineInput
@@ -449,13 +728,28 @@ function ProjectBranch({
       )}
       {expanded && (
         <>
+          {webUpload && (
+            <div className={styles.row_busy}>
+              <Spinner size={12} />
+              {t("library.browser_uploading", "正在上传 {{sent}}/{{total}}", webUpload)}
+            </div>
+          )}
+          {shownBatches.map((b) => (
+            <BatchRow
+              key={b.id}
+              batch={b}
+              depth={1}
+              active={ctx.selectedKey === ingestBatchKey(b.id)}
+              onOpen={() => ctx.onOpenBatch(b.id)}
+            />
+          ))}
           {rootBusy && <div className={styles.row_busy}><Spinner size={12} /></div>}
           {folders.map((f) => (
             <FolderBranch key={f.path} node={f} depth={1} ctx={ctx} />
           ))}
           {folders.length === 0 && !ctx.searching && (
             <div className={styles.no_folders}>
-              {t("library.no_folders", "这个项目还没有目录结构。点右侧 + 新建文件夹。")}
+              {t("library.no_folders_upload", "这个项目还没有目录结构。点 + 新建文件夹，或直接上传文件——AI 会按项目内容起草一套。")}
             </div>
           )}
           <UnfiledBranch items={unfiled} ctx={ctx} />

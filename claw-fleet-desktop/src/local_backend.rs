@@ -3026,6 +3026,50 @@ impl LocalBackend {
         crate::library::move_item(kind, id, folder)
     }
 
+    pub fn library_ingest_start_paths(
+        &self,
+        workspace_path: &str,
+        paths: &[String],
+    ) -> Result<crate::library_ingest::IngestBatch, String> {
+        crate::library_ingest::start_paths(workspace_path, paths)
+    }
+
+    pub fn library_ingest_batches(
+        &self,
+        workspace: Option<&str>,
+    ) -> Result<Vec<crate::library_ingest::BatchSummary>, String> {
+        crate::library_ingest::list_batches(workspace)
+    }
+
+    pub fn library_ingest_batch(&self, id: &str) -> Result<crate::library_ingest::IngestBatch, String> {
+        crate::library_ingest::get_batch(id)
+    }
+
+    /// One item when `item_id` is given, else the whole batch.
+    pub fn library_ingest_undo(
+        &self,
+        batch_id: &str,
+        item_id: Option<&str>,
+    ) -> Result<crate::library_ingest::IngestBatch, String> {
+        match item_id.filter(|i| !i.is_empty()) {
+            Some(item) => crate::library_ingest::undo_item(batch_id, item),
+            None => crate::library_ingest::undo_batch(batch_id),
+        }
+    }
+
+    pub fn library_ingest_move(
+        &self,
+        batch_id: &str,
+        item_id: &str,
+        folder: &str,
+    ) -> Result<crate::library_ingest::IngestBatch, String> {
+        crate::library_ingest::move_item(batch_id, item_id, folder)
+    }
+
+    pub fn library_ingest_dismiss(&self, batch_id: &str) -> Result<(), String> {
+        crate::library_ingest::dismiss_batch(batch_id)
+    }
+
     pub fn read_artifact_bytes(
         &self,
         id: &str,
