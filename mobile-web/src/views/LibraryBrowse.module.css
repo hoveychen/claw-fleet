@@ -326,6 +326,7 @@
 
 .sort {
   flex-shrink: 0;
+  width: auto;
   padding: 4px 8px;
   border-radius: 8px;
   border: 1px solid var(--color-border);
@@ -434,7 +435,7 @@
 .tag {
   padding: 0 7px;
   border-radius: 999px;
-  background: var(--color-bg-input);
+  background: var(--color-bg-card-hover);
   color: var(--color-text-secondary);
   font-size: 11px;
   line-height: 18px;

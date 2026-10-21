@@ -149,8 +149,10 @@ export function ProjectOverview({
         {[
           t("{0} 份资料", total),
           t("{0} 个目录", project.folders.length),
-          t("未归档 {0}", view.unfiledTotal),
-        ].join(" · ")}
+          view.unfiledTotal > 0 ? t("未归档 {0}", view.unfiledTotal) : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       </div>
       {review > 0 && (
         <div className={styles.reviewBanner}>
