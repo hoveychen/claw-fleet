@@ -45,6 +45,11 @@ const ALL_KEYS = [
   "report-rail-width",
   "artifacts-rail-width",
   "library-rail-width",
+  // 资料: width of the content column while a preview is open, and the
+  // project the page last showed (it reopens there instead of on every
+  // project at once).
+  "library-list-width",
+  "library-last-project",
   "projects-rail-width",
   // Width of an expanded doc card in a session detail's auxiliary rail, stored
   // as a *fraction* of the pane rather than a pixel count: the same setting has

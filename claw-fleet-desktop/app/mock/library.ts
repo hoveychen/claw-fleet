@@ -14,11 +14,21 @@ import type {
 } from "../../../shared-ts/libraryIngest";
 import type { LibraryFolderOrigin } from "../../../shared-ts/libraryTree";
 import { MOCK_ARTIFACTS, MOCK_WIKI_DOCS } from "./data";
+import { FIXTURE_ARTIFACTS, FIXTURE_DOCS, FIXTURE_FOLDERS } from "./libraryFixtures";
+
+// The library-only projects join the shared fixtures once, so the 文档 / 产出
+// pages, the preview pane and search all see the same items as the tree.
+for (const a of FIXTURE_ARTIFACTS) if (!MOCK_ARTIFACTS.some((x) => x.id === a.id)) (MOCK_ARTIFACTS as Array<typeof a>).push(a);
+for (const d of FIXTURE_DOCS) {
+  if (!MOCK_WIKI_DOCS.some((x) => x.slug === d.slug)) MOCK_WIKI_DOCS.push(d as (typeof MOCK_WIKI_DOCS)[number]);
+}
 
 interface MockFolder {
   workspacePath: string;
   path: string;
   description: string;
+  /** Spelled out for CJK names, whose prefix the ASCII rule cannot derive. */
+  wikiPrefix?: string;
   origin?: LibraryFolderOrigin | null;
 }
 
@@ -53,6 +63,7 @@ export const MOCK_LIBRARY_FOLDERS: MockFolder[] = [
     },
   },
   { workspacePath: "/Users/demo/workspace/api-server", path: "guides", description: "运维手册" },
+  ...FIXTURE_FOLDERS,
 ];
 
 function prefixOf(path: string): string {
@@ -76,7 +87,7 @@ function nameOf(workspacePath: string): string {
 }
 
 function folderRec(f: MockFolder) {
-  return { ...f, wikiPrefix: prefixOf(f.path), createdMs: NOW, updatedMs: NOW };
+  return { ...f, wikiPrefix: f.wikiPrefix ?? prefixOf(f.path), createdMs: NOW, updatedMs: NOW };
 }
 
 export function mockLibraryTree() {
@@ -97,6 +108,8 @@ export function mockLibraryTree() {
         location: dirOf(d.slug),
         updatedMs: d.updatedMs,
         artifactKind: "",
+        summary: (d as { summary?: string }).summary,
+        tags: (d as { tags?: string[] }).tags,
       }));
       const arts = MOCK_ARTIFACTS.filter((a) => a.workspacePath === key).map((a) => ({
         kind: "artifact" as const,
@@ -107,6 +120,11 @@ export function mockLibraryTree() {
         location: a.path,
         updatedMs: a.createdMs,
         artifactKind: a.kind,
+        summary: a.summary,
+        tags: a.tags,
+        name: a.name,
+        mime: a.mime,
+        sizeBytes: a.sizeBytes,
       }));
       return {
         workspacePath: key,

@@ -50,6 +50,14 @@ export interface LibraryEntry {
   location: string;
   updatedMs: number;
   artifactKind: string;
+  /** AI summary and tags; absent until one was written. */
+  summary?: string;
+  tags?: string[];
+  /** The artifact's file name, mime and size (absent for docs) — enough to
+   *  build its blob URL and decide whether a thumbnail is worth fetching. */
+  name?: string;
+  mime?: string;
+  sizeBytes?: number;
 }
 
 /** Mirrors `claw_fleet_core::library::LibraryProject`. */

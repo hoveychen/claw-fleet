@@ -85,6 +85,8 @@ import {
 } from "./data";
 
 import { installWebsiteFixtures, websiteScene } from "./website";
+import { FIXTURE_BLOBS } from "./libraryFixtures";
+import { setArtifactBlobOverride } from "../artifactAssets";
 installWebsiteFixtures();
 
 // ── Dynamic session state (simulates live updates) ──────────────────────────
@@ -1847,6 +1849,7 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
   // `?mock&live` — data commands go to a real `fleet serve` probe instead of
   // the fixtures; everything else still answers from the mock. See liveProxy.ts.
   if (LIVE_MODE) installLiveProxy();
+  else setArtifactBlobOverride((id) => FIXTURE_BLOBS[id] ?? null);
 
   // Install IPC handler with event mocking enabled
   mockIPC(async (cmd, args) => {

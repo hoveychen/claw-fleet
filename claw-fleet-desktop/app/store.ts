@@ -67,10 +67,22 @@ export interface MainViewState {
   };
   library: {
     query: string;
-    /** Repo-root path; empty = every project. */
+    /** Repo-root path of the open project; empty = not picked yet (the page
+     *  opens the last used one). */
     project: string;
-    /** `doc:<slug>` / `artifact:<id>` — see shared-ts/library.ts. */
+    /** `doc:<slug>` / `artifact:<id>` / an ingest batch — what the preview
+     *  column shows. */
     selectedKey: string | null;
+    /** The folder the content column lists: null = the project overview,
+     *  `""` = the unfiled bucket. */
+    folder: string | null;
+    /** The content column shows the project's upload / re-file batches. */
+    batches: boolean;
+    /** Type filter of the content column (`LibraryTypeGroup`); null = all. */
+    typeGroup: string | null;
+    sort: "newest" | "oldest";
+    /** Search every project rather than the open one. */
+    searchAll: boolean;
   };
   projects: {
     query: string;
@@ -133,7 +145,16 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     collapsedFolders: [],
     versionBySlug: {},
   },
-  library: { query: "", project: "", selectedKey: null },
+  library: {
+    query: "",
+    project: "",
+    selectedKey: null,
+    folder: null,
+    batches: false,
+    typeGroup: null,
+    sort: "newest",
+    searchAll: false,
+  },
   projects: { query: "", selectedPath: null, tab: "overview" },
   skills: {
     query: "",
