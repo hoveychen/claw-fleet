@@ -688,8 +688,24 @@ async function handleIPC(
     }
     // A path clicked in agent prose that belongs to no workspace (`/tmp/…`).
     case "read_external_file": {
-      const content = `# ${(args.path as string) ?? ""}\n\nmock 模式下的工作区外文件内容。\n`;
+      const path = (args.path as string) ?? "";
+      if (/\.(png|jpe?g|gif|webp|svg)$/i.test(path)) {
+        return { kind: "image", base64: btoa(MOCK_CHART_SVG), mime: "image/svg+xml", sizeBytes: MOCK_CHART_SVG.length };
+      }
+      const content = `# ${path}\n\nmock 模式下的工作区外文件内容。\n`;
       return { kind: "text", content, truncated: false, sizeBytes: content.length };
+    }
+    // A `reviewDocs` folder: the same small listing whatever the path, so a
+    // sub-folder clicked inside it opens too.
+    case "list_external_dir": {
+      const dir = ((args.path as string) ?? "").replace(/\/+$/, "");
+      const entries = [
+        { name: "raw", isDir: true, sizeBytes: 0 },
+        { name: "latency-p99.svg", isDir: false, sizeBytes: 18_204 },
+        { name: "summary.md", isDir: false, sizeBytes: 2_310 },
+        { name: "throughput.png", isDir: false, sizeBytes: 96_512 },
+      ].map((e) => ({ ...e, path: `${dir}/${e.name}`, modifiedMs: Date.now() - 3_600_000 }));
+      return { path: dir, entries, truncated: false };
     }
     // ?mock has no filesystem to stat, so every reading "exists": answer with
     // the workspace join, which is what the chip would have used anyway. The
@@ -1875,6 +1891,10 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
       reviewDocs: [
         { kind: "file", ref: "/Users/demo/billing-service/docs/cutover-plan.md", title: "cutover-plan.md" },
         { kind: "wiki", ref: "billing/rollback-runbook", title: "Rollback runbook" },
+        { kind: "dir", ref: "/Users/demo/billing-service/out/bench", title: "Benchmark outputs" },
+        { kind: "file", ref: "/Users/demo/billing-service/out/bench/latency-p99.svg", title: "p99 latency chart" },
+        { kind: "url", ref: "https://status.example.com/billing", title: "Status page" },
+        { kind: "artifact", ref: "20260826-173311", title: "架构评审" },
       ],
       questions: [
         {
@@ -2011,3 +2031,16 @@ function mockSubtaskRecovery(coordinatorId: string) {
     ...(shapes[i] ?? { class: "done", phase: "done", detail: "最后一回合正常结束" }),
   }));
 }
+
+/** A small chart the mock serves for any image path, so an image review doc
+ *  visibly renders as a picture in ?mock. */
+const MOCK_CHART_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260" viewBox="0 0 480 260">
+<rect width="480" height="260" fill="#fbf8f2"/>
+<text x="24" y="34" font-family="sans-serif" font-size="16" fill="#3a3530">p99 latency (ms)</text>
+<g fill="#c8643b">
+<rect x="40" y="150" width="40" height="80"/><rect x="110" y="120" width="40" height="110"/>
+<rect x="180" y="90" width="40" height="140"/><rect x="250" y="130" width="40" height="100"/>
+<rect x="320" y="70" width="40" height="160"/><rect x="390" y="110" width="40" height="120"/>
+</g>
+<line x1="30" y1="230" x2="450" y2="230" stroke="#8a8178"/>
+</svg>`;

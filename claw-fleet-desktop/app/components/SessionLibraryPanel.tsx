@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import {
   Bot,
   FileText,
+  Folder,
   Globe,
   MessageCircleQuestion,
   NotebookText,
@@ -18,6 +19,7 @@ import { SkeletonList } from "./loading";
 
 const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
+  dir: Folder,
   wiki: NotebookText,
   web: Globe,
   artifact: Package,

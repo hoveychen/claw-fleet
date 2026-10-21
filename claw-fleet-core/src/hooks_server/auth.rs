@@ -156,6 +156,8 @@ mod tests {
             routes::EXPLORER_BYTES,
             // Same read power as EXPLORER_FILE with no workspace gate at all.
             routes::EXPLORER_EXTERNAL_FILE,
+            // Lists what EXPLORER_EXTERNAL_FILE could read one by one.
+            routes::EXPLORER_EXTERNAL_DIR,
             // Reads nothing, but answers "does this path exist" for paths
             // outside every workspace — an oracle, and it feeds the read above.
             routes::EXPLORER_RESOLVE,
@@ -238,6 +240,7 @@ mod tests {
             routes::EXPLORER_FILE,          // reads an arbitrary path
             routes::EXPLORER_BYTES,         // reads an arbitrary path, whole file
             routes::EXPLORER_EXTERNAL_FILE, // reads an arbitrary path, ungated
+            routes::EXPLORER_EXTERNAL_DIR,  // lists an arbitrary directory, ungated
             routes::EXPLORER_RESOLVE,       // existence oracle for arbitrary paths
             routes::SCRATCHPAD_FILE,        // reads an arbitrary scratchpad path
             routes::PROC_RUN,               // arbitrary command exec

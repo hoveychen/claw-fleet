@@ -843,6 +843,7 @@ fn probe_targets_in(
             }
         }
     })
+    .map_err(|e| crate::log_debug(&format!("watch {id}: target probe write failed: {e}")))
     .ok()
     .filter(|r| r.generation == generation)
 }
@@ -885,8 +886,19 @@ pub fn get(id: &str) -> Option<WatchRecord> {
 }
 
 fn get_in(dir: &Path, id: &str) -> Option<WatchRecord> {
-    let s = fs::read_to_string(record_path(dir, id)).ok()?;
-    serde_json::from_str(&s).ok()
+    read_in(dir, id).ok().flatten()
+}
+
+/// [`get_in`], but telling "no such record" (`Ok(None)`: stopped or fired)
+/// apart from a record that exists and could not be read or parsed right now
+/// (`Err`). The timer must only exit on the former.
+fn read_in(dir: &Path, id: &str) -> Result<Option<WatchRecord>, String> {
+    let s = match fs::read_to_string(record_path(dir, id)) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("read: {e}")),
+    };
+    serde_json::from_str(&s).map(Some).map_err(|e| format!("parse: {e}"))
 }
 
 /// Every registered watch, soonest-deadline first.
@@ -1259,6 +1271,10 @@ fn claim_fire_locked(dir: &Path, id: &str, generation: u64) -> Result<WatchRecor
 /// lingers after `fleet watch stop` deletes the record (it notices on the next
 /// wake and exits), and bounds clock-drift from one long nap over a suspend.
 const POLL_CAP_MS: u64 = 30_000;
+
+/// Consecutive unreadable-record polls (each [`POLL_CAP_MS`] apart, so ~10
+/// minutes) before a timer stops retrying.
+const MAX_UNREADABLE_STREAK: u32 = 20;
 
 /// What the timer should do this iteration. Pure decision, split out so the
 /// nap/fire/exit logic is unit-testable without spawning subprocesses or sleeping.
@@ -1861,10 +1877,35 @@ fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, 
 /// decision lives in the unit-tested [`decide`], only the real `sleep` and shell
 /// poll live here.
 pub fn run_timer_blocking(id: &str, generation: u64) {
+    let mut unreadable_streak = 0u32;
     loop {
-        let Some(rec) = get(id) else {
-            crate::log_debug(&format!("watch {id}: record gone, timer exiting"));
+        let Some(dir) = watches_dir() else {
+            crate::log_debug(&format!("watch {id}: no home dir, timer exiting"));
             return;
+        };
+        let rec = match read_in(&dir, id) {
+            Ok(Some(rec)) => {
+                unreadable_streak = 0;
+                rec
+            }
+            Ok(None) => {
+                crate::log_debug(&format!("watch {id}: record gone, timer exiting"));
+                return;
+            }
+            Err(e) => {
+                // The record is still on disk; a transient read failure must not
+                // end the wait. Give up only if it stays unreadable.
+                unreadable_streak += 1;
+                if unreadable_streak >= MAX_UNREADABLE_STREAK {
+                    crate::log_debug(&format!(
+                        "watch {id}: record unreadable {unreadable_streak} polls in a row ({e}), timer exiting"
+                    ));
+                    return;
+                }
+                crate::log_debug(&format!("watch {id}: record unreadable ({e}), retrying"));
+                std::thread::sleep(std::time::Duration::from_millis(POLL_CAP_MS));
+                continue;
+            }
         };
         // `decide` stays a pure exit-code decision; the outcome is stashed here
         // so the Nap branch can persist the diagnosis alongside the heartbeat.
@@ -1977,7 +2018,9 @@ fn touch_locked(
                     0
                 };
             }
-            let _ = write_record(dir, &rec);
+            if let Err(e) = write_record(dir, &rec) {
+                crate::log_debug(&format!("watch {id}: heartbeat write failed: {e}"));
+            }
         }
     }
 }
@@ -2071,6 +2114,17 @@ mod tests {
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    /// The timer exits only on `Ok(None)`; a record that is on disk but
+    /// unreadable right now must come back as `Err` so the timer retries.
+    #[test]
+    fn read_in_tells_missing_apart_from_unreadable() {
+        let d = dir();
+        assert_eq!(read_in(d.path(), "w1"), Ok(None));
+        fs::write(record_path(d.path(), "w1"), "{ torn").unwrap();
+        assert!(read_in(d.path(), "w1").is_err());
+        assert!(get_in(d.path(), "w1").is_none());
     }
 
     /// The plan gate's watch exit: an armed `until` watch owned by the session

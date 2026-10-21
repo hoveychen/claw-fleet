@@ -442,22 +442,106 @@ pub fn read_scratchpad_file(
 /// them (`pathLinks.tsx`), and agents write `~/Downloads/…` constantly, so
 /// this expansion mirrors what `reveal_path` already does for the same string.
 pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {
+    read_file_content(&canonical_external(path)?)
+}
+
+/// `~/` expansion, the absolute-path check and canonicalization shared by the
+/// out-of-workspace readers. Canonicalizing first makes a symlinked spelling
+/// (`/tmp/x` on macOS, which is really `/private/tmp/x`) resolve the same way
+/// the explorer's roots do — the front end compares against canonical roots to
+/// decide a path is "external" in the first place.
+fn canonical_external(path: &str) -> Result<PathBuf, String> {
     let expanded = match path.strip_prefix("~/") {
         Some(rest) => crate::session::real_home_dir()
             .ok_or_else(|| "home directory unknown".to_string())?
             .join(rest),
         None => PathBuf::from(path),
     };
-    let p = expanded.as_path();
-    if !p.is_absolute() {
+    if !expanded.is_absolute() {
         return Err("external path must be absolute".into());
     }
-    // Canonicalize before reading so a symlinked spelling (`/tmp/x` on macOS,
-    // which is really `/private/tmp/x`) resolves the same way the explorer's
-    // roots do — the front end compares against canonical roots to decide a
-    // path is "external" in the first place.
-    let canon = fs::canonicalize(p).map_err(|e| format!("external path: {e}"))?;
-    read_file_content(&canon)
+    fs::canonicalize(&expanded).map_err(|e| format!("external path: {e}"))
+}
+
+/// Whether a path names an image the previewers render as one (by extension —
+/// the same table [`read_file_content`] classifies with).
+pub fn is_image_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| image_mime(&e.to_lowercase()).is_some())
+}
+
+/// Most entries [`list_external_dir`] returns. A folder an agent hands over as
+/// material is a handful of outputs, not a data dump; past this the listing
+/// says it was cut rather than shipping thousands of rows to the reader.
+pub const EXTERNAL_DIR_CAP: usize = 200;
+
+/// One row of [`list_external_dir`], addressed by absolute path so the reader
+/// can open it with [`read_external_file`] (or list it again, for a folder).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalDirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size_bytes: u64,
+    pub modified_ms: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalDirListing {
+    /// The canonical directory that was listed.
+    pub path: String,
+    pub entries: Vec<ExternalDirEntry>,
+    /// More entries existed than [`EXTERNAL_DIR_CAP`].
+    pub truncated: bool,
+}
+
+/// List the top level of a folder an agent named as material (`reviewDocs`
+/// kind `dir`). One level, no recursion; dotfiles are skipped; folders first,
+/// then by name; capped at [`EXTERNAL_DIR_CAP`].
+///
+/// Same reach and same admin-only route gate as [`read_external_file`]: a
+/// listing reveals no more than reading each file would.
+pub fn list_external_dir(path: &str) -> Result<ExternalDirListing, String> {
+    let dir = canonical_external(path)?;
+    if !dir.is_dir() {
+        return Err("not a directory".into());
+    }
+    let rd = crate::tcc::guarded_read_dir(&dir).map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+    for entry in rd.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path().to_string_lossy().into_owned();
+        if let Some(e) = build_entry(&entry, name, String::new(), false) {
+            entries.push(ExternalDirEntry {
+                name: e.name,
+                path,
+                is_dir: e.is_dir,
+                size_bytes: e.size_bytes,
+                modified_ms: e.modified_ms,
+            });
+        }
+    }
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    let truncated = entries.len() > EXTERNAL_DIR_CAP;
+    entries.truncate(EXTERNAL_DIR_CAP);
+    Ok(ExternalDirListing {
+        path: dir.to_string_lossy().into_owned(),
+        entries,
+        truncated,
+    })
 }
 
 // ── Resolving a path an agent wrote in prose ─────────────────────────────────
@@ -1134,6 +1218,67 @@ mod tests {
             ExplorerFileContent::Image { mime, .. } => assert_eq!(mime, "image/png"),
             other => panic!("expected image, got {other:?}"),
         }
+    }
+
+    /// Every extension a `reviewDocs` file image may carry renders as an image,
+    /// SVG included (it is text, but must not fall through to the text reader).
+    #[test]
+    fn external_read_renders_every_review_image_extension_as_image() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for name in ["a.png", "b.JPG", "c.jpeg", "d.gif", "e.webp", "f.svg"] {
+            assert!(is_image_path(name), "{name} should count as an image");
+            let file = tmp.path().join(name);
+            fs::write(&file, b"<svg/>").unwrap();
+            match read_external_file(file.to_str().unwrap()).unwrap() {
+                ExplorerFileContent::Image { .. } => {}
+                other => panic!("{name}: expected image, got {other:?}"),
+            }
+        }
+        assert!(!is_image_path("/x/notes.md"));
+        assert!(!is_image_path("/x/png"));
+    }
+
+    #[test]
+    fn external_dir_lists_one_level_folders_first_without_dotfiles() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::write(tmp.path().join("b.md"), b"b").unwrap();
+        fs::write(tmp.path().join("A.png"), b"a").unwrap();
+        fs::write(tmp.path().join(".hidden"), b"h").unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::create_dir_all(tmp.path().join("sub/deeper")).unwrap();
+        fs::write(tmp.path().join("sub/inner.md"), b"i").unwrap();
+
+        let listing = list_external_dir(tmp.path().to_str().unwrap()).unwrap();
+        let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["sub", "A.png", "b.md"]);
+        assert!(!listing.truncated);
+        assert!(listing.entries[0].is_dir);
+        // Paths are absolute and readable as-is.
+        let png = &listing.entries[1];
+        assert!(Path::new(&png.path).is_absolute());
+        assert_eq!(png.size_bytes, 1);
+        assert!(read_external_file(&png.path).is_ok());
+    }
+
+    #[test]
+    fn external_dir_caps_and_flags_truncation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for i in 0..EXTERNAL_DIR_CAP + 5 {
+            fs::write(tmp.path().join(format!("f{i:04}.txt")), b"x").unwrap();
+        }
+        let listing = list_external_dir(tmp.path().to_str().unwrap()).unwrap();
+        assert_eq!(listing.entries.len(), EXTERNAL_DIR_CAP);
+        assert!(listing.truncated);
+        assert_eq!(listing.entries[0].name, "f0000.txt");
+    }
+
+    #[test]
+    fn external_dir_rejects_files_and_relative_paths() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("x.md");
+        fs::write(&file, b"x").unwrap();
+        assert!(list_external_dir(file.to_str().unwrap()).is_err());
+        assert!(list_external_dir("relative/dir").unwrap_err().contains("absolute"));
     }
 
     #[test]

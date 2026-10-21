@@ -67,18 +67,19 @@ pub struct FleetAskRequest {
 }
 
 /// One document attached to a `fleet__ask` card for the user to review.
-/// Listed in the session's material rail; the body is fetched live by the
-/// frontend (via the backend `read_review_doc`) rather than snapshotted into the
+/// Listed in the session's material rail; the desktop opens it in its side-panel
+/// readers, which read the target live rather than from a snapshot in the
 /// request, so the user always sees the current on-disk content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDoc {
     pub kind: ReviewDocKind,
-    /// For `wiki`: the published wiki slug. For `file`: an absolute path on the
-    /// agent host. Relative paths the agent supplies are resolved against
+    /// For `wiki`: the published wiki slug. For `file` / `dir`: an absolute path
+    /// on the agent host. Relative paths the agent supplies are resolved against
     /// `CLAUDE_PROJECT_DIR` (its cwd) at write time by [`resolve_review_docs`],
-    /// so this is always absolute by the time it reaches the frontend.
+    /// so this is always absolute by the time it reaches the frontend. For
+    /// `url`: the address. For `artifact`: the artifact-store id.
     #[serde(rename = "ref")]
     pub reference: String,
     /// Tab label. Falls back to the slug / file name when absent.
@@ -93,121 +94,15 @@ pub enum ReviewDocKind {
     /// A wiki doc, addressed by slug (`fleet wiki publish` output).
     Wiki,
     /// A file on disk, addressed by path relative to the agent cwd (or absolute).
+    /// Image files (see [`crate::file_explorer::is_image_path`]) open as images.
     File,
-}
-
-/// Resolved body of a [`ReviewDoc`], fetched live by the frontend through the
-/// backend (`read_review_doc`) so it renders the current on-disk content. Crosses
-/// the probe HTTP boundary, hence `Serialize` + `Deserialize`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct ReviewDocContent {
-    /// How the frontend should render `body`: markdown (ReactMarkdown) or html
-    /// (sandboxed iframe).
-    pub format: ReviewDocFormat,
-    /// The document text — markdown source or raw html.
-    pub body: String,
-    /// Resolved tab label (the doc's own title / slug / file name).
-    pub title: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[serde(rename_all = "lowercase")]
-pub enum ReviewDocFormat {
-    Markdown,
-    Html,
-}
-
-/// Max review-doc size fetched into the card — a design doc, not a data dump.
-const REVIEW_DOC_MAX_BYTES: u64 = 2 * 1024 * 1024;
-
-/// Resolve a [`ReviewDoc`] to its current body. The single source of truth for
-/// both `LocalBackend::read_review_doc` (desktop) and the `fleet serve`
-/// `/review_doc` endpoint (remote), so the two paths render identically. Reads
-/// wiki entries and local files off the same host the serving process runs on.
-pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
-    let mut content = match doc.kind {
-        ReviewDocKind::File => read_review_file(&doc.reference, doc.title.as_deref())?,
-        ReviewDocKind::Wiki => {
-            let wdoc = crate::wiki::get_doc(&doc.reference)?;
-            let bytes = crate::wiki::get_file(&doc.reference, "current", &wdoc.entry)?;
-            let body = String::from_utf8(bytes.bytes)
-                .map_err(|_| format!("wiki doc '{}' entry is not UTF-8", doc.reference))?;
-            let format = if wdoc.kind == "markdown" {
-                ReviewDocFormat::Markdown
-            } else {
-                ReviewDocFormat::Html
-            };
-            let title = doc
-                .title
-                .clone()
-                .filter(|s| !s.is_empty())
-                .unwrap_or(wdoc.title);
-            ReviewDocContent {
-                format,
-                body,
-                title,
-            }
-        }
-    };
-    autoheight_review_content(&mut content);
-    Ok(content)
-}
-
-/// An HTML review doc renders in the same sandboxed, self-sizing iframe
-/// (`AutoHeightFrame`) as the inline `html` field, so it needs the same
-/// height-reporting script injected — without it the frame is stuck at its
-/// min-height and a tall doc shows only its top, the rest a blank strip. This
-/// mirrors what [`normalize_html`] does for the inline `html` preview. Markdown
-/// is rendered by the app (ReactMarkdown), not framed, so it is left untouched.
-fn autoheight_review_content(content: &mut ReviewDocContent) {
-    if content.format == ReviewDocFormat::Html {
-        content.body = with_autoheight(&content.body);
-    }
-}
-
-/// Read a `file`-kind review doc off disk into a [`ReviewDocContent`]. Shared by
-/// [`read_review_doc`] and reused directly for the `file` branch so both apply
-/// the same size cap and UTF-8 / title handling. `path` is the absolute path
-/// [`resolve_review_docs`] produced; `title` is the agent-supplied override.
-pub fn read_review_file(path: &str, title: Option<&str>) -> Result<ReviewDocContent, String> {
-    let p = Path::new(path);
-    let meta = fs::metadata(p).map_err(|e| format!("cannot read '{path}': {e}"))?;
-    if !meta.is_file() {
-        return Err(format!("'{path}' is not a file"));
-    }
-    if meta.len() > REVIEW_DOC_MAX_BYTES {
-        return Err(format!(
-            "'{path}' is too large to preview ({} bytes)",
-            meta.len()
-        ));
-    }
-    let bytes = fs::read(p).map_err(|e| format!("cannot read '{path}': {e}"))?;
-    let body = String::from_utf8(bytes).map_err(|_| format!("'{path}' is not valid UTF-8"))?;
-    let title = title
-        .map(str::to_string)
-        .filter(|s| !s.is_empty())
-        .or_else(|| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
-        .unwrap_or_else(|| path.to_string());
-    // An `.html`/`.htm` file is meant to render, not to be shown as raw markdown
-    // source. Flag it Html so the card frames it in the sandboxed iframe;
-    // `read_review_doc` then injects the height-reporting script for it.
-    let format = match p
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("html") | Some("htm") => ReviewDocFormat::Html,
-        _ => ReviewDocFormat::Markdown,
-    };
-    Ok(ReviewDocContent {
-        format,
-        body,
-        title,
-    })
+    /// A directory on disk, same addressing as `File`. The reader lists its
+    /// top level ([`crate::file_explorer::list_external_dir`]).
+    Dir,
+    /// A web address. Opened in the system browser; never fetched.
+    Url,
+    /// A deliverable in the artifact store, addressed by its id.
+    Artifact,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -825,7 +720,7 @@ pub fn normalize_html(req: &mut FleetAskRequest) {
     }
 }
 
-/// Resolve every `file` review-doc reference to an absolute path so the desktop
+/// Resolve every `file` / `dir` review-doc reference to an absolute path so the desktop
 /// (a different process, possibly a different cwd) can read it back live.
 ///
 /// Runs inside the `fleet mcp` child — the same host and cwd as the agent — so
@@ -833,10 +728,11 @@ pub fn normalize_html(req: &mut FleetAskRequest) {
 /// `CLAUDE_PROJECT_DIR`), then the whole thing is canonicalized. Best-effort:
 /// a ref that can't be canonicalized (file since moved, bad path) is left as the
 /// joined absolute path so the card can still show a "couldn't read" tab rather
-/// than silently dropping it. `wiki` refs are slugs, not paths — left untouched.
+/// than silently dropping it. `wiki` / `url` / `artifact` refs are not paths —
+/// left untouched.
 pub fn resolve_review_docs(req: &mut FleetAskRequest, project_dir: Option<&Path>) {
     for doc in &mut req.review_docs {
-        if doc.kind != ReviewDocKind::File {
+        if !matches!(doc.kind, ReviewDocKind::File | ReviewDocKind::Dir) {
             continue;
         }
         let raw = Path::new(&doc.reference);
@@ -1068,18 +964,18 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
             },
             "reviewDocs": {
                 "type": "array",
-                "description": "OPTIONAL documents for the user to review alongside this card — the `.md` files or wiki entries you just produced. Fleet lists each doc in the session's material side rail (not inside the card), so the user opens and reads them there instead of hunting the path down in your prose. Card-level, not per-question. The body is fetched live when the card opens (not snapshotted), so the user always sees the current on-disk content. Use this whenever your answer references a design doc / report / plan file you want signed off.",
+                "description": "OPTIONAL material for the user to review alongside this card — the files, folders, wiki entries, links or deliverables your text points at. Fleet lists each in the session's material side rail (not inside the card), so the user opens it there instead of hunting the reference down in your prose. Card-level, not per-question. Content is read live when opened (not snapshotted). Use this whenever your text asks the user to look at something.",
                 "items": {
                     "type": "object",
                     "properties": {
                         "kind": {
                             "type": "string",
-                            "enum": ["wiki", "file"],
-                            "description": "`wiki` = a published wiki doc (ref is its slug); `file` = a file on disk (ref is its path)."
+                            "enum": ["wiki", "file", "dir", "url", "artifact"],
+                            "description": "`wiki` = a published wiki doc; `file` = a file on disk (text, html or an image); `dir` = a folder on disk (the user browses its files); `url` = a web link (opens in the browser); `artifact` = a deliverable filed with fleet__artifact."
                         },
                         "ref": {
                             "type": "string",
-                            "description": "For kind=wiki: the wiki slug (e.g. `arch/overview`). For kind=file: a path to the file, relative to your cwd or absolute (e.g. `docs/design.md`)."
+                            "description": "wiki: the slug (e.g. `arch/overview`). file / dir: a path relative to your cwd or absolute (e.g. `docs/design.md`). url: the full address. artifact: the artifact id."
                         },
                         "title": {
                             "type": "string",
@@ -1370,6 +1266,51 @@ mod tests {
     }
 
     #[test]
+    fn resolve_review_docs_joins_dirs_and_leaves_urls_and_artifacts() {
+        let mut req = empty_request("rd3");
+        let doc = |kind, reference: &str| ReviewDoc {
+            kind,
+            reference: reference.into(),
+            title: None,
+        };
+        req.review_docs = vec![
+            doc(ReviewDocKind::Dir, "out/shots"),
+            doc(ReviewDocKind::Url, "https://example.com/a"),
+            doc(ReviewDocKind::Artifact, "20261021-101500"),
+        ];
+        resolve_review_docs(&mut req, Some(&std::env::temp_dir()));
+        assert!(Path::new(&req.review_docs[0].reference).is_absolute());
+        assert!(req.review_docs[0].reference.ends_with("out/shots"));
+        assert_eq!(req.review_docs[1].reference, "https://example.com/a");
+        assert_eq!(req.review_docs[2].reference, "20261021-101500");
+    }
+
+    #[test]
+    fn review_doc_kinds_parse_from_agent_json() {
+        let docs: Vec<ReviewDoc> = serde_json::from_value(serde_json::json!([
+            { "kind": "dir", "ref": "out" },
+            { "kind": "url", "ref": "https://x.dev" },
+            { "kind": "artifact", "ref": "20261021-101500" },
+        ]))
+        .unwrap();
+        let kinds: Vec<_> = docs.iter().map(|d| d.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![ReviewDocKind::Dir, ReviewDocKind::Url, ReviewDocKind::Artifact]
+        );
+    }
+
+    #[test]
+    fn review_docs_schema_lists_every_kind() {
+        // The enum the agent sees must match what serde accepts, or an agent
+        // following the schema gets its whole reviewDocs array dropped.
+        let schema = fleet_ask_input_schema();
+        let kinds = &schema["properties"]["reviewDocs"]["items"]["properties"]["kind"]["enum"];
+        let listed: Vec<ReviewDocKind> = serde_json::from_value(kinds.clone()).unwrap();
+        assert_eq!(listed.len(), 5);
+    }
+
+    #[test]
     fn review_docs_round_trip_uses_ref_key() {
         let mut req = empty_request("rd2");
         req.review_docs = vec![ReviewDoc {
@@ -1386,100 +1327,6 @@ mod tests {
         assert_eq!(back.review_docs[0].reference, "/abs/x.md");
     }
 
-    #[test]
-    fn read_review_doc_reads_a_real_markdown_file() {
-        // Write a real .md into a temp dir, resolve + read it back through the
-        // same path the desktop uses — proving the file branch end to end.
-        let dir = std::env::temp_dir().join(format!("fleet-rdc-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("design.md");
-        fs::write(&file, "# Title\n\nbody line").unwrap();
-
-        let doc = ReviewDoc {
-            kind: ReviewDocKind::File,
-            reference: file.to_string_lossy().into_owned(),
-            title: None,
-        };
-        let content = read_review_doc(&doc).expect("read file review doc");
-        assert!(matches!(content.format, ReviewDocFormat::Markdown));
-        assert_eq!(content.body, "# Title\n\nbody line");
-        // Title falls back to the file name when the agent gives none.
-        assert_eq!(content.title, "design.md");
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn read_review_doc_errors_on_missing_file() {
-        let doc = ReviewDoc {
-            kind: ReviewDocKind::File,
-            reference: "/no/such/path/nope.md".into(),
-            title: None,
-        };
-        assert!(read_review_doc(&doc).is_err());
-    }
-
-    #[test]
-    fn html_review_doc_gets_autoheight_script() {
-        // The "Docs" panel frames an HTML review doc in the same sandboxed,
-        // self-sizing iframe as the inline preview. Without the height-reporting
-        // script the frame collapses to its min-height and a tall doc shows only
-        // its top — the empty-strip bug. read_review_doc must inject it.
-        let mut content = ReviewDocContent {
-            format: ReviewDocFormat::Html,
-            body: "<div style=\"height:900px\">tall</div>".into(),
-            title: "plan".into(),
-        };
-        autoheight_review_content(&mut content);
-        assert!(
-            content.body.contains(AUTOHEIGHT_MARKER),
-            "html review doc must report its height: {}",
-            content.body
-        );
-    }
-
-    #[test]
-    fn markdown_review_doc_left_untouched() {
-        // Markdown is rendered by the app, not framed — injecting a <script>
-        // would corrupt the source, so it must pass through verbatim.
-        let mut content = ReviewDocContent {
-            format: ReviewDocFormat::Markdown,
-            body: "# Title\n\nbody".into(),
-            title: "notes".into(),
-        };
-        autoheight_review_content(&mut content);
-        assert_eq!(content.body, "# Title\n\nbody");
-    }
-
-    #[test]
-    fn html_file_review_doc_renders_as_html_with_autoheight() {
-        // A `.html` file review doc must render in the sandboxed iframe (Html
-        // format) and carry the height-reporting script — same as a wiki HTML
-        // doc — not be shown as raw markdown source in a collapsed frame.
-        let dir = std::env::temp_dir().join(format!("fleet-rdc-html-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("plan.html");
-        fs::write(&file, "<div style=\"height:900px\">tall</div>").unwrap();
-
-        let doc = ReviewDoc {
-            kind: ReviewDocKind::File,
-            reference: file.to_string_lossy().into_owned(),
-            title: None,
-        };
-        let content = read_review_doc(&doc).expect("read html file review doc");
-        assert!(
-            matches!(content.format, ReviewDocFormat::Html),
-            "a .html file must be flagged Html, got {:?}",
-            content.format
-        );
-        assert!(
-            content.body.contains(AUTOHEIGHT_MARKER),
-            "html file review doc must report its height: {}",
-            content.body
-        );
-
-        let _ = fs::remove_dir_all(&dir);
-    }
 
     #[test]
     fn request_carries_session_envelope() {

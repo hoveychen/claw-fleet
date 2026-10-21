@@ -114,7 +114,7 @@ function pruneSessions(map: DocHistoryMap, keep: string): DocHistoryMap {
   return out;
 }
 
-const KINDS: readonly string[] = ["file", "wiki", "web", "artifact"];
+const KINDS: readonly string[] = ["file", "dir", "wiki", "web", "artifact"];
 
 /**
  * Read the blob back, tolerating anything.

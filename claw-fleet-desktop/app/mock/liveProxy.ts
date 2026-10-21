@@ -1149,6 +1149,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.path) },
   }),
 
+  list_external_dir: (a) => ({
+    method: "GET",
+    path: "/explorer_external_dir",
+    query: { path: q(a.path) },
+  }),
+
   resolve_prose_path: (a) => ({
     method: "GET",
     path: "/explorer_resolve",

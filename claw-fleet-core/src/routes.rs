@@ -125,6 +125,9 @@ pub const EXPLORER_FILE: &str = "/explorer_file";
 /// Read one absolute path outside every workspace (a path clicked in agent
 /// prose). Admin-only, like `EXPLORER_FILE` — it carries no workspace gate.
 pub const EXPLORER_EXTERNAL_FILE: &str = "/explorer_external_file";
+/// List the top level of one absolute folder outside every workspace (a
+/// `reviewDocs` `dir`). Admin-only, same reach as `EXPLORER_EXTERNAL_FILE`.
+pub const EXPLORER_EXTERNAL_DIR: &str = "/explorer_external_dir";
 /// Resolve a path as an agent wrote it into one that exists, trying each
 /// reading in turn. Admin-only: it reports existence for paths outside any
 /// workspace, which is the same widening `EXPLORER_EXTERNAL_FILE` carries.
