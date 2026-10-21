@@ -4,6 +4,8 @@ import {
   MAX_LIBRARY_UPLOAD_BYTES,
   UploadSkippedAll,
   chunkRanges,
+  folderChoices,
+  uploadProjects,
   uniqueUploadNames,
   uploadToLibrary,
 } from "./libraryApi";
@@ -109,5 +111,32 @@ describe("uploadToLibrary", () => {
     const huge = { name: "movie.mov", size: MAX_LIBRARY_UPLOAD_BYTES + 1 } as File;
     await expect(uploadToLibrary(client, "/w/p", [huge])).rejects.toBeInstanceOf(UploadSkippedAll);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("folderChoices", () => {
+  it("lists folders in tree order, indented by depth", () => {
+    expect(folderChoices([{ path: "发票/2026" }, { path: "合同" }, { path: "发票" }])).toEqual([
+      { path: "发票", label: "发票" },
+      { path: "发票/2026", label: "　2026" },
+      { path: "合同", label: "合同" },
+    ]);
+  });
+});
+
+describe("uploadProjects", () => {
+  it("merges library projects with recent workspaces, library names first", () => {
+    expect(
+      uploadProjects(
+        [{ workspacePath: "/w/house", workspaceName: "house" }],
+        [
+          { path: "/w/house", name: "house-checkout" },
+          { path: "/w/acct", name: "acct" },
+        ],
+      ),
+    ).toEqual([
+      { path: "/w/acct", name: "acct" },
+      { path: "/w/house", name: "house" },
+    ]);
   });
 });

@@ -312,3 +312,32 @@ export class UploadSkippedAll extends Error {
     super(skipped.map((s) => `${s.name}: ${s.reason}`).join("; ") || "nothing to upload");
   }
 }
+
+/** A project's folders as picker options: tree order, each indented by depth
+ *  so a native `<select>` (the phone's wheel picker) still reads as a tree. */
+export function folderChoices(
+  folders: ReadonlyArray<Pick<LibraryFolderRec, "path">>,
+): Array<{ path: string; label: string }> {
+  return [...new Set(folders.map((f) => f.path).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .map((path) => {
+      const depth = path.split("/").length - 1;
+      const leaf = path.slice(path.lastIndexOf("/") + 1);
+      return { path, label: `${"　".repeat(depth)}${leaf}` };
+    });
+}
+
+/** Projects to upload into: those the library already knows, then the ones
+ *  sessions ran in recently — a project with nothing filed yet is exactly
+ *  where a first receipt goes. Library names win; sorted by name. */
+export function uploadProjects(
+  library: ReadonlyArray<{ workspacePath: string; workspaceName: string }>,
+  recent: ReadonlyArray<{ path: string; name: string }>,
+): Array<{ path: string; name: string }> {
+  const by = new Map<string, string>();
+  for (const p of library) if (p.workspacePath) by.set(p.workspacePath, p.workspaceName || p.workspacePath);
+  for (const r of recent) if (r.path && !by.has(r.path)) by.set(r.path, r.name || r.path);
+  return [...by]
+    .map(([path, name]) => ({ path, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}

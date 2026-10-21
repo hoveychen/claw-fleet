@@ -976,6 +976,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       ),
     [states, deviceOrder],
   );
+  /** The library tab talks to one device: its upload menu offers that
+   *  device's workspaces only. */
+  const librarySessions = useMemo(
+    () => mergedSessions.filter((s) => s.deviceId === activeDeviceId),
+    [mergedSessions, activeDeviceId],
+  );
 
   /** Which directories the terminal can open in — every workspace seen in tasks,
    *  de-duped by device. Kept cross-device: terminal processes run on their owning host,
@@ -1457,6 +1463,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : tab === "library" ? (
           <LibraryView
             client={client}
+            sessions={librarySessions}
             onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
           />
         ) : (
