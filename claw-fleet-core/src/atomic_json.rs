@@ -80,16 +80,27 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut tmp_name = path.as_os_str().to_owned();
     tmp_name.push(format!(".tmp.{}.{}", std::process::id(), seq));
     let tmp = std::path::PathBuf::from(tmp_name);
-    std::fs::write(&tmp, bytes)?;
+    if let Err(e) = std::fs::write(&tmp, bytes) {
+        // A failed write still leaves the created temp file behind.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     if let Err(first) = std::fs::rename(&tmp, path) {
-        // Some platforms (Windows) can't rename onto an existing file: drop the
-        // old file first, then retry. Still far narrower than a full truncate.
-        let _ = std::fs::remove_file(path);
-        if let Err(second) = std::fs::rename(&tmp, path) {
-            let _ = std::fs::remove_file(&tmp);
-            let _ = first;
-            return Err(second);
+        // Never unlink the target on POSIX: rename(2) replaces an existing file
+        // atomically there, so a failure is transient (or a real error), and
+        // deleting the target first turned one failed write into a lost record
+        // — a watch timer reads a missing record as "stopped" and exits for good.
+        #[cfg(windows)]
+        {
+            // Windows can't rename onto an existing file: drop the old file
+            // first, then retry. Still far narrower than a full truncate.
+            let _ = std::fs::remove_file(path);
+            if std::fs::rename(&tmp, path).is_ok() {
+                return Ok(());
+            }
         }
+        let _ = std::fs::remove_file(&tmp);
+        return Err(first);
     }
     Ok(())
 }
@@ -144,6 +155,26 @@ mod tests {
             leftovers.is_empty(),
             "temp files must be renamed away, found: {leftovers:?}"
         );
+    }
+
+    /// A failed rename must leave the target in place: the old fallback
+    /// unlinked it first, which is how a watch record vanished mid-wait.
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_failed_rename_keeps_the_target_and_no_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        // A non-empty directory as the target: rename(file, dir) always fails.
+        let path = dir.path().join("store.json");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("keep"), b"x").unwrap();
+        assert!(write_atomic(&path, br#"{"a":1}"#).is_err());
+        assert!(path.join("keep").exists(), "target must not be removed");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file must be cleaned up: {leftovers:?}");
     }
 
     #[test]
