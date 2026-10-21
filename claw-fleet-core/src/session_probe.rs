@@ -529,8 +529,13 @@ pub fn dsh_tail_verdict(lines: &[Value]) -> TailVerdict {
                 let code = e["code"].as_str().unwrap_or_default();
                 match code {
                     "RATE_LIMIT" => TailVerdict::RateLimited,
+                    // MALFORMED_RESPONSE is the model emitting unparseable
+                    // tool-call JSON (session 0552cf92: a raw LaTeX `\delta`
+                    // inside the arguments). dsh does not retry it, but it is
+                    // a nondeterministic glitch the next sample gets right —
+                    // the same family as claude's unparseable-tool-call record.
                     "SERVER" | "TRANSPORT" | "TIMEOUT" | "LLM_STREAM_IDLE_TIMEOUT"
-                    | "STREAM_CLOSED" => {
+                    | "STREAM_CLOSED" | "MALFORMED_RESPONSE" => {
                         TailVerdict::ServerError
                     }
                     _ => {
@@ -964,6 +969,11 @@ mod tests {
         assert_eq!(v(json!({"kind":"error","error":{"message":"slow down","code":"RATE_LIMIT"}})), TailVerdict::RateLimited);
         assert_eq!(
             v(json!({"kind":"error","error":{"message":"SSE stream ended without [DONE]","code":"STREAM_CLOSED"}})),
+            TailVerdict::ServerError
+        );
+        // Session 0552cf92's turn 4: unescaped LaTeX in tool-call arguments.
+        assert_eq!(
+            v(json!({"kind":"error","error":{"message":"DeepSeek Messages stream: tool input is invalid JSON","code":"MALFORMED_RESPONSE"}})),
             TailVerdict::ServerError
         );
         assert_eq!(

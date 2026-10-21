@@ -1025,6 +1025,27 @@ mod tests {
     }
 
     #[test]
+    fn server_error_retry_selects_a_fleet_owned_dsh_session() {
+        // The shape `dsh_source::session_info_from_list_item` produces for a
+        // stopped Fleet-spawned session whose last turn failed transiently. The
+        // scheduler hands `agent_source` to `resume_session_with_pending`, which
+        // routes "dsh" to `DshSource::resume` (a `session/prompt` on the shared
+        // server), so selection is all this side has to get right.
+        let cfg = AutoResumeConfig::default();
+        let mut s = mk_server_errored();
+        s.id = "session-0552cf92".into();
+        s.agent_source = "dsh".into();
+        s.fleet_spawned = true;
+        s.jsonl_path = "dsh://session-0552cf92".into();
+        let picked = select_server_error_retries(std::slice::from_ref(&s), &cfg, |_| false, 1);
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].0, "session-0552cf92");
+        // The per-episode budget / debounce gate is the caller's `skip`, and it
+        // applies to dsh rows the same way.
+        assert!(select_server_error_retries(std::slice::from_ref(&s), &cfg, |_| true, 1).is_empty());
+    }
+
+    #[test]
     fn server_error_retry_blocked_when_flag_off() {
         // enabled (rate-limit resume on) but the server-error opt-out is set.
         let mut cfg = AutoResumeConfig::default();

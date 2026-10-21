@@ -1203,6 +1203,22 @@ pub(crate) fn session_log_verdict(session_id: &str) -> Option<(crate::session_pr
     Some((verdict, mtime_ms))
 }
 
+/// A roster row's status before the live overlay. `running` is all the roster
+/// knows; for a stopped session whose log was read, a transient failure as the
+/// last turn's end reads as `ServerErrored` — the status the auto-resume
+/// scheduler's server-error retry keys on, which dsh sessions never reached
+/// before (a turn dsh gave up on just sat there as Idle). Rate limits stay Idle:
+/// that retry needs a `RateLimitState` dsh's log does not carry.
+fn roster_status(running: bool, verdict: Option<&crate::session_probe::TailVerdict>) -> SessionStatus {
+    if running {
+        SessionStatus::Active
+    } else if matches!(verdict, Some(crate::session_probe::TailVerdict::ServerError)) {
+        SessionStatus::ServerErrored
+    } else {
+        SessionStatus::Idle
+    }
+}
+
 pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     let id = item.get("sessionId").and_then(Value::as_str)?.to_string();
     let workspace_path = item
@@ -1246,13 +1262,15 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
 
     let selection = roster_selection(&projections);
     let subagent = roster_subagent(item, &projections);
-    // Only for the sessions the task page labels (Fleet's own, stopped): a
-    // running session's log changes every event, and the roster also lists
-    // hundreds of sessions nobody asked Fleet about.
-    let last_turn_end = (fleet_spawned && !running)
+    // Only for the sessions the task page labels and the server-error retry may
+    // touch (Fleet's own, stopped): a running session's log changes every
+    // event, and the roster also lists hundreds of sessions nobody asked Fleet
+    // about.
+    let verdict = (fleet_spawned && !running)
         .then(|| session_log_verdict(&id))
         .flatten()
-        .and_then(|(v, _)| crate::session_probe::turn_end_of(&v));
+        .map(|(v, _)| v);
+    let last_turn_end = verdict.as_ref().and_then(crate::session_probe::turn_end_of);
 
     Some(SessionInfo {
         // The roster *does* name a route, in `modelSelection` — it just took
@@ -1284,11 +1302,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         // `running` is the only liveness bit `session/list` carries. Finer
         // phases (Thinking / Streaming / Executing / Processing) come off the
         // mux downlink and are overlaid by `scan_sessions`.
-        status: if running {
-            SessionStatus::Active
-        } else {
-            SessionStatus::Idle
-        },
+        status: roster_status(running, verdict.as_ref()),
         total_output_tokens: output,
         total_input_tokens: input,
         context_percent: roster_context_percent(&projections),
@@ -3126,6 +3140,27 @@ mod tests {
     /// build), so the id could never arrive and the spinner never stopped —
     /// while `dsh web` was healthy and the session existed, which is what made
     /// it look like a hang rather than a mismatch.
+    #[test]
+    fn a_transient_last_turn_failure_reads_as_server_errored() {
+        use crate::session_probe::TailVerdict as V;
+        assert_eq!(roster_status(false, Some(&V::ServerError)), SessionStatus::ServerErrored);
+        // A running session is whatever its live turn is, whatever the log said.
+        assert_eq!(roster_status(true, Some(&V::ServerError)), SessionStatus::Active);
+        // Permanent failures must never reach the retry: they would fail again.
+        for v in [
+            V::Fatal("AUTH: invalid api key".into()),
+            V::Fatal("ACCOUNT_QUOTA: balance exhausted".into()),
+            V::RateLimited,
+            V::Ended,
+            V::Interrupted,
+            V::InFlight,
+        ] {
+            assert_eq!(roster_status(false, Some(&v)), SessionStatus::Idle, "{v:?}");
+        }
+        // No log read (not Fleet's session): the roster's plain reading.
+        assert_eq!(roster_status(false, None), SessionStatus::Idle);
+    }
+
     #[test]
     fn a_fleet_spawned_session_reads_back_as_a_fleet_owned_task() {
         let _lock = crate::session::fleet_home_lock();
