@@ -3134,6 +3134,14 @@ impl LocalBackend {
         crate::artifacts::read_version_bytes(id, version, range)
     }
 
+    /// A video artifact's host-extracted poster frame as JPEG.
+    pub fn read_artifact_poster(
+        &self,
+        id: &str,
+    ) -> Result<crate::artifacts::ArtifactBytes, String> {
+        crate::video_poster::read_poster(id)
+    }
+
     pub fn rollback_artifact(
         &self,
         id: &str,
