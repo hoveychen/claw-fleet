@@ -44,6 +44,21 @@ export interface IngestItem {
   artifactId: string | null;
   duplicateOf: { kind: "item" | "artifact"; id: string; title: string } | null;
   error: string | null;
+  /** Set on a re-file batch's items: the existing doc / artifact it moves. */
+  refile?: IngestRefileRef | null;
+}
+
+/** Mirrors `library_ingest::BatchKind`; absent on batches from before re-filing. */
+export type IngestBatchKind = "upload" | "refile";
+
+/** Mirrors `library_ingest::RefileRef`. */
+export interface IngestRefileRef {
+  /** `doc` or `artifact`. */
+  kind: string;
+  /** Where it is now: a doc's current slug, an artifact's id. */
+  id: string;
+  /** Where it was: a doc's slug, an artifact's path. */
+  from: string;
 }
 
 /** Mirrors `library_ingest::archive::Rejected`. */
@@ -55,6 +70,7 @@ export interface IngestRejected {
 /** Mirrors `library_ingest::IngestBatch`. */
 export interface IngestBatch {
   id: string;
+  kind?: IngestBatchKind;
   workspacePath: string;
   workspaceName: string;
   status: IngestBatchStatus;
@@ -98,6 +114,7 @@ export function newFolderItems(batch: Pick<IngestBatch, "items">, path: string):
 /** Mirrors `library_ingest::BatchSummary`. */
 export interface IngestBatchSummary {
   id: string;
+  kind?: IngestBatchKind;
   workspacePath: string;
   workspaceName: string;
   status: IngestBatchStatus;
@@ -119,6 +136,71 @@ export interface IngestBatchSummary {
   llmCalls: number;
   costUsd: number;
   error: string | null;
+}
+
+export function isRefileBatch(batch: { kind?: IngestBatchKind }): boolean {
+  return batch.kind === "refile";
+}
+
+/** Mirrors `library::ProjectHealth`. */
+export type LibraryProjectHealth = "ok" | "missing" | "temp" | "home" | "tiny";
+
+/** Mirrors `library_ingest::refile::RefilePlan`. */
+export interface RefilePlan {
+  workspacePath: string;
+  workspaceName: string;
+  health: LibraryProjectHealth;
+  /** Why the project is skipped unless forced; empty when healthy. */
+  healthReason: string;
+  unfiledDocs: number;
+  unfiledArtifacts: number;
+  /** Schema folders it has now (0 = a schema will be drafted). */
+  folders: number;
+  willDraft: boolean;
+  calls: number;
+  estCostUsd: number;
+  /** A re-file batch of this project that has not finished. */
+  runningBatch?: string | null;
+}
+
+/** Mirrors `library_summary::BackfillPlan`. */
+export interface BackfillPlan {
+  docs: number;
+  textArtifacts: number;
+  imageArtifacts: number;
+  newPending: number;
+  estCostUsd: number;
+  enabled: boolean;
+}
+
+/** Mirrors `library_summary::BackfillRun`. */
+export interface BackfillRun {
+  state: "running" | "done" | "stopped" | "interrupted";
+  startedMs: number;
+  updatedMs: number;
+  finishedMs?: number | null;
+  segmentStartedMs: number;
+  /** Wall-clock of the finished segments. */
+  elapsedMs: number;
+  concurrency: number;
+  planned: number;
+  done: number;
+  failed: number;
+  costUsd: number;
+  resumes: number;
+  stopRequested: boolean;
+  failures: { kind: string; id: string; title: string; error: string }[];
+}
+
+/** Mirrors `library_summary::BackfillStatus`. */
+export interface BackfillStatus {
+  plan: BackfillPlan;
+  /** Everything due right now — what a run would do. */
+  due: number;
+  dueCostUsd: number;
+  run: BackfillRun | null;
+  /** A process is running a backfill right now. */
+  running: boolean;
 }
 
 /** Selection key of a batch in the library page's detail column. */

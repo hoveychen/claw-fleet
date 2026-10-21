@@ -23,6 +23,21 @@ export interface WikiLinkContext {
   openSlug: (slug: string) => void;
 }
 
+/**
+ * Every slug a doc answers to — its current one and the former slugs a move
+ * left behind (`aliases`, see `claw-fleet-core/src/wiki.rs` Redirects) — mapped
+ * to its current slug. A `[[old-slug]]` written before the doc was re-filed is
+ * live and opens the doc where it is now.
+ */
+export function wikiSlugIndex(docs: { slug: string; aliases?: string[] }[]): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const d of docs) index.set(d.slug, d.slug);
+  for (const d of docs) {
+    for (const a of d.aliases ?? []) if (!index.has(a)) index.set(a, d.slug);
+  }
+  return index;
+}
+
 const WIKI_HASH = "#wiki=";
 /** One slug segment; `/` joins them into virtual directories (`arch/overview`). */
 const SEGMENTS = "[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*";

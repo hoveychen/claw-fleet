@@ -10,6 +10,7 @@ import {
   useWikiDocs,
 } from "../hooks/useWikiDocs";
 import type { AuxDoc } from "../detailAux";
+import { wikiSlugIndex } from "../markdown/wikiLinks";
 import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildWikiMenu, type AuxCardTail } from "./auxDocMenu";
 import { exportWikiDoc, WikiDocBody } from "./WikiView";
@@ -50,7 +51,11 @@ export function WikiTabPane({
   const [error, setError] = useState<string | null>(null);
   const slug = card.ref;
 
-  const doc = useMemo(() => docs.find((d) => d.slug === slug) ?? null, [docs, slug]);
+  // A card opened under a former slug (the doc was moved since) still finds it.
+  const doc = useMemo(
+    () => docs.find((d) => d.slug === slug) ?? docs.find((d) => d.aliases?.includes(slug)) ?? null,
+    [docs, slug],
+  );
 
   // The shared list is fetched once, so a doc published *after* the app opened
   // is absent from it — which is exactly this pane's common case, since the card
@@ -63,7 +68,7 @@ export function WikiTabPane({
   // Cross-doc links resolve against the whole list, so a link to a doc hidden by
   // the Knowledge Base page's current filter is still live here.
   const wikiLinks = useMemo(() => {
-    const slugs = new Set(docs.map((d) => d.slug));
+    const slugs = wikiSlugIndex(docs);
     return {
       hasSlug: (s: string) => {
         if (slugs.has(s)) return true;
@@ -75,7 +80,7 @@ export function WikiTabPane({
         queueMicrotask(() => refetchWikiDocsForMissingSlug(s));
         return false;
       },
-      openSlug: onOpenSlug,
+      openSlug: (s: string) => onOpenSlug(slugs.get(s) ?? s),
     };
   }, [docs, inFlight, onOpenSlug]);
 

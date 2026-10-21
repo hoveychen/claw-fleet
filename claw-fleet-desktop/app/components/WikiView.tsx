@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { useIframeImgZoom } from "./useIframeImgZoom";
-import type { WikiLinkContext } from "../markdown/wikiLinks";
+import { wikiSlugIndex, type WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PromptDialog } from "./PromptDialog";
@@ -83,6 +83,8 @@ export interface WikiDoc {
   /** The library's AI summary / tags (omitted until one is written). */
   summary?: string;
   tags?: string[];
+  /** Former slugs that still resolve to this doc (it was moved). */
+  aliases?: string[];
 }
 
 interface WikiSearchHit {
@@ -420,11 +422,11 @@ export function WikiView() {
   useFadeOnChange(previewRef, selected?.slug ?? null);
 
   const wikiLinks = useMemo<WikiLinkContext>(() => {
-    const slugs = new Set(docs.map((d) => d.slug));
+    const slugs = wikiSlugIndex(docs);
     return {
       // null = not known yet: a ref must not render dead before the list lands.
       hasSlug: (slug: string) => (loaded ? slugs.has(slug) : null),
-      openSlug: setSelectedSlug,
+      openSlug: (slug: string) => setSelectedSlug(slugs.get(slug) ?? slug),
     };
   }, [docs, loaded]);
 

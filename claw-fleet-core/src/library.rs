@@ -104,6 +104,9 @@ const MAX_PREFIX_LEN: usize = wiki::MAX_SLUG_LEN - 32;
 pub const ORIGIN_AGENT: &str = "agent";
 /// [`FolderOrigin::source`] of a folder an upload's classifier created.
 pub const ORIGIN_UPLOAD: &str = "upload";
+/// [`FolderOrigin::source`] of a folder re-filing a project's existing items
+/// created (`library_ingest::refile`).
+pub const ORIGIN_REFILE: &str = "refile";
 
 /// Who made a folder the user did not make, and why. A folder carrying one
 /// that is not yet [`accepted`](FolderOrigin::accepted_ms) is shown with a
@@ -112,7 +115,7 @@ pub const ORIGIN_UPLOAD: &str = "upload";
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderOrigin {
-    /// [`ORIGIN_AGENT`] or [`ORIGIN_UPLOAD`].
+    /// [`ORIGIN_AGENT`], [`ORIGIN_UPLOAD`] or [`ORIGIN_REFILE`].
     pub source: String,
     /// Why no existing folder fitted, in the creator's words.
     #[serde(default)]
@@ -120,7 +123,7 @@ pub struct FolderOrigin {
     /// The agent session that created it.
     #[serde(default)]
     pub session_id: Option<String>,
-    /// The upload batch that created it.
+    /// The upload or re-file batch that created it.
     #[serde(default)]
     pub batch_id: Option<String>,
     #[serde(default)]
@@ -149,6 +152,10 @@ impl FolderOrigin {
             created_ms: now_ms(),
             ..Default::default()
         }
+    }
+
+    pub fn refile(batch_id: &str, reason: &str) -> Self {
+        Self { source: ORIGIN_REFILE.to_string(), ..Self::upload(batch_id, reason) }
     }
 }
 
@@ -1116,7 +1123,7 @@ pub fn rename_folder_in(
         for (old, new) in &doc_plan {
             if let Err(e) = wiki::move_doc_in(&roots.wiki, old, new) {
                 for (o, n) in done.iter().rev() {
-                    let _ = wiki::move_doc_in(&roots.wiki, n, o);
+                    let _ = wiki::unmove_doc_in(&roots.wiki, n, o);
                 }
                 return Err(e);
             }
@@ -1278,6 +1285,75 @@ pub fn artifact_folders() -> Vec<artifacts::Folder> {
         Ok(roots) => artifact_folders_in(&roots),
         Err(_) => Vec::new(),
     }
+}
+
+// ── Workspace hygiene ───────────────────────────────────────────────────────
+
+/// Fewest unfiled items a project needs before re-filing drafts a schema for
+/// it; below this a schema would be guessed from almost nothing.
+pub const MIN_REFILE_ITEMS: usize = 5;
+
+/// Whether a project key names a real project worth a folder schema of its
+/// own. Items get recorded under whatever directory the agent ran in, so the
+/// store also holds session scratchpads, `/tmp` probes, the home directory and
+/// projects deleted since; drafting a schema for each of those would bury the
+/// real projects' folders under one-off ones.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectHealth {
+    Ok,
+    /// The directory no longer exists.
+    Missing,
+    /// Under a temp directory (`/tmp`, `/var/folders`, the session scratchpads).
+    Temp,
+    /// The home directory itself: not a project.
+    Home,
+    /// Fewer than [`MIN_REFILE_ITEMS`] unfiled items.
+    Tiny,
+}
+
+impl ProjectHealth {
+    /// Why re-filing skips the project; empty for [`Self::Ok`].
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Ok => "",
+            Self::Missing => "the project directory no longer exists",
+            Self::Temp => "it is a temporary directory",
+            Self::Home => "it is the home directory, not a project",
+            Self::Tiny => "it has fewer than 5 unfiled items",
+        }
+    }
+}
+
+fn is_temp_path(path: &Path) -> bool {
+    let mut roots: Vec<PathBuf> = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders", "/var/tmp"]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    let tmp = std::env::temp_dir();
+    if let Ok(canon) = tmp.canonicalize() {
+        roots.push(canon);
+    }
+    roots.push(tmp);
+    roots.iter().any(|r| path.starts_with(r))
+}
+
+/// Classify project `key` holding `unfiled` unfiled items.
+pub fn project_health(key: &str, unfiled: usize) -> ProjectHealth {
+    let path = Path::new(key);
+    if is_temp_path(path) {
+        return ProjectHealth::Temp;
+    }
+    if dirs::home_dir().is_some_and(|h| h == path) {
+        return ProjectHealth::Home;
+    }
+    if !path.is_dir() {
+        return ProjectHealth::Missing;
+    }
+    if unfiled < MIN_REFILE_ITEMS {
+        return ProjectHealth::Tiny;
+    }
+    ProjectHealth::Ok
 }
 
 #[cfg(test)]
@@ -1724,5 +1800,20 @@ mod tests {
         fs::write(dir.join("x.json.tmp.1.2"), b"{").unwrap();
         fs::write(dir.join("broken.json"), b"{").unwrap();
         assert_eq!(list_folders_in(&e.roots, &e.ws()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn project_health_skips_temp_home_missing_and_tiny_projects() {
+        let real = std::env::current_dir().unwrap();
+        let real = real.display().to_string();
+        assert_eq!(project_health(&real, MIN_REFILE_ITEMS), ProjectHealth::Ok);
+        assert_eq!(project_health(&real, MIN_REFILE_ITEMS - 1), ProjectHealth::Tiny);
+        assert_eq!(project_health("/private/tmp/claude-501/x/scratchpad", 50), ProjectHealth::Temp);
+        assert_eq!(project_health("/tmp/wk", 50), ProjectHealth::Temp);
+        let tmp = TempDir::new().unwrap();
+        assert_eq!(project_health(&tmp.path().display().to_string(), 50), ProjectHealth::Temp);
+        assert_eq!(project_health("/definitely/not/here/project", 50), ProjectHealth::Missing);
+        let home = dirs::home_dir().unwrap().display().to_string();
+        assert_eq!(project_health(&home, 50), ProjectHealth::Home);
     }
 }

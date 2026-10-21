@@ -1088,6 +1088,23 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { batch_id: a.batchId },
   }),
 
+  // The one-time summary backfill and re-filing a project's unfiled items.
+  library_backfill_status: () => ({ method: "GET", path: "/library_backfill_status" }),
+  library_backfill_start: () => ({ method: "POST", path: "/library_backfill_start", body: {} }),
+  library_backfill_stop: () => ({ method: "POST", path: "/library_backfill_stop", body: {} }),
+
+  library_refile_plan: (a) => ({
+    method: "GET",
+    path: "/library_refile_plan",
+    query: { workspace: q(a.workspace) },
+  }),
+
+  library_refile_start: (a) => ({
+    method: "POST",
+    path: "/library_refile_start",
+    body: { workspace_path: a.workspacePath, force: a.force ?? false },
+  }),
+
   list_wiki_docs: () => ({
     method: "GET",
     path: "/wiki_docs",

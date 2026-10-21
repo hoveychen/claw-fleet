@@ -17,6 +17,9 @@ import { RELAY_SCRIPTS } from "./demoScripts";
 import { LIVE_MODE, installLiveProxy, liveInvoke } from "./liveProxy";
 import {
   mockIngestBatch,
+  mockBackfillStart,
+  mockBackfillStatus,
+  mockBackfillStop,
   mockIngestBatches,
   mockIngestDismiss,
   mockIngestMove,
@@ -29,6 +32,8 @@ import {
   mockLibraryRenameFolder,
   mockLibrarySearch,
   mockLibraryTree,
+  mockRefilePlan,
+  mockRefileStart,
 } from "./library";
 import {
   MOCK_QA_DELAY_MS,
@@ -783,6 +788,16 @@ async function handleIPC(
       return mockIngestMove(args);
     case "library_ingest_dismiss":
       return mockIngestDismiss(args);
+    case "library_backfill_status":
+      return mockBackfillStatus();
+    case "library_backfill_start":
+      return mockBackfillStart();
+    case "library_backfill_stop":
+      return mockBackfillStop();
+    case "library_refile_plan":
+      return mockRefilePlan(args);
+    case "library_refile_start":
+      return mockRefileStart(args);
     case "list_wiki_docs":
       return MOCK_WIKI_DOCS;
     case "search_wiki_docs":

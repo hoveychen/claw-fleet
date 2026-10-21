@@ -33,7 +33,7 @@ use serde_json::Value;
 use crate::artifacts;
 use crate::library::{Roots, ITEM_ARTIFACT, ITEM_DOC};
 use crate::library_index::LibraryIndex;
-use crate::library_ingest::classify;
+use crate::library_ingest::{classify, Brain, LiveBrain};
 use crate::wiki;
 
 /// Most summaries per machine-hour.
@@ -226,6 +226,16 @@ fn release(index: &LibraryIndex, rowid: i64, failed: bool, now: u64) {
     let _ = index.conn().execute(sql, params![rowid, now as i64]);
 }
 
+/// Take a row out of the due set right after its summary was stored. The next
+/// sync re-reads the item and fills in the real summary; until then a worker
+/// looping without a sync in between would summarize the same item again.
+fn mark_summarized(index: &LibraryIndex, rowid: i64, version: &str) {
+    let _ = index.conn().execute(
+        "UPDATE items SET summary_version = ?2 WHERE id = ?1",
+        params![rowid, version],
+    );
+}
+
 fn mode_of(d: &Due) -> Option<Mode> {
     if !d.body.trim().is_empty() {
         Some(Mode::Text)
@@ -275,17 +285,20 @@ pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
     (!summary.is_empty()).then(|| (summary, classify::tags_field(&v)))
 }
 
-/// Summarize one claimed item and store the result. Returns the call's cost.
-fn summarize_one(roots: &Roots, d: &Due) -> Result<f64, String> {
+/// Summarize one claimed item and store the result. `spent` gets the call's
+/// cost whether or not a summary came of it: an answer that does not parse
+/// was still paid for.
+fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain, spent: &mut f64) -> Result<(), String> {
     let mode = mode_of(d).ok_or_else(|| "nothing to summarize".to_string())?;
     let outcome = match mode {
         Mode::Text => {
             let label = if d.kind == ITEM_DOC { "document" } else { "file" };
-            classify::complete_text(
-                crate::llm_provider::ModelSlot::Fast,
-                &summary_prompt(&d.title, label, &d.body),
-            )
-            .ok_or_else(|| "no model answered".to_string())?
+            brain
+                .text(
+                    crate::llm_provider::ModelSlot::Fast,
+                    &summary_prompt(&d.title, label, &d.body),
+                )
+                .ok_or_else(|| "no model answered".to_string())?
         }
         Mode::Vision => {
             let a = artifacts::get_in(&roots.artifacts, &d.item_id)?;
@@ -294,11 +307,14 @@ fn summarize_one(roots: &Roots, d: &Due) -> Result<f64, String> {
             }
             let blob = artifacts::blob_path(&roots.artifacts, &a);
             let dir = blob.parent().ok_or("artifact blob has no directory")?;
-            classify::complete_vision(dir, &vision_summary_prompt(&a.name, &d.title))?
+            brain.vision(dir, &vision_summary_prompt(&a.name, &d.title))?
         }
     };
-    let (summary, tags) =
-        parse_summary(&outcome.text).ok_or_else(|| "unparseable summary".to_string())?;
+    *spent = outcome.cost_usd;
+    // Keep the start of the answer: the only clue to why it did not parse.
+    let (summary, tags) = parse_summary(&outcome.text).ok_or_else(|| {
+        format!("unparseable summary: {}", classify::clip(&outcome.text, 160))
+    })?;
     match d.kind.as_str() {
         ITEM_DOC => wiki::write_summary_in(
             &roots.wiki,
@@ -322,7 +338,7 @@ fn summarize_one(roots: &Roots, d: &Due) -> Result<f64, String> {
             })?;
         }
     }
-    Ok(outcome.cost_usd)
+    Ok(())
 }
 
 /// One pass: summarize up to `limit` due items. Returns how many succeeded.
@@ -339,13 +355,15 @@ pub fn run_pass(roots: &Roots, index: &LibraryIndex, limit: usize) -> Result<usi
         if !claim(index, d.rowid, now)? {
             continue;
         }
-        match summarize_one(roots, &d) {
-            Ok(cost) => {
+        let mut spent = 0.0;
+        match summarize_one(roots, &d, &LiveBrain, &mut spent) {
+            Ok(()) => {
                 crate::log_debug(&format!(
-                    "[library_summary] {} {} summarized (${cost:.4})",
+                    "[library_summary] {} {} summarized (${spent:.4})",
                     d.kind, d.item_id
                 ));
                 release(index, d.rowid, false, now_ms());
+                mark_summarized(index, d.rowid, &d.version);
                 done += 1;
             }
             Err(e) => {
@@ -373,6 +391,433 @@ pub fn is_due(index: &LibraryIndex, kind: &str, id: &str) -> bool {
         .ok()
         .flatten()
         .is_some()
+}
+
+// ── Full backfill run ────────────────────────────────────────────────────────
+//
+// The worker above drips the backlog at MAX_PER_HOUR. A full backfill the user
+// approved instead runs at a bounded concurrency with the hourly cap lifted for
+// that run only — it never touches the shared budget, so the drip keeps its
+// own. The CLI runs it in the foreground, the desktop / `fleet serve` on a
+// background thread. It is resumable by construction: a summarized item is no
+// longer due, so a run that was interrupted continues where it stopped, and its
+// counters (calls, cost, failures) carry over in `backfill.json` until a run
+// ends with nothing left.
+
+/// Most calls a backfill runs at once: the library's LLM slot gate.
+pub const BACKFILL_CONCURRENCY: usize = classify::MAX_PARALLEL_CALLS;
+/// Failures kept on the run record (the newest).
+const MAX_RECORDED_FAILURES: usize = 200;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackfillState {
+    Running,
+    /// Ran out of due items (failures, if any, are listed).
+    Done,
+    /// Stopped on request or at `--limit`; the next run resumes it.
+    Stopped,
+    /// The process running it died; the next run resumes it.
+    Interrupted,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillFailure {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+    pub error: String,
+}
+
+/// One backfill, possibly over several resumed runs.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillRun {
+    pub state: BackfillState,
+    pub started_ms: u64,
+    pub updated_ms: u64,
+    #[serde(default)]
+    pub finished_ms: Option<u64>,
+    /// When the current (or last) run segment started.
+    #[serde(default)]
+    pub segment_started_ms: u64,
+    /// Wall-clock of the finished segments.
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    pub concurrency: usize,
+    /// Items due when the backfill first started.
+    pub planned: usize,
+    pub done: usize,
+    pub failed: usize,
+    pub cost_usd: f64,
+    #[serde(default)]
+    pub resumes: u32,
+    #[serde(default)]
+    pub stop_requested: bool,
+    #[serde(default)]
+    pub failures: Vec<BackfillFailure>,
+}
+
+/// What the library's backfill button shows.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillStatus {
+    pub plan: BackfillPlan,
+    /// Everything due right now, backlog and new — what a run would do.
+    pub due: usize,
+    /// Estimated cost of `due`.
+    pub due_cost_usd: f64,
+    pub run: Option<BackfillRun>,
+    /// A process is running a backfill right now.
+    pub running: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct BackfillOpts {
+    pub concurrency: usize,
+    /// Stop after this many items (a smoke run); the next run resumes.
+    pub limit: Option<usize>,
+}
+
+impl Default for BackfillOpts {
+    fn default() -> Self {
+        Self { concurrency: BACKFILL_CONCURRENCY, limit: None }
+    }
+}
+
+/// One finished item, for a caller printing progress.
+#[derive(Clone, Debug)]
+pub struct BackfillTick {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+    pub cost_usd: f64,
+    pub error: Option<String>,
+    pub run: BackfillRun,
+}
+
+fn run_file(roots: &Roots) -> std::path::PathBuf {
+    roots.library.join("backfill.json")
+}
+
+fn load_run(roots: &Roots) -> Option<BackfillRun> {
+    serde_json::from_str(&std::fs::read_to_string(run_file(roots)).ok()?).ok()
+}
+
+fn save_run(roots: &Roots, run: &BackfillRun) -> Result<(), String> {
+    let body = serde_json::to_vec_pretty(run).map_err(|e| e.to_string())?;
+    crate::atomic_json::write_atomic(&run_file(roots), &body)
+        .map_err(|e| format!("write backfill record: {e}"))
+}
+
+/// Locked read-modify-write of the run record; `None` when there is none.
+fn update_run<R>(roots: &Roots, f: impl FnOnce(&mut BackfillRun) -> R) -> Option<R> {
+    crate::atomic_json::with_file_lock(&run_file(roots), || {
+        let mut run = load_run(roots)?;
+        let out = f(&mut run);
+        run.updated_ms = now_ms();
+        save_run(roots, &run).ok()?;
+        Some(out)
+    })
+}
+
+/// The OS lock a running backfill holds, so it dies with its process.
+fn open_run_lock(roots: &Roots) -> Option<std::fs::File> {
+    let _ = std::fs::create_dir_all(&roots.library);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(roots.library.join("backfill.lock"))
+        .ok()
+}
+
+fn backfill_running(roots: &Roots) -> bool {
+    match open_run_lock(roots) {
+        Some(f) => f.try_lock().is_err(),
+        None => false,
+    }
+}
+
+fn count_due(index: &LibraryIndex) -> Result<(usize, f64), String> {
+    index
+        .conn()
+        .query_row(
+            &format!(
+                "SELECT COUNT(*), COALESCE(SUM(artifact_kind = 'image' AND body = ''), 0)
+                 FROM items WHERE {DUE_WHERE}"
+            ),
+            [],
+            |r| Ok((r.get::<_, i64>(0)? as usize, r.get::<_, i64>(1)? as usize)),
+        )
+        .map(|(all, images)| {
+            let cost = (all - images) as f64 * EST_TEXT_CALL_USD + images as f64 * EST_VISION_CALL_USD;
+            (all, cost)
+        })
+        .map_err(|e| format!("count: {e}"))
+}
+
+/// The backfill button's numbers. Syncs the index and extracts artifact text
+/// for up to `extract_budget` first: an artifact whose text is not extracted
+/// yet is not counted as due.
+pub fn backfill_status_in(roots: &Roots, extract_budget: Duration) -> Result<BackfillStatus, String> {
+    let index = LibraryIndex::open_at(&crate::library_index::db_path(roots))?;
+    index.sync(roots)?;
+    let started = std::time::Instant::now();
+    while started.elapsed() < extract_budget
+        && index.extract_pending(roots, extract_budget.saturating_sub(started.elapsed()))? > 0
+    {}
+    let plan = backfill_plan(&index)?;
+    let (due, due_cost_usd) = count_due(&index)?;
+    let running = backfill_running(roots);
+    let mut run = load_run(roots);
+    if let Some(r) = run.as_mut() {
+        if r.state == BackfillState::Running && !running {
+            r.state = BackfillState::Interrupted;
+        }
+    }
+    Ok(BackfillStatus { plan, due, due_cost_usd, run, running })
+}
+
+pub fn backfill_status() -> Result<BackfillStatus, String> {
+    backfill_status_in(&Roots::home()?, Duration::from_secs(2))
+}
+
+/// The next due row nobody holds, claimed. A row this run already finished
+/// drops out on its own: a success is marked summarized, a failure gets a
+/// back-off (cleared for every due row when the run starts, so each run
+/// retries earlier failures once).
+fn claim_next(index: &LibraryIndex) -> Result<Option<Due>, String> {
+    loop {
+        let now = now_ms();
+        let rows: Vec<Due> = {
+            let mut stmt = index
+                .conn()
+                .prepare(&format!(
+                    "SELECT id, kind, item_id, title, version, artifact_kind, body FROM items
+                     WHERE {DUE_WHERE} AND summary_claim_until_ms < ?1 AND summary_retry_ms <= ?1
+                     ORDER BY updated_ms DESC
+                     LIMIT 8"
+                ))
+                .map_err(|e| format!("prepare: {e}"))?;
+            let rows = stmt
+                .query_map(params![now as i64], |r| {
+                    Ok(Due {
+                        rowid: r.get(0)?,
+                        kind: r.get(1)?,
+                        item_id: r.get(2)?,
+                        title: r.get(3)?,
+                        version: r.get(4)?,
+                        artifact_kind: r.get(5)?,
+                        body: r.get(6)?,
+                    })
+                })
+                .map_err(|e| format!("query: {e}"))?;
+            rows.flatten().collect()
+        };
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        for d in rows {
+            if claim(index, d.rowid, now)? {
+                return Ok(Some(d));
+            }
+        }
+        // Every candidate was taken by another worker in between: look again.
+    }
+}
+
+/// Summarize everything due, `opts.concurrency` at a time, without the hourly
+/// cap. Refuses when another process is already running a backfill. Resumes an
+/// unfinished record. `on_tick` is called after every item.
+pub fn run_backfill_in(
+    roots: &Roots,
+    opts: &BackfillOpts,
+    brain: &dyn Brain,
+    on_tick: &(dyn Fn(&BackfillTick) + Sync),
+) -> Result<BackfillRun, String> {
+    let lock = open_run_lock(roots).ok_or("cannot open the backfill lock")?;
+    if lock.try_lock().is_err() {
+        return Err("a backfill is already running".to_string());
+    }
+    let db = crate::library_index::db_path(roots);
+    let index = LibraryIndex::open_at(&db)?;
+    index.sync(roots)?;
+    // An artifact whose text is not extracted yet is not due; extract it all
+    // now so the run covers the whole store.
+    while index.extract_pending(roots, Duration::from_secs(60))? > 0 {}
+    let (due_now, _) = count_due(&index)?;
+    index
+        .conn()
+        .execute(&format!("UPDATE items SET summary_retry_ms = 0 WHERE {DUE_WHERE}"), [])
+        .map_err(|e| format!("reset back-off: {e}"))?;
+
+    let now = now_ms();
+    let concurrency = opts.concurrency.clamp(1, BACKFILL_CONCURRENCY);
+    crate::atomic_json::with_file_lock(&run_file(roots), || {
+        let mut run = match load_run(roots) {
+            Some(mut r) if r.state != BackfillState::Done => {
+                r.resumes += 1;
+                r
+            }
+            _ => BackfillRun {
+                state: BackfillState::Running,
+                started_ms: now,
+                updated_ms: now,
+                finished_ms: None,
+                segment_started_ms: now,
+                elapsed_ms: 0,
+                concurrency,
+                planned: due_now,
+                done: 0,
+                failed: 0,
+                cost_usd: 0.0,
+                resumes: 0,
+                stop_requested: false,
+                failures: Vec::new(),
+            },
+        };
+        run.state = BackfillState::Running;
+        run.stop_requested = false;
+        run.concurrency = concurrency;
+        run.segment_started_ms = now;
+        run.finished_ms = None;
+        run.updated_ms = now;
+        save_run(roots, &run)
+    })?;
+
+    let taken = std::sync::atomic::AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let limited = AtomicBool::new(false);
+    std::thread::scope(|s| {
+        for _ in 0..concurrency {
+            s.spawn(|| {
+                let Ok(index) = LibraryIndex::open_at(&db) else { return };
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if load_run(roots).is_some_and(|r| r.stop_requested) {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    if opts.limit.is_some_and(|l| taken.fetch_add(1, Ordering::SeqCst) >= l) {
+                        limited.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let d = match claim_next(&index) {
+                        Ok(Some(d)) => d,
+                        Ok(None) => break,
+                        Err(e) => {
+                            crate::log_debug(&format!("[library_summary] backfill: {e}"));
+                            break;
+                        }
+                    };
+                    let mut spent = 0.0;
+                    let result = summarize_one(roots, &d, brain, &mut spent);
+                    match &result {
+                        Ok(_) => {
+                            release(&index, d.rowid, false, now_ms());
+                            mark_summarized(&index, d.rowid, &d.version);
+                        }
+                        Err(_) => release(&index, d.rowid, true, now_ms()),
+                    }
+                    let snapshot = update_run(roots, |r| {
+                        // `failed` counts items failing now: a resumed run
+                        // retries them, and a retry that works clears them.
+                        let known = r.failures.iter().position(|f| f.kind == d.kind && f.id == d.item_id);
+                        r.cost_usd += spent;
+                        match &result {
+                            Ok(()) => {
+                                r.done += 1;
+                                if let Some(i) = known {
+                                    r.failures.remove(i);
+                                    r.failed = r.failed.saturating_sub(1);
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(i) = known {
+                                    r.failures.remove(i);
+                                } else {
+                                    r.failed += 1;
+                                }
+                                r.failures.push(BackfillFailure {
+                                    kind: d.kind.clone(),
+                                    id: d.item_id.clone(),
+                                    title: d.title.clone(),
+                                    error: e.clone(),
+                                });
+                                let over = r.failures.len().saturating_sub(MAX_RECORDED_FAILURES);
+                                r.failures.drain(..over);
+                            }
+                        }
+                        r.clone()
+                    });
+                    if let Some(run) = snapshot {
+                        on_tick(&BackfillTick {
+                            kind: d.kind.clone(),
+                            id: d.item_id.clone(),
+                            title: d.title.clone(),
+                            cost_usd: spent,
+                            error: result.err(),
+                            run,
+                        });
+                    }
+                }
+            });
+        }
+    });
+
+    // The summaries written above reach the index's text on this sync.
+    let _ = index.sync(roots);
+    let stopped = stop.load(Ordering::Relaxed) || limited.load(Ordering::Relaxed);
+    let finished = update_run(roots, |r| {
+        let end = now_ms();
+        r.elapsed_ms += end.saturating_sub(r.segment_started_ms);
+        r.state = if stopped { BackfillState::Stopped } else { BackfillState::Done };
+        r.finished_ms = (!stopped).then_some(end);
+        r.stop_requested = false;
+        r.clone()
+    })
+    .ok_or("the backfill record disappeared")?;
+    drop(lock);
+    Ok(finished)
+}
+
+/// Start a full backfill on a background thread (the desktop / `fleet
+/// serve` button). Answers the status as it stands right after starting.
+pub fn start_backfill() -> Result<BackfillStatus, String> {
+    let roots = Roots::home()?;
+    if backfill_running(&roots) {
+        return Err("a backfill is already running".to_string());
+    }
+    let thread_roots = roots.clone();
+    std::thread::Builder::new()
+        .name("library-backfill".into())
+        .spawn(move || {
+            if let Err(e) =
+                run_backfill_in(&thread_roots, &BackfillOpts::default(), &LiveBrain, &|_| {})
+            {
+                crate::log_debug(&format!("[library_summary] backfill failed: {e}"));
+            }
+        })
+        .map_err(|e| format!("start backfill: {e}"))?;
+    // Let the thread take its lock and write its record before answering.
+    for _ in 0..50 {
+        if backfill_running(&roots) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    backfill_status_in(&roots, Duration::ZERO)
+}
+
+/// Ask a running backfill to stop after the items in flight.
+pub fn stop_backfill() -> Result<BackfillStatus, String> {
+    let roots = Roots::home()?;
+    update_run(&roots, |r| r.stop_requested = true).ok_or("no backfill has run")?;
+    backfill_status_in(&roots, Duration::ZERO)
 }
 
 static WORKER: AtomicBool = AtomicBool::new(false);
@@ -530,6 +975,102 @@ mod tests {
         }
         assert!(!take_budget(&two, now).unwrap(), "budget is per database, not per handle");
         assert!(take_budget(&two, now + 3_600_001).unwrap(), "a new hour resets it");
+    }
+
+    /// Answers every text prompt with a summary, except prompts naming
+    /// `FAILME`, which get a paid-for answer that is not JSON; counts calls.
+    struct FakeBrain(std::sync::atomic::AtomicUsize);
+
+    impl Brain for FakeBrain {
+        fn text(
+            &self,
+            _slot: crate::llm_provider::ModelSlot,
+            prompt: &str,
+        ) -> Option<classify::CallOutcome> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(5));
+            let text = if prompt.contains("FAILME") {
+                "Sorry, I cannot summarize this."
+            } else {
+                r#"{"summary":"A fake summary.","tags":["fake"]}"#
+            };
+            Some(classify::CallOutcome { text: text.into(), cost_usd: 0.01, ..Default::default() })
+        }
+        fn vision(&self, _dir: &std::path::Path, _prompt: &str) -> Result<classify::CallOutcome, String> {
+            Err("no vision in tests".into())
+        }
+    }
+
+    #[test]
+    fn a_backfill_runs_past_the_hourly_cap_resumes_and_accounts_cost() {
+        let tmp = TempDir::new().unwrap();
+        let (roots, ws) = roots(&tmp);
+        for i in 0..6 {
+            wiki::publish_text_in(&roots.wiki, &format!("d{i}"), None, &format!("body {i}"), &ws, wiki::TextPublishMode::Replace)
+                .unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        wiki::publish_text_in(&roots.wiki, "bad", None, "FAILME", &ws, wiki::TextPublishMode::Replace).unwrap();
+        let index = LibraryIndex::open_at(&crate::library_index::db_path(&roots)).unwrap();
+        // Everything predates the index: backlog only, which the drip skips.
+        index.meta_set("activated_ms", &(now_ms() + 1).to_string()).unwrap();
+        // Spend the hour's budget: a backfill must not care.
+        for _ in 0..MAX_PER_HOUR {
+            take_budget(&index, now_ms()).unwrap();
+        }
+        let status = backfill_status_in(&roots, Duration::ZERO).unwrap();
+        assert_eq!((status.due, status.running, status.run.is_none()), (7, false, true));
+
+        let brain = FakeBrain(Default::default());
+        let ticks = std::sync::Mutex::new(0usize);
+        let tick = |_: &BackfillTick| *ticks.lock().unwrap() += 1;
+        let first = run_backfill_in(&roots, &BackfillOpts { concurrency: 3, limit: Some(3) }, &brain, &tick).unwrap();
+        assert_eq!(first.state, BackfillState::Stopped, "a limited run stops, to be resumed");
+        assert_eq!(first.done + first.failed, 3);
+
+        let done = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &tick).unwrap();
+        assert_eq!(done.state, BackfillState::Done);
+        assert_eq!((done.planned, done.done, done.failed, done.resumes), (7, 6, 1, 1), "{done:?}");
+        // Six summaries plus two answers for `bad` that did not parse: those
+        // were paid for too.
+        assert!((done.cost_usd - 0.08).abs() < 1e-9, "cost carried over the resume: {}", done.cost_usd);
+        assert_eq!(done.failures[0].id, "bad");
+        assert_eq!(done.failures[0].error, "unparseable summary: Sorry, I cannot summarize this.");
+        // `bad` is the newest, so the first run tried it; the resumed run
+        // retried it once more. Everything else was called exactly once.
+        assert_eq!(*ticks.lock().unwrap(), 8);
+        assert_eq!(brain.0.load(Ordering::SeqCst), 8);
+        assert_eq!(wiki::get_doc_in(&roots.wiki, "d3").unwrap().summary, "A fake summary.");
+
+        // A new run starts a fresh record and retries the failure once.
+        let again = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &tick).unwrap();
+        assert_eq!((again.planned, again.done, again.failed), (1, 0, 1));
+        let status = backfill_status_in(&roots, Duration::ZERO).unwrap();
+        assert_eq!(status.due, 1);
+    }
+
+    #[test]
+    fn a_stop_request_ends_the_run_and_a_held_lock_refuses_a_second_one() {
+        let tmp = TempDir::new().unwrap();
+        let (roots, ws) = roots(&tmp);
+        for i in 0..4 {
+            wiki::publish_text_in(&roots.wiki, &format!("d{i}"), None, "body", &ws, wiki::TextPublishMode::Replace)
+                .unwrap();
+        }
+        let brain = FakeBrain(Default::default());
+        let stop_after_first = |t: &BackfillTick| {
+            if t.run.done == 1 {
+                update_run(&roots, |r| r.stop_requested = true);
+            }
+        };
+        let run = run_backfill_in(&roots, &BackfillOpts { concurrency: 1, limit: None }, &brain, &stop_after_first).unwrap();
+        assert_eq!((run.state, run.done), (BackfillState::Stopped, 1));
+
+        let held = open_run_lock(&roots).unwrap();
+        held.try_lock().unwrap();
+        assert!(backfill_running(&roots));
+        let err = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &|_| {}).unwrap_err();
+        assert!(err.contains("already running"), "{err}");
     }
 
     /// Per-call cost of real summaries, read-only: point

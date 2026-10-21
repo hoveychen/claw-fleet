@@ -3089,6 +3089,33 @@ impl LocalBackend {
         crate::library_ingest::dismiss_batch(batch_id)
     }
 
+    pub fn library_backfill_status(&self) -> Result<crate::library_summary::BackfillStatus, String> {
+        crate::library_summary::backfill_status()
+    }
+
+    pub fn library_backfill_start(&self) -> Result<crate::library_summary::BackfillStatus, String> {
+        crate::library_summary::start_backfill()
+    }
+
+    pub fn library_backfill_stop(&self) -> Result<crate::library_summary::BackfillStatus, String> {
+        crate::library_summary::stop_backfill()
+    }
+
+    pub fn library_refile_plan(
+        &self,
+        workspace: &str,
+    ) -> Result<crate::library_ingest::refile::RefilePlan, String> {
+        crate::library_ingest::refile::refile_plan(workspace)
+    }
+
+    pub fn library_refile_start(
+        &self,
+        workspace_path: &str,
+        force: bool,
+    ) -> Result<crate::library_ingest::IngestBatch, String> {
+        crate::library_ingest::refile::start_refile(workspace_path, force)
+    }
+
     pub fn read_artifact_bytes(
         &self,
         id: &str,

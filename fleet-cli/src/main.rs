@@ -101,6 +101,13 @@ enum Commands {
         #[command(subcommand)]
         action: WikiCommands,
     },
+    /// The library (wiki docs + artifacts as one tree per project): full
+    /// summary backfill, re-filing a project's existing items into its folder
+    /// schema, and the per-project overview.
+    Library {
+        #[command(subcommand)]
+        action: LibraryCommands,
+    },
     /// Private incremental checkpoint notes for this session (survive context
     /// compaction and handoff relays). CLI face of the `fleet__notes` MCP tool.
     /// Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
@@ -1335,6 +1342,63 @@ pub(crate) enum ArtifactCommands {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum LibraryCommands {
+    /// Summarize every library item that has no AI summary yet (docs, text
+    /// artifacts, images), at a bounded concurrency and without the background
+    /// worker's hourly cap. Resumable: run it again after an interruption and it
+    /// continues, with its cost and failures carried over.
+    Backfill {
+        /// Only show how many items are due and the estimated cost.
+        #[arg(long)]
+        dry_run: bool,
+        /// Calls at once (at most 3).
+        #[arg(long, default_value_t = 3)]
+        concurrency: usize,
+        /// Stop after this many items (a smoke run; the next run resumes).
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Every project in the library with its doc/artifact counts, how many
+    /// are unfiled, whether it has a folder schema or a re-file batch, and
+    /// whether re-filing would take it (temp dirs, the home dir, deleted
+    /// projects and projects with under 5 unfiled items are skipped).
+    Workspaces {
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Re-file a project's unfiled docs and artifacts into its folder schema
+    /// (drafting one when it has none), as a batch that can be undone item by
+    /// item or whole (`fleet library refile-undo <batch>`, or the desktop's
+    /// batch view). Moved docs keep resolving at their old slugs.
+    Refile {
+        /// Project directory (default: the current directory).
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+        /// Every healthy project not re-filed yet, one after another.
+        #[arg(long, conflicts_with = "workspace")]
+        all: bool,
+        /// Only show what would be re-filed and the estimated cost.
+        #[arg(long)]
+        dry_run: bool,
+        /// Re-file a project the hygiene check would skip.
+        #[arg(long)]
+        force: bool,
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Undo a re-file (or upload) batch: every item goes back where it was
+    /// and the folders the batch created are removed once empty.
+    RefileUndo {
+        batch: String,
+    },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum WikiCommands {
     /// Publish a .html file, a .md file, or a directory containing an HTML
     /// entry. Re-publishing an existing slug creates a new version (old
@@ -1422,14 +1486,20 @@ pub(crate) enum WikiCommands {
         #[arg(long)]
         version: Option<String>,
     },
-    /// Re-key a doc, which moves it between virtual directories. Version
-    /// history rides along. e.g. `fleet wiki mv overview arch/overview`
+    /// Move a doc into one of its project's library folders. Version history
+    /// rides along and the old slug keeps resolving. The target must be in the
+    /// schema: `fleet wiki mv overview arch/overview` (when `arch` is a
+    /// folder's prefix) or `fleet wiki mv overview --folder 架构`; a new folder
+    /// needs --new-folder --folder --description --reason.
     #[command(alias = "move")]
     Mv {
         /// Current slug
         from: String,
-        /// New slug — `/` separates virtual directories
-        to: String,
+        /// New slug; its directory must be a folder's prefix. With --folder,
+        /// only its last segment is used (default: the current name)
+        to: Option<String>,
+        #[command(flatten)]
+        filing: FilingFlags,
     },
     /// Retag docs whose workspace was recorded as a session scratchpad
     /// directory (published before scratchpad decoding existed)
@@ -1599,6 +1669,7 @@ fn main() {
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
         Commands::Artifact { action } => commands::artifact::cmd_artifact(action),
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
+        Commands::Library { action } => commands::library::cmd_library(action),
         Commands::Job { action } => commands::job::cmd_job(action),
         Commands::Notes { action, session } => commands::notes::cmd_notes(action, session.as_deref()),
         Commands::History { action } => commands::notes::cmd_history(action),

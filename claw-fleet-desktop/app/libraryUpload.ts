@@ -139,6 +139,7 @@ export function rejectedReasonKey(reason: string): { key: string; params?: Recor
 export function itemNoteKey(note: string): string {
   if (note.includes("archive stored as is")) return "library.note_archive_kept";
   if (note.includes("proposed a new folder")) return "library.note_new_folder_capped";
+  if (note.includes("left where it was")) return "library.note_refile_left";
   if (note.includes("could not read it")) return "library.note_vision_failed";
   if (note.includes("could not classify")) return "library.note_classify_failed";
   if (note.includes("encrypted pdf")) return "library.note_encrypted";

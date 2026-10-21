@@ -149,7 +149,8 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
     setOpeningSlug(slug);
     try {
       const list = await listWikiDocs(client);
-      const target = list.find((d) => d.slug === slug);
+      // A link written before the doc was moved names a former slug.
+      const target = list.find((d) => d.slug === slug) ?? list.find((d) => d.aliases?.includes(slug));
       if (target) onOpenDoc(target);
       else window.alert(t("知识库里没有找到「{0}」", slug));
     } catch {

@@ -139,11 +139,15 @@ content; use Simplified Chinese when the file has no readable text.";
 /// Prompt asking for a folder schema that fits this project and this batch.
 pub fn draft_prompt(input: &DraftInput) -> String {
     let mut p = String::new();
-    p.push_str(
+    p.push_str(if input.items.is_empty() {
+        "You organize a project's document library. Draft its folder structure so that everything \
+it already holds (listed below with a summary each) — and the kind of documents this project will \
+keep producing — has one obvious home.\n\n"
+    } else {
         "You organize a project's document library. Draft its folder structure so that every \
 file listed below — and the kind of files this project will keep receiving — has one obvious \
-home.\n\n",
-    );
+home.\n\n"
+    });
     p.push_str(&format!("Project: {}\n", input.project_name));
     if !input.readme.trim().is_empty() {
         p.push_str(&format!("\nREADME (excerpt):\n{}\n", input.readme.trim()));
@@ -157,7 +161,9 @@ home.\n\n",
             p.push_str(&format!("- {t}\n"));
         }
     }
-    p.push_str("\nFiles being uploaded now (path · size · start of text):\n");
+    if !input.items.is_empty() {
+        p.push_str("\nFiles being uploaded now (path · size · start of text):\n");
+    }
     for it in &input.items {
         let excerpt: String = it.excerpt.chars().take(200).collect();
         let excerpt = excerpt.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -210,6 +216,54 @@ include the identifying facts (who, what, date, amount) when the file has them; 
 is a hint (folder names the user chose) but decide by content.{new_rule} {LANGUAGE_RULE}\n\n\
 Reply with a JSON array only:\n\
 [{{\"id\":\"{}\",\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"]}}]\n",
+        items.first().map(|i| i.id.as_str()).unwrap_or("i0000"),
+        new_rule = new_folder_rule(folders),
+    ));
+    p
+}
+
+/// One existing library item as re-filing shows it to the model.
+#[derive(Clone, Debug, Default)]
+pub struct RefileBrief {
+    pub id: String,
+    /// `doc`, or the artifact's kind (`pdf`, `image`, …).
+    pub kind: String,
+    pub title: String,
+    /// The AI summary; empty when it has none.
+    pub summary: String,
+    /// Where it sits now (a doc's slug directory, an artifact's directory).
+    pub location: String,
+}
+
+/// Prompt placing a chunk of a project's existing, unfiled items into its
+/// folders. Only the folder is asked for: the items already have titles and
+/// summaries.
+pub fn refile_prompt(folders: &[LibraryFolder], items: &[RefileBrief]) -> String {
+    let mut p = String::new();
+    p.push_str(
+        "These items are already in this project's library but in no folder. Place each one into \
+one folder of the project's library.\n\n",
+    );
+    p.push_str("Folders (path — what belongs there):\n");
+    p.push_str(&folder_list(folders));
+    p.push_str("\n\nItems (id · kind · title · current location — summary):\n");
+    for it in items {
+        p.push_str(&format!("- {} · {} · {}", it.id, it.kind, it.title.trim()));
+        if !it.location.is_empty() {
+            p.push_str(&format!(" · {}", it.location));
+        }
+        let summary = it.summary.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !summary.is_empty() {
+            p.push_str(&format!(" — {summary}"));
+        }
+        p.push('\n');
+    }
+    p.push_str(&format!(
+        "\nFor every item return \"id\" and \"folder\": exactly one folder path from the list above, \
+or \"\" when none fits. The current location is a hint (a directory someone chose) but decide by \
+title and summary.{new_rule}\n\n\
+Reply with a JSON array only:\n\
+[{{\"id\":\"{}\",\"folder\":\"...\"}}]\n",
         items.first().map(|i| i.id.as_str()).unwrap_or("i0000"),
         new_rule = new_folder_rule(folders),
     ));
@@ -377,6 +431,20 @@ fn proposal_from(v: &Value) -> Option<ProposedFolder> {
 /// Verdicts for the ids in `expected`, in that order; ids the model skipped
 /// or garbled are simply absent (the caller retries or falls back).
 pub fn parse_verdicts(text: &str, folders: &[LibraryFolder], expected: &[String]) -> Vec<Verdict> {
+    verdict_rows(text, folders, expected)
+        .into_iter()
+        .filter(|v| !v.title.is_empty() || !v.summary.is_empty())
+        .collect()
+}
+
+/// Verdicts of a [`refile_prompt`] answer: only the folder is asked for, so a
+/// row counts with no title or summary — and `"folder": ""` (nothing fits) is
+/// an answer too.
+pub fn parse_refile_verdicts(text: &str, folders: &[LibraryFolder], expected: &[String]) -> Vec<Verdict> {
+    verdict_rows(text, folders, expected)
+}
+
+fn verdict_rows(text: &str, folders: &[LibraryFolder], expected: &[String]) -> Vec<Verdict> {
     let Some(value) = parse_value(text) else {
         return Vec::new();
     };
@@ -407,8 +475,7 @@ pub fn parse_verdicts(text: &str, folders: &[LibraryFolder], expected: &[String]
         .iter()
         .filter_map(|id| {
             let (_, v) = rows.iter().find(|(rid, _)| rid.trim() == id)?;
-            let verdict = verdict_from(v, id, folders);
-            (!verdict.title.is_empty() || !verdict.summary.is_empty()).then_some(verdict)
+            Some(verdict_from(v, id, folders))
         })
         .collect()
 }

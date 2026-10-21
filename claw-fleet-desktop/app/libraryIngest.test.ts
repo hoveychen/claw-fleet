@@ -6,6 +6,7 @@ import {
   ingestBatchKey,
   ingestProgress,
   isIngestRunning,
+  isRefileBatch,
   uploadRelPath,
   type IngestBatchSummary,
   type IngestItem,
@@ -132,5 +133,18 @@ describe("library upload batches", () => {
     expect(itemNoteKey("legacy .doc not supported")).toBe("library.note_no_text");
     expect(itemNoteKey("sheet Sheet1 cut at 2000 rows")).toBe("library.note_truncated");
     expect(itemNoteKey("something else")).toBe("");
+  });
+
+  it("tells a re-file batch apart and maps its left-in-place notes", () => {
+    expect(isRefileBatch({ kind: "refile" })).toBe(true);
+    // Batches stored before re-filing existed carry no kind: uploads.
+    expect(isRefileBatch({})).toBe(false);
+    expect(isRefileBatch({ kind: "upload" })).toBe(false);
+    expect(itemNoteKey("no folder fits it; left where it was")).toBe("library.note_refile_left");
+    expect(itemNoteKey("the AI did not place it; left where it was")).toBe("library.note_refile_left");
+    // The new-folder cap keeps its own, more specific note.
+    expect(
+      itemNoteKey("the AI proposed a new folder 'x', but this batch already added 3; left where it was"),
+    ).toBe("library.note_new_folder_capped");
   });
 });

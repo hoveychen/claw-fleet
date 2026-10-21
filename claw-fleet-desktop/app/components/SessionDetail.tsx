@@ -38,7 +38,7 @@ import { WaitedByRow, WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { ApiErrorContext } from "./blocks/ApiErrorActions";
 import type { PathLinkContext } from "../markdown/pathLinks";
-import type { WikiLinkContext } from "../markdown/wikiLinks";
+import { wikiSlugIndex, type WikiLinkContext } from "../markdown/wikiLinks";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
 import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
@@ -1017,7 +1017,7 @@ export function SessionDetail({
   // a miss buys one re-read (once per slug) before we believe it.
   const { docs: wikiDocs, loaded: wikiLoaded, inFlight: wikiInFlight } = useWikiDocs();
   const wikiLinks = useMemo<WikiLinkContext>(() => {
-    const slugs = new Set(wikiDocs.map((d) => d.slug));
+    const slugs = wikiSlugIndex(wikiDocs);
     return {
       hasSlug: (slug) => {
         if (slugs.has(slug)) return true;
@@ -1030,7 +1030,7 @@ export function SessionDetail({
         return false;
       },
       // Beside the prose, same as a clicked path.
-      openSlug: (slug) => openAuxDoc("wiki", slug),
+      openSlug: (slug) => openAuxDoc("wiki", slugs.get(slug) ?? slug),
     };
   }, [wikiDocs, wikiLoaded, wikiInFlight, openAuxDoc]);
 

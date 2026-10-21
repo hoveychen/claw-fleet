@@ -207,6 +207,16 @@ pub const LIBRARY_INGEST_BATCH: &str = "/library_ingest_batch";
 pub const LIBRARY_INGEST_UNDO: &str = "/library_ingest_undo";
 pub const LIBRARY_INGEST_MOVE: &str = "/library_ingest_move";
 pub const LIBRARY_INGEST_DISMISS: &str = "/library_ingest_dismiss";
+/// The one-time summary backfill (`crate::library_summary`): GET status
+/// (due count, estimated cost, the run record), POST start / stop.
+pub const LIBRARY_BACKFILL_STATUS: &str = "/library_backfill_status";
+pub const LIBRARY_BACKFILL_START: &str = "/library_backfill_start";
+pub const LIBRARY_BACKFILL_STOP: &str = "/library_backfill_stop";
+/// Re-filing a project's unfiled items (`crate::library_ingest::refile`):
+/// GET plan `?workspace=` (counts and estimated cost), POST start
+/// `{workspace_path, force?}` → the batch, reviewed like an upload's.
+pub const LIBRARY_REFILE_PLAN: &str = "/library_refile_plan";
+pub const LIBRARY_REFILE_START: &str = "/library_refile_start";
 pub const LIST_CLAUDE_BINARIES: &str = "/list_claude_binaries";
 pub const LIVE_THINKING: &str = "/live_thinking";
 pub const LLM_CONFIG: &str = "/llm/config";

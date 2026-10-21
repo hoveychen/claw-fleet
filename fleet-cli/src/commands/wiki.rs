@@ -291,8 +291,16 @@ pub(crate) fn cmd_wiki(action: WikiCommands) {
             }
         }
 
-        WikiCommands::Mv { from, to } => match wiki::move_doc(&from, &to) {
-            Ok(doc) => println!("Moved {from} → {}", doc.slug),
+        WikiCommands::Mv { from, to, filing } => match claw_fleet_core::library_filing::move_wiki(
+            &from,
+            to.as_deref(),
+            &filing.args(),
+            std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref(),
+        ) {
+            Ok((doc, filed)) => {
+                println!("Moved {from} → {}", doc.slug);
+                println!("  {}", filed.describe(filing.reason.as_deref()));
+            }
             Err(e) => {
                 eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
                 std::process::exit(1);

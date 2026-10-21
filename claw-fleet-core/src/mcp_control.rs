@@ -335,12 +335,12 @@ fn schedule_tool_def() -> Value {
 fn wiki_tool_def() -> Value {
     json!({
         "name": "fleet__wiki",
-        "description": "Publish and browse docs in the Fleet wiki knowledge base — knowledge you are banking for yourself and for later sessions. The split against `fleet__artifact` is AUDIENCE, not file format: a doc you are handing to a person belongs in the artifact store even when it is html or markdown, and a doc later sessions will read back belongs here. Use this instead of the `fleet wiki` CLI. Every doc is FILED in one of the project's library folders: run action=folders first to see them (path, doc prefix, what belongs there), then publish with folder=<path>. Without a folder, or with one the project does not have, publish is refused with that list. Only if no folder fits, create one with new_folder=true plus folder, description and reason — the user is shown every folder an agent creates. Re-publishing an existing slug keeps its folder and needs none. Actions: folders, publish (--path and --folder required; --slug/--title optional — the slug becomes <folder prefix>/<name>), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug and --to required — rename a slug, e.g. into a virtual directory; versions move with it), list, search (--query required — ranked full-text over docs AND artifacts: titles, folders, AI summaries, tags and body text; each hit line says which). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
+        "description": "Publish and browse docs in the Fleet wiki knowledge base — knowledge you are banking for yourself and for later sessions. The split against `fleet__artifact` is AUDIENCE, not file format: a doc you are handing to a person belongs in the artifact store even when it is html or markdown, and a doc later sessions will read back belongs here. Use this instead of the `fleet wiki` CLI. Every doc is FILED in one of the project's library folders: run action=folders first to see them (path, doc prefix, what belongs there), then publish with folder=<path>. Without a folder, or with one the project does not have, publish is refused with that list. Only if no folder fits, create one with new_folder=true plus folder, description and reason — the user is shown every folder an agent creates. Re-publishing an existing slug keeps its folder and needs none. Actions: folders, publish (--path and --folder required; --slug/--title optional — the slug becomes <folder prefix>/<name>), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug required, plus --folder <path> or a --to slug whose directory is a folder's doc prefix — move a doc into another library folder; versions move with it and the old slug keeps resolving; moving out of every folder is refused), list, search (--query required — ranked full-text over docs AND artifacts: titles, folders, AI summaries, tags and body text; each hit line says which). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["folders", "publish", "cat", "show", "mv", "list", "search"]},
-                "to": {"type": "string", "description": "New slug (mv only)."},
+                "to": {"type": "string", "description": "New slug (mv only). Its directory must be a folder's doc prefix; with folder, only its last segment is used."},
                 "all": {"type": "boolean", "description": "Reach every workspace instead of just this one (list/search only)."},
                 "path": {"type": "string", "description": "File or dir to publish. Required for publish."},
                 "slug": {"type": "string", "description": "Doc slug. Required for cat. For publish: an existing slug re-publishes in place; otherwise only its last segment is used, under the folder's prefix."},
@@ -1906,12 +1906,14 @@ fn handle_wiki(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result<Str
         }
         "mv" => {
             let from = req(args, "slug")?;
-            let to = req(args, "to")?;
-            let doc = wiki::move_doc(&from, &to)?;
+            let to = arg(args, "to");
+            let filing = crate::library_filing::FilingArgs::from_json(args);
+            let (doc, filed) = crate::library_filing::move_wiki(&from, to.as_deref(), &filing, session_id)?;
             Ok(format!(
-                "Moved {from} → {} ({} version(s) moved with it)",
+                "Moved {from} → {} ({} version(s) moved with it; the old slug still resolves). {}",
                 doc.slug,
-                doc.versions.len()
+                doc.versions.len(),
+                filed.describe(filing.reason.as_deref())
             ))
         }
         "list" => {
@@ -2314,18 +2316,11 @@ mod tests {
         assert!(!err.is_empty(), "a missing slug must report an error");
     }
 
-    /// `mv` takes two slugs; omitting the destination must say which one.
+    /// `mv` needs the doc to move; the destination may be a folder instead
+    /// of a `to` slug (see `library_filing::move_wiki_in`).
     #[test]
-    fn wiki_mv_requires_both_slugs() {
+    fn wiki_mv_requires_the_slug() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = handle(
-            "fleet__wiki",
-            &json!({"action": "mv", "slug": "a"}),
-            None,
-            tmp.path(),
-        )
-        .unwrap_err();
-        assert!(err.contains("`to`"), "{err}");
         let err = handle(
             "fleet__wiki",
             &json!({"action": "mv", "to": "b"}),

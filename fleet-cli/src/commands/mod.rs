@@ -17,6 +17,7 @@ pub(crate) mod harness;
 pub(crate) mod loop_cmd;
 pub(crate) mod memory;
 pub(crate) mod job;
+pub(crate) mod library;
 pub(crate) mod notes;
 pub(crate) mod plan;
 pub(crate) mod prd;

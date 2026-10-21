@@ -6,6 +6,7 @@ import {
   CircleCheck,
   Copy,
   FolderOpen,
+  FolderSync,
   Inbox,
   Sparkles,
   TriangleAlert,
@@ -20,6 +21,7 @@ import {
   newFolderItems,
   ingestProgress,
   isIngestRunning,
+  isRefileBatch,
   type IngestBatch,
   type IngestBatchSummary,
   type IngestItem,
@@ -40,7 +42,7 @@ function durationText(ms: number): string {
   return `${m}m${String(s % 60).padStart(2, "0")}s`;
 }
 
-/** One upload under its project's header: status, progress, age. */
+/** One upload (or re-file) under its project's header: status, progress, age. */
 export function BatchRow({
   batch,
   depth,
@@ -54,6 +56,7 @@ export function BatchRow({
 }) {
   const { t } = useTranslation();
   const running = isIngestRunning(batch.status);
+  const refile = isRefileBatch(batch);
   const { done, total } = ingestProgress(batch);
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   return (
@@ -73,13 +76,17 @@ export function BatchRow({
           <TriangleAlert size={14} strokeWidth={1.6} />
         ) : batch.status === "undone" ? (
           <Undo2 size={14} strokeWidth={1.6} />
+        ) : refile ? (
+          <FolderSync size={14} strokeWidth={1.6} />
         ) : (
           <Upload size={14} strokeWidth={1.6} />
         )}
       </span>
       <span className={styles.batch_body}>
         <span className={styles.batch_title}>
-          {t("library.batch_label", "上传 · {{count}} 个文件", { count: batch.total })}
+          {refile
+            ? t("library.refile_batch_label", "整理存量 · {{count}} 条", { count: batch.total })
+            : t("library.batch_label", "上传 · {{count}} 个文件", { count: batch.total })}
           <span className={styles.batch_status}>
             {t(`library.batch_status_${batch.status}`)}
             {running && total > 0 && batch.status !== "staging" && batch.status !== "drafting"
@@ -107,13 +114,16 @@ export function BatchRow({
 /**
  * The batch summary — "what went into which folder". Every filed item shows
  * the AI's title and summary and can be moved to another folder or undone;
- * the whole batch can be undone once it finished.
+ * the whole batch can be undone once it finished. A re-file batch reads the
+ * same: its items are existing docs and artifacts, and undo puts them back
+ * where they were instead of deleting them.
  */
 export function BatchDetail({
   id,
   folders,
   onChanged,
   onOpenArtifact,
+  onOpenDoc,
   onClose,
 }: {
   id: string;
@@ -122,6 +132,7 @@ export function BatchDetail({
   /** Something was filed, moved or undone: the tree should reload. */
   onChanged: () => void;
   onOpenArtifact: (artifactId: string) => void;
+  onOpenDoc: (slug: string) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -176,14 +187,23 @@ export function BatchDetail({
     );
   }
 
+  const refile = isRefileBatch(batch);
   const filed = batch.items.filter((i) => i.status === "filed");
   const elapsed = (batch.finishedMs ?? Date.now()) - batch.createdMs;
   const stats: string[] = [
-    t("library.stat_total", "{{n}} 个文件", { n: batch.items.length }),
+    refile
+      ? t("library.stat_total_items", "{{n}} 条", { n: batch.items.length })
+      : t("library.stat_total", "{{n}} 个文件", { n: batch.items.length }),
     t("library.stat_filed", "归档 {{n}}", { n: filed.filter((i) => i.folder).length }),
   ];
   const unfiled = filed.filter((i) => !i.folder).length;
-  if (unfiled) stats.push(t("library.stat_unfiled", "未归档 {{n}}", { n: unfiled }));
+  if (unfiled) {
+    stats.push(
+      refile
+        ? t("library.stat_left", "留在原处 {{n}}", { n: unfiled })
+        : t("library.stat_unfiled", "未归档 {{n}}", { n: unfiled }),
+    );
+  }
   if (grouped.duplicates.length) stats.push(t("library.stat_dup", "重复 {{n}}", { n: grouped.duplicates.length }));
   if (grouped.failed.length) stats.push(t("library.stat_failed", "失败 {{n}}", { n: grouped.failed.length }));
   if (batch.rejected.length) stats.push(t("library.stat_rejected", "未导入 {{n}}", { n: batch.rejected.length }));
@@ -209,16 +229,18 @@ export function BatchDetail({
     );
   const undoBatch = () => {
     const n = filed.length;
-    if (
-      !window.confirm(
-        t(
+    const question = refile
+      ? t(
+          "library.refile_undo_confirm",
+          "撤销这次整理？{{n}} 条资料会回到原来的位置（文档恢复原 slug），AI 新建且已空的目录也会删掉。",
+          { n },
+        )
+      : t(
           "library.undo_batch_confirm",
           "撤销这次上传？已归档的 {{n}} 个文件会从资料里删除，AI 新建且已空的目录也会删掉。",
           { n },
-        ),
-      )
-    )
-      return;
+        );
+    if (!window.confirm(question)) return;
     void act("batch", () => invoke<IngestBatch>("library_ingest_undo", { batchId: batch.id, itemId: null }));
   };
   const dismiss = () =>
@@ -232,8 +254,8 @@ export function BatchDetail({
     <div className={styles.detail}>
       <header className={styles.head}>
         <div className={styles.head_title}>
-          <Upload size={16} strokeWidth={1.6} />
-          <span>{t("library.batch_title", "上传整理")}</span>
+          {refile ? <FolderSync size={16} strokeWidth={1.6} /> : <Upload size={16} strokeWidth={1.6} />}
+          <span>{refile ? t("library.refile_title", "整理存量") : t("library.batch_title", "上传整理")}</span>
           <span className={styles.chip} data-status={batch.status} data-batch-status={batch.status}>
             {running && <Spinner size={10} />}
             {t(`library.batch_status_${batch.status}`)}
@@ -316,7 +338,10 @@ export function BatchDetail({
           <section key={g.folder || "\u0000"} className={styles.group}>
             <h4 className={styles.group_head}>
               {g.folder ? <FolderOpen size={13} strokeWidth={1.5} /> : <Inbox size={13} strokeWidth={1.5} />}
-              {g.folder || t("library.unfiled_group", "未归档（没有合适的目录）")}
+              {g.folder ||
+                (refile
+                  ? t("library.refile_left_group", "留在原处（没有合适的目录）")
+                  : t("library.unfiled_group", "未归档（没有合适的目录）"))}
               <span className={styles.group_count}>{g.items.length}</span>
             </h4>
             {g.items.map((it) => (
@@ -324,10 +349,15 @@ export function BatchDetail({
                 key={it.id}
                 item={it}
                 folders={folders}
+                refile={refile}
                 busy={busy === it.id}
                 onMove={(f) => move(it, f)}
                 onUndo={() => undoItem(it)}
-                onOpen={() => it.artifactId && it.status === "filed" && onOpenArtifact(it.artifactId)}
+                onOpen={() => {
+                  if (it.status !== "filed") return;
+                  if (it.refile?.kind === "doc") onOpenDoc(it.refile.id);
+                  else if (it.artifactId) onOpenArtifact(it.artifactId);
+                }}
               />
             ))}
           </section>
@@ -392,6 +422,7 @@ export function BatchDetail({
 function ItemCard({
   item,
   folders,
+  refile,
   busy,
   onMove,
   onUndo,
@@ -399,6 +430,8 @@ function ItemCard({
 }: {
   item: IngestItem;
   folders: LibraryFolderRec[];
+  /** Re-file batch: `""` in the picker means "back where it was". */
+  refile: boolean;
   busy: boolean;
   onMove: (folder: string) => void;
   onUndo: () => void;
@@ -447,17 +480,22 @@ function ItemCard({
               aria-label={t("library.move_to", "移到…")}
               onChange={(e) => onMove(e.target.value)}
             >
-              <option value="">{t("library.unfiled", "未归档")}</option>
+              <option value="">
+                {refile ? t("library.refile_back", "放回原处") : t("library.unfiled", "未归档")}
+              </option>
               {folders.map((f) => (
                 <option key={f.path} value={f.path}>
                   {f.path}
                 </option>
               ))}
             </select>
-            <button type="button" className={styles.button_quiet} onClick={onUndo} disabled={busy}>
-              <Undo2 size={11} />
-              {t("library.undo_item", "撤销")}
-            </button>
+            {/* A re-filed item the AI left in place has nothing to undo. */}
+            {!(refile && !item.folder) && (
+              <button type="button" className={styles.button_quiet} onClick={onUndo} disabled={busy}>
+                <Undo2 size={11} />
+                {t("library.undo_item", "撤销")}
+              </button>
+            )}
           </>
         )}
       </div>
