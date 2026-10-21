@@ -38,6 +38,27 @@ fn respond<T: serde::Serialize>(
     );
 }
 
+/// `GET /library_search?q=&workspace=&kind=&limit=` — ranked hits across the
+/// wiki and artifact stores.
+pub(crate) fn route_library_search(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let opts = crate::library_index::SearchOpts {
+        workspace: Some(decoded(query, "workspace")).filter(|s| !s.is_empty()),
+        kind: Some(decoded(query, "kind")).filter(|s| !s.is_empty()),
+        limit: decoded(query, "limit").parse().unwrap_or(0),
+    };
+    respond(
+        request,
+        json_header,
+        crate::library_index::search(&decoded(query, "q"), &opts),
+    );
+}
+
 /// `GET /library_tree[?workspace=…]` — every project's tree, or one project's.
 pub(crate) fn route_library_tree(
     ctx: &ServeCtx,

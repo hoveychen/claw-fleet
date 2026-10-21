@@ -186,6 +186,9 @@ pub const LIBRARY_FOLDER_DESCRIBE: &str = "/library_folder_describe";
 pub const LIBRARY_FOLDER_DELETE: &str = "/library_folder_delete";
 pub const LIBRARY_FOLDER_RENAME: &str = "/library_folder_rename";
 pub const LIBRARY_MOVE: &str = "/library_move";
+/// Full-text search over both stores (`crate::library_index`):
+/// `?q=&workspace=&kind=doc|artifact&limit=` → ranked `LibraryHit`s.
+pub const LIBRARY_SEARCH: &str = "/library_search";
 /// 资料 uploads (`crate::library_ingest`). A browser upload is
 /// `LIBRARY_INGEST_CREATE` `{workspace_path}` → one `LIBRARY_INGEST_UPLOAD`
 /// per file (`?batch=&path=`, raw body) → `LIBRARY_INGEST_START` `{batch_id}`.

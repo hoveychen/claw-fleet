@@ -482,6 +482,27 @@ mod tests {
     }
 
     #[test]
+    fn an_artifact_that_already_has_a_summary_is_not_due() {
+        let tmp = TempDir::new().unwrap();
+        let (roots, ws) = roots(&tmp);
+        let add = |name: &str| {
+            let src = ws.join(name);
+            std::fs::write(&src, b"plain text body").unwrap();
+            artifacts::add_in(&roots.artifacts, &src, None, None, &ws, None).unwrap()
+        };
+        let bare = add("bare.txt");
+        let filed = add("filed.txt");
+        // The upload organizer wrote this one's summary already.
+        artifacts::edit_in(&roots.artifacts, &filed.id, |a| a.summary = "from upload".into()).unwrap();
+        let index = LibraryIndex::open_at(&crate::library_index::db_path(&roots)).unwrap();
+        index.meta_set("activated_ms", "0").unwrap();
+        index.sync(&roots).unwrap();
+        index.extract_pending(&roots, Duration::from_secs(10)).unwrap();
+        assert!(is_due(&index, ITEM_ARTIFACT, &bare.id));
+        assert!(!is_due(&index, ITEM_ARTIFACT, &filed.id));
+    }
+
+    #[test]
     fn claims_are_exclusive_and_the_hourly_budget_is_shared() {
         let tmp = TempDir::new().unwrap();
         let (roots, ws) = roots(&tmp);
@@ -506,5 +527,72 @@ mod tests {
         }
         assert!(!take_budget(&two, now).unwrap(), "budget is per database, not per handle");
         assert!(take_budget(&two, now + 3_600_001).unwrap(), "a new hour resets it");
+    }
+
+    /// Per-call cost of real summaries, read-only: point
+    /// `FLEET_LIBRARY_MEASURE_DIR` at the scratch index `measure_real_store`
+    /// built. Three doc bodies go through the lean text route; one image is
+    /// copied into the scratch dir for the vision route. Nothing is written
+    /// back to either store.
+    #[test]
+    #[ignore]
+    fn measure_summary_cost() {
+        let Ok(dir) = std::env::var("FLEET_LIBRARY_MEASURE_DIR") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        let home = Roots::home().unwrap();
+        let roots = Roots { library: dir.clone(), wiki: home.wiki.clone(), artifacts: home.artifacts.clone() };
+        let index = LibraryIndex::open_at(&crate::library_index::db_path(&roots)).unwrap();
+        let docs: Vec<(String, String)> = {
+            let mut stmt = index
+                .conn()
+                .prepare(
+                    "SELECT title, body FROM items WHERE kind = 'doc' AND length(body) > 2000
+                     ORDER BY updated_ms DESC LIMIT 3",
+                )
+                .unwrap();
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+            rows.flatten().collect()
+        };
+        for (title, body) in docs {
+            let t = std::time::Instant::now();
+            let out = classify::complete_text(
+                crate::llm_provider::ModelSlot::Fast,
+                &summary_prompt(&title, "document", &body),
+            );
+            match out {
+                Some(o) => println!(
+                    "text  {:.1}s ${:.5} {}/{} body {} chars -> {:?}",
+                    t.elapsed().as_secs_f64(), o.cost_usd, o.provider, o.model,
+                    body.chars().count(), parse_summary(&o.text)
+                ),
+                None => println!("text  no answer for {title}"),
+            }
+        }
+        let img: Option<(String, String)> = index
+            .conn()
+            .query_row(
+                "SELECT item_id, title FROM items WHERE artifact_kind = 'image'
+                 ORDER BY updated_ms DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .unwrap();
+        if let Some((id, title)) = img {
+            let a = artifacts::get_in(&roots.artifacts, &id).unwrap();
+            let scratch = dir.join("vision-sample");
+            std::fs::create_dir_all(&scratch).unwrap();
+            std::fs::copy(artifacts::blob_path(&roots.artifacts, &a), scratch.join(&a.name)).unwrap();
+            let t = std::time::Instant::now();
+            match classify::complete_vision(&scratch, &vision_summary_prompt(&a.name, &title)) {
+                Ok(o) => println!(
+                    "vision {:.1}s ${:.5} {} -> {:?}",
+                    t.elapsed().as_secs_f64(), o.cost_usd, o.model, parse_summary(&o.text)
+                ),
+                Err(e) => println!("vision failed: {e}"),
+            }
+        }
     }
 }

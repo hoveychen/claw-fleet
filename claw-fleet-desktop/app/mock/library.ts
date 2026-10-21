@@ -296,3 +296,70 @@ export function mockIngestDismiss(args: Record<string, unknown>) {
   if (i >= 0) MOCK_BATCHES.splice(i, 1);
   return null;
 }
+
+/** Mock bodies the search can cut snippets from (core reads the real files). */
+const MOCK_BODIES: Record<string, string> = {
+  "doc:arch/overview":
+    "Fleet 的数据平面在 claw-fleet-core。资料索引用 SQLite FTS5，覆盖知识库与产出两个库的标题、目录、摘要、标签和正文，增量同步，按 schema 版本重建。",
+  "doc:arch/session-scanner":
+    "会话扫描器每 30 秒对比 transcript 的 mtime，只重读变化的文件；搜索索引与资料索引分库存放，互不阻塞写事务。",
+  "doc:promo/launch-script":
+    "第三幕：镜头推到资料页，搜索「索引」，结果按相关度排列，命中处高亮。",
+};
+
+/** Mirrors `library_index::search` closely enough for screenshots: every
+ *  term must appear in title / summary / tags / body; title hits rank first. */
+export function mockLibrarySearch(args: Record<string, unknown>) {
+  const query = String(args.query ?? "").trim().toLowerCase();
+  const ws = args.workspace ? String(args.workspace) : "";
+  if (query.length < 2) return [];
+  const terms = query.split(/\s+/).filter(Boolean);
+  const meta = new Map<string, { summary: string; tags: string[] }>();
+  for (const d of MOCK_WIKI_DOCS as Array<{ slug: string; summary?: string; tags?: string[] }>) {
+    meta.set(`doc:${d.slug}`, { summary: d.summary ?? "", tags: d.tags ?? [] });
+  }
+  for (const a of MOCK_ARTIFACTS as Array<{ id: string; note: string; summary?: string; tags?: string[] }>) {
+    meta.set(`artifact:${a.id}`, { summary: a.summary ?? "", tags: a.tags ?? [] });
+    MOCK_BODIES[`artifact:${a.id}`] ??= a.note;
+  }
+  const mark = (text: string) => {
+    const lower = text.toLowerCase();
+    const at = lower.indexOf(terms.find((t) => lower.includes(t)) ?? "\u0000");
+    if (at < 0) return "";
+    const term = terms.find((t) => lower.slice(at).startsWith(t))!;
+    const start = Math.max(0, at - 24);
+    const end = Math.min(text.length, at + term.length + 48);
+    return `${start > 0 ? "…" : ""}${text.slice(start, at)}<mark>${text.slice(at, at + term.length)}</mark>${text.slice(at + term.length, end)}${end < text.length ? "…" : ""}`;
+  };
+  const hits = [];
+  for (const p of mockLibraryTree()) {
+    if (ws && p.workspacePath !== ws) continue;
+    for (const e of p.items) {
+      const key = `${e.kind}:${e.id}`;
+      const m = meta.get(key) ?? { summary: "", tags: [] };
+      const body = MOCK_BODIES[key] ?? "";
+      const hay = [e.title, m.summary, m.tags.join(" "), body].join("\n").toLowerCase();
+      if (!terms.every((t) => hay.includes(t))) continue;
+      const inTitle = terms.some((t) => e.title.toLowerCase().includes(t));
+      const fromBody = mark(body);
+      const fromSummary = fromBody ? "" : mark(m.summary);
+      hits.push({
+        kind: e.kind,
+        id: e.id,
+        title: e.title,
+        project: p.workspacePath,
+        workspacePath: p.workspacePath,
+        folder: e.folder ?? "",
+        location: e.location,
+        field: fromBody ? "content" : fromSummary ? "summary" : inTitle ? "title" : "meta",
+        snippet: fromBody || fromSummary,
+        summary: m.summary,
+        tags: m.tags,
+        updatedMs: e.updatedMs,
+        artifactKind: e.artifactKind,
+        rank: inTitle ? -10 : fromBody ? -2 : -1,
+      });
+    }
+  }
+  return hits.sort((a, b) => a.rank - b.rank);
+}

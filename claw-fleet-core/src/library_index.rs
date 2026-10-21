@@ -813,7 +813,13 @@ fn artifact_row(
             .unwrap_or(a.created_ms),
         artifact_kind: a.kind.clone(),
         version: a.current_version.clone(),
-        summary_version: String::new(),
+        // Artifacts carry no summary version of their own: one that already
+        // has a summary (the upload organizer's, or ours) is not due again.
+        summary_version: if a.summary.trim().is_empty() {
+            String::new()
+        } else {
+            a.current_version.clone()
+        },
         meta_sig,
         body_sig,
         body: body.unwrap_or_else(|| KEEP_BODY.to_string()),

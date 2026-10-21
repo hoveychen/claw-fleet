@@ -46,6 +46,7 @@ import {
   type IngestBatch,
   type IngestBatchSummary,
 } from "../../../shared-ts/libraryIngest";
+import { snippetRuns, type LibraryHit } from "../../../shared-ts/librarySearch";
 import type { AuxDoc } from "../detailAux";
 import {
   filesFromDataTransfer,
@@ -92,34 +93,34 @@ function uploadTargetAt(el: Element | null): string | null {
   return el?.closest(`[${UPLOAD_ATTR}]`)?.getAttribute(UPLOAD_ATTR) ?? null;
 }
 
-/** Wiki bodies matched by a full-text search, so a doc whose title does not
- *  contain the query still passes it. Debounced; a query shorter than two
- *  characters is answered from titles alone. */
-function useWikiBodyHits(query: string): { slugs: ReadonlySet<string>; busy: boolean } {
-  const [hits, setHits] = useState<{ q: string; slugs: Set<string> }>({ q: "", slugs: new Set() });
+/** Full-text hits across both stores (`library_search`), ranked, scoped to
+ *  the picked project. Debounced; a query shorter than two characters is
+ *  answered by filtering the tree on titles instead. */
+function useLibraryHits(query: string, workspace: string): { hits: LibraryHit[] | null; busy: boolean } {
+  const [state, setState] = useState<{ key: string; hits: LibraryHit[] }>({ key: "", hits: [] });
   const q = query.trim();
+  const key = `${workspace}\u0000${q}`;
   useEffect(() => {
     if (q.length < 2) return;
     let alive = true;
     const timer = window.setTimeout(() => {
-      invoke<Array<{ slug: string }>>("search_wiki_docs", { query: q })
+      invoke<LibraryHit[]>("library_search", { query: q, workspace: workspace || null, kind: null, limit: 100 })
         .then((rows) => {
-          if (alive) setHits({ q, slugs: new Set((rows ?? []).map((r) => r.slug)) });
+          if (alive) setState({ key, hits: rows ?? [] });
         })
         .catch(() => {
-          if (alive) setHits({ q, slugs: new Set() });
+          if (alive) setState({ key, hits: [] });
         });
     }, 200);
     return () => {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [q]);
-  const current = q.length >= 2 && hits.q === q;
-  return { slugs: current ? hits.slugs : EMPTY, busy: q.length >= 2 && !current };
+  }, [q, workspace, key]);
+  if (q.length < 2) return { hits: null, busy: false };
+  const current = state.key === key;
+  return { hits: current ? state.hits : null, busy: !current };
 }
-
-const EMPTY: ReadonlySet<string> = new Set();
 
 /** The row a folder verb is running on, so it can show a spinner. */
 type Busy = string | null;
@@ -352,20 +353,20 @@ export function LibraryView() {
     void filesFromDataTransfer(e.dataTransfer).then((files) => uploadWebFiles(target, files));
   };
 
-  const bodyHits = useWikiBodyHits(query);
+  const search = useLibraryHits(query, activeProject);
   const q = query.trim();
+  // Two characters and up, the list becomes the index's ranked hits; until
+  // they arrive (and for a one-character query) the tree filters on titles.
+  const searching = q.length >= 2;
   const views = useMemo(() => {
-    const keep = q
-      ? (e: LibraryEntry) =>
-          libraryEntryMatches(e, q) || (e.kind === "doc" && bodyHits.slugs.has(e.id))
-      : undefined;
+    const keep = q ? (e: LibraryEntry) => libraryEntryMatches(e, q) : undefined;
     // "All projects" lists those with a library; a picked project shows even
     // when it has none yet, so there is somewhere to upload to.
     return (activeProject ? allProjects.filter((p) => p.workspacePath === activeProject) : projects ?? [])
       .map((p) => ({ project: p, view: buildLibraryTree(p, keep) }))
       .filter(({ project: p, view }) => !q || view.shown > 0 || p.workspacePath === activeProject);
-  }, [projects, allProjects, activeProject, q, bodyHits.slugs]);
-  const shownCount = views.reduce((s, v) => s + v.view.shown, 0);
+  }, [projects, allProjects, activeProject, q]);
+  const shownCount = search.hits ? search.hits.length : views.reduce((s, v) => s + v.view.shown, 0);
 
   const batchId = ingestBatchIdOf(selectedKey);
   const batchFolders = useMemo(() => {
@@ -373,13 +374,14 @@ export function LibraryView() {
     return (projects ?? []).find((p) => p.workspacePath === ws)?.folders ?? [];
   }, [batches, batchId, projects]);
 
-  const selected = useMemo(() => {
+  const selected = useMemo<SelectedItem | null>(() => {
     for (const p of projects ?? []) {
       const hit = p.items.find((e) => libraryEntryKey(e) === selectedKey);
       if (hit) return hit;
     }
-    return null;
-  }, [projects, selectedKey]);
+    // An indexed item the tree has not loaded yet still opens.
+    return search.hits?.find((h) => libraryEntryKey(h) === selectedKey) ?? null;
+  }, [projects, selectedKey, search.hits]);
 
   /** Run a schema/filing mutation with a spinner on `row`, then reload. A full
    *  reload rather than a splice: a rename re-keys docs and re-files artifacts
@@ -526,6 +528,8 @@ export function LibraryView() {
     >
       {projects === null ? (
         <SkeletonList rows={8} />
+      ) : searching && search.hits ? (
+        <HitList hits={search.hits} selectedKey={selectedKey} onOpen={(key) => set({ selectedKey: key })} />
       ) : views.length === 0 ? (
         <div className={styles.none}>
           {projects.length === 0
@@ -560,8 +564,8 @@ export function LibraryView() {
       search={{
         value: query,
         onChange: (v) => set({ query: v }),
-        placeholder: t("library.search", "搜索标题 / 正文…"),
-        busy: bodyHits.busy,
+        placeholder: t("library.search_full", "搜索标题 / 正文 / 摘要 / 标签…"),
+        busy: search.busy,
       }}
       subBar={
         <div className={styles.filters}>
@@ -619,6 +623,74 @@ export function LibraryView() {
     </PageShell>
   );
 }
+
+/** The ranked full-text hits that replace the tree while a query is typed. */
+function HitList({
+  hits,
+  selectedKey,
+  onOpen,
+}: {
+  hits: LibraryHit[];
+  selectedKey: string | null;
+  onOpen: (key: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (hits.length === 0) {
+    return <div className={styles.none}>{t("library.no_hits", "没有找到相关资料")}</div>;
+  }
+  return (
+    <div className={styles.hits}>
+      {hits.map((h) => {
+        const key = libraryEntryKey(h);
+        const active = selectedKey === key;
+        const Icon = h.kind === "doc" ? BookOpen : (ARTIFACT_ICON[h.artifactKind] ?? FileText);
+        // A title/meta-only hit has no excerpt; its summary says what it is.
+        const excerpt = h.snippet || h.summary;
+        return (
+          <button
+            key={key}
+            type="button"
+            className={`${styles.row} ${styles.hit}${active ? ` ${styles.row_active}` : ""}`}
+            onClick={() => onOpen(key)}
+            aria-current={active ? "true" : undefined}
+          >
+            <span className={styles.icon} data-type={h.kind}>
+              <Icon size={14} strokeWidth={1.6} />
+            </span>
+            <span className={styles.body}>
+              <span className={styles.title}>{h.title}</span>
+              <span className={styles.meta}>
+                <span>{h.kind === "doc" ? t("library.type_doc", "文档") : t("library.type_artifact", "产出")}</span>
+                <span className={styles.location} title={h.folder || h.location}>
+                  {h.folder || t("library.unfiled", "未归档")}
+                </span>
+                {h.field === "summary" && <span>{t("library.hit_in_summary", "摘要命中")}</span>}
+                {h.updatedMs > 0 && <span className={styles.time}>{timeAgo(h.updatedMs, t)}</span>}
+              </span>
+              {excerpt && (
+                <span className={styles.hit_snippet}>
+                  {snippetRuns(excerpt).map((r, i) =>
+                    r.mark ? <mark key={i}>{r.text}</mark> : <span key={i}>{r.text}</span>,
+                  )}
+                </span>
+              )}
+              {h.tags.length > 0 && (
+                <span className={styles.hit_tags}>
+                  {h.tags.map((tag) => (
+                    <span key={tag} className={styles.tag}>{tag}</span>
+                  ))}
+                </span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** What the detail column needs: a tree entry or a search hit. */
+type SelectedItem = { kind: string; id: string; title: string };
 
 /** Batch rows shown under a project: every running one, then the most recent
  *  finished ones (the rest stay reachable once dismissed ones go). */
@@ -1005,7 +1077,7 @@ function InlineInput({
 /** The reader for the selected item: the side-rail pane of its kind, pinned
  *  open. Its close / collapse both clear the selection; there are no sibling
  *  cards here, so the "close others" family has nothing to act on. */
-function LibraryDetail({ item, onClose }: { item: LibraryEntry; onClose: () => void }) {
+function LibraryDetail({ item, onClose }: { item: SelectedItem; onClose: () => void }) {
   const setSelected = useUIStore((s) => s.updateMainViewState);
   const doc: AuxDoc =
     item.kind === "doc"

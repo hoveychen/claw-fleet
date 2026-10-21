@@ -245,3 +245,71 @@ fn two_handles_on_one_database_both_sync_safely() {
     }
     assert_eq!(e.find("walrus").len(), 20);
 }
+
+/// Read-only measurement against the real stores, with the index in a scratch
+/// directory: `FLEET_LIBRARY_MEASURE_DIR=<dir> cargo test -p claw-fleet-core
+/// --lib measure_real_store -- --ignored --nocapture`. Nothing under
+/// `~/.fleet/wiki` or `~/.fleet/artifacts` is written.
+#[test]
+#[ignore]
+fn measure_real_store() {
+    let Ok(dir) = std::env::var("FLEET_LIBRARY_MEASURE_DIR") else {
+        return;
+    };
+    let home = Roots::home().unwrap();
+    let roots = Roots {
+        library: PathBuf::from(dir),
+        wiki: home.wiki.clone(),
+        artifacts: home.artifacts.clone(),
+    };
+    let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
+    let idx = LibraryIndex::open_at(&db_path(&roots)).unwrap();
+
+    let t = std::time::Instant::now();
+    let s = idx.sync(&roots).unwrap();
+    println!("sync#1 {:.0} ms  {s:?}", ms(t));
+    let t = std::time::Instant::now();
+    let mut extracted = 0;
+    loop {
+        let n = idx.extract_pending(&roots, std::time::Duration::from_secs(600)).unwrap();
+        extracted += n;
+        if n == 0 {
+            break;
+        }
+    }
+    println!("extract {:.0} ms  {extracted} artifacts", ms(t));
+    let t = std::time::Instant::now();
+    let s = idx.sync(&roots).unwrap();
+    println!("sync#2 (steady) {:.0} ms  {s:?}", ms(t));
+    println!("stats {:?}", idx.stats().unwrap());
+    println!("db bytes {}", fs::metadata(db_path(&roots)).map(|m| m.len()).unwrap_or(0));
+
+    let pct = |v: &mut Vec<f64>, p: f64| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v[((v.len() - 1) as f64 * p).round() as usize]
+    };
+    for q in ["资料", "索引", "决策卡", "fleet", "deploy", "screenshot", "relay 部署"] {
+        let (mut fts, mut warm, mut lin) = (Vec::new(), Vec::new(), Vec::new());
+        let mut n = (0, 0, 0);
+        for _ in 0..7 {
+            let t = std::time::Instant::now();
+            let hits = idx.search(q, &SearchOpts { limit: 50, ..Default::default() }).unwrap();
+            fts.push(ms(t));
+            n.0 = hits.len();
+            let t = std::time::Instant::now();
+            let hits = search_in(&roots, q, &SearchOpts { limit: 50, ..Default::default() }).unwrap();
+            warm.push(ms(t));
+            n.1 = hits.len();
+            let t = std::time::Instant::now();
+            n.2 = wiki::search_docs_in(&roots.wiki, q).len();
+            lin.push(ms(t));
+        }
+        println!(
+            "q={q:<12} fts p50 {:.1} p95 {:.1} ({} hits) | search_in(sync+search) p50 {:.1} p95 {:.1} ({}) | linear wiki p50 {:.1} p95 {:.1} ({} docs)",
+            pct(&mut fts, 0.5), pct(&mut fts, 0.95), n.0,
+            pct(&mut warm, 0.5), pct(&mut warm, 0.95), n.1,
+            pct(&mut lin, 0.5), pct(&mut lin, 0.95), n.2,
+        );
+    }
+    println!("backfill {:?}", crate::library_summary::backfill_plan(&idx).unwrap());
+}

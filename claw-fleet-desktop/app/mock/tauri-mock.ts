@@ -26,6 +26,7 @@ import {
   mockLibraryDescribeFolder,
   mockLibraryMoveItem,
   mockLibraryRenameFolder,
+  mockLibrarySearch,
   mockLibraryTree,
 } from "./library";
 import {
@@ -741,6 +742,8 @@ async function handleIPC(
     }
     case "library_tree":
       return mockLibraryTree();
+    case "library_search":
+      return mockLibrarySearch(args);
     case "library_create_folder":
       return mockLibraryCreateFolder(args);
     case "library_describe_folder":
