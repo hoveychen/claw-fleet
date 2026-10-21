@@ -231,6 +231,18 @@ fn run_cli(
     timeout: Duration,
     tag: &str,
 ) -> Option<String> {
+    run_cli_in(bin, args, envs, None, timeout, tag)
+}
+
+/// [`run_cli`] with an explicit working directory.
+fn run_cli_in(
+    bin: &str,
+    args: &[&str],
+    envs: &[(String, String)],
+    cwd: Option<&std::path::Path>,
+    timeout: Duration,
+    tag: &str,
+) -> Option<String> {
     // Only log the binary and flag names, not prompt content (which can be huge).
     let safe_args: Vec<&str> = args
         .iter()
@@ -240,6 +252,9 @@ fn run_cli(
     let mut cmd = crate::process_util::command(bin);
     for (key, value) in envs {
         cmd.env(key, value);
+    }
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
     }
     let child = match cmd
         .args(args)
@@ -295,7 +310,13 @@ fn run_cli(
 
 pub struct ClaudeCliProvider {
     bin_path: Option<String>,
+    /// Run as a bare completion: see [`ClaudeCliProvider::lean`].
+    lean: bool,
 }
+
+/// System prompt of a lean completion — replaces Claude Code's own.
+const LEAN_SYSTEM_PROMPT: &str =
+    "You are a careful assistant. Answer exactly in the format the user asks for.";
 
 impl ClaudeCliProvider {
     pub fn new() -> Self {
@@ -304,8 +325,56 @@ impl ClaudeCliProvider {
         let config = crate::claude_binary::ClaudeBinaryConfig::load();
         let bin_path =
             crate::claude_binary::resolve(config.override_path.as_deref()).map(|b| b.path);
-        Self { bin_path }
+        Self {
+            bin_path,
+            lean: false,
+        }
     }
+
+    /// A provider whose calls carry none of Claude Code's agent context: no
+    /// tools, no MCP servers, no user settings or CLAUDE.md (`--setting-sources
+    /// project` from an empty working directory), and a one-line system prompt
+    /// in place of Claude Code's. Measured 2026-10-21 on Haiku: a one-sentence
+    /// prompt went from ~21.9K context tokens ($0.0176) to 450 ($0.0012).
+    ///
+    /// For plain prompt-in / text-out work (library summaries and filing). The
+    /// default provider keeps the full context for callers that may rely on it.
+    pub fn lean() -> Self {
+        Self {
+            lean: true,
+            ..Self::new()
+        }
+    }
+}
+
+/// Argv of a lean completion (see [`ClaudeCliProvider::lean`]).
+pub fn lean_claude_args<'a>(prompt: &'a str, model: &'a str) -> Vec<&'a str> {
+    vec![
+        "-p",
+        prompt,
+        "--model",
+        model,
+        "--no-session-persistence",
+        "--output-format",
+        "json",
+        "--tools",
+        "",
+        "--setting-sources",
+        "project",
+        "--strict-mcp-config",
+        "--system-prompt",
+        LEAN_SYSTEM_PROMPT,
+        "--max-turns",
+        "1",
+    ]
+}
+
+/// An empty directory to run lean completions in, so `--setting-sources
+/// project` finds no project settings or CLAUDE.md.
+fn lean_cwd() -> Option<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join("fleet-lean-llm");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
 }
 
 impl LlmProvider for ClaudeCliProvider {
@@ -338,6 +407,18 @@ impl LlmProvider for ClaudeCliProvider {
 
     fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
+        if self.lean {
+            let cwd = lean_cwd()?;
+            let raw = run_cli_in(
+                bin,
+                &lean_claude_args(prompt, model),
+                &[],
+                Some(&cwd),
+                timeout,
+                "llm:claude-lean",
+            )?;
+            return parse_claude_json_response(&raw);
+        }
         // `--output-format json` makes Claude Code emit a single JSON object with
         // `result` (the text) and a `usage` block carrying real token counts
         // (including the ~36k cache_creation tokens CLI injects from its
@@ -1147,7 +1228,34 @@ pub fn complete_routed_usage(
     timeout: Duration,
     scenario: &str,
 ) -> Option<(String, crate::llm_usage::FleetLlmUsageEntry)> {
-    for route in provider_routes(config, slot, &config.provider) {
+    complete_routed_usage_with(config, slot, prompt, timeout, scenario, false)
+}
+
+/// [`complete_routed_usage`] whose Claude route runs lean
+/// ([`ClaudeCliProvider::lean`]). Codex and dsh routes are unchanged — they
+/// already run from a clean home without the user's guidance files.
+pub fn complete_routed_usage_lean(
+    config: &LlmConfig,
+    slot: ModelSlot,
+    prompt: &str,
+    timeout: Duration,
+    scenario: &str,
+) -> Option<(String, crate::llm_usage::FleetLlmUsageEntry)> {
+    complete_routed_usage_with(config, slot, prompt, timeout, scenario, true)
+}
+
+fn complete_routed_usage_with(
+    config: &LlmConfig,
+    slot: ModelSlot,
+    prompt: &str,
+    timeout: Duration,
+    scenario: &str,
+    lean: bool,
+) -> Option<(String, crate::llm_usage::FleetLlmUsageEntry)> {
+    for mut route in provider_routes(config, slot, &config.provider) {
+        if lean && route.provider.name() == "claude" {
+            route.provider = Box::new(ClaudeCliProvider::lean());
+        }
         log_debug(&format!(
             "[llm:route] scenario={scenario} provider={} model={}",
             route.provider.name(),
@@ -1171,6 +1279,25 @@ pub fn complete_routed_usage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lean_claude_calls_carry_no_agent_context() {
+        let a = lean_claude_args("prompt", "haiku");
+        let joined = a.join(" ");
+        for flag in [
+            "--setting-sources project",
+            "--strict-mcp-config",
+            "--no-session-persistence",
+            "--output-format json",
+            "--system-prompt",
+        ] {
+            assert!(joined.contains(flag), "missing {flag}: {joined}");
+        }
+        let tools = a.iter().position(|x| *x == "--tools").unwrap();
+        assert_eq!(a[tools + 1], "", "an empty --tools list disables every tool");
+        assert!(!a.contains(&"--bare"), "--bare refuses OAuth logins");
+        assert!(ClaudeCliProvider::lean().lean && !ClaudeCliProvider::new().lean);
+    }
 
     #[test]
     fn resolve_unknown_provider_returns_none() {

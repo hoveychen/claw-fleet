@@ -60,7 +60,35 @@ pub struct WikiDoc {
     pub current_version: String,
     /// Newest first.
     pub versions: Vec<WikiVersion>,
+    /// AI summary of the doc, from `summary.json` beside `doc.json` (see
+    /// [`DocSummary`]). Never persisted in `doc.json` itself.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// The version `summary` was written for; differs from `current_version`
+    /// once the doc is re-published and the summary is stale.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary_version: String,
 }
+
+/// A doc's AI summary, stored in its own `summary.json` rather than in
+/// `doc.json`: the summarizer runs in the background, and a read-modify-write
+/// of `doc.json` racing a re-publish would drop the new version's entry.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocSummary {
+    pub summary: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Version id the summary describes.
+    pub version: String,
+    #[serde(default)]
+    pub generated_ms: u64,
+}
+
+/// File name of a doc's [`DocSummary`] sidecar.
+pub const SUMMARY_FILE: &str = "summary.json";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -580,6 +608,9 @@ fn assemble_doc(
             updated_ms: now,
             current_version: version.id.clone(),
             versions: vec![version],
+            summary: String::new(),
+            tags: Vec::new(),
+            summary_version: String::new(),
         },
     }
 }
@@ -892,16 +923,37 @@ pub struct WikiSearchHit {
     pub snippet: String,
 }
 
-/// Case-insensitive (ASCII) substring search over every doc's metadata and the
-/// plain text of its current version's entry file. Scans on demand — the doc
-/// set is small and this keeps the no-global-index concurrency design intact.
+/// Ranked full-text search over every doc's title, folder, summary, tags and
+/// current entry text, through the library index ([`crate::library_index`]).
+/// Snippets are plain text. Falls back to the linear scan
+/// ([`search_docs_in`]) when the index cannot be opened.
 pub fn search_docs(query: &str) -> Vec<WikiSearchHit> {
-    wiki_dir()
-        .map(|root| search_docs_in(&root, query))
-        .unwrap_or_default()
+    let opts = crate::library_index::SearchOpts {
+        kind: Some(crate::library::ITEM_DOC.to_string()),
+        limit: 200,
+        ..Default::default()
+    };
+    match crate::library_index::search(query, &opts) {
+        Ok(hits) => hits
+            .into_iter()
+            .map(|h| WikiSearchHit {
+                slug: h.id,
+                field: if h.field == "content" { "content" } else { "meta" }.to_string(),
+                snippet: h.snippet.replace("<mark>", "").replace("</mark>", ""),
+            })
+            .collect(),
+        Err(e) => {
+            crate::log_debug(&format!("[wiki] library index unavailable, scanning: {e}"));
+            wiki_dir()
+                .map(|root| search_docs_in(&root, query))
+                .unwrap_or_default()
+        }
+    }
 }
 
-/// [`search_docs`] against an explicit wiki root.
+/// Case-insensitive (ASCII) substring scan over every doc's metadata and the
+/// plain text of its current version's entry file — the index's fallback, and
+/// the baseline it is measured against.
 pub fn search_docs_in(root: &Path, query: &str) -> Vec<WikiSearchHit> {
     let query = query.trim();
     if query.is_empty() {
@@ -1127,7 +1179,7 @@ fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<(), 
 
 /// Crude tag stripper for search: drops <script>/<style> blocks, comments, and
 /// all tags; entities are left as-is (good enough for substring matching).
-fn strip_html(html: &str) -> String {
+pub(crate) fn strip_html(html: &str) -> String {
     let mut out = String::with_capacity(html.len() / 2);
     let bytes = html.as_bytes();
     let mut i = 0;
@@ -1450,13 +1502,42 @@ pub fn delete_version_in(root: &Path, slug: &str, version: &str) -> Result<(), S
 fn read_doc_json(doc_dir: &Path) -> Result<WikiDoc, String> {
     let path = doc_dir.join("doc.json");
     let raw = fs::read_to_string(&path).map_err(|e| format!("read '{}': {e}", path.display()))?;
-    serde_json::from_str(&raw).map_err(|e| format!("parse '{}': {e}", path.display()))
+    let mut doc: WikiDoc =
+        serde_json::from_str(&raw).map_err(|e| format!("parse '{}': {e}", path.display()))?;
+    if let Some(s) = read_summary(doc_dir) {
+        doc.summary = s.summary;
+        doc.tags = s.tags;
+        doc.summary_version = s.version;
+    }
+    Ok(doc)
+}
+
+fn read_summary(doc_dir: &Path) -> Option<DocSummary> {
+    serde_json::from_str(&fs::read_to_string(doc_dir.join(SUMMARY_FILE)).ok()?).ok()
+}
+
+/// Store a doc's AI summary. Fails when the doc no longer exists, so a
+/// summary finishing after a delete or move does not resurrect a stray dir.
+pub fn write_summary_in(root: &Path, slug: &str, summary: &DocSummary) -> Result<(), String> {
+    let doc_dir = root.join(slug_to_dirname(slug));
+    if !doc_dir.join("doc.json").is_file() {
+        return Err(format!("doc '{slug}' not found"));
+    }
+    let body = serde_json::to_vec_pretty(summary).map_err(|e| e.to_string())?;
+    crate::atomic_json::write_atomic(&doc_dir.join(SUMMARY_FILE), &body)
+        .map_err(|e| format!("write summary of '{slug}': {e}"))
 }
 
 /// Write-tmp-then-rename so a concurrent reader never sees a torn doc.json.
 fn write_doc_json(doc_dir: &Path, doc: &WikiDoc) -> Result<(), String> {
     let tmp = doc_dir.join("doc.json.tmp");
-    let body = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
+    // The summary lives in its own file; keep doc.json free of a copy that
+    // could go stale.
+    let mut doc = doc.clone();
+    doc.summary.clear();
+    doc.tags.clear();
+    doc.summary_version.clear();
+    let body = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
     fs::write(&tmp, body).map_err(|e| format!("write doc.json: {e}"))?;
     fs::rename(&tmp, doc_dir.join("doc.json")).map_err(|e| format!("commit doc.json: {e}"))
 }

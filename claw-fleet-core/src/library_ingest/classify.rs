@@ -64,7 +64,7 @@ pub struct DraftInput {
 }
 
 const MAX_TITLE_CHARS: usize = 120;
-const MAX_SUMMARY_CHARS: usize = 600;
+pub(crate) const MAX_SUMMARY_CHARS: usize = 600;
 const MAX_TAGS: usize = 5;
 const MAX_TAG_CHARS: usize = 24;
 /// Most characters of transcription kept from a vision answer.
@@ -72,7 +72,7 @@ pub const MAX_VISION_TEXT_CHARS: usize = 4000;
 /// Most folders a drafted schema may have.
 const MAX_DRAFT_FOLDERS: usize = 40;
 
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     let s = s.trim();
     if s.chars().count() <= max {
         return s.to_string();
@@ -104,7 +104,7 @@ fn folder_list(folders: &[LibraryFolder]) -> String {
         .join("\n")
 }
 
-const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
+pub(crate) const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
 content; use Simplified Chinese when the file has no readable text.";
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
@@ -276,7 +276,7 @@ fn str_field(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
-fn tags_field(v: &Value) -> Vec<String> {
+pub(crate) fn tags_field(v: &Value) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let raw: Vec<String> = match v.get("tags") {
         Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
@@ -460,11 +460,13 @@ pub const TEXT_TIMEOUT: Duration = Duration::from_secs(180);
 pub const VISION_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// A routed text completion (claude / codex / dsh), accounted under
-/// [`crate::llm_usage::SCENARIO_LIBRARY_INGEST`].
+/// [`crate::llm_usage::SCENARIO_LIBRARY_INGEST`]. Lean: the Claude route
+/// carries no Claude Code agent context (see
+/// [`crate::llm_provider::ClaudeCliProvider::lean`]).
 pub fn complete_text(slot: crate::llm_provider::ModelSlot, prompt: &str) -> Option<CallOutcome> {
     let config = crate::llm_provider::shared_config();
     with_llm_slot(|| {
-        crate::llm_provider::complete_routed_usage(
+        crate::llm_provider::complete_routed_usage_lean(
             &config,
             slot,
             prompt,

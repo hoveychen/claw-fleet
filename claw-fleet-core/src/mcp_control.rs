@@ -335,7 +335,7 @@ fn schedule_tool_def() -> Value {
 fn wiki_tool_def() -> Value {
     json!({
         "name": "fleet__wiki",
-        "description": "Publish and browse docs in the Fleet wiki knowledge base — knowledge you are banking for yourself and for later sessions. The split against `fleet__artifact` is AUDIENCE, not file format: a doc you are handing to a person belongs in the artifact store even when it is html or markdown, and a doc later sessions will read back belongs here. Use this instead of the `fleet wiki` CLI. Actions: publish (--path required; --slug/--title optional), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug and --to required — rename a slug, e.g. into a virtual directory; versions move with it), list, search (--query required). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
+        "description": "Publish and browse docs in the Fleet wiki knowledge base — knowledge you are banking for yourself and for later sessions. The split against `fleet__artifact` is AUDIENCE, not file format: a doc you are handing to a person belongs in the artifact store even when it is html or markdown, and a doc later sessions will read back belongs here. Use this instead of the `fleet wiki` CLI. Actions: publish (--path required; --slug/--title optional), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug and --to required — rename a slug, e.g. into a virtual directory; versions move with it), list, search (--query required — ranked full-text over docs AND artifacts: titles, folders, AI summaries, tags and body text; each hit line says which). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -358,16 +358,17 @@ fn wiki_tool_def() -> Value {
 fn artifact_tool_def() -> Value {
     json!({
         "name": "fleet__artifact",
-        "description": "Store a finished DELIVERABLE in the Fleet artifact library (the desktop's 产出 page) so the user can find it, preview it and hand it to someone. Use this instead of the `fleet artifact` CLI. This is for files whose point is to be given to a person — a PDF, a slide deck, a spreadsheet, a rendered video or image, an exported dataset, and equally an outward-facing html report or a markdown spec you are delivering. The split against `fleet__wiki` is AUDIENCE, not file format: there is no format filter here (`add` takes any single file), so pick by whether the thing is being handed over (here) or banked for later sessions to read back (`fleet__wiki`). NOT for source code — that lives in the repo. Add the artifact as soon as you produce it: the file is usually written inside a `.worktrees/<task-id>` checkout that gets deleted when the plan merges, and once that happens the deliverable is gone. Actions: add (--path required; --title/--note optional and worth filling in — they are what the user reads on the card), list, get (--id required), delete (--id required). `add` reads a path on the host serving this session.",
+        "description": "Store a finished DELIVERABLE in the Fleet artifact library (the desktop's 产出 page) so the user can find it, preview it and hand it to someone. Use this instead of the `fleet artifact` CLI. This is for files whose point is to be given to a person — a PDF, a slide deck, a spreadsheet, a rendered video or image, an exported dataset, and equally an outward-facing html report or a markdown spec you are delivering. The split against `fleet__wiki` is AUDIENCE, not file format: there is no format filter here (`add` takes any single file), so pick by whether the thing is being handed over (here) or banked for later sessions to read back (`fleet__wiki`). NOT for source code — that lives in the repo. Add the artifact as soon as you produce it: the file is usually written inside a `.worktrees/<task-id>` checkout that gets deleted when the plan merges, and once that happens the deliverable is gone. Actions: add (--path required; --title/--note optional and worth filling in — they are what the user reads on the card), list, get (--id required), search (--query required — ranked full-text over titles, notes, AI summaries, tags and the files' extracted text; this workspace unless all:true), delete (--id required). `add` reads a path on the host serving this session.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["add", "list", "get", "delete"]},
+                "action": {"type": "string", "enum": ["add", "list", "get", "search", "delete"]},
                 "path": {"type": "string", "description": "File to store. Required for add. One file, not a directory — zip a folder first."},
                 "title": {"type": "string", "description": "Display name on the card (add only). Defaults to the filename; a real title is much more useful."},
                 "note": {"type": "string", "description": "One line on what this is and who it is for (add only). Shown under the preview."},
                 "id": {"type": "string", "description": "Artifact id. Required for get and delete."},
-                "all": {"type": "boolean", "description": "List every workspace's artifacts instead of just this one (list only)."}
+                "query": {"type": "string", "description": "Search terms. Required for search."},
+                "all": {"type": "boolean", "description": "Reach every workspace's artifacts instead of just this one (list/search only)."}
             },
             "required": ["action"],
             "additionalProperties": false
@@ -1747,7 +1748,7 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
             let id = req(args, "id")?;
             let a = artifacts::get(&id)?;
             Ok(format!(
-                "{}  —  {}\n  file: {}   kind: {}   mime: {}\n  size: {} bytes\n  workspace: {}\n  added: {}\n  from: {}\n  note: {}{}",
+                "{}  —  {}\n  file: {}   kind: {}   mime: {}\n  size: {} bytes\n  workspace: {}\n  added: {}\n  from: {}\n  note: {}{}{}",
                 a.id,
                 a.title,
                 a.name,
@@ -1758,6 +1759,11 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
                 fmt_ms(a.created_ms),
                 a.source_path,
                 if a.note.is_empty() { "(none)" } else { &a.note },
+                if a.summary.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n  summary: {}\n  tags: {}", a.summary, a.tags.join(", "))
+                },
                 if a.drifted {
                     "\n  WARNING: hard-linked, and the source has been rewritten in place since — \
                      the stored bytes are no longer what was archived."
@@ -1766,6 +1772,11 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
                 }
             ))
         }
+        "search" => {
+            let query = req(args, "query")?;
+            let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
+            library_search_text(&query, all, Some(crate::library::ITEM_ARTIFACT), cwd)
+        }
         "delete" => {
             let id = req(args, "id")?;
             artifacts::delete(&id)?;
@@ -1773,6 +1784,50 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
         }
         other => Err(format!("unknown artifact action: {other}")),
     }
+}
+
+/// Library search rendered for an agent: one line per hit, docs and artifacts
+/// ranked together (or one store with `kind`).
+fn library_search_text(
+    query: &str,
+    all: bool,
+    kind: Option<&str>,
+    cwd: &Path,
+) -> Result<String, String> {
+    use crate::library_index::{search, SearchOpts};
+    let opts = SearchOpts {
+        workspace: (!all).then(|| crate::wiki::resolve_workspace_path(cwd)),
+        kind: kind.map(str::to_string),
+        limit: 30,
+    };
+    let hits = search(query, &opts)?;
+    if hits.is_empty() {
+        let what = match kind {
+            Some(crate::library::ITEM_ARTIFACT) => "artifact",
+            _ => "doc or artifact",
+        };
+        return Ok(if all {
+            format!("No {what} matches '{query}'.")
+        } else {
+            format!("No {what} in this workspace matches '{query}'. Pass all:true to search every workspace.")
+        });
+    }
+    let mut out = String::new();
+    for h in &hits {
+        let label = if h.kind == crate::library::ITEM_DOC { "doc" } else { "artifact" };
+        let matched = if h.snippet.is_empty() {
+            h.title.clone()
+        } else {
+            format!(
+                "{} — {}",
+                h.title,
+                h.snippet.replace("<mark>", "").replace("</mark>", "").replace('\n', " ")
+            )
+        };
+        let folder = if h.folder.is_empty() { String::new() } else { format!("  ({})", h.folder) };
+        out.push_str(&format!("{label} {}  [{}]{folder}  {matched}\n", h.id, h.field));
+    }
+    Ok(out.trim_end().to_string())
 }
 
 fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
@@ -1872,38 +1927,10 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
         }
         "search" => {
             let query = req(args, "query")?;
-            // Was unscoped — every workspace, always — while the guidance
-            // documents search as workspace-local with `--all` to widen. Scope
-            // it here so the tool matches the contract agents are handed.
-            let all = flag(args, "all");
-            let scope = wiki::resolve_workspace_path(cwd);
-            let by_slug: std::collections::HashMap<String, wiki::WikiDoc> = wiki::list_docs()
-                .into_iter()
-                .filter(|d| all || wiki::workspace_contains(&d.workspace_path, &scope))
-                .map(|d| (d.slug.clone(), d))
-                .collect();
-            let hits: Vec<_> = wiki::search_docs(&query)
-                .into_iter()
-                .filter(|h| by_slug.contains_key(&h.slug))
-                .collect();
-            if hits.is_empty() {
-                return Ok(if all {
-                    format!("No doc matches '{query}'.")
-                } else {
-                    format!("No doc in this workspace matches '{query}'. Pass all:true to search every workspace.")
-                });
-            }
-            let mut out = String::new();
-            for h in &hits {
-                let doc = &by_slug[&h.slug];
-                let matched = if h.snippet.is_empty() {
-                    &doc.title
-                } else {
-                    &h.snippet
-                };
-                out.push_str(&format!("{}  [{}]  {}\n", h.slug, h.field, matched));
-            }
-            Ok(out.trim_end().to_string())
+            // Scoped to this workspace's project unless `all`, as the guidance
+            // documents. Artifacts are searched too — by content as well as
+            // title — so a deliverable is findable from the same query.
+            library_search_text(&query, flag(args, "all"), None, cwd)
         }
         other => Err(format!("unknown wiki action: {other}")),
     }
