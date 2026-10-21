@@ -100,10 +100,13 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "show": return t("查看 {0} 的版本", str(input, "slug"));
       case "mv": return t("移动 {0}", str(input, "slug"));
       case "search": return t("搜索 {0}", str(input, "query"));
+      case "folders": return t("列出资料目录");
     }
   } else if (tool === "artifact") {
     switch (action) {
       case "add": return t("存入产出 {0}", str(input, "title"));
+      case "folders": return t("列出资料目录");
+      case "search": return t("搜索产出 {0}", str(input, "query"));
       case "list": return t("列出产出");
       case "get": return t("查看产出 {0}", id);
       case "delete": return t("删除产出 {0}", id);

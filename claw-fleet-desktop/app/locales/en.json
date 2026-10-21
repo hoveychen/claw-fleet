@@ -95,7 +95,10 @@
       "wake": "Wake on finish",
       "tail": "Tail lines",
       "step": "Step",
-      "type": "Task type"
+      "type": "Task type",
+      "folder": "Folder",
+      "new_folder": "New folder",
+      "description": "Folder description"
     },
     "param_for": {
       "handoff": {
@@ -166,13 +169,16 @@
         "list": "List docs",
         "search": "Search {{query}}",
         "show": "View versions of {{slug}}",
-        "mv": "Move {{slug}}"
+        "mv": "Move {{slug}}",
+        "folders": "Listed library folders"
       },
       "artifact": {
         "add": "Stored artifact {{title}}",
         "list": "Listed artifacts",
         "get": "Artifact {{id}}",
-        "delete": "Deleted artifact {{id}}"
+        "delete": "Deleted artifact {{id}}",
+        "folders": "Listed library folders",
+        "search": "Searched artifacts {{query}}"
       },
       "inspect": {
         "list": "Listed running agents",

@@ -1237,6 +1237,41 @@ pub(crate) enum PlanCommands {
     },
 }
 
+/// Where `wiki publish` / `artifact add` file the item: one of the project's
+/// library folders (see `folders`), or a new one with a reason.
+#[derive(clap::Args, Clone, Debug, Default)]
+pub(crate) struct FilingFlags {
+    /// Library folder to file into: a path from `folders` (its doc prefix or
+    /// a unique leaf name also work). Required unless re-publishing an
+    /// existing item.
+    #[arg(long)]
+    pub folder: Option<String>,
+    /// Create --folder because no existing folder fits (needs --description
+    /// and --reason; the user reviews every folder an agent creates).
+    #[arg(long)]
+    pub new_folder: bool,
+    /// With --new-folder: why none of the existing folders fits.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// With --new-folder: one line on what belongs in the new folder.
+    #[arg(long)]
+    pub description: Option<String>,
+}
+
+impl FilingFlags {
+    pub(crate) fn args(&self) -> claw_fleet_core::library_filing::FilingArgs {
+        let clean = |v: &Option<String>| {
+            v.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
+        };
+        claw_fleet_core::library_filing::FilingArgs {
+            folder: clean(&self.folder),
+            new_folder: self.new_folder,
+            reason: clean(&self.reason),
+            description: clean(&self.description),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub(crate) enum ArtifactCommands {
     /// Store one file in the artifact library. Add it as soon as it is
@@ -1256,7 +1291,14 @@ pub(crate) enum ArtifactCommands {
         workspace: Option<std::path::PathBuf>,
         /// Output the stored artifact's metadata as JSON
         #[arg(long)]
-        json: bool,
+        json: bool,        #[command(flatten)]
+        filing: FilingFlags,
+    },
+    /// List the project's library folders an artifact can be filed into
+    Folders {
+        /// Workspace whose project to list. Default: current directory.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
     },
     /// List artifacts from the current workspace, newest first (--all for
     /// every workspace)
@@ -1313,7 +1355,14 @@ pub(crate) enum WikiCommands {
         workspace: Option<std::path::PathBuf>,
         /// Output the published doc metadata as JSON
         #[arg(long)]
-        json: bool,
+        json: bool,        #[command(flatten)]
+        filing: FilingFlags,
+    },
+    /// List the project's library folders a doc can be filed into
+    Folders {
+        /// Workspace whose project to list. Default: current directory.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
     },
     /// List wiki docs published from the current workspace, newest first
     /// (--all for every workspace)

@@ -344,6 +344,17 @@ describe("parseWikiPublish", () => {
     });
   });
 
+  it("ignores the filing line that follows the sentence", () => {
+    const text =
+      "Published hetong/deck (version v1, 1 total). title: Deck\nFiled in NEW folder '合同' (reason: none fits).";
+    expect(parseWikiPublish(text)).toEqual({ slug: "hetong/deck", version: "v1", title: "Deck" });
+    const added = parseArtifactAdd(
+      "Stored artifact a1 — Deck (pdf, 9 bytes), copied. It is now on the 产出 page.\nFiled in NEW folder '合同' (reason: x (y)).",
+    );
+    expect(added?.title).toBe("Deck");
+    expect(added?.artifactKind).toBe("pdf");
+  });
+
   it("returns null on an unrecognised sentence", () => {
     expect(parseWikiPublish("Moved arch/overview to arch/v2/overview.")).toBeNull();
   });

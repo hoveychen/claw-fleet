@@ -95,7 +95,10 @@
       "wake": "完成后唤醒",
       "tail": "尾部行数",
       "step": "步骤",
-      "type": "任务类型"
+      "type": "任务类型",
+      "folder": "目录",
+      "new_folder": "新建目录",
+      "description": "目录说明"
     },
     "param_for": {
       "handoff": {
@@ -166,13 +169,16 @@
         "list": "列出文档",
         "search": "搜索 {{query}}",
         "show": "查看 {{slug}} 的版本",
-        "mv": "移动 {{slug}}"
+        "mv": "移动 {{slug}}",
+        "folders": "列出资料目录"
       },
       "artifact": {
         "add": "存入产出 {{title}}",
         "list": "列出产出",
         "get": "查看产出 {{id}}",
-        "delete": "删除产出 {{id}}"
+        "delete": "删除产出 {{id}}",
+        "folders": "列出资料目录",
+        "search": "搜索产出 {{query}}"
       },
       "inspect": {
         "list": "列出在跑的 agent",
