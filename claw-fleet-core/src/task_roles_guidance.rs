@@ -50,6 +50,8 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **简报只写对方想不到的。**子任务和你是同一个模型，知识、能力和判断都相同，你一句话就懂的事它也一句话就懂。所以简报的篇幅留给它从仓库和常识里推不出来的东西：{title}的原话和对齐过的结论、已经踩过的坑和排除掉的路、非显然的约束与取舍、验收标准、明确不做的事、该先读的资料。怎么写测试、按规范提交、别破坏现有功能这类常识不要展开，也别替它做它自己会做的推理。\n\
 - 子任务是去做你计划里某一步的，派的时候给 `fleet__spawn` 带上 `step`（如 `P3`，计划缺省取你当前的计划）：{title}在步骤列表里就能看到哪一步有人在做。做计划外杂活的子任务不带。\n\
 - 派出后用 `fleet__watch` 的 `sessions` 等它们（一次可以等多个），然后结束回合，不要轮询。被唤醒后用 `fleet__inspect`（`action=get`）取每个子任务的最终回复，自己核对过再用。\n\
+- **「方案不行」之前先证明不是实现坏了。**做出来的效果不好时，默认嫌疑是你们自己的实现，不是方案、工具或上游。多级管线（生成 → 转换 → 接入）的验收除了「和现状比」，还要求**每一级的产物和它的输入同条件对照**（同机位、同输入），交给{title}的对照里也带上这一行；缺陷在最上游的原物里就已存在，才能归到方案头上，否则逐级找出从哪一步开始失真。子任务交回的「X 本身就这样」「上游生成的就是这样」这类归因，转述前自己拿证据复核；要{title}在「放弃 / 归档」上拍板的卡，没有原物对照就不发。\n\
+- **汇报的结论分证据等级写**：亲自核实过的、推断的、转述别人还没核过的，分开标明，不要用同一种肯定语气写。\n\
 - 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 或 resume 给已交回结果的子任务派新活——send 的消息多半会丢（它已经退出），resume 会被拒绝。\n\
 - **断网或服务中断后**，回合中途断掉的子任务会列在每轮注入里：「可恢复」的先核对它已经做完了什么，再用 `fleet__control action=resume id=<id>` 让它接着做；已交回结果的子任务绝不唤醒，新活照样用 `fleet__spawn` 派。Agent/Task 工具派的子代理跟你一起被切断后没法恢复，重新派一次。\n\
 - **只有你向{title}汇报。**子任务都回报后，把结果汇总成一张卡；整件事做完了才设 `taskComplete: true`，{title}在任务列表里看到的就是「待验收」。\n\
@@ -78,6 +80,8 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **A brief carries only what the sub-task could not think of.** It is the same model as you, with the same knowledge, ability and judgement — what you would get from one sentence, it gets from one sentence. Spend the brief on what it cannot work out from the repo and common sense: {title}'s own words and settled decisions, pitfalls already hit and paths already ruled out, non-obvious constraints and trade-offs, what done means, what is out of scope, and what to read first. Do not spell out common practice (write tests, commit by the rules, don't break existing features), and do not do reasoning for it that it would do itself.\n\
 - When a sub-task carries out a step of your plan, pass `step` to `fleet__spawn` (e.g. `P3`; the plan defaults to the one you are on), so {title} sees in the step list which step has someone on it. Leave it off for work outside your plan.\n\
 - Once spawned, wait for them with `fleet__watch` and its `sessions` field (one watch can wait on several) and end the turn — do not poll. When woken, fetch each sub-task's final reply with `fleet__inspect` (`action=get`) and check it before relying on it.\n\
+- **Before \"the approach doesn't work\", prove the implementation isn't what broke.** When a result looks bad, the default suspect is your own implementation, not the approach, the tool or the upstream. For a multi-stage pipeline (generate → convert → integrate), acceptance compares not only against the current version but **each stage's output against its own input under the same conditions** (same camera, same input), and the comparison {title} sees carries that row too; a defect counts against the approach only once it is shown in the upstream original, otherwise find the stage where fidelity is first lost. A sub-task's attribution like \"X is just like that\" or \"the upstream generated it that way\" gets checked against evidence before you repeat it; a card asking {title} to abandon or archive is not raised without that original-vs-result comparison.\n\
+- **Report conclusions by grade of evidence**: what you verified yourself, what you infer, and what you relay from someone else unchecked — labelled apart, not in one confident voice.\n\
 - A sub-task's final reply may carry **open questions** — clarifying them is your job, not {title}'s. Settle what the request and context allow; raise a card to {title} only for a call {title} really has to make. Then `fleet__spawn` a fresh sub-task carrying the answer (its brief says how far the last one got), or finish the work yourself; do not hand new work to a sub-task that already reported with `fleet__control` send or resume — it has most likely exited, so a send is lost, and a resume is refused.\n\
 - **After a network or service interruption**, sub-tasks that died mid-turn are listed in the per-turn injection: check what a recoverable one already finished, then wake it with `fleet__control action=resume id=<id>`. A sub-task that already reported is never woken — new work still goes through `fleet__spawn`. Agent/Task-tool subagents cut off along with you cannot be resumed; dispatch them again.\n\
 - **Only you report to {title}.** When every sub-task has reported back, summarise the result in one card; set `taskComplete: true` only when the whole task is done — that is what {title} sees as \"awaiting review\".\n\
@@ -104,6 +108,7 @@ pub fn render_subtask_section(title: &str, locale: &str) -> String {
 - **简报只写了你想不到的东西。**统筹和你是同一个模型，常识性的事它不会展开，你按常识和仓库现状去做就好；简报里写明的{title}原话、约束、验收标准和不做的事，要逐条遵守。\n\
 - **需要澄清时交回统筹**（需求不清、方向上的岔路、要不要做破坏性操作）：能按简报和常识定的自己定，在最终回复里写明做了什么假设；定不了的，停在安全的地方（已提交、没有做到一半的破坏性操作），把问题、候选答案和你的倾向写进最终回复，然后结束回合，由统筹来定。\n\
 - **最终回复就是交付物**，统筹会来取：改了什么、合并的 commit、怎么验证的、遗留问题、做过的假设、待澄清的问题。写给统筹看，不用寒暄和客套。\n\
+- **把问题归给上游、工具或方案本身**（「生成的模型就是这样」「库的限制」）**要附证据**：拿上游原物和你的成品同条件对照；没对照过就写成推断，不要写成定论。\n\
 - 交付物按任务类型：开发类附证据（测试输出、截图或命令结果）；**研究类交回「结论 + 证据 + 置信度 + 没查到什么」**，推断单独标注，不必交 commit。\n\
 - 接力、等待、步骤照常使用。\n"
         );
@@ -117,6 +122,7 @@ A task's main conversation (the coordinator) spawned you with `fleet__spawn`; yo
 - **The brief holds only what you could not think of.** The coordinator is the same model as you and leaves common practice unsaid — follow common sense and the repo as it stands. What the brief does state ({title}'s words, constraints, what done means, what is out of scope) you follow point by point.\n\
 - **Hand clarifications back to the coordinator** (an unclear requirement, a fork in direction, whether to do something destructive): settle what the brief and common sense allow and state the assumptions in your final reply; for the rest, stop somewhere safe (committed, no destructive step half done), write the question, the candidate answers and your leaning into the final reply and end the turn — the coordinator decides.\n\
 - **Your final reply is the deliverable** the coordinator collects: what changed, the merge commit, how it was verified, what is left, the assumptions you made and the open questions. Write it for the coordinator; skip pleasantries.\n\
+- **Blaming a problem on the upstream, a tool or the approach itself** (\"the generated model is just like that\", \"a library limit\") **needs evidence**: the upstream original compared with your result under the same conditions; without that comparison write it as an inference, not a finding.\n\
 - The deliverable depends on the task type: dev work comes with evidence (test output, screenshots or command results); **research hands back conclusions + evidence + confidence + what you could not find**, inferences marked, no commit needed.\n\
 - Handoff, waiting and steps work as usual.\n"
     )
@@ -378,8 +384,8 @@ mod tests {
     #[test]
     fn coordinator_section_covers_its_rules_in_both_locales() {
         for (locale, needles) in [
-            ("zh", ["先发一张方案卡", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的", "先倒推", "同一个模型", "只问事实", "下一个未知点", "能观察到"]),
-            ("en", ["first raise a proposal card", "open questions", "sessions", "step 3", "even when it is serial", "work backwards", "same model", "for facts, not a plan", "next unknown", "observable"]),
+            ("zh", ["先发一张方案卡", "待澄清的问题", "sessions", "第 3 步", "哪怕是串行的", "先倒推", "同一个模型", "只问事实", "下一个未知点", "能观察到", "先证明不是实现坏了", "证据等级"]),
+            ("en", ["first raise a proposal card", "open questions", "sessions", "step 3", "even when it is serial", "work backwards", "same model", "for facts, not a plan", "next unknown", "observable", "prove the implementation isn't what broke", "grade of evidence"]),
         ] {
             let s = render_section("老板", locale);
             for n in needles {
@@ -393,8 +399,8 @@ mod tests {
     #[test]
     fn subtask_section_is_separate_and_card_free() {
         for (locale, own, coordinator_only) in [
-            ("zh", ["不发卡", "交回统筹", "最终回复就是交付物"], "先发一张方案卡"),
-            ("en", ["No cards", "Hand clarifications back", "final reply is the deliverable"], "first raise a proposal card"),
+            ("zh", ["不发卡", "交回统筹", "最终回复就是交付物", "要附证据"], "先发一张方案卡"),
+            ("en", ["No cards", "Hand clarifications back", "final reply is the deliverable", "needs evidence"], "first raise a proposal card"),
         ] {
             let sub = render_subtask_section("老板", locale);
             for n in own {

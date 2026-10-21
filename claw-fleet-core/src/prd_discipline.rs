@@ -182,7 +182,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 ```
 
 - `--note` 强制。`--plan/--next` 让 Fleet 把后继者自动归属到该计划和 P。`--model/--effort` 可选，不传就继承当前会话。
-- **`--note` 是整条链共用的交接文档，不是一次性留言。**每一棒在上一版上改写出新一版，旧版本全部留存。第一棒从零写；之后每一棒都以开场收到的那一版为底稿：与{title}对齐过的结论、踩过的坑原样保留（确已失效的写明为什么再删），进度、在飞的事和下一步按实际情况重写。你没带过去的内容，后面每一棒都看不到。上下文压缩后要找回当前版本，`fleet__handoff` 传 `action="show"`，末一版就是。
+- **`--note` 是整条链共用的交接文档，不是一次性留言。**每一棒在上一版上改写出新一版，旧版本全部留存。第一棒从零写；之后每一棒都以开场收到的那一版为底稿：与{title}对齐过的结论、踩过的坑原样保留（确已失效的写明为什么再删），进度、在飞的事和下一步按实际情况重写。**查实的事实连同证据位置也原样保留**（「高模头发本来是密的，见 `sheet_hilo_full.png`」「根因不在 X，排除实验在 …」）：它们最容易在改写时被当成过程细节删掉，后面的棒就会重新得出被推翻过的结论；要推翻它，写明推翻它的证据。你没带过去的内容，后面每一棒都看不到。上下文压缩后要找回当前版本，`fleet__handoff` 传 `action="show"`，末一版就是。
 - **长步骤的耗时和瓶颈也写进 `--note`**：哪一步实测跑了多久、吞吐多少、瓶颈在哪（GPU / CPU / IO / 网络）、做过哪些预检和优化、判过哪些不值得磨以及理由（见下文「长任务开跑前先预检墙钟」）。后面的棒拿到数字就能直接决定，不用重测；值得跨链留存的（比如某个训练脚本的基准吞吐）再写进 wiki。
 - **第一棒交接时用 `--goal` 写下这条链的目标**——一句话的「什么做完了这条链才算完」。你是在回合*末尾*登记的，所以哪怕这活是聊到一半才定下来的，此刻你也已经知道{title}要什么了。它会被每轮注入到后继者眼前，并成为**收工的判据**：计划树全勾了、只要 goal 没达成，就不该把决策卡标成 `taskComplete: true`。
 - **目标变了是正常的**（{title}中途改路线、或原目标已不成立），改就是了——但要用 `--goal <新目标> --goal-reason <为什么>` 显式改，并在卡里告诉{title}。没有理由的改动会被拒：那条规则挡的不是「目标变了」，而是把链的目标**悄悄缩成你手上那个 plan**，然后宣布达成。纯探索、本来就没有终点的链，不写 goal 也完全可以。
@@ -428,7 +428,7 @@ fleet handoff --note "<the chain's handoff brief: conclusions aligned with {titl
 ```
 
 - `--note` is mandatory. `--plan/--next` let Fleet attribute the successor to that plan and P. `--model/--effort` are optional and otherwise inherited.
-- **`--note` is the chain's shared handoff brief, not a one-off message.** Every baton revises the previous version into a new one, and all versions are kept. Baton 1 writes it from scratch; every later baton starts from the version it opened with: conclusions aligned with {title} and known traps carry over verbatim (delete one only when it no longer holds, and say why), while progress, in-flight work and the next step are rewritten to match reality. Whatever you do not carry forward, no later baton will see. After a compaction, recover the current version with `fleet__handoff` `action="show"` — it is the last one.
+- **`--note` is the chain's shared handoff brief, not a one-off message.** Every baton revises the previous version into a new one, and all versions are kept. Baton 1 writes it from scratch; every later baton starts from the version it opened with: conclusions aligned with {title} and known traps carry over verbatim (delete one only when it no longer holds, and say why), while progress, in-flight work and the next step are rewritten to match reality. **Established facts carry over verbatim too, with where their evidence lives** ("the raw high-poly hair is dense, see `sheet_hilo_full.png`", "the root cause is not X, ruled out by …"): they are the easiest thing to cut as process detail in a rewrite, and a later baton then re-reaches the conclusion they had refuted; to overturn one, state the evidence that overturns it. Whatever you do not carry forward, no later baton will see. After a compaction, recover the current version with `fleet__handoff` `action="show"` — it is the last one.
 - **Put long steps' timings and bottlenecks in the `--note` too**: how long a step actually took, its throughput, where the bottleneck is (GPU / CPU / IO / network), what preflight and optimisation you did, and what you judged not worth it and why (see "Preflight the wall clock before a long run" below). A later baton holding the numbers can decide straight away instead of measuring again; anything worth keeping beyond this chain (a training script's baseline throughput, say) also goes in the wiki.
 - **On the first baton, state the chain's goal with `--goal`** — one sentence of "this chain is done when …". You register at the *end* of your turn, so even when the work only took shape mid-conversation you already know what {title} settled on. It is injected in front of every later baton and becomes **the test for finishing**: with the goal unmet, a fully ticked plan tree is still not grounds for `taskComplete: true`.
 - **A goal changing is normal** ({title} changes course, or the original no longer holds) — just change it explicitly with `--goal <new> --goal-reason <why>`, and tell {title} on a card. A change with no reason is refused: the rule does not forbid the goal moving, it forbids **quietly shrinking it down to the plan in your hands** and then declaring victory. A purely exploratory chain with no finish line can leave the goal unset.
@@ -641,6 +641,19 @@ mod tests {
             g.contains("UserPromptSubmit"),
             "guidance must mention the hook so the agent knows where the auto-injection comes from"
         );
+    }
+
+    /// On the yellow ai-head chain (2026-10-21) a hop rewrote its note and
+    /// dropped an established fact ("the raw high-poly hair is dense"); the
+    /// next hop then re-reached the refuted conclusion. Rule 5 must keep facts.
+    #[test]
+    fn rule_5_keeps_established_facts_with_evidence_in_both_locales() {
+        for (locale, needle) in [
+            ("zh", "查实的事实连同证据位置也原样保留"),
+            ("en", "Established facts carry over verbatim too"),
+        ] {
+            assert!(render_guidance("Boss", locale).contains(needle), "[{locale}] missing {needle:?}");
+        }
     }
 
     /// Two failure modes seen on one relay (mslug3 chain, 2026-09-14): hop 73
