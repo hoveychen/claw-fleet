@@ -169,6 +169,7 @@ function tailItems(tail: AuxCardTail, t: TFunction): ContextMenuItem[] {
 function chipCopy(doc: AuxDoc, t: TFunction): { label: string; text: string } {
   switch (doc.kind) {
     case "file":
+    case "dir":
       return { label: t("detail.aux_copy_path", "复制路径"), text: doc.ref };
     case "wiki":
       return { label: t("wiki.copy_ref_short", "复制引用"), text: `[[${doc.ref}]]` };
@@ -230,7 +231,7 @@ export function buildChipMenu({
     dividerBefore: onOpenPage == null,
     onSelect: () => copy(copyable.text, fail, t),
   });
-  if (doc.kind === "file" && canRevealPath()) {
+  if ((doc.kind === "file" || doc.kind === "dir") && canRevealPath()) {
     items.push({
       id: "reveal",
       label: revealLabel(t),

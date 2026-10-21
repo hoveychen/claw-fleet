@@ -148,11 +148,11 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 ### 提到的资料必须挂进 `reviewDocs`\n\
 \n\
-卡片顶层还有一个 `reviewDocs` 字段（整张卡一份，不属于某个问题）：`[{{ \"kind\": \"wiki\"|\"file\", \"ref\": \"<slug 或路径>\", \"title\"?: \"<标签>\" }}]`。列进去的每份资料会出现在会话旁的资料栏里，{title_zh}点一下就能读，读到的是磁盘上的当前内容。\n\
+卡片顶层还有一个 `reviewDocs` 字段（整张卡一份，不属于某个问题）：`[{{ \"kind\": \"wiki\"|\"file\"|\"dir\"|\"url\"|\"artifact\", \"ref\": \"…\", \"title\"?: \"<标签>\" }}]`。列进去的每份资料会出现在会话旁的资料栏里，{title_zh}点一下就能打开，读到的是磁盘上的当前内容。\n\
 \n\
-- **正文里只要让{title_zh}去读某份文档**——你写的调研报告、设计稿、计划、规格、wiki 页面——就把它挂进 `reviewDocs`。只在正文里写一句「详见 `docs/x.md`」「报告已发到 wiki `arch/foo`」，{title_zh}没有简单的办法找到它。\n\
-- `file` 的 `ref` 写相对你 cwd 的路径或绝对路径；`wiki` 写 slug。`title` 写一句人能看懂的名字（「CPU 采样报告」），不要写文件名。\n\
-- 图片不走 `reviewDocs`：正文说「看下面这几张图」时，图必须真的挂在 `images` 里。\n\
+- **正文里只要让{title_zh}去看某样东西**——你写的调研报告、设计稿、计划、wiki 页面、一个输出目录、一张图、一个链接、一份产出——就把它挂进 `reviewDocs`。只在正文里写一句「详见 `docs/x.md`」「报告已发到 wiki `arch/foo`」，{title_zh}没有简单的办法找到它。\n\
+- `ref`：`file`（文本、html 或图片）和 `dir`（文件夹）写相对你 cwd 的路径或绝对路径；`wiki` 写 slug；`url` 写完整地址；`artifact` 写产出 id。`title` 写一句人能看懂的名字（「CPU 采样报告」），不要写文件名。\n\
+- 要在卡片里直接展示的图走 `images`；正文说「看下面这几张图」时，图必须真的挂在 `images` 里。\n\
 \n\
 {task_roles}\n\
 \n\
@@ -254,11 +254,11 @@ The test is not \"could plain text express this?\" (it always can) but \"is the 
 \n\
 ### Material you mention goes in `reviewDocs`\n\
 \n\
-The card also takes a top-level `reviewDocs` field (one per card, not per question): `[{{ \"kind\": \"wiki\"|\"file\", \"ref\": \"<slug or path>\", \"title\"?: \"<label>\" }}]`. Each entry is listed in the material rail beside the conversation, where {title_en} opens it with one click and reads its current on-disk content.\n\
+The card also takes a top-level `reviewDocs` field (one per card, not per question): `[{{ \"kind\": \"wiki\"|\"file\"|\"dir\"|\"url\"|\"artifact\", \"ref\": \"…\", \"title\"?: \"<label>\" }}]`. Each entry is listed in the material rail beside the conversation, where {title_en} opens it with one click and sees its current on-disk content.\n\
 \n\
-- **Whenever your text asks {title_en} to read a document** — a research report, design doc, plan, spec or wiki page you produced — attach it in `reviewDocs`. A bare \"see `docs/x.md`\" or \"published to wiki `arch/foo`\" in the prose leaves {title_en} no easy way to find it.\n\
-- For `file`, `ref` is a path relative to your cwd or absolute; for `wiki`, it is the slug. Give `title` a human name (\"CPU sampling report\"), not the file name.\n\
-- Images do not go in `reviewDocs`: when your text says \"see the images below\", they must actually be attached via `images`.\n\
+- **Whenever your text asks {title_en} to look at something** — a research report, design doc, plan, wiki page, an output folder, an image, a link or a deliverable — attach it in `reviewDocs`. A bare \"see `docs/x.md`\" or \"published to wiki `arch/foo`\" in the prose leaves {title_en} no easy way to find it.\n\
+- `ref`: for `file` (text, html or an image) and `dir` (a folder), a path relative to your cwd or absolute; for `wiki`, the slug; for `url`, the full address; for `artifact`, the artifact id. Give `title` a human name (\"CPU sampling report\"), not the file name.\n\
+- Images to show inside the card go in `images`: when your text says \"see the images below\", they must actually be attached there.\n\
 \n\
 {task_roles}\n\
 \n\

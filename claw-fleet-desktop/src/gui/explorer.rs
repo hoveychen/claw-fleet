@@ -149,6 +149,16 @@ pub(crate) fn read_external_file(
     state.backend.read_external_file(&path)
 }
 
+/// List the top level of a folder outside every workspace — a `reviewDocs`
+/// `dir` the agent handed over as material.
+#[tauri::command(async)]
+pub(crate) fn list_external_dir(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::file_explorer::ExternalDirListing, String> {
+    state.backend.list_external_dir(&path)
+}
+
 /// Turn a path as an agent wrote it into one that exists, if any reading of it
 /// does. The webview cannot do this itself — resolving needs `stat`, and the
 /// chip's join is computed during render — so the click asks here first.

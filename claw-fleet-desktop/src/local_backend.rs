@@ -3261,6 +3261,13 @@ impl LocalBackend {
         crate::file_explorer::read_external_file(path)
     }
 
+    pub fn list_external_dir(
+        &self,
+        path: &str,
+    ) -> Result<crate::file_explorer::ExternalDirListing, String> {
+        crate::file_explorer::list_external_dir(path)
+    }
+
     pub fn resolve_prose_path(
         &self,
         workspace: &str,

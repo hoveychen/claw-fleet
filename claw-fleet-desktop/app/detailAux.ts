@@ -69,9 +69,9 @@ export function isAuxFacet(value: unknown): value is AuxFacet {
   return FACETS.includes(value as AuxFacet);
 }
 
-/** A document the agent named and the reader opened: a repo file, a wiki doc,
- *  a web page, or a deliverable the run filed into the artifacts store. */
-export type AuxDocKind = "file" | "wiki" | "web" | "artifact";
+/** A document the agent named and the reader opened: a repo file, a folder, a
+ *  wiki doc, a web page, or a deliverable the run filed into the artifacts store. */
+export type AuxDocKind = "file" | "dir" | "wiki" | "web" | "artifact";
 
 export interface AuxDoc {
   /** Identity *and* the value stored in `expanded`. Prefixed by kind, so it can
@@ -192,7 +192,8 @@ export function auxDocLabel(kind: AuxDocKind, ref: string): string {
  */
 export function auxDocMeta(kind: AuxDocKind, ref: string): string {
   switch (kind) {
-    case "file": {
+    case "file":
+    case "dir": {
       const dir = ref.slice(0, Math.max(ref.lastIndexOf("/"), ref.lastIndexOf("\\")));
       return dir ? basename(dir) : "";
     }

@@ -75,10 +75,11 @@ pub struct FleetAskRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDoc {
     pub kind: ReviewDocKind,
-    /// For `wiki`: the published wiki slug. For `file`: an absolute path on the
-    /// agent host. Relative paths the agent supplies are resolved against
+    /// For `wiki`: the published wiki slug. For `file` / `dir`: an absolute path
+    /// on the agent host. Relative paths the agent supplies are resolved against
     /// `CLAUDE_PROJECT_DIR` (its cwd) at write time by [`resolve_review_docs`],
-    /// so this is always absolute by the time it reaches the frontend.
+    /// so this is always absolute by the time it reaches the frontend. For
+    /// `url`: the address. For `artifact`: the artifact-store id.
     #[serde(rename = "ref")]
     pub reference: String,
     /// Tab label. Falls back to the slug / file name when absent.
@@ -93,7 +94,15 @@ pub enum ReviewDocKind {
     /// A wiki doc, addressed by slug (`fleet wiki publish` output).
     Wiki,
     /// A file on disk, addressed by path relative to the agent cwd (or absolute).
+    /// Image files (see [`crate::file_explorer::is_image_path`]) open as images.
     File,
+    /// A directory on disk, same addressing as `File`. The reader lists its
+    /// top level ([`crate::file_explorer::list_external_dir`]).
+    Dir,
+    /// A web address. Opened in the system browser; never fetched.
+    Url,
+    /// A deliverable in the artifact store, addressed by its id.
+    Artifact,
 }
 
 /// Resolved body of a [`ReviewDoc`], fetched live by the frontend through the
@@ -130,6 +139,14 @@ const REVIEW_DOC_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
     let mut content = match doc.kind {
         ReviewDocKind::File => read_review_file(&doc.reference, doc.title.as_deref())?,
+        // These open in their own readers (directory listing, browser, the
+        // artifact pane); they have no single text body.
+        ReviewDocKind::Dir | ReviewDocKind::Url | ReviewDocKind::Artifact => {
+            return Err(format!(
+                "review doc '{}' has no text body to read",
+                doc.reference
+            ))
+        }
         ReviewDocKind::Wiki => {
             let wdoc = crate::wiki::get_doc(&doc.reference)?;
             let bytes = crate::wiki::get_file(&doc.reference, "current", &wdoc.entry)?;
@@ -825,7 +842,7 @@ pub fn normalize_html(req: &mut FleetAskRequest) {
     }
 }
 
-/// Resolve every `file` review-doc reference to an absolute path so the desktop
+/// Resolve every `file` / `dir` review-doc reference to an absolute path so the desktop
 /// (a different process, possibly a different cwd) can read it back live.
 ///
 /// Runs inside the `fleet mcp` child — the same host and cwd as the agent — so
@@ -833,10 +850,11 @@ pub fn normalize_html(req: &mut FleetAskRequest) {
 /// `CLAUDE_PROJECT_DIR`), then the whole thing is canonicalized. Best-effort:
 /// a ref that can't be canonicalized (file since moved, bad path) is left as the
 /// joined absolute path so the card can still show a "couldn't read" tab rather
-/// than silently dropping it. `wiki` refs are slugs, not paths — left untouched.
+/// than silently dropping it. `wiki` / `url` / `artifact` refs are not paths —
+/// left untouched.
 pub fn resolve_review_docs(req: &mut FleetAskRequest, project_dir: Option<&Path>) {
     for doc in &mut req.review_docs {
-        if doc.kind != ReviewDocKind::File {
+        if !matches!(doc.kind, ReviewDocKind::File | ReviewDocKind::Dir) {
             continue;
         }
         let raw = Path::new(&doc.reference);
@@ -1068,18 +1086,18 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
             },
             "reviewDocs": {
                 "type": "array",
-                "description": "OPTIONAL documents for the user to review alongside this card — the `.md` files or wiki entries you just produced. Fleet lists each doc in the session's material side rail (not inside the card), so the user opens and reads them there instead of hunting the path down in your prose. Card-level, not per-question. The body is fetched live when the card opens (not snapshotted), so the user always sees the current on-disk content. Use this whenever your answer references a design doc / report / plan file you want signed off.",
+                "description": "OPTIONAL material for the user to review alongside this card — the files, folders, wiki entries, links or deliverables your text points at. Fleet lists each in the session's material side rail (not inside the card), so the user opens it there instead of hunting the reference down in your prose. Card-level, not per-question. Content is read live when opened (not snapshotted). Use this whenever your text asks the user to look at something.",
                 "items": {
                     "type": "object",
                     "properties": {
                         "kind": {
                             "type": "string",
-                            "enum": ["wiki", "file"],
-                            "description": "`wiki` = a published wiki doc (ref is its slug); `file` = a file on disk (ref is its path)."
+                            "enum": ["wiki", "file", "dir", "url", "artifact"],
+                            "description": "`wiki` = a published wiki doc; `file` = a file on disk (text, html or an image); `dir` = a folder on disk (the user browses its files); `url` = a web link (opens in the browser); `artifact` = a deliverable filed with fleet__artifact."
                         },
                         "ref": {
                             "type": "string",
-                            "description": "For kind=wiki: the wiki slug (e.g. `arch/overview`). For kind=file: a path to the file, relative to your cwd or absolute (e.g. `docs/design.md`)."
+                            "description": "wiki: the slug (e.g. `arch/overview`). file / dir: a path relative to your cwd or absolute (e.g. `docs/design.md`). url: the full address. artifact: the artifact id."
                         },
                         "title": {
                             "type": "string",
@@ -1367,6 +1385,51 @@ mod tests {
         assert!(req.review_docs[0].reference.ends_with("docs/design.md"));
         // Wiki slug is left verbatim — it is not a path.
         assert_eq!(req.review_docs[1].reference, "arch/overview");
+    }
+
+    #[test]
+    fn resolve_review_docs_joins_dirs_and_leaves_urls_and_artifacts() {
+        let mut req = empty_request("rd3");
+        let doc = |kind, reference: &str| ReviewDoc {
+            kind,
+            reference: reference.into(),
+            title: None,
+        };
+        req.review_docs = vec![
+            doc(ReviewDocKind::Dir, "out/shots"),
+            doc(ReviewDocKind::Url, "https://example.com/a"),
+            doc(ReviewDocKind::Artifact, "20261021-101500"),
+        ];
+        resolve_review_docs(&mut req, Some(&std::env::temp_dir()));
+        assert!(Path::new(&req.review_docs[0].reference).is_absolute());
+        assert!(req.review_docs[0].reference.ends_with("out/shots"));
+        assert_eq!(req.review_docs[1].reference, "https://example.com/a");
+        assert_eq!(req.review_docs[2].reference, "20261021-101500");
+    }
+
+    #[test]
+    fn review_doc_kinds_parse_from_agent_json() {
+        let docs: Vec<ReviewDoc> = serde_json::from_value(serde_json::json!([
+            { "kind": "dir", "ref": "out" },
+            { "kind": "url", "ref": "https://x.dev" },
+            { "kind": "artifact", "ref": "20261021-101500" },
+        ]))
+        .unwrap();
+        let kinds: Vec<_> = docs.iter().map(|d| d.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![ReviewDocKind::Dir, ReviewDocKind::Url, ReviewDocKind::Artifact]
+        );
+    }
+
+    #[test]
+    fn review_docs_schema_lists_every_kind() {
+        // The enum the agent sees must match what serde accepts, or an agent
+        // following the schema gets its whole reviewDocs array dropped.
+        let schema = fleet_ask_input_schema();
+        let kinds = &schema["properties"]["reviewDocs"]["items"]["properties"]["kind"]["enum"];
+        let listed: Vec<ReviewDocKind> = serde_json::from_value(kinds.clone()).unwrap();
+        assert_eq!(listed.len(), 5);
     }
 
     #[test]

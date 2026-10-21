@@ -510,7 +510,7 @@ export type ReviewDoc = { kind: ReviewDocKind,
 ref: string, 
 title?: string | null, };
 
-export type ReviewDocKind = "wiki" | "file";
+export type ReviewDocKind = "wiki" | "file" | "dir" | "url" | "artifact";
 
 export type ReviewDocContent = { 
 format: ReviewDocFormat, 
