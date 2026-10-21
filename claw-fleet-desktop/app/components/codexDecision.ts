@@ -22,19 +22,34 @@ export function inlinePendingFleetAsk(
   records: DecisionHistoryRecord[] = [],
 ): FleetAskDecision | null {
   if (!session) return null;
-  const resolvedIds = new Set(
+  const resolved = new Map(
     records
-      .filter((record) => record.kind === "fleet-ask" && record.sessionId === session.id)
-      .map((record) => record.id),
+      .filter(
+        (record): record is Extract<DecisionHistoryRecord, { kind: "fleet-ask" }> =>
+          record.kind === "fleet-ask" && record.sessionId === session.id,
+      )
+      .map((record) => [record.id, record.outcome] as const),
   );
   return (
     decisions.find(
       (d): d is FleetAskDecision =>
         d.kind === "fleet-ask"
         && d.request.sessionId === session.id
-        && !resolvedIds.has(d.id),
+        && !resolvedBy(resolved.get(d.id), d),
     ) ?? null
   );
+}
+
+/**
+ * Whether a history record means the pending copy is stale. A parked card is
+ * the exception: the producer writes a `timeout` record the moment it parks,
+ * yet the card is still waiting for an answer. Treating that record as a
+ * resolution dropped the card from the dock, leaving a timed-out question with
+ * nowhere to answer it.
+ */
+function resolvedBy(outcome: string | undefined, d: FleetAskDecision): boolean {
+  if (outcome === undefined) return false;
+  return !(outcome === "timeout" && d.request.parked === true);
 }
 
 function messageToolUseIds(messages: RawMessage[]): Set<string> {
