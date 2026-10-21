@@ -488,6 +488,14 @@ mod tests {
             let url = thumb["thumb"].as_str().expect("an image gets a thumbnail");
             assert!(url.starts_with("data:image/jpeg;base64,"), "{url}");
             assert!(url.len() < 30 * 1024, "thumbnail is list-sized: {}", url.len());
+            // A quarter of the images in a real library are GIFs; they thumb from the first frame.
+            let gif = ws.join("hit.gif");
+            image::RgbImage::from_pixel(640, 360, image::Rgb([30, 90, 200]))
+                .save(&gif)
+                .unwrap();
+            let anim = crate::artifacts::add(&gif, None, None, ws, None).unwrap();
+            let thumb = serve_request("library_thumb", &json!({ "id": anim.id })).unwrap();
+            assert!(thumb["thumb"].as_str().is_some_and(|u| u.starts_with("data:image/jpeg;base64,")), "{thumb}");
             let none = serve_request("library_thumb", &json!({ "id": loose.id })).unwrap();
             assert_eq!(none["thumb"], Value::Null);
         });
