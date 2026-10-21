@@ -285,8 +285,10 @@ pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
     (!summary.is_empty()).then(|| (summary, classify::tags_field(&v)))
 }
 
-/// Summarize one claimed item and store the result. Returns the call's cost.
-fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain) -> Result<f64, String> {
+/// Summarize one claimed item and store the result. `spent` gets the call's
+/// cost whether or not a summary came of it: an answer that does not parse
+/// was still paid for.
+fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain, spent: &mut f64) -> Result<(), String> {
     let mode = mode_of(d).ok_or_else(|| "nothing to summarize".to_string())?;
     let outcome = match mode {
         Mode::Text => {
@@ -308,8 +310,11 @@ fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain) -> Result<f64, Strin
             brain.vision(dir, &vision_summary_prompt(&a.name, &d.title))?
         }
     };
-    let (summary, tags) =
-        parse_summary(&outcome.text).ok_or_else(|| "unparseable summary".to_string())?;
+    *spent = outcome.cost_usd;
+    // Keep the start of the answer: the only clue to why it did not parse.
+    let (summary, tags) = parse_summary(&outcome.text).ok_or_else(|| {
+        format!("unparseable summary: {}", classify::clip(&outcome.text, 160))
+    })?;
     match d.kind.as_str() {
         ITEM_DOC => wiki::write_summary_in(
             &roots.wiki,
@@ -333,7 +338,7 @@ fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain) -> Result<f64, Strin
             })?;
         }
     }
-    Ok(outcome.cost_usd)
+    Ok(())
 }
 
 /// One pass: summarize up to `limit` due items. Returns how many succeeded.
@@ -350,10 +355,11 @@ pub fn run_pass(roots: &Roots, index: &LibraryIndex, limit: usize) -> Result<usi
         if !claim(index, d.rowid, now)? {
             continue;
         }
-        match summarize_one(roots, &d, &LiveBrain) {
-            Ok(cost) => {
+        let mut spent = 0.0;
+        match summarize_one(roots, &d, &LiveBrain, &mut spent) {
+            Ok(()) => {
                 crate::log_debug(&format!(
-                    "[library_summary] {} {} summarized (${cost:.4})",
+                    "[library_summary] {} {} summarized (${spent:.4})",
                     d.kind, d.item_id
                 ));
                 release(index, d.rowid, false, now_ms());
@@ -708,7 +714,8 @@ pub fn run_backfill_in(
                             break;
                         }
                     };
-                    let result = summarize_one(roots, &d, brain);
+                    let mut spent = 0.0;
+                    let result = summarize_one(roots, &d, brain, &mut spent);
                     match &result {
                         Ok(_) => {
                             release(&index, d.rowid, false, now_ms());
@@ -720,10 +727,10 @@ pub fn run_backfill_in(
                         // `failed` counts items failing now: a resumed run
                         // retries them, and a retry that works clears them.
                         let known = r.failures.iter().position(|f| f.kind == d.kind && f.id == d.item_id);
+                        r.cost_usd += spent;
                         match &result {
-                            Ok(cost) => {
+                            Ok(()) => {
                                 r.done += 1;
-                                r.cost_usd += cost;
                                 if let Some(i) = known {
                                     r.failures.remove(i);
                                     r.failed = r.failed.saturating_sub(1);
@@ -752,7 +759,7 @@ pub fn run_backfill_in(
                             kind: d.kind.clone(),
                             id: d.item_id.clone(),
                             title: d.title.clone(),
-                            cost_usd: *result.as_ref().unwrap_or(&0.0),
+                            cost_usd: spent,
                             error: result.err(),
                             run,
                         });
@@ -971,7 +978,7 @@ mod tests {
     }
 
     /// Answers every text prompt with a summary, except prompts naming
-    /// `FAILME`; counts calls.
+    /// `FAILME`, which get a paid-for answer that is not JSON; counts calls.
     struct FakeBrain(std::sync::atomic::AtomicUsize);
 
     impl Brain for FakeBrain {
@@ -982,11 +989,12 @@ mod tests {
         ) -> Option<classify::CallOutcome> {
             self.0.fetch_add(1, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(5));
-            (!prompt.contains("FAILME")).then(|| classify::CallOutcome {
-                text: r#"{"summary":"A fake summary.","tags":["fake"]}"#.into(),
-                cost_usd: 0.01,
-                ..Default::default()
-            })
+            let text = if prompt.contains("FAILME") {
+                "Sorry, I cannot summarize this."
+            } else {
+                r#"{"summary":"A fake summary.","tags":["fake"]}"#
+            };
+            Some(classify::CallOutcome { text: text.into(), cost_usd: 0.01, ..Default::default() })
         }
         fn vision(&self, _dir: &std::path::Path, _prompt: &str) -> Result<classify::CallOutcome, String> {
             Err("no vision in tests".into())
@@ -1023,8 +1031,11 @@ mod tests {
         let done = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &tick).unwrap();
         assert_eq!(done.state, BackfillState::Done);
         assert_eq!((done.planned, done.done, done.failed, done.resumes), (7, 6, 1, 1), "{done:?}");
-        assert!((done.cost_usd - 0.06).abs() < 1e-9, "cost carried over the resume: {}", done.cost_usd);
+        // Six summaries plus two answers for `bad` that did not parse: those
+        // were paid for too.
+        assert!((done.cost_usd - 0.08).abs() < 1e-9, "cost carried over the resume: {}", done.cost_usd);
         assert_eq!(done.failures[0].id, "bad");
+        assert_eq!(done.failures[0].error, "unparseable summary: Sorry, I cannot summarize this.");
         // `bad` is the newest, so the first run tried it; the resumed run
         // retried it once more. Everything else was called exactly once.
         assert_eq!(*ticks.lock().unwrap(), 8);
