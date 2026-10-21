@@ -273,7 +273,8 @@
 }
 
 .folder_desc {
-  flex: 1 1 auto;
+  /* Basis 0: the description only takes what the name (and chip) leave. */
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -283,6 +284,14 @@
 
 .unfiled_row {
   margin-top: var(--space-1);
+}
+
+/* On a row with the AI-folder chip the name may ellipsize, so a narrow row
+   (hover verbs shown) cuts the name instead of clipping the chip. Only there:
+   a shrinkable name ellipsizes on any sub-pixel squeeze. */
+.folder_label_yield {
+  flex-shrink: 1;
+  min-width: 2em;
 }
 
 /* An AI-created folder the user has not reviewed yet. */

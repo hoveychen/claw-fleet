@@ -907,7 +907,12 @@ function FolderBranch({ node, depth, ctx }: { node: LibraryFolderNode; depth: nu
         <button type="button" className={styles.tree_target} onClick={() => setExpanded((v) => !v)}>
           {open ? <FolderOpen size={15} strokeWidth={1.4} /> : <Folder size={15} strokeWidth={1.4} />}
           <span className={styles.folder_text}>
-            <span className={styles.folder_label} title={node.path}>{node.label}</span>
+            <span
+              className={review ? `${styles.folder_label} ${styles.folder_label_yield}` : styles.folder_label}
+              title={node.path}
+            >
+              {node.label}
+            </span>
             {review && (
               <span className={styles.ai_chip} title={originTitle(t, review)}>
                 <Sparkles size={10} strokeWidth={1.8} />
