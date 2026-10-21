@@ -1001,6 +1001,68 @@ pub fn folder_items_in(
         .collect())
 }
 
+/// A task's 资料, as [`task_items`] answers it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskItems {
+    /// Artifacts any of the task's sessions produced, in whatever project.
+    pub outputs: Vec<LibraryItem>,
+    /// Every wiki doc of the task's project. Docs carry no session id, so the
+    /// project is the closest a doc gets to "this task's".
+    pub docs: Vec<LibraryItem>,
+}
+
+/// The items a task's 资料 segment shows, filtered here so a phone does not
+/// pull both whole stores (~2.4 MB on a real library) to keep a few dozen.
+/// Both lists newest first, with summaries and tags.
+pub fn task_items(workspace: &str, session_ids: &[String]) -> Result<TaskItems, String> {
+    Ok(task_items_in(&Roots::home()?, workspace, session_ids))
+}
+
+pub fn task_items_in(roots: &Roots, workspace: &str, session_ids: &[String]) -> TaskItems {
+    import_legacy_artifact_folders(roots);
+    let mut keys = KeyCache::default();
+    let mut folders: HashMap<String, Vec<LibraryFolder>> = HashMap::new();
+    let mut folders_of = |key: &str| -> Vec<LibraryFolder> {
+        folders
+            .entry(key.to_string())
+            .or_insert_with(|| project_folders(roots, key))
+            .clone()
+    };
+    let newest_first = |items: &mut Vec<LibraryItem>| {
+        items.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms).then_with(|| a.id.cmp(&b.id)));
+    };
+
+    let wanted: HashSet<&str> = session_ids.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
+    let mut outputs = Vec::new();
+    if !wanted.is_empty() {
+        for a in artifacts::list_in(&roots.artifacts) {
+            if !a.session_id.as_deref().is_some_and(|s| wanted.contains(s)) {
+                continue;
+            }
+            let key = keys.key(&a.workspace_path);
+            let folder = artifact_folder(&folders_of(&key), &a);
+            outputs.push(artifact_item(&a, folder));
+        }
+    }
+
+    let mut docs = Vec::new();
+    let project = if workspace.trim().is_empty() { String::new() } else { keys.key(workspace) };
+    if !project.is_empty() {
+        let project_folders = folders_of(&project);
+        for doc in wiki::list_docs_in(&roots.wiki) {
+            if keys.key(&doc.workspace_path) == project {
+                let folder = doc_folder(&project_folders, &doc.slug);
+                docs.push(doc_item(&doc, folder));
+            }
+        }
+    }
+
+    newest_first(&mut outputs);
+    newest_first(&mut docs);
+    TaskItems { outputs, docs }
+}
+
 // ── Folder edits ─────────────────────────────────────────────────────────────
 
 fn checked_path(raw: &str) -> Result<String, String> {
@@ -1865,6 +1927,40 @@ mod tests {
         // A folder name that merely shares a prefix is not "beneath".
         assert!(folder_items_in(&e.roots, &e.ws(), "发").unwrap().is_empty());
         assert!(folder_items_in(&e.roots, "", "发票").is_err());
+    }
+
+    #[test]
+    fn task_items_keep_the_task_sessions_outputs_and_the_project_docs() {
+        let e = env();
+        let other_ws = e.ws.parent().unwrap().join("other");
+        fs::create_dir_all(&other_ws).unwrap();
+        create_folder_in(&e.roots, &e.ws(), "发票", None).unwrap();
+        let made = |name: &str, ws: &Path, session: Option<&str>| {
+            let src = ws.join(name);
+            fs::write(&src, b"bytes").unwrap();
+            artifacts::add_in(&e.roots.artifacts, &src, None, None, ws, session).unwrap()
+        };
+        let mine = made("mine.pdf", &e.ws, Some("s1"));
+        move_item_in(&e.roots, ITEM_ARTIFACT, &mine.id, "发票").unwrap();
+        // Another project's artifact still counts when this task's session made it.
+        let elsewhere = made("elsewhere.pdf", &other_ws, Some("s2"));
+        made("someone-else.pdf", &e.ws, Some("s9"));
+        made("no-session.pdf", &e.ws, None);
+        let doc = e.doc("notes", &e.ws);
+        e.doc("foreign", &other_ws);
+
+        let got = task_items_in(&e.roots, &e.ws(), &["s1".into(), "s2".into()]);
+        let mut outs: Vec<&str> = got.outputs.iter().map(|i| i.id.as_str()).collect();
+        outs.sort();
+        let mut want = vec![mine.id.as_str(), elsewhere.id.as_str()];
+        want.sort();
+        assert_eq!(outs, want);
+        let filed = got.outputs.iter().find(|i| i.id == mine.id).unwrap();
+        assert_eq!(filed.folder.as_deref(), Some("发票"));
+        assert_eq!(got.docs.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec![doc.slug.as_str()]);
+
+        let none = task_items_in(&e.roots, "", &[]);
+        assert!(none.outputs.is_empty() && none.docs.is_empty());
     }
 
     #[test]

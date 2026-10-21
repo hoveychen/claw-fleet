@@ -48,6 +48,7 @@ import {
   type LibrarySort,
   type LibraryTypeGroup,
 } from "../libraryApi";
+import { repoRootPath } from "../../../shared-ts/repoPath";
 import { KIND_ICON } from "./ArtifactsView";
 import { timeAgo } from "./TasksView";
 import { awaitingFolders } from "./LibraryTree";
@@ -575,6 +576,35 @@ export function SearchCards({
           project={hideProject ? undefined : projectName(h.project)}
           snippet={h.snippet || undefined}
           onOpen={() => onOpen(h)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** A flat run of entry cards (a task's 资料), each labelled with its folder,
+ *  and with its project when that is not `homeProject`. */
+export function EntryCards({
+  client,
+  entries,
+  homeProject,
+  onOpen,
+}: {
+  client: FleetTransport | null;
+  entries: LibraryEntry[];
+  homeProject: string;
+  onOpen: (e: LibraryEntry) => void;
+}) {
+  return (
+    <div className={styles.cards}>
+      {entries.map((e) => (
+        <EntryCard
+          key={libraryEntryKey(e)}
+          client={client}
+          entry={e}
+          where={e.folder || t("未归档")}
+          project={repoRootPath(e.workspacePath) === homeProject ? undefined : projectName(e.workspacePath)}
+          onOpen={() => onOpen(e)}
         />
       ))}
     </div>

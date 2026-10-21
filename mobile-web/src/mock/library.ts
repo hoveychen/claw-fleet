@@ -99,6 +99,19 @@ export function mockFolderItems(workspacePath: string, folder: string): LibraryE
   );
 }
 
+/** `library_task_items`: the fixture artifacts the sessions made, the
+ *  project's docs. */
+export function mockTaskItems(workspacePath: string, sessionIds: string[]) {
+  const ids = new Set(sessionIds);
+  const made = new Set(FIXTURE_ARTIFACTS.filter((a) => a.sessionId && ids.has(a.sessionId)).map((a) => a.id));
+  const all = mockLibraryTree().flatMap((p) => p.items);
+  const project = mockLibraryTree(workspacePath)[0]?.items ?? [];
+  return {
+    outputs: all.filter((e) => e.kind === "artifact" && made.has(e.id)),
+    docs: project.filter((e) => e.kind === "doc"),
+  };
+}
+
 export function mockWikiDoc(slug: string) {
   return FIXTURE_DOCS.find((d) => d.slug === slug) ?? null;
 }

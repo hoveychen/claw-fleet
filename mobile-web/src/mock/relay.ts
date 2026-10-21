@@ -45,6 +45,7 @@ import {
 import {
   mockArtifactRecord,
   mockFolderItems,
+  mockTaskItems,
   mockLibraryBlob,
   mockLibraryOutline,
   mockLibrarySearch,
@@ -394,6 +395,11 @@ export class MockRelayClient extends RelayClient {
       }
       case "library_folder_items":
         return mockFolderItems(String(params?.workspacePath ?? ""), String(params?.folder ?? ""));
+      case "library_task_items":
+        return mockTaskItems(
+          String(params?.workspacePath ?? ""),
+          Array.isArray(params?.sessionIds) ? params.sessionIds.map(String) : [],
+        );
       case "library_search":
         return mockLibrarySearch(String(params?.query ?? ""), params?.workspace ? String(params.workspace) : undefined);
       case "library_thumb":

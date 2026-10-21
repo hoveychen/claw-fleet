@@ -84,7 +84,28 @@ export function fetchFolderItems(
   return client.request<LibraryEntry[]>("library_folder_items", { workspacePath, folder });
 }
 
-/** One wiki doc's record, to open it without pulling `wiki_list`. */
+/** Mirrors `claw_fleet_core::library::TaskItems`. */
+export interface TaskLibraryItems {
+  /** Artifacts the task's sessions made, in whatever project. */
+  outputs: LibraryEntry[];
+  /** Every wiki doc of the task's project. */
+  docs: LibraryEntry[];
+}
+
+/** A task's 资料, filtered on the host — not both whole stores. */
+export function fetchTaskLibrary(
+  client: FleetTransport,
+  workspacePath: string,
+  sessionIds: Iterable<string>,
+): Promise<TaskLibraryItems> {
+  return client.request<TaskLibraryItems>("library_task_items", {
+    workspacePath,
+    sessionIds: [...sessionIds],
+  });
+}
+
+/** One wiki doc's record, to open it without pulling `wiki_list`. A slug a
+ *  move left behind resolves to the doc's current one on the host. */
 export function fetchWikiDoc(client: FleetTransport, slug: string): Promise<WikiDoc> {
   return client.request<WikiDoc>("wiki_doc", { slug });
 }
