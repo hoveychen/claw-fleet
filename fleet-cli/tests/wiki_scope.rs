@@ -103,7 +103,9 @@ struct Fixture {
 fn fixture() -> Fixture {
     let home = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
-    let ancestor = root.path().to_path_buf();
+    // A fixed name: the project namespace (first slug segment) is spelled from it.
+    let ancestor = root.path().join("anc");
+    std::fs::create_dir_all(&ancestor).unwrap();
     let repo = ancestor.join("myrepo");
     let worktree = repo.join(".worktrees").join("feat");
     let other = ancestor.join("other");
@@ -130,7 +132,7 @@ fn fixture() -> Fixture {
 
     // Each workspace is its own project with no library folders yet, so its
     // first publish has to create one (`library_filing`); the doc then lives
-    // at `notes/<name>`.
+    // at `<project>/notes/<name>`.
     for (cwd, file) in [(&repo, "perf.md"), (&other, "misc.md"), (&ancestor, "home.md")] {
         wiki(home.path(), cwd, &["publish", file, "--new-folder", "--folder", "notes",
             "--description", "Working notes", "--reason", "first folder of a test project"]);
@@ -150,8 +152,8 @@ fn fixture() -> Fixture {
 #[test]
 fn list_defaults_to_the_callers_workspace() {
     let f = fixture();
-    assert_eq!(list_slugs(&f.home, &f.repo, &[]), ["notes/perf"]);
-    assert_eq!(list_slugs(&f.home, &f.other, &[]), ["notes/misc"]);
+    assert_eq!(list_slugs(&f.home, &f.repo, &[]), ["myrepo/notes/perf"]);
+    assert_eq!(list_slugs(&f.home, &f.other, &[]), ["other/notes/misc"]);
 }
 
 #[test]
@@ -159,7 +161,7 @@ fn list_from_a_worktree_sees_the_repos_docs() {
     let f = fixture();
     // `perf` was published from the repo root; a caller standing in
     // `<repo>/.worktrees/feat` is in the same workspace and must still see it.
-    assert_eq!(list_slugs(&f.home, &f.worktree, &[]), ["notes/perf"]);
+    assert_eq!(list_slugs(&f.home, &f.worktree, &[]), ["myrepo/notes/perf"]);
 }
 
 #[test]
@@ -167,17 +169,17 @@ fn list_ignores_docs_published_from_an_ancestor_directory() {
     let f = fixture();
     // `home` was published from the tempdir root, an ancestor of `repo` that is
     // not a checkout. Path nesting alone must not make it the repo's doc.
-    assert!(!list_slugs(&f.home, &f.repo, &[]).contains(&"notes/home".to_string()));
-    assert!(!list_slugs(&f.home, &f.worktree, &[]).contains(&"notes/home".to_string()));
+    assert!(!list_slugs(&f.home, &f.repo, &[]).contains(&"anc/notes/home".to_string()));
+    assert!(!list_slugs(&f.home, &f.worktree, &[]).contains(&"anc/notes/home".to_string()));
     // Standing in that directory, it is of course the doc you published.
-    assert_eq!(list_slugs(&f.home, &f.ancestor, &[]), ["notes/home"]);
+    assert_eq!(list_slugs(&f.home, &f.ancestor, &[]), ["anc/notes/home"]);
 }
 
 #[test]
 fn search_ignores_docs_published_from_an_ancestor_directory() {
     let f = fixture();
     // All three docs say "caching"; only the repo's own is in scope.
-    assert_eq!(search_slugs(&f.home, &f.repo, "caching", &[]), ["notes/perf"]);
+    assert_eq!(search_slugs(&f.home, &f.repo, "caching", &[]), ["myrepo/notes/perf"]);
 }
 
 #[test]
@@ -185,7 +187,7 @@ fn list_all_spans_every_workspace() {
     let f = fixture();
     let mut slugs = list_slugs(&f.home, &f.repo, &["--all"]);
     slugs.sort();
-    assert_eq!(slugs, ["notes/home", "notes/misc", "notes/perf"]);
+    assert_eq!(slugs, ["anc/notes/home", "myrepo/notes/perf", "other/notes/misc"]);
 }
 
 #[test]
@@ -193,7 +195,7 @@ fn list_workspace_substring_still_selects_across_workspaces() {
     let f = fixture();
     assert_eq!(
         list_slugs(&f.home, &f.repo, &["--workspace", "other"]),
-        ["notes/misc"]
+        ["other/notes/misc"]
     );
 }
 
@@ -201,8 +203,8 @@ fn list_workspace_substring_still_selects_across_workspaces() {
 fn search_defaults_to_the_callers_workspace() {
     let f = fixture();
     // Both docs contain "caching"; only the local one is in scope.
-    assert_eq!(search_slugs(&f.home, &f.repo, "caching", &[]), ["notes/perf"]);
-    assert_eq!(search_slugs(&f.home, &f.other, "caching", &[]), ["notes/misc"]);
+    assert_eq!(search_slugs(&f.home, &f.repo, "caching", &[]), ["myrepo/notes/perf"]);
+    assert_eq!(search_slugs(&f.home, &f.other, "caching", &[]), ["other/notes/misc"]);
 }
 
 #[test]
@@ -210,14 +212,14 @@ fn search_all_spans_every_workspace() {
     let f = fixture();
     let mut slugs = search_slugs(&f.home, &f.repo, "caching", &["--all"]);
     slugs.sort();
-    assert_eq!(slugs, ["notes/home", "notes/misc", "notes/perf"]);
+    assert_eq!(slugs, ["anc/notes/home", "myrepo/notes/perf", "other/notes/misc"]);
 }
 
 #[test]
 fn search_matches_content_case_insensitively_and_in_cjk() {
     let f = fixture();
-    assert_eq!(search_slugs(&f.home, &f.repo, "CACHING", &[]), ["notes/perf"]);
-    assert_eq!(search_slugs(&f.home, &f.repo, "吞吐率", &[]), ["notes/perf"]);
+    assert_eq!(search_slugs(&f.home, &f.repo, "CACHING", &[]), ["myrepo/notes/perf"]);
+    assert_eq!(search_slugs(&f.home, &f.repo, "吞吐率", &[]), ["myrepo/notes/perf"]);
 }
 
 #[test]
