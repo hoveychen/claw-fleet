@@ -70,6 +70,11 @@ pub struct WikiDoc {
     /// once the doc is re-published and the summary is stale.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub summary_version: String,
+    /// Slugs the doc had before it was moved. Each one keeps resolving to the
+    /// doc (see [`resolve_slug_in`]), so a `[[old-slug]]` link in another doc,
+    /// or a slug an agent wrote into a handoff note, still finds it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// A doc's AI summary, stored in its own `summary.json` rather than in
@@ -520,11 +525,13 @@ pub fn publish_in(
         }
     };
 
-    // Slug: explicit > normalized file stem / dir name.
+    // Slug: explicit > normalized file stem / dir name. A slug the doc had
+    // before it was moved names the doc: re-publishing it adds a version there.
     let slug = match slug {
         Some(s) => normalize_slug(s)?,
         None => derived_slug(&source)?,
     };
+    let slug = resolve_slug_in(root, &slug).unwrap_or(slug);
 
     // Title: explicit > extracted from content > slug.
     let entry_abs = if meta.is_dir() {
@@ -540,6 +547,8 @@ pub fn publish_in(
     let doc_dir = root.join(slug_to_dirname(&slug));
     let versions_dir = doc_dir.join("versions");
     fs::create_dir_all(&versions_dir).map_err(|e| format!("create wiki dirs: {e}"))?;
+    // A redirect whose doc is gone gives way to the new doc.
+    let _ = fs::remove_file(doc_dir.join(REDIRECT_FILE));
 
     // Load existing doc.json (re-publish) before writing anything new.
     let existing = read_doc_json(&doc_dir).ok();
@@ -615,6 +624,7 @@ fn assemble_doc(
             summary: String::new(),
             tags: Vec::new(),
             summary_version: String::new(),
+            aliases: Vec::new(),
         },
     }
 }
@@ -659,6 +669,7 @@ pub fn publish_text_in(
     mode: TextPublishMode,
 ) -> Result<WikiDoc, String> {
     let slug = normalize_slug(slug)?;
+    let slug = resolve_slug_in(root, &slug).unwrap_or(slug);
     let doc_dir = root.join(slug_to_dirname(&slug));
     let existing = read_doc_json(&doc_dir).ok();
 
@@ -702,6 +713,7 @@ pub fn publish_text_in(
     let version_id = next_version_id(&versions_dir, now);
     let version_dir = versions_dir.join(&version_id);
     fs::create_dir_all(&version_dir).map_err(|e| format!("create wiki dirs: {e}"))?;
+    let _ = fs::remove_file(doc_dir.join(REDIRECT_FILE));
     let entry_abs = version_dir.join(&entry);
     fs::write(&entry_abs, body.as_bytes())
         .map_err(|e| format!("write '{}': {e}", entry_abs.display()))?;
@@ -1083,7 +1095,7 @@ pub fn export_doc_in(root: &Path, slug: &str, version: &str) -> Result<WikiExpor
         return Err("invalid version id".to_string());
     }
     let dir = root
-        .join(slug_to_dirname(slug))
+        .join(slug_to_dirname(&doc.slug))
         .join("versions")
         .join(version);
     if !dir.is_dir() {
@@ -1234,8 +1246,93 @@ pub(crate) fn strip_html(html: &str) -> String {
     out
 }
 
+/// The doc at `slug`, following the redirect a move left behind — the doc
+/// returned carries its current slug.
 pub fn get_doc_in(root: &Path, slug: &str) -> Result<WikiDoc, String> {
-    read_doc_json(&root.join(slug_to_dirname(slug)))
+    match read_doc_json(&root.join(slug_to_dirname(slug))) {
+        Ok(doc) => Ok(doc),
+        Err(e) => match resolve_slug_in(root, slug) {
+            Some(current) if current != slug => read_doc_json(&root.join(slug_to_dirname(&current))),
+            _ => Err(e),
+        },
+    }
+}
+
+// ── Redirects ────────────────────────────────────────────────────────────────
+//
+// Moving a doc changes its slug, and slugs are how everything else refers to a
+// doc: `[[slug]]` links in other docs, slugs agents wrote into handoff notes
+// and reports, `fleet wiki cat <slug>` in a script. So a move leaves a small
+// redirect where the doc used to be — `<old dirname>/redirect.json`, with no
+// `doc.json`, which keeps it out of every listing — and records the old slug
+// on the doc (`aliases`). Reads follow the redirect; a re-publish to the old
+// slug adds a version to the moved doc. Links inside docs are not rewritten:
+// versions are immutable, and a redirect also covers the references that live
+// outside the wiki, which a rewrite never could.
+
+/// The redirect a move leaves at a doc's former slug.
+pub const REDIRECT_FILE: &str = "redirect.json";
+/// Most redirects one lookup follows (a doc's redirects are rewritten to its
+/// newest slug on every move, so a chain longer than one is only a leftover).
+const MAX_REDIRECT_HOPS: usize = 8;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct WikiRedirect {
+    to: String,
+    #[serde(default)]
+    moved_ms: u64,
+}
+
+fn read_redirect(dir: &Path) -> Option<WikiRedirect> {
+    serde_json::from_str(&fs::read_to_string(dir.join(REDIRECT_FILE)).ok()?).ok()
+}
+
+fn write_redirect(root: &Path, from: &str, to: &str) -> Result<(), String> {
+    let dir = root.join(slug_to_dirname(from));
+    if dir.join("doc.json").exists() {
+        // A real doc took the slug since; it wins.
+        return Ok(());
+    }
+    fs::create_dir_all(&dir).map_err(|e| format!("create redirect '{from}': {e}"))?;
+    let body = serde_json::to_vec_pretty(&WikiRedirect { to: to.to_string(), moved_ms: now_ms() })
+        .map_err(|e| e.to_string())?;
+    crate::atomic_json::write_atomic(&dir.join(REDIRECT_FILE), &body)
+        .map_err(|e| format!("write redirect '{from}': {e}"))
+}
+
+/// Remove the redirect at `slug` if that is all its directory holds.
+fn remove_redirect(root: &Path, slug: &str) -> Result<(), String> {
+    let dir = root.join(slug_to_dirname(slug));
+    if !dir.exists() {
+        return Ok(());
+    }
+    let only_redirect = fs::read_dir(&dir)
+        .map_err(|e| format!("read '{slug}': {e}"))?
+        .flatten()
+        .all(|e| e.file_name() == REDIRECT_FILE);
+    if !only_redirect {
+        return Err(format!("'{slug}' is occupied by something that is not a wiki doc"));
+    }
+    fs::remove_dir_all(&dir).map_err(|e| format!("remove redirect '{slug}': {e}"))
+}
+
+/// The current slug of the doc `slug` names: `slug` itself when a doc lives
+/// there, else wherever the redirects it left lead. `None` when neither.
+pub fn resolve_slug_in(root: &Path, slug: &str) -> Option<String> {
+    let mut cur = slug.to_string();
+    for _ in 0..=MAX_REDIRECT_HOPS {
+        let dir = root.join(slug_to_dirname(&cur));
+        if dir.join("doc.json").is_file() {
+            return Some(cur);
+        }
+        cur = read_redirect(&dir)?.to;
+    }
+    None
+}
+
+pub fn resolve_slug(slug: &str) -> Option<String> {
+    resolve_slug_in(&wiki_dir()?, slug)
 }
 
 /// Read one file of one version. `version` empty or `"current"` resolves via
@@ -1261,8 +1358,9 @@ pub fn get_file_in(
     if version.contains('/') || version.contains('\\') || version.contains("..") {
         return Err("invalid version id".to_string());
     }
+    // `doc.slug`, not `slug`: the latter may be a redirect left by a move.
     let version_dir = root
-        .join(slug_to_dirname(slug))
+        .join(slug_to_dirname(&doc.slug))
         .join("versions")
         .join(version);
 
@@ -1311,10 +1409,25 @@ pub fn move_doc(from: &str, to: &str) -> Result<WikiDoc, String> {
     move_doc_in(&wiki_dir_or_err()?, from, to)
 }
 
-/// [`move_doc`] against an explicit wiki root.
+/// [`move_doc`] against an explicit wiki root. `from` may be a former slug.
+/// Leaves a redirect at the slug the doc leaves (see the Redirects section),
+/// and points every older redirect of the doc at `to` as well.
 pub fn move_doc_in(root: &Path, from: &str, to: &str) -> Result<WikiDoc, String> {
+    move_doc_impl(root, from, to, true)
+}
+
+/// Put a doc back at a slug it had before — the inverse of [`move_doc_in`],
+/// for undo and rollback: the redirect waiting at `to` is replaced by the doc,
+/// `to` is no longer an alias, and the slug it leaves gets no redirect (it
+/// was never meant to be the doc's address).
+pub fn unmove_doc_in(root: &Path, from: &str, to: &str) -> Result<WikiDoc, String> {
+    move_doc_impl(root, from, to, false)
+}
+
+fn move_doc_impl(root: &Path, from: &str, to: &str, leave_redirect: bool) -> Result<WikiDoc, String> {
     let to = normalize_slug(to)?;
-    let from_dir = root.join(slug_to_dirname(from));
+    let from = resolve_slug_in(root, from).unwrap_or_else(|| from.to_string());
+    let from_dir = root.join(slug_to_dirname(&from));
     let mut doc = read_doc_json(&from_dir).map_err(|_| format!("no wiki doc '{from}'"))?;
     if to == from {
         return Ok(doc);
@@ -1323,13 +1436,45 @@ pub fn move_doc_in(root: &Path, from: &str, to: &str) -> Result<WikiDoc, String>
     if to_dir.join("doc.json").exists() {
         return Err(format!("wiki doc '{to}' already exists"));
     }
+    // A redirect waiting at `to` (this doc's own, or one some other doc left)
+    // gives way to the doc itself.
+    let displaced = read_redirect(&to_dir);
+    if displaced.is_some() {
+        remove_redirect(root, &to)?;
+    }
     fs::rename(&from_dir, &to_dir).map_err(|e| format!("move '{from}' → '{to}': {e}"))?;
-    doc.slug = to;
+    let old_aliases = doc.aliases.clone();
+    doc.slug = to.clone();
+    doc.aliases.retain(|a| *a != to);
+    if leave_redirect && !doc.aliases.contains(&from) {
+        doc.aliases.push(from.clone());
+    }
     // Roll the rename back if the metadata write fails, so the doc is never
     // left at a path its own doc.json disagrees with.
     if let Err(e) = write_doc_json(&to_dir, &doc) {
         let _ = fs::rename(&to_dir, &from_dir);
+        if let Some(r) = &displaced {
+            let _ = write_redirect(root, &to, &r.to);
+        }
         return Err(e);
+    }
+    // Every slug the doc ever had now points straight at `to`.
+    for alias in &doc.aliases {
+        if let Err(e) = write_redirect(root, alias, &to) {
+            crate::log_debug(&format!("[wiki] redirect {alias} → {to}: {e}"));
+        }
+    }
+    // An alias given up (moving back onto it) keeps no stale redirect.
+    for gone in old_aliases.iter().filter(|a| !doc.aliases.contains(a) && **a != to) {
+        let _ = remove_redirect(root, gone);
+    }
+    // A redirect taken over from another doc: that doc no longer has the alias.
+    if let Some(r) = displaced.filter(|r| r.to != from && r.to != to) {
+        let other_dir = root.join(slug_to_dirname(&r.to));
+        if let Ok(mut other) = read_doc_json(&other_dir) {
+            other.aliases.retain(|a| *a != to);
+            let _ = write_doc_json(&other_dir, &other);
+        }
     }
     Ok(doc)
 }
@@ -1426,7 +1571,7 @@ pub fn move_folder_in(root: &Path, from: &str, to: &str) -> Result<Vec<WikiDoc>,
             }
             Err(e) => {
                 for (old_slug, new_slug) in done.iter().rev() {
-                    let _ = move_doc_in(root, new_slug, old_slug);
+                    let _ = unmove_doc_in(root, new_slug, old_slug);
                 }
                 return Err(e);
             }
@@ -1472,9 +1617,22 @@ pub fn delete_doc(slug: &str) -> Result<(), String> {
 pub fn delete_doc_in(root: &Path, slug: &str) -> Result<(), String> {
     let doc_dir = root.join(slug_to_dirname(slug));
     if !doc_dir.join("doc.json").exists() {
-        return Err(format!("no wiki doc '{slug}'"));
+        // Deleting goes by the doc's current slug only — never through a
+        // redirect, which would delete something the caller did not name.
+        return Err(match resolve_slug_in(root, slug) {
+            Some(current) => format!("'{slug}' was moved to '{current}' — delete it by that slug"),
+            None => format!("no wiki doc '{slug}'"),
+        });
     }
-    fs::remove_dir_all(&doc_dir).map_err(|e| format!("delete '{slug}': {e}"))
+    let aliases = read_doc_json(&doc_dir).map(|d| d.aliases).unwrap_or_default();
+    fs::remove_dir_all(&doc_dir).map_err(|e| format!("delete '{slug}': {e}"))?;
+    // Its redirects would now lead nowhere.
+    for alias in aliases {
+        if read_redirect(&root.join(slug_to_dirname(&alias))).is_some_and(|r| r.to == slug) {
+            let _ = remove_redirect(root, &alias);
+        }
+    }
+    Ok(())
 }
 
 /// Remove a single non-current version.
@@ -1669,7 +1827,8 @@ mod tests {
         assert_eq!(moved.slug, "arch/overview");
         assert_eq!(moved.versions.len(), 2, "version history rides along");
 
-        assert!(get_doc_in(root.path(), "overview").is_err());
+        // The old slug is a redirect now: it answers with the moved doc.
+        assert_eq!(get_doc_in(root.path(), "overview").unwrap().slug, "arch/overview");
         let reread = get_doc_in(root.path(), "arch/overview").unwrap();
         assert_eq!(reread.slug, "arch/overview");
         assert_eq!(reread.versions.len(), 2);
@@ -1708,6 +1867,69 @@ mod tests {
     }
 
     #[test]
+    fn a_moved_doc_keeps_answering_to_its_old_slug() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "notes");
+        seed(&root, &ws, "other");
+        let moved = move_doc_in(root.path(), "notes", "research/notes").unwrap();
+        assert_eq!(moved.aliases, ["notes"]);
+
+        // Reads by the old slug find the doc under its new one.
+        let doc = get_doc_in(root.path(), "notes").unwrap();
+        assert_eq!(doc.slug, "research/notes");
+        let body = get_file_in(root.path(), "notes", "current", &doc.entry).unwrap();
+        assert_eq!(String::from_utf8(body.bytes).unwrap(), "# notes\n");
+        assert_eq!(resolve_slug_in(root.path(), "notes").as_deref(), Some("research/notes"));
+        assert!(export_doc_in(root.path(), "notes", "").is_ok());
+        // The redirect is not a doc of its own.
+        let slugs: Vec<String> = list_docs_in(root.path()).into_iter().map(|d| d.slug).collect();
+        assert_eq!(slugs.len(), 2);
+        assert!(!slugs.contains(&"notes".to_string()));
+
+        // Re-publishing the old slug adds a version to the moved doc.
+        let again = publish_text_in(root.path(), "notes", None, "# v2", ws.path(), TextPublishMode::Replace).unwrap();
+        assert_eq!((again.slug.as_str(), again.versions.len()), ("research/notes", 2));
+
+        // A second move points every old slug straight at the newest one.
+        move_doc_in(root.path(), "research/notes", "archive/notes").unwrap();
+        for old in ["notes", "research/notes"] {
+            let dir = root.path().join(slug_to_dirname(old));
+            assert_eq!(read_redirect(&dir).unwrap().to, "archive/notes", "{old}");
+        }
+        // Moving by an old slug works too, and a doc may move onto a redirect.
+        let back = move_doc_in(root.path(), "notes", "notes").unwrap();
+        assert_eq!(back.slug, "notes");
+        assert_eq!(back.aliases, ["research/notes", "archive/notes"]);
+        assert_eq!(resolve_slug_in(root.path(), "archive/notes").as_deref(), Some("notes"));
+
+        // Deleting goes by the current slug only, and takes the redirects along.
+        let err = delete_doc_in(root.path(), "archive/notes").unwrap_err();
+        assert!(err.contains("moved to 'notes'"), "{err}");
+        delete_doc_in(root.path(), "notes").unwrap();
+        assert!(!root.path().join(slug_to_dirname("archive/notes")).exists());
+        assert!(get_doc_in(root.path(), "research/notes").is_err());
+    }
+
+    #[test]
+    fn an_unmove_restores_the_slug_without_leaving_a_redirect() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "plan");
+        move_doc_in(root.path(), "plan", "work/plan").unwrap();
+        let back = unmove_doc_in(root.path(), "work/plan", "plan").unwrap();
+        assert_eq!((back.slug.as_str(), back.aliases.len()), ("plan", 0));
+        assert!(!root.path().join(slug_to_dirname("work/plan")).exists(), "no redirect at the undone slug");
+        assert!(get_doc_in(root.path(), "work/plan").is_err());
+        // A redirect another doc left is taken over, and that doc forgets it.
+        seed(&root, &ws, "a");
+        move_doc_in(root.path(), "a", "b").unwrap();
+        let taker = move_doc_in(root.path(), "plan", "a").unwrap();
+        assert_eq!(taker.slug, "a");
+        assert!(get_doc_in(root.path(), "b").unwrap().aliases.is_empty());
+    }
+
+    #[test]
     fn move_folder_rekeys_every_doc_beneath() {
         let root = tmp();
         let ws = tmp();
@@ -1724,7 +1946,9 @@ mod tests {
         // A doc whose slug equals the folder name renders beside it, so it stays.
         assert!(get_doc_in(root.path(), "arch").is_ok());
         assert!(get_doc_in(root.path(), "unrelated").is_ok());
-        assert!(get_doc_in(root.path(), "arch/one").is_err());
+        // Old slugs redirect to where the docs went.
+        assert_eq!(get_doc_in(root.path(), "arch/one").unwrap().slug, "design/one");
+        assert_eq!(list_docs_in(root.path()).len(), 4, "redirects are not docs");
     }
 
     #[test]

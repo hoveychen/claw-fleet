@@ -454,6 +454,8 @@ export interface WikiDoc {
   currentVersion: string;
   /** Newest first. */
   versions: WikiVersion[];
+  /** Former slugs that still resolve to this doc (it was moved). */
+  aliases?: string[];
 }
 
 /** One wiki file, base64-framed by the `wiki_file` relay method. */

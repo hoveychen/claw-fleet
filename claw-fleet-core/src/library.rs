@@ -1116,7 +1116,7 @@ pub fn rename_folder_in(
         for (old, new) in &doc_plan {
             if let Err(e) = wiki::move_doc_in(&roots.wiki, old, new) {
                 for (o, n) in done.iter().rev() {
-                    let _ = wiki::move_doc_in(&roots.wiki, n, o);
+                    let _ = wiki::unmove_doc_in(&roots.wiki, n, o);
                 }
                 return Err(e);
             }
