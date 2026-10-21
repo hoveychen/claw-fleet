@@ -741,10 +741,10 @@ function BackfillButton({ onFinished, onError }: { onFinished: () => void; onErr
     return () => window.clearInterval(timer);
   }, [running, refresh]);
 
-  const act = async (command: "library_backfill_start" | "library_backfill_stop") => {
+  const act = async (op: () => Promise<BackfillStatus>) => {
     setBusy(true);
     try {
-      const next = await invoke<BackfillStatus>(command);
+      const next = await op();
       setStatus(next);
       wasRunning.current = next.running;
     } catch (e) {
@@ -771,7 +771,7 @@ function BackfillButton({ onFinished, onError }: { onFinished: () => void; onErr
         <button
           type="button"
           className={styles.upload_btn}
-          onClick={() => void act("library_backfill_stop")}
+          onClick={() => void act(() => invoke<BackfillStatus>("library_backfill_stop"))}
           disabled={busy || run.stopRequested}
           title={t("library.backfill_stop_hint", "做完手上这几条就停；下次开始会接着跑")}
         >
@@ -787,7 +787,7 @@ function BackfillButton({ onFinished, onError }: { onFinished: () => void; onErr
       "为 {{n}} 条还没有摘要的资料补写摘要？\n\n预计调用 AI {{n}} 次，约 ${{cost}}。3 路并发，可以随时停止，下次接着跑。",
       { n: status.due, cost: status.dueCostUsd.toFixed(2) },
     );
-    if (window.confirm(question)) void act("library_backfill_start");
+    if (window.confirm(question)) void act(() => invoke<BackfillStatus>("library_backfill_start"));
   };
   return (
     <button
