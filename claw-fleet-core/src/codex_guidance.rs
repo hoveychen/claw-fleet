@@ -565,10 +565,10 @@ pub fn render_codex_wiki_block(locale: &str) -> String {
 架构说明、性能分析、数据可视化等)时,完成后用 Fleet 的 wiki 知识库归档,\
 不要只把文件留在工作目录里:\n\
 \n\
-```\nfleet wiki publish <path> [--slug <slug>] [--title \"<标题>\"]\n```\n\
+```\nfleet wiki publish <path> --folder <目录> [--slug <slug>] [--title \"<标题>\"]\n```\n\
 \n\
 > **若工具列表里有 `fleet__wiki`(codex 下为 `mcp__fleet__fleet__wiki`)MCP \
-工具,优先用它(`action=\"publish\"/\"cat\"/\"list\"/\"search\"`)而不是 `fleet wiki` \
+工具,优先用它(`action=\"folders\"/\"publish\"/\"cat\"/\"list\"/\"search\"`)而不是 `fleet wiki` \
 CLI——远端会话里 shell 跑 `fleet wiki` 会失败。注意 `publish` 读**本地**文件,\
 远端会话里文件可能在远端 fs 上,那种情况仍用 CLI 或先取回本地。工具不可用时\
 才退回 CLI。**\n\
@@ -577,9 +577,12 @@ CLI——远端会话里 shell 跑 `fleet wiki` 会失败。注意 `publish` 读
 连同相对引用的 js/css/图片一起入库)。\n\
 - 同一份文档迭代**复用同一个 slug** 重新 publish——生成新版本、旧版保留可回看;\
 别为同一份内容起新 slug。\n\
-- slug 用小写字母/数字/连字符;`/` 是**虚拟目录**分隔符(如 `--slug arch/overview` \
-归到 `arch` 目录),同一主题共用前缀。已发布的可 `fleet wiki mv <旧> <新>` 改键搬家,\
-版本历史一起带走。\n\
+- **必须归档进已有目录**(wiki 与产出库同):`action=\"folders\"`(CLI \
+`fleet wiki folders`)列目录,挑最贴切的传 `folder`(CLI `--folder`);不传或不存在\
+会被拒并附清单。重新 publish 已有 slug 留在原目录。\n\
+- **没有合适的才新建**:`new_folder=true` 加 `folder`、`description`、`reason`\
+(CLI `--new-folder --folder --description --reason`),会标成 AI 新建给用户审;\
+项目还没目录时第一次归档就这样建。\n\
 - 只归档最终成品,草稿/中间产物/一次性调试页不 publish。\n\
 - markdown 里用 `[[slug]]` 或 `[[slug|显示文字]]` 交叉引用,渲染后可点击;\
 引用前先 `fleet wiki list --all` 确认目标 slug 已发布。\n\
@@ -605,10 +608,10 @@ fleet wiki cat <slug> --file assets/app.js    # 目录型文档里的其他文�
 (调研报告、架构说明)→ wiki;**要递到人手上**(交给老板/客户/同事,或要\
 发出去的东西)→ **产出库**:\n\
 \n\
-```\nfleet artifact add <path> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
+```\nfleet artifact add <path> --folder <目录> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
 \n\
 > **若工具列表里有 `fleet__artifact` MCP 工具(codex 下显示为 \
-`mcp__fleet__fleet__artifact`),优先用它(`action=\"add\"/\"list\"/\"get\"/\
+`mcp__fleet__fleet__artifact`),优先用它(`action=\"folders\"/\"add\"/\"list\"/\"get\"/\
 \"delete\"`)而不是 CLI——理由与 `fleet__wiki` 相同:rca 远端会话里 shell 跑 \
 `fleet` 会失败。**\n\
 \n\
@@ -644,11 +647,11 @@ document (research reports, architecture notes, performance analyses, data \
 visualizations…), archive it into the Fleet wiki when done instead of leaving \
 it in the workdir:\n\
 \n\
-```\nfleet wiki publish <path> [--slug <slug>] [--title \"<title>\"]\n```\n\
+```\nfleet wiki publish <path> --folder <folder> [--slug <slug>] [--title \"<title>\"]\n```\n\
 \n\
 > **If your tool list includes the `fleet__wiki` MCP tool (under codex it \
 appears as `mcp__fleet__fleet__wiki`), prefer it \
-(`action=\"publish\"/\"cat\"/\"list\"/\"search\"`) over the `fleet wiki` CLI — in \
+(`action=\"folders\"/\"publish\"/\"cat\"/\"list\"/\"search\"`) over the `fleet wiki` CLI — in \
 an rca remote session a shell `fleet wiki` fails. Note `publish` reads a \
 **local** file path; if the file lives on the remote fs, use the CLI or fetch \
 it locally first. Fall back to the CLI only when the tool is absent.**\n\
@@ -657,10 +660,17 @@ it locally first. Fall back to the CLI only when the tool is absent.**\n\
 `index.html` entry (its relatively-referenced js/css/images are archived too).\n\
 - Iterating on the same doc → **re-publish with the same slug** (new version, \
 old ones stay browsable); don't mint a new slug for the same content.\n\
-- Slugs are lowercase letters/digits/hyphens; `/` is a **virtual directory** \
-separator (`--slug arch/overview` files under an `arch` folder) — share a \
-prefix across docs on one topic. Move a published doc with \
-`fleet wiki mv <old> <new>`, version history included.\n\
+- **File into one of the project's existing folders** (wiki and artifact \
+store alike): list them with `action=\"folders\"` (CLI `fleet wiki folders`) \
+and pass the best-fitting path as `folder` (CLI `--folder <folder>`). No \
+folder, or an unknown one, is refused with the folder list — pick one and \
+retry. The folder decides the slug (`<folder prefix>/<name>`); re-publishing an \
+existing slug keeps its folder.\n\
+- **Create a folder only when none fits**: `new_folder=true` with `folder`, \
+`description` (what belongs there) and `reason` (why no existing folder fits); \
+CLI `--new-folder --folder <path> --description <text> --reason <text>`. It is \
+marked AI-created, with your reason, for the user to review — don't open one \
+for a single doc. A project with no folders gets its first one this way.\n\
 - Publish finished artifacts only — no drafts, intermediates, or debug pages.\n\
 - Cross-link other docs with `[[slug]]` / `[[slug|display text]]` (clickable \
 when rendered); check the target exists first with `fleet wiki list --all`.\n\
@@ -690,11 +700,11 @@ Knowledge banked for yourself and later sessions → the wiki. Something you are
 **handing to a person** (the user, a client, a colleague — anything meant to \
 leave your hands) → the **artifact store**:\n\
 \n\
-```\nfleet artifact add <path> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
+```\nfleet artifact add <path> --folder <folder> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
 \n\
 > **If your tool list includes the `fleet__artifact` MCP tool (under codex it \
 appears as `mcp__fleet__fleet__artifact`), prefer it \
-(`action=\"add\"/\"list\"/\"get\"/\"delete\"`) over the CLI — same reason as \
+(`action=\"folders\"/\"add\"/\"list\"/\"get\"/\"delete\"`) over the CLI — same reason as \
 `fleet__wiki`: in an rca remote session a shell `fleet` fails.**\n\
 \n\
 - A PDF report, a slide deck (pptx), a spreadsheet (xlsx), a Word document, a \
@@ -1306,6 +1316,18 @@ mod tests {
             model.contains("inherit"),
             "model block must teach the inherit default"
         );
+    }
+
+    /// Publish / add without an existing folder is refused (`library_filing`),
+    /// so codex must learn the folder listing and the explicit new-folder form.
+    #[test]
+    fn wiki_block_teaches_filing_into_a_folder() {
+        for locale in ["zh", "en"] {
+            let wiki = render_codex_wiki_block(locale);
+            for needle in ["action=\"folders\"", "fleet wiki folders", "--folder", "new_folder=true", "--new-folder", "reason"] {
+                assert!(wiki.contains(needle), "{locale}: codex wiki block must mention {needle}");
+            }
+        }
     }
 
     /// A codex session used to be told only about the wiki, so an agent that

@@ -36,10 +36,10 @@ pub fn render_guidance(locale: &str) -> String {
 架构说明、性能分析、数据可视化等)时,完成后用 Fleet 的 wiki 知识库归档,\
 不要只把文件留在工作目录里:\n\
 \n\
-```\nfleet wiki publish <path> [--slug <slug>] [--title \"<标题>\"]\n```\n\
+```\nfleet wiki publish <path> --folder <目录> [--slug <slug>] [--title \"<标题>\"]\n```\n\
 \n\
 > **若工具列表里有 `fleet__wiki` MCP 工具(Fleet 启动的会话都有),优先用它\
-(`action=\"publish\"/\"cat\"/\"list\"/\"search\"`)而不是 `fleet wiki` CLI——远端\
+(`action=\"folders\"/\"publish\"/\"cat\"/\"list\"/\"search\"`)而不是 `fleet wiki` CLI——远端\
 (rca)会话里 Bash 跑 `fleet wiki` 会被路由到没有 fleet 的远端而失败。\
 注意 `publish` 读的是**本地**文件路径,远端会话里 agent 写的文件可能在远端 fs \
 上;这种情况仍需用 CLI 或先把文件取到本地。工具不可用时才退回 CLI。**\n\
@@ -50,10 +50,6 @@ pub fn render_guidance(locale: &str) -> String {
 旧版本自动保留可回看;不要为同一份内容起新 slug。\n\
 - slug 用小写字母/数字/连字符;`--title` 缺省时取 `<title>` 标签或首个 \
 `# ` 标题。\n\
-- slug 里的 `/` 是**虚拟目录**分隔符(像对象存储的 key):发布成 \
-`--slug arch/overview` 后,桌面端知识库会把它显示在 `arch` 目录下。同一主题的 \
-文档用同一个前缀,别让根目录堆满散装文档。已发布的文档可以用 \
-`fleet wiki mv <旧 slug> <新 slug>` 改键搬进目录,版本历史会一起带走。\n\
 - 只归档最终成品,草稿、中间产物、一次性调试页不要 publish。\n\
 - markdown 文档里可以用 `[[slug]]` 或 `[[slug|显示文字]]` 引用知识库里\
 其他文档,渲染后可点击跳转;slug 是全局的,引用前先用 \
@@ -61,6 +57,25 @@ pub fn render_guidance(locale: &str) -> String {
 死链)。\n\
 - 发布后文档出现在 Fleet 桌面端的「知识库」板块,用户可按 workspace \
 筛选、全文搜索、切换版本、导出、直接渲染(HTML 里的 JS 可运行)。\n\
+\n\
+## 归档进项目已有的目录(wiki 和产出库都一样)\n\
+\n\
+每个项目的资料库有一套目录结构,每个目录带一句「这里放什么」。publish 和 add \
+**必须用 `folder` 指定其中一个目录**,不能随手乱放:\n\
+\n\
+- 先列目录:`fleet__wiki` / `fleet__artifact` 的 `action=\"folders\"`(CLI:\
+`fleet wiki folders`),按每个目录的说明挑最贴切的一个,把它的路径传给 \
+`folder`(CLI:`--folder <目录>`)。\n\
+- 不传 folder、或传了不存在的目录,调用会被拒绝,拒绝信息里附带目录清单——\
+照着挑一个重试即可。\n\
+- 文档的 slug 由目录决定(`<目录前缀>/<名字>`),`--slug` 只取最后一段当名字。\
+重新 publish 已有的 slug、或再次 add 同一个交付物,会留在原目录,不用再传 folder。\n\
+- **只有确实没有合适的目录时才新建**:`new_folder=true` 加 `folder`(新目录\
+路径)、`description`(这里放什么)和 `reason`(为什么现有目录都不合适);CLI 是 \
+`--new-folder --folder <路径> --description <说明> --reason <理由>`。新建的目录会\
+在资料树里标成 AI 新建并附上理由,由用户决定保留、改名还是删除——别为一份文档\
+单开一个目录,优先放进宽一点的已有目录。项目还没有任何目录时,第一次归档就用\
+这个方式建第一个目录。\n\
 \n\
 ## 读取知识库里的文档\n\
 \n\
@@ -93,10 +108,10 @@ workspace。\n\
 PDF 报告、幻灯片(pptx)、表格(xlsx)、Word 文档、渲染好的视频或图片、\
 导出的数据集——**也包括**一份对外的 html 提案、一份要交出去的 md 规格书。\n\
 \n\
-```\nfleet artifact add <path> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
+```\nfleet artifact add <path> --folder <目录> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
 \n\
 > **若工具列表里有 `fleet__artifact` MCP 工具(Fleet 启动的会话都有),优先\
-用它(`action=\"add\"/\"list\"/\"get\"/\"delete\"`)而不是 `fleet artifact` CLI\
+用它(`action=\"folders\"/\"add\"/\"list\"/\"get\"/\"delete\"`)而不是 `fleet artifact` CLI\
 ——理由与 `fleet__wiki` 相同:远端(rca)会话里 Bash 跑 `fleet` 会被路由到\
 没有 fleet 的远端而失败。**\n\
 \n\
@@ -140,10 +155,10 @@ document (research reports, architecture notes, performance analyses, data \
 visualizations…), archive it into the Fleet wiki when done instead of leaving \
 it in the workdir:\n\
 \n\
-```\nfleet wiki publish <path> [--slug <slug>] [--title \"<title>\"]\n```\n\
+```\nfleet wiki publish <path> --folder <folder> [--slug <slug>] [--title \"<title>\"]\n```\n\
 \n\
 > **If your tool list includes the `fleet__wiki` MCP tool (every Fleet-launched \
-session has it), prefer it (`action=\"publish\"/\"cat\"/\"list\"/\"search\"`) over \
+session has it), prefer it (`action=\"folders\"/\"publish\"/\"cat\"/\"list\"/\"search\"`) over \
 the `fleet wiki` CLI — in an rca remote session a Bash `fleet wiki` is routed to \
 a remote executor with no `fleet` and fails. Note `publish` reads a **local** \
 file path; in a remote session the file the agent wrote may live on the remote \
@@ -158,11 +173,6 @@ that creates a new version and keeps old ones browsable; don't mint a new \
 slug for the same content.\n\
 - Slugs are lowercase letters/digits/hyphens; `--title` defaults to the \
 `<title>` tag or first `# ` heading.\n\
-- A `/` in a slug is a **virtual directory** separator, like an object-store \
-key: `--slug arch/overview` files the doc under an `arch` folder in the \
-desktop Wiki board. Share a prefix across docs on one topic instead of piling \
-everything at the root. Already-published docs move with \
-`fleet wiki mv <old-slug> <new-slug>`, version history included.\n\
 - Publish finished artifacts only — no drafts, intermediates, or one-off \
 debug pages.\n\
 - Markdown docs can reference other wiki docs with `[[slug]]` or \
@@ -172,6 +182,29 @@ global, so check the target exists first with `fleet wiki list --all` \
 - Published docs appear in the Fleet desktop app's Wiki board, filterable by \
 workspace, full-text searchable, with version switching, export, and live \
 HTML rendering (scripts run).\n\
+\n\
+## File into one of the project's folders (wiki and artifact store alike)\n\
+\n\
+Every project's library has a folder structure, each folder with a line on \
+what belongs there. Publish and add **must name one of those folders with \
+`folder`** — nothing goes wherever it happens to land:\n\
+\n\
+- List them first: `action=\"folders\"` on `fleet__wiki` / `fleet__artifact` \
+(CLI: `fleet wiki folders`). Pick the one whose description fits best and pass \
+its path as `folder` (CLI: `--folder <folder>`).\n\
+- With no folder, or one that does not exist, the call is refused and the \
+refusal lists the folders — pick one and retry.\n\
+- The folder decides a doc's slug (`<folder prefix>/<name>`); `--slug` only \
+supplies the last segment. Re-publishing an existing slug, or adding the same \
+deliverable again, keeps it in its folder with no `folder` needed.\n\
+- **Create a folder only when none fits**: `new_folder=true` with `folder` \
+(the new path), `description` (what belongs there) and `reason` (why no \
+existing folder fits); on the CLI, `--new-folder --folder <path> \
+--description <text> --reason <text>`. The folder shows up in the library tree \
+marked as AI-created, with your reason, and the user keeps, renames or deletes \
+it — so don't open a folder for a single document; prefer a broader existing \
+one. In a project with no folders yet, the first filing creates the first \
+folder this way.\n\
 \n\
 ## Reading a wiki doc\n\
 \n\
@@ -209,11 +242,11 @@ PDF report, a slide deck (pptx), a spreadsheet (xlsx), a Word document, a \
 rendered video or image, an exported dataset — **and equally** an outward-facing \
 html proposal or a markdown spec you're delivering.\n\
 \n\
-```\nfleet artifact add <path> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
+```\nfleet artifact add <path> --folder <folder> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
 \n\
 > **If your tool list includes the `fleet__artifact` MCP tool (every \
-Fleet-launched session has it), prefer it (`action=\"add\"/\"list\"/\"get\"/\
-\"delete\"`) over the `fleet artifact` CLI — same reason as `fleet__wiki`: in \
+Fleet-launched session has it), prefer it (`action=\"folders\"/\"add\"/\"list\"/\
+\"get\"/\"delete\"`) over the `fleet artifact` CLI — same reason as `fleet__wiki`: in \
 an rca remote session a Bash `fleet` is routed to a remote executor with no \
 `fleet` and fails.**\n\
 \n\
@@ -426,6 +459,29 @@ mod tests {
                 g.contains(both_sides),
                 "{locale}: must show a text format landing on the artifact side too"
             );
+        }
+    }
+
+    /// `library_filing` refuses a publish/add without an existing folder. An
+    /// agent the guidance never told about folders burns a refused call on
+    /// every filing, so both locales must name the listing action, the
+    /// `folder` parameter, and the explicit new-folder escape with its reason.
+    #[test]
+    fn render_both_locales_require_an_existing_folder() {
+        for locale in ["zh", "en"] {
+            let g = render_guidance(locale);
+            for needle in [
+                "action=\"folders\"",
+                "fleet wiki folders",
+                "--folder",
+                "new_folder=true",
+                "--new-folder",
+                "reason",
+                "description",
+            ] {
+                assert!(g.contains(needle), "{locale}: guidance must mention {needle}");
+            }
+            assert!(!g.contains("virtual directory") && !g.contains("虚拟目录"), "{locale}: free-form slug folders are gone");
         }
     }
 

@@ -332,7 +332,13 @@ fn fleet_session_artifact_add_really_stores_the_file() {
                 "action":"add",
                 "path": src.to_str().unwrap(),
                 "title":"Q3 deck",
-                "note":"for the board"
+                "note":"for the board",
+                // A fresh project has no library folders, so the add has to
+                // create the first one (`library_filing`).
+                "folder":"decks",
+                "new_folder":true,
+                "description":"Slide decks for the board",
+                "reason":"first folder of this project"
             }}}),
             json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
                 "name":"fleet__artifact","arguments":{"action":"list"}}}),
@@ -345,6 +351,7 @@ fn fleet_session_artifact_add_really_stores_the_file() {
     // The kind drives the desktop's icon and preview choice, so it is part of
     // the contract, not a detail of the message.
     assert!(added.contains("slides"), "add text: {added}");
+    assert!(added.contains("NEW folder 'decks'"), "add text: {added}");
 
     // On disk, under this test's own FLEET_HOME — the meta plus the blob.
     let store = home.path().join(".fleet").join("artifacts");
@@ -359,6 +366,7 @@ fn fleet_session_artifact_add_really_stores_the_file() {
     assert_eq!(meta["title"], "Q3 deck");
     assert_eq!(meta["note"], "for the board");
     assert_eq!(meta["kind"], "slides");
+    assert_eq!(meta["path"], "decks", "the artifact must be filed into the folder");
     assert_eq!(
         meta["sessionId"], SID,
         "the producing session must be recorded"

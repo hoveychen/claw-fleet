@@ -542,7 +542,7 @@ pub fn render_dsh_wiki_block(locale: &str) -> String {
 架构说明、性能分析、数据可视化等)时,完成后用 Fleet 的 wiki 知识库归档,\
 不要只把文件留在工作目录里:\n\
 \n\
-```\nfleet wiki publish <path> [--slug <slug>] [--title \"<标题>\"]\n```\n\
+```\nfleet wiki publish <path> --folder <目录> [--slug <slug>] [--title \"<标题>\"]\n```\n\
 \n\
 dsh 没有 Fleet 的 MCP 工具,所以一律走上面这个 CLI(Claude / Codex 会话的\
 指引里那个「优先用 `fleet__wiki`」在这里不适用)。\n\
@@ -551,9 +551,13 @@ dsh 没有 Fleet 的 MCP 工具,所以一律走上面这个 CLI(Claude / Codex �
 连同相对引用的 js/css/图片一起入库)。\n\
 - 同一份文档迭代**复用同一个 slug** 重新 publish——生成新版本、旧版保留可回看;\
 别为同一份内容起新 slug。\n\
-- slug 用小写字母/数字/连字符;`/` 是**虚拟目录**分隔符(如 `--slug arch/overview` \
-归到 `arch` 目录),同一主题共用前缀。已发布的可 `fleet wiki mv <旧> <新>` 改键搬家,\
-版本历史一起带走。\n\
+- **必须归档进项目已有的目录**(wiki 和产出库都一样):先用 `fleet wiki folders` \
+列出目录和说明,挑最贴切的传给 `--folder <目录>`。不传或目录不存在会被拒绝并附\
+目录清单,照着挑一个重试。slug 由目录决定(`<目录前缀>/<名字>`);重新 publish \
+已有 slug 留在原目录。\n\
+- **只有确实没有合适目录时才新建**:`--new-folder --folder <路径> --description \
+<这里放什么> --reason <为什么现有目录都不合适>`。新目录会标成 AI 新建并附理由给\
+用户审;别为一份文档单开目录。项目还没有目录时,第一次归档就这样建第一个。\n\
 - 只归档最终成品,草稿/中间产物/一次性调试页不 publish。\n\
 - markdown 里用 `[[slug]]` 或 `[[slug|显示文字]]` 交叉引用,渲染后可点击;\
 引用前先 `fleet wiki list --all` 确认目标 slug 已发布。\n\
@@ -579,7 +583,7 @@ fleet wiki cat <slug> --file assets/app.js    # 目录型文档里的其他文�
 (调研报告、架构说明)→ wiki;**要递到人手上**(交给老板/客户/同事,或要\
 发出去的东西)→ **产出库**:\n\
 \n\
-```\nfleet artifact add <path> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
+```\nfleet artifact add <path> --folder <目录> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
 \n\
 - PDF 报告、幻灯片(pptx)、表格(xlsx)、Word 文档、渲染好的视频或图片、\
 导出的数据集,**也包括**一份对外的 html 提案、一份要交出去的 markdown 规格书。\
@@ -611,7 +615,7 @@ document (research reports, architecture notes, performance analyses, data \
 visualizations…), archive it into the Fleet wiki when done instead of leaving \
 it in the workdir:\n\
 \n\
-```\nfleet wiki publish <path> [--slug <slug>] [--title \"<title>\"]\n```\n\
+```\nfleet wiki publish <path> --folder <folder> [--slug <slug>] [--title \"<title>\"]\n```\n\
 \n\
 dsh has no Fleet MCP tools, so always use this CLI — the \"prefer `fleet__wiki`\" \
 advice in the Claude / Codex guidance does not apply here.\n\
@@ -620,10 +624,15 @@ advice in the Claude / Codex guidance does not apply here.\n\
 `index.html` entry (its relatively-referenced js/css/images are archived too).\n\
 - Iterating on the same doc → **re-publish with the same slug** (new version, \
 old ones stay browsable); don't mint a new slug for the same content.\n\
-- Slugs are lowercase letters/digits/hyphens; `/` is a **virtual directory** \
-separator (`--slug arch/overview` files under an `arch` folder) — share a \
-prefix across docs on one topic. Move a published doc with \
-`fleet wiki mv <old> <new>`, version history included.\n\
+- **File into one of the project's existing folders** (wiki and artifact \
+store alike): list them with `fleet wiki folders` and pass the best-fitting \
+path as `--folder <folder>`. No folder, or an unknown one, is refused with the \
+folder list — pick one and retry. The folder decides the slug \
+(`<folder prefix>/<name>`); re-publishing an existing slug keeps its folder.\n\
+- **Create a folder only when none fits**: `--new-folder --folder <path> \
+--description <what belongs there> --reason <why no existing folder fits>`. It \
+is marked AI-created, with your reason, for the user to review — don't open \
+one for a single doc. A project with no folders gets its first one this way.\n\
 - Publish finished artifacts only — no drafts, intermediates, or debug pages.\n\
 - Cross-link other docs with `[[slug]]` / `[[slug|display text]]` (clickable \
 when rendered); check the target exists first with `fleet wiki list --all`.\n\
@@ -653,7 +662,7 @@ Knowledge banked for yourself and later sessions → the wiki. Something you are
 **handing to a person** (the user, a client, a colleague — anything meant to \
 leave your hands) → the **artifact store**:\n\
 \n\
-```\nfleet artifact add <path> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
+```\nfleet artifact add <path> --folder <folder> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
 \n\
 - A PDF report, a slide deck (pptx), a spreadsheet (xlsx), a Word document, a \
 rendered video or image, an exported dataset — **and equally** an \
@@ -1490,6 +1499,20 @@ mod tests {
             model.contains("claude-opus-5") && model.contains("gpt-6-astra"),
             "model block must still cover the tiers a dsh session spawns Fleet work with"
         );
+    }
+
+    /// Publish / add without an existing folder is refused (`library_filing`).
+    /// dsh only has the CLI, so the block must teach the CLI spelling — the
+    /// MCP `new_folder=true` form would not parse as a flag.
+    #[test]
+    fn wiki_block_teaches_filing_into_a_folder_with_cli_flags() {
+        for locale in ["zh", "en"] {
+            let wiki = render_dsh_wiki_block(locale);
+            for needle in ["fleet wiki folders", "--folder", "--new-folder", "--reason", "--description"] {
+                assert!(wiki.contains(needle), "{locale}: dsh wiki block must mention {needle}");
+            }
+            assert!(!wiki.contains("new_folder=true"), "{locale}: dsh has no MCP tools");
+        }
     }
 
     /// A dsh session used to be told only about the wiki, so an agent that
