@@ -260,8 +260,14 @@ pub struct LibraryProject {
     pub workspace_name: String,
     /// Sorted by path, so a parent always precedes its children.
     pub folders: Vec<LibraryFolder>,
-    /// Newest first.
+    /// Newest first. In an [`outline`] only the newest few per folder, with
+    /// no summary or tags.
     pub items: Vec<LibraryItem>,
+    /// Set only by [`outline`]: how many items are filed directly in each
+    /// folder path, `""` keying the unfiled ones. Absent from a full tree,
+    /// where `items` is the count.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub counts: BTreeMap<String, usize>,
 }
 
 /// What a folder rename re-filed.
@@ -868,6 +874,7 @@ pub fn tree_in(roots: &Roots, workspace: Option<&str>) -> Vec<LibraryProject> {
                 workspace_name: wiki::workspace_name_of(key),
                 folders: Vec::new(),
                 items: Vec::new(),
+                counts: BTreeMap::new(),
             });
     };
 
@@ -918,6 +925,74 @@ pub fn tree_in(roots: &Roots, workspace: Option<&str>) -> Vec<LibraryProject> {
             .then_with(|| a.workspace_path.cmp(&b.workspace_path))
     });
     out
+}
+
+/// Items an [`outline`] keeps per folder by default — what a project
+/// overview card lists under each folder.
+pub const OUTLINE_RECENT: usize = 3;
+
+/// The tree without the bulk: every project's (or `workspace`'s) folders,
+/// how many items each folder holds directly ([`LibraryProject::counts`]),
+/// and only the newest `recent` items of each folder, stripped of summary and
+/// tags.
+///
+/// This is what the phone draws its project list and project overview from.
+/// The full tree is ~1.4 MB on a real library (2,000 items, most of it
+/// summaries); a folder's items, summaries included, come from
+/// [`folder_items`] when it is opened. The newest few per folder are enough
+/// for any folder's "newest few beneath it", since those are each among the
+/// newest few of their own folder.
+pub fn outline(workspace: Option<&str>, recent: usize) -> Result<Vec<LibraryProject>, String> {
+    Ok(outline_in(&Roots::home()?, workspace, recent))
+}
+
+pub fn outline_in(roots: &Roots, workspace: Option<&str>, recent: usize) -> Vec<LibraryProject> {
+    let mut out = tree_in(roots, workspace);
+    for p in &mut out {
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        let items = std::mem::take(&mut p.items);
+        for mut item in items {
+            let n = counts.entry(item.folder.clone().unwrap_or_default()).or_insert(0);
+            *n += 1;
+            // Items arrive newest first, so the first `recent` per folder win.
+            if *n <= recent {
+                item.summary = String::new();
+                item.tags = Vec::new();
+                p.items.push(item);
+            }
+        }
+        p.counts = counts;
+    }
+    out
+}
+
+/// Every item of `workspace`'s project filed in `folder` or beneath it,
+/// newest first, with summaries and tags; `folder` `""` answers the unfiled
+/// ones. The listing a phone fetches when a folder is opened (see
+/// [`outline`]).
+pub fn folder_items(workspace: &str, folder: &str) -> Result<Vec<LibraryItem>, String> {
+    folder_items_in(&Roots::home()?, workspace, folder)
+}
+
+pub fn folder_items_in(
+    roots: &Roots,
+    workspace: &str,
+    folder: &str,
+) -> Result<Vec<LibraryItem>, String> {
+    checked_key(workspace)?;
+    let folder = folder.trim().trim_matches('/');
+    let items = tree_in(roots, Some(workspace))
+        .into_iter()
+        .next()
+        .map(|p| p.items)
+        .unwrap_or_default();
+    Ok(items
+        .into_iter()
+        .filter(|i| match i.folder.as_deref() {
+            None => folder.is_empty(),
+            Some(f) => !folder.is_empty() && is_at_or_under(f, folder),
+        })
+        .collect())
 }
 
 // ── Folder edits ─────────────────────────────────────────────────────────────
@@ -1734,6 +1809,54 @@ mod tests {
         // Empty facts stay off the wire.
         let json = serde_json::to_value(a).unwrap();
         assert!(json.get("summary").is_none() && json.get("tags").is_none());
+    }
+
+    #[test]
+    fn outline_counts_every_folder_but_keeps_only_the_newest_few_without_summaries() {
+        let e = env();
+        create_folder_in(&e.roots, &e.ws(), "发票", None).unwrap();
+        create_folder_in(&e.roots, &e.ws(), "发票/2026", None).unwrap();
+        for n in 0..5 {
+            let doc = e.doc(&format!("bill-{n}"), &e.ws);
+            wiki::write_summary_in(
+                &e.roots.wiki,
+                &doc.slug,
+                &wiki::DocSummary {
+                    summary: format!("Bill {n}."),
+                    tags: vec!["bill".into()],
+                    version: doc.current_version.clone(),
+                    generated_ms: 1,
+                },
+            )
+            .unwrap();
+            let folder = if n < 3 { "发票" } else { "发票/2026" };
+            move_item_in(&e.roots, ITEM_DOC, &doc.slug, folder).unwrap();
+        }
+        e.artifact("loose.pdf", &e.ws);
+
+        let p = outline_in(&e.roots, Some(&e.ws()), 2).remove(0);
+        assert_eq!(p.counts.get("发票"), Some(&3));
+        assert_eq!(p.counts.get("发票/2026"), Some(&2));
+        assert_eq!(p.counts.get(""), Some(&1), "unfiled items count under \"\"");
+        // Two per folder survive, plus the one unfiled item.
+        assert_eq!(p.items.len(), 5);
+        assert_eq!(p.items.iter().filter(|i| i.folder.as_deref() == Some("发票")).count(), 2);
+        assert!(p.items.iter().all(|i| i.summary.is_empty() && i.tags.is_empty()));
+        assert_eq!(p.folders.len(), 2, "folders are carried whole");
+        // A full tree never carries counts.
+        assert!(serde_json::to_value(e.project()).unwrap().get("counts").is_none());
+
+        // Opening a folder answers everything beneath it, summaries included.
+        let under = folder_items_in(&e.roots, &e.ws(), "发票").unwrap();
+        assert_eq!(under.len(), 5);
+        assert!(under.iter().all(|i| i.summary.starts_with("Bill ")));
+        assert_eq!(folder_items_in(&e.roots, &e.ws(), "/发票/2026/").unwrap().len(), 2);
+        let unfiled = folder_items_in(&e.roots, &e.ws(), "").unwrap();
+        assert_eq!(unfiled.len(), 1);
+        assert_eq!(unfiled[0].name, "loose.pdf");
+        // A folder name that merely shares a prefix is not "beneath".
+        assert!(folder_items_in(&e.roots, &e.ws(), "发").unwrap().is_empty());
+        assert!(folder_items_in(&e.roots, "", "发票").is_err());
     }
 
     #[test]
