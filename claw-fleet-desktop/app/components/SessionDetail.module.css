@@ -4,7 +4,12 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
+  /* `clip`, not `hidden`: a hidden box is still a scroll container, so any
+     scrollIntoView()/focus() inside it scrolls it too — and with no scrollbar
+     the reader has no way back. A snapshot on 2026-10-21 caught exactly that:
+     .root at top=0 with its body row at top=-384 (scrollHeight 1282 in an
+     820px box), the transcript and the rail both cut off at the window edge. */
+  overflow: clip;
   background: var(--color-bg);
   flex-shrink: 0;
   transition: width 0.25s ease, min-width 0.25s ease;
