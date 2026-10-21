@@ -281,9 +281,8 @@ pub fn queue_refile_in(roots: &Roots, workspace: &str, force: bool) -> Result<In
             }
         })
         .collect();
-    let batch = new_batch(roots, &key, BatchStatus::Queued)?;
+    let batch = new_batch(roots, &key, BatchStatus::Queued, BatchKind::Refile)?;
     update(roots, &batch.id, |b| {
-        b.kind = BatchKind::Refile;
         b.items = items;
         Ok(b.clone())
     })
@@ -699,6 +698,14 @@ mod tests {
         let brain = RefileBrain::default();
         let b = run_refile_in(&e.roots, &e.ws(), true, &brain).unwrap();
         assert_eq!((b.status, b.kind), (BatchStatus::Done, BatchKind::Refile), "{:?}", b.error);
+        // Builds from before re-filing list only `[A-Za-z0-9-]` ids; one of
+        // them undoing this batch as an upload would delete real artifacts.
+        assert!(
+            !b.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "a re-file batch id must be invisible to older builds: {}",
+            b.id
+        );
+        assert!(super::super::list_batches_in(&e.roots, None).iter().any(|s| s.id == b.id));
         assert!(b.schema_drafted);
         assert_eq!(b.llm_calls, 2);
         let prompts = brain.prompts.lock().unwrap().clone();

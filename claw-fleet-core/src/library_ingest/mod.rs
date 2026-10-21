@@ -380,7 +380,7 @@ fn ingest_dir(roots: &Roots) -> PathBuf {
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn batch_dir(roots: &Roots, id: &str) -> Result<PathBuf, String> {
@@ -430,21 +430,31 @@ fn set_status(roots: &Roots, id: &str, status: BatchStatus) -> Result<(), String
     })
 }
 
-fn new_batch_id() -> String {
+/// Prefix of a re-file batch's id. Builds from before re-filing accept only
+/// `[A-Za-z0-9-]` ids, so the `_` keeps them from listing such a batch at all:
+/// they would read it as an upload, and an upload's undo deletes the item's
+/// artifact — here an existing deliverable, not an uploaded copy.
+const REFILE_ID_PREFIX: &str = "refile_";
+
+fn new_batch_id(kind: BatchKind) -> String {
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let rand = uuid::Uuid::new_v4().simple().to_string();
-    format!("{ts}-{}", &rand[..6])
+    let prefix = match kind {
+        BatchKind::Upload => "",
+        BatchKind::Refile => REFILE_ID_PREFIX,
+    };
+    format!("{prefix}{ts}-{}", &rand[..6])
 }
 
-fn new_batch(roots: &Roots, workspace: &str, status: BatchStatus) -> Result<IngestBatch, String> {
+fn new_batch(roots: &Roots, workspace: &str, status: BatchStatus, kind: BatchKind) -> Result<IngestBatch, String> {
     let key = library::project_key(workspace);
     if key.is_empty() {
         return Err("pick the project to upload into".to_string());
     }
     let now = now_ms();
     let batch = IngestBatch {
-        id: new_batch_id(),
-        kind: BatchKind::Upload,
+        id: new_batch_id(kind),
+        kind,
         workspace_name: crate::wiki::workspace_name_of(&key),
         workspace_path: key,
         status,
@@ -478,7 +488,7 @@ pub fn create_batch(workspace: &str) -> Result<IngestBatch, String> {
 }
 
 pub fn create_batch_in(roots: &Roots, workspace: &str) -> Result<IngestBatch, String> {
-    new_batch(roots, workspace, BatchStatus::Receiving)
+    new_batch(roots, workspace, BatchStatus::Receiving, BatchKind::Upload)
 }
 
 /// Store one uploaded file's bytes under its path in the upload (`a/b.pdf`
@@ -574,7 +584,7 @@ pub fn queue_paths_in(roots: &Roots, workspace: &str, paths: &[String]) -> Resul
     if let Some(missing) = sources.iter().find(|p| !Path::new(p).exists()) {
         return Err(format!("'{missing}' does not exist"));
     }
-    let batch = new_batch(roots, workspace, BatchStatus::Queued)?;
+    let batch = new_batch(roots, workspace, BatchStatus::Queued, BatchKind::Upload)?;
     update(roots, &batch.id, |b| {
         b.sources = sources;
         Ok(b.clone())
