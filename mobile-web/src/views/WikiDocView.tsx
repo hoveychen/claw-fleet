@@ -15,7 +15,9 @@ import { MdLink } from "../markdown/linkComponents";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { WikiDoc } from "../types";
-import { buildWikiHtml, exportWikiDoc, fetchWikiText, listWikiDocs } from "../wiki";
+import { buildWikiHtml, exportWikiDoc, fetchWikiText } from "../wiki";
+import { fetchWikiDoc } from "../libraryApi";
+import { isDesktopRejection } from "../transport";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import { LibraryInfo } from "./LibraryInfo";
@@ -149,13 +151,12 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
     if (!client || openingSlug) return;
     setOpeningSlug(slug);
     try {
-      const list = await listWikiDocs(client);
-      // A link written before the doc was moved names a former slug.
-      const target = list.find((d) => d.slug === slug) ?? list.find((d) => d.aliases?.includes(slug));
-      if (target) onOpenDoc(target);
-      else window.alert(t("知识库里没有找到「{0}」", slug));
-    } catch {
-      /* offline — ignore */
+      // A link written before the doc was moved names a former slug; the host
+      // follows the redirect the move left there.
+      onOpenDoc(await fetchWikiDoc(client, slug));
+    } catch (e) {
+      // The host answered: no such doc. Anything else is offline — ignore.
+      if (isDesktopRejection(e)) window.alert(t("知识库里没有找到「{0}」", slug));
     } finally {
       setOpeningSlug(null);
     }

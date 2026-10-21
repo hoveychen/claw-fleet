@@ -2586,6 +2586,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "artifact_blob" => serve_artifact_blob(params),
         "library_tree" => serve_library_tree(params),
         "library_folder_items" => serve_library_folder_items(params),
+        "library_task_items" => serve_library_task_items(params),
         "library_thumb" => serve_library_thumb(params),
         "wiki_doc" => serve_wiki_doc(params),
         "artifact_get" => serve_artifact_get(params),

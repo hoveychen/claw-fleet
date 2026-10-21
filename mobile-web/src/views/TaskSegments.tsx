@@ -9,10 +9,19 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, FolderOpen, GitFork, WifiOff } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
-import type { SessionInfo, SubtaskStep, TaskPlanDetail, WikiDoc } from "../types";
+import type { Artifact, SessionInfo, SubtaskStep, TaskPlanDetail, WikiDoc } from "../types";
 import { subtaskRowsOf, taskSessionIds, taskTitle } from "../taskRows";
-import { taskLibrary } from "../library";
-import { LibraryList, useLibrary } from "./LibraryList";
+import { repoRootPath } from "../../../shared-ts/repoPath";
+import {
+  fetchArtifactRecord,
+  fetchTaskLibrary,
+  fetchWikiDoc,
+  type LibraryEntry,
+  type TaskLibraryItems,
+} from "../libraryApi";
+import { EntryCards } from "./LibraryBrowse";
+import { ArtifactDetail } from "./ArtifactsView";
+import { Presence } from "../Presence";
 import { isWakingSticky, statusTone, subtaskStateLabel, timeAgo } from "./TasksView";
 import { subtaskOutcomeOnStep, type SubtaskOutcome } from "../../../shared-ts/subtaskOutcome";
 import { EmptyState } from "./EmptyState";
@@ -290,21 +299,56 @@ export function TaskLibraryPane({
   client: FleetTransport | null;
   onOpenDoc: (doc: WikiDoc) => void;
 }) {
-  const lib = useLibrary(client);
-  const ids = useMemo(() => taskSessionIds(sessions, session), [sessions, session]);
-  const scoped = useMemo(
-    () => (lib.items ? taskLibrary(lib.items, ids, session.workspacePath) : null),
-    [lib.items, ids, session.workspacePath],
+  // Keyed on the ids' content: `sessions` is a new array on every poll.
+  const idsKey = useMemo(
+    () => [...taskSessionIds(sessions, session)].sort().join("\n"),
+    [sessions, session],
   );
+  const [items, setItems] = useState<TaskLibraryItems | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  const [opening, setOpening] = useState(false);
+
+  useEffect(() => {
+    if (!client) return;
+    let live = true;
+    setError(null);
+    fetchTaskLibrary(client, session.workspacePath, idsKey ? idsKey.split("\n") : [])
+      .then((r) => live && setItems(r))
+      .catch((e) => {
+        if (!live) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setItems((prev) => prev ?? { outputs: [], docs: [] });
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, session.workspacePath, idsKey]);
+
+  // An item's record is fetched when it is tapped, as in the 资料 tab.
+  const open = async (e: LibraryEntry) => {
+    if (!client || opening) return;
+    setOpening(true);
+    setError(null);
+    try {
+      if (e.kind === "doc") onOpenDoc(await fetchWikiDoc(client, e.id));
+      else setArtifact(await fetchArtifactRecord(client, e.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOpening(false);
+    }
+  };
 
   if (!client) return <EmptyState compact icon={WifiOff} title={t("桌面端离线")} />;
-  if (!scoped) return <SkeletonList rows={4} avatar />;
+  if (!items) return <SkeletonList rows={4} avatar />;
+  const home = repoRootPath(session.workspacePath);
   return (
-    <div className={styles.libraryPane}>
-      {lib.error && <div className={styles.error}>{t("资料加载失败：{0}", lib.error)}</div>}
+    <div className={styles.libraryPane} data-task-library>
+      {error && <div className={styles.error}>{t("资料加载失败：{0}", error)}</div>}
       <div className={styles.groupHead}>{t("本任务产出")}</div>
-      {scoped.outputs.length > 0 ? (
-        <LibraryList items={scoped.outputs} client={client} onOpenDoc={onOpenDoc} hideProject />
+      {items.outputs.length > 0 ? (
+        <EntryCards client={client} entries={items.outputs} homeProject={home} onOpen={open} />
       ) : (
         <div className={styles.groupEmpty}>{t("这个任务还没有存进产出库的文件。")}</div>
       )}
@@ -312,11 +356,14 @@ export function TaskLibraryPane({
         <FolderOpen size={13} />
         {t("{0} 的文档", session.workspaceName || t("本项目"))}
       </div>
-      {scoped.docs.length > 0 ? (
-        <LibraryList items={scoped.docs} client={client} onOpenDoc={onOpenDoc} hideProject />
+      {items.docs.length > 0 ? (
+        <EntryCards client={client} entries={items.docs} homeProject={home} onOpen={open} />
       ) : (
         <div className={styles.groupEmpty}>{t("这个项目还没有归档的文档。")}</div>
       )}
+      <Presence when={!!artifact}>
+        {artifact && <ArtifactDetail artifact={artifact} client={client} onBack={() => setArtifact(null)} />}
+      </Presence>
     </div>
   );
 }

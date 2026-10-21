@@ -17,7 +17,7 @@ import { fetchArtifact, formatBytes, listArtifacts } from "../artifacts";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { Artifact, IngestSummary, WikiDoc } from "../types";
-import { listWikiDocs } from "../wiki";
+import { fetchWikiDoc } from "../libraryApi";
 import { ArtifactDetail } from "./ArtifactsView";
 import { WikiDocView } from "./WikiDocView";
 import { Skeleton, Spinner } from "./loading";
@@ -167,11 +167,13 @@ function WikiIngestCard({
     if (!client) return;
     let alive = true;
     setResolved(false);
-    listWikiDocs(client)
-      .then((docs) => {
-        if (alive) setDoc(docs.find((d) => d.slug === ingest.slug) ?? null);
+    fetchWikiDoc(client, ingest.slug)
+      .then((d) => {
+        if (alive) setDoc(d);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (alive) setDoc(null);
+      })
       .finally(() => {
         if (alive) setResolved(true);
       });

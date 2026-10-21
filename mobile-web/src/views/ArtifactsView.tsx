@@ -1,5 +1,5 @@
-// One artifact, full screen — opened from the 资料 tab's list (LibraryList)
-// and from ingest cards in a transcript. Bytes come via the relay's
+// One artifact, full screen — opened from the 资料 tab's cards, a task's 资料
+// segment and ingest cards in a transcript. Bytes come via the relay's
 // `artifact_blob` (see claw-fleet-core/src/mobile_relay.rs).
 //
 // Preview and download part ways above MAX_RELAY_BYTES. A preview is one frame

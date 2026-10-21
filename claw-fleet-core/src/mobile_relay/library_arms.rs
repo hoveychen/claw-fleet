@@ -80,6 +80,20 @@ pub(super) fn serve_library_folder_items(params: &Value) -> Result<Value, String
     )?)
 }
 
+/// A task's 资料 segment: artifacts its sessions made plus its project's docs,
+/// filtered here instead of on the phone over both whole stores.
+pub(super) fn serve_library_task_items(params: &Value) -> Result<Value, String> {
+    let ids: Vec<String> = params
+        .get("sessionIds")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    to_value(crate::library::task_items(
+        str_param(params, "workspacePath").unwrap_or(""),
+        &ids,
+    )?)
+}
+
 /// One wiki doc, so opening an item does not need the whole `wiki_list`.
 pub(super) fn serve_wiki_doc(params: &Value) -> Result<Value, String> {
     to_value(crate::wiki::get_doc(required(params, "slug")?)?)
@@ -479,6 +493,14 @@ mod tests {
             assert_eq!(items.as_array().unwrap().len(), 1);
             assert_eq!(items[0]["id"], json!(shot.id));
             assert!(serve_request("library_folder_items", &json!({ "folder": "发票" })).is_err());
+
+            let task = serve_request(
+                "library_task_items",
+                &json!({ "workspacePath": wsp, "sessionIds": ["nobody"] }),
+            )
+            .unwrap();
+            assert_eq!(task["outputs"], json!([]), "{task}");
+            assert_eq!(task["docs"], json!([]), "{task}");
 
             let got = serve_request("artifact_get", &json!({ "id": loose.id })).unwrap();
             assert_eq!(got["name"], "loose.pdf");

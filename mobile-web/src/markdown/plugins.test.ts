@@ -153,3 +153,22 @@ describe("inline SVG blank lines and same-line open tags", () => {
     expect(normalizeSvgBlankLines(prose)).toBe(prose);
   });
 });
+
+describe("wiki: links survive sanitize", () => {
+  it("keeps a [[slug]] link's wiki: href for the doc reader", () => {
+    // With WikiDocView's urlTransform, which lets `wiki:` past react-markdown.
+    const html = renderToStaticMarkup(
+      createElement(ReactMarkdown, {
+        remarkPlugins: mdRemarkPlugins,
+        rehypePlugins: mdRehypePlugins,
+        urlTransform: (url: string) => url,
+        children: "see [arch/codex-parity](wiki:arch%2Fcodex-parity)",
+      }),
+    );
+    expect(html).toContain('href="wiki:arch%2Fcodex-parity"');
+  });
+
+  it("still strips javascript: hrefs", () => {
+    expect(render("[x](javascript:alert(1))")).not.toContain("javascript:");
+  });
+});

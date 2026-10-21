@@ -111,7 +111,7 @@ import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
 import { AttentionView } from "./views/AttentionView";
 import { WikiDocView } from "./views/WikiDocView";
-import { listWikiDocs } from "./wiki";
+import { fetchWikiDoc } from "./libraryApi";
 import { Presence } from "./Presence";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
@@ -1074,17 +1074,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [],
   );
 
-  // A reference chip names a wiki doc by slug only; resolve it against that
-  // device's list and push the doc reader. A slug that is gone opens nothing.
+  // A reference chip names a wiki doc by slug only; fetch that one record (the
+  // host follows the redirect a move left at a former slug) and push the doc
+  // reader. A slug that is gone opens nothing.
   const openWikiSlug = useCallback(
     (deviceId: string, slug: string) => {
       const client = transportFor(deviceId);
       if (!client) return;
-      listWikiDocs(client)
-        .then((docs) => {
-          const doc = docs.find((d) => d.slug === slug);
-          if (doc) setWikiStack((s) => [...s, { deviceId, doc }]);
-        })
+      fetchWikiDoc(client, slug)
+        .then((doc) => setWikiStack((s) => [...s, { deviceId, doc }]))
         .catch(() => {});
     },
     [transportFor],
