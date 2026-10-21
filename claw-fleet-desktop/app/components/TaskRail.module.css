@@ -4,6 +4,11 @@
    it is reference, not a second pane. Its width is the row's `--rail-w`, which
    the facet drawer's offset and fit probe read too. */
 .rail {
+  /* The containing block for `.step_now` (and any other absolute child). Left
+     static, that visually-hidden label anchored to SessionDetail's body row
+     instead, escaped this scroller's clip, and at its static position far down
+     a long rail made the whole pane overflow — 1282px in an 820px window. */
+  position: relative;
   flex: 0 0 var(--rail-w, clamp(240px, 22%, 320px));
   min-width: 0;
   min-height: 0;
