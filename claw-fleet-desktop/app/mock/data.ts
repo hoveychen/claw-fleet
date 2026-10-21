@@ -4154,6 +4154,20 @@ export const MOCK_ARTIFACT_USAGE = {
 // WikiView does setDocs(null), and the first docs.filter() blanks the app.
 export const MOCK_WIKI_DOCS = [
   {
+    slug: "promo/launch-script",
+    title: "发布片脚本与分镜",
+    kind: "markdown" as const,
+    entry: "launch-script.md",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    createdMs: NOW - 7 * HOUR,
+    updatedMs: NOW - 5 * HOUR,
+    currentVersion: "v1",
+    versions: [
+      { id: "v1", publishedMs: NOW - 5 * HOUR, sizeBytes: 6_400, fileCount: 1, sourcePath: "/tmp/launch-script.md" },
+    ],
+  },
+  {
     slug: "arch/overview",
     title: "Architecture Overview",
     kind: "markdown" as const,

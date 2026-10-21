@@ -327,7 +327,7 @@ pub fn normalize_dir_path(raw: &str) -> Result<String, String> {
 /// True when `path` is `ancestor` itself or sits underneath it.
 ///
 /// The `/` matters: without it `docs` would also claim `docs-old`.
-fn is_at_or_under(path: &str, ancestor: &str) -> bool {
+pub(crate) fn is_at_or_under(path: &str, ancestor: &str) -> bool {
     if ancestor.is_empty() {
         return true;
     }
@@ -335,7 +335,7 @@ fn is_at_or_under(path: &str, ancestor: &str) -> bool {
 }
 
 /// Re-root `path` from under `from` to under `to`, or `None` if it isn't there.
-fn repath(path: &str, from: &str, to: &str) -> Option<String> {
+pub(crate) fn repath(path: &str, from: &str, to: &str) -> Option<String> {
     if path == from {
         return Some(to.to_string());
     }
@@ -1234,210 +1234,40 @@ fn zip_filename(directory: &str, workspace_path: &str) -> String {
 
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
-// One `folders.json` at the store root, unlike the per-artifact `meta.json`.
-// The no-global-index rule exists because several agents ingest concurrently
-// and must never contend on a shared file; folders are the opposite — they are
-// only ever created by a person clicking "new folder", one at a time. And a
-// folder has nowhere else to live: an empty one has no artifact to hang off.
-// A `.json` file at the root is invisible to [`list_in`], which only descends
-// into directories.
+// Folders used to live in one `folders.json` at the store root. They are now
+// the per-project schema owned by [`crate::library`], which imports that file
+// whenever it finds it; these wrappers keep the Artifacts page, the phone and
+// `fleet serve` on their existing calls while reading and writing the schema.
+// A `.json` file at the root is still invisible to [`list_in`], which only
+// descends into directories — that matters while an old build may recreate it.
 
-fn folders_path(root: &Path) -> PathBuf {
-    root.join("folders.json")
-}
-
-/// Every folder the user has made. Missing or unreadable file reads as empty —
-/// folders are navigation, and losing one must not blank the Artifacts page.
+/// Every schema folder, once per workspace path the Artifacts page groups by.
 pub fn list_folders() -> Vec<Folder> {
-    match artifacts_dir() {
-        Some(root) => list_folders_in(&root),
-        None => Vec::new(),
-    }
+    crate::library::artifact_folders()
 }
 
-pub fn list_folders_in(root: &Path) -> Vec<Folder> {
-    let Ok(raw) = fs::read_to_string(folders_path(root)) else {
-        return Vec::new();
-    };
-    let mut out: Vec<Folder> = serde_json::from_str(&raw).unwrap_or_default();
-    out.sort_by(|a, b| {
-        a.workspace_path
-            .cmp(&b.workspace_path)
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    out.dedup();
-    out
-}
-
-fn write_folders(root: &Path, folders: &[Folder]) -> Result<(), String> {
-    fs::create_dir_all(root).map_err(|e| format!("create artifact store: {e}"))?;
-    let body = serde_json::to_vec_pretty(folders).map_err(|e| e.to_string())?;
-    crate::atomic_json::write_atomic(&folders_path(root), &body)
-        .map_err(|e| format!("write folders.json: {e}"))
-}
-
-/// Register a folder (and every ancestor of it) under `workspace`.
-///
-/// Ancestors are registered too so that deleting a subfolder leaves its parent
-/// standing, the way it would in a file manager. Creating a folder that
-/// already exists is a no-op success — the UI can call this without checking.
+/// Add a folder (and its ancestors) to `workspace`'s project schema. Creating
+/// a folder that already exists is a no-op success.
 pub fn create_folder(workspace: &Path, path: &str) -> Result<Folder, String> {
-    let root = artifacts_dir_or_err()?;
-    create_folder_in(&root, workspace, path)
-}
-
-pub fn create_folder_in(root: &Path, workspace: &Path, path: &str) -> Result<Folder, String> {
-    let path = normalize_dir_path(path)?;
-    if path.is_empty() {
-        return Err("a folder needs a name".to_string());
-    }
-    let workspace_path = crate::wiki::resolve_workspace_path(workspace);
-    let mut folders = list_folders_in(root);
-
-    let mut prefix = String::new();
-    for seg in path.split('/') {
-        prefix = if prefix.is_empty() {
-            seg.to_string()
-        } else {
-            format!("{prefix}/{seg}")
-        };
-        let entry = Folder {
-            workspace_path: workspace_path.clone(),
-            path: prefix.clone(),
-        };
-        if !folders.contains(&entry) {
-            folders.push(entry);
-        }
-    }
-    write_folders(root, &folders)?;
+    let created =
+        crate::library::create_folder(&workspace.display().to_string(), path, None)?;
     Ok(Folder {
-        workspace_path,
-        path,
+        workspace_path: crate::wiki::resolve_workspace_path(workspace),
+        path: created.path,
     })
 }
 
-/// Forget a folder. Refused while anything is still inside it, so the button
-/// can never quietly orphan a deliverable.
+/// Remove a folder from the schema. Refused while anything — an artifact or a
+/// wiki doc — is still filed in it.
 pub fn delete_folder(workspace: &Path, path: &str) -> Result<(), String> {
-    let root = artifacts_dir_or_err()?;
-    delete_folder_in(&root, workspace, path)
+    crate::library::delete_folder(&workspace.display().to_string(), path)
 }
 
-pub fn delete_folder_in(root: &Path, workspace: &Path, path: &str) -> Result<(), String> {
-    let path = normalize_dir_path(path)?;
-    if path.is_empty() {
-        return Err("the workspace root is not a folder you can delete".to_string());
-    }
-    let workspace_path = crate::wiki::resolve_workspace_path(workspace);
-
-    let filed = list_in(root)
-        .into_iter()
-        .filter(|a| a.workspace_path == workspace_path && is_at_or_under(&a.path, &path))
-        .count();
-    if filed > 0 {
-        return Err(format!(
-            "'{path}' still holds {filed} artifact(s) — move them out first"
-        ));
-    }
-
-    let mut folders = list_folders_in(root);
-    let before = folders.len();
-    // Strictly-under children go with it: an empty folder tree is empty.
-    folders.retain(|f| !(f.workspace_path == workspace_path && is_at_or_under(&f.path, &path)));
-    if folders.len() == before {
-        return Err(format!("folder '{path}' not found"));
-    }
-    write_folders(root, &folders)
-}
-
-/// Rename or move a folder, carrying its subfolders and everything filed under
-/// it. Returns how many artifacts were re-filed.
+/// Rename or move a folder, carrying everything filed under it. Returns how
+/// many artifacts were re-filed (wiki docs move too, but are not counted here).
 pub fn rename_folder(workspace: &Path, from: &str, to: &str) -> Result<usize, String> {
-    let root = artifacts_dir_or_err()?;
-    rename_folder_in(&root, workspace, from, to)
-}
-
-pub fn rename_folder_in(
-    root: &Path,
-    workspace: &Path,
-    from: &str,
-    to: &str,
-) -> Result<usize, String> {
-    let from = normalize_dir_path(from)?;
-    let to = normalize_dir_path(to)?;
-    if from.is_empty() {
-        return Err("the workspace root cannot be renamed".to_string());
-    }
-    if to.is_empty() {
-        return Err("a folder needs a name".to_string());
-    }
-    if from == to {
-        return Ok(0);
-    }
-    // Dropping a folder inside itself would detach it from the tree entirely.
-    if is_at_or_under(&to, &from) {
-        return Err(format!("cannot move '{from}' into itself"));
-    }
-    let workspace_path = crate::wiki::resolve_workspace_path(workspace);
-
-    let mut folders = list_folders_in(root);
-    if !folders
-        .iter()
-        .any(|f| f.workspace_path == workspace_path && f.path == from)
-    {
-        return Err(format!("folder '{from}' not found"));
-    }
-    // Merging two folders is a decision the user has to make explicitly, so
-    // refuse rather than silently pouring one into the other.
-    if folders
-        .iter()
-        .any(|f| f.workspace_path == workspace_path && f.path == to)
-    {
-        return Err(format!("folder '{to}' already exists"));
-    }
-
-    for f in folders.iter_mut() {
-        if f.workspace_path != workspace_path {
-            continue;
-        }
-        if let Some(next) = repath(&f.path, &from, &to) {
-            f.path = next;
-        }
-    }
-    // Re-register the destination's ancestors, or the renamed folder would
-    // hang off a parent nothing records.
-    let mut prefix = String::new();
-    for seg in to.split('/') {
-        prefix = if prefix.is_empty() {
-            seg.to_string()
-        } else {
-            format!("{prefix}/{seg}")
-        };
-        let entry = Folder {
-            workspace_path: workspace_path.clone(),
-            path: prefix.clone(),
-        };
-        if !folders.contains(&entry) {
-            folders.push(entry);
-        }
-    }
-    write_folders(root, &folders)?;
-
-    let mut moved = 0usize;
-    for a in list_in(root) {
-        if a.workspace_path != workspace_path {
-            continue;
-        }
-        let Some(next) = repath(&a.path, &from, &to) else {
-            continue;
-        };
-        let dir = artifact_dir(root, &a.id)?;
-        let mut artifact = read_meta(&dir)?;
-        artifact.path = next;
-        write_meta(&dir, &artifact)?;
-        moved += 1;
-    }
-    Ok(moved)
+    crate::library::rename_folder(&workspace.display().to_string(), from, to)
+        .map(|r| r.moved_artifacts)
 }
 
 // ── Usage ────────────────────────────────────────────────────────────────────
@@ -2091,7 +1921,6 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let root = store();
         let ws = store();
         let out = store();
-        create_folder_in(root.path(), ws.path(), "空的").unwrap();
 
         let dest = out.path().join("empty.zip");
         let ws_path = crate::wiki::resolve_workspace_path(ws.path());
@@ -2160,149 +1989,13 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     }
 
     #[test]
-    fn a_new_folder_exists_before_anything_is_filed_in_it() {
-        let root = store();
-        let ws = store();
-
-        let f = create_folder_in(root.path(), ws.path(), "/交付/2026Q3/").unwrap();
-        assert_eq!(f.path, "交付/2026Q3");
-        // The parent is registered too, so deleting the leaf leaves it standing.
-        let paths: Vec<String> = list_folders_in(root.path())
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        assert_eq!(paths, vec!["交付".to_string(), "交付/2026Q3".to_string()]);
-
-        // Creating it again is a no-op success, not a duplicate row.
-        create_folder_in(root.path(), ws.path(), "交付/2026Q3").unwrap();
-        assert_eq!(list_folders_in(root.path()).len(), 2);
-
-        assert!(create_folder_in(root.path(), ws.path(), " / ")
-            .unwrap_err()
-            .contains("needs a name"));
-    }
-
-    #[test]
-    fn deleting_a_folder_is_refused_while_something_is_filed_in_it() {
-        let root = store();
-        let ws = store();
-        let src = write_file(ws.path(), "report.pdf", b"%PDF-1.4");
-        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
-        create_folder_in(root.path(), ws.path(), "交付/2026Q3").unwrap();
-        update_in(root.path(), &a.id, None, None, None, Some("交付/2026Q3")).unwrap();
-
-        // Refused from the folder itself and from its ancestor.
-        let err = delete_folder_in(root.path(), ws.path(), "交付/2026Q3").unwrap_err();
-        assert!(err.contains("still holds 1"), "{err}");
-        assert!(delete_folder_in(root.path(), ws.path(), "交付")
-            .unwrap_err()
-            .contains("still holds 1"));
-
-        update_in(root.path(), &a.id, None, None, None, Some("")).unwrap();
-        delete_folder_in(root.path(), ws.path(), "交付").unwrap();
-        assert!(
-            list_folders_in(root.path()).is_empty(),
-            "children go with the parent"
-        );
-
-        assert!(delete_folder_in(root.path(), ws.path(), "交付")
-            .unwrap_err()
-            .contains("not found"));
-        assert!(delete_folder_in(root.path(), ws.path(), "")
-            .unwrap_err()
-            .contains("root"));
-    }
-
-    #[test]
-    fn renaming_a_folder_carries_its_subfolders_and_its_contents() {
-        let root = store();
-        let ws = store();
-        let other = store();
-        let src = write_file(ws.path(), "a.pdf", b"%PDF");
-        let deep = write_file(ws.path(), "b.pdf", b"%PDF");
-        let elsewhere = write_file(other.path(), "c.pdf", b"%PDF");
-
-        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
-        let b = add_in(root.path(), &deep, None, None, ws.path(), None).unwrap();
-        let c = add_in(root.path(), &elsewhere, None, None, other.path(), None).unwrap();
-        create_folder_in(root.path(), ws.path(), "docs/2026").unwrap();
-        create_folder_in(root.path(), ws.path(), "docs-old").unwrap();
-        create_folder_in(root.path(), other.path(), "docs").unwrap();
-        update_in(root.path(), &a.id, None, None, None, Some("docs")).unwrap();
-        update_in(root.path(), &b.id, None, None, None, Some("docs/2026")).unwrap();
-        update_in(root.path(), &c.id, None, None, None, Some("docs")).unwrap();
-
-        let moved = rename_folder_in(root.path(), ws.path(), "docs", "交付").unwrap();
-        assert_eq!(moved, 2);
-        assert_eq!(get_in(root.path(), &a.id).unwrap().path, "交付");
-        assert_eq!(get_in(root.path(), &b.id).unwrap().path, "交付/2026");
-        assert_eq!(
-            get_in(root.path(), &c.id).unwrap().path,
-            "docs",
-            "another workspace's identically named folder must not move"
-        );
-
-        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
-        let names: Vec<String> = list_folders_in(root.path())
-            .into_iter()
-            .filter(|f| f.workspace_path == ws_path)
-            .map(|f| f.path)
-            .collect();
-        assert!(names.contains(&"交付".to_string()));
-        assert!(names.contains(&"交付/2026".to_string()));
-        assert!(
-            names.contains(&"docs-old".to_string()),
-            "a sibling prefix must be left alone"
-        );
-
-        // Nesting a folder into its own subtree, or onto an existing one.
-        create_folder_in(root.path(), ws.path(), "归档").unwrap();
-        assert!(
-            rename_folder_in(root.path(), ws.path(), "交付", "交付/内层")
-                .unwrap_err()
-                .contains("into itself")
-        );
-        assert!(rename_folder_in(root.path(), ws.path(), "交付", "归档")
-            .unwrap_err()
-            .contains("already exists"));
-        assert!(rename_folder_in(root.path(), ws.path(), "没有这个", "x")
-            .unwrap_err()
-            .contains("not found"));
-        assert_eq!(
-            rename_folder_in(root.path(), ws.path(), "交付", "交付").unwrap(),
-            0
-        );
-    }
-
-    #[test]
-    fn moving_a_folder_deeper_registers_the_parent_it_lands_under() {
-        let root = store();
-        let ws = store();
-        create_folder_in(root.path(), ws.path(), "报告").unwrap();
-        rename_folder_in(root.path(), ws.path(), "报告", "交付/2026/报告").unwrap();
-
-        let names: Vec<String> = list_folders_in(root.path())
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        assert_eq!(
-            names,
-            vec![
-                "交付".to_string(),
-                "交付/2026".to_string(),
-                "交付/2026/报告".to_string()
-            ],
-            "the destination's ancestors must exist or the tree has a hole"
-        );
-    }
-
-    #[test]
     fn folders_json_is_invisible_to_the_artifact_scan() {
         let root = store();
         let ws = store();
         let src = write_file(ws.path(), "a.pdf", b"%PDF");
         add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
-        create_folder_in(root.path(), ws.path(), "交付").unwrap();
+        // The legacy registry an older build may still write beside the ids.
+        fs::write(root.path().join("folders.json"), b"[]").unwrap();
 
         assert_eq!(
             list_in(root.path()).len(),

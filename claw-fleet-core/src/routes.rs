@@ -177,6 +177,15 @@ pub const HOOKS_PLAN: &str = "/hooks_plan";
 pub const INTERACTION_DIAGNOSTICS: &str = "/interaction_diagnostics";
 pub const INTERRUPT: &str = "/interrupt";
 pub const INTERRUPT_AGENT_SESSION: &str = "/interrupt_agent_session";
+/// 资料 (Library): the per-project folder schema and the merged wiki +
+/// artifact tree (`crate::library`). `LIBRARY_TREE` takes an optional
+/// `?workspace=`; the rest are POSTs with a JSON body.
+pub const LIBRARY_TREE: &str = "/library_tree";
+pub const LIBRARY_FOLDER_CREATE: &str = "/library_folder_create";
+pub const LIBRARY_FOLDER_DESCRIBE: &str = "/library_folder_describe";
+pub const LIBRARY_FOLDER_DELETE: &str = "/library_folder_delete";
+pub const LIBRARY_FOLDER_RENAME: &str = "/library_folder_rename";
+pub const LIBRARY_MOVE: &str = "/library_move";
 pub const LIST_CLAUDE_BINARIES: &str = "/list_claude_binaries";
 pub const LIVE_THINKING: &str = "/live_thinking";
 pub const LLM_CONFIG: &str = "/llm/config";

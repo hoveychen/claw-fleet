@@ -3138,9 +3138,20 @@
     "no_match": "Nothing matches these filters",
     "search": "Search titles / text…",
     "project_all": "All projects",
-    "load_failed": "Couldn't load deliverables: {{error}}",
     "pick_title": "Pick something to read",
-    "pick_sub": "Docs and deliverables in one list; filter by type and project on the left."
+    "pick_sub_tree": "Docs and deliverables share each project's folder structure; drag an item to file it.",
+    "drag_hint": "Drag an item onto a folder to file it",
+    "unfiled": "Unfiled",
+    "unfiled_desc": "Not in any folder yet — drag into a folder to file it",
+    "no_folders": "This project has no folders yet. Use + on the right to create one.",
+    "folder_new": "New folder",
+    "folder_new_sub": "New subfolder",
+    "folder_rename": "Rename",
+    "folder_describe": "Edit description",
+    "folder_delete": "Delete folder",
+    "folder_delete_confirm": "Delete folder \"{{name}}\"?",
+    "folder_name_placeholder": "Folder name",
+    "folder_desc_placeholder": "One line on what goes here"
   },
   "nav_tab_projects": "Projects",
   "routines": {

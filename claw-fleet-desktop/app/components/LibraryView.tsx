@@ -1,40 +1,51 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Archive,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   Film,
   FileSpreadsheet,
   FileText,
   FileType,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
   Image as ImageIcon,
+  Inbox,
   Library,
   Music,
+  NotebookPen,
+  Pencil,
   Presentation,
+  Trash2,
 } from "lucide-react";
 
 import { useUIStore } from "../store";
 import { useWikiDocsStore } from "../hooks/useWikiDocs";
+import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import {
-  filterLibrary,
-  libraryProjects,
-  mergeLibrary,
-  type LibraryItem as GenericLibraryItem,
-} from "../../../shared-ts/library";
+  buildLibraryTree,
+  libraryDropKey,
+  libraryDropTarget,
+  libraryEntryKey,
+  libraryEntryMatches,
+  type LibraryEntry,
+  type LibraryFolderNode,
+  type LibraryProjectTree,
+} from "../../../shared-ts/libraryTree";
 import type { AuxDoc } from "../detailAux";
 import type { AuxCardTail } from "./auxDocMenu";
-import type { Artifact } from "./ArtifactsView";
-import type { WikiDoc } from "./WikiView";
 import { ArtifactTabPane } from "./ArtifactTabPane";
 import { WikiTabPane } from "./WikiTabPane";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
-import { SkeletonList } from "./loading";
+import { SkeletonList, Spinner } from "./loading";
 import { timeAgo } from "./timeAgo";
 import styles from "./LibraryView.module.css";
-
-export type LibraryItem = GenericLibraryItem<WikiDoc, Artifact>;
 
 const ARTIFACT_ICON: Record<string, typeof FileText> = {
   image: ImageIcon,
@@ -47,6 +58,10 @@ const ARTIFACT_ICON: Record<string, typeof FileText> = {
   archive: Archive,
   text: FileText,
 };
+
+/** Rows carrying this attribute are drop zones; the value is a
+ *  `libraryDropKey(project, folder)` (`folder: ""` = the unfiled bucket). */
+const DROP_ATTR = "data-library-drop";
 
 /** Wiki bodies matched by a full-text search, so a doc whose title does not
  *  contain the query still passes it. Debounced; a query shorter than two
@@ -77,16 +92,35 @@ function useWikiBodyHits(query: string): { slugs: ReadonlySet<string>; busy: boo
 
 const EMPTY: ReadonlySet<string> = new Set();
 
+/** The row a folder verb is running on, so it can show a spinner. */
+type Busy = string | null;
+
+/** Everything a folder or entry row needs from the page, passed down once. */
+interface TreeCtx {
+  project: string;
+  selectedKey: string | null;
+  dropActive: string | null;
+  busy: Busy;
+  draggingKey: string | null;
+  searching: boolean;
+  onOpen: (e: LibraryEntry) => void;
+  entryDrag: (e: LibraryEntry) => { onPointerDown: (ev: React.PointerEvent) => void };
+  onCreateFolder: (project: string, path: string) => void;
+  onRenameFolder: (project: string, from: string, to: string) => void;
+  onDeleteFolder: (project: string, path: string, label: string) => void;
+  onDescribeFolder: (project: string, path: string, description: string) => void;
+}
+
 /**
- * 资料 (Library): wiki documents and artifacts as one list.
+ * 资料 (Library): wiki documents and artifacts as one folder tree per project.
  *
- * Only the presentation is merged — both stores, their Tauri commands and
- * their management pages stay as they were. Those pages are the other two
- * segments of this section (文档 / 产出), so the section switch is the type
- * filter: 全部 here, one type there, each with its own project filter and
- * search. This list filters by project and searches titles plus wiki bodies; the detail column reuses the same reader panes a
- * conversation's side rail opens, which in turn link over to the full page for
- * the actions only that page owns (move, rename, rollback).
+ * The folders are the project's schema (`claw_fleet_core::library`), each with
+ * a one-line description; core places every doc and artifact in the folder it
+ * is filed in, or in 未归档 when it is not filed in any schema folder. Both
+ * stores stay as they are — moving an item re-keys a doc's slug or sets an
+ * artifact's `path`, done server-side. The other two segments of this section
+ * (文档 / 产出) are still each store's own management page. The detail column
+ * reuses the reader panes a conversation's side rail opens.
  */
 export function LibraryView() {
   const { t } = useTranslation();
@@ -98,62 +132,204 @@ export function LibraryView() {
     [update],
   );
 
-  const docs = useWikiDocsStore((s) => s.docs);
-  const docsLoaded = useWikiDocsStore((s) => s.loaded);
   const fetchDocs = useWikiDocsStore((s) => s.fetch);
-  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
+  const [projects, setProjects] = useState<LibraryProjectTree[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
 
   const load = useCallback(async () => {
-    setError(null);
-    // The shared doc list is a one-shot snapshot; this page is where a user
-    // expects to see what was published since the app opened.
-    void fetchDocs();
     try {
-      setArtifacts((await invoke<Artifact[]>("list_artifacts")) ?? []);
+      setProjects((await invoke<LibraryProjectTree[]>("library_tree", { workspace: null })) ?? []);
     } catch (e) {
-      setArtifacts((prev) => prev ?? []);
+      setProjects((prev) => prev ?? []);
       setError(String(e));
     }
-  }, [fetchDocs]);
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const items = useMemo<LibraryItem[] | null>(
-    () => (docsLoaded && artifacts ? mergeLibrary(docs, artifacts) : null),
-    [docs, docsLoaded, artifacts],
+  // A stored project key from before the tree (a string-derived repo root) may
+  // name nothing core knows; fall back to every project rather than a blank.
+  const activeProject = useMemo(
+    () => (projects ?? []).find((p) => p.workspacePath === project)?.workspacePath ?? "",
+    [projects, project],
   );
-  const projects = useMemo(() => libraryProjects(items ?? []), [items]);
   const bodyHits = useWikiBodyHits(query);
-  const shown = useMemo(
-    () => filterLibrary(items ?? [], { project, query, extraDocSlugs: bodyHits.slugs }),
-    [items, project, query, bodyHits.slugs],
+  const q = query.trim();
+  const views = useMemo(() => {
+    const keep = q
+      ? (e: LibraryEntry) =>
+          libraryEntryMatches(e, q) || (e.kind === "doc" && bodyHits.slugs.has(e.id))
+      : undefined;
+    return (projects ?? [])
+      .filter((p) => !activeProject || p.workspacePath === activeProject)
+      .map((p) => ({ project: p, view: buildLibraryTree(p, keep) }))
+      .filter(({ project: p, view }) => !q || view.shown > 0 || p.workspacePath === activeProject);
+  }, [projects, activeProject, q, bodyHits.slugs]);
+  const shownCount = views.reduce((s, v) => s + v.view.shown, 0);
+
+  const selected = useMemo(() => {
+    for (const p of projects ?? []) {
+      const hit = p.items.find((e) => libraryEntryKey(e) === selectedKey);
+      if (hit) return hit;
+    }
+    return null;
+  }, [projects, selectedKey]);
+
+  /** Run a schema/filing mutation with a spinner on `row`, then reload. A full
+   *  reload rather than a splice: a rename re-keys docs and re-files artifacts
+   *  server-side, so every count under it changes. */
+  const mutate = useCallback(
+    async (row: string, op: () => Promise<unknown>) => {
+      setBusy(row);
+      try {
+        await op();
+        setError(null);
+        await load();
+        void fetchDocs();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [load, fetchDocs],
   );
-  const selected = useMemo(
-    () => (items ?? []).find((it) => it.key === selectedKey) ?? null,
-    [items, selectedKey],
+
+  const onCreateFolder = useCallback(
+    (p: string, path: string) => {
+      const parentPath = path.split("/").slice(0, -1).join("/");
+      void mutate(libraryDropKey(p, parentPath), () =>
+        invoke("library_create_folder", { workspacePath: p, path, description: null }),
+      );
+    },
+    [mutate],
   );
+  const onRenameFolder = useCallback(
+    (p: string, from: string, to: string) =>
+      void mutate(libraryDropKey(p, from), () =>
+        invoke("library_rename_folder", { workspacePath: p, from, to }),
+      ),
+    [mutate],
+  );
+  const onDeleteFolder = useCallback(
+    (p: string, path: string, label: string) => {
+      if (!window.confirm(t("library.folder_delete_confirm", "删除文件夹「{{name}}」？", { name: label }))) return;
+      void mutate(libraryDropKey(p, path), () =>
+        invoke("library_delete_folder", { workspacePath: p, path }),
+      );
+    },
+    [mutate, t],
+  );
+  const onDescribeFolder = useCallback(
+    (p: string, path: string, description: string) =>
+      void mutate(libraryDropKey(p, path), () =>
+        invoke("library_describe_folder", { workspacePath: p, path, description }),
+      ),
+    [mutate],
+  );
+
+  const moveEntry = useCallback(
+    (entry: LibraryEntry, p: string, folder: string) => {
+      if ((entry.folder ?? "") === folder) return;
+      void mutate(libraryDropKey(p, folder), async () => {
+        const moved = await invoke<LibraryEntry>("library_move_item", {
+          kind: entry.kind,
+          id: entry.id,
+          folder,
+        });
+        // A doc's slug — its id — changes with its folder; keep it selected.
+        if (moved && selectedKey === libraryEntryKey(entry)) {
+          set({ selectedKey: libraryEntryKey(moved) });
+        }
+      });
+    },
+    [mutate, selectedKey, set],
+  );
+
+  // ── Drag to file ──────────────────────────────────────────────────────────
+  // Pointer events, not HTML5 DnD (inert in this webview — see usePointerDrag).
+  const pressed = useRef<{ entry: LibraryEntry; project: string } | null>(null);
+  const [dragging, setDragging] = useState<{ entry: LibraryEntry; project: string } | null>(null);
+  const [dropAt, setDropAt] = useState<string | null>(null);
+  const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null);
+  const endDrag = useCallback(() => {
+    pressed.current = null;
+    setDragging(null);
+    setDropAt(null);
+    setDragPoint(null);
+  }, []);
+  const drag = usePointerDrag({
+    onStart: (pt) => {
+      if (!pressed.current) return false;
+      setDragging(pressed.current);
+      setDragPoint({ x: pt.x, y: pt.y });
+    },
+    onMove: (pt) => {
+      setDragPoint({ x: pt.x, y: pt.y });
+      const key = dropTargetAt(pt.over, DROP_ATTR);
+      const src = pressed.current;
+      setDropAt(src && libraryDropTarget(key, src.project) !== null ? key : null);
+    },
+    onDrop: (pt) => {
+      const src = pressed.current;
+      const folder = src ? libraryDropTarget(dropTargetAt(pt.over, DROP_ATTR), src.project) : null;
+      endDrag();
+      if (src && folder !== null) moveEntry(src.entry, src.project, folder);
+    },
+    onCancel: endDrag,
+  });
+
+  const onOpen = useCallback(
+    (e: LibraryEntry) => {
+      // The click a finished drag fires is not an open.
+      if (drag.didDrag()) return;
+      set({ selectedKey: libraryEntryKey(e) });
+    },
+    [drag, set],
+  );
+
+  const treeCtx = (p: string): TreeCtx => ({
+    project: p,
+    selectedKey,
+    dropActive: dropAt,
+    busy,
+    draggingKey: dragging ? libraryEntryKey(dragging.entry) : null,
+    searching: !!q,
+    onOpen,
+    entryDrag: (e) => ({
+      onPointerDown: (ev) => {
+        pressed.current = { entry: e, project: p };
+        drag.onPointerDown(ev);
+      },
+    }),
+    onCreateFolder,
+    onRenameFolder,
+    onDeleteFolder,
+    onDescribeFolder,
+  });
 
   const list = (
     <div className={styles.list}>
-      {items === null ? (
+      {projects === null ? (
         <SkeletonList rows={8} />
-      ) : shown.length === 0 ? (
+      ) : views.length === 0 ? (
         <div className={styles.none}>
-          {items.length === 0
+          {projects.length === 0
             ? t("library.empty", "还没有资料。agent 发布的文档和交付的文件会出现在这里。")
             : t("library.no_match", "没有符合筛选条件的资料")}
         </div>
       ) : (
-        shown.map((it) => (
-          <LibraryRow
-            key={it.key}
-            item={it}
-            active={it.key === selectedKey}
-            showProject={!project}
-            onOpen={() => set({ selectedKey: it.key })}
+        views.map(({ project: p, view }) => (
+          <ProjectBranch
+            key={p.workspacePath}
+            name={p.workspaceName}
+            total={view.shown}
+            folders={view.folders}
+            unfiled={view.unfiled}
+            ctx={treeCtx(p.workspacePath)}
           />
         ))
       )}
@@ -164,8 +340,8 @@ export function LibraryView() {
     <PageShell
       view="library"
       title={t("nav_section_library", "资料")}
-      count={items ? shown.length : null}
-      countLoading={items === null}
+      count={projects ? shownCount : null}
+      countLoading={projects === null}
       search={{
         value: query,
         onChange: (v) => set({ query: v }),
@@ -176,80 +352,371 @@ export function LibraryView() {
         <div className={styles.filters}>
           <select
             className={styles.select}
-            value={project}
+            value={activeProject}
             onChange={(e) => set({ project: e.target.value })}
             aria-label={t("library.project_all", "全部项目")}
           >
             <option value="">{t("library.project_all", "全部项目")}</option>
-            {projects.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.name}
+            {(projects ?? []).map((p) => (
+              <option key={p.workspacePath} value={p.workspacePath}>
+                {p.workspaceName}
               </option>
             ))}
           </select>
+          <span className={styles.hint}>{t("library.drag_hint", "拖动条目到文件夹即可归档")}</span>
         </div>
       }
       secondary={list}
       detailKey={selectedKey}
     >
-      {error && <div className={styles.error}>{t("library.load_failed", "产出加载失败：{{error}}", { error })}</div>}
+      {error && <div className={styles.error}>{error}</div>}
+      {dragging && dragPoint && (
+        <div className={styles.drag_ghost} style={{ left: dragPoint.x + 12, top: dragPoint.y + 12 }}>
+          {dragging.entry.title}
+        </div>
+      )}
       {selected ? (
-        <LibraryDetail key={selected.key} item={selected} onClose={() => set({ selectedKey: null })} />
+        <LibraryDetail key={libraryEntryKey(selected)} item={selected} onClose={() => set({ selectedKey: null })} />
       ) : (
         <EmptyState
           icon={<Library size={28} strokeWidth={1.4} />}
           title={t("library.pick_title", "选一份资料")}
-          subtitle={t("library.pick_sub", "文档和产出放在一起；左边按类型和项目筛选。")}
+          subtitle={t("library.pick_sub_tree", "文档和产出按项目的目录结构放在一起；拖动条目即可归档。")}
         />
       )}
     </PageShell>
   );
 }
 
-function LibraryRow({
-  item,
-  active,
-  showProject,
-  onOpen,
+function ProjectBranch({
+  name,
+  total,
+  folders,
+  unfiled,
+  ctx,
 }: {
-  item: LibraryItem;
-  active: boolean;
-  showProject: boolean;
-  onOpen: () => void;
+  name: string;
+  total: number;
+  folders: LibraryFolderNode[];
+  unfiled: LibraryEntry[];
+  ctx: TreeCtx;
 }) {
   const { t } = useTranslation();
-  const Icon = item.type === "doc" ? BookOpen : (ARTIFACT_ICON[item.artifact.kind] ?? FileText);
+  const [expanded, setExpanded] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const rootBusy = ctx.busy === libraryDropKey(ctx.project, "") && !creating;
+  return (
+    <div className={styles.project}>
+      <div className={styles.tree_row} style={{ paddingLeft: 4 }}>
+        <button
+          type="button"
+          className={styles.twisty}
+          aria-label={expanded ? "Collapse" : "Expand"}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        <span className={styles.tree_target} title={ctx.project}>
+          <FolderGit2 size={15} strokeWidth={1.5} />
+          <span className={styles.project_name}>{name}</span>
+          <span className={styles.count}>{total}</span>
+        </span>
+        <span className={styles.actions}>
+          <button
+            type="button"
+            className={styles.action}
+            title={t("library.folder_new", "新建文件夹")}
+            aria-label={t("library.folder_new", "新建文件夹")}
+            onClick={() => {
+              setExpanded(true);
+              setCreating(true);
+            }}
+          >
+            <FolderPlus size={13} strokeWidth={1.5} />
+          </button>
+        </span>
+      </div>
+      {creating && (
+        <InlineInput
+          depth={0}
+          placeholder={t("library.folder_name_placeholder", "文件夹名")}
+          initial=""
+          onDone={(v) => {
+            setCreating(false);
+            if (v) ctx.onCreateFolder(ctx.project, v);
+          }}
+        />
+      )}
+      {expanded && (
+        <>
+          {rootBusy && <div className={styles.row_busy}><Spinner size={12} /></div>}
+          {folders.map((f) => (
+            <FolderBranch key={f.path} node={f} depth={1} ctx={ctx} />
+          ))}
+          {folders.length === 0 && !ctx.searching && (
+            <div className={styles.no_folders}>
+              {t("library.no_folders", "这个项目还没有目录结构。点右侧 + 新建文件夹。")}
+            </div>
+          )}
+          <UnfiledBranch items={unfiled} ctx={ctx} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function FolderBranch({ node, depth, ctx }: { node: LibraryFolderNode; depth: number; ctx: TreeCtx }) {
+  const { t } = useTranslation();
+  // Folders start open while searching (so every hit is visible) and when
+  // shallow; deeper ones start closed so a big schema reads at a glance.
+  const [expanded, setExpanded] = useState(depth <= 1);
+  const [editing, setEditing] = useState<null | "create" | "rename" | "describe">(null);
+  const key = libraryDropKey(ctx.project, node.path);
+  const open = expanded || ctx.searching;
+  const rowBusy = ctx.busy === key;
+
+  const commit = (value: string) => {
+    const mode = editing;
+    setEditing(null);
+    if (mode === "describe") {
+      if (value !== node.description) ctx.onDescribeFolder(ctx.project, node.path, value);
+      return;
+    }
+    if (!value) return;
+    if (mode === "create") {
+      setExpanded(true);
+      ctx.onCreateFolder(ctx.project, `${node.path}/${value}`);
+      return;
+    }
+    // Rename replaces the last segment only; re-nesting is a different gesture.
+    if (value === node.label) return;
+    const parent = node.path.split("/").slice(0, -1).join("/");
+    ctx.onRenameFolder(ctx.project, node.path, parent ? `${parent}/${value}` : value);
+  };
+
+  return (
+    <div>
+      <div
+        className={`${styles.tree_row} ${ctx.dropActive === key ? styles.tree_row_drop : ""}`}
+        style={{ paddingLeft: 4 + depth * 14 }}
+        {...{ [DROP_ATTR]: key }}
+      >
+        <button
+          type="button"
+          className={styles.twisty}
+          aria-label={open ? "Collapse" : "Expand"}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        <button type="button" className={styles.tree_target} onClick={() => setExpanded((v) => !v)}>
+          {open ? <FolderOpen size={15} strokeWidth={1.4} /> : <Folder size={15} strokeWidth={1.4} />}
+          <span className={styles.folder_text}>
+            <span className={styles.folder_label} title={node.path}>{node.label}</span>
+            {node.description && (
+              <span className={styles.folder_desc} title={node.description}>{node.description}</span>
+            )}
+          </span>
+          {rowBusy ? <Spinner size={12} /> : <span className={styles.count}>{node.total}</span>}
+        </button>
+        <span className={styles.actions}>
+          <button
+            type="button"
+            className={styles.action}
+            title={t("library.folder_new_sub", "新建子文件夹")}
+            aria-label={t("library.folder_new_sub", "新建子文件夹")}
+            onClick={() => setEditing("create")}
+          >
+            <FolderPlus size={13} strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className={styles.action}
+            title={t("library.folder_describe", "编辑说明")}
+            aria-label={t("library.folder_describe", "编辑说明")}
+            onClick={() => setEditing("describe")}
+          >
+            <NotebookPen size={13} strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className={styles.action}
+            title={t("library.folder_rename", "重命名")}
+            aria-label={t("library.folder_rename", "重命名")}
+            onClick={() => setEditing("rename")}
+          >
+            <Pencil size={13} strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            className={styles.action}
+            title={t("library.folder_delete", "删除文件夹")}
+            aria-label={t("library.folder_delete", "删除文件夹")}
+            onClick={() => ctx.onDeleteFolder(ctx.project, node.path, node.label)}
+          >
+            <Trash2 size={13} strokeWidth={1.5} />
+          </button>
+        </span>
+      </div>
+      {editing && (
+        <InlineInput
+          depth={depth}
+          initial={editing === "rename" ? node.label : editing === "describe" ? node.description : ""}
+          placeholder={
+            editing === "describe"
+              ? t("library.folder_desc_placeholder", "一句话说明这里放什么")
+              : t("library.folder_name_placeholder", "文件夹名")
+          }
+          // A description may be cleared on purpose; a name may not.
+          allowEmpty={editing === "describe"}
+          onDone={(v) => (v === null ? setEditing(null) : commit(v))}
+        />
+      )}
+      {open && (
+        <>
+          {node.children.map((c) => (
+            <FolderBranch key={c.path} node={c} depth={depth + 1} ctx={ctx} />
+          ))}
+          {node.items.map((e) => (
+            <EntryRow key={libraryEntryKey(e)} entry={e} depth={depth + 1} ctx={ctx} />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function UnfiledBranch({ items, ctx }: { items: LibraryEntry[]; ctx: TreeCtx }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(true);
+  const key = libraryDropKey(ctx.project, "");
+  if (items.length === 0 && ctx.searching) return null;
+  return (
+    <div>
+      <div
+        className={`${styles.tree_row} ${styles.unfiled_row} ${ctx.dropActive === key ? styles.tree_row_drop : ""}`}
+        style={{ paddingLeft: 18 }}
+        {...{ [DROP_ATTR]: key }}
+      >
+        <button
+          type="button"
+          className={styles.twisty}
+          aria-label={expanded ? "Collapse" : "Expand"}
+          onClick={() => setExpanded((v) => !v)}
+          disabled={items.length === 0}
+        >
+          {items.length > 0 ? (expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}
+        </button>
+        <button type="button" className={styles.tree_target} onClick={() => setExpanded((v) => !v)}>
+          <Inbox size={15} strokeWidth={1.4} />
+          <span className={styles.folder_text}>
+            <span className={styles.folder_label}>{t("library.unfiled", "未归档")}</span>
+            <span className={styles.folder_desc}>
+              {t("library.unfiled_desc", "不在任何目录里的资料，拖进文件夹即可归档")}
+            </span>
+          </span>
+          <span className={styles.count}>{items.length}</span>
+        </button>
+      </div>
+      {expanded &&
+        items.map((e) => <EntryRow key={libraryEntryKey(e)} entry={e} depth={2} ctx={ctx} showLocation />)}
+    </div>
+  );
+}
+
+function EntryRow({
+  entry,
+  depth,
+  ctx,
+  showLocation = false,
+}: {
+  entry: LibraryEntry;
+  depth: number;
+  ctx: TreeCtx;
+  showLocation?: boolean;
+}) {
+  const { t } = useTranslation();
+  const key = libraryEntryKey(entry);
+  const active = ctx.selectedKey === key;
+  const Icon = entry.kind === "doc" ? BookOpen : (ARTIFACT_ICON[entry.artifactKind] ?? FileText);
   return (
     <button
       type="button"
-      className={`${styles.row}${active ? ` ${styles.row_active}` : ""}`}
-      onClick={onOpen}
+      className={`${styles.row}${active ? ` ${styles.row_active}` : ""}${
+        ctx.draggingKey === key ? ` ${styles.row_dragging}` : ""
+      }`}
+      style={{ paddingLeft: 8 + depth * 14 }}
+      onClick={() => ctx.onOpen(entry)}
       aria-current={active ? "true" : undefined}
+      {...ctx.entryDrag(entry)}
     >
-      <span className={styles.icon} data-type={item.type}>
-        <Icon size={15} strokeWidth={1.6} />
+      <span className={styles.icon} data-type={entry.kind}>
+        <Icon size={14} strokeWidth={1.6} />
       </span>
       <span className={styles.body}>
-        <span className={styles.title}>{item.title}</span>
+        <span className={styles.title}>{entry.title}</span>
         <span className={styles.meta}>
-          <span>{item.type === "doc" ? t("library.type_doc", "文档") : t("library.type_artifact", "产出")}</span>
-          {showProject && item.workspaceName && <span className={styles.project}>{item.workspaceName}</span>}
-          {item.updatedMs > 0 && <span className={styles.time}>{timeAgo(item.updatedMs, t)}</span>}
+          <span>{entry.kind === "doc" ? t("library.type_doc", "文档") : t("library.type_artifact", "产出")}</span>
+          {showLocation && entry.location && (
+            <span className={styles.location} title={entry.location}>
+              {entry.location}/
+            </span>
+          )}
+          {entry.updatedMs > 0 && <span className={styles.time}>{timeAgo(entry.updatedMs, t)}</span>}
         </span>
       </span>
     </button>
   );
 }
 
+/** Inline editor under a tree row. Enter or blur commits, Escape cancels
+ *  (`onDone(null)`). Inline rather than `window.prompt`, which is not reliably
+ *  available in the Tauri webview. */
+function InlineInput({
+  depth,
+  initial,
+  placeholder,
+  allowEmpty = false,
+  onDone,
+}: {
+  depth: number;
+  initial: string;
+  placeholder: string;
+  allowEmpty?: boolean;
+  onDone: (value: string | null) => void;
+}) {
+  const done = useRef(false);
+  const finish = (v: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    const trimmed = v === null ? null : v.trim();
+    onDone(trimmed === "" && !allowEmpty ? null : trimmed);
+  };
+  return (
+    <input
+      className={styles.tree_input}
+      style={{ marginLeft: 26 + depth * 14 }}
+      autoFocus
+      defaultValue={initial}
+      placeholder={placeholder}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(e.currentTarget.value);
+        if (e.key === "Escape") finish(null);
+      }}
+      onBlur={(e) => finish(e.currentTarget.value)}
+    />
+  );
+}
+
 /** The reader for the selected item: the side-rail pane of its kind, pinned
  *  open. Its close / collapse both clear the selection; there are no sibling
  *  cards here, so the "close others" family has nothing to act on. */
-function LibraryDetail({ item, onClose }: { item: LibraryItem; onClose: () => void }) {
+function LibraryDetail({ item, onClose }: { item: LibraryEntry; onClose: () => void }) {
   const setSelected = useUIStore((s) => s.updateMainViewState);
   const doc: AuxDoc =
-    item.type === "doc"
-      ? { id: `wiki:${item.doc.slug}`, kind: "wiki", ref: item.doc.slug, label: item.title, openedMs: 0 }
-      : { id: `artifact:${item.artifact.id}`, kind: "artifact", ref: item.artifact.id, label: item.title, openedMs: 0 };
+    item.kind === "doc"
+      ? { id: `wiki:${item.id}`, kind: "wiki", ref: item.id, label: item.title, openedMs: 0 }
+      : { id: `artifact:${item.id}`, kind: "artifact", ref: item.id, label: item.title, openedMs: 0 };
   const tail: AuxCardTail = {
     isExpanded: true,
     onToggle: onClose,

@@ -1,4 +1,5 @@
-/* 资料 (Library): merged wiki + artifact list. Tokens only — no new colours. */
+/* 资料 (Library): one folder tree per project, wiki docs and artifacts mixed.
+ * Tokens only — no new colours. */
 
 .filters {
   display: flex;
@@ -105,16 +106,6 @@
   font-size: var(--font-size-xs);
 }
 
-.project {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 5px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-}
 
 .time {
   flex: 0 0 auto;
@@ -137,4 +128,200 @@
   background: var(--color-error-bg);
   color: var(--color-error-fg);
   font-size: var(--font-size-sm);
+}
+
+.hint {
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.project + .project {
+  margin-top: var(--space-3);
+}
+
+.tree_row {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+}
+
+.tree_row:hover {
+  background: var(--color-bg-row-hover);
+  color: var(--color-text);
+}
+
+/* The row the pointer is over mid-drag: outlined, so "where will this land"
+ * is unmistakable even over a tinted row. */
+.tree_row_drop,
+.tree_row_drop:hover {
+  background: var(--color-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.twisty,
+.tree_target {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.twisty {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.twisty:disabled {
+  cursor: default;
+}
+
+.tree_target {
+  min-width: 0;
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  text-align: left;
+}
+
+.project_name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.folder_text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.folder_label {
+  flex: 0 0 auto;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
+.folder_desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.unfiled_row {
+  margin-top: var(--space-1);
+}
+
+.count {
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Per-folder verbs, out of the layout until hover so they neither squeeze the
+ * folder name nor push the count column out of line with the unfiled rows.
+ * `:focus-within` keeps them reachable by keyboard. */
+.actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.tree_row:hover .actions,
+.tree_row:focus-within .actions {
+  display: flex;
+}
+
+.action {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--color-bg-field);
+  color: var(--color-text);
+}
+
+.tree_input {
+  width: calc(100% - 60px);
+  margin-block: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+}
+
+.no_folders,
+.row_busy {
+  padding: var(--space-1) var(--space-4) var(--space-1) 40px;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.location {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.row_dragging {
+  opacity: 0.45;
+}
+
+.drag_ghost {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-modal);
+  color: var(--color-text);
+  font-size: var(--font-size-2xs);
+  box-shadow: var(--shadow-card-hover);
 }

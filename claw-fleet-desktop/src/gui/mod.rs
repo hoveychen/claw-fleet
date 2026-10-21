@@ -31,6 +31,7 @@ mod tts;
 pub(crate) use setup::HarnessInstallProgress;
 mod alerts;
 mod artifacts;
+mod library;
 mod audit;
 mod claude_bin;
 mod cli_installer;
@@ -59,6 +60,7 @@ mod wiki;
 
 use self::alerts::*;
 use self::artifacts::*;
+use self::library::*;
 use self::audit::*;
 use self::claude_bin::*;
 use self::cli_installer::*;
@@ -1759,6 +1761,12 @@ pub fn run() {
             create_artifact_folder,
             delete_artifact_folder,
             rename_artifact_folder,
+            library_tree,
+            library_create_folder,
+            library_describe_folder,
+            library_delete_folder,
+            library_rename_folder,
+            library_move_item,
             export_artifact,
             export_bytes,
             reveal_artifact,

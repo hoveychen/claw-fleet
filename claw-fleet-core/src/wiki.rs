@@ -95,14 +95,14 @@ fn wiki_dir_or_err() -> Result<PathBuf, String> {
 // ── Slug ─────────────────────────────────────────────────────────────────────
 
 /// Max characters in one `/`-separated slug segment.
-const MAX_SLUG_SEGMENT: usize = 64;
+pub(crate) const MAX_SLUG_SEGMENT: usize = 64;
 /// Max characters in a whole slug, separators included.
-const MAX_SLUG_LEN: usize = 128;
+pub(crate) const MAX_SLUG_LEN: usize = 128;
 /// Max number of segments (`a/b/c` is 3).
-const MAX_SLUG_DEPTH: usize = 8;
+pub(crate) const MAX_SLUG_DEPTH: usize = 8;
 
 /// Lowercase, collapse runs of non-alphanumerics to a single hyphen, trim.
-fn normalize_segment(raw: &str) -> String {
+pub(crate) fn normalize_segment(raw: &str) -> String {
     let mut out = String::new();
     let mut prev_hyphen = true; // suppress leading hyphen
     for c in raw.chars() {
@@ -361,7 +361,7 @@ pub fn workspace_contains(doc_workspace: &str, cwd_workspace: &str) -> bool {
 /// A linked worktree's `.git` is a file, and resolving it yields the *main*
 /// checkout, which is what makes a worktree and its repo compare equal.
 /// `None` when `path` is not inside a checkout at all.
-fn repo_root(path: &Path) -> Option<PathBuf> {
+pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
     let mut dir = Some(path);
     while let Some(d) = dir {
         let dot_git = d.join(".git");
