@@ -181,8 +181,12 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
     let z = e.item(&b, "说明书.zip/油烟机.txt");
     assert_eq!(z.folder.as_deref(), Some("资料"));
     assert_eq!(b.skipped_junk, 1);
-    assert_eq!(b.rejected.len(), 1);
-    assert!(b.rejected[0].reason.contains("rar"));
+    // The rar is not opened, but kept: filed whole with a note.
+    assert!(b.rejected.is_empty(), "{:?}", b.rejected);
+    let old = e.item(&b, "旧图.rar");
+    assert_eq!(old.status, ItemStatus::Filed);
+    assert!(old.error.as_deref().unwrap_or("").contains("rar archive stored as is"), "{:?}", old.error);
+    assert!(old.artifact_id.is_some());
 
     // One draft, one classification chunk, one image (the last two run in
     // parallel); the duplicate cost nothing.
@@ -212,7 +216,7 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
     assert!(!batch_dir(&e.roots, &b.id).unwrap().join("files").exists());
 
     let s = b.summary();
-    assert_eq!((s.total, s.filed, s.duplicates, s.rejected, s.unfiled), (4, 3, 1, 1, 0));
+    assert_eq!((s.total, s.filed, s.duplicates, s.rejected, s.unfiled), (5, 4, 1, 0, 1));
 }
 
 #[test]

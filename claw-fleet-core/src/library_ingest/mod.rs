@@ -977,8 +977,8 @@ fn extract_all(roots: &Roots, id: &str) -> Result<(), String> {
                         i.text_chars = got.text.chars().count();
                         i.needs_vision = needs_vision;
                         i.vision_file = vision_file.clone();
-                        if let Some(note) = &got.note {
-                            i.error = Some(note.clone());
+                        if let Some(note) = archive::unsupported_archive_note(&i.name).or_else(|| got.note.clone()) {
+                            i.error = Some(note);
                         }
                         i.status = ItemStatus::Extracted;
                     }
