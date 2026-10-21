@@ -24,7 +24,6 @@ import {
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import {
-  LIBRARY_TYPE_GROUPS,
   buildLibraryTree,
   fetchFolderItems,
   fetchLibraryThumb,
@@ -40,6 +39,7 @@ import {
   projectTotals,
   snippetRuns,
   typeCounts,
+  visibleTypeGroups,
   type LibraryEntry,
   type LibraryFolderNode,
   type LibraryFolderRec,
@@ -57,6 +57,8 @@ import styles from "./LibraryBrowse.module.css";
 
 export const TYPE_LABEL: Record<LibraryTypeGroup, string> = {
   doc: "文档",
+  artifact: "产出",
+  text: "文本",
   image: "图片",
   video: "视频",
   sheet: "表格",
@@ -329,7 +331,7 @@ export function FolderContent({
   const counts = useMemo(() => typeCounts(rows), [rows]);
   const shown = useMemo(() => filterListing(rows, group, sort), [rows, group, sort]);
   const choices = useMemo(() => folderChoices(project.folders), [project.folders]);
-  const groups = LIBRARY_TYPE_GROUPS.filter((g) => (counts[g] ?? 0) > 0);
+  const groups = visibleTypeGroups(counts);
 
   return (
     <div className={styles.level} data-library-folder={path}>

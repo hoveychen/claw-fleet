@@ -1230,6 +1230,7 @@ const DICT: Record<string, string> = {
   "正在打开…": "Opening…",
   还没放进任何目录的资料: "Items not in any folder yet",
   图片: "Image",
+  文本: "Text",
   视频: "Video",
   表格: "Sheet",
   幻灯片: "Slides",
