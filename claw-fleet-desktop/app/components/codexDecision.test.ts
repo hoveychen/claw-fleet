@@ -70,6 +70,25 @@ describe("inlinePendingFleetAsk", () => {
       [historicalAsk("ask-1", "codex-session", "2026-09-06T12:00:01.000Z")],
     )).toBeNull();
   });
+
+  it("keeps a parked card answerable despite its park-time timeout record", () => {
+    const parked = ask("ask-1", "claude-session");
+    parked.request.parked = true;
+    const timeout = {
+      ...historicalAsk("ask-1", "claude-session", "2026-09-06T12:00:01.000Z"),
+      outcome: "timeout",
+      answers: {},
+    } as DecisionHistoryRecord;
+    expect(inlinePendingFleetAsk(session("claude-session", "claude-code"), [parked], [timeout]))
+      .toBe(parked);
+    // A non-parked copy with a timeout record is stale and stays hidden.
+    const live = ask("ask-2", "claude-session");
+    expect(inlinePendingFleetAsk(
+      session("claude-session", "claude-code"),
+      [live],
+      [{ ...timeout, id: "ask-2" } as DecisionHistoryRecord],
+    )).toBeNull();
+  });
 });
 
 describe("withCodexDecisionHistory", () => {
