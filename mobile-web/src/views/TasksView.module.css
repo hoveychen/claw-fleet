@@ -410,13 +410,11 @@
   color: var(--color-text);
 }
 
-/* Project tag: a label, not a place — there is no "enter project". Sits at
-   the end of the second line and gives way before the status text does. */
+/* Project tag: a label, not a place — there is no "enter project". Leads the
+   third line; the preview after it gives way before the tag does. */
 .project {
-  flex-shrink: 1;
-  min-width: 0;
+  flex-shrink: 0;
   max-width: 45%;
-  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -483,8 +481,19 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Project tag, then the preview (or search snippet). Top-aligned so the tag
+   stays on the first line of a two-line snippet. */
+.line3 {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
 /* The last thing said, one line, quieter than the status line above it. */
 .preview {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -493,6 +502,8 @@
 }
 
 .snippet {
+  flex: 1;
+  min-width: 0;
   font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   display: -webkit-box;
@@ -515,30 +526,6 @@
   font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
-}
-
-/* Stop kills the process, so it is red; interrupt only ends the current
-   turn and stays neutral. */
-.stopButton {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
-  background: none;
-  color: var(--color-error);
-  font-size: var(--t-aux, 12px);
-}
-
-.stopButton[data-mode="interrupt"] {
-  border-color: var(--color-border-strong);
-  color: var(--color-text-secondary);
-}
-
-.stopButton:disabled {
-  opacity: 0.5;
 }
 
 .acceptButton {
