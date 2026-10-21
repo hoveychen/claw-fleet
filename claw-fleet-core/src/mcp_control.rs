@@ -1941,6 +1941,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn artifact_search_finds_an_artifact_by_its_body_text() {
+        let guard = crate::paths::fleet_home_guard_with(|| {
+            let tmp = std::env::temp_dir().join(format!(
+                "fleet-mcp-artifact-search-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            let _ = std::fs::create_dir_all(&tmp);
+            tmp
+        });
+        let home = guard.home().to_path_buf();
+        let ws = home.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let src = ws.join("notes.txt");
+        std::fs::write(&src, "the quokka migration runbook").unwrap();
+        let a = crate::artifacts::add(&src, Some("Runbook"), None, &ws, None).unwrap();
+
+        let out = handle_artifact(&json!({"action": "search", "query": "quokka"}), None, &ws).unwrap();
+        assert!(out.contains(&a.id) && out.contains("quokka"), "{out}");
+        let none = handle_artifact(&json!({"action": "search", "query": "wombat"}), None, &ws).unwrap();
+        assert!(none.starts_with("No artifact"), "{none}");
+        drop(guard);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn job_wake_note_prefers_agent_note_and_shortens_command() {
         assert_eq!(job_wake_note(Some("  整局 bot 长跑  "), "python3 run.py"), "整局 bot 长跑");
         assert_eq!(job_wake_note(Some("   "), "make test"), "job: make test");
