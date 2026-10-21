@@ -1396,6 +1396,21 @@ pub(crate) enum LibraryCommands {
     RefileUndo {
         batch: String,
     },
+    /// Move docs filed before slugs were namespaced per project
+    /// (`research/memo`) onto their folder's namespaced prefix
+    /// (`<project>/research/memo`). The old slug keeps resolving through a
+    /// redirect. Safe to run again; re-filing runs it for its project first.
+    MigrateSlugs {
+        /// Only this project (default: every project with a folder schema).
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+        /// Only list what would move.
+        #[arg(long)]
+        dry_run: bool,
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
