@@ -243,8 +243,12 @@ pub struct LibraryItem {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub mime: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_zero_size")]
     pub size_bytes: u64,
+}
+
+fn is_zero_size(v: &u64) -> bool {
+    *v == 0
 }
 
 /// One project's tree: its schema folders and every item, filed or not.

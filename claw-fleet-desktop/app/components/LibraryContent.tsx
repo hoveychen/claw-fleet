@@ -551,7 +551,6 @@ function SearchResults(props: Props) {
                 key={key}
                 entry={{ ...entry, title: h.title, summary: h.summary, tags: h.tags }}
                 where={where}
-                whereIsFolder
                 snippet={h.snippet || h.summary}
                 hitInSummary={h.field === "summary"}
                 ctx={ctx}
@@ -604,7 +603,6 @@ function BatchList(props: Props) {
 function ItemCard({
   entry,
   where,
-  whereIsFolder = false,
   snippet,
   hitInSummary = false,
   ctx,
@@ -612,7 +610,6 @@ function ItemCard({
   entry: LibraryEntry;
   /** The subfolder (in a folder listing) or the folder (in search results). */
   where: string;
-  whereIsFolder?: boolean;
   /** A search snippet with `<mark>` runs; the summary otherwise. */
   snippet?: string;
   hitInSummary?: boolean;
@@ -644,14 +641,19 @@ function ItemCard({
         ) : (
           <span className={`${styles.card_summary} ${styles.dim}`}>{t("library.no_summary", "还没有摘要")}</span>
         )}
+        {tags.length > 0 && (
+          <span className={styles.card_tags}>
+            {tags.slice(0, 6).map((tag) => (
+              <span key={tag} className={styles.tag}>{tag}</span>
+            ))}
+          </span>
+        )}
         <span className={styles.card_meta}>
-          {tags.slice(0, 4).map((tag) => (
-            <span key={tag} className={styles.tag}>{tag}</span>
-          ))}
           <span className={styles.card_kind}>{kindLabel(t, entry)}</span>
           {where && (
             <span className={styles.location} title={where}>
-              {whereIsFolder ? where : `${where}/`}
+              <Folder size={11} aria-hidden style={{ flexShrink: 0 }} />
+              <span className={styles.location_text}>{where}</span>
             </span>
           )}
           {hitInSummary && <span>{t("library.hit_in_summary", "摘要命中")}</span>}

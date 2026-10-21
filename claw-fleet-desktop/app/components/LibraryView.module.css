@@ -69,10 +69,21 @@
 }
 
 .location {
+  flex: 0 1 auto;
   min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.location_text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tag {
@@ -82,11 +93,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 6px;
+  border: 1px solid var(--color-border-soft);
   border-radius: 999px;
   background: var(--color-bg-field);
   color: var(--color-text-secondary);
   font-size: var(--font-size-2xs);
-  line-height: 18px;
+  line-height: 16px;
 }
 
 /* ── Rail: projects and the open project's folder tree ───────────────── */
@@ -848,6 +860,14 @@
   background: var(--color-accent-soft);
   color: var(--color-accent);
   font-weight: 600;
+}
+
+.card_tags {
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  overflow: hidden;
 }
 
 .card_meta {

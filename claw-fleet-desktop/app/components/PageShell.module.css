@@ -211,6 +211,12 @@
   flex-shrink: 0;
 }
 
+/* A sub-bar component that rendered nothing (e.g. nothing to backfill) must not
+   leave a bordered empty strip under the search box. */
+.sub_bar:empty {
+  display: none;
+}
+
 /* Inside the list column the chips get the column's tighter gutter; they already
    wrap, so a narrower measure just costs an extra row. */
 .sub_bar_column {
