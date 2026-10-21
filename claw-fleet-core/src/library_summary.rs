@@ -276,7 +276,7 @@ short keywords. {rule}\n\nReply with one JSON object only:\n\
 
 /// `(summary, tags)` from a model answer.
 pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
-    let v: Value = serde_json::from_str(classify::extract_json(text)?).ok()?;
+    let v: Value = classify::parse_value(text)?;
     let v = match v {
         Value::Array(mut a) if !a.is_empty() => a.swap_remove(0),
         v => v,
@@ -886,6 +886,9 @@ mod tests {
         assert_eq!((s.as_str(), t), ("一份装修合同。", vec!["合同".to_string(), "装修".to_string()]));
         assert!(parse_summary("{\"summary\":\"\"}").is_none());
         assert!(parse_summary("no").is_none());
+        // Answers that failed the 2026-10-21 backfill: bare quotes inside the summary.
+        let (s, _) = parse_summary("```json\n{\"summary\":\"标题为\"新渠道能否带来持续增量\"的记录页。\",\"tags\":[\"投资\"]}\n```").unwrap();
+        assert_eq!(s, "标题为\"新渠道能否带来持续增量\"的记录页。");
         let p = summary_prompt("T", "document", &"x".repeat(10_000), classify::Language::Chinese);
         assert!(p.contains("Title: T") && p.len() < 5_000);
         assert!(p.contains(classify::Language::Chinese.rule()));

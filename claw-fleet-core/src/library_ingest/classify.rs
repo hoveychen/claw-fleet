@@ -414,8 +414,50 @@ pub fn extract_json(text: &str) -> Option<&str> {
     None
 }
 
-fn parse_value(text: &str) -> Option<Value> {
-    serde_json::from_str(extract_json(text)?).ok()
+/// The JSON value in a model's answer. Models writing Chinese often quote a
+/// phrase with bare ASCII quotes inside a string (`书写着"教师节快乐"的`),
+/// which is not JSON; such an answer is parsed again with those quotes
+/// escaped (see [`escape_inner_quotes`]).
+pub(crate) fn parse_value(text: &str) -> Option<Value> {
+    if let Some(v) = extract_json(text).and_then(|j| serde_json::from_str(j).ok()) {
+        return Some(v);
+    }
+    let start = text.find(['[', '{'])?;
+    let end = text.rfind([']', '}'])?;
+    (end > start)
+        .then(|| escape_inner_quotes(&text[start..=end]))
+        .and_then(|j| serde_json::from_str(&j).ok())
+}
+
+/// Escape the `"` inside JSON strings that do not end them: a quote that
+/// closes a string is followed by `,` `:` `}` `]` or the end; any other one
+/// is part of the text.
+fn escape_inner_quotes(json: &str) -> String {
+    let chars: Vec<char> = json.chars().collect();
+    let mut out = String::with_capacity(json.len() + 8);
+    let mut in_str = false;
+    let mut escaped = false;
+    for (i, &c) in chars.iter().enumerate() {
+        if !in_str {
+            in_str = c == '"';
+            out.push(c);
+            continue;
+        }
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            let next = chars[i + 1..].iter().find(|c| !c.is_whitespace());
+            if next.is_none_or(|n| matches!(n, ',' | ':' | '}' | ']')) {
+                in_str = false;
+            } else {
+                out.push('\\');
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Normalize a folder path the way the schema stores it.
@@ -850,6 +892,13 @@ mod tests {
         assert_eq!(extract_json("{\"a\":\"\\\"}\"}"), Some("{\"a\":\"\\\"}\"}"));
         assert_eq!(extract_json("no json here"), None);
         assert_eq!(extract_json("[1, 2"), None);
+        // Bare quotes inside a Chinese string are repaired, not refused.
+        let raw = "```json\n{\n  \"summary\": \"背景黑板上书写着\"教师节快乐\"的红色字样。\",\n  \"tags\": [\"教师节\"]\n}\n```";
+        let v = parse_value(raw).unwrap();
+        assert_eq!(v["summary"], "背景黑板上书写着\"教师节快乐\"的红色字样。");
+        assert_eq!(v["tags"][0], "教师节");
+        let v = parse_value("[{\"id\":\"i1\",\"title\":\"标题为\"新渠道\"的页面\",\"folder\":\"\"}]").unwrap();
+        assert_eq!(v[0]["title"], "标题为\"新渠道\"的页面");
     }
 
     #[test]

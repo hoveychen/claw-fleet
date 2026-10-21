@@ -241,27 +241,43 @@ impl LibraryIndex {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let conn = Connection::open(path).map_err(|e| format!("sqlite open: {e}"))?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA busy_timeout = 10000;",
-        )
-        .map_err(|e| format!("sqlite pragma: {e}"))?;
+        let mut conn = Connection::open(path).map_err(|e| format!("sqlite open: {e}"))?;
+        conn.execute_batch("PRAGMA busy_timeout = 10000;")
+            .map_err(|e| format!("sqlite pragma: {e}"))?;
+        // Switching a new database to WAL takes a lock another connection
+        // opening at the same moment may hold, and SQLite does not always
+        // wait on the busy timeout for it: retry briefly.
+        let mut tries = 0;
+        loop {
+            match conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;") {
+                Ok(()) => break,
+                Err(e) if tries < 50 && e.to_string().contains("locked") => {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(e) => return Err(format!("sqlite pragma: {e}")),
+            }
+        }
 
         // Drop before create: `CREATE … IF NOT EXISTS` cannot change the shape
         // of a table that already exists (see `search_index` for the history).
-        let version: i64 = conn
+        // One write transaction from reading the version to stamping it, so a
+        // second connection opening a new database at the same moment cannot
+        // read the old version and drop the tables the first just created.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| format!("sqlite migrate begin: {e}"))?;
+        let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap_or(0);
         if version < SCHEMA_VERSION {
-            conn.execute_batch(
+            tx.execute_batch(
                 "DROP TABLE IF EXISTS library_fts;
                  DROP TABLE IF EXISTS items;",
             )
             .map_err(|e| format!("sqlite migrate drop: {e}"))?;
         }
-        conn.execute_batch(
+        tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS items (
                  id              INTEGER PRIMARY KEY,
                  key             TEXT NOT NULL UNIQUE,
@@ -302,9 +318,10 @@ impl LibraryIndex {
         )
         .map_err(|e| format!("sqlite schema: {e}"))?;
         if version < SCHEMA_VERSION {
-            conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
+            tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
                 .map_err(|e| format!("sqlite migrate stamp: {e}"))?;
         }
+        tx.commit().map_err(|e| format!("sqlite migrate commit: {e}"))?;
         let index = Self { conn };
         // The summary policy's "new item" line: set once, on first open.
         if index.meta_get("activated_ms").is_none() {
