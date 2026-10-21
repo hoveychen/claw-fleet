@@ -18,6 +18,7 @@ import type { WikiDoc } from "../types";
 import { buildWikiHtml, exportWikiDoc, fetchWikiText, listWikiDocs } from "../wiki";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
+import { LibraryInfo } from "./LibraryInfo";
 import styles from "./WikiDocView.module.css";
 import mdStyles from "./markdownBody.module.css";
 import { AppHeader } from "./AppHeader";
@@ -280,6 +281,11 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
 
       <div className={styles.body}>
         <TopProgress active={showMdRefetch} />
+        {(doc.summary || (doc.tags?.length ?? 0) > 0) && (
+          <div className={styles.libraryInfo}>
+            <LibraryInfo summary={doc.summary} tags={doc.tags} />
+          </div>
+        )}
         {error && <div className={styles.hint}>{t("加载失败：{0}", error)}</div>}
 
         {!client && !error && markdown === null && srcdoc === null ? (

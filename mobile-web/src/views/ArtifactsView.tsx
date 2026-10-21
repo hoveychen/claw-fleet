@@ -39,6 +39,7 @@ import {
   isTextPreview,
   previewKind,
 } from "../artifacts";
+import { LibraryInfo } from "./LibraryInfo";
 import styles from "./ArtifactsView.module.css";
 import { AppHeader } from "./AppHeader";
 import { PreviewBody, type PreviewSource } from "./ArtifactPreviewBody";
@@ -307,6 +308,7 @@ export function ArtifactDetail({
       </div>
 
       <div className={styles.detailMeta}>
+        <LibraryInfo summary={artifact.summary} tags={artifact.tags} />
         {artifact.note && <div className={styles.note}>{artifact.note}</div>}
         <div className={styles.metaRow}>
           <span>{formatBytes(artifact.sizeBytes)}</span>

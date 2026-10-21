@@ -29,6 +29,9 @@ use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+mod library_arms;
+use library_arms::*;
+
 /// Fallback relay host — also the value every non-mainland region resolves to.
 /// The *effective* default is region-derived, see [`default_relay_url`].
 pub const DEFAULT_RELAY_URL: &str = crate::relay_region::RELAY_URL_GLOBAL;
@@ -2241,6 +2244,10 @@ fn is_ackable_method(method: &str) -> bool {
             | "set_resume_settings"
             | "session_explain_ask"
             | "upload_attachment"
+            | "library_ingest_create"
+            | "library_ingest_chunk"
+            | "library_ingest_start"
+            | "library_ingest_undo"
             | "decision_answer"
     )
 }
@@ -2577,6 +2584,10 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "artifact_list" => serve_artifact_list(params),
         "artifact_folders" => serve_artifact_folders(params),
         "artifact_blob" => serve_artifact_blob(params),
+        "library_tree" => serve_library_tree(params),
+        "library_search" => serve_library_search(params),
+        "library_ingest_batches" => serve_library_ingest_batches(params),
+        "library_ingest_batch" => serve_library_ingest_batch(params),
         "chat_workspace" => serve_chat_workspace(params),
         "sources_config" => serve_sources_config(params),
         "resume_settings" => serve_resume_settings(params),
@@ -2613,6 +2624,35 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             idempotent_write(method, params, || serve_session_explain_ask(params))
         }
         "upload_attachment" => serve_upload_attachment(params),
+        // 资料 writes. Folder edits and moves land the same way twice; the
+        // rest would not (a second batch, an undo of an undone item), so a
+        // resend of a lost reply replays the first answer.
+        "library_folder_accept" => serve_library_folder_accept(params),
+        "library_folder_rename" => {
+            idempotent_write(method, params, || serve_library_folder_rename(params))
+        }
+        "library_folder_delete" => {
+            idempotent_write(method, params, || serve_library_folder_delete(params))
+        }
+        "library_move" => serve_library_move(params),
+        "library_ingest_create" => {
+            idempotent_write(method, params, || serve_library_ingest_create(params))
+        }
+        // A resent piece is recognised by its offset (see library_arms); the
+        // key covers the last piece, whose part file is gone once filed.
+        "library_ingest_chunk" => {
+            idempotent_write(method, params, || serve_library_ingest_chunk(params))
+        }
+        "library_ingest_start" => {
+            idempotent_write(method, params, || serve_library_ingest_start(params))
+        }
+        "library_ingest_undo" => {
+            idempotent_write(method, params, || serve_library_ingest_undo(params))
+        }
+        "library_ingest_move" => serve_library_ingest_move(params),
+        "library_ingest_dismiss" => {
+            idempotent_write(method, params, || serve_library_ingest_dismiss(params))
+        }
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
         "user_attachment" => serve_user_attachment(params),
@@ -3483,9 +3523,8 @@ fn serve_artifact_list(_params: &Value) -> Result<Value, String> {
 /// The user's folders, so the phone can group by the same tree the desktop
 /// shows — including a folder that is still empty, which no artifact reveals.
 ///
-/// Read-only on purpose: filing and folder management are desk work (the phone's
-/// output tab has never had an edit affordance at all), and a write arm nothing
-/// calls is a surface to keep in sync for nothing.
+/// The legacy per-artifact folders. Filing on the phone goes through the
+/// library's schema folders instead (`library_move`, see `library_arms`).
 fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::artifacts::list_folders()).map_err(|e| e.to_string())
 }

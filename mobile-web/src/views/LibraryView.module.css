@@ -31,3 +31,70 @@
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
 }
+
+.uploadBtn {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+}
+
+.uploadBtn:active {
+  background: var(--color-accent-hover);
+}
+
+.uploadBtn:disabled {
+  opacity: 0.5;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionHead {
+  margin: 0;
+  padding: 0 2px;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.reviewBanner {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+}
+
+.mark {
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.hitTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hitTag {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--color-bg-input);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}

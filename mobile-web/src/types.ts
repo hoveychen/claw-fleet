@@ -456,6 +456,9 @@ export interface WikiDoc {
   versions: WikiVersion[];
   /** Former slugs that still resolve to this doc (it was moved). */
   aliases?: string[];
+  /** AI summary (`summary.json` beside the doc); absent/empty when none yet. */
+  summary?: string;
+  tags?: string[];
 }
 
 /** One wiki file, base64-framed by the `wiki_file` relay method. */
@@ -490,6 +493,9 @@ export interface Artifact {
   currentVersion: string;
   /** Every ingest of this deliverable, newest first — always at least one. */
   versions: ArtifactVersion[];
+  /** AI summary and tags (an upload's classifier, or the backfill). */
+  summary?: string;
+  tags?: string[];
 }
 
 /** One ingest of an artifact (claw_fleet_core::artifacts::ArtifactVersion). */

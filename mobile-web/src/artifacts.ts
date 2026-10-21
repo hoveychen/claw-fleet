@@ -15,7 +15,8 @@
 // destination on the machine that holds the bytes — a phone has nowhere to put
 // twenty exported files and no undo for a mistaken delete-twenty. The phone's
 // Deliverables tab stays what it has always been: browse and open one deliverable.
-// Filing and tidying stay desk work.
+// Filing one item into a library folder is the exception — that is the 资料
+// tab's move (see libraryApi.ts), one item at a time, and undoable.
 //
 // Folder-as-zip export is absent for the same reason plus a harder one: the
 // relay's one shape for bytes is a base64 payload in a single JSON frame

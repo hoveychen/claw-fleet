@@ -80,3 +80,10 @@
   border: none;
   background: #fff;
 }
+
+/* The AI summary and tags, above the document. */
+.libraryInfo {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
