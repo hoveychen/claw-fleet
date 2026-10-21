@@ -544,9 +544,32 @@ fn open_run_lock(roots: &Roots) -> Option<std::fs::File> {
         .ok()
 }
 
+/// How long a busy run lock must stay busy before it counts as a running
+/// backfill. A running backfill holds it for minutes; other holders last
+/// milliseconds: a child process this process is spawning carries a copy of
+/// every descriptor until its exec closes them, and a status probe takes the
+/// lock for an instant to test it. Without the grace, a run started right
+/// after another ended, or racing a status poll, refused as "already running".
+const RUN_LOCK_SETTLE: Duration = Duration::from_millis(250);
+
+/// Take the run lock, retrying through brief holders; `false` when it stayed
+/// held for the whole grace.
+fn try_lock_settled(lock: &std::fs::File) -> bool {
+    let started = std::time::Instant::now();
+    loop {
+        if lock.try_lock().is_ok() {
+            return true;
+        }
+        if started.elapsed() >= RUN_LOCK_SETTLE {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 fn backfill_running(roots: &Roots) -> bool {
     match open_run_lock(roots) {
-        Some(f) => f.try_lock().is_err(),
+        Some(f) => !try_lock_settled(&f),
         None => false,
     }
 }
@@ -650,7 +673,7 @@ pub fn run_backfill_in(
     on_tick: &(dyn Fn(&BackfillTick) + Sync),
 ) -> Result<BackfillRun, String> {
     let lock = open_run_lock(roots).ok_or("cannot open the backfill lock")?;
-    if lock.try_lock().is_err() {
+    if !try_lock_settled(&lock) {
         return Err("a backfill is already running".to_string());
     }
     let db = crate::library_index::db_path(roots);
@@ -1091,6 +1114,25 @@ mod tests {
         assert!(backfill_running(&roots));
         let err = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &|_| {}).unwrap_err();
         assert!(err.contains("already running"), "{err}");
+    }
+
+    #[test]
+    fn a_lock_held_only_for_an_instant_does_not_refuse_a_run() {
+        let tmp = TempDir::new().unwrap();
+        let (roots, ws) = roots(&tmp);
+        wiki::publish_text_in(&roots.wiki, "d", None, "body", &ws, wiki::TextPublishMode::Replace).unwrap();
+        // What a child process being spawned, or a status probe, does: hold
+        // the lock through a descriptor of its own for a moment.
+        let brief = open_run_lock(&roots).unwrap();
+        brief.try_lock().unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(brief);
+        });
+        let brain = FakeBrain(Default::default());
+        let run = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &|_| {}).unwrap();
+        assert_eq!(run.state, BackfillState::Done);
+        release.join().unwrap();
     }
 
     /// Per-call cost of real summaries, read-only: point
