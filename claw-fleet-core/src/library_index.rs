@@ -47,6 +47,7 @@ use serde::{Deserialize, Serialize};
 use crate::artifacts::{self, Artifact};
 use crate::fts_text::{build_snippet, query_terms, sanitize_fts_query_prefix, segment_cjk};
 use crate::library::{self, LibraryFolder, Roots, ITEM_ARTIFACT, ITEM_DOC};
+use crate::library_ingest::classify;
 use crate::wiki::{self, WikiDoc};
 
 /// Bumped whenever the indexed shape changes; an older database has its
@@ -629,6 +630,23 @@ impl LibraryIndex {
         Ok(rows.flatten().collect())
     }
 
+    /// The dominant language of project `project`'s library (see
+    /// [`classify::dominant_language`]), from each indexed item's title and
+    /// the head of its text, plus `extra` texts (an upload's files, which a
+    /// new project has nothing else to go by).
+    pub fn project_language(&self, project: &str, extra: &[String]) -> classify::Language {
+        let mut texts: Vec<String> = extra.to_vec();
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT title || ' ' || substr(body, 1, ?2) FROM items WHERE project = ?1")
+        {
+            if let Ok(rows) = stmt.query_map(params![project, LANGUAGE_SAMPLE_CHARS as i64], |r| r.get::<_, String>(0)) {
+                texts.extend(rows.flatten());
+            }
+        }
+        classify::dominant_language(texts.iter().map(String::as_str))
+    }
+
     pub fn stats(&self) -> Result<IndexStats, String> {
         self.conn
             .query_row(
@@ -938,6 +956,18 @@ fn delete_row(tx: &Connection, id: i64) -> Result<(), String> {
 /// Time a search may spend extracting artifact text the index has not seen
 /// yet. The rest is picked up by later searches or the background worker.
 const SEARCH_EXTRACT_BUDGET: Duration = Duration::from_millis(1500);
+
+/// Characters of an item's text its language is judged by.
+const LANGUAGE_SAMPLE_CHARS: usize = 1500;
+
+/// [`LibraryIndex::project_language`] against the store's index, as it was
+/// last synced; Chinese when it cannot be opened and `extra` says nothing.
+pub fn project_language_in(roots: &Roots, project: &str, extra: &[String]) -> classify::Language {
+    match LibraryIndex::open_at(&db_path(roots)) {
+        Ok(index) => index.project_language(project, extra),
+        Err(_) => classify::dominant_language(extra.iter().map(String::as_str)),
+    }
+}
 
 /// Sync, then search — the call every surface makes.
 pub fn search(query: &str, opts: &SearchOpts) -> Result<Vec<LibraryHit>, String> {

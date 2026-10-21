@@ -131,8 +131,85 @@ belongs there\", \"reason\": \"why no existing folder fits\"} — usually a subf
 existing one (a new year or month, a new counterparty), at most 2 levels deep, named in the \
 existing folders' language. Use the same new_folder path for every file that belongs there.";
 
-pub(crate) const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
-content; use Simplified Chinese when the file has no readable text.";
+/// The language a project's library is written in, which every title,
+/// summary and tag the AI writes for it follows. Per project, not per item: a
+/// Chinese project's English log or English-language paper still gets a
+/// Chinese summary, so the library reads in one language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Language {
+    Chinese,
+    English,
+}
+
+impl Language {
+    /// The prompt sentence that pins the output language.
+    pub fn rule(self) -> &'static str {
+        match self {
+            Self::Chinese => "Write titles, summaries and tags in Simplified Chinese — the language \
+this project's library is written in — even when the item itself is in English or another \
+language; keep code identifiers, file names and product names as they are.",
+            Self::English => "Write titles, summaries and tags in English — the language this \
+project's library is written in — even when the item itself is in another language.",
+        }
+    }
+}
+
+/// Share of CJK characters, among CJK characters and Latin words, from which
+/// a text counts as Chinese. A CJK character carries about what a word does;
+/// Chinese technical writing is full of English identifiers, so the bar is
+/// well below half.
+const CHINESE_SHARE: f64 = 0.3;
+/// Fewest Latin words a text without enough CJK needs to count as English.
+const MIN_ENGLISH_WORDS: usize = 5;
+
+/// The language one text is written in; `None` when it has too little text.
+pub fn text_language(text: &str) -> Option<Language> {
+    let mut cjk = 0usize;
+    let mut words = 0usize;
+    let mut in_word = false;
+    for c in text.chars() {
+        if matches!(c, '\u{4e00}'..='\u{9fff}' | '\u{3400}'..='\u{4dbf}') {
+            cjk += 1;
+            in_word = false;
+        } else if c.is_ascii_alphabetic() {
+            if !in_word {
+                words += 1;
+            }
+            in_word = true;
+        } else {
+            in_word = false;
+        }
+    }
+    if cjk + words == 0 {
+        return None;
+    }
+    if cjk as f64 / (cjk + words) as f64 >= CHINESE_SHARE {
+        Some(Language::Chinese)
+    } else if words >= MIN_ENGLISH_WORDS {
+        Some(Language::English)
+    } else {
+        None
+    }
+}
+
+/// The dominant language of `texts` (one per item): English only when more
+/// items are English than Chinese; Chinese on a tie or with nothing to go by,
+/// the library's users being Chinese-speaking first.
+pub fn dominant_language<'a>(texts: impl IntoIterator<Item = &'a str>) -> Language {
+    let (mut zh, mut en) = (0usize, 0usize);
+    for t in texts {
+        match text_language(t) {
+            Some(Language::Chinese) => zh += 1,
+            Some(Language::English) => en += 1,
+            None => {}
+        }
+    }
+    if en > zh {
+        Language::English
+    } else {
+        Language::Chinese
+    }
+}
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
@@ -193,7 +270,7 @@ Reply with JSON only, no prose:\n\
 }
 
 /// Prompt filing a chunk of text-bearing files.
-pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief]) -> String {
+pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief], lang: Language) -> String {
     let mut p = String::new();
     p.push_str("File each uploaded file into one folder of this project's library.\n\n");
     p.push_str("Folders (path — what belongs there):\n");
@@ -213,11 +290,12 @@ pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief]) -> String
 above, or \"\" when none fits; \"title\": a short descriptive title, not just the file name — \
 include the identifying facts (who, what, date, amount) when the file has them; \"summary\": 1 to \
 3 sentences on what it is and its key facts; \"tags\": 1 to 5 short keywords. The original path \
-is a hint (folder names the user chose) but decide by content.{new_rule} {LANGUAGE_RULE}\n\n\
+is a hint (folder names the user chose) but decide by content.{new_rule} {lang_rule}\n\n\
 Reply with a JSON array only:\n\
 [{{\"id\":\"{}\",\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"]}}]\n",
         items.first().map(|i| i.id.as_str()).unwrap_or("i0000"),
         new_rule = new_folder_rule(folders),
+        lang_rule = lang.rule(),
     ));
     p
 }
@@ -271,7 +349,7 @@ Reply with a JSON array only:\n\
 }
 
 /// Prompt for one image or scan, read by Claude through its `Read` tool.
-pub fn vision_prompt(folders: &[LibraryFolder], item: &ItemBrief, file_name: &str) -> String {
+pub fn vision_prompt(folders: &[LibraryFolder], item: &ItemBrief, file_name: &str, lang: Language) -> String {
     let pdf = file_name.to_lowercase().ends_with(".pdf");
     format!(
         "Use the Read tool to look at the file `{file_name}` in the current directory{pdf_hint}, \
@@ -282,13 +360,14 @@ Return: \"folder\": exactly one folder path from the list, or \"\" when none fit
 short descriptive title with the identifying facts (who, what, date, amount) when visible; \
 \"summary\": 1 to 3 sentences on what it is and its key facts; \"tags\": 1 to 5 short keywords; \
 \"text\": the document's important visible text transcribed (names, numbers, dates, line items), \
-at most 1500 characters, or \"\" for a photo without text.{new_rule} {LANGUAGE_RULE}\n\n\
+at most 1500 characters, or \"\" for a photo without text.{new_rule} {lang_rule}\n\n\
 Reply with one JSON object only:\n\
 {{\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"text\":\"...\"}}\n",
         pdf_hint = if pdf { " (the first 3 pages are enough)" } else { "" },
         folders = folder_list(folders),
         rel = item.rel_path,
         new_rule = new_folder_rule(folders),
+        lang_rule = lang.rule(),
     )
 }
 
@@ -854,7 +933,7 @@ mod tests {
             ItemBrief { id: "i0001".into(), rel_path: "合同/施工合同.docx".into(), size: 23_000, excerpt: "施工合同 甲方：陈某".into() },
             ItemBrief { id: "i0002".into(), rel_path: "IMG_1.jpg".into(), size: 3_000_000, excerpt: String::new() },
         ];
-        let p = classify_prompt(&schema(), &items);
+        let p = classify_prompt(&schema(), &items, Language::Chinese);
         assert!(p.contains("- 票据/收据 — 小票"));
         assert!(p.contains("### i0001 · 合同/施工合同.docx · 22 KB"));
         assert!(p.contains("施工合同 甲方：陈某"));
@@ -871,7 +950,7 @@ mod tests {
         assert!(d.contains("- 合同/施工合同.docx · 22 KB · \"施工合同 甲方：陈某\""));
         assert!(d.contains("\"key\""));
 
-        let v = vision_prompt(&schema(), &items[1], "scan.pdf");
+        let v = vision_prompt(&schema(), &items[1], "scan.pdf", Language::Chinese);
         assert!(v.contains("`scan.pdf`") && v.contains("first 3 pages") && v.contains("IMG_1.jpg"));
     }
 
@@ -931,8 +1010,8 @@ mod tests {
         let v = parse_verdicts(text, &[], &ids);
         assert!(v.iter().all(|v| v.new_folder.is_none()));
         let brief = ItemBrief { id: "i1".into(), ..Default::default() };
-        assert!(classify_prompt(&folders, std::slice::from_ref(&brief)).contains("\"new_folder\""));
-        assert!(vision_prompt(&folders, &brief, "a.jpg").contains("\"new_folder\""));
-        assert!(!classify_prompt(&[], std::slice::from_ref(&brief)).contains("new_folder"));
+        assert!(classify_prompt(&folders, std::slice::from_ref(&brief), Language::Chinese).contains("\"new_folder\""));
+        assert!(vision_prompt(&folders, &brief, "a.jpg", Language::Chinese).contains("\"new_folder\""));
+        assert!(!classify_prompt(&[], std::slice::from_ref(&brief), Language::Chinese).contains("new_folder"));
     }
 }

@@ -227,15 +227,16 @@ pub fn publish_wiki_in(
         }
     }
 
-    // A slug whose directory already is a folder's prefix names that folder
+    // A slug whose directory already is a folder's prefix — with the project
+    // namespace or, as written before namespacing, without — names that folder
     // (`--slug invoices/jd-0920`), so the old habit keeps working.
     let mut args = args.clone();
     if args.folder.is_none() {
         if let Some(dir) = slug.as_deref().map(library::slug_dir).filter(|d| !d.is_empty()) {
             let project = project_of(workspace)?;
             let folders = library::list_folders_in(roots, &project)?;
-            if folders.iter().any(|f| f.wiki_prefix == dir) {
-                args.folder = Some(dir.to_string());
+            if let Some(f) = library::folder_by_dir(&folders, dir) {
+                args.folder = Some(f.path.clone());
                 args.new_folder = false;
             }
         }
@@ -288,10 +289,10 @@ pub fn move_wiki_in(
                 refusal(&project, &folders, None)
             ));
         }
-        if !folders.iter().any(|f| f.wiki_prefix == dir) {
+        let Some(f) = library::folder_by_dir(&folders, dir) else {
             return Err(refusal(&project, &folders, Some(dir)));
-        }
-        args.folder = Some(dir.to_string());
+        };
+        args.folder = Some(f.path.clone());
     }
 
     let (folder, created) = resolve_in(roots, workspace, &args, session_id)?;

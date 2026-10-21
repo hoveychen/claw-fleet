@@ -26,6 +26,7 @@
 //!   scratchpad.
 
 use super::*;
+use std::collections::HashSet;
 
 use crate::library::{LibraryItem, ProjectHealth, ITEM_ARTIFACT, ITEM_DOC};
 use crate::wiki;
@@ -88,6 +89,23 @@ fn unfiled_of(roots: &Roots, key: &str) -> Vec<LibraryItem> {
         .flat_map(|p| p.items)
         .filter(|i| i.folder.is_none())
         .collect()
+}
+
+/// Slugs earlier, undone re-files of the project gave each doc, keyed by the
+/// slug the undo put it back on.
+fn undone_slugs(roots: &Roots, key: &str) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for b in all_batches(roots).into_iter().filter(|b| b.kind == BatchKind::Refile && b.workspace_path == key) {
+        for r in b.items.iter().filter(|i| i.status == ItemStatus::Undone).filter_map(|i| i.refile.as_ref()) {
+            if let Some(was) = &r.undone_from {
+                let list = out.entry(r.id.clone()).or_default();
+                if !list.contains(was) {
+                    list.push(was.clone());
+                }
+            }
+        }
+    }
+    out
 }
 
 fn latest_refile(roots: &Roots, key: &str) -> Option<IngestBatch> {
@@ -176,7 +194,16 @@ pub fn refile_plan_in(roots: &Roots, workspace: &str) -> Result<RefilePlan, Stri
     if key.is_empty() {
         return Err("a workspace is required".to_string());
     }
-    let unfiled = unfiled_of(roots, &key);
+    // Docs filed before namespacing are moved by the re-file itself, not
+    // classified again.
+    let legacy: HashSet<String> = library::migrate_namespaces_in(roots, Some(&key), true)?
+        .into_iter()
+        .map(|m| m.from)
+        .collect();
+    let unfiled: Vec<LibraryItem> = unfiled_of(roots, &key)
+        .into_iter()
+        .filter(|i| !(i.kind == ITEM_DOC && legacy.contains(&i.id)))
+        .collect();
     let folders = library::list_folders_in(roots, &key)?.len();
     let health = library::project_health(&key, unfiled.len());
     let docs = unfiled.iter().filter(|i| i.kind == ITEM_DOC).count();
@@ -232,6 +259,13 @@ pub fn queue_refile_in(roots: &Roots, workspace: &str, force: bool) -> Result<In
         return Err("a workspace is required".to_string());
     }
     let name = wiki::workspace_name_of(&key);
+    // Docs filed under a folder's prefix from before namespacing move onto the
+    // namespaced one first, so they are not taken for unfiled.
+    for m in library::migrate_namespaces_in(roots, Some(&key), false)? {
+        if let Some(e) = m.error {
+            crate::log_debug(&format!("[library_refile] namespacing {} failed: {e}", m.from));
+        }
+    }
     let unfiled = unfiled_of(roots, &key);
     if unfiled.is_empty() {
         return Err(format!("project '{name}' has nothing unfiled to re-file"));
@@ -247,6 +281,7 @@ pub fn queue_refile_in(roots: &Roots, workspace: &str, force: bool) -> Result<In
         return Err(format!("project '{name}' is already being re-filed (batch {})", b.id));
     }
     let sums = summaries(roots);
+    let undone = undone_slugs(roots, &key);
     let items: Vec<IngestItem> = unfiled
         .iter()
         .enumerate()
@@ -277,7 +312,17 @@ pub fn queue_refile_in(roots: &Roots, workspace: &str, force: bool) -> Result<In
                 staged: String::new(),
                 vision_file: None,
                 new_folder: None,
-                refile: Some(RefileRef { kind: i.kind.clone(), id: i.id.clone(), from }),
+                refile: Some(RefileRef {
+                    kind: i.kind.clone(),
+                    id: i.id.clone(),
+                    from,
+                    undone_from: None,
+                    keep_alive: if i.kind == ITEM_DOC {
+                        undone.get(&i.id).cloned().unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    },
+                }),
             }
         })
         .collect();
@@ -446,20 +491,6 @@ fn classify_all(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), String
     Ok(())
 }
 
-/// A slug under `prefix` for a doc named `base` that nothing occupies — no
-/// doc and no redirect another doc left (taking that over would cut the other
-/// doc's old link).
-fn free_slug(root: &Path, prefix: &str, base: &str) -> Result<String, String> {
-    for n in 1..100 {
-        let name = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
-        let slug = wiki::normalize_slug(&format!("{prefix}/{name}"))?;
-        if !root.join(wiki::slug_to_dirname(&slug)).exists() {
-            return Ok(slug);
-        }
-    }
-    Err(format!("no free slug for '{base}' under '{prefix}'"))
-}
-
 /// Move one item into `folder`. Returns where it is now (a doc's new slug, an
 /// artifact's id).
 fn file_one(roots: &Roots, r: &RefileRef, folder: &LibraryFolder) -> Result<String, String> {
@@ -468,11 +499,18 @@ fn file_one(roots: &Roots, r: &RefileRef, folder: &LibraryFolder) -> Result<Stri
             let current = wiki::resolve_slug_in(&roots.wiki, &r.id)
                 .ok_or_else(|| format!("wiki doc '{}' no longer exists", r.id))?;
             // A restart after the move but before the batch recorded it.
-            if library::slug_dir(&current) == folder.wiki_prefix {
-                return Ok(current);
+            let now = if library::slug_dir(&current) == folder.wiki_prefix {
+                current
+            } else {
+                let target = library::free_slug(&roots.wiki, &folder.wiki_prefix, wiki::slug_basename(&current))?;
+                wiki::move_doc_in(&roots.wiki, &current, &target)?.slug
+            };
+            for slug in &r.keep_alive {
+                if let Err(e) = wiki::add_alias_in(&roots.wiki, &now, slug) {
+                    crate::log_debug(&format!("[library_refile] keep {slug} → {now}: {e}"));
+                }
             }
-            let target = free_slug(&roots.wiki, &folder.wiki_prefix, wiki::slug_basename(&current))?;
-            Ok(wiki::move_doc_in(&roots.wiki, &current, &target)?.slug)
+            Ok(now)
         }
         ITEM_ARTIFACT => {
             artifacts::update_in(&roots.artifacts, &r.id, None, None, None, Some(&folder.path))?;
@@ -541,6 +579,7 @@ pub(super) fn undo_one(roots: &Roots, item: &mut IngestItem) -> Result<(), Strin
                 if let Some(current) = wiki::resolve_slug_in(&roots.wiki, &r.id) {
                     if current != r.from {
                         wiki::unmove_doc_in(&roots.wiki, &current, &r.from)?;
+                        r.undone_from = Some(current);
                     }
                     r.id = r.from.clone();
                 }

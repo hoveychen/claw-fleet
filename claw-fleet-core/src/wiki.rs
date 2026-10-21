@@ -1331,6 +1331,35 @@ pub fn resolve_slug_in(root: &Path, slug: &str) -> Option<String> {
     None
 }
 
+/// Make `alias` a former slug of the doc at `slug`: a redirect there and an
+/// entry in its `aliases`, so later moves keep it pointing at the doc. For a
+/// slug the doc once had that a redirect no longer covers (an undone move).
+/// Returns false, changing nothing, when `alias` is taken — by a doc, or by a
+/// redirect to some other doc.
+pub fn add_alias_in(root: &Path, slug: &str, alias: &str) -> Result<bool, String> {
+    let alias = normalize_slug(alias)?;
+    let dir = root.join(slug_to_dirname(slug));
+    let mut doc = read_doc_json(&dir).map_err(|_| format!("no wiki doc '{slug}'"))?;
+    if alias == doc.slug {
+        return Ok(false);
+    }
+    let alias_dir = root.join(slug_to_dirname(&alias));
+    if alias_dir.join("doc.json").exists()
+        || read_redirect(&alias_dir).is_some_and(|r| resolve_slug_in(root, &r.to).as_deref() != Some(doc.slug.as_str()))
+    {
+        return Ok(false);
+    }
+    if alias_dir.exists() && read_redirect(&alias_dir).is_none() {
+        return Ok(false);
+    }
+    write_redirect(root, &alias, &doc.slug)?;
+    if !doc.aliases.contains(&alias) {
+        doc.aliases.push(alias);
+        write_doc_json(&dir, &doc)?;
+    }
+    Ok(true)
+}
+
 pub fn resolve_slug(slug: &str) -> Option<String> {
     resolve_slug_in(&wiki_dir()?, slug)
 }
