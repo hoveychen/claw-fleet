@@ -90,6 +90,7 @@ pub mod launch_spec;
 pub mod launchd;
 pub mod lessons_store;
 pub mod library;
+pub mod library_filing;
 pub mod library_index;
 pub mod library_ingest;
 pub mod library_summary;

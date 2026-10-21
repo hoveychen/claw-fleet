@@ -36,6 +36,8 @@ zstd = "0.13"
 # genuinely new dependency for a 100MB-capped, no-compression use case).
 crc32fast = "1"
 sha2 = "0.10"
+# Readable ASCII slug keys for CJK library folder names (`发票` → `fapiao`).
+pinyin = { version = "0.11", default-features = false, features = ["plain"] }
 base64 = "0.22"
 # End-to-end encryption of relay `msg` payloads (relay_crypto.rs). HKDF-SHA256
 # derives a channel token + AES-256-GCM key from the pairing secret; the relay
