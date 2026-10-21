@@ -16,6 +16,7 @@ import {
   FolderGit2,
   FolderOpen,
   FolderPlus,
+  FolderSync,
   FolderUp,
   Image as ImageIcon,
   Inbox,
@@ -24,7 +25,9 @@ import {
   NotebookPen,
   Pencil,
   Presentation,
+  ScanText,
   Sparkles,
+  Square,
   Trash2,
 } from "lucide-react";
 
@@ -46,8 +49,11 @@ import {
   ingestBatchIdOf,
   ingestBatchKey,
   isIngestRunning,
+  isRefileBatch,
+  type BackfillStatus,
   type IngestBatch,
   type IngestBatchSummary,
+  type RefilePlan,
 } from "../../../shared-ts/libraryIngest";
 import { snippetRuns, type LibraryHit } from "../../../shared-ts/librarySearch";
 import type { AuxDoc } from "../detailAux";
@@ -144,6 +150,10 @@ interface TreeCtx {
   onDescribeFolder: (project: string, path: string, description: string) => void;
   onAcceptFolder: (project: string, path: string) => void;
   onOpenBatch: (batchId: string) => void;
+  /** Re-file the project's unfiled items (asks first). */
+  onRefile: (project: string) => void;
+  /** The project whose re-file plan is being fetched. */
+  refilePending: string | null;
 }
 
 /**
@@ -279,6 +289,53 @@ export function LibraryView() {
       }
     },
     [uploadPaths, uploadWebFiles],
+  );
+
+  // ── Re-filing a project's unfiled items ───────────────────────────────────
+  const [refilePending, setRefilePending] = useState<string | null>(null);
+  const onRefile = useCallback(
+    async (p: string) => {
+      setRefilePending(p);
+      try {
+        const plan = await invoke<RefilePlan>("library_refile_plan", { workspace: p });
+        if (plan.runningBatch) {
+          set({ selectedKey: ingestBatchKey(plan.runningBatch) });
+          return;
+        }
+        const n = plan.unfiledDocs + plan.unfiledArtifacts;
+        if (n === 0) {
+          setError(t("library.refile_nothing", "「{{name}}」没有未归档的资料", { name: plan.workspaceName }));
+          return;
+        }
+        const healthy = plan.health === "ok";
+        const question = [
+          t("library.refile_confirm", "让 AI 整理「{{name}}」的 {{n}} 条未归档资料（文档 {{docs}} 篇、产出 {{artifacts}} 个），放进合适的目录？", {
+            name: plan.workspaceName,
+            n,
+            docs: plan.unfiledDocs,
+            artifacts: plan.unfiledArtifacts,
+          }),
+          plan.willDraft
+            ? t("library.refile_confirm_draft", "这个项目还没有目录结构，AI 会先按项目内容起草一套。")
+            : "",
+          t("library.refile_confirm_cost", "预计调用 AI {{calls}} 次，约 ${{cost}}。整理结果可以逐条或整批撤销；文档换了位置，旧链接照样能打开。", {
+            calls: plan.calls,
+            cost: plan.estCostUsd.toFixed(2),
+          }),
+          healthy ? "" : t(`library.refile_health_${plan.health}`, plan.healthReason),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        if (!window.confirm(question)) return;
+        // The user saw the health warning and confirmed anyway.
+        afterStart(await invoke<IngestBatch>("library_refile_start", { workspacePath: p, force: !healthy }));
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setRefilePending(null);
+      }
+    },
+    [afterStart, set, t],
   );
 
   // A stored project key from before the tree (a string-derived repo root) may
@@ -528,6 +585,8 @@ export function LibraryView() {
     onDescribeFolder,
     onAcceptFolder,
     onOpenBatch: (id) => set({ selectedKey: ingestBatchKey(id) }),
+    onRefile: (p) => void onRefile(p),
+    refilePending,
   });
 
   const list = (
@@ -598,6 +657,13 @@ export function LibraryView() {
           <span className={styles.hint}>
             {t("library.drag_hint_upload", "把文件、文件夹或压缩包拖到项目上即可上传，AI 自动归档；拖动条目到文件夹可手动归档")}
           </span>
+          <BackfillButton
+            onFinished={() => {
+              void load();
+              void fetchDocs();
+            }}
+            onError={setError}
+          />
         </div>
       }
       secondary={list}
@@ -619,6 +685,7 @@ export function LibraryView() {
             void loadBatches();
           }}
           onOpenArtifact={(id) => set({ selectedKey: `artifact:${id}` })}
+          onOpenDoc={(slug) => set({ selectedKey: `doc:${slug}` })}
           onClose={() => set({ selectedKey: null })}
         />
       ) : selected ? (
@@ -634,6 +701,106 @@ export function LibraryView() {
         />
       )}
     </PageShell>
+  );
+}
+
+/** Polling period of the backfill button while a backfill runs. Each status
+ *  call syncs the index first, so not as tight as a batch's. */
+const BACKFILL_POLL_MS = 5000;
+
+/**
+ * "补全摘要": the one-time summary backfill for items that have none. Shown
+ * only while something is due or a run is going; asks with the count and the
+ * estimated cost first, then shows done/planned and the cost so far, with a
+ * stop (the next start resumes).
+ */
+function BackfillButton({ onFinished, onError }: { onFinished: () => void; onError: (e: string) => void }) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<BackfillStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const wasRunning = useRef(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await invoke<BackfillStatus>("library_backfill_status");
+      setStatus(next);
+      // Summaries landed: titles, search and folder views read them.
+      if (wasRunning.current && !next.running) onFinished();
+      wasRunning.current = next.running;
+    } catch {
+      // A companion of the page; the tree works without it.
+    }
+  }, [onFinished]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  const running = !!status?.running;
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => void refresh(), BACKFILL_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [running, refresh]);
+
+  const act = async (command: "library_backfill_start" | "library_backfill_stop") => {
+    setBusy(true);
+    try {
+      const next = await invoke<BackfillStatus>(command);
+      setStatus(next);
+      wasRunning.current = next.running;
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status || (!running && status.due === 0)) return null;
+  const run = status.run;
+  if (running && run) {
+    return (
+      <span className={styles.backfill} data-backfill="running">
+        <Spinner size={11} />
+        <span>
+          {t("library.backfill_running", "补全摘要 {{done}}/{{planned}} · ${{cost}}", {
+            done: run.done,
+            planned: run.planned,
+            cost: run.costUsd.toFixed(2),
+          })}
+          {run.failed > 0 && ` · ${t("library.stat_failed", "失败 {{n}}", { n: run.failed })}`}
+        </span>
+        <button
+          type="button"
+          className={styles.upload_btn}
+          onClick={() => void act("library_backfill_stop")}
+          disabled={busy || run.stopRequested}
+          title={t("library.backfill_stop_hint", "做完手上这几条就停；下次开始会接着跑")}
+        >
+          <Square size={11} strokeWidth={1.8} />
+          {run.stopRequested ? t("library.backfill_stopping", "正在停止…") : t("library.backfill_stop", "停止")}
+        </button>
+      </span>
+    );
+  }
+  const start = () => {
+    const question = t(
+      "library.backfill_confirm",
+      "为 {{n}} 条还没有摘要的资料补写摘要？\n\n预计调用 AI {{n}} 次，约 ${{cost}}。3 路并发，可以随时停止，下次接着跑。",
+      { n: status.due, cost: status.dueCostUsd.toFixed(2) },
+    );
+    if (window.confirm(question)) void act("library_backfill_start");
+  };
+  return (
+    <button
+      type="button"
+      className={styles.upload_btn}
+      onClick={start}
+      disabled={busy}
+      data-backfill="idle"
+      title={t("library.backfill_hint", "{{n}} 条资料还没有摘要；摘要用于搜索和自动归档", { n: status.due })}
+    >
+      {busy ? <Spinner size={11} /> : <ScanText size={13} strokeWidth={1.6} />}
+      {t("library.backfill", "补全摘要（{{n}} 条）", { n: status.due })}
+    </button>
   );
 }
 
@@ -735,6 +902,7 @@ function ProjectBranch({
   const [creating, setCreating] = useState(false);
   const rootBusy = ctx.busy === libraryDropKey(ctx.project, "") && !creating;
   const running = batches.filter((b) => isIngestRunning(b.status));
+  const refiling = running.some(isRefileBatch) || ctx.refilePending === ctx.project;
   const shownBatches = [
     ...running,
     ...batches.filter((b) => !isIngestRunning(b.status)).slice(0, Math.max(0, RECENT_BATCHES - running.length)),
@@ -778,6 +946,19 @@ function ProjectBranch({
           </button>
         </span>
         <span className={styles.upload_actions}>
+          {unfiled.length > 0 && !ctx.searching && (
+            <button
+              type="button"
+              className={styles.upload_btn}
+              title={t("library.refile_hint", "让 AI 把未归档的资料放进合适的目录（先确认数量和费用，可撤销）")}
+              onClick={() => ctx.onRefile(ctx.project)}
+              disabled={refiling}
+              data-refile
+            >
+              {refiling ? <Spinner size={11} /> : <FolderSync size={13} strokeWidth={1.6} />}
+              {t("library.refile", "整理存量")}
+            </button>
+          )}
           <button
             type="button"
             className={styles.upload_btn}
@@ -852,7 +1033,9 @@ function originTitle(
   const who =
     o.source === "upload"
       ? t("library.ai_folder_by_upload", "上传整理时由 AI 新建（批次 {{id}}）", { id: o.batchId ?? "" })
-      : t("library.ai_folder_by_agent", "由 agent 归档时新建（会话 {{id}}）", { id: (o.sessionId ?? "").slice(0, 8) });
+      : o.source === "refile"
+        ? t("library.ai_folder_by_refile", "整理存量时由 AI 新建（批次 {{id}}）", { id: o.batchId ?? "" })
+        : t("library.ai_folder_by_agent", "由 agent 归档时新建（会话 {{id}}）", { id: (o.sessionId ?? "").slice(0, 8) });
   const when = o.createdMs ? new Date(o.createdMs).toLocaleString() : "";
   return [who, when, o.reason ? t("library.ai_folder_reason", "原因：{{reason}}", { reason: o.reason }) : ""]
     .filter(Boolean)
@@ -918,7 +1101,9 @@ function FolderBranch({ node, depth, ctx }: { node: LibraryFolderNode; depth: nu
                 <Sparkles size={10} strokeWidth={1.8} />
                 {review.source === "upload"
                   ? t("library.ai_folder_upload", "上传新建")
-                  : t("library.ai_folder_agent", "AI 新建")}
+                  : review.source === "refile"
+                    ? t("library.ai_folder_refile", "整理新建")
+                    : t("library.ai_folder_agent", "AI 新建")}
               </span>
             )}
             {node.description && (

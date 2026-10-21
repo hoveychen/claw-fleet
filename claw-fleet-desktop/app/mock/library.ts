@@ -5,7 +5,13 @@
 // unfiled. The wiki-prefix rule is simplified here (ASCII names only — the
 // mock schema has no CJK folder names).
 
-import type { IngestBatch, IngestBatchSummary, IngestItem } from "../../../shared-ts/libraryIngest";
+import type {
+  BackfillStatus,
+  IngestBatch,
+  IngestBatchSummary,
+  IngestItem,
+  RefilePlan,
+} from "../../../shared-ts/libraryIngest";
 import type { LibraryFolderOrigin } from "../../../shared-ts/libraryTree";
 import { MOCK_ARTIFACTS, MOCK_WIKI_DOCS } from "./data";
 
@@ -280,12 +286,49 @@ const MOCK_BATCHES: IngestBatch[] = [
     costUsd: 0.031,
     error: null,
   },
+  // A finished re-file: existing items moved into the schema, one left alone.
+  {
+    id: "20261021-093000-d4e5f6",
+    kind: "refile",
+    workspacePath: DEMO_WS,
+    workspaceName: "claw-fleet",
+    status: "done",
+    createdMs: NOW - 3 * 3600_000,
+    updatedMs: NOW - 3 * 3600_000 + 95_000,
+    finishedMs: NOW - 3 * 3600_000 + 95_000,
+    items: [
+      mockItem("i0001", "", "arch", "数据平面拆分方案", "core 承载数据平面，桌面 / serve / relay 三端各自薄接线。", ["架构"], {
+        textMethod: "doc",
+        artifactId: null,
+        refile: { kind: "doc", id: "arch/data-plane-split", from: "data-plane-split" },
+      }),
+      mockItem("i0002", "reports", "reports", "九月用量报告", "按模型与会话拆分的九月 token 与花费。", ["用量"], {
+        textMethod: "pdf",
+        refile: { kind: "artifact", id: "mock-i0002", from: "" },
+      }),
+      mockItem("i0003", "", null, "随手记", "几条零散的想法。", [], {
+        textMethod: "doc",
+        artifactId: null,
+        refile: { kind: "doc", id: "scratch-notes", from: "scratch-notes" },
+        error: "no folder fits it; left where it was",
+      }),
+    ],
+    rejected: [],
+    skippedJunk: 0,
+    schemaDrafted: false,
+    createdFolders: [],
+    newFolders: [],
+    llmCalls: 1,
+    costUsd: 0.042,
+    error: null,
+  },
 ];
 
 function summaryOf(b: IngestBatch): IngestBatchSummary {
   const n = (f: (i: IngestItem) => boolean) => b.items.filter(f).length;
   return {
     id: b.id,
+    kind: b.kind,
     workspacePath: b.workspacePath,
     workspaceName: b.workspaceName,
     status: b.status,
@@ -344,6 +387,131 @@ export function mockIngestDismiss(args: Record<string, unknown>) {
   const i = MOCK_BATCHES.findIndex((b) => b.id === args.batchId);
   if (i >= 0) MOCK_BATCHES.splice(i, 1);
   return null;
+}
+
+// ── Summary backfill and re-filing ───────────────────────────────────────────
+// The backfill advances a few items per status poll so the button's progress
+// moves in `?mock`; a re-file finishes at once and leaves everything in place
+// (there is no classifier here).
+
+const BACKFILL_DUE = 24;
+const MOCK_BACKFILL: BackfillStatus = {
+  plan: { docs: 14, textArtifacts: 6, imageArtifacts: 4, newPending: 0, estCostUsd: 0.25, enabled: true },
+  due: BACKFILL_DUE,
+  dueCostUsd: 0.25,
+  run: null,
+  running: false,
+};
+
+export function mockBackfillStatus(): BackfillStatus {
+  const run = MOCK_BACKFILL.run;
+  if (MOCK_BACKFILL.running && run) {
+    const step = Math.min(3, run.planned - run.done);
+    run.done += step;
+    run.costUsd += step * 0.0104;
+    run.updatedMs = Date.now();
+    MOCK_BACKFILL.due = run.planned - run.done;
+    MOCK_BACKFILL.dueCostUsd = MOCK_BACKFILL.due * 0.0104;
+    if (run.done >= run.planned || run.stopRequested) {
+      run.state = run.done >= run.planned ? "done" : "stopped";
+      run.finishedMs = Date.now();
+      MOCK_BACKFILL.running = false;
+    }
+  }
+  return structuredClone(MOCK_BACKFILL);
+}
+
+export function mockBackfillStart(): BackfillStatus {
+  if (!MOCK_BACKFILL.running && MOCK_BACKFILL.due > 0) {
+    const now = Date.now();
+    const prev = MOCK_BACKFILL.run;
+    MOCK_BACKFILL.run =
+      prev && prev.state !== "done"
+        ? { ...prev, state: "running", stopRequested: false, resumes: prev.resumes + 1, segmentStartedMs: now }
+        : {
+            state: "running",
+            startedMs: now,
+            updatedMs: now,
+            finishedMs: null,
+            segmentStartedMs: now,
+            elapsedMs: 0,
+            concurrency: 3,
+            planned: MOCK_BACKFILL.due,
+            done: 0,
+            failed: 0,
+            costUsd: 0,
+            resumes: 0,
+            stopRequested: false,
+            failures: [],
+          };
+    MOCK_BACKFILL.running = true;
+  }
+  return structuredClone(MOCK_BACKFILL);
+}
+
+export function mockBackfillStop(): BackfillStatus {
+  if (MOCK_BACKFILL.run && MOCK_BACKFILL.running) MOCK_BACKFILL.run.stopRequested = true;
+  return structuredClone(MOCK_BACKFILL);
+}
+
+function unfiledOf(workspace: string) {
+  return mockLibraryTree()
+    .filter((p) => p.workspacePath === workspace)
+    .flatMap((p) => p.items)
+    .filter((i) => i.folder === null);
+}
+
+export function mockRefilePlan(args: Record<string, unknown>): RefilePlan {
+  const ws = String(args.workspace ?? "");
+  const unfiled = unfiledOf(ws);
+  const folders = MOCK_LIBRARY_FOLDERS.filter((f) => f.workspacePath === ws).length;
+  const calls = (folders === 0 ? 1 : 0) + Math.ceil(unfiled.length / 30);
+  return {
+    workspacePath: ws,
+    workspaceName: nameOf(ws),
+    health: unfiled.length < 5 ? "tiny" : "ok",
+    healthReason: unfiled.length < 5 ? `only ${unfiled.length} unfiled item(s)` : "",
+    unfiledDocs: unfiled.filter((i) => i.kind === "doc").length,
+    unfiledArtifacts: unfiled.filter((i) => i.kind === "artifact").length,
+    folders,
+    willDraft: folders === 0,
+    calls,
+    estCostUsd: calls * 0.06,
+    runningBatch: null,
+  };
+}
+
+export function mockRefileStart(args: Record<string, unknown>): IngestBatch {
+  const ws = String(args.workspacePath ?? "");
+  const now = Date.now();
+  const batch: IngestBatch = {
+    id: `mock-refile-${now}`,
+    kind: "refile",
+    workspacePath: ws,
+    workspaceName: nameOf(ws),
+    status: "done",
+    createdMs: now,
+    updatedMs: now,
+    finishedMs: now,
+    items: unfiledOf(ws).map((e, n) =>
+      mockItem(`i${String(n + 1).padStart(4, "0")}`, e.location, null, e.title, "", [], {
+        textMethod: e.kind === "doc" ? "doc" : e.artifactKind,
+        artifactId: e.kind === "artifact" ? e.id : null,
+        refile: { kind: e.kind, id: e.id, from: e.kind === "doc" ? e.id : e.location },
+        error: "no folder fits it; left where it was",
+      }),
+    ),
+    rejected: [],
+    skippedJunk: 0,
+    schemaDrafted: false,
+    createdFolders: [],
+    newFolders: [],
+    llmCalls: 1,
+    costUsd: 0.06,
+    error: null,
+  };
+  MOCK_BATCHES.unshift(batch);
+  return batch;
 }
 
 /** Mock bodies the search can cut snippets from (core reads the real files). */
