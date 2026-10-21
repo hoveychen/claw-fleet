@@ -281,6 +281,7 @@ pub mod today_usage;
 pub mod token_analysis;
 pub mod transcript_chain;
 pub mod user_attachments;
+pub mod video_poster;
 pub mod wakeup_guard;
 pub mod watch;
 pub mod web_assets;

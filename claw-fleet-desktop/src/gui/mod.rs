@@ -1208,10 +1208,19 @@ pub fn run() {
                         .and_then(|v| v.to_str().ok())
                         .and_then(claw_fleet_core::artifacts::parse_range_header);
 
+                    // `?poster=1` answers a video's host-extracted poster
+                    // frame instead of its bytes (404 when there is none).
+                    let poster = request.uri().query().is_some_and(|q| {
+                        q.split('&').any(|kv| kv == "poster=1")
+                    });
                     let result = {
                         let state = app.state::<AppState>();
                         let backend = &state.backend;
-                        backend.read_artifact_version_bytes(&id, version.as_deref(), range)
+                        if poster {
+                            backend.read_artifact_poster(&id)
+                        } else {
+                            backend.read_artifact_version_bytes(&id, version.as_deref(), range)
+                        }
                     };
                     let response = artifact_response(result, range.is_some());
                     responder.respond(response);

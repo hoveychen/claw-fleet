@@ -45,7 +45,7 @@ import {
 } from "../../../shared-ts/libraryTree";
 import { isIngestRunning, ingestBatchKey, type IngestBatchSummary } from "../../../shared-ts/libraryIngest";
 import { snippetRuns, type LibraryHit } from "../../../shared-ts/librarySearch";
-import { artifactBlobUrl } from "../artifactAssets";
+import { artifactBlobUrl, artifactPosterUrl } from "../artifactAssets";
 import { thumbMode } from "../officePreview";
 import type { PickKind } from "../libraryUpload";
 import ArtifactThumb from "./ArtifactThumb";
@@ -712,8 +712,13 @@ function thumbMediaOf(entry: LibraryEntry): "image" | "video" | null {
  *  loading fails — a thumbnail is decoration. */
 function Thumb({ entry, media }: { entry: LibraryEntry; media: "image" | "video" }) {
   const [failed, setFailed] = useState(false);
+  // A video first tries the host's poster frame — the same one the phone
+  // shows — and only without one grabs a frame in the webview.
+  const poster = media === "video" ? artifactPosterUrl(entry.id, entry.name ?? "") : null;
+  const [posterFailed, setPosterFailed] = useState(poster === null);
   // Stable: ArtifactThumb re-runs its render effect when this changes.
   const onFail = useCallback(() => setFailed(true), []);
+  const onPosterFail = useCallback(() => setPosterFailed(true), []);
   const Icon = iconOf(entry);
   const url = failed ? "" : artifactBlobUrl(entry.id, entry.name ?? "");
   return (
@@ -722,7 +727,10 @@ function Thumb({ entry, media }: { entry: LibraryEntry; media: "image" | "video"
       {!failed && media === "image" && (
         <img src={url} alt="" loading="lazy" decoding="async" draggable={false} onError={onFail} />
       )}
-      {!failed && media === "video" && (
+      {!failed && media === "video" && !posterFailed && poster && (
+        <img src={poster} alt="" loading="lazy" decoding="async" draggable={false} onError={onPosterFail} />
+      )}
+      {!failed && media === "video" && posterFailed && (
         <ArtifactThumb
           id={entry.id}
           url={url}

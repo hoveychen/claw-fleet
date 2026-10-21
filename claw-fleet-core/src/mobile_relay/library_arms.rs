@@ -107,18 +107,25 @@ pub(super) fn serve_artifact_get(params: &Value) -> Result<Value, String> {
 
 /// A list-sized JPEG of an image artifact, re-encoded here so a folder of
 /// photographed receipts costs the phone ~12 KB a card instead of each full
-/// photo. `{thumb: null}` for anything that is not an image or will not
-/// decode — the card keeps its icon.
+/// photo. A video gets its host-extracted poster frame
+/// ([`crate::video_poster`]), squeezed the same way. `{thumb: null}` for
+/// anything else, or when nothing decodes — the card keeps its icon.
 pub(super) fn serve_library_thumb(params: &Value) -> Result<Value, String> {
     let a = crate::artifacts::get(required(params, "id")?)?;
-    if a.kind != "image" {
+    if a.kind != "image" && a.kind != "video" {
         return Ok(json!({ "thumb": null }));
     }
     // Keyed on the version as well, so a re-published image is re-encoded.
     let ident = format!("library-thumb:{}:{}:{}", a.id, a.current_version, a.size_bytes);
-    let thumb = super::tail_thumb_cached(&ident, &a.mime, || {
-        crate::artifacts::read_bytes(&a.id, None).ok().map(|b| b.bytes)
-    });
+    let thumb = if a.kind == "video" {
+        super::tail_thumb_cached(&ident, "image/jpeg", || {
+            crate::video_poster::poster_jpeg(&a.id).ok().flatten()
+        })
+    } else {
+        super::tail_thumb_cached(&ident, &a.mime, || {
+            crate::artifacts::read_bytes(&a.id, None).ok().map(|b| b.bytes)
+        })
+    };
     Ok(json!({ "thumb": thumb.map(|b64| format!("data:image/jpeg;base64,{b64}")) }))
 }
 
@@ -520,6 +527,26 @@ mod tests {
             assert!(thumb["thumb"].as_str().is_some_and(|u| u.starts_with("data:image/jpeg;base64,")), "{thumb}");
             let none = serve_request("library_thumb", &json!({ "id": loose.id })).unwrap();
             assert_eq!(none["thumb"], Value::Null);
+            // A video thumbs from its host-extracted poster, when this host
+            // has the ffmpeg to make the clip in the first place.
+            let clip = ws.join("clip.mp4");
+            let made = crate::process_util::which("ffmpeg").is_some_and(|ffmpeg| {
+                crate::process_util::command(ffmpeg)
+                    .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i"])
+                    .arg("testsrc=size=640x360:rate=10:duration=1")
+                    .args(["-pix_fmt", "yuv420p", "-y"])
+                    .arg(&clip)
+                    .status()
+                    .is_ok_and(|s| s.success())
+            });
+            if made {
+                let video = crate::artifacts::add(&clip, None, None, ws, None).unwrap();
+                assert_eq!(video.kind, "video");
+                let thumb = serve_request("library_thumb", &json!({ "id": video.id })).unwrap();
+                let url = thumb["thumb"].as_str().expect("a video gets its poster");
+                assert!(url.starts_with("data:image/jpeg;base64,"), "{url}");
+                assert!(url.len() < 30 * 1024, "poster is list-sized: {}", url.len());
+            }
         });
     }
 

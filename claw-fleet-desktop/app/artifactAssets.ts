@@ -40,6 +40,27 @@ export function artifactBlobUrl(id: string, name: string, version?: string): str
     : `fleet-artifact://localhost/${path}`;
 }
 
+/**
+ * URL of a video artifact's poster frame, extracted on the host and answered
+ * as a JPEG by the same protocol / route as the blob (`poster=1`). 404 when
+ * the host has no poster for it — no ffmpeg or Quick Look, or an undecodable
+ * file — and the caller falls back.
+ *
+ * The phone gets the same poster through the relay's `library_thumb`, so all
+ * three clients show one frame. `null` under the mock override, which has no
+ * host to extract with.
+ */
+export function artifactPosterUrl(id: string, name: string): string | null {
+  if (blobOverride?.(id)) return null;
+  if (isWebBuild()) {
+    return `${window.location.origin}/artifact_blob?id=${encodeURIComponent(id)}&poster=1`;
+  }
+  const path = `${encodeURIComponent(id)}/${encodeURIComponent(name)}?poster=1`;
+  return navigator.userAgent.includes("Windows")
+    ? `http://fleet-artifact.localhost/${path}`
+    : `fleet-artifact://localhost/${path}`;
+}
+
 let blobOverride: ((id: string) => string | null) | null = null;
 
 /**

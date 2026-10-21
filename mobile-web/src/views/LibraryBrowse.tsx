@@ -427,13 +427,13 @@ function queueThumb(run: () => Promise<void>) {
   else thumbQueue.push(start);
 }
 
-/** An image's thumbnail once its card scrolls into view; null until then, and
- *  for anything that is not an image. */
-function useThumb(client: FleetTransport | null, id: string, isImage: boolean) {
+/** An image's thumbnail (or a video's host-extracted poster) once its card
+ *  scrolls into view; null until then, and for anything else. */
+function useThumb(client: FleetTransport | null, id: string, hasThumb: boolean) {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [url, setUrl] = useState<string | null>(() => thumbCache.get(id) ?? null);
   useEffect(() => {
-    if (!client || !isImage || thumbCache.has(id)) return;
+    if (!client || !hasThumb || thumbCache.has(id)) return;
     const el = ref.current;
     if (!el) return;
     let alive = true;
@@ -458,7 +458,7 @@ function useThumb(client: FleetTransport | null, id: string, isImage: boolean) {
       alive = false;
       io.disconnect();
     };
-  }, [client, id, isImage]);
+  }, [client, id, hasThumb]);
   return { ref, url };
 }
 
@@ -483,7 +483,11 @@ export function EntryCard({
   move?: { choices: Array<{ path: string; label: string }>; busy: boolean; onMove: (folder: string) => void };
 }) {
   const group = libraryTypeGroup(entry);
-  const thumb = useThumb(client, entry.id, entry.kind === "artifact" && entry.artifactKind === "image");
+  const thumb = useThumb(
+    client,
+    entry.id,
+    entry.kind === "artifact" && (entry.artifactKind === "image" || entry.artifactKind === "video"),
+  );
   const runs = snippet ? snippetRuns(snippet) : [];
   const tags = entry.tags ?? [];
   return (

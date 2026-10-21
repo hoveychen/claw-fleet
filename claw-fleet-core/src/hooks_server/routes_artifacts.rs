@@ -451,7 +451,14 @@ pub(crate) fn route_artifact_blob(
     } else {
         Some(version.as_str())
     };
-    match crate::artifacts::read_version_bytes(&id, version, range) {
+    // `&poster=1` answers a video's host-extracted poster frame (JPEG) instead
+    // of its bytes; 404 when there is none, so the card keeps its icon.
+    let result = if decoded(query, "poster") == "1" {
+        crate::video_poster::read_poster(&id)
+    } else {
+        crate::artifacts::read_version_bytes(&id, version, range)
+    };
+    match result {
         Ok(blob) => {
             // Ahead of the range branch: RFC 9110 has If-None-Match win over
             // Range, and a client holding the current bytes wants neither.
