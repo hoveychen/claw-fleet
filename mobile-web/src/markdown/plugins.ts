@@ -76,6 +76,14 @@ const schema = {
   // visible text. Strip the content too, as the default schema does for `<script>`.
   // Mirrored from the desktop chain; pinned in plugins.test.ts.
   strip: [...(defaultSchema.strip ?? []), "style"],
+  // `wiki:` is the doc reader's `[[slug]]` link (WikiDocView). Sanitize keeps
+  // only http(s)/mailto-like hrefs by default and emptied it, so every
+  // cross-doc link on the phone rendered inert. Elsewhere `MdLink` still draws
+  // a `wiki:` href inert, as any scheme it cannot open.
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "wiki"],
+  },
   attributes: {
     ...defaultSchema.attributes,
     span: [

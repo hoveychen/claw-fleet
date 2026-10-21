@@ -8,6 +8,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -23,6 +24,7 @@ import { applyMention, detectMention, mentionSegments, type OpenMention } from "
 import type { FleetTransport } from "../transport";
 import type { SessionInfo, WikiDoc } from "../types";
 import { listWikiDocs } from "../wiki";
+import { fetchWikiDoc } from "../libraryApi";
 import { timeAgo } from "./TasksView";
 import styles from "./SessionMention.module.css";
 
@@ -356,11 +358,13 @@ export function RefChips({
   onRemove?: (r: PromptRef) => void;
 }) {
   const nav = useContext(SessionMentionNavContext);
-  // A sent `[[slug]]` carries no title; ask the view to fetch its wiki list.
-  const untitledWiki = refs.some((r) => r.kind === "wiki" && !r.title);
+  // A sent `[[slug]]` carries no title; ask the view to fetch those docs.
+  const untitledWiki = refs
+    .flatMap((r) => (r.kind === "wiki" && !r.title ? [r.slug] : []))
+    .join("\n");
   const wantWikiTitles = nav?.wantWikiTitles;
   useEffect(() => {
-    if (untitledWiki) wantWikiTitles?.();
+    if (untitledWiki) wantWikiTitles?.(untitledWiki.split("\n"));
   }, [untitledWiki, wantWikiTitles]);
   if (refs.length === 0) return null;
   return (
@@ -409,22 +413,34 @@ export interface SessionMentionNav {
   has: (sessionId: string) => boolean;
   /** Open a wiki doc of this view's device by slug. */
   openWiki?: (slug: string) => void;
-  /** Title of a wiki doc by slug, once the view's wiki list is loaded. */
+  /** Title of a wiki doc by slug, once that doc's record has arrived. */
   wikiTitle?: (slug: string) => string | undefined;
-  /** A chip needs `wikiTitle`; the view fetches its wiki list lazily on this. */
-  wantWikiTitles?: () => void;
+  /** Chips need `wikiTitle` for these slugs; the view fetches each doc once. */
+  wantWikiTitles?: (slugs: string[]) => void;
 }
 
-/** `wikiTitle` / `wantWikiTitles` for a view's nav: fetches the device's wiki
- *  list only once a chip asks for a title. */
+/** `wikiTitle` / `wantWikiTitles` for a view's nav: fetches just the docs a
+ *  chip asks a title for (`wiki_doc`), not the device's whole wiki list. */
 export function useWikiTitles(client: FleetTransport | null) {
-  const [want, setWant] = useState(false);
-  const docs = useWikiDocList(client, want);
-  const wantWikiTitles = useCallback(() => setWant(true), []);
-  const wikiTitle = useCallback(
-    (slug: string) => docs?.find((d) => d.slug === slug)?.title || undefined,
-    [docs],
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const asked = useRef<{ client: FleetTransport | null; slugs: Set<string> }>({ client, slugs: new Set() });
+  const wantWikiTitles = useCallback(
+    (slugs: string[]) => {
+      if (!client) return;
+      if (asked.current.client !== client) asked.current = { client, slugs: new Set() };
+      for (const slug of slugs) {
+        if (asked.current.slugs.has(slug)) continue;
+        asked.current.slugs.add(slug);
+        fetchWikiDoc(client, slug)
+          .then((d) => d.title && setTitles((t) => ({ ...t, [slug]: d.title })))
+          .catch(() => {});
+      }
+    },
+    [client],
   );
+  // Another device's titles are not this one's.
+  useEffect(() => setTitles({}), [client]);
+  const wikiTitle = useCallback((slug: string) => titles[slug] || undefined, [titles]);
   return { wikiTitle, wantWikiTitles };
 }
 
