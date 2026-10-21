@@ -512,13 +512,6 @@ title?: string | null, };
 
 export type ReviewDocKind = "wiki" | "file" | "dir" | "url" | "artifact";
 
-export type ReviewDocContent = { 
-format: ReviewDocFormat, 
-body: string, 
-title: string, };
-
-export type ReviewDocFormat = "markdown" | "html";
-
 export type PlanApprovalRequest = { id: string, sessionId: string, workspaceName: string, 
 aiTitle?: string | null, 
 task?: DecisionTaskRef | null, 
