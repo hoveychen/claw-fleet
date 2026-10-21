@@ -536,6 +536,13 @@ export function LibraryView() {
     [activeProject, pickFolder, set],
   );
 
+  // Stable: the backfill button refetches its status whenever this changes,
+  // which as an inline arrow was on every render (each pointer move of a drag).
+  const onBackfillFinished = useCallback(() => {
+    void load();
+    void fetchDocs();
+  }, [load, fetchDocs]);
+
   // ── Preview column ────────────────────────────────────────────────────────
   const preview = batchId ? (
     <BatchDetail
@@ -613,13 +620,7 @@ export function LibraryView() {
         busy: search.busy,
       }}
       subBar={
-        <BackfillButton
-          onFinished={() => {
-            void load();
-            void fetchDocs();
-          }}
-          onError={setError}
-        />
+        <BackfillButton onFinished={onBackfillFinished} onError={setError} />
       }
       secondary={rail}
     >
