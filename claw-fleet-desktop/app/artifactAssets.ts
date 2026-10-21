@@ -23,6 +23,8 @@ import { isWebBuild } from "./hostEnv";
  * from the view would drag the whole board into the test.
  */
 export function artifactBlobUrl(id: string, name: string, version?: string): string {
+  const stand = blobOverride?.(id);
+  if (stand) return stand;
   // `version` pins the URL to one entry of the artifact's history; omitted, it
   // means the current version. Passed as a query on both hosts so the `<name>`
   // tail — which is what gives a `<video>` its decoder hint — stays the last
@@ -36,4 +38,15 @@ export function artifactBlobUrl(id: string, name: string, version?: string): str
   return navigator.userAgent.includes("Windows")
     ? `http://fleet-artifact.localhost/${path}`
     : `fleet-artifact://localhost/${path}`;
+}
+
+let blobOverride: ((id: string) => string | null) | null = null;
+
+/**
+ * The `?mock` harness only: answer some artifacts' bytes from inline data
+ * URLs. Mock reads as the desktop, whose `fleet-artifact://` scheme a browser
+ * tab cannot load, so without this every image fixture would show its icon.
+ */
+export function setArtifactBlobOverride(fn: ((id: string) => string | null) | null): void {
+  blobOverride = fn;
 }

@@ -230,6 +230,25 @@ pub struct LibraryItem {
     /// The artifact's coarse kind (`pdf`, `image`, …); empty for docs.
     #[serde(default)]
     pub artifact_kind: String,
+    /// The AI summary (a doc's `summary.json`, an artifact's `meta.json`), so
+    /// a folder's listing can say what each item is without opening it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// The artifact's file name, mime and size — what a client needs to build
+    /// its blob URL and decide whether a thumbnail is worth fetching. Empty
+    /// for docs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mime: String,
+    #[serde(default, skip_serializing_if = "is_zero_size")]
+    pub size_bytes: u64,
+}
+
+fn is_zero_size(v: &u64) -> bool {
+    *v == 0
 }
 
 /// One project's tree: its schema folders and every item, filed or not.
@@ -774,6 +793,11 @@ fn doc_item(doc: &WikiDoc, folder: Option<String>) -> LibraryItem {
         location: slug_dir(&doc.slug).to_string(),
         updated_ms: doc.updated_ms.max(doc.created_ms),
         artifact_kind: String::new(),
+        summary: doc.summary.clone(),
+        tags: doc.tags.clone(),
+        name: String::new(),
+        mime: String::new(),
+        size_bytes: 0,
     }
 }
 
@@ -791,6 +815,11 @@ fn artifact_item(a: &Artifact, folder: Option<String>) -> LibraryItem {
         location: artifacts::effective_directory(a),
         updated_ms: a.created_ms,
         artifact_kind: a.kind.clone(),
+        summary: a.summary.clone(),
+        tags: a.tags.clone(),
+        name: a.name.clone(),
+        mime: a.mime.clone(),
+        size_bytes: a.size_bytes,
     }
 }
 
@@ -1675,6 +1704,36 @@ mod tests {
 
     fn item<'a>(p: &'a LibraryProject, id: &str) -> &'a LibraryItem {
         p.items.iter().find(|i| i.id == id).expect("item present")
+    }
+
+    #[test]
+    fn tree_items_carry_summary_tags_and_file_facts() {
+        let e = env();
+        let doc = e.doc("notes", &e.ws);
+        wiki::write_summary_in(
+            &e.roots.wiki,
+            &doc.slug,
+            &wiki::DocSummary {
+                summary: "What the notes say.".into(),
+                tags: vec!["notes".into()],
+                version: doc.current_version.clone(),
+                generated_ms: 1,
+            },
+        )
+        .unwrap();
+        let art = e.artifact("shot.png", &e.ws);
+        let p = e.project();
+        let d = item(&p, &doc.slug);
+        assert_eq!(d.summary, "What the notes say.");
+        assert_eq!(d.tags, vec!["notes".to_string()]);
+        assert!(d.name.is_empty() && d.size_bytes == 0);
+        let a = item(&p, &art.id);
+        assert_eq!(a.name, "shot.png");
+        assert_eq!(a.mime, art.mime);
+        assert_eq!(a.size_bytes, 5);
+        // Empty facts stay off the wire.
+        let json = serde_json::to_value(a).unwrap();
+        assert!(json.get("summary").is_none() && json.get("tags").is_none());
     }
 
     #[test]
