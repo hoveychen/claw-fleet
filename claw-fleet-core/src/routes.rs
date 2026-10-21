@@ -182,8 +182,12 @@ pub const INTERRUPT: &str = "/interrupt";
 pub const INTERRUPT_AGENT_SESSION: &str = "/interrupt_agent_session";
 /// 资料 (Library): the per-project folder schema and the merged wiki +
 /// artifact tree (`crate::library`). `LIBRARY_TREE` takes an optional
-/// `?workspace=`; the rest are POSTs with a JSON body.
+/// `?workspace=`, and `&outline=1[&recent=N]` for the folders, their counts and
+/// the newest few items of each; `LIBRARY_FOLDER_ITEMS`
+/// (`?workspace=&folder=`) is one folder's items with summaries. The rest are
+/// POSTs with a JSON body.
 pub const LIBRARY_TREE: &str = "/library_tree";
+pub const LIBRARY_FOLDER_ITEMS: &str = "/library_folder_items";
 pub const LIBRARY_FOLDER_CREATE: &str = "/library_folder_create";
 pub const LIBRARY_FOLDER_DESCRIBE: &str = "/library_folder_describe";
 pub const LIBRARY_FOLDER_ACCEPT: &str = "/library_folder_accept";

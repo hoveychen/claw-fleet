@@ -951,20 +951,3 @@
   overflow: hidden;
 }
 
-.manage_btn {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-dim);
-  cursor: pointer;
-}
-
-.manage_btn:hover {
-  border-color: var(--color-border-soft);
-  background: var(--color-bg-row-hover);
-  color: var(--color-text-secondary);
-}

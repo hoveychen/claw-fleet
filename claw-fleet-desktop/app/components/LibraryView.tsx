@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Library, ListChecks, ScanText, Square } from "lucide-react";
+import { Library, ScanText, Square } from "lucide-react";
 
 import { useUIStore } from "../store";
 import { getItem, setItem } from "../storage";
@@ -21,6 +21,7 @@ import {
   defaultLibraryProject,
   findLibraryFolder,
   orderLibraryProjects,
+  projectTotals,
   type LibrarySort,
   type LibraryTypeGroup,
 } from "../../../shared-ts/libraryBrowse";
@@ -62,6 +63,9 @@ import styles from "./LibraryView.module.css";
 /** Where the page reopens: the project it last showed. */
 const LAST_PROJECT_KEY = "library-last-project";
 
+/** Items the outline keeps per folder: the overview cards list three. */
+const OUTLINE_RECENT = 3;
+
 function uploadTargetAt(el: Element | null): string | null {
   return el?.closest(`[${UPLOAD_ATTR}]`)?.getAttribute(UPLOAD_ATTR) ?? null;
 }
@@ -79,6 +83,11 @@ function uploadTargetAt(el: Element | null): string | null {
  *
  * The folders are the project's schema (`claw_fleet_core::library`); moving
  * an item re-keys a doc's slug or sets an artifact's `path`, done server-side.
+ *
+ * Loaded level by level: the rail and the overview come from an outline
+ * (folders, counts, the newest few items per folder, no summaries), and a
+ * folder's items with their summaries are fetched when it is opened. The full
+ * tree of a real library is ~1.4 MB, most of it summaries nobody is looking at.
  */
 export function LibraryView() {
   const { t } = useTranslation();
@@ -87,7 +96,6 @@ export function LibraryView() {
   const showBatches = lib.batches;
   const typeGroup = lib.typeGroup as LibraryTypeGroup | null;
   const update = useUIStore((s) => s.updateMainViewState);
-  const setViewMode = useUIStore((s) => s.setViewMode);
   const set = useCallback((patch: Partial<typeof lib>) => update("library", patch), [update]);
 
   const fetchDocs = useWikiDocsStore((s) => s.fetch);
@@ -95,9 +103,19 @@ export function LibraryView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Bumped by every reload, so the open folder's items are refetched with it.
+  const [rev, setRev] = useState(0);
+
   const load = useCallback(async () => {
     try {
-      setProjects((await invoke<LibraryProjectTree[]>("library_tree", { workspace: null })) ?? []);
+      setProjects(
+        (await invoke<LibraryProjectTree[]>("library_tree", {
+          workspace: null,
+          outline: true,
+          recent: OUTLINE_RECENT,
+        })) ?? [],
+      );
+      setRev((r) => r + 1);
     } catch (e) {
       setProjects((prev) => prev ?? []);
       setError(String(e));
@@ -138,21 +156,6 @@ export function LibraryView() {
     [allProjects, activeProject],
   );
   const view = useMemo(() => (current ? buildLibraryTree(current) : null), [current]);
-  // Every entry by key, and the project (core's key, not the item's own
-  // possibly-worktree path) each one belongs to — what a drop is checked
-  // against.
-  const { entryByKey, projectOf } = useMemo(() => {
-    const entries = new Map<string, LibraryEntry>();
-    const owners = new Map<string, string>();
-    for (const p of projects ?? []) {
-      for (const e of p.items) {
-        const key = libraryEntryKey(e);
-        entries.set(key, e);
-        owners.set(key, p.workspacePath);
-      }
-    }
-    return { entryByKey: entries, projectOf: owners };
-  }, [projects]);
   const projectName = useCallback(
     (ws: string) => allProjects.find((p) => p.workspacePath === ws)?.workspaceName ?? ws.split("/").pop() ?? ws,
     [allProjects],
@@ -362,6 +365,27 @@ export function LibraryView() {
   const folderExists = folder === null || folder === "" || (!!view && !!findLibraryFolder(view.folders, folder));
   const openFolder = folderExists ? folder : null;
   const mode: ContentMode = searching ? "search" : showBatches ? "batches" : openFolder === null ? "overview" : "folder";
+  const folderItems = useFolderItems(activeProject, mode === "folder" ? openFolder : null, rev, setError);
+
+  // Every entry loaded so far by key — the outline's few per folder, the open
+  // folder's, the search hits — and the project (core's key, not the item's
+  // own possibly-worktree path) each belongs to, which a drop is checked
+  // against.
+  const { entryByKey, projectOf } = useMemo(() => {
+    const entries = new Map<string, LibraryEntry>();
+    const owners = new Map<string, string>();
+    const put = (e: LibraryEntry, project: string) => {
+      const key = libraryEntryKey(e);
+      // The fuller record wins: a folder listing carries the summary and tags
+      // an outline strips.
+      if (!entries.has(key) || e.summary !== undefined) entries.set(key, e);
+      owners.set(key, project);
+    };
+    for (const h of search.hits ?? []) put(hitEntry(h), h.project);
+    for (const p of projects ?? []) for (const e of p.items) put(e, p.workspacePath);
+    for (const e of folderItems ?? []) put(e, activeProject);
+    return { entryByKey: entries, projectOf: owners };
+  }, [projects, folderItems, activeProject, search.hits]);
 
   const batchId = ingestBatchIdOf(selectedKey);
   const batchFolders = useMemo(() => {
@@ -373,9 +397,10 @@ export function LibraryView() {
     if (!selectedKey) return null;
     const hit = entryByKey.get(selectedKey);
     if (hit) return hit;
-    // An indexed item the tree has not loaded yet still opens.
-    return search.hits?.find((h) => libraryEntryKey(h) === selectedKey) ?? null;
-  }, [entryByKey, selectedKey, search.hits]);
+    // An item in a folder that is not loaded (a link from a doc, a batch
+    // row) still opens: the reader panes fetch the item by id themselves.
+    return selectedFromKey(selectedKey);
+  }, [entryByKey, selectedKey]);
 
   /** Run a schema/filing mutation with a spinner on `row`, then reload. A full
    *  reload rather than a splice: a rename re-keys docs and re-files artifacts
@@ -579,22 +604,7 @@ export function LibraryView() {
       view="library"
       title={t("nav_section_library", "资料")}
       sectionSwitch={false}
-      // The documents / artifacts pages keep what this page does not have
-      // (bulk select, zipped folder export, storage usage); their own switch
-      // leads back here.
-      actions={
-        <button
-          type="button"
-          className={styles.manage_btn}
-          onClick={() => setViewMode("wiki")}
-          title={t("library.manage_pages_hint", "文档页与产出页：批量操作、打包导出、存储用量")}
-          aria-label={t("library.manage_pages", "管理页")}
-          data-library-manage
-        >
-          <ListChecks size={14} strokeWidth={1.6} />
-        </button>
-      }
-      count={current ? current.items.length : null}
+      count={current ? projectTotals(current).total : null}
       countLoading={projects === null}
       search={{
         value: query,
@@ -641,6 +651,7 @@ export function LibraryView() {
               project={current}
               view={view}
               folder={openFolder}
+              folderItems={folderItems}
               query={searching ? query : q}
               typeGroup={typeGroup}
               sort={sort as LibrarySort}
@@ -692,6 +703,63 @@ export function LibraryView() {
       )}
     </PageShell>
   );
+}
+
+/** The open folder's items and everything beneath it, with summaries and tags
+ *  (`library_folder_items`; `folder` `""` = unfiled, `null` = none open).
+ *  Null until the first answer for this folder; a refetch after a reload
+ *  (`rev`) keeps the previous list on screen instead of blanking it. */
+function useFolderItems(
+  project: string,
+  folder: string | null,
+  rev: number,
+  onError: (e: string) => void,
+): LibraryEntry[] | null {
+  const [state, setState] = useState<{ key: string; items: LibraryEntry[] } | null>(null);
+  const key = folder === null || !project ? "" : `${project}\u0000${folder}`;
+  useEffect(() => {
+    if (!key || folder === null) return;
+    let alive = true;
+    invoke<LibraryEntry[]>("library_folder_items", { workspacePath: project, folder })
+      .then((items) => {
+        if (alive) setState({ key, items: items ?? [] });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setState({ key, items: [] });
+        onError(String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [key, project, folder, rev, onError]);
+  return key && state?.key === key ? state.items : null;
+}
+
+/** A search hit as a list entry, with the file facts its thumbnail needs. */
+function hitEntry(h: LibraryHit): LibraryEntry {
+  return {
+    kind: h.kind === "doc" ? "doc" : "artifact",
+    id: h.id,
+    title: h.title,
+    workspacePath: h.workspacePath,
+    folder: h.folder || null,
+    location: h.location,
+    updatedMs: h.updatedMs,
+    artifactKind: h.artifactKind,
+    name: h.name,
+    mime: h.mime,
+    sizeBytes: h.sizeBytes,
+  };
+}
+
+/** `doc:<slug>` / `artifact:<id>` as something the preview can open. */
+function selectedFromKey(key: string): SelectedItem | null {
+  const cut = key.indexOf(":");
+  if (cut < 0) return null;
+  const kind = key.slice(0, cut);
+  const id = key.slice(cut + 1);
+  return (kind === "doc" || kind === "artifact") && id ? { kind, id, title: id } : null;
 }
 
 /** Full-text hits across both stores (`library_search`), ranked, scoped to

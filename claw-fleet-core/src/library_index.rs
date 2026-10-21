@@ -108,8 +108,21 @@ pub struct LibraryHit {
     pub updated_ms: u64,
     /// The artifact's coarse kind; empty for docs.
     pub artifact_kind: String,
+    /// The artifact's file name, mime and size, read from its record after the
+    /// query — what a client needs to draw a hit's thumbnail without having
+    /// the item's folder loaded. Empty for docs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mime: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub size_bytes: u64,
     /// bm25 score, lower is better.
     pub rank: f64,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 /// What to search.
@@ -639,6 +652,9 @@ impl LibraryIndex {
                         tags: serde_json::from_str(&tags).unwrap_or_default(),
                         updated_ms: r.get::<_, i64>(9)? as u64,
                         artifact_kind: r.get(10)?,
+                        name: String::new(),
+                        mime: String::new(),
+                        size_bytes: 0,
                         rank: r.get(12)?,
                     })
                 },
@@ -995,7 +1011,15 @@ pub fn search_in(roots: &Roots, query: &str, opts: &SearchOpts) -> Result<Vec<Li
     let index = LibraryIndex::open_at(&db_path(roots))?;
     index.sync(roots)?;
     index.extract_pending(roots, SEARCH_EXTRACT_BUDGET)?;
-    index.search(query, opts)
+    let mut hits = index.search(query, opts)?;
+    for h in hits.iter_mut().filter(|h| h.kind == ITEM_ARTIFACT) {
+        if let Ok(a) = artifacts::get_in(&roots.artifacts, &h.id) {
+            h.name = a.name;
+            h.mime = a.mime;
+            h.size_bytes = a.size_bytes;
+        }
+    }
+    Ok(hits)
 }
 
 #[cfg(test)]
