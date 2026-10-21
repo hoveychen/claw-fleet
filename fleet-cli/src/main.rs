@@ -1361,6 +1361,41 @@ pub(crate) enum LibraryCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Every project in the library with its doc/artifact counts, how many
+    /// are unfiled, whether it has a folder schema or a re-file batch, and
+    /// whether re-filing would take it (temp dirs, the home dir, deleted
+    /// projects and projects with under 5 unfiled items are skipped).
+    Workspaces {
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Re-file a project's unfiled docs and artifacts into its folder schema
+    /// (drafting one when it has none), as a batch that can be undone item by
+    /// item or whole (`fleet library refile-undo <batch>`, or the desktop's
+    /// batch view). Moved docs keep resolving at their old slugs.
+    Refile {
+        /// Project directory (default: the current directory).
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+        /// Every healthy project not re-filed yet, one after another.
+        #[arg(long, conflicts_with = "workspace")]
+        all: bool,
+        /// Only show what would be re-filed and the estimated cost.
+        #[arg(long)]
+        dry_run: bool,
+        /// Re-file a project the hygiene check would skip.
+        #[arg(long)]
+        force: bool,
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Undo a re-file (or upload) batch: every item goes back where it was
+    /// and the folders the batch created are removed once empty.
+    RefileUndo {
+        batch: String,
+    },
 }
 
 #[derive(Subcommand)]

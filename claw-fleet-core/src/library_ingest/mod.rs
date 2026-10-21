@@ -42,6 +42,7 @@
 pub mod archive;
 pub mod classify;
 pub mod extract;
+pub mod refile;
 
 use std::collections::HashMap;
 use std::fs;
@@ -80,6 +81,29 @@ impl BatchStatus {
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Done | Self::Failed | Self::Undone)
     }
+}
+
+/// What a batch does: file new uploads, or re-file a project's existing
+/// unfiled items ([`refile`]).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchKind {
+    #[default]
+    Upload,
+    Refile,
+}
+
+/// A re-filed item: which existing doc or artifact it is and where it was
+/// before the batch moved it, so undo can put it back.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RefileRef {
+    /// [`library::ITEM_DOC`] or [`library::ITEM_ARTIFACT`].
+    pub kind: String,
+    /// Where it is now: a doc's current slug, an artifact's id.
+    pub id: String,
+    /// Where it was: a doc's slug, an artifact's `path`.
+    pub from: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +173,9 @@ pub struct IngestItem {
     /// creates it (see [`MAX_NEW_FOLDERS_PER_BATCH`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_folder: Option<classify::ProposedFolder>,
+    /// Set on the items of a [`BatchKind::Refile`] batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refile: Option<RefileRef>,
 }
 
 /// A folder the classifier added during this batch, for the summary.
@@ -187,6 +214,8 @@ pub struct IncomingFile {
 #[serde(rename_all = "camelCase")]
 pub struct IngestBatch {
     pub id: String,
+    #[serde(default)]
+    pub kind: BatchKind,
     /// The project key ([`library::project_key`]).
     pub workspace_path: String,
     pub workspace_name: String,
@@ -230,6 +259,8 @@ pub struct IngestBatch {
 #[serde(rename_all = "camelCase")]
 pub struct BatchSummary {
     pub id: String,
+    #[serde(default)]
+    pub kind: BatchKind,
     pub workspace_path: String,
     pub workspace_name: String,
     pub status: BatchStatus,
@@ -286,6 +317,7 @@ impl IngestBatch {
         };
         BatchSummary {
             id: self.id.clone(),
+            kind: self.kind,
             workspace_path: self.workspace_path.clone(),
             workspace_name: self.workspace_name.clone(),
             status: self.status,
@@ -412,6 +444,7 @@ fn new_batch(roots: &Roots, workspace: &str, status: BatchStatus) -> Result<Inge
     let now = now_ms();
     let batch = IngestBatch {
         id: new_batch_id(),
+        kind: BatchKind::Upload,
         workspace_name: crate::wiki::workspace_name_of(&key),
         workspace_path: key,
         status,
@@ -610,6 +643,9 @@ pub fn undo_item_in(roots: &Roots, batch_id: &str, item_id: &str) -> Result<Inge
 }
 
 fn undo_one(roots: &Roots, item: &mut IngestItem) -> Result<(), String> {
+    if item.refile.is_some() {
+        return refile::undo_one(roots, item);
+    }
     if let Some(id) = &item.artifact_id {
         match artifacts::delete_in(&roots.artifacts, id) {
             Ok(()) => {}
@@ -672,6 +708,10 @@ pub fn move_item_in(
             .iter_mut()
             .find(|i| i.id == item_id)
             .ok_or_else(|| format!("no item '{item_id}' in this upload"))?;
+        if item.refile.is_some() {
+            refile::move_one(roots, item, folder)?;
+            return Ok(b.clone());
+        }
         let artifact = match (&item.status, &item.artifact_id) {
             (ItemStatus::Filed, Some(a)) => a.clone(),
             _ => return Err("only a filed item can be moved".to_string()),
@@ -775,6 +815,9 @@ fn run_pipeline(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), String
     let batch = load(roots, id)?;
     if batch.status.is_terminal() || batch.status == BatchStatus::Receiving {
         return Ok(());
+    }
+    if batch.kind == BatchKind::Refile {
+        return refile::run_pipeline(roots, id, brain);
     }
     if matches!(batch.status, BatchStatus::Queued | BatchStatus::Staging) {
         set_status(roots, id, BatchStatus::Staging)?;
@@ -895,6 +938,7 @@ fn stage(roots: &Roots, id: &str) -> Result<(), String> {
             staged,
             vision_file: None,
             new_folder: None,
+            refile: None,
         });
     }
     let rejected = stager.rejected.clone();
@@ -1021,18 +1065,8 @@ fn draft_if_needed(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), Str
     if active.is_empty() {
         return Ok(());
     }
-    // Two batches for one schemaless project must not both draft one.
-    let gate = {
-        use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(batch.workspace_path.as_bytes());
-        let hex: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
-        ingest_dir(roots).join(format!("draft-{hex}"))
-    };
-    crate::atomic_json::with_file_lock(&gate, || {
-        if !library::list_folders_in(roots, &batch.workspace_path)?.is_empty() {
-            return Ok(());
-        }
-        let dir = batch_dir(roots, id)?;
+    let dir = batch_dir(roots, id)?;
+    draft_schema(roots, &batch, brain, || {
         let ws = Path::new(&batch.workspace_path);
         let existing_titles: Vec<String> = library::tree_in(roots, Some(&batch.workspace_path))
             .into_iter()
@@ -1040,7 +1074,7 @@ fn draft_if_needed(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), Str
             .map(|i| i.title)
             .take(100)
             .collect();
-        let input = classify::DraftInput {
+        classify::DraftInput {
             project_name: batch.workspace_name.clone(),
             readme: read_head(&ws.join("README.md"), 3000),
             claude_md: read_head(&ws.join("CLAUDE.md"), 3000),
@@ -1055,8 +1089,32 @@ fn draft_if_needed(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), Str
                     excerpt: read_excerpt(&dir, &i.id, 300),
                 })
                 .collect(),
-        };
-        let prompt = classify::draft_prompt(&input);
+        }
+    })
+}
+
+/// Draft a schema for `batch`'s project if it still has none, recording the
+/// folders it made on the batch. `input` is only built once the project is
+/// known to need one.
+fn draft_schema(
+    roots: &Roots,
+    batch: &IngestBatch,
+    brain: &dyn Brain,
+    input: impl FnOnce() -> classify::DraftInput,
+) -> Result<(), String> {
+    let id = batch.id.as_str();
+    // Two batches for one schemaless project must not both draft one.
+    let gate = {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(batch.workspace_path.as_bytes());
+        let hex: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+        ingest_dir(roots).join(format!("draft-{hex}"))
+    };
+    crate::atomic_json::with_file_lock(&gate, || {
+        if !library::list_folders_in(roots, &batch.workspace_path)?.is_empty() {
+            return Ok(());
+        }
+        let prompt = classify::draft_prompt(&input());
         let mut specs = None;
         let mut last_err = String::from("no model answered");
         for _ in 0..2 {
@@ -1327,7 +1385,10 @@ fn create_proposed_folders(
                 &p.path,
                 desc,
                 key,
-                FolderOrigin::upload(&batch.id, &p.reason),
+                match batch.kind {
+                    BatchKind::Upload => FolderOrigin::upload(&batch.id, &p.reason),
+                    BatchKind::Refile => FolderOrigin::refile(&batch.id, &p.reason),
+                },
             )
         };
         // The model's key may collide with a sibling's; the folder matters
