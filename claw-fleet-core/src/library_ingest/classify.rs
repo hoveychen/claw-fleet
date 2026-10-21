@@ -131,8 +131,85 @@ belongs there\", \"reason\": \"why no existing folder fits\"} — usually a subf
 existing one (a new year or month, a new counterparty), at most 2 levels deep, named in the \
 existing folders' language. Use the same new_folder path for every file that belongs there.";
 
-pub(crate) const LANGUAGE_RULE: &str = "Write titles, summaries and tags in the language of the file's own \
-content; use Simplified Chinese when the file has no readable text.";
+/// The language a project's library is written in, which every title,
+/// summary and tag the AI writes for it follows. Per project, not per item: a
+/// Chinese project's English log or English-language paper still gets a
+/// Chinese summary, so the library reads in one language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Language {
+    Chinese,
+    English,
+}
+
+impl Language {
+    /// The prompt sentence that pins the output language.
+    pub fn rule(self) -> &'static str {
+        match self {
+            Self::Chinese => "Write titles, summaries and tags in Simplified Chinese — the language \
+this project's library is written in — even when the item itself is in English or another \
+language; keep code identifiers, file names and product names as they are.",
+            Self::English => "Write titles, summaries and tags in English — the language this \
+project's library is written in — even when the item itself is in another language.",
+        }
+    }
+}
+
+/// Share of CJK characters, among CJK characters and Latin words, from which
+/// a text counts as Chinese. A CJK character carries about what a word does;
+/// Chinese technical writing is full of English identifiers, so the bar is
+/// well below half.
+const CHINESE_SHARE: f64 = 0.3;
+/// Fewest Latin words a text without enough CJK needs to count as English.
+const MIN_ENGLISH_WORDS: usize = 5;
+
+/// The language one text is written in; `None` when it has too little text.
+pub fn text_language(text: &str) -> Option<Language> {
+    let mut cjk = 0usize;
+    let mut words = 0usize;
+    let mut in_word = false;
+    for c in text.chars() {
+        if matches!(c, '\u{4e00}'..='\u{9fff}' | '\u{3400}'..='\u{4dbf}') {
+            cjk += 1;
+            in_word = false;
+        } else if c.is_ascii_alphabetic() {
+            if !in_word {
+                words += 1;
+            }
+            in_word = true;
+        } else {
+            in_word = false;
+        }
+    }
+    if cjk + words == 0 {
+        return None;
+    }
+    if cjk as f64 / (cjk + words) as f64 >= CHINESE_SHARE {
+        Some(Language::Chinese)
+    } else if words >= MIN_ENGLISH_WORDS {
+        Some(Language::English)
+    } else {
+        None
+    }
+}
+
+/// The dominant language of `texts` (one per item): English only when more
+/// items are English than Chinese; Chinese on a tie or with nothing to go by,
+/// the library's users being Chinese-speaking first.
+pub fn dominant_language<'a>(texts: impl IntoIterator<Item = &'a str>) -> Language {
+    let (mut zh, mut en) = (0usize, 0usize);
+    for t in texts {
+        match text_language(t) {
+            Some(Language::Chinese) => zh += 1,
+            Some(Language::English) => en += 1,
+            None => {}
+        }
+    }
+    if en > zh {
+        Language::English
+    } else {
+        Language::Chinese
+    }
+}
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
@@ -193,7 +270,7 @@ Reply with JSON only, no prose:\n\
 }
 
 /// Prompt filing a chunk of text-bearing files.
-pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief]) -> String {
+pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief], lang: Language) -> String {
     let mut p = String::new();
     p.push_str("File each uploaded file into one folder of this project's library.\n\n");
     p.push_str("Folders (path — what belongs there):\n");
@@ -213,11 +290,12 @@ pub fn classify_prompt(folders: &[LibraryFolder], items: &[ItemBrief]) -> String
 above, or \"\" when none fits; \"title\": a short descriptive title, not just the file name — \
 include the identifying facts (who, what, date, amount) when the file has them; \"summary\": 1 to \
 3 sentences on what it is and its key facts; \"tags\": 1 to 5 short keywords. The original path \
-is a hint (folder names the user chose) but decide by content.{new_rule} {LANGUAGE_RULE}\n\n\
+is a hint (folder names the user chose) but decide by content.{new_rule} {lang_rule}\n\n\
 Reply with a JSON array only:\n\
 [{{\"id\":\"{}\",\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"]}}]\n",
         items.first().map(|i| i.id.as_str()).unwrap_or("i0000"),
         new_rule = new_folder_rule(folders),
+        lang_rule = lang.rule(),
     ));
     p
 }
@@ -271,7 +349,7 @@ Reply with a JSON array only:\n\
 }
 
 /// Prompt for one image or scan, read by Claude through its `Read` tool.
-pub fn vision_prompt(folders: &[LibraryFolder], item: &ItemBrief, file_name: &str) -> String {
+pub fn vision_prompt(folders: &[LibraryFolder], item: &ItemBrief, file_name: &str, lang: Language) -> String {
     let pdf = file_name.to_lowercase().ends_with(".pdf");
     format!(
         "Use the Read tool to look at the file `{file_name}` in the current directory{pdf_hint}, \
@@ -282,13 +360,14 @@ Return: \"folder\": exactly one folder path from the list, or \"\" when none fit
 short descriptive title with the identifying facts (who, what, date, amount) when visible; \
 \"summary\": 1 to 3 sentences on what it is and its key facts; \"tags\": 1 to 5 short keywords; \
 \"text\": the document's important visible text transcribed (names, numbers, dates, line items), \
-at most 1500 characters, or \"\" for a photo without text.{new_rule} {LANGUAGE_RULE}\n\n\
+at most 1500 characters, or \"\" for a photo without text.{new_rule} {lang_rule}\n\n\
 Reply with one JSON object only:\n\
 {{\"folder\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"text\":\"...\"}}\n",
         pdf_hint = if pdf { " (the first 3 pages are enough)" } else { "" },
         folders = folder_list(folders),
         rel = item.rel_path,
         new_rule = new_folder_rule(folders),
+        lang_rule = lang.rule(),
     )
 }
 
@@ -335,8 +414,50 @@ pub fn extract_json(text: &str) -> Option<&str> {
     None
 }
 
-fn parse_value(text: &str) -> Option<Value> {
-    serde_json::from_str(extract_json(text)?).ok()
+/// The JSON value in a model's answer. Models writing Chinese often quote a
+/// phrase with bare ASCII quotes inside a string (`书写着"教师节快乐"的`),
+/// which is not JSON; such an answer is parsed again with those quotes
+/// escaped (see [`escape_inner_quotes`]).
+pub(crate) fn parse_value(text: &str) -> Option<Value> {
+    if let Some(v) = extract_json(text).and_then(|j| serde_json::from_str(j).ok()) {
+        return Some(v);
+    }
+    let start = text.find(['[', '{'])?;
+    let end = text.rfind([']', '}'])?;
+    (end > start)
+        .then(|| escape_inner_quotes(&text[start..=end]))
+        .and_then(|j| serde_json::from_str(&j).ok())
+}
+
+/// Escape the `"` inside JSON strings that do not end them: a quote that
+/// closes a string is followed by `,` `:` `}` `]` or the end; any other one
+/// is part of the text.
+fn escape_inner_quotes(json: &str) -> String {
+    let chars: Vec<char> = json.chars().collect();
+    let mut out = String::with_capacity(json.len() + 8);
+    let mut in_str = false;
+    let mut escaped = false;
+    for (i, &c) in chars.iter().enumerate() {
+        if !in_str {
+            in_str = c == '"';
+            out.push(c);
+            continue;
+        }
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            let next = chars[i + 1..].iter().find(|c| !c.is_whitespace());
+            if next.is_none_or(|n| matches!(n, ',' | ':' | '}' | ']')) {
+                in_str = false;
+            } else {
+                out.push('\\');
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Normalize a folder path the way the schema stores it.
@@ -771,6 +892,13 @@ mod tests {
         assert_eq!(extract_json("{\"a\":\"\\\"}\"}"), Some("{\"a\":\"\\\"}\"}"));
         assert_eq!(extract_json("no json here"), None);
         assert_eq!(extract_json("[1, 2"), None);
+        // Bare quotes inside a Chinese string are repaired, not refused.
+        let raw = "```json\n{\n  \"summary\": \"背景黑板上书写着\"教师节快乐\"的红色字样。\",\n  \"tags\": [\"教师节\"]\n}\n```";
+        let v = parse_value(raw).unwrap();
+        assert_eq!(v["summary"], "背景黑板上书写着\"教师节快乐\"的红色字样。");
+        assert_eq!(v["tags"][0], "教师节");
+        let v = parse_value("[{\"id\":\"i1\",\"title\":\"标题为\"新渠道\"的页面\",\"folder\":\"\"}]").unwrap();
+        assert_eq!(v[0]["title"], "标题为\"新渠道\"的页面");
     }
 
     #[test]
@@ -854,7 +982,7 @@ mod tests {
             ItemBrief { id: "i0001".into(), rel_path: "合同/施工合同.docx".into(), size: 23_000, excerpt: "施工合同 甲方：陈某".into() },
             ItemBrief { id: "i0002".into(), rel_path: "IMG_1.jpg".into(), size: 3_000_000, excerpt: String::new() },
         ];
-        let p = classify_prompt(&schema(), &items);
+        let p = classify_prompt(&schema(), &items, Language::Chinese);
         assert!(p.contains("- 票据/收据 — 小票"));
         assert!(p.contains("### i0001 · 合同/施工合同.docx · 22 KB"));
         assert!(p.contains("施工合同 甲方：陈某"));
@@ -871,7 +999,7 @@ mod tests {
         assert!(d.contains("- 合同/施工合同.docx · 22 KB · \"施工合同 甲方：陈某\""));
         assert!(d.contains("\"key\""));
 
-        let v = vision_prompt(&schema(), &items[1], "scan.pdf");
+        let v = vision_prompt(&schema(), &items[1], "scan.pdf", Language::Chinese);
         assert!(v.contains("`scan.pdf`") && v.contains("first 3 pages") && v.contains("IMG_1.jpg"));
     }
 
@@ -931,8 +1059,50 @@ mod tests {
         let v = parse_verdicts(text, &[], &ids);
         assert!(v.iter().all(|v| v.new_folder.is_none()));
         let brief = ItemBrief { id: "i1".into(), ..Default::default() };
-        assert!(classify_prompt(&folders, std::slice::from_ref(&brief)).contains("\"new_folder\""));
-        assert!(vision_prompt(&folders, &brief, "a.jpg").contains("\"new_folder\""));
-        assert!(!classify_prompt(&[], std::slice::from_ref(&brief)).contains("new_folder"));
+        assert!(classify_prompt(&folders, std::slice::from_ref(&brief), Language::Chinese).contains("\"new_folder\""));
+        assert!(vision_prompt(&folders, &brief, "a.jpg", Language::Chinese).contains("\"new_folder\""));
+        assert!(!classify_prompt(&[], std::slice::from_ref(&brief), Language::Chinese).contains("new_folder"));
+    }
+
+    #[test]
+    fn text_language_counts_cjk_against_latin_words() {
+        assert_eq!(text_language("施工合同，甲方陈某，乙方装修公司"), Some(Language::Chinese));
+        // Chinese technical prose full of identifiers is still Chinese.
+        assert_eq!(
+            text_language("用 cargo test 跑 library_filing 模块的单测，再看 wiki redirect 是否生效"),
+            Some(Language::Chinese)
+        );
+        assert_eq!(
+            text_language("A summary of the quarterly budget review and its open questions"),
+            Some(Language::English)
+        );
+        assert_eq!(text_language("IMG_1 jpg"), None, "too few words to tell");
+        assert_eq!(text_language("2026-10-21 · 42"), None);
+    }
+
+    #[test]
+    fn the_dominant_language_is_chinese_unless_english_wins_outright() {
+        let en = "This is a plain English note about the build";
+        let zh = "这是一份关于构建流程的中文笔记";
+        assert_eq!(dominant_language([en, en, zh]), Language::English);
+        assert_eq!(dominant_language([en, zh]), Language::Chinese, "a tie stays Chinese");
+        assert_eq!(dominant_language([zh, zh, en]), Language::Chinese);
+        assert_eq!(dominant_language(["", "IMG_1"]), Language::Chinese, "nothing to go by");
+    }
+
+    #[test]
+    fn prompts_pin_the_project_language_not_the_items() {
+        let brief = ItemBrief {
+            id: "i0001".into(),
+            rel_path: "report.md".into(),
+            size: 10,
+            excerpt: "An English report".into(),
+        };
+        let zh = classify_prompt(&schema(), std::slice::from_ref(&brief), Language::Chinese);
+        assert!(zh.contains(Language::Chinese.rule()));
+        assert!(!zh.contains(Language::English.rule()));
+        let en = vision_prompt(&schema(), &brief, "a.png", Language::English);
+        assert!(en.contains(Language::English.rule()));
+        assert!(!en.contains(Language::Chinese.rule()));
     }
 }

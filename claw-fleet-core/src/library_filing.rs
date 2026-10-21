@@ -227,15 +227,16 @@ pub fn publish_wiki_in(
         }
     }
 
-    // A slug whose directory already is a folder's prefix names that folder
+    // A slug whose directory already is a folder's prefix — with the project
+    // namespace or, as written before namespacing, without — names that folder
     // (`--slug invoices/jd-0920`), so the old habit keeps working.
     let mut args = args.clone();
     if args.folder.is_none() {
         if let Some(dir) = slug.as_deref().map(library::slug_dir).filter(|d| !d.is_empty()) {
             let project = project_of(workspace)?;
             let folders = library::list_folders_in(roots, &project)?;
-            if folders.iter().any(|f| f.wiki_prefix == dir) {
-                args.folder = Some(dir.to_string());
+            if let Some(f) = library::folder_by_dir(&folders, dir) {
+                args.folder = Some(f.path.clone());
                 args.new_folder = false;
             }
         }
@@ -288,10 +289,10 @@ pub fn move_wiki_in(
                 refusal(&project, &folders, None)
             ));
         }
-        if !folders.iter().any(|f| f.wiki_prefix == dir) {
+        let Some(f) = library::folder_by_dir(&folders, dir) else {
             return Err(refusal(&project, &folders, Some(dir)));
-        }
-        args.folder = Some(dir.to_string());
+        };
+        args.folder = Some(f.path.clone());
     }
 
     let (folder, created) = resolve_in(roots, workspace, &args, session_id)?;
@@ -457,13 +458,13 @@ mod tests {
         let src = e.file("report.md", "# Report");
         let err = publish_wiki_in(&e.roots, &src, None, None, &e.ws, &FilingArgs::default(), None).unwrap_err();
         assert!(err.contains("A folder is required"), "{err}");
-        assert!(err.contains("- 调研  (research) — 调研报告与分析"), "{err}");
+        assert!(err.contains("- 调研  (project/research) — 调研报告与分析"), "{err}");
         assert!(err.contains("new_folder=true"), "{err}");
         assert!(wiki::list_docs_in(&e.roots.wiki).is_empty(), "nothing published");
 
         let err = add_artifact_in(&e.roots, &src, None, None, &e.ws, &folder("made-up"), None).unwrap_err();
         assert!(err.contains("'made-up' is not one of"), "{err}");
-        assert!(err.contains("- 发票  (invoices) — 报销发票"), "{err}");
+        assert!(err.contains("- 发票  (project/invoices) — 报销发票"), "{err}");
         assert!(artifacts::list_in(&e.roots.artifacts).is_empty(), "nothing stored");
     }
 
@@ -473,18 +474,22 @@ mod tests {
         e.schema();
         let src = e.file("q3.md", "# Q3");
         let (doc, filed) = publish_wiki_in(&e.roots, &src, None, None, &e.ws, &folder("调研"), None).unwrap();
-        assert_eq!(doc.slug, "research/q3");
+        assert_eq!(doc.slug, "project/research/q3");
         assert_eq!(filed, Filed { folder: Some("调研".into()), created: false, kept: false });
 
         // By prefix, with an explicit slug whose directory is dropped.
         let src2 = e.file("x.md", "# X");
         let (doc, _) = publish_wiki_in(&e.roots, &src2, Some("old/place/memo"), None, &e.ws, &folder("research"), None).unwrap();
-        assert_eq!(doc.slug, "research/memo");
+        assert_eq!(doc.slug, "project/research/memo");
 
-        // A slug already under a folder's prefix names that folder.
+        // A slug already under a folder's prefix names that folder — written
+        // with the namespace or, as before namespacing, without.
         let src3 = e.file("y.md", "# Y");
-        let (doc, filed) = publish_wiki_in(&e.roots, &src3, Some("invoices/jd-0920"), None, &e.ws, &FilingArgs::default(), None).unwrap();
-        assert_eq!((doc.slug.as_str(), filed.folder.as_deref()), ("invoices/jd-0920", Some("发票")));
+        let (doc, filed) = publish_wiki_in(&e.roots, &src3, Some("project/invoices/jd-0920"), None, &e.ws, &FilingArgs::default(), None).unwrap();
+        assert_eq!((doc.slug.as_str(), filed.folder.as_deref()), ("project/invoices/jd-0920", Some("发票")));
+        let src4 = e.file("z.md", "# Z");
+        let (doc, filed) = publish_wiki_in(&e.roots, &src4, Some("invoices/jd-0921"), None, &e.ws, &FilingArgs::default(), None).unwrap();
+        assert_eq!((doc.slug.as_str(), filed.folder.as_deref()), ("project/invoices/jd-0921", Some("发票")));
 
         let pdf = e.file("receipt.pdf", "%PDF");
         let (a, filed) = add_artifact_in(&e.roots, &pdf, Some("Receipt"), None, &e.ws, &folder("invoices"), Some("s1")).unwrap();
@@ -510,7 +515,7 @@ mod tests {
         args.description = Some("签过的合同".into());
         let (doc, filed) = publish_wiki_in(&e.roots, &src, None, None, &e.ws, &args, Some("sess-1")).unwrap();
         assert!(filed.created);
-        assert_eq!(doc.slug, "hetong/deck", "a CJK folder gets a pinyin key");
+        assert_eq!(doc.slug, "project/hetong/deck", "a CJK folder gets a pinyin key");
         let f = e.folders().into_iter().find(|f| f.path == "合同").unwrap();
         assert_eq!(f.description, "签过的合同");
         let o = f.origin.as_ref().unwrap();
@@ -549,10 +554,10 @@ mod tests {
             description: Some("Architecture notes".into()),
         };
         let (doc, filed) = publish_wiki_in(&e.roots, &src, None, None, &e.ws, &args, None).unwrap();
-        assert_eq!(doc.slug, "architecture/notes");
+        assert_eq!(doc.slug, "project/architecture/notes");
         assert!(filed.created);
         let text = folders_text_in(&e.roots, &e.ws).unwrap();
-        assert!(text.contains("- architecture — Architecture notes  [new, awaiting the user's review]"), "{text}");
+        assert!(text.contains("- architecture  (project/architecture) — Architecture notes  [new, awaiting the user's review]"), "{text}");
     }
 
     #[test]
@@ -597,29 +602,30 @@ mod tests {
         e.schema();
         let src = e.file("memo.md", "# Memo");
         let (doc, _) = publish_wiki_in(&e.roots, &src, None, None, &e.ws, &folder("调研"), None).unwrap();
-        assert_eq!(doc.slug, "research/memo");
+        assert_eq!(doc.slug, "project/research/memo");
 
         // Out of every folder, or into a directory the schema lacks: refused.
-        let err = move_wiki_in(&e.roots, "research/memo", Some("memo"), &FilingArgs::default(), None).unwrap_err();
+        let err = move_wiki_in(&e.roots, "project/research/memo", Some("memo"), &FilingArgs::default(), None).unwrap_err();
         assert!(err.contains("may not move docs out"), "{err}");
-        let err = move_wiki_in(&e.roots, "research/memo", Some("misc/memo"), &FilingArgs::default(), None).unwrap_err();
+        let err = move_wiki_in(&e.roots, "project/research/memo", Some("misc/memo"), &FilingArgs::default(), None).unwrap_err();
         assert!(err.contains("'misc' is not one of"), "{err}");
-        assert!(wiki::get_doc_in(&e.roots.wiki, "research/memo").unwrap().slug == "research/memo", "not moved");
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/research/memo").unwrap().slug == "project/research/memo", "not moved");
 
-        // Into a folder's prefix, or by naming the folder.
-        let (moved, filed) = move_wiki_in(&e.roots, "research/memo", Some("invoices/memo-0920"), &FilingArgs::default(), None).unwrap();
-        assert_eq!((moved.slug.as_str(), filed.folder.as_deref()), ("invoices/memo-0920", Some("发票")));
-        let (moved, _) = move_wiki_in(&e.roots, "invoices/memo-0920", None, &folder("调研"), None).unwrap();
-        assert_eq!(moved.slug, "research/memo-0920");
-        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "research/memo").as_deref(), Some("research/memo-0920"));
-        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "invoices/memo-0920").unwrap().slug, "research/memo-0920");
+        // Into a folder's prefix (here as written before namespacing), or by
+        // naming the folder.
+        let (moved, filed) = move_wiki_in(&e.roots, "project/research/memo", Some("invoices/memo-0920"), &FilingArgs::default(), None).unwrap();
+        assert_eq!((moved.slug.as_str(), filed.folder.as_deref()), ("project/invoices/memo-0920", Some("发票")));
+        let (moved, _) = move_wiki_in(&e.roots, "project/invoices/memo-0920", None, &folder("调研"), None).unwrap();
+        assert_eq!(moved.slug, "project/research/memo-0920");
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "project/research/memo").as_deref(), Some("project/research/memo-0920"));
+        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "project/invoices/memo-0920").unwrap().slug, "project/research/memo-0920");
 
         // A new folder needs the same reason + description, and is marked.
         let args = FilingArgs { folder: Some("合同".into()), new_folder: true, ..Default::default() };
-        assert!(move_wiki_in(&e.roots, "research/memo-0920", None, &args, None).is_err());
+        assert!(move_wiki_in(&e.roots, "project/research/memo-0920", None, &args, None).is_err());
         let args = FilingArgs { reason: Some("contracts".into()), description: Some("签过的合同".into()), ..args };
-        let (moved, filed) = move_wiki_in(&e.roots, "research/memo", None, &args, Some("s9")).unwrap();
-        assert_eq!(moved.slug, "hetong/memo-0920");
+        let (moved, filed) = move_wiki_in(&e.roots, "project/research/memo", None, &args, Some("s9")).unwrap();
+        assert_eq!(moved.slug, "project/hetong/memo-0920");
         assert!(filed.created);
         assert!(e.folders().iter().find(|f| f.path == "合同").unwrap().awaiting_review());
     }

@@ -33,6 +33,13 @@
 //!   The upload organizer writes a key for every folder it drafts; a folder
 //!   made by hand without one keeps the derived segment.
 //!
+//!   Every prefix starts with the project's [namespace](project_namespace_in)
+//!   (`dayday/research`, not `research`): slugs are global across projects,
+//!   and the first re-filed project took bare `research/…` and `design/…`, so
+//!   every later project with a research folder would have collided with it
+//!   or got `-2` slugs. Docs filed before namespacing are moved onto the
+//!   namespaced prefix by [`migrate_namespaces_in`].
+//!
 //! An item whose folder is not in the schema is reported with `folder: None`
 //! and shows under the tree's "unfiled" bucket. Nothing here invents a folder
 //! from where an item happens to sit — that is how the tree got messy.
@@ -52,6 +59,7 @@
 //!
 //! ```text
 //! ~/.fleet/library/projects/<h(project key)>/
+//!   project.json               # ProjectRecord: the project's slug namespace
 //!   folders/<h(path)>.json     # LibraryFolder
 //!   schema.lock                # serializes multi-file edits (create with
 //!                              # ancestors, rename of a subtree)
@@ -89,9 +97,10 @@ pub const ITEM_DOC: &str = "doc";
 pub const ITEM_ARTIFACT: &str = "artifact";
 
 /// Deepest a folder may nest. A wiki slug holds at most
-/// [`wiki::MAX_SLUG_DEPTH`] segments and the doc's own name is one of them, so
-/// a deeper folder could hold artifacts but never a document.
-pub const MAX_FOLDER_DEPTH: usize = wiki::MAX_SLUG_DEPTH - 1;
+/// [`wiki::MAX_SLUG_DEPTH`] segments and the project namespace and the doc's
+/// own name are two of them, so a deeper folder could hold artifacts but never
+/// a document.
+pub const MAX_FOLDER_DEPTH: usize = wiki::MAX_SLUG_DEPTH - 2;
 
 /// Longest a folder's wiki prefix may be. Leaves room under
 /// [`wiki::MAX_SLUG_LEN`] for a `/` and a reasonable doc name.
@@ -369,36 +378,175 @@ fn leaf_of(path: &str) -> &str {
     path.rfind('/').map(|i| &path[i + 1..]).unwrap_or(path)
 }
 
-/// `path`'s wiki prefix within `folders`: each segment is its folder's
-/// [`LibraryFolder::key`] when that folder is in the list and has one, else
-/// [`segment_key`] of the segment's name.
-pub fn prefix_in(folders: &[LibraryFolder], path: &str) -> String {
+/// `path`'s wiki prefix within `folders` of the project whose namespace is
+/// `ns`: the namespace, then per segment its folder's [`LibraryFolder::key`]
+/// when that folder is in the list and has one, else [`segment_key`] of the
+/// segment's name. An empty `ns` gives the prefix as it was before namespacing.
+fn prefix_in(ns: &str, folders: &[LibraryFolder], path: &str) -> String {
     let by_path: HashMap<&str, &LibraryFolder> =
         folders.iter().map(|f| (f.path.as_str(), f)).collect();
-    prefix_with(&by_path, path)
+    prefix_with(ns, &by_path, path)
 }
 
-fn prefix_with(by_path: &HashMap<&str, &LibraryFolder>, path: &str) -> String {
-    prefixes(path)
+fn prefix_with(ns: &str, by_path: &HashMap<&str, &LibraryFolder>, path: &str) -> String {
+    let rel = prefixes(path)
         .iter()
         .map(|p| match by_path.get(p.as_str()).filter(|f| !f.key.is_empty()) {
             Some(f) => f.key.clone(),
             None => segment_key(leaf_of(p)),
         })
         .collect::<Vec<_>>()
-        .join("/")
+        .join("/");
+    if ns.is_empty() {
+        rel
+    } else {
+        format!("{ns}/{rel}")
+    }
 }
 
 /// Fill in every folder's `wiki_prefix` from the list itself.
-fn assign_prefixes(folders: &mut [LibraryFolder]) {
+fn assign_prefixes(ns: &str, folders: &mut [LibraryFolder]) {
     let computed: Vec<String> = {
         let by_path: HashMap<&str, &LibraryFolder> =
             folders.iter().map(|f| (f.path.as_str(), f)).collect();
-        folders.iter().map(|f| prefix_with(&by_path, &f.path)).collect()
+        folders.iter().map(|f| prefix_with(ns, &by_path, &f.path)).collect()
     };
     for (f, p) in folders.iter_mut().zip(computed) {
         f.wiki_prefix = p;
     }
+}
+
+/// A folder's wiki prefix without the project namespace — what it was before
+/// namespacing, and what agents used to write as a slug's directory.
+pub(crate) fn rel_prefix(folder: &LibraryFolder) -> &str {
+    folder
+        .wiki_prefix
+        .split_once('/')
+        .map(|(_, rest)| rest)
+        .unwrap_or(&folder.wiki_prefix)
+}
+
+/// The schema folder a slug directory names: its prefix exactly, else — for
+/// the habit of writing `research/memo` from before namespacing — the prefix
+/// without the namespace.
+pub(crate) fn folder_by_dir<'a>(folders: &'a [LibraryFolder], dir: &str) -> Option<&'a LibraryFolder> {
+    if dir.is_empty() {
+        return None;
+    }
+    folders
+        .iter()
+        .find(|f| f.wiki_prefix == dir)
+        .or_else(|| folders.iter().find(|f| rel_prefix(f) == dir))
+}
+
+// ── Project namespace ───────────────────────────────────────────────────────
+
+/// A project's persisted identity in the library: the namespace its docs'
+/// slugs start with.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRecord {
+    /// The project key ([`project_key`]).
+    pub workspace_path: String,
+    /// First slug segment of every doc filed in the project's folders.
+    pub namespace: String,
+    #[serde(default)]
+    pub assigned_ms: u64,
+}
+
+fn project_record_file(roots: &Roots, key: &str) -> PathBuf {
+    project_dir(roots, key).join("project.json")
+}
+
+fn read_project_record(roots: &Roots, key: &str) -> Option<ProjectRecord> {
+    let raw = fs::read_to_string(project_record_file(roots, key)).ok()?;
+    serde_json::from_str::<ProjectRecord>(&raw)
+        .ok()
+        .filter(|r| r.workspace_path == key && !r.namespace.is_empty())
+}
+
+/// What a namespace is spelled from: the project's name (the repo's directory
+/// name, which is what most projects' docs were already prefixed with by hand
+/// — `human-zoo/…`, `suikou/…`), as a lowercase ASCII slug segment; a CJK
+/// name becomes pinyin.
+fn namespace_base(key: &str) -> String {
+    let name = wiki::workspace_name_of(key);
+    let ascii = if name.is_ascii() { normalize_key(&name) } else { normalize_key(&auto_key(&name)) };
+    ascii.unwrap_or_else(|| format!("p-{}", short_hash(key, 6)))
+}
+
+/// Namespaces to try, in order: the name, then the name under its parent
+/// directory's name, then the name with a hash of the key.
+fn namespace_candidates(key: &str) -> Vec<String> {
+    let base = namespace_base(key);
+    let mut out = vec![base.clone()];
+    let parent = Path::new(key)
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| normalize_key(&n.to_string_lossy()));
+    if let Some(parent) = parent {
+        if let Some(k) = normalize_key(&format!("{parent}-{base}")) {
+            out.push(k);
+        }
+    }
+    let head: String = base.chars().take(MAX_KEY_LEN - 7).collect();
+    out.push(format!("{}-{}", head.trim_end_matches('-'), short_hash(key, 6)));
+    out
+}
+
+/// The slug namespace of project `key` — the first segment of every folder's
+/// wiki prefix.
+///
+/// Assigned once and then persisted, so it never changes under a project's
+/// docs: the project's name when no other project holds it, else a longer
+/// spelling (see [`namespace_candidates`]). Persisting is what keeps it stable
+/// when a second project with the same directory name shows up later — a
+/// rule derived afresh on every read would rename the first one's docs. One
+/// repo and all its worktrees are one key, so they share a namespace.
+pub fn project_namespace_in(roots: &Roots, key: &str) -> String {
+    if let Some(r) = read_project_record(roots, key) {
+        return r.namespace;
+    }
+    let assign = || -> Result<String, String> {
+        if let Some(r) = read_project_record(roots, key) {
+            return Ok(r.namespace);
+        }
+        let taken: HashSet<String> = fs::read_dir(projects_dir(roots))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| fs::read_to_string(e.path().join("project.json")).ok())
+            .filter_map(|raw| serde_json::from_str::<ProjectRecord>(&raw).ok())
+            .filter(|r| r.workspace_path != key)
+            .map(|r| r.namespace)
+            .collect();
+        let candidates = namespace_candidates(key);
+        let namespace = candidates
+            .iter()
+            .find(|c| !taken.contains(*c))
+            .cloned()
+            .unwrap_or_else(|| format!("p-{}", short_hash(key, 12)));
+        let record = ProjectRecord { workspace_path: key.to_string(), namespace, assigned_ms: now_ms() };
+        let body = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
+        crate::atomic_json::write_atomic(&project_record_file(roots, key), &body)
+            .map_err(|e| format!("write project record: {e}"))?;
+        Ok(record.namespace)
+    };
+    // One lock for the whole store: two projects with the same name assigning
+    // at once must not both take it.
+    match crate::atomic_json::with_file_lock(&projects_dir(roots).join("namespaces"), assign) {
+        Ok(ns) => ns,
+        Err(e) => {
+            // Unwritable store: fall back to the name, unpersisted.
+            crate::log_debug(&format!("[library] namespace for {key}: {e}"));
+            namespace_base(key)
+        }
+    }
+}
+
+pub fn project_namespace(workspace: &str) -> Result<String, String> {
+    let roots = Roots::home()?;
+    Ok(project_namespace_in(&roots, &checked_key(workspace)?))
 }
 
 fn parent_of(path: &str) -> &str {
@@ -451,6 +599,7 @@ fn with_project_lock<R>(roots: &Roots, key: &str, f: impl FnOnce() -> R) -> R {
     crate::atomic_json::with_file_lock(&project_dir(roots, key).join("schema"), f)
 }
 
+/// The folder records in one project directory, prefixes not yet assigned.
 fn read_folders_dir(project: &Path) -> Vec<LibraryFolder> {
     let Ok(entries) = fs::read_dir(project.join("folders")) else {
         return Vec::new();
@@ -467,18 +616,21 @@ fn read_folders_dir(project: &Path) -> Vec<LibraryFolder> {
         .collect();
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out.dedup_by(|a, b| a.path == b.path);
-    assign_prefixes(&mut out);
     out
 }
 
 /// One project's schema, without the legacy import.
 fn project_folders(roots: &Roots, key: &str) -> Vec<LibraryFolder> {
-    read_folders_dir(&project_dir(roots, key))
+    let mut out: Vec<LibraryFolder> = read_folders_dir(&project_dir(roots, key))
         .into_iter()
         // A hash collision between two project keys is astronomically
         // unlikely, but a folder must never show up under the wrong project.
         .filter(|f| f.workspace_path == key)
-        .collect()
+        .collect();
+    if !out.is_empty() {
+        assign_prefixes(&project_namespace_in(roots, key), &mut out);
+    }
+    out
 }
 
 fn write_folder(roots: &Roots, folder: &LibraryFolder) -> Result<(), String> {
@@ -576,11 +728,14 @@ pub(crate) fn all_folders(roots: &Roots) -> Vec<LibraryFolder> {
     let Ok(entries) = fs::read_dir(projects_dir(roots)) else {
         return Vec::new();
     };
-    let mut out: Vec<LibraryFolder> = entries
+    let keys: BTreeMap<String, ()> = entries
         .flatten()
         .filter(|e| e.path().is_dir())
         .flat_map(|e| read_folders_dir(&e.path()))
+        .map(|f| (f.workspace_path, ()))
         .collect();
+    let mut out: Vec<LibraryFolder> =
+        keys.into_keys().flat_map(|k| project_folders(roots, &k)).collect();
     out.sort_by(|a, b| {
         a.workspace_path
             .cmp(&b.workspace_path)
@@ -856,6 +1011,7 @@ fn create_folder_impl(
     let leaf_key = folder_key.and_then(normalize_key).unwrap_or_default();
     with_project_lock(roots, &key, || {
         let mut folders = project_folders(roots, &key);
+        let ns = project_namespace_in(roots, &key);
         let now = now_ms();
         let mut created = Vec::new();
         for p in prefixes(&path) {
@@ -874,7 +1030,7 @@ fn create_folder_impl(
                 ..Default::default()
             };
             folders.push(f.clone());
-            f.wiki_prefix = prefix_in(&folders, &p);
+            f.wiki_prefix = prefix_in(&ns, &folders, &p);
             folders.pop();
             if explicit.is_empty() && !auto.is_empty() {
                 // A pinyin key is a nicety, not a promise: two names can
@@ -883,7 +1039,7 @@ fn create_folder_impl(
                 if ensure_prefix_free(&folders, &p, &f.wiki_prefix, None).is_err() {
                     f.key = String::new();
                     folders.push(f.clone());
-                    f.wiki_prefix = prefix_in(&folders, &p);
+                    f.wiki_prefix = prefix_in(&ns, &folders, &p);
                     folders.pop();
                 }
             }
@@ -951,6 +1107,10 @@ pub fn resolve_folder<'a>(folders: &'a [LibraryFolder], raw: &str) -> Option<&'a
         .iter()
         .find(|f| f.path.to_lowercase() == lower || f.wiki_prefix.to_lowercase() == lower)
     {
+        return Some(f);
+    }
+    // The prefix without the project namespace, as agents wrote it before.
+    if let Some(f) = folders.iter().find(|f| rel_prefix(f) == lower) {
         return Some(f);
     }
     if want.contains('/') {
@@ -1064,6 +1224,7 @@ pub fn rename_folder_in(
 
     with_project_lock(roots, &key, || {
         let folders = project_folders(roots, &key);
+        let ns = project_namespace_in(roots, &key);
         if !folders.iter().any(|f| f.path == from) {
             return Err(format!("folder '{from}' not found"));
         }
@@ -1090,8 +1251,8 @@ pub fn rename_folder_in(
                 None => f.clone(),
             })
             .collect();
-        let old_prefix = prefix_in(&folders, &from);
-        let new_prefix = prefix_in(&after, &to);
+        let old_prefix = prefix_in(&ns, &folders, &from);
+        let new_prefix = prefix_in(&ns, &after, &to);
         ensure_prefix_free(&folders, &to, &new_prefix, Some(&from))?;
 
         // Plan the wiki re-keys before touching anything: they are the part
@@ -1138,7 +1299,7 @@ pub fn rename_folder_in(
             let next = repath(&f.path, &from, &to).expect("filtered under from");
             let mut moved = (*f).clone();
             moved.path = next.clone();
-            moved.wiki_prefix = prefix_in(&after, &next);
+            moved.wiki_prefix = prefix_in(&ns, &after, &next);
             moved.updated_ms = now;
             // Renaming an AI-created folder is the user deciding what it is:
             // that clears its marker, as accepting would.
@@ -1157,7 +1318,7 @@ pub fn rename_folder_in(
                     &LibraryFolder {
                         workspace_path: key.clone(),
                         path: p.clone(),
-                        wiki_prefix: prefix_in(&after, &p),
+                        wiki_prefix: prefix_in(&ns, &after, &p),
                         created_ms: now,
                         updated_ms: now,
                         ..Default::default()
@@ -1221,7 +1382,9 @@ pub fn move_item_in(
             let base = wiki::slug_basename(&doc.slug);
             let slug = match &dest {
                 Some(f) => format!("{}/{base}", f.wiki_prefix),
-                None => base.to_string(),
+                // Unfiled, but still in the project's namespace: a bare slug
+                // would compete with every other project's.
+                None => format!("{}/{base}", project_namespace_in(roots, &checked_key(&doc.workspace_path)?)),
             };
             let moved = wiki::move_doc_in(&roots.wiki, &doc.slug, &slug)?;
             Ok(doc_item(&moved, dest.map(|f| f.path)))
@@ -1236,6 +1399,101 @@ pub fn move_item_in(
         }
         other => Err(format!("unknown library item kind '{other}'")),
     }
+}
+
+/// A slug under `prefix` for the doc at `doc` (named `base` there) that
+/// nothing else occupies — no other doc and no redirect another doc left
+/// (taking that over would cut the other doc's old link). A redirect to `doc`
+/// itself, left by an earlier move of it, is free: the doc takes it back.
+pub(crate) fn free_slug(wiki_root: &Path, prefix: &str, doc: &str) -> Result<String, String> {
+    let base = wiki::slug_basename(doc);
+    let current = wiki::resolve_slug_in(wiki_root, doc);
+    for n in 1..100 {
+        let name = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
+        let slug = wiki::normalize_slug(&format!("{prefix}/{name}"))?;
+        let dir = wiki_root.join(wiki::slug_to_dirname(&slug));
+        let own_redirect = !dir.join("doc.json").exists()
+            && current.is_some()
+            && wiki::resolve_slug_in(wiki_root, &slug) == current;
+        if !dir.exists() || own_redirect {
+            return Ok(slug);
+        }
+    }
+    Err(format!("no free slug for '{base}' under '{prefix}'"))
+}
+
+/// One doc [`migrate_namespaces_in`] moves (or would move).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NamespaceMove {
+    pub workspace_path: String,
+    pub folder: String,
+    pub from: String,
+    pub to: String,
+    /// Why it was not moved; `None` = moved (or, in a dry run, would be).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Move docs filed before namespacing onto their folder's namespaced prefix:
+/// a doc of a project whose slug directory is a folder's prefix without the
+/// namespace (`research/memo`) goes to `<namespace>/research/memo`, leaving a
+/// redirect at the old slug so links and quoted slugs keep working. Every
+/// project, or only `workspace`'s. Idempotent: a moved doc no longer matches.
+/// Safe to run again whenever an older build may have filed more docs the old
+/// way.
+pub fn migrate_namespaces_in(
+    roots: &Roots,
+    workspace: Option<&str>,
+    dry_run: bool,
+) -> Result<Vec<NamespaceMove>, String> {
+    import_legacy_artifact_folders(roots);
+    let only = workspace.map(checked_key).transpose()?;
+    let mut by_project: BTreeMap<String, Vec<LibraryFolder>> = BTreeMap::new();
+    for f in all_folders(roots) {
+        if only.as_ref().is_none_or(|k| *k == f.workspace_path) {
+            by_project.entry(f.workspace_path.clone()).or_default().push(f);
+        }
+    }
+    let mut keys = KeyCache::default();
+    let docs = wiki::list_docs_in(&roots.wiki);
+    let mut out = Vec::new();
+    for (key, folders) in by_project {
+        for doc in docs.iter().filter(|d| keys.key(&d.workspace_path) == key) {
+            let dir = slug_dir(&doc.slug);
+            // Already on a namespaced prefix (or unfiled): nothing to do.
+            if dir.is_empty() || folders.iter().any(|f| f.wiki_prefix == dir) {
+                continue;
+            }
+            let Some(folder) = folders.iter().find(|f| rel_prefix(f) == dir) else {
+                continue;
+            };
+            let mut m = NamespaceMove {
+                workspace_path: key.clone(),
+                folder: folder.path.clone(),
+                from: doc.slug.clone(),
+                to: String::new(),
+                error: None,
+            };
+            match free_slug(&roots.wiki, &folder.wiki_prefix, &doc.slug) {
+                Ok(to) => {
+                    m.to = to;
+                    if !dry_run {
+                        if let Err(e) = wiki::move_doc_in(&roots.wiki, &doc.slug, &m.to) {
+                            m.error = Some(e);
+                        }
+                    }
+                }
+                Err(e) => m.error = Some(e),
+            }
+            out.push(m);
+        }
+    }
+    Ok(out)
+}
+
+pub fn migrate_namespaces(workspace: Option<&str>, dry_run: bool) -> Result<Vec<NamespaceMove>, String> {
+    migrate_namespaces_in(&Roots::home()?, workspace, dry_run)
 }
 
 // ── Artifacts page compatibility ─────────────────────────────────────────────
@@ -1457,14 +1715,14 @@ mod tests {
         create_folder_in(&e.roots, &e.ws(), "发票/餐饮", None).unwrap();
         let folders = list_folders_in(&e.roots, &e.ws()).unwrap();
         let prefix = |p: &str| folders.iter().find(|f| f.path == p).unwrap().wiki_prefix.clone();
-        assert_eq!(prefix("发票"), "invoices");
-        assert_eq!(prefix("发票/2026"), "invoices/y2026");
-        assert_eq!(prefix("发票/餐饮"), "invoices/canyin");
+        assert_eq!(prefix("发票"), "project/invoices");
+        assert_eq!(prefix("发票/2026"), "project/invoices/y2026");
+        assert_eq!(prefix("发票/餐饮"), "project/invoices/canyin");
 
         // Docs file under the keyed prefix and are found there.
         let moved = move_item_in(&e.roots, ITEM_DOC, &e.doc("scan", &e.ws).slug, "发票/2026").unwrap();
-        assert_eq!(moved.id, "invoices/y2026/scan");
-        assert_eq!(item(&e.project(), "invoices/y2026/scan").folder.as_deref(), Some("发票/2026"));
+        assert_eq!(moved.id, "project/invoices/y2026/scan");
+        assert_eq!(item(&e.project(), "project/invoices/y2026/scan").folder.as_deref(), Some("发票/2026"));
 
         // Creating an existing folder again never changes its key.
         create_keyed_folder_in(&e.roots, &e.ws(), "发票", None, Some("bills")).unwrap();
@@ -1479,21 +1737,21 @@ mod tests {
     fn rename_keeps_keys_so_docs_keep_their_slugs() {
         let e = env();
         create_keyed_folder_in(&e.roots, &e.ws(), "发票", None, Some("invoices")).unwrap();
-        e.doc("invoices/jd-0920", &e.ws);
+        e.doc("project/invoices/jd-0920", &e.ws);
         let r = rename_folder_in(&e.roots, &e.ws(), "发票", "报销发票").unwrap();
         // Same key, same prefix: nothing to re-key.
         assert_eq!(r.moved_docs, 0);
         let p = e.project();
         assert_eq!(p.folders[0].path, "报销发票");
         assert_eq!(p.folders[0].key, "invoices");
-        assert_eq!(item(&p, "invoices/jd-0920").folder.as_deref(), Some("报销发票"));
+        assert_eq!(item(&p, "project/invoices/jd-0920").folder.as_deref(), Some("报销发票"));
 
         // Re-nesting under a new parent moves the docs under the parent's prefix.
         create_keyed_folder_in(&e.roots, &e.ws(), "财务", None, Some("finance")).unwrap();
         let r = rename_folder_in(&e.roots, &e.ws(), "报销发票", "财务/报销发票").unwrap();
         assert_eq!(r.moved_docs, 1);
         assert_eq!(
-            item(&e.project(), "finance/invoices/jd-0920").folder.as_deref(),
+            item(&e.project(), "project/finance/invoices/jd-0920").folder.as_deref(),
             Some("财务/报销发票")
         );
     }
@@ -1502,7 +1760,7 @@ mod tests {
     fn a_folder_holds_both_a_doc_and_an_artifact_and_the_rest_is_unfiled() {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "reports", Some("Quarterly reports")).unwrap();
-        e.doc("reports/q3", &e.ws);
+        e.doc("project/reports/q3", &e.ws);
         e.doc("loose-note", &e.ws);
         e.doc("elsewhere/deep", &e.ws);
         let filed = e.artifact("q3.pdf", &e.ws);
@@ -1513,8 +1771,8 @@ mod tests {
         let p = e.project();
         assert_eq!(p.folders.len(), 1);
         assert_eq!(p.folders[0].description, "Quarterly reports");
-        assert_eq!(p.folders[0].wiki_prefix, "reports");
-        assert_eq!(item(&p, "reports/q3").folder.as_deref(), Some("reports"));
+        assert_eq!(p.folders[0].wiki_prefix, "project/reports");
+        assert_eq!(item(&p, "project/reports/q3").folder.as_deref(), Some("reports"));
         assert_eq!(item(&p, &filed.id).folder.as_deref(), Some("reports"));
         assert_eq!(item(&p, "loose-note").folder, None);
         assert_eq!(item(&p, &loose.id).folder, None);
@@ -1554,8 +1812,8 @@ mod tests {
         .unwrap();
 
         create_folder_in(&e.roots, &wt.display().to_string(), "notes", None).unwrap();
-        e.doc("notes/from-worktree", &wt);
-        e.doc("notes/from-main", &repo);
+        e.doc("repo/notes/from-worktree", &wt);
+        e.doc("repo/notes/from-main", &repo);
 
         let all = tree_in(&e.roots, Some(&repo.display().to_string()));
         assert_eq!(all.len(), 1);
@@ -1573,10 +1831,10 @@ mod tests {
         fs::create_dir_all(&other).unwrap();
         create_folder_in(&e.roots, &e.ws(), "a", None).unwrap();
         create_folder_in(&e.roots, &other.display().to_string(), "b", None).unwrap();
-        e.doc("a/one", &e.ws);
-        e.doc("b/two", &other);
-        // `a/` exists only in the first project's schema.
-        e.doc("a/three", &other);
+        e.doc("project/a/one", &e.ws);
+        e.doc("other/b/two", &other);
+        // `project/a/` exists only in the first project's schema.
+        e.doc("project/a/three", &other);
 
         let all = tree_in(&e.roots, None);
         assert_eq!(all.len(), 2);
@@ -1585,8 +1843,8 @@ mod tests {
             .find(|p| p.workspace_path == other.display().to_string())
             .unwrap();
         assert_eq!(theirs.folders.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["b"]);
-        assert_eq!(item(theirs, "a/three").folder, None);
-        assert_eq!(item(theirs, "b/two").folder.as_deref(), Some("b"));
+        assert_eq!(item(theirs, "project/a/three").folder, None);
+        assert_eq!(item(theirs, "other/b/two").folder.as_deref(), Some("b"));
     }
 
     #[test]
@@ -1635,7 +1893,7 @@ mod tests {
 
         let moved = move_item_in(&e.roots, ITEM_DOC, "scan", "发票").unwrap();
         assert_eq!(moved.folder.as_deref(), Some("发票"));
-        assert_eq!(moved.id, "fapiao/scan");
+        assert_eq!(moved.id, "project/fapiao/scan");
         let moved_a = move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "发票").unwrap();
         assert_eq!(moved_a.folder.as_deref(), Some("发票"));
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &a.id).unwrap().path, "发票");
@@ -1643,9 +1901,10 @@ mod tests {
         let p = e.project();
         assert!(p.items.iter().all(|i| i.folder.as_deref() == Some("发票")));
 
-        // Back out: the doc returns to the wiki root, the artifact's path clears.
+        // Back out: the doc stays in the project's namespace but in no folder,
+        // the artifact's path clears.
         let out = move_item_in(&e.roots, ITEM_DOC, &moved.id, "").unwrap();
-        assert_eq!((out.id.as_str(), out.folder), ("scan", None));
+        assert_eq!((out.id.as_str(), out.folder), ("project/scan", None));
         move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "").unwrap();
         assert_eq!(artifacts::get_in(&e.roots.artifacts, &a.id).unwrap().path, "");
 
@@ -1657,10 +1916,10 @@ mod tests {
     fn delete_is_refused_while_anything_is_filed_and_takes_subfolders() {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "docs/2026", None).unwrap();
-        e.doc("docs/2026/plan", &e.ws);
+        e.doc("project/docs/2026/plan", &e.ws);
         let err = delete_folder_in(&e.roots, &e.ws(), "docs").unwrap_err();
         assert!(err.contains("1 item"), "{err}");
-        move_item_in(&e.roots, ITEM_DOC, "docs/2026/plan", "").unwrap();
+        move_item_in(&e.roots, ITEM_DOC, "project/docs/2026/plan", "").unwrap();
         delete_folder_in(&e.roots, &e.ws(), "docs").unwrap();
         assert!(list_folders_in(&e.roots, &e.ws()).unwrap().is_empty());
         assert!(delete_folder_in(&e.roots, &e.ws(), "docs").is_err());
@@ -1672,9 +1931,9 @@ mod tests {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "docs/2026", Some("this year")).unwrap();
         create_folder_in(&e.roots, &e.ws(), "docs-old", None).unwrap();
-        e.doc("docs/2026/plan", &e.ws);
-        e.doc("docs/top", &e.ws);
-        e.doc("docs-old/keep", &e.ws);
+        e.doc("project/docs/2026/plan", &e.ws);
+        e.doc("project/docs/top", &e.ws);
+        e.doc("project/docs-old/keep", &e.ws);
         let a = e.artifact("deck.pptx", &e.ws);
         move_item_in(&e.roots, ITEM_ARTIFACT, &a.id, "docs/2026").unwrap();
 
@@ -1687,9 +1946,9 @@ mod tests {
         let kept = p.folders.iter().find(|f| f.path == "交付/2026").unwrap();
         assert_eq!(kept.description, "this year");
         let k = segment_key("交付");
-        assert_eq!(item(&p, &format!("{k}/2026/plan")).folder.as_deref(), Some("交付/2026"));
-        assert_eq!(item(&p, &format!("{k}/top")).folder.as_deref(), Some("交付"));
-        assert_eq!(item(&p, "docs-old/keep").folder.as_deref(), Some("docs-old"));
+        assert_eq!(item(&p, &format!("project/{k}/2026/plan")).folder.as_deref(), Some("交付/2026"));
+        assert_eq!(item(&p, &format!("project/{k}/top")).folder.as_deref(), Some("交付"));
+        assert_eq!(item(&p, "project/docs-old/keep").folder.as_deref(), Some("docs-old"));
         assert_eq!(item(&p, &a.id).folder.as_deref(), Some("交付/2026"));
 
         assert!(rename_folder_in(&e.roots, &e.ws(), "交付", "交付/内层").is_err());
@@ -1707,24 +1966,25 @@ mod tests {
         let other = e.ws.parent().unwrap().join("other");
         fs::create_dir_all(&other).unwrap();
         create_folder_in(&e.roots, &e.ws(), "arch", None).unwrap();
-        e.doc("arch/mine", &e.ws);
-        e.doc("arch/theirs", &other);
+        e.doc("project/arch/mine", &e.ws);
+        // Another project's doc under this project's prefix is not this rename's to move.
+        e.doc("project/arch/theirs", &other);
         rename_folder_in(&e.roots, &e.ws(), "arch", "design").unwrap();
-        assert!(wiki::get_doc_in(&e.roots.wiki, "design/mine").is_ok());
-        assert!(wiki::get_doc_in(&e.roots.wiki, "arch/theirs").is_ok());
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/design/mine").is_ok());
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/arch/theirs").is_ok());
     }
 
     #[test]
     fn rename_that_would_collide_in_the_wiki_changes_nothing() {
         let e = env();
         create_folder_in(&e.roots, &e.ws(), "a", None).unwrap();
-        e.doc("a/x", &e.ws);
-        // Some other project already owns `b/x`.
+        e.doc("project/a/x", &e.ws);
+        // Some other project already owns `project/b/x`.
         let other = e.ws.parent().unwrap().join("other");
         fs::create_dir_all(&other).unwrap();
-        e.doc("b/x", &other);
+        e.doc("project/b/x", &other);
         assert!(rename_folder_in(&e.roots, &e.ws(), "a", "b").is_err());
-        assert!(wiki::get_doc_in(&e.roots.wiki, "a/x").is_ok());
+        assert!(wiki::get_doc_in(&e.roots.wiki, "project/a/x").is_ok());
         assert_eq!(list_folders_in(&e.roots, &e.ws()).unwrap()[0].path, "a");
     }
 
@@ -1815,5 +2075,86 @@ mod tests {
         assert_eq!(project_health("/definitely/not/here/project", 50), ProjectHealth::Missing);
         let home = dirs::home_dir().unwrap().display().to_string();
         assert_eq!(project_health(&home, 50), ProjectHealth::Home);
+    }
+
+    #[test]
+    fn folder_prefixes_start_with_the_projects_namespace() {
+        let e = env();
+        let f = create_folder_in(&e.roots, &e.ws(), "research/notes", None).unwrap();
+        assert_eq!(f.wiki_prefix, "project/research/notes");
+        assert_eq!(rel_prefix(&f), "research/notes");
+        e.doc("project/research/notes/memo", &e.ws);
+        assert_eq!(item(&e.project(), "project/research/notes/memo").folder.as_deref(), Some("research/notes"));
+        // A CJK project name is spelled in pinyin.
+        let cjk = e.ws.parent().unwrap().join("装修");
+        fs::create_dir_all(&cjk).unwrap();
+        let f = create_folder_in(&e.roots, &cjk.display().to_string(), "合同", None).unwrap();
+        assert_eq!(f.wiki_prefix, "zhuangxiu/hetong");
+    }
+
+    #[test]
+    fn same_named_projects_get_distinct_namespaces_that_never_change() {
+        let e = env();
+        let base = e.ws.parent().unwrap();
+        let a = base.join("work/app");
+        let b = base.join("side/app");
+        let c = base.join("side2/side/app");
+        for p in [&a, &b, &c] {
+            fs::create_dir_all(p).unwrap();
+        }
+        let key = |p: &Path| p.display().to_string();
+        assert_eq!(project_namespace_in(&e.roots, &key(&a)), "app");
+        assert_eq!(project_namespace_in(&e.roots, &key(&b)), "side-app");
+        // Name and parent-name both taken: the hashed spelling.
+        let third = project_namespace_in(&e.roots, &key(&c));
+        assert!(third.starts_with("app-") && third.len() == "app-".len() + 6, "{third}");
+        // Persisted: asking again (in any order) gives the same answers, so
+        // a project's docs never move because another project appeared.
+        assert_eq!(project_namespace_in(&e.roots, &key(&b)), "side-app");
+        assert_eq!(project_namespace_in(&e.roots, &key(&a)), "app");
+        assert_eq!(project_namespace_in(&e.roots, &key(&c)), third);
+    }
+
+    #[test]
+    fn worktrees_share_their_repos_namespace() {
+        let e = env();
+        let repo = e.ws.join("repo");
+        fs::create_dir_all(repo.join(".git/worktrees/feat")).unwrap();
+        let wt = repo.join(".worktrees/feat");
+        fs::create_dir_all(&wt).unwrap();
+        fs::write(wt.join(".git"), format!("gitdir: {}\n", repo.join(".git/worktrees/feat").display())).unwrap();
+        let f = create_folder_in(&e.roots, &wt.display().to_string(), "notes", None).unwrap();
+        assert_eq!(f.wiki_prefix, "repo/notes");
+        assert_eq!(
+            project_namespace_in(&e.roots, &project_key(&wt.display().to_string())),
+            project_namespace_in(&e.roots, &repo.display().to_string())
+        );
+    }
+
+    #[test]
+    fn migration_moves_un_namespaced_docs_and_leaves_redirects() {
+        let e = env();
+        create_folder_in(&e.roots, &e.ws(), "research", None).unwrap();
+        e.doc("research/memo", &e.ws);
+        e.doc("project/research/already", &e.ws);
+        e.doc("loose", &e.ws);
+        // Another project's `research/x` is not this project's to move.
+        let other = e.ws.parent().unwrap().join("other");
+        fs::create_dir_all(&other).unwrap();
+        e.doc("research/x", &other);
+
+        let plan = migrate_namespaces_in(&e.roots, None, true).unwrap();
+        assert_eq!(plan.len(), 1, "{plan:?}");
+        assert_eq!((plan[0].from.as_str(), plan[0].to.as_str()), ("research/memo", "project/research/memo"));
+        assert!(wiki::get_doc_in(&e.roots.wiki, "research/memo").unwrap().slug == "research/memo", "dry run moves nothing");
+
+        let done = migrate_namespaces_in(&e.roots, Some(&e.ws()), false).unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].error, None);
+        assert_eq!(wiki::resolve_slug_in(&e.roots.wiki, "research/memo").as_deref(), Some("project/research/memo"));
+        assert_eq!(item(&e.project(), "project/research/memo").folder.as_deref(), Some("research"));
+        assert_eq!(wiki::get_doc_in(&e.roots.wiki, "research/x").unwrap().slug, "research/x");
+        // Idempotent.
+        assert!(migrate_namespaces_in(&e.roots, None, false).unwrap().is_empty());
     }
 }

@@ -104,6 +104,15 @@ pub struct RefileRef {
     pub id: String,
     /// Where it was: a doc's slug, an artifact's `path`.
     pub from: String,
+    /// A doc's slug in this batch at the moment the batch was undone. Agents
+    /// may have quoted it while the batch stood, so a later re-file keeps it
+    /// resolving (see `keep_alive`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undone_from: Option<String>,
+    /// Slugs an earlier, undone re-file gave this doc; filing it leaves a
+    /// redirect at each, pointing at its new slug.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keep_alive: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1195,11 +1204,12 @@ fn classify_chunk(
     brain: &dyn Brain,
     folders: &[LibraryFolder],
     chunk: &[ItemBrief],
+    lang: classify::Language,
     may_split: bool,
 ) -> Vec<Verdict> {
     let ids: Vec<String> = chunk.iter().map(|i| i.id.clone()).collect();
     let mut got = Vec::new();
-    if let Some(out) = brain.text(ModelSlot::Fast, &classify::classify_prompt(folders, chunk)) {
+    if let Some(out) = brain.text(ModelSlot::Fast, &classify::classify_prompt(folders, chunk, lang)) {
         add_cost(roots, id, &out);
         got = classify::parse_verdicts(&out.text, folders, &ids);
     }
@@ -1212,11 +1222,11 @@ fn classify_chunk(
         return got;
     }
     if missing.len() == 1 {
-        got.extend(classify_chunk(roots, id, brain, folders, &missing, false));
+        got.extend(classify_chunk(roots, id, brain, folders, &missing, lang, false));
     } else {
         let (a, b) = missing.split_at(missing.len() / 2);
-        got.extend(classify_chunk(roots, id, brain, folders, a, false));
-        got.extend(classify_chunk(roots, id, brain, folders, b, false));
+        got.extend(classify_chunk(roots, id, brain, folders, a, lang, false));
+        got.extend(classify_chunk(roots, id, brain, folders, b, lang, false));
     }
     got
 }
@@ -1287,6 +1297,10 @@ fn classify_all(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), String
             excerpt: read_excerpt(&dir, &i.id, EXCERPT_CHARS),
         })
         .collect();
+    // Titles and summaries follow the project's language, not each file's;
+    // the files themselves vote too, for a project with nothing indexed yet.
+    let samples: Vec<String> = briefs.iter().map(|b| b.excerpt.clone()).collect();
+    let lang = crate::library_index::project_language_in(roots, &batch.workspace_path, &samples);
     let text_chunks = chunks(briefs);
 
     std::thread::scope(|s| {
@@ -1296,7 +1310,7 @@ fn classify_all(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), String
             let folders = &folders;
             let dir = &dir;
             s.spawn(move || {
-                let verdicts = classify_chunk(roots, id, brain, folders, chunk, true);
+                let verdicts = classify_chunk(roots, id, brain, folders, chunk, lang, true);
                 for it in chunk {
                     let v = verdicts.iter().find(|v| v.id == it.id).cloned();
                     apply_verdict(roots, id, dir, v, &it.id, "the AI could not classify it; left unfiled");
@@ -1319,7 +1333,7 @@ fn classify_all(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), String
                     size: item.size,
                     excerpt: String::new(),
                 };
-                let prompt = classify::vision_prompt(folders, &brief, &file_name);
+                let prompt = classify::vision_prompt(folders, &brief, &file_name, lang);
                 let mut verdict = None;
                 let mut note = String::from("the AI could not read it; left unfiled");
                 for _ in 0..2 {

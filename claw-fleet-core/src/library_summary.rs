@@ -74,6 +74,8 @@ struct Due {
     version: String,
     artifact_kind: String,
     body: String,
+    /// The project key, whose language the summary is written in.
+    project: String,
 }
 
 /// How an item would be summarized.
@@ -174,7 +176,7 @@ fn due(index: &LibraryIndex, now: u64, limit: usize) -> Result<Vec<Due>, String>
     let mut stmt = index
         .conn()
         .prepare(&format!(
-            "SELECT id, kind, item_id, title, version, artifact_kind, body FROM items
+            "SELECT id, kind, item_id, title, version, artifact_kind, body, project FROM items
              WHERE {DUE_WHERE}
                AND updated_ms >= ?1
                AND summary_claim_until_ms < ?2
@@ -193,6 +195,7 @@ fn due(index: &LibraryIndex, now: u64, limit: usize) -> Result<Vec<Due>, String>
                 version: r.get(4)?,
                 artifact_kind: r.get(5)?,
                 body: r.get(6)?,
+                project: r.get(7)?,
             })
         })
         .map_err(|e| format!("query: {e}"))?;
@@ -247,7 +250,7 @@ fn mode_of(d: &Due) -> Option<Mode> {
 }
 
 /// Prompt for summarizing one item from its text.
-pub fn summary_prompt(title: &str, kind_label: &str, body: &str) -> String {
+pub fn summary_prompt(title: &str, kind_label: &str, body: &str, lang: classify::Language) -> String {
     let excerpt: String = body.chars().take(EXCERPT_CHARS).collect();
     format!(
         "Summarize this {kind_label} for a project library, so someone browsing or searching \
@@ -256,24 +259,24 @@ off):\n{excerpt}\n\nReturn \"summary\": 1 to 3 sentences on what it is and its k
 \"tags\": 1 to 5 short keywords. {rule}\n\nReply with one JSON object only:\n\
 {{\"summary\":\"...\",\"tags\":[\"...\"]}}\n",
         excerpt = excerpt.trim(),
-        rule = classify::LANGUAGE_RULE,
+        rule = lang.rule(),
     )
 }
 
-fn vision_summary_prompt(file_name: &str, title: &str) -> String {
+fn vision_summary_prompt(file_name: &str, title: &str, lang: classify::Language) -> String {
     format!(
         "Use the Read tool to look at the file `{file_name}` in the current directory. Read \
 nothing else. It is stored in a project library under the title \"{title}\".\n\nReturn \
 \"summary\": 1 to 3 sentences on what it shows and any key facts visible; \"tags\": 1 to 5 \
 short keywords. {rule}\n\nReply with one JSON object only:\n\
 {{\"summary\":\"...\",\"tags\":[\"...\"]}}\n",
-        rule = classify::LANGUAGE_RULE,
+        rule = lang.rule(),
     )
 }
 
 /// `(summary, tags)` from a model answer.
 pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
-    let v: Value = serde_json::from_str(classify::extract_json(text)?).ok()?;
+    let v: Value = classify::parse_value(text)?;
     let v = match v {
         Value::Array(mut a) if !a.is_empty() => a.swap_remove(0),
         v => v,
@@ -288,15 +291,23 @@ pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
 /// Summarize one claimed item and store the result. `spent` gets the call's
 /// cost whether or not a summary came of it: an answer that does not parse
 /// was still paid for.
-fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain, spent: &mut f64) -> Result<(), String> {
+fn summarize_one(
+    roots: &Roots,
+    index: &LibraryIndex,
+    d: &Due,
+    brain: &dyn Brain,
+    spent: &mut f64,
+) -> Result<(), String> {
     let mode = mode_of(d).ok_or_else(|| "nothing to summarize".to_string())?;
+    // The project's language, not the item's: one library reads in one.
+    let lang = index.project_language(&d.project, &[]);
     let outcome = match mode {
         Mode::Text => {
             let label = if d.kind == ITEM_DOC { "document" } else { "file" };
             brain
                 .text(
                     crate::llm_provider::ModelSlot::Fast,
-                    &summary_prompt(&d.title, label, &d.body),
+                    &summary_prompt(&d.title, label, &d.body, lang),
                 )
                 .ok_or_else(|| "no model answered".to_string())?
         }
@@ -307,7 +318,7 @@ fn summarize_one(roots: &Roots, d: &Due, brain: &dyn Brain, spent: &mut f64) -> 
             }
             let blob = artifacts::blob_path(&roots.artifacts, &a);
             let dir = blob.parent().ok_or("artifact blob has no directory")?;
-            brain.vision(dir, &vision_summary_prompt(&a.name, &d.title))?
+            brain.vision(dir, &vision_summary_prompt(&a.name, &d.title, lang))?
         }
     };
     *spent = outcome.cost_usd;
@@ -356,7 +367,7 @@ pub fn run_pass(roots: &Roots, index: &LibraryIndex, limit: usize) -> Result<usi
             continue;
         }
         let mut spent = 0.0;
-        match summarize_one(roots, &d, &LiveBrain, &mut spent) {
+        match summarize_one(roots, index, &d, &LiveBrain, &mut spent) {
             Ok(()) => {
                 crate::log_debug(&format!(
                     "[library_summary] {} {} summarized (${spent:.4})",
@@ -595,7 +606,7 @@ fn claim_next(index: &LibraryIndex) -> Result<Option<Due>, String> {
             let mut stmt = index
                 .conn()
                 .prepare(&format!(
-                    "SELECT id, kind, item_id, title, version, artifact_kind, body FROM items
+                    "SELECT id, kind, item_id, title, version, artifact_kind, body, project FROM items
                      WHERE {DUE_WHERE} AND summary_claim_until_ms < ?1 AND summary_retry_ms <= ?1
                      ORDER BY updated_ms DESC
                      LIMIT 8"
@@ -611,6 +622,7 @@ fn claim_next(index: &LibraryIndex) -> Result<Option<Due>, String> {
                         version: r.get(4)?,
                         artifact_kind: r.get(5)?,
                         body: r.get(6)?,
+                        project: r.get(7)?,
                     })
                 })
                 .map_err(|e| format!("query: {e}"))?;
@@ -715,7 +727,7 @@ pub fn run_backfill_in(
                         }
                     };
                     let mut spent = 0.0;
-                    let result = summarize_one(roots, &d, brain, &mut spent);
+                    let result = summarize_one(roots, &index, &d, brain, &mut spent);
                     match &result {
                         Ok(_) => {
                             release(&index, d.rowid, false, now_ms());
@@ -874,8 +886,16 @@ mod tests {
         assert_eq!((s.as_str(), t), ("一份装修合同。", vec!["合同".to_string(), "装修".to_string()]));
         assert!(parse_summary("{\"summary\":\"\"}").is_none());
         assert!(parse_summary("no").is_none());
-        let p = summary_prompt("T", "document", &"x".repeat(10_000));
+        // Answers that failed the 2026-10-21 backfill: bare quotes inside the summary.
+        let (s, _) = parse_summary("```json\n{\"summary\":\"标题为\"新渠道能否带来持续增量\"的记录页。\",\"tags\":[\"投资\"]}\n```").unwrap();
+        assert_eq!(s, "标题为\"新渠道能否带来持续增量\"的记录页。");
+        let p = summary_prompt("T", "document", &"x".repeat(10_000), classify::Language::Chinese);
         assert!(p.contains("Title: T") && p.len() < 5_000);
+        assert!(p.contains(classify::Language::Chinese.rule()));
+        let en = summary_prompt("T", "document", "body", classify::Language::English);
+        assert!(en.contains(classify::Language::English.rule()) && !en.contains(classify::Language::Chinese.rule()));
+        let v = vision_summary_prompt("a.png", "T", classify::Language::English);
+        assert!(v.contains(classify::Language::English.rule()));
     }
 
     #[test]
@@ -1103,7 +1123,7 @@ mod tests {
             let t = std::time::Instant::now();
             let out = classify::complete_text(
                 crate::llm_provider::ModelSlot::Fast,
-                &summary_prompt(&title, "document", &body),
+                &summary_prompt(&title, "document", &body, classify::Language::Chinese),
             );
             match out {
                 Some(o) => println!(
@@ -1130,7 +1150,7 @@ mod tests {
             std::fs::create_dir_all(&scratch).unwrap();
             std::fs::copy(artifacts::blob_path(&roots.artifacts, &a), scratch.join(&a.name)).unwrap();
             let t = std::time::Instant::now();
-            match classify::complete_vision(&scratch, &vision_summary_prompt(&a.name, &title)) {
+            match classify::complete_vision(&scratch, &vision_summary_prompt(&a.name, &title, classify::Language::Chinese)) {
                 Ok(o) => println!(
                     "vision {:.1}s ${:.5} {} -> {:?}",
                     t.elapsed().as_secs_f64(), o.cost_usd, o.model, parse_summary(&o.text)

@@ -40,7 +40,30 @@ pub(crate) fn cmd_library(action: LibraryCommands) {
                 b.created_folders.len()
             );
         }
+        LibraryCommands::MigrateSlugs { workspace, dry_run, json } => migrate_slugs(workspace, dry_run, json),
     }
+}
+
+fn migrate_slugs(workspace: Option<std::path::PathBuf>, dry_run: bool, json: bool) {
+    let ws = workspace.map(|p| p.display().to_string());
+    let moves = claw_fleet_core::library::migrate_namespaces(ws.as_deref(), dry_run).unwrap_or_else(|e| fail(e));
+    if json {
+        println!("{}", serde_json::to_string_pretty(&moves).unwrap());
+        return;
+    }
+    for m in &moves {
+        match &m.error {
+            None => println!("  {} → {}", m.from, m.to),
+            Some(e) => println!("  {}{} — not moved: {e}{}", "\x1b[33m", m.from, c_reset()),
+        }
+    }
+    let failed = moves.iter().filter(|m| m.error.is_some()).count();
+    println!(
+        "{} {} doc(s){}",
+        if dry_run { "Would move" } else { "Moved" },
+        moves.len() - failed,
+        if failed > 0 { format!(", {failed} not moved") } else { String::new() }
+    );
 }
 
 fn health_label(h: ProjectHealth) -> &'static str {
