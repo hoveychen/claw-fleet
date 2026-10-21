@@ -1453,6 +1453,32 @@ fn handle_request(
                 route_library_ingest_dismiss(ctx, request, &query, json_header, path)
             }
 
+            crate::routes::LIBRARY_BACKFILL_STATUS => {
+                route_library_backfill_status(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_BACKFILL_START
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_backfill_start(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_BACKFILL_STOP
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_backfill_stop(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_REFILE_PLAN => {
+                route_library_refile_plan(ctx, request, &query, json_header, path)
+            }
+
+            crate::routes::LIBRARY_REFILE_START
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_library_refile_start(ctx, request, &query, json_header, path)
+            }
+
             crate::routes::WIKI_DOCS => route_wiki_docs(ctx, request, &query, json_header, path),
 
             crate::routes::WIKI_DOC => route_wiki_doc(ctx, request, &query, json_header, path),

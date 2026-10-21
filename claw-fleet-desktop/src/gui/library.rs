@@ -153,3 +153,44 @@ pub(crate) fn library_ingest_dismiss(
 ) -> Result<(), String> {
     state.backend.library_ingest_dismiss(&batch_id)
 }
+
+// ── Summary backfill and re-filing ──────────────────────────────────────────
+
+#[tauri::command(async)]
+pub(crate) fn library_backfill_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library_summary::BackfillStatus, String> {
+    state.backend.library_backfill_status()
+}
+
+#[tauri::command(async)]
+pub(crate) fn library_backfill_start(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library_summary::BackfillStatus, String> {
+    state.backend.library_backfill_start()
+}
+
+#[tauri::command(async)]
+pub(crate) fn library_backfill_stop(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library_summary::BackfillStatus, String> {
+    state.backend.library_backfill_stop()
+}
+
+#[tauri::command(async)]
+pub(crate) fn library_refile_plan(
+    workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library_ingest::refile::RefilePlan, String> {
+    state.backend.library_refile_plan(&workspace)
+}
+
+/// Re-file a project's unfiled items in the background; answers the batch.
+#[tauri::command(async)]
+pub(crate) fn library_refile_start(
+    workspace_path: String,
+    force: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library_ingest::IngestBatch, String> {
+    state.backend.library_refile_start(&workspace_path, force.unwrap_or(false))
+}

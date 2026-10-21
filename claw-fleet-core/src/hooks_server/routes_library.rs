@@ -327,3 +327,71 @@ pub(crate) fn route_library_ingest_dismiss(
         .map(|()| serde_json::json!({}));
     respond(request, json_header, result);
 }
+
+// ── Backfill and re-filing ──────────────────────────────────────────────────
+
+/// `GET /library_backfill_status` — what the backfill button shows.
+pub(crate) fn route_library_backfill_status(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    respond(request, json_header, crate::library_summary::backfill_status());
+}
+
+/// `POST /library_backfill_start` — start the backfill in the background.
+pub(crate) fn route_library_backfill_start(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    respond(request, json_header, crate::library_summary::start_backfill());
+}
+
+/// `POST /library_backfill_stop` — stop after the items in flight.
+pub(crate) fn route_library_backfill_stop(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    respond(request, json_header, crate::library_summary::stop_backfill());
+}
+
+/// `GET /library_refile_plan?workspace=` — what re-filing would do.
+pub(crate) fn route_library_refile_plan(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let workspace = decoded(query, "workspace");
+    respond(request, json_header, crate::library_ingest::refile::refile_plan(&workspace));
+}
+
+#[derive(serde::Deserialize)]
+struct RefileReq {
+    workspace_path: String,
+    #[serde(default)]
+    force: bool,
+}
+
+/// `POST /library_refile_start` — `{workspace_path, force?}`; answers the
+/// batch, which runs in the background.
+pub(crate) fn route_library_refile_start(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let result = parse_body::<RefileReq>(&mut request, crate::routes::LIBRARY_REFILE_START)
+        .and_then(|r| crate::library_ingest::refile::start_refile(&r.workspace_path, r.force));
+    respond(request, json_header, result);
+}
