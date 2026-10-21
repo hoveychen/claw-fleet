@@ -49,10 +49,13 @@ const PER_PASS: usize = 4;
 /// Time a pass may spend extracting artifact text.
 const EXTRACT_BUDGET: Duration = Duration::from_secs(20);
 
-/// Estimated cost of one call, for [`backfill_plan`]. Measured on the lean
-/// route with Haiku (see the plan's P3 report); refresh when the model changes.
-pub const EST_TEXT_CALL_USD: f64 = 0.003;
-pub const EST_VISION_CALL_USD: f64 = 0.006;
+/// Estimated cost of one call, for [`backfill_plan`]. Measured 2026-10-21 on
+/// the lean route with Haiku (`measure_summary_cost`): three real docs whose
+/// 4,000-char excerpts ran ~8.4K input tokens cost $0.0095–$0.0146 (most of
+/// the store hits the excerpt cap), one image $0.0081. Refresh when the model
+/// or the prompt changes.
+pub const EST_TEXT_CALL_USD: f64 = 0.011;
+pub const EST_VISION_CALL_USD: f64 = 0.0085;
 
 fn now_ms() -> u64 {
     SystemTime::now()

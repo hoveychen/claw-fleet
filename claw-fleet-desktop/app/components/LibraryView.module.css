@@ -113,6 +113,10 @@
   gap: 2px;
 }
 
+.hit {
+  padding-block: 10px;
+}
+
 .hit_snippet {
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -129,7 +133,8 @@
   padding: 0 1px;
   border-radius: 3px;
   background: var(--color-accent-soft);
-  color: var(--color-text);
+  color: var(--color-accent);
+  font-weight: 600;
 }
 
 .hit_tags {

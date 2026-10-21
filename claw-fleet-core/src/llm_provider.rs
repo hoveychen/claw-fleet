@@ -315,7 +315,7 @@ pub struct ClaudeCliProvider {
 }
 
 /// System prompt of a lean completion — replaces Claude Code's own.
-const LEAN_SYSTEM_PROMPT: &str =
+pub(crate) const LEAN_SYSTEM_PROMPT: &str =
     "You are a careful assistant. Answer exactly in the format the user asks for.";
 
 impl ClaudeCliProvider {
@@ -369,6 +369,14 @@ pub fn lean_claude_args<'a>(prompt: &'a str, model: &'a str) -> Vec<&'a str> {
     ]
 }
 
+/// Environment of a lean completion: extended thinking off. Measured
+/// 2026-10-21 on a ~3K-token library summary prompt (Haiku): output went from
+/// 1,484 tokens ($0.0140) to 198 ($0.0075) with an equally good summary — a
+/// short JSON answer gains nothing from a hidden reasoning pass.
+pub fn lean_claude_env() -> Vec<(String, String)> {
+    vec![("MAX_THINKING_TOKENS".into(), "0".into())]
+}
+
 /// An empty directory to run lean completions in, so `--setting-sources
 /// project` finds no project settings or CLAUDE.md.
 fn lean_cwd() -> Option<std::path::PathBuf> {
@@ -412,7 +420,7 @@ impl LlmProvider for ClaudeCliProvider {
             let raw = run_cli_in(
                 bin,
                 &lean_claude_args(prompt, model),
-                &[],
+                &lean_claude_env(),
                 Some(&cwd),
                 timeout,
                 "llm:claude-lean",
@@ -1296,6 +1304,7 @@ mod tests {
         let tools = a.iter().position(|x| *x == "--tools").unwrap();
         assert_eq!(a[tools + 1], "", "an empty --tools list disables every tool");
         assert!(!a.contains(&"--bare"), "--bare refuses OAuth logins");
+        assert!(lean_claude_env().contains(&("MAX_THINKING_TOKENS".into(), "0".into())));
         assert!(ClaudeCliProvider::lean().lean && !ClaudeCliProvider::new().lean);
     }
 

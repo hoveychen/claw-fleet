@@ -514,6 +514,11 @@ pub fn vision_args(prompt: &str, model: &str) -> Vec<String> {
         "--setting-sources",
         "project",
         "--strict-mcp-config",
+        // Claude Code's own system prompt is ~10K tokens of agent context a
+        // look-and-describe call never uses. Measured 2026-10-21 (Haiku, one
+        // image): $0.0264 → $0.0079 with this and thinking off.
+        "--system-prompt",
+        crate::llm_provider::LEAN_SYSTEM_PROMPT,
         "--max-turns",
         "4",
     ]
@@ -536,6 +541,7 @@ fn run_vision(bin: &str, dir: &Path, prompt: &str, model: &str) -> Result<CallOu
     use std::process::Stdio;
     let mut cmd = crate::process_util::command(bin);
     cmd.args(vision_args(prompt, model))
+        .envs(crate::llm_provider::lean_claude_env())
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -739,7 +745,7 @@ mod tests {
     fn the_vision_call_is_lean_and_read_only() {
         let a = vision_args("prompt", "haiku");
         let joined = a.join(" ");
-        for flag in ["--tools Read", "--allowedTools Read", "--setting-sources project", "--strict-mcp-config", "--no-session-persistence", "--output-format json"] {
+        for flag in ["--tools Read", "--allowedTools Read", "--setting-sources project", "--strict-mcp-config", "--no-session-persistence", "--output-format json", "--system-prompt"] {
             assert!(joined.contains(flag), "missing {flag}: {joined}");
         }
         assert!(!a.iter().any(|x| x == "--bare"), "--bare refuses OAuth logins");
