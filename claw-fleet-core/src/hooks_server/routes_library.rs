@@ -40,11 +40,12 @@ fn respond<T: serde::Serialize>(
 
 /// `GET /library_export?workspace_path=&scope=&folder=&items=&unfiled_label=&filename=`
 /// — the zip of a folder, a selection or a whole project
-/// ([`crate::library_export`]).
+/// ([`crate::library_export`]), streamed while it is packed
+/// ([`super::routes_artifacts::send_zip`]).
 ///
-/// Packed to a temporary file and then sent, like `/artifact_folder_zip`:
-/// tiny_http wants the length or a reader up front, and the temp file keeps
-/// memory flat however large the project is.
+/// The export is resolved first, so a bad scope or an unknown project is
+/// still a JSON `400`; only a failure while copying bytes (a file vanishing
+/// mid-export, the disk erroring) truncates the download instead.
 pub(crate) fn route_library_export(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -64,50 +65,36 @@ pub(crate) fn route_library_export(
             .collect(),
         unfiled_label: decoded(query, "unfiled_label"),
     };
-    let tmp = std::env::temp_dir().join(format!("fleet-library-{}.zip", uuid::Uuid::new_v4()));
-    let report = match crate::library_export::export_to_file(&spec, &tmp) {
-        Ok(r) => r,
+    let prepared = match crate::library_export::prepare(&spec) {
+        Ok(p) => p,
         Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
             respond::<()>(request, json_header, Err(e));
             return;
         }
     };
     let filename = Some(decoded(query, "filename"))
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or(report.filename.clone());
-    match std::fs::File::open(&tmp).and_then(|f| f.metadata().map(|m| (f, m.len()))) {
-        Ok((file, len)) => {
-            // The quoted name is the ASCII fallback; `filename*` carries the
-            // real (usually CJK) one for every browser that reads it.
-            let encoded =
-                percent_encoding::utf8_percent_encode(&filename, percent_encoding::NON_ALPHANUMERIC);
-            let resp = tiny_http::Response::new(
-                tiny_http::StatusCode(200),
-                vec![
-                    super::routes_artifacts::header("Content-Type", "application/zip"),
-                    super::routes_artifacts::header(
-                        "Content-Disposition",
-                        &format!(
-                            "attachment; filename=\"{}\"; filename*=UTF-8''{encoded}",
-                            super::routes_artifacts::ascii_fallback(&filename)
-                        ),
-                    ),
-                    super::routes_artifacts::header("X-Fleet-Items", &report.item_count.to_string()),
-                    super::routes_artifacts::header("X-Fleet-Skipped", &report.skipped.len().to_string()),
-                ],
-                file,
-                Some(len as usize),
-                None,
-            );
-            let _ = request.respond(resp);
-        }
-        Err(_) => {
-            let _ = request.respond(tiny_http::Response::empty(500));
-        }
-    }
-    // `respond` returns once the body is written.
-    let _ = std::fs::remove_file(&tmp);
+        .unwrap_or_else(|| prepared.filename().to_string());
+    // The quoted name is the ASCII fallback; `filename*` carries the real
+    // (usually CJK) one for every browser that reads it.
+    let encoded = percent_encoding::utf8_percent_encode(&filename, percent_encoding::NON_ALPHANUMERIC);
+    let headers = vec![
+        super::routes_artifacts::header("Content-Type", "application/zip"),
+        super::routes_artifacts::header(
+            "Content-Disposition",
+            &format!(
+                "attachment; filename=\"{}\"; filename*=UTF-8''{encoded}",
+                super::routes_artifacts::ascii_fallback(&filename)
+            ),
+        ),
+        // Known before packing: the plan already decided what goes in and
+        // which items' bytes are missing.
+        super::routes_artifacts::header("X-Fleet-Items", &prepared.item_count().to_string()),
+        super::routes_artifacts::header("X-Fleet-Skipped", &prepared.skipped().len().to_string()),
+    ];
+    super::routes_artifacts::send_zip(request, headers, "library-export", move |sink| {
+        prepared.write(sink).map(|_| ())
+    });
 }
 
 /// `GET /library_search?q=&workspace=&kind=&limit=` — ranked hits across the

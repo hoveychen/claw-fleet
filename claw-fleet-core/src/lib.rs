@@ -267,6 +267,7 @@ pub mod session_todos;
 pub mod skill_history;
 pub mod skill_sync;
 pub mod skills;
+pub mod stream_pipe;
 pub mod subagent_caller;
 pub mod task_migration;
 pub mod task_model;
