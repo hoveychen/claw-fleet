@@ -247,11 +247,17 @@ pub(crate) fn route_artifact_folder_zip(
         }
     };
     let filename = crate::artifacts::zip_filename(&normalized, &workspace_path);
+    // The quoted name is the ASCII fallback; `filename*` carries the real
+    // (usually CJK) one now that the browser build follows a link here.
+    let encoded = percent_encoding::utf8_percent_encode(&filename, percent_encoding::NON_ALPHANUMERIC);
     let headers = vec![
         header("Content-Type", "application/zip"),
         header(
             "Content-Disposition",
-            &format!("attachment; filename=\"{}\"", ascii_fallback(&filename)),
+            &format!(
+                "attachment; filename=\"{}\"; filename*=UTF-8''{encoded}",
+                ascii_fallback(&filename)
+            ),
         ),
     ];
     send_zip(request, headers, "artifact-folder-zip", move |sink| {

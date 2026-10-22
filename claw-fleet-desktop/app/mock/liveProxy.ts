@@ -1841,19 +1841,32 @@ export async function downloadArtifact(id: string, filename: string): Promise<vo
  * Download a folder's archive — the browser build's replacement for the
  * desktop's save-dialog + `export_artifact_folder`.
  *
- * The server streams the zip, so a folder of renders never has to fit in the
- * tab's memory before the download starts.
+ * A link the browser follows, like `downloadLibraryZip`: the server streams the
+ * zip, and a fetch into a Blob would still hold all of it in the tab first.
  */
 export async function downloadFolderZip(
   workspacePath: string,
   directory: string,
   filename: string,
 ): Promise<void> {
-  await downloadFromProbe(
-    "/artifact_folder_zip",
-    { workspace_path: workspacePath, directory },
+  followDownloadLink(
+    probeUrl({
+      method: "GET",
+      path: "/artifact_folder_zip",
+      query: { workspace_path: workspacePath, directory },
+    }),
     filename,
   );
+}
+
+function followDownloadLink(url: string, filename: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /**
@@ -1887,13 +1900,7 @@ export function downloadLibraryZip(
       filename,
     },
   });
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  followDownloadLink(url, filename);
 }
 
 export async function downloadWikiExport(
