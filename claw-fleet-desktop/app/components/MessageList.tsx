@@ -33,6 +33,8 @@ import {
   type FullToolResult,
 } from "./blocks/toolResultFetch";
 import { UserContent } from "./blocks/UserContent";
+import { AgentMail, agentMailOf } from "./blocks/AgentMail";
+import { agentMailPlainText } from "../../../shared-ts/agentMail";
 import { CopyButton } from "./CopyButton";
 import { ReaderModal } from "./ReaderModal";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
@@ -278,7 +280,10 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     isAssistant && msg.message.stop_reason === null;
 
   const time = msg.timestamp ? formatMsgTime(msg.timestamp) : null;
-  const copyText = messageToText(msg);
+  // Mail from another Fleet session: rendered on the left with its sender as a
+  // chip, and copied without the reply-address footer meant for the model.
+  const mail = isUser ? agentMailOf(content) : null;
+  const copyText = mail ? agentMailPlainText(mail) : messageToText(msg);
 
   // Turn status. Previously a timeline dot in the gutter; now a marker on the
   // usage row, because roles are told apart by layout (full-width assistant vs.
@@ -301,6 +306,27 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     </div>
   ) : null;
 
+  const renderUserText = (text: string, key: number) =>
+    searchTerms ? <HighlightedText key={key} text={text} terms={searchTerms} /> : text;
+  const bubbleFooter =
+    isUser && (time || msg.fleetPending) ? (
+      <>
+        {msg.fleetPending && (
+          <span
+            className={styles.pending_unread}
+            title={msg.fleetPendingStale ? undefined : t("detail.pending_unread_hint")}
+          >
+            {msg.fleetPendingStale ? t("detail.pending_unread_stale") : t("detail.pending_unread")}
+          </span>
+        )}
+        {time && (
+          <span className={styles.msg_time} title={time.full}>
+            {time.short}
+          </span>
+        )}
+      </>
+    ) : null;
+
   const stopReason = msg.message.stop_reason;
   const dotClass =
     stopReason === "end_turn"
@@ -315,7 +341,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
 
   return (
     <div
-      className={`${styles.message} ${isAssistant ? styles.assistant : styles.user} ${isActiveMatch ? styles.active_match : ""}`}
+      className={`${styles.message} ${isAssistant ? styles.assistant : styles.user} ${mail ? styles.mail : ""} ${isActiveMatch ? styles.active_match : ""}`}
       data-msg-idx={msgIdx}
       // Role and record uuid on the row: the selection toolbar reads the first
       // to tell agent prose from the user's, and a side question keeps the
@@ -351,42 +377,21 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             rail
           />
         )}
-        {isUser && (
+        {mail && (
+          <AgentMail
+            parts={mail}
+            renderText={renderUserText}
+            footer={bubbleFooter}
+          />
+        )}
+        {isUser && !mail && (
           <div className={styles.user_text}>
-            <UserContent
-              content={content}
-              paths={paths}
-              renderText={(text, key) =>
-                searchTerms ? (
-                  <HighlightedText key={key} text={text} terms={searchTerms} />
-                ) : (
-                  text
-                )
-              }
-            />
+            <UserContent content={content} paths={paths} renderText={renderUserText} />
             {/* Inside the bubble, not under it. Loose in `.content` it was an
                 orphan — a 10px grey run belonging to no container, sitting in
                 the gap between two turns. As a footer it belongs to the thing
                 it timestamps. */}
-            {(time || msg.fleetPending) && (
-              <div className={styles.bubble_time}>
-                {msg.fleetPending && (
-                  <span
-                    className={styles.pending_unread}
-                    title={msg.fleetPendingStale ? undefined : t("detail.pending_unread_hint")}
-                  >
-                    {msg.fleetPendingStale
-                      ? t("detail.pending_unread_stale")
-                      : t("detail.pending_unread")}
-                  </span>
-                )}
-                {time && (
-                  <span className={styles.msg_time} title={time.full}>
-                    {time.short}
-                  </span>
-                )}
-              </div>
-            )}
+            {bubbleFooter && <div className={styles.bubble_time}>{bubbleFooter}</div>}
           </div>
         )}
         {/* The footer also carries the read/copy pair, so a record with prose

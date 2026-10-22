@@ -347,6 +347,22 @@
   margin-top: 18px;
 }
 
+/* Mail from another session (AgentMail): still a turn boundary, so it keeps
+   the user row's air, but it is left-aligned — it was not typed by the user. */
+.message.user.mail {
+  justify-content: flex-start;
+}
+
+.message.user.mail .content {
+  align-items: flex-start;
+}
+
+.message.user.mail .row_actions {
+  order: 1;
+  margin-right: 0;
+  margin-left: 6px;
+}
+
 .message.user {
   margin-bottom: 2px;
 }

@@ -1,0 +1,66 @@
+/* Mail from another Fleet session. It sits on the left, where the agent's own
+   output lives, but on the tool-plane surface so it still reads as something
+   that arrived rather than something this agent wrote. No coloured rule — see
+   TaskNotification.module.css for why the surface alone carries the edge. */
+.root {
+  background: var(--color-bg-tool);
+  border-radius: 4px 12px 12px 12px;
+  padding: 8px 14px 8px;
+  font-size: var(--t-body, 13px);
+  line-height: 1.6;
+  color: var(--color-text);
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.part + .part {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: var(--t-ui, 12px);
+  color: var(--color-text-dim);
+}
+
+.icon { opacity: 0.8; }
+
+.from_label { cursor: help; }
+
+.sender {
+  padding: 0 5px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+  max-width: 32em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender:hover { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+
+.sender_gone {
+  cursor: default;
+  color: var(--color-text-dim);
+  background: color-mix(in srgb, var(--color-text-dim) 12%, transparent);
+}
+
+.workspace { white-space: nowrap; }
+
+.footer {
+  margin-top: 6px;
+  font-size: var(--t-meta, 10px);
+  color: var(--color-text-dim);
+  text-align: right;
+}

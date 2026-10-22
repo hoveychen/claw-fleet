@@ -157,7 +157,7 @@ function withMentions(body: string, index: number, renderText: Props["renderText
  * `References:` list) become chips the same way. The summary Fleet inlined for session mentions
  * collapses to one line — it is for the agent, not something the user typed.
  */
-function UserText({
+export function UserText({
   text,
   index,
   renderText,

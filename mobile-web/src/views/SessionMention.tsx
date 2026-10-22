@@ -411,6 +411,8 @@ export function RefChips({
 export interface SessionMentionNav {
   open: (sessionId: string) => void;
   has: (sessionId: string) => boolean;
+  /** This device's scan row for a session, for chips that show its title. */
+  session?: (sessionId: string) => SessionInfo | undefined;
   /** Open a wiki doc of this view's device by slug. */
   openWiki?: (slug: string) => void;
   /** Title of a wiki doc by slug, once that doc's record has arrived. */
@@ -489,6 +491,35 @@ export function MentionText({ text }: { text: string }) {
           </span>
         );
       })}
+    </>
+  );
+}
+
+/** The sender of agent mail (`shared-ts/agentMail.ts`): `@title · workspace`,
+ *  tappable when this device's snapshot has that session. */
+export function MailSenderChip({ id, workspace }: { id: string; workspace?: string }) {
+  const nav = useContext(SessionMentionNavContext);
+  const row = nav?.session?.(id);
+  const title = (row && mentionTitleOf(row)) || id.slice(0, 8);
+  const ws = row?.workspaceName || workspace;
+  const label = `@${title}`;
+  return (
+    <>
+      {nav?.has(id) ? (
+        <button
+          type="button"
+          className={styles.chip}
+          onClick={() => nav.open(id)}
+          aria-label={t("打开任务 {0}", title)}
+        >
+          {label}
+        </button>
+      ) : (
+        <span className={styles.chip} data-inert="true">
+          {label}
+        </span>
+      )}
+      {ws && <span> · {ws}</span>}
     </>
   );
 }
