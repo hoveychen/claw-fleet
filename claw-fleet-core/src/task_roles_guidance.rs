@@ -300,7 +300,7 @@ itself, asking the user only if it has to.";
 
 /// The main conversation `session_id` is a sub-task of, if it is one.
 pub fn subtask_parent(session_id: &str) -> Option<String> {
-    crate::task_model::TaskGraph::load().place(session_id).parent_task_id
+    crate::task_model::place_session(session_id).parent_task_id
 }
 
 /// Whether the session should see the sub-task's tool set. A Fleet fork (an
