@@ -149,6 +149,17 @@ pub(super) fn serve_library_search(params: &Value) -> Result<Value, String> {
 
 // ── Folder review and moves ─────────────────────────────────────────────────
 
+/// Add a folder (any missing ancestor included) by hand — the same call the
+/// desktop's `library_create_folder` makes, so a CJK name gets its pinyin key
+/// there too. Creating one that exists is a no-op that answers the folder.
+pub(super) fn serve_library_folder_create(params: &Value) -> Result<Value, String> {
+    to_value(crate::library::create_folder(
+        required(params, "workspacePath")?,
+        required(params, "path")?,
+        str_param(params, "description").filter(|d| !d.trim().is_empty()),
+    )?)
+}
+
 /// Keep a folder an AI created (clears its review marker).
 pub(super) fn serve_library_folder_accept(params: &Value) -> Result<Value, String> {
     to_value(crate::library::accept_folder(

@@ -246,6 +246,9 @@
   background: var(--color-error-bg);
   color: var(--color-error);
   font-size: var(--font-size-xs);
+  /* A generic error line keeps the host's message on a second line. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .head_actions {

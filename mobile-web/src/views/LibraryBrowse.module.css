@@ -132,6 +132,27 @@
   overflow: hidden;
 }
 
+/* The overview's last card: add a folder. Dashed so it reads as an action,
+   not as one more (empty) folder. */
+.newFolder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 13px 12px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--r-md, 14px);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--t-ui, 14px);
+  font-weight: 500;
+}
+
+.newFolder:active {
+  background: var(--color-bg-card);
+}
+
 .cardHead {
   display: flex;
   align-items: center;
@@ -224,6 +245,12 @@
 }
 
 .subChip svg {
+  color: var(--color-text-secondary);
+}
+
+.subChipNew {
+  border-style: dashed;
+  background: transparent;
   color: var(--color-text-secondary);
 }
 

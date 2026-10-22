@@ -150,6 +150,25 @@ export function fetchIngestBatch(client: FleetTransport, batchId: string): Promi
 
 // ── Folder review and moves ─────────────────────────────────────────────────
 
+/** Add a folder by hand (missing ancestors too); a CJK name gets its pinyin
+ *  key on the host, as on the desktop. An existing path answers itself. */
+export function createFolder(
+  client: FleetTransport,
+  workspacePath: string,
+  path: string,
+): Promise<LibraryFolderRec> {
+  return client.request<LibraryFolderRec>("library_folder_create", { workspacePath, path });
+}
+
+/** `name` joined under `parent`, each segment trimmed and empty ones dropped —
+ *  the shape the host stores (`normalize_dir_path`). */
+export function childFolderPath(parent: string, name: string): string {
+  return [...parent.split("/"), ...name.split("/")]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("/");
+}
+
 export function acceptFolder(
   client: FleetTransport,
   workspacePath: string,

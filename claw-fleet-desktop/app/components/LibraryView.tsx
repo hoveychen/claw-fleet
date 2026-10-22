@@ -61,6 +61,7 @@ import { PageShell } from "./PageShell";
 import { ResizeHandle } from "./ResizeHandle";
 import { SkeletonList, Spinner } from "./loading";
 import styles from "./LibraryView.module.css";
+import { libraryErrorText } from "../libraryErrors";
 
 /** Where the page reopens: the project it last showed. */
 const LAST_PROJECT_KEY = "library-last-project";
@@ -121,9 +122,9 @@ export function LibraryView() {
       setRev((r) => r + 1);
     } catch (e) {
       setProjects((prev) => prev ?? []);
-      setError(String(e));
+      setError(libraryErrorText(t, e));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -212,10 +213,10 @@ export function LibraryView() {
       try {
         afterStart(await startLocalUpload(p, paths));
       } catch (e) {
-        setError(String(e));
+        setError(libraryErrorText(t, e));
       }
     },
-    [afterStart],
+    [afterStart, t],
   );
   const uploadWebFiles = useCallback(
     async (p: string, files: WebUploadFile[]) => {
@@ -226,26 +227,26 @@ export function LibraryView() {
           await uploadBrowserFiles(p, files, (sent, total) => setWebUpload({ project: p, sent, total })),
         );
       } catch (e) {
-        setError(String(e));
+        setError(libraryErrorText(t, e));
       } finally {
         setWebUpload(null);
       }
     },
-    [afterStart],
+    [afterStart, t],
   );
   const onUpload = useCallback(
     (p: string, kind: PickKind) => {
       if (!isWebBuild()) {
         pickLocalPaths(kind)
           .then((paths) => uploadPaths(p, paths))
-          .catch((e) => setError(String(e)));
+          .catch((e) => setError(libraryErrorText(t, e)));
       } else {
         // Synchronous from the click: the browser only opens a file dialog
         // inside the user's activation window.
         void pickBrowserFiles(kind).then((files) => uploadWebFiles(p, files));
       }
     },
-    [uploadPaths, uploadWebFiles],
+    [uploadPaths, uploadWebFiles, t],
   );
 
   // ── Re-filing a project's unfiled items ───────────────────────────────────
@@ -287,7 +288,7 @@ export function LibraryView() {
         // The user saw the health warning and confirmed anyway.
         afterStart(await invoke<IngestBatch>("library_refile_start", { workspacePath: p, force: !healthy }));
       } catch (e) {
-        setError(String(e));
+        setError(libraryErrorText(t, e));
       } finally {
         setRefilePending(null);
       }
@@ -417,12 +418,12 @@ export function LibraryView() {
         await load();
         void fetchDocs();
       } catch (e) {
-        setError(String(e));
+        setError(libraryErrorText(t, e));
       } finally {
         setBusy(null);
       }
     },
-    [load, fetchDocs],
+    [load, fetchDocs, t],
   );
 
   const onCreateFolder = useCallback(
@@ -774,6 +775,7 @@ function useFolderItems(
   rev: number,
   onError: (e: string) => void,
 ): LibraryEntry[] | null {
+  const { t } = useTranslation();
   const [state, setState] = useState<{ key: string; items: LibraryEntry[] } | null>(null);
   const key = folder === null || !project ? "" : `${project}\u0000${folder}`;
   useEffect(() => {
@@ -786,12 +788,12 @@ function useFolderItems(
       .catch((e) => {
         if (!alive) return;
         setState({ key, items: [] });
-        onError(String(e));
+        onError(libraryErrorText(t, e));
       });
     return () => {
       alive = false;
     };
-  }, [key, project, folder, rev, onError]);
+  }, [key, project, folder, rev, onError, t]);
   return key && state?.key === key ? state.items : null;
 }
 
@@ -894,7 +896,7 @@ function BackfillButton({ onFinished, onError }: { onFinished: () => void; onErr
       setStatus(next);
       wasRunning.current = next.running;
     } catch (e) {
-      onError(String(e));
+      onError(libraryErrorText(t, e));
     } finally {
       setBusy(false);
     }

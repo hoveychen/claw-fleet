@@ -37,6 +37,8 @@ import {
   type LibraryFolderRec,
 } from "../libraryApi";
 import { useConfirm } from "../confirmDialog";
+import { libraryErrorLine, libraryErrorOf, type LibraryErrorView } from "../libraryErrors";
+import { LibraryErrorNote } from "./LibraryErrorNote";
 import { AppHeader } from "./AppHeader";
 import { Spinner } from "./loading";
 import styles from "./LibraryBatch.module.css";
@@ -59,10 +61,6 @@ const STATUS_LABEL: Record<IngestBatchStatus, string> = {
 
 export function batchStatusLabel(s: IngestBatchStatus): string {
   return t(STATUS_LABEL[s] ?? s);
-}
-
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 // ── Rows ────────────────────────────────────────────────────────────────────
@@ -161,7 +159,7 @@ export function BatchView({
 }) {
   const confirm = useConfirm();
   const [batch, setBatch] = useState<IngestBatch | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LibraryErrorView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -170,7 +168,7 @@ export function BatchView({
       setBatch(await fetchIngestBatch(client, batchId));
       setError(null);
     } catch (e) {
-      setError(errText(e));
+      setError(libraryErrorOf(e, t("加载整理记录")));
     }
   }, [client, batchId]);
 
@@ -192,7 +190,7 @@ export function BatchView({
   }, [running]);
 
   const act = useCallback(
-    async (key: string, op: () => Promise<IngestBatch | null>) => {
+    async (key: string, action: string, op: () => Promise<IngestBatch | null>) => {
       setBusy(key);
       try {
         const next = await op();
@@ -200,7 +198,7 @@ export function BatchView({
         setError(null);
         onChanged();
       } catch (e) {
-        setError(errText(e));
+        setError(libraryErrorOf(e, action));
       } finally {
         setBusy(null);
       }
@@ -223,7 +221,7 @@ export function BatchView({
       <div className={styles.page}>
         {header}
         <div className={styles.center}>
-          {error ? <div className={styles.error}>{error}</div> : <Spinner size={18} />}
+          {error ? <LibraryErrorNote error={error} className={styles.error} /> : <Spinner size={18} />}
         </div>
       </div>
     );
@@ -249,10 +247,10 @@ export function BatchView({
     const ok = await confirm(
       t("撤销这次上传？已归档的 {0} 个文件会从资料里删除，AI 新建且已空的目录也会删掉。", filed.length),
     );
-    if (ok) void act("batch", () => undoIngest(client, batch.id));
+    if (ok) void act("batch", t("撤销整批"), () => undoIngest(client, batch.id));
   };
   const dismiss = () =>
-    void act("dismiss", async () => {
+    void act("dismiss", t("清除记录"), async () => {
       await dismissIngest(client, batch.id);
       onBack();
       return null;
@@ -288,7 +286,7 @@ export function BatchView({
               <span>
                 {t("{0} 个文件没传上：", skipped.length)}
                 {skipped
-                  .map((s) => `${s.name}（${s.reason === "too-large" ? t("超过 512 MB") : s.reason}）`)
+                  .map((s) => `${s.name}（${s.reason === "too-large" ? t("超过 512 MB") : libraryErrorLine(s.reason)}）`)
                   .join("、")}
               </span>
             </div>
@@ -318,8 +316,8 @@ export function BatchView({
               </div>
             </div>
           )}
-          {batch.error && <div className={styles.error}>{batch.error}</div>}
-          {error && <div className={styles.error}>{error}</div>}
+          {batch.error && <div className={styles.error}>{libraryErrorLine(batch.error)}</div>}
+          <LibraryErrorNote error={error} className={styles.error} />
           {!running && (
             <div className={styles.actions}>
               {filed.length > 0 && batch.status !== "undone" && (
@@ -363,8 +361,8 @@ export function BatchView({
                 item={it}
                 choices={choices}
                 busy={busy === it.id}
-                onMove={(f) => void act(it.id, () => moveIngestItem(client, batch.id, it.id, f))}
-                onUndo={() => void act(it.id, () => undoIngest(client, batch.id, it.id))}
+                onMove={(f) => void act(it.id, t("移动资料"), () => moveIngestItem(client, batch.id, it.id, f))}
+                onUndo={() => void act(it.id, t("撤销"), () => undoIngest(client, batch.id, it.id))}
                 onOpen={() => it.status === "filed" && it.artifactId && onOpenArtifact(it.artifactId)}
               />
             ))}
@@ -397,13 +395,13 @@ export function BatchView({
             {grouped.failed.map((it) => (
               <div key={it.id} className={styles.line}>
                 <span>{it.relPath}</span>
-                <span className={styles.lineNote}>{it.error}</span>
+                <span className={styles.lineNote}>{it.error ? libraryErrorLine(it.error) : null}</span>
               </div>
             ))}
             {batch.rejected.map((r) => (
               <div key={r.relPath} className={styles.line}>
                 <span>{r.relPath}</span>
-                <span className={styles.lineNote}>{r.reason}</span>
+                <span className={styles.lineNote}>{libraryErrorLine(r.reason)}</span>
               </div>
             ))}
           </section>
@@ -445,7 +443,7 @@ function ItemCard({
       </button>
       <div className={styles.itemPath}>{item.relPath}</div>
       {item.summary && <div className={styles.itemSummary}>{item.summary}</div>}
-      {item.error && <div className={styles.itemNote}>{item.error}</div>}
+      {item.error && <div className={styles.itemNote}>{libraryErrorLine(item.error)}</div>}
       {(item.tags.length > 0 || filed) && (
         <div className={styles.itemFoot}>
           {item.tags.map((tag) => (

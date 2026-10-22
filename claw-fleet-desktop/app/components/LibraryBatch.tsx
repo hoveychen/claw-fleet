@@ -31,6 +31,7 @@ import { itemNoteKey, rejectedReasonKey } from "../libraryUpload";
 import { Spinner } from "./loading";
 import { timeAgo } from "./timeAgo";
 import styles from "./LibraryBatch.module.css";
+import { libraryErrorText } from "../libraryErrors";
 
 /** Polling period while a batch is being filed. */
 export const BATCH_POLL_MS = 1500;
@@ -145,9 +146,9 @@ export function BatchDetail({
       setBatch(await invoke<IngestBatch>("library_ingest_batch", { id }));
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(libraryErrorText(t, e));
     }
-  }, [id]);
+  }, [id, t]);
 
   useEffect(() => {
     void load();
@@ -169,12 +170,12 @@ export function BatchDetail({
         setError(null);
         onChanged();
       } catch (e) {
-        setError(String(e));
+        setError(libraryErrorText(t, e));
       } finally {
         setBusy(null);
       }
     },
-    [onChanged],
+    [onChanged, t],
   );
 
   const grouped = useMemo(() => (batch ? groupIngestItems(batch) : null), [batch]);

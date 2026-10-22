@@ -1,0 +1,7 @@
+.detail {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  overflow-wrap: anywhere;
+}

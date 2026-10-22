@@ -42,6 +42,9 @@
   color: var(--color-error-fg);
   font-size: var(--font-size-sm);
   cursor: pointer;
+  /* A generic error line keeps the host's message on a second line. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 /* What an export wrote (or that a browser download started). */

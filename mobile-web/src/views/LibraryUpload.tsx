@@ -17,6 +17,8 @@ import {
 } from "../libraryApi";
 import { Spinner } from "./loading";
 import treeStyles from "./LibraryTree.module.css";
+import { libraryErrorLine, libraryErrorOf, type LibraryErrorView } from "../libraryErrors";
+import { LibraryErrorNote } from "./LibraryErrorNote";
 import styles from "./LibraryUpload.module.css";
 
 interface Picked {
@@ -47,7 +49,7 @@ export function UploadSheet({
   const [picked, setPicked] = useState<Picked[]>([]);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LibraryErrorView | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const filesRef = useRef<HTMLInputElement>(null);
 
@@ -97,8 +99,15 @@ export function UploadSheet({
     } catch (e) {
       setError(
         e instanceof UploadSkippedAll
-          ? t("一个文件都没传上：{0}", e.message)
-          : t("上传失败：{0}", e instanceof Error ? e.message : String(e)),
+          ? {
+              message: t(
+                "一个文件都没传上：{0}",
+                e.skipped
+                  .map((s) => `${s.name}（${s.reason === "too-large" ? t("超过 512 MB") : libraryErrorLine(s.reason)}）`)
+                  .join("；"),
+              ),
+            }
+          : libraryErrorOf(e, t("上传")),
       );
       setSending(false);
     }
@@ -239,7 +248,7 @@ export function UploadSheet({
             </span>
           </div>
         )}
-        {error && <div className={treeStyles.error}>{error}</div>}
+        <LibraryErrorNote error={error} className={treeStyles.error} />
 
         <button
           type="button"
