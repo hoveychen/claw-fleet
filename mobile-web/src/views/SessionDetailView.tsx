@@ -87,6 +87,7 @@ import {
   useInFlightTools,
 } from "./inFlightTools";
 import { userDisplayText } from "./slashCommand";
+import { agentMailPlainText, splitAgentMail } from "../../../shared-ts/agentMail";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ImageResultSummary, IngestSummary, ToolDigest } from "../types";
@@ -98,6 +99,7 @@ import {
   stripRefsBlock,
 } from "../../../shared-ts/sessionMentions";
 import {
+  MailSenderChip,
   MentionText,
   RefChips,
   RefsNote,
@@ -1253,6 +1255,41 @@ const MessageRow = memo(function MessageRow({
         </div>
       );
     }
+    // Mail from another Fleet session: drawn on the left with its sender as a
+    // chip, the reply-address footer (meant for the model) dropped from view.
+    // Same rule as the desktop's AgentMail — only an all-text turn qualifies.
+    const mail = imageThumbs(msg).length === 0 ? splitAgentMail(userText(msg)) : null;
+    if (mail) {
+      return (
+        <div className={styles.assistantRow}>
+          <div className={styles.mailCard}>
+            {mail.map((p, i) => (
+              <div key={i} className={styles.mailPart}>
+                {p.from && (
+                  <div className={styles.mailFrom}>
+                    ↪ {t("来自")} <MailSenderChip id={p.from.id} workspace={p.from.workspace} />
+                  </div>
+                )}
+                <div className={styles.userText}>
+                  <MentionText text={p.body} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className={styles.rowTime}>
+            {msg.fleetPending && (
+              <span className={styles.pendingUnread}>
+                {msg.fleetPendingStale
+                  ? t("任务在读到这条之前就结束了")
+                  : t("已送达 · 等当前工具跑完才会被读到")}
+              </span>
+            )}
+            <CopyButton text={agentMailPlainText(mail)} />
+            {fmtTime(msg.timestamp)}
+          </div>
+        </div>
+      );
+    }
     // The composers staple picked files onto the prompt as a trailing
     // `Context files:` block, which Claude Code freezes into the transcript
     // verbatim. Peel it back off: the paths become thumbnails, and the bubble
@@ -1571,6 +1608,7 @@ export function SessionDetailView({
     () => ({
       open: (id: string) => onOpenSessionId(id),
       has: (id: string) => sessions.some((s) => s.id === id),
+      session: (id: string) => sessions.find((s) => s.id === id),
       openWiki: onOpenWikiSlug,
       wikiTitle,
       wantWikiTitles,

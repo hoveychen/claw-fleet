@@ -1861,6 +1861,8 @@
     "result_capped": "Too long to render; the last {{count}} characters are omitted (copy to get all)",
     "open_subagent": "Open subtask",
     "slash_command": "slash command",
+    "agent_mail_from": "From",
+    "agent_mail_hint": "A message another task sent this one, not something you typed",
     "open_mentioned_session": "Open this task",
     "session_refs_attached": "Summaries of {{n}} tasks attached",
     "skill_loaded": "SKILL LOADED",

@@ -1244,6 +1244,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
   ]),
   "sess-billing-3": billingLeg("b3", NOW - 38 * MIN, "successor", [
     ["assistant", "Picked up P4: flipping the read path behind `usage_billing_v2`, dual-write stays on for 48h."],
+    // Mail from another session (`fleet send`): the reply-address footer is
+    // the exact shape `with_reply_address` writes — see shared-ts/agentMail.
+    ["user", "上一轮切读路径时 Fleet 工具服务启动超时，进程被带停了（现在已恢复）。请接着做：先跑一遍 `ledger_v2_miss_total` 的对账，再继续切流量。\n\n---\n（这条消息来自 Fleet 会话 sess-billing-1（billing-service）。要回复它，用 `fleet__control action=send id=sess-billing-1 text=<回复>`（CLI：`fleet send sess-billing-1 <回复>`）。）"],
     ["user", "先只切 top 50 租户，三个企业租户保持旧路径。"],
     ["assistant", "Done — the flag now gates the top 50 tenants; the three enterprise tenants are pinned to the legacy reader. Watching `ledger_v2_miss_total`."],
   ]),

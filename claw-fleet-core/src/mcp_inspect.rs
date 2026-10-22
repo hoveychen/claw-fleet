@@ -481,6 +481,9 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
 /// running `fleet send` in a terminal) — there is nothing to reply to then, so
 /// the body goes out untouched. The sender's own scan row is optional too: a
 /// session that has not been scanned yet still has a usable id.
+///
+/// The transcript views parse this footer back out (`shared-ts/agentMail.ts`)
+/// to render the turn as mail from the sender — change both together.
 fn with_reply_address(text: &str, sender: Option<(&str, Option<&SessionInfo>)>) -> String {
     let Some((id, row)) = sender else {
         return text.to_string();
