@@ -754,11 +754,28 @@ mod tests {
     }
 
     #[test]
-    fn auth_failures_other_than_403_stay_permanent() {
-        // Expired OAuth and logged-out sessions cannot fix themselves; retrying
-        // them would only burn spawns.
+    fn auth_oauth_expired_is_retryable() {
+        // A fresh `claude` re-reads the credential store, so a refresh another
+        // process won (or a re-login since) lets the retry through.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "authentication_failed",
+                "Failed to authenticate: OAuth session expired and could not be refreshed",
+                "2026-10-22T13:51:27.925Z",
+            ),
+        ];
+        assert!(
+            detect_server_error(&lines),
+            "an expired OAuth session must be treated as transient"
+        );
+    }
+
+    #[test]
+    fn auth_failures_other_than_whitelisted_stay_permanent() {
+        // Logged-out sessions and 401s cannot fix themselves; retrying them
+        // would only burn spawns.
         for text in [
-            "Failed to authenticate: OAuth session expired and could not be refreshed",
             "Not logged in · Please run /login",
             "Failed to authenticate. API Error: 401 Invalid authentication credentials",
         ] {

@@ -233,12 +233,13 @@ pub(crate) fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> 
 /// Every *other* API error (`authentication_failed`, `invalid_request`,
 /// `oauth_org_not_allowed`, `model_not_found`, …) is permanent and must NOT be
 /// auto-retried, so this returns `false` for them: only `server_error`, the
-/// unparseable-tool-call record and the transient 403 below are whitelisted.
+/// unparseable-tool-call record and the transient auth failures below are
+/// whitelisted.
 ///
-/// ## The third family: a transient 403
+/// ## The third family: transient auth failures
 ///
-/// See [`is_transient_auth_403`]: one specific `authentication_failed` text
-/// that turned out to clear on its own.
+/// See [`is_transient_auth_failure`]: the 403 and the expired OAuth session,
+/// two `authentication_failed` texts a fresh attempt can get past.
 ///
 /// ## The second family: an unparseable tool call
 ///
@@ -269,7 +270,7 @@ pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
         // permanent and must not re-fire spawns forever.
         return v.get("error").and_then(|e| e.as_str()) == Some("server_error")
             || is_unparseable_tool_call(v)
-            || is_transient_auth_403(v);
+            || is_transient_auth_failure(v);
     }
     false
 }
@@ -316,17 +317,23 @@ fn is_unparseable_tool_call(v: &Value) -> bool {
     })
 }
 
-/// The `authentication_failed` record whose text is `403 Request not allowed`.
+/// The `authentication_failed` records that are retried like a server error:
+/// `403 Request not allowed` and `OAuth session expired and could not be
+/// refreshed`.
 ///
-/// It shares its `error` enum with genuinely permanent failures — "OAuth
-/// session expired and could not be refreshed", "Not logged in" — so only the
-/// text tells them apart, and only this one text is whitelisted. Measured
-/// across every transcript on this machine (2026-10-20): 299 such 403 episodes,
-/// 259 of which were followed by a normal assistant reply in the same session,
-/// 221 of those after a single 403. The credential was fine; the request was
-/// refused for a while. The scheduler's existing per-episode cap and debounce
-/// bound the retries, so a 403 that does persist stops after a few attempts.
-fn is_transient_auth_403(v: &Value) -> bool {
+/// They share their `error` enum with failures a retry cannot fix — "Not
+/// logged in", a 401 — so only the text tells them apart, and only these texts
+/// are whitelisted. The 403, measured across every transcript on this machine
+/// (2026-10-20): 299 episodes, 259 of which were followed by a normal assistant
+/// reply in the same session, 221 of those after a single 403. The credential
+/// was fine; the request was refused for a while.
+///
+/// The OAuth expiry is retried on the boss's call (2026-10-22): a fresh
+/// `claude` re-reads the credential store, so a refresh another process won —
+/// or a re-login in the meantime — lets the retry through. The scheduler's
+/// existing per-episode cap and debounce bound the retries, so one that does
+/// persist stops after a few attempts.
+fn is_transient_auth_failure(v: &Value) -> bool {
     if v.get("error").and_then(|e| e.as_str()) != Some("authentication_failed") {
         return false;
     }
@@ -340,7 +347,10 @@ fn is_transient_auth_403(v: &Value) -> bool {
     blocks.iter().any(|b| {
         b.get("text")
             .and_then(|t| t.as_str())
-            .is_some_and(|t| t.contains("403 Request not allowed"))
+            .is_some_and(|t| {
+                t.contains("403 Request not allowed")
+                    || t.contains("OAuth session expired and could not be refreshed")
+            })
     })
 }
 
