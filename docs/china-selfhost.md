@@ -45,7 +45,7 @@ ssh own-api-sz 'test ! -e /srv/claw-fleet-site/current && test ! -L /srv/claw-fl
 
 运行仓库 `scripts/site/build.py` 和 `scripts/site/distribute.py --tag <稳定版本> --public-url https://fleet.eternizedlab.com --output <新本地目录>`（不要加 `--publish`，该开关专用于 COS）。工具先下载并验证官方文件，再生成清单。随后按本节发布配置应用 provider、分享图片和备案页脚，生成全站 SHA-256 清单，上传到新部署目录，校验通过后切换入口。保留已发布的历史 `releases/<版本>/` 路径，避免旧链接因站点更新失效。
 
-自托管已接入服务器端稳定版自动同步，详见下节；上述 SSH 流程保留用于修改官网设计。COS 工作流仍为未启用的备选。
+自托管已接入服务器端稳定版自动同步，详见下节；页面随每个稳定版自动更新。上述 SSH 流程只在要立刻发布、不等下一个版本时使用（或者在服务器上带 `--rebuild-current` 手动跑一次 `selfhost.py`）。COS 工作流仍为未启用的备选。
 
 
 ## 部署产物的域名配置
@@ -111,12 +111,14 @@ paths = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "DEPLOY-S
 
 ## 稳定版自动同步
 
+服务器副本在 `/opt/fleet-site-updater/`，需要 `selfhost.py`、`distribute.py`、`mirror_site.py`、`site_origin.py`、`sitemap_lastmod.py` 五个文件一起从仓库 `scripts/site/` 拷过去；改了仓库不等于改了服务器。
+
 Boss 已授权接入自动发版。采用深圳服务器的 systemd timer 主动检查 GitHub，不需要 GitHub 保存 SSH 私钥，也不依赖本地会话常驻。
 
 - `fleet-site-update.timer` 每 15 分钟检查一次，随机延迟最多 60 秒；机器重启后补执行错过的检查。
 - 最新稳定版没有变化时只读取元数据，不重新下载安装包、不改站点。忽略低于当前版本的上游版本，不自动降级。
 - 新版必须是完整的官方 `vX.Y.Z` 稳定发行，四类必需安装包齐全；同步所有允许的官方附件，逐个检查 GitHub 提供的 SHA-256 和字节数。缺包、摘要缺失、下载错误、同版本被替换都会拒绝切换。
-- 先写未公开部署目录，保留当前官网 HTML、CSS、图片和备案信息；验证完新包后，生成新版下载清单并原子替换 `/srv/claw-fleet-site/current` 软链接。旧部署保留；历史包使用硬链接，避免每个部署重复占用历史包空间。不会自动删除旧版本。
+- 先写未公开部署目录；验证完新包后，从 codeload 下载该版本 tag 的源码包，只取 `docs/`，用 `scripts/site/mirror_site.py` 重新生成全部页面（替换为本站域名、补备案页脚），再生成新版下载清单并原子替换 `/srv/claw-fleet-site/current` 软链接。源码包下载失败同样拒绝切换。（2026-10-22 之前这一步是沿用上一次部署的 HTML，导致镜像页面停在 2026-09-08 那版整整六周。）旧部署保留；历史包使用硬链接，避免每个部署重复占用历史包空间。不会自动删除旧版本。
 - 失败退出会记录到 journal，当前站点继续工作；下一次定时检查重试。同一时间只允许一个更新实例（`.update.lock` 文件锁）。
 - 单轮仍由 `TimeoutStartSec=45min` 限制，避免无人值守任务无限占用进程；这条跨境链路实测只有 10–40 KB/s，整套 230 MB 会跨越多轮 timer 才能完成。
 - 失败或被杀的暂存目录**刻意保留**，下一轮复用同版本中「已下载字节最多」的那个继续下（不是 mtime 最新的那个——刚起的一轮几乎是空的）。已校验成品直接复用，单个未完产物按 `Range` 续传，每个最多重试 8 次。暂存目录里发现的每个文件都会重新校验 SHA-256，不过就删掉重取，所以保留暂存不会让坏字节上线。成功切换后清扫全部孤儿暂存目录。

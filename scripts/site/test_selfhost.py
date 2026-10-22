@@ -5,11 +5,14 @@ import http.client
 import io
 import json
 from pathlib import Path
+import shutil
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import distribute
+import mirror_site
 import selfhost
 from test_distribute import fixture
 
@@ -68,6 +71,36 @@ class SelfhostTests(unittest.TestCase):
             self.assertEqual(old.stat().st_ino, retained.stat().st_ino)
             self.assertEqual(retained.read_bytes(), self.previous_body)
             self.assertEqual((live / 'releases/v2.6.0' / name).read_bytes(), self.body)
+
+    def test_a_new_release_brings_its_own_pages(self):
+        """Carrying the live pages over froze the mirror at its first design."""
+        def fetch_docs(tag, workdir):
+            self.assertEqual(tag, 'v2.6.0')
+            docs = workdir / 'claw-fleet-2.6.0' / 'docs'
+            shutil.copytree(distribute.ROOT / 'docs', docs)
+            page = docs / 'zh/index.html'
+            page.write_text(page.read_text().replace('</main>', '<p>fresh-from-tag</p></main>', 1))
+            return docs
+        with patch.object(distribute.urllib.request, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(self.body)):
+            self.assertTrue(selfhost.sync(self.root, 'https://dl.example.com', self.release,
+                                          fetch_docs=fetch_docs))
+        live = (self.root / 'current').resolve()
+        zh = (live / 'zh/index.html').read_text()
+        self.assertIn('fresh-from-tag', zh)
+        self.assertNotIn('fresh-from-tag', (self.old / 'zh/index.html').read_text())
+        self.assertIn(mirror_site.ICP_NUMBER, zh)
+        self.assertIn('https://dl.example.com/', zh)
+        self.assertNotIn('__SITE_ORIGIN__', zh)
+        self.assertIn('"softwareVersion":"2.6.0"', zh)
+        self.assertEqual(json.loads((live / 'downloads.json').read_text())['version'], 'v2.6.0')
+
+    def test_a_failed_page_fetch_never_replaces_current(self):
+        def fetch_docs(tag, workdir):
+            raise OSError('codeload unreachable')
+        with patch.object(distribute.urllib.request, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(self.body)):
+            with self.assertRaises(OSError):
+                selfhost.sync(self.root, 'https://dl.example.com', self.release, fetch_docs=fetch_docs)
+        self.assertEqual((self.root / 'current').resolve(), self.old)
 
     def test_corrupt_package_never_replaces_current(self):
         before = (self.old / 'downloads.json').read_bytes()
@@ -193,6 +226,25 @@ class SelfhostTests(unittest.TestCase):
             asset['browser_download_url'] = asset['browser_download_url'].replace('v2.5.0', 'v2.4.0')
         self.assertFalse(selfhost.sync(self.root, 'https://dl.example.com', older))
         self.assertEqual((self.root / 'current').resolve(), self.old)
+
+
+class FetchSiteDocsTests(unittest.TestCase):
+    def test_only_docs_is_extracted_from_the_tag_archive(self):
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
+            for name, body in [('claw-fleet-3.1.0/docs/index.html', b'<html></html>'),
+                               ('claw-fleet-3.1.0/src/main.rs', b'fn main() {}')]:
+                info = tarfile.TarInfo(name)
+                info.size = len(body)
+                tar.addfile(info, io.BytesIO(body))
+        buffer.seek(0)
+        with tempfile.TemporaryDirectory() as work, \
+                patch.object(selfhost.urllib.request, 'urlopen', return_value=buffer) as network:
+            docs = selfhost.fetch_site_docs('v3.1.0', Path(work))
+            self.assertEqual((docs / 'index.html').read_bytes(), b'<html></html>')
+            self.assertFalse((docs.parent / 'src').exists())
+        self.assertIn('codeload.github.com/hoveychen/claw-fleet/tar.gz/refs/tags/v3.1.0',
+                      network.call_args.args[0].full_url)
 
 
 class UpstreamReleaseTests(unittest.TestCase):
