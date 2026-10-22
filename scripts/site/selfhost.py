@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mirror new stable releases into an existing self-hosted site; retain its design."""
+"""Mirror new stable releases, and the site pages of that release, into the self-hosted site."""
 import argparse
 import fcntl
 import json
@@ -7,11 +7,13 @@ import os
 from pathlib import Path
 import re
 import shutil
+import tarfile
 import tempfile
 import urllib.request
 import uuid
 
 import distribute
+import mirror_site
 
 
 def version(tag):
@@ -33,6 +35,32 @@ def upstream_release():
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         return distribute.newest_downloadable_release(json.load(response))
+
+
+def fetch_site_docs(tag, workdir):
+    """Download the repository at `tag` and return the path of its `docs/`.
+
+    The source archive comes from codeload because that is the GitHub route
+    the Shenzhen box can reach: raw.githubusercontent.com does not resolve
+    there, and the contents API allows 60 unauthenticated requests an hour,
+    fewer than the site has files. The whole archive took ~3s there (measured
+    2026-10-22, ~50 MB at v3.1.0); only `docs/` is extracted.
+    """
+    request = urllib.request.Request(
+        f'https://codeload.github.com/{distribute.REPO}/tar.gz/refs/tags/{tag}',
+        headers={'User-Agent': 'Claw-Fleet-selfhost'},
+    )
+    archive = workdir / 'source.tar.gz'
+    with urllib.request.urlopen(request, timeout=120) as response, archive.open('wb') as out:
+        shutil.copyfileobj(response, out)
+    extracted = workdir / 'source'
+    with tarfile.open(archive) as tar:
+        members = [m for m in tar.getmembers() if m.name.split('/')[1:2] == ['docs']]
+        if not members:
+            raise ValueError(f'No docs/ in the {tag} source archive')
+        tar.extractall(extracted, members=members, filter='data')
+    (top,) = extracted.iterdir()
+    return top / 'docs'
 
 
 def staging_directory(deployments, tag):
@@ -60,8 +88,14 @@ def staging_directory(deployments, tag):
     return Path(tempfile.mkdtemp(prefix=f'.stage-{tag}-', dir=deployments))
 
 
-def sync(root, public_url, release, *, rebuild_current=False):
-    """Caller holds the update lock. Failed preparation never changes current."""
+def sync(root, public_url, release, *, rebuild_current=False, fetch_docs=None):
+    """Caller holds the update lock. Failed preparation never changes current.
+
+    With `fetch_docs`, the new deployment's pages are rebuilt from the
+    release's own sources; without it they are carried over from the live
+    deployment. Carrying over was the only behaviour until 2026-10-22, and it
+    left the mirror serving the 2026-09-08 pages for six weeks of releases.
+    """
     root = root.resolve()
     public_url = distribute.validate_base_url(public_url)
     deployments = root / 'deployments'
@@ -105,6 +139,13 @@ def sync(root, public_url, release, *, rebuild_current=False):
                         dirs_exist_ok=True)
         distribute.prepare(release, stage, public_url, site_root=current,
                            provider=saved['china'].get('provider', 'Self-hosted'))
+        if fetch_docs:
+            with tempfile.TemporaryDirectory() as work:
+                docs = fetch_docs(tag, Path(work))
+                # Overwrites the carried-over pages in place. Safe: only
+                # releases/ in the stage is hard-linked to older deployments.
+                mirror_site.build(docs, stage, public_url, tag, repo_root=docs.parent)
+            print(f'Rebuilt site pages from {tag} sources', flush=True)
         # mkdtemp is 0700: nginx must be able to traverse the ready deployment.
         stage.chmod(0o755)
         ready = deployments / ('auto-' + tag + '-' + uuid.uuid4().hex[:12])
@@ -143,7 +184,8 @@ def main():
         except BlockingIOError:
             print('Another update is running; skipped', flush=True)
             return
-        sync(args.root, args.public_url, upstream_release(), rebuild_current=args.rebuild_current)
+        sync(args.root, args.public_url, upstream_release(), rebuild_current=args.rebuild_current,
+             fetch_docs=fetch_site_docs)
 
 
 if __name__ == '__main__':
