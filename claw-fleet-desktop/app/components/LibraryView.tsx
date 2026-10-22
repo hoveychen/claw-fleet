@@ -651,8 +651,6 @@ export function LibraryView() {
             onDeleteFolder,
             onDescribeFolder,
             onAcceptFolder,
-            onExportFolder: (path, label) => void onExport({ key: path, scope: "folder", folder: path, name: label }),
-            exporting,
           }}
         />
       )}
