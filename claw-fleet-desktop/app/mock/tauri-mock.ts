@@ -87,7 +87,7 @@ import {
 } from "./data";
 
 import { installWebsiteFixtures, websiteScene } from "./website";
-import { FIXTURE_BLOBS } from "./libraryFixtures";
+import { FIXTURE_BLOBS } from "../../../shared-ts/libraryFixtures";
 import { setArtifactBlobOverride } from "../artifactAssets";
 installWebsiteFixtures();
 

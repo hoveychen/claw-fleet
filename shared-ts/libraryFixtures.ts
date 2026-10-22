@@ -5,7 +5,7 @@
 // by `mock/library.ts`, so the 文档 / 产出 pages, the preview pane and search
 // agree with the tree.
 
-import type { LibraryFolderOrigin } from "../../../shared-ts/libraryTree";
+import type { LibraryFolderOrigin } from "./libraryTree";
 
 const NOW = Date.now();
 const MIN = 60_000;

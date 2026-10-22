@@ -1,5 +1,5 @@
 // `?mock` 资料 (library): the two library-only demo projects the desktop's
-// `?mock` shows (claw-fleet-desktop/app/mock/libraryFixtures.ts — imported, not
+// `?mock` shows (shared-ts/libraryFixtures.ts — imported, not
 // copied, so both mocks show the same folders, items and pictures), answered in
 // the shapes the host's relay methods use. Placement mirrors
 // `claw_fleet_core::library`: a doc is filed by its slug directory matching a
@@ -10,7 +10,7 @@ import {
   FIXTURE_BLOBS,
   FIXTURE_DOCS,
   FIXTURE_FOLDERS,
-} from "../../../claw-fleet-desktop/app/mock/libraryFixtures";
+} from "../../../shared-ts/libraryFixtures";
 import type { LibraryEntry, LibraryProjectTree } from "../../../shared-ts/libraryTree";
 import type { LibraryHit } from "../../../shared-ts/librarySearch";
 
