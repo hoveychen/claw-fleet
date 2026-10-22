@@ -4,7 +4,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Download,
   Folder,
   FolderGit2,
   FolderOpen,
@@ -53,10 +52,6 @@ export interface FolderRailCtx {
   onDeleteFolder: (project: string, path: string, label: string) => void;
   onDescribeFolder: (project: string, path: string, description: string) => void;
   onAcceptFolder: (project: string, path: string) => void;
-  /** Export the folder (and everything beneath it) as a zip. */
-  onExportFolder: (path: string, label: string) => void;
-  /** The key of the export running, if any (a folder path while it is one). */
-  exporting: string | null;
 }
 
 /** Hover text of an AI-created folder's marker: who made it, when, and why. */
@@ -345,17 +340,6 @@ function FolderNode({ node, depth, ctx }: { node: LibraryFolderNode; depth: numb
             onClick={() => setEditing("create")}
           >
             <FolderPlus size={13} strokeWidth={1.5} />
-          </button>
-          <button
-            type="button"
-            className={styles.action}
-            title={t("library.export_folder_hint", "把这个目录（含子目录）的文档和产出按目录结构打成一个 zip")}
-            aria-label={t("library.export_folder", "导出")}
-            onClick={() => ctx.onExportFolder(node.path, node.label)}
-            disabled={ctx.exporting !== null || node.total === 0}
-            data-library-rail-export={node.path}
-          >
-            {ctx.exporting === node.path ? <Spinner size={12} /> : <Download size={13} strokeWidth={1.5} />}
           </button>
           <button
             type="button"
