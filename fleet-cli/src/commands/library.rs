@@ -41,6 +41,94 @@ pub(crate) fn cmd_library(action: LibraryCommands) {
             );
         }
         LibraryCommands::MigrateSlugs { workspace, dry_run, json } => migrate_slugs(workspace, dry_run, json),
+        LibraryCommands::FixLanguage { dry_run, concurrency, limit, json } => {
+            fix_language(dry_run, concurrency, limit, json)
+        }
+        LibraryCommands::RestoreSummaries { backup } => {
+            let roots = Roots::home().unwrap_or_else(|e| fail(e));
+            let n = library_summary::restore_summaries_in(&roots, &backup).unwrap_or_else(|e| fail(e));
+            println!("Restored {n} summary(ies) from {}", backup.display());
+        }
+    }
+}
+
+fn fix_language(dry_run: bool, concurrency: usize, limit: Option<usize>, json: bool) {
+    let roots = Roots::home().unwrap_or_else(|e| fail(e));
+    let index = claw_fleet_core::library_index::LibraryIndex::open_at(&claw_fleet_core::library_index::db_path(&roots))
+        .unwrap_or_else(|e| fail(e));
+    index.sync(&roots).unwrap_or_else(|e| fail(e));
+    let found = library_summary::language_mismatches(&roots, &index).unwrap_or_else(|e| fail(e));
+    let todo: Vec<_> = found.iter().take(limit.unwrap_or(usize::MAX)).collect();
+    if dry_run {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&found).unwrap());
+            return;
+        }
+        for m in &todo {
+            println!(
+                "  [{}] {} {} — {}",
+                m.project_language,
+                m.kind,
+                truncate(&m.title, 50),
+                truncate(&m.summary, 70)
+            );
+        }
+        println!(
+            "{} summary(ies) not in their project's language; rewriting {} costs about ${:.2}",
+            found.len(),
+            todo.len(),
+            todo.len() as f64 * library_summary::EST_TEXT_CALL_USD
+        );
+        return;
+    }
+    let targets: Vec<(String, String)> = todo.iter().map(|m| (m.kind.clone(), m.id.clone())).collect();
+    let tick = |t: &BackfillTick| {
+        if json {
+            return;
+        }
+        let r = &t.run;
+        let mark = match (&t.error, &t.skipped) {
+            (Some(e), _) => format!("{}FAILED{} {}", "\x1b[31m", c_reset(), truncate(e, 80)),
+            (None, Some(why)) => format!("skipped ({why})"),
+            (None, None) => format!("{}ok{} ${:.4}", "\x1b[32m", c_reset(), t.cost_usd),
+        };
+        println!(
+            "[{}/{} · ${:.3}] {} {} — {}",
+            r.done + r.failed + r.skipped,
+            r.planned,
+            r.cost_usd,
+            t.kind,
+            truncate(&t.title, 50),
+            mark
+        );
+    };
+    let report = library_summary::resummarize_in(
+        &roots,
+        &targets,
+        concurrency,
+        None,
+        &claw_fleet_core::library_ingest::LiveBrain,
+        &tick,
+    )
+    .unwrap_or_else(|e| fail(e));
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        return;
+    }
+    println!(
+        "{}Rewrote {} of {} summary(ies){}, {} failed · ${:.3}",
+        c_bold(),
+        report.done,
+        report.planned,
+        c_reset(),
+        report.failed,
+        report.cost_usd
+    );
+    for f in &report.failures {
+        println!("  {} {} — {}", f.kind, truncate(&f.id, 40), truncate(&f.error, 100));
+    }
+    if let Some(b) = &report.backup {
+        println!("Old summaries backed up — undo with `fleet library restore-summaries {}`", b.display());
     }
 }
 
@@ -219,8 +307,8 @@ fn backfill(dry_run: bool, concurrency: usize, limit: Option<usize>, json: bool)
         println!("{}Summary backfill — dry run{}", c_bold(), c_reset());
         println!("  due now:          {} item(s), est. ${:.2}", status.due, status.due_cost_usd);
         println!(
-            "  of which backlog: {} doc(s), {} text artifact(s), {} image(s)",
-            p.docs, p.text_artifacts, p.image_artifacts
+            "  of which backlog: {} doc(s), {} text artifact(s), {} image(s), {} video(s)",
+            p.docs, p.text_artifacts, p.image_artifacts, p.video_artifacts
         );
         println!("  new since index:  {}", p.new_pending);
         if let Some(r) = &status.run {
@@ -246,13 +334,14 @@ fn backfill(dry_run: bool, concurrency: usize, limit: Option<usize>, json: bool)
             return;
         }
         let r = &t.run;
-        let mark = match &t.error {
-            None => format!("{}ok{} ${:.4}", "\x1b[32m", c_reset(), t.cost_usd),
-            Some(e) => format!("{}FAILED{} {}", "\x1b[31m", c_reset(), truncate(e, 80)),
+        let mark = match (&t.error, &t.skipped) {
+            (Some(e), _) => format!("{}FAILED{} {}", "\x1b[31m", c_reset(), truncate(e, 80)),
+            (None, Some(why)) => format!("skipped ({why})"),
+            (None, None) => format!("{}ok{} ${:.4}", "\x1b[32m", c_reset(), t.cost_usd),
         };
         println!(
             "[{}/{} · {} failed · ${:.3} · {}] {} {} — {}",
-            r.done + r.failed,
+            r.done + r.failed + r.skipped,
             r.planned,
             r.failed,
             r.cost_usd,
@@ -276,7 +365,7 @@ fn backfill(dry_run: bool, concurrency: usize, limit: Option<usize>, json: bool)
     }
     println!();
     println!(
-        "{}Backfill {}{}: {} summarized, {} failed of {} planned · ${:.3} · {} (this run {}, {} resume(s))",
+        "{}Backfill {}{}: {} summarized, {} failed, {} skipped of {} planned · ${:.3} · {} (this run {}, {} resume(s))",
         c_bold(),
         match run.state {
             BackfillState::Done => "done",
@@ -286,6 +375,7 @@ fn backfill(dry_run: bool, concurrency: usize, limit: Option<usize>, json: bool)
         c_reset(),
         run.done,
         run.failed,
+        run.skipped,
         run.planned,
         run.cost_usd,
         minutes(run.elapsed_ms),

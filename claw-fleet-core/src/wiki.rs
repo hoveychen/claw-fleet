@@ -1708,6 +1708,11 @@ fn read_summary(doc_dir: &Path) -> Option<DocSummary> {
     serde_json::from_str(&fs::read_to_string(doc_dir.join(SUMMARY_FILE)).ok()?).ok()
 }
 
+/// A doc's stored AI summary sidecar, if it has one.
+pub fn read_summary_in(root: &Path, slug: &str) -> Option<DocSummary> {
+    read_summary(&root.join(slug_to_dirname(slug)))
+}
+
 /// Store a doc's AI summary. Fails when the doc no longer exists, so a
 /// summary finishing after a delete or move does not resurrect a stray dir.
 pub fn write_summary_in(root: &Path, slug: &str, summary: &DocSummary) -> Result<(), String> {

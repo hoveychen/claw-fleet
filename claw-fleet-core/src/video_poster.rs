@@ -57,6 +57,12 @@ pub fn poster_jpeg(id: &str) -> Result<Option<Vec<u8>>, String> {
     Ok(poster_for(&root, &cache, &artifact, &Extractors::detect()))
 }
 
+/// [`poster_jpeg`] for an artifact already loaded from the store at `root`
+/// (the library summary worker, which runs against explicit roots).
+pub fn poster_jpeg_for(root: &Path, artifact: &Artifact) -> Option<Vec<u8>> {
+    poster_for(root, &cache_dir()?, artifact, &Extractors::detect())
+}
+
 /// [`poster_jpeg`] answered as blob bytes, for the two `?poster=1` surfaces
 /// (the desktop's `fleet-artifact://` protocol and `fleet serve`'s
 /// `/artifact_blob`). A missing poster is an error, which both answer as 404

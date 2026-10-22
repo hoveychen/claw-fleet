@@ -664,15 +664,18 @@ impl LibraryIndex {
     }
 
     /// The dominant language of project `project`'s library (see
-    /// [`classify::dominant_language`]), from each indexed item's title and
-    /// the head of its text, plus `extra` texts (an upload's files, which a
-    /// new project has nothing else to go by).
+    /// [`classify::dominant_language`]), from what the project itself wrote:
+    /// each doc's title and the head of its text, and each artifact's title —
+    /// not an artifact's extracted text, which is whatever the file holds (a
+    /// Chinese project's English hotel receipts made it vote English) — plus
+    /// `extra` texts (an upload's files, which a new project has nothing else
+    /// to go by).
     pub fn project_language(&self, project: &str, extra: &[String]) -> classify::Language {
         let mut texts: Vec<String> = extra.to_vec();
-        if let Ok(mut stmt) = self
-            .conn
-            .prepare("SELECT title || ' ' || substr(body, 1, ?2) FROM items WHERE project = ?1")
-        {
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT CASE WHEN kind = 'doc' THEN title || ' ' || substr(body, 1, ?2) ELSE title END
+             FROM items WHERE project = ?1",
+        ) {
             if let Ok(rows) = stmt.query_map(params![project, LANGUAGE_SAMPLE_CHARS as i64], |r| r.get::<_, String>(0)) {
                 texts.extend(rows.flatten());
             }

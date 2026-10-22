@@ -1539,8 +1539,12 @@ fn file_one(
     };
     let source = original_path(batch, &item.rel_path);
     let edited = artifacts::edit_in(&roots.artifacts, &added.id, |a| {
-        a.summary = item.summary.clone();
-        a.tags = item.tags.clone();
+        // The classifier saw only a video's name; the summary worker
+        // (`library_summary`) writes its summary and tags from the poster.
+        if a.kind != "video" {
+            a.summary = item.summary.clone();
+            a.tags = item.tags.clone();
+        }
         a.path = folder.unwrap_or("").to_string();
         a.origin = Some(origin);
         a.source_path = source.clone();

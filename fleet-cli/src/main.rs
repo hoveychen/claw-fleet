@@ -1344,7 +1344,7 @@ pub(crate) enum ArtifactCommands {
 #[derive(Subcommand)]
 pub(crate) enum LibraryCommands {
     /// Summarize every library item that has no AI summary yet (docs, text
-    /// artifacts, images), at a bounded concurrency and without the background
+    /// artifacts, images, videos by their poster frame), at a bounded concurrency and without the background
     /// worker's hourly cap. Resumable: run it again after an interruption and it
     /// continues, with its cost and failures carried over.
     Backfill {
@@ -1395,6 +1395,29 @@ pub(crate) enum LibraryCommands {
     /// and the folders the batch created are removed once empty.
     RefileUndo {
         batch: String,
+    },
+    /// Find AI summaries not written in their project's language (English
+    /// summaries in a Chinese project, from before summaries followed the
+    /// project) and write them again. The summaries it replaces are backed up
+    /// first; `fleet library restore-summaries <backup>` puts them back.
+    FixLanguage {
+        /// Only list the mismatched summaries and the estimated cost.
+        #[arg(long)]
+        dry_run: bool,
+        /// Calls at once (at most 3).
+        #[arg(long, default_value_t = 3)]
+        concurrency: usize,
+        /// Rewrite at most this many.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Output JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put back the summaries a `fix-language` run replaced, from the backup
+    /// file it printed (under ~/.fleet/library/summary-backups/).
+    RestoreSummaries {
+        backup: std::path::PathBuf,
     },
     /// Move docs filed before slugs were namespaced per project
     /// (`research/memo`) onto their folder's namespaced prefix
