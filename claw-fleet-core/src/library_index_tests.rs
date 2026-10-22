@@ -335,6 +335,37 @@ fn project_language_is_the_majority_of_the_projects_items() {
     assert_eq!(idx.project_language("/elsewhere", &many_en), classify::Language::English);
 }
 
+/// The 2026-10-22 `us_invoices` case: Chinese titles on English receipts.
+/// What a file holds is not what the project writes in.
+#[test]
+fn an_artifacts_extracted_text_does_not_vote_on_the_project_language() {
+    let e = env();
+    let idx = e.index();
+    let key = e.ws.display().to_string();
+    let receipt = b"Air Masters Travel Limited SUITE 20A WING LOK STREET TRADE CENTER HONG KONG \
+Travel invoice for hotel accommodation, guest name and nights, total amount paid in US dollars";
+    for (i, title) in ["酒店收据（八月四日）", "酒店收据（八月七日）", "酒店收据（八月九日）"].iter().enumerate() {
+        e.add_file(&format!("hotel_{i}.txt"), receipt, Some(title));
+    }
+    idx.sync(&e.roots).unwrap();
+    idx.extract_pending(&e.roots, Duration::from_secs(10)).unwrap();
+    assert!(
+        idx.conn().query_row("SELECT COUNT(*) FROM items WHERE body LIKE '%Air Masters%'", [], |r| r.get::<_, i64>(0)).unwrap() == 3,
+        "the receipts' text is indexed"
+    );
+    assert_eq!(idx.project_language(&key, &[]), classify::Language::Chinese);
+
+    // English titles still make an English project.
+    let other = env();
+    let oidx = other.index();
+    for i in 0..3 {
+        other.add_file(&format!("r{i}.txt"), "一份中文的内容说明".as_bytes(), Some("Quarterly revenue report for the board"));
+    }
+    oidx.sync(&other.roots).unwrap();
+    oidx.extract_pending(&other.roots, Duration::from_secs(10)).unwrap();
+    assert_eq!(oidx.project_language(&other.ws.display().to_string(), &[]), classify::Language::English);
+}
+
 #[test]
 fn artifact_hits_carry_the_file_facts_a_thumbnail_needs() {
     let e = env();

@@ -168,6 +168,8 @@ export interface BackfillPlan {
   docs: number;
   textArtifacts: number;
   imageArtifacts: number;
+  /** Videos, summarized from their poster frame. */
+  videoArtifacts?: number;
   newPending: number;
   estCostUsd: number;
   enabled: boolean;
@@ -186,6 +188,8 @@ export interface BackfillRun {
   planned: number;
   done: number;
   failed: number;
+  /** Items with nothing to summarize from (videos without a poster). */
+  skipped?: number;
   costUsd: number;
   resumes: number;
   stopRequested: boolean;

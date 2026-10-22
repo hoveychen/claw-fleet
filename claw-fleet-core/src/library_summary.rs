@@ -1,6 +1,7 @@
 //! Background AI summaries + tags for library items that lack them: wiki docs
 //! (re-summarized when re-published) and artifacts an agent added without the
-//! upload organizer's summary.
+//! upload organizer's summary. Videos are summarized from their poster frame
+//! ([`crate::video_poster`]) plus their title, file name, folder and note.
 //!
 //! Driven off the [`crate::library_index`] database, which already knows every
 //! item's current version, body text and summary state:
@@ -17,8 +18,11 @@
 //!   the `backfill` flag is on — see [`set_backfill`] / [`backfill_plan`].
 //! - **Lean and accounted.** Text goes through
 //!   [`crate::library_ingest::classify::complete_text`] (lean Claude route,
-//!   codex/dsh fallback), images through its vision call; both are logged under
-//!   [`crate::llm_usage::SCENARIO_LIBRARY_INGEST`].
+//!   codex/dsh fallback), images and video posters through its vision call;
+//!   both are logged under [`crate::llm_usage::SCENARIO_LIBRARY_INGEST`].
+//! - **Repairable.** [`language_mismatches`] finds summaries not written in
+//!   their project's language; [`resummarize_in`] rewrites them after backing
+//!   the old ones up, and [`restore_summaries_in`] puts a backup back.
 //!
 //! Where the result lands: a doc's `summary.json` sidecar
 //! ([`crate::wiki::write_summary_in`]) and an artifact's `meta.json`.
@@ -83,12 +87,21 @@ struct Due {
 enum Mode {
     Text,
     Vision,
+    /// A video, through its poster frame.
+    Poster,
 }
 
 /// The SQL condition for "needs a summary": its summary does not describe the
 /// current version, and there is something to summarize.
 const DUE_WHERE: &str = "summary_version != version
-     AND ((body_state = 'done' AND body != '') OR artifact_kind = 'image')";
+     AND ((body_state = 'done' AND body != '') OR artifact_kind IN ('image', 'video'))";
+
+/// SQL for "summarized through a vision call" (an image or a video poster),
+/// for cost estimates.
+const VISION_SQL: &str = "artifact_kind IN ('image', 'video') AND NOT (body_state = 'done' AND body != '')";
+
+/// File name a video's poster is handed to the vision call under.
+const POSTER_FILE: &str = "poster.jpg";
 
 /// What a full backfill would cost, for the user to approve first.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -98,6 +111,8 @@ pub struct BackfillPlan {
     pub docs: usize,
     pub text_artifacts: usize,
     pub image_artifacts: usize,
+    #[serde(default)]
+    pub video_artifacts: usize,
     /// Items newer than activation still waiting (handled automatically).
     pub new_pending: usize,
     pub est_cost_usd: f64,
@@ -117,17 +132,18 @@ pub fn backfill_plan(index: &LibraryIndex) -> Result<BackfillPlan, String> {
         .map_err(|e| format!("count: {e}"))
     };
     let docs = count("updated_ms < ?1 AND kind = 'doc'")?;
-    let image_artifacts =
-        count("updated_ms < ?1 AND kind = 'artifact' AND NOT (body_state = 'done' AND body != '')")?;
+    let image_artifacts = count(&format!("updated_ms < ?1 AND artifact_kind = 'image' AND {VISION_SQL}"))?;
+    let video_artifacts = count(&format!("updated_ms < ?1 AND artifact_kind = 'video' AND {VISION_SQL}"))?;
     let text_artifacts = count("updated_ms < ?1 AND kind = 'artifact' AND body_state = 'done' AND body != ''")?;
     let new_pending = count("updated_ms >= ?1")?;
     Ok(BackfillPlan {
         docs,
         text_artifacts,
         image_artifacts,
+        video_artifacts,
         new_pending,
         est_cost_usd: (docs + text_artifacts) as f64 * EST_TEXT_CALL_USD
-            + image_artifacts as f64 * EST_VISION_CALL_USD,
+            + (image_artifacts + video_artifacts) as f64 * EST_VISION_CALL_USD,
         enabled: backfill_enabled(index),
     })
 }
@@ -244,6 +260,8 @@ fn mode_of(d: &Due) -> Option<Mode> {
         Some(Mode::Text)
     } else if d.kind == ITEM_ARTIFACT && d.artifact_kind == "image" {
         Some(Mode::Vision)
+    } else if d.kind == ITEM_ARTIFACT && d.artifact_kind == "video" {
+        Some(Mode::Poster)
     } else {
         None
     }
@@ -274,6 +292,51 @@ short keywords. {rule}\n\nReply with one JSON object only:\n\
     )
 }
 
+/// What a video is summarized from besides its poster frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VideoBrief {
+    pub title: String,
+    pub file_name: String,
+    /// The library folder it is filed in, or the directory it came from.
+    pub folder: String,
+    /// What the agent or person who added it wrote about it.
+    pub note: String,
+}
+
+impl VideoBrief {
+    pub fn of(a: &artifacts::Artifact) -> Self {
+        Self {
+            title: if a.title.trim().is_empty() { a.name.clone() } else { a.title.clone() },
+            file_name: a.name.clone(),
+            folder: artifacts::effective_directory(a),
+            note: a.note.clone(),
+        }
+    }
+}
+
+/// Prompt for summarizing a video from its poster frame ([`POSTER_FILE`])
+/// and what is known about it.
+pub fn video_summary_prompt(v: &VideoBrief, lang: classify::Language) -> String {
+    let mut facts = format!("Title: {}\nFile name: {}\n", v.title.trim(), v.file_name.trim());
+    if !v.folder.trim().is_empty() {
+        facts.push_str(&format!("Folder: {}\n", v.folder.trim()));
+    }
+    if !v.note.trim().is_empty() {
+        let note: String = v.note.trim().chars().take(EXCERPT_CHARS).collect();
+        facts.push_str(&format!("Note from whoever added it: {note}\n"));
+    }
+    format!(
+        "Use the Read tool to look at the file `{POSTER_FILE}` in the current directory. Read \
+nothing else. It is one frame taken from near the start of a video stored in a project library:\n\n\
+{facts}\nThe frame shows a single moment, so judge what the video is about from the frame and \
+the facts above together, and do not claim what a still cannot show (motion, sound, length) \
+unless the facts say it.\n\nReturn \"summary\": 1 to 3 sentences on what the video is and its \
+key facts; \"tags\": 1 to 5 short keywords. {rule}\n\nReply with one JSON object only:\n\
+{{\"summary\":\"...\",\"tags\":[\"...\"]}}\n",
+        rule = lang.rule(),
+    )
+}
+
 /// `(summary, tags)` from a model answer.
 pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
     let v: Value = classify::parse_value(text)?;
@@ -288,16 +351,27 @@ pub fn parse_summary(text: &str) -> Option<(String, Vec<String>)> {
     (!summary.is_empty()).then(|| (summary, classify::tags_field(&v)))
 }
 
+/// How a summarize attempt that did not fail ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Summarized {
+    Done,
+    /// Nothing to summarize from (a video with no poster frame); no call was
+    /// made. Not a failure: retrying would not help until the file changes.
+    Skipped(String),
+}
+
 /// Summarize one claimed item and store the result. `spent` gets the call's
 /// cost whether or not a summary came of it: an answer that does not parse
-/// was still paid for.
+/// was still paid for. `force` overwrites an artifact summary that is already
+/// there (a re-summarize); otherwise one written meanwhile wins.
 fn summarize_one(
     roots: &Roots,
     index: &LibraryIndex,
     d: &Due,
     brain: &dyn Brain,
     spent: &mut f64,
-) -> Result<(), String> {
+    force: bool,
+) -> Result<Summarized, String> {
     let mode = mode_of(d).ok_or_else(|| "nothing to summarize".to_string())?;
     // The project's language, not the item's: one library reads in one.
     let lang = index.project_language(&d.project, &[]);
@@ -320,6 +394,14 @@ fn summarize_one(
             let dir = blob.parent().ok_or("artifact blob has no directory")?;
             brain.vision(dir, &vision_summary_prompt(&a.name, &d.title, lang))?
         }
+        Mode::Poster => {
+            let a = artifacts::get_in(&roots.artifacts, &d.item_id)?;
+            let Some(jpeg) = crate::video_poster::poster_jpeg_for(&roots.artifacts, &a) else {
+                return Ok(Summarized::Skipped("no poster frame".to_string()));
+            };
+            let scratch = PosterScratch::new(&jpeg)?;
+            brain.vision(&scratch.0, &video_summary_prompt(&VideoBrief::of(&a), lang))?
+        }
     };
     *spent = outcome.cost_usd;
     // Keep the start of the answer: the only clue to why it did not parse.
@@ -339,8 +421,11 @@ fn summarize_one(
         )?,
         _ => {
             artifacts::edit_in(&roots.artifacts, &d.item_id, |a| {
-                // A summary someone else wrote meanwhile wins.
-                if a.summary.trim().is_empty() {
+                if force {
+                    a.summary = summary;
+                    a.tags = tags;
+                } else if a.summary.trim().is_empty() {
+                    // A summary someone else wrote meanwhile wins.
                     a.summary = summary;
                     if a.tags.is_empty() {
                         a.tags = tags;
@@ -349,7 +434,41 @@ fn summarize_one(
             })?;
         }
     }
-    Ok(())
+    Ok(Summarized::Done)
+}
+
+/// A private directory holding just a video's poster, for the vision call
+/// (which may read anything in its working directory); removed on drop.
+struct PosterScratch(std::path::PathBuf);
+
+impl PosterScratch {
+    fn new(jpeg: &[u8]) -> Result<Self, String> {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "fleet-video-summary-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("poster scratch dir: {e}"))?;
+        let scratch = Self(dir);
+        std::fs::write(scratch.0.join(POSTER_FILE), jpeg).map_err(|e| format!("write poster: {e}"))?;
+        Ok(scratch)
+    }
+}
+
+impl Drop for PosterScratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Whether a video row has a poster frame to summarize from (extracting it
+/// now if it was never tried).
+fn poster_available(roots: &Roots, d: &Due) -> bool {
+    artifacts::get_in(&roots.artifacts, &d.item_id)
+        .ok()
+        .and_then(|a| crate::video_poster::poster_jpeg_for(&roots.artifacts, &a))
+        .is_some()
 }
 
 /// One pass: summarize up to `limit` due items. Returns how many succeeded.
@@ -360,6 +479,15 @@ pub fn run_pass(roots: &Roots, index: &LibraryIndex, limit: usize) -> Result<usi
             continue;
         }
         let now = now_ms();
+        // A skip costs nothing; only a call takes from the budget. The
+        // poster is looked up again inside, from its cache.
+        if mode_of(&d) == Some(Mode::Poster) && !poster_available(roots, &d) {
+            if claim(index, d.rowid, now)? {
+                release(index, d.rowid, false, now);
+                mark_summarized(index, d.rowid, &d.version);
+            }
+            continue;
+        }
         if !take_budget(index, now)? {
             break;
         }
@@ -367,8 +495,8 @@ pub fn run_pass(roots: &Roots, index: &LibraryIndex, limit: usize) -> Result<usi
             continue;
         }
         let mut spent = 0.0;
-        match summarize_one(roots, index, &d, &LiveBrain, &mut spent) {
-            Ok(()) => {
+        match summarize_one(roots, index, &d, &LiveBrain, &mut spent, false) {
+            Ok(Summarized::Done) => {
                 crate::log_debug(&format!(
                     "[library_summary] {} {} summarized (${spent:.4})",
                     d.kind, d.item_id
@@ -376,6 +504,13 @@ pub fn run_pass(roots: &Roots, index: &LibraryIndex, limit: usize) -> Result<usi
                 release(index, d.rowid, false, now_ms());
                 mark_summarized(index, d.rowid, &d.version);
                 done += 1;
+            }
+            Ok(Summarized::Skipped(why)) => {
+                crate::log_debug(&format!("[library_summary] {} {} skipped: {why}", d.kind, d.item_id));
+                release(index, d.rowid, false, now_ms());
+                // Settled in the index only: a new version of the file is
+                // looked at again.
+                mark_summarized(index, d.rowid, &d.version);
             }
             Err(e) => {
                 crate::log_debug(&format!(
@@ -461,6 +596,9 @@ pub struct BackfillRun {
     pub planned: usize,
     pub done: usize,
     pub failed: usize,
+    /// Items with nothing to summarize from (videos without a poster).
+    #[serde(default)]
+    pub skipped: usize,
     pub cost_usd: f64,
     #[serde(default)]
     pub resumes: u32,
@@ -505,6 +643,8 @@ pub struct BackfillTick {
     pub title: String,
     pub cost_usd: f64,
     pub error: Option<String>,
+    /// Why nothing was summarized, for a skipped item.
+    pub skipped: Option<String>,
     pub run: BackfillRun,
 }
 
@@ -579,7 +719,7 @@ fn count_due(index: &LibraryIndex) -> Result<(usize, f64), String> {
         .conn()
         .query_row(
             &format!(
-                "SELECT COUNT(*), COALESCE(SUM(artifact_kind = 'image' AND body = ''), 0)
+                "SELECT COUNT(*), COALESCE(SUM({VISION_SQL}), 0)
                  FROM items WHERE {DUE_WHERE}"
             ),
             [],
@@ -707,6 +847,7 @@ pub fn run_backfill_in(
                 planned: due_now,
                 done: 0,
                 failed: 0,
+                skipped: 0,
                 cost_usd: 0.0,
                 resumes: 0,
                 stop_requested: false,
@@ -750,7 +891,12 @@ pub fn run_backfill_in(
                         }
                     };
                     let mut spent = 0.0;
-                    let result = summarize_one(roots, &index, &d, brain, &mut spent);
+                    let result = summarize_one(roots, &index, &d, brain, &mut spent, false);
+                    let skipped = match &result {
+                        Ok(Summarized::Skipped(why)) => Some(why.clone()),
+                        _ => None,
+                    };
+                    let result = result.map(|_| ());
                     match &result {
                         Ok(_) => {
                             release(&index, d.rowid, false, now_ms());
@@ -764,6 +910,7 @@ pub fn run_backfill_in(
                         let known = r.failures.iter().position(|f| f.kind == d.kind && f.id == d.item_id);
                         r.cost_usd += spent;
                         match &result {
+                            Ok(()) if skipped.is_some() => r.skipped += 1,
                             Ok(()) => {
                                 r.done += 1;
                                 if let Some(i) = known {
@@ -796,6 +943,7 @@ pub fn run_backfill_in(
                             title: d.title.clone(),
                             cost_usd: spent,
                             error: result.err(),
+                            skipped,
                             run,
                         });
                     }
@@ -853,6 +1001,292 @@ pub fn stop_backfill() -> Result<BackfillStatus, String> {
     let roots = Roots::home()?;
     update_run(&roots, |r| r.stop_requested = true).ok_or("no backfill has run")?;
     backfill_status_in(&roots, Duration::ZERO)
+}
+
+// ── Language repair ─────────────────────────────────────────────────────────
+//
+// Summaries follow their project's language (`LibraryIndex::project_language`).
+// Ones written before that rule, under "the language of the file's own
+// content", are English in Chinese projects. They are found by comparing each
+// AI summary's language with its project's and rewritten in place; the old
+// summaries are backed up first so the rewrite can be undone.
+
+/// An AI summary not written in its project's language.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageMismatch {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+    pub project: String,
+    /// `zh` or `en`.
+    pub project_language: String,
+    pub summary: String,
+}
+
+fn lang_code(l: classify::Language) -> &'static str {
+    match l {
+        classify::Language::Chinese => "zh",
+        classify::Language::English => "en",
+    }
+}
+
+/// Whether `summary` is clearly written in another language than `project`.
+/// A summary too short or too mixed to tell is never a mismatch.
+pub fn summary_language_mismatch(summary: &str, project: classify::Language) -> bool {
+    classify::text_language(summary).is_some_and(|l| l != project)
+}
+
+/// The AI summary of an item: a doc's `summary.json`, an artifact's `summary`
+/// (never its note, which the person or agent who added it wrote).
+fn ai_summary(roots: &Roots, kind: &str, id: &str) -> Option<(String, Vec<String>)> {
+    match kind {
+        ITEM_DOC => wiki::read_summary_in(&roots.wiki, id).map(|s| (s.summary, s.tags)),
+        _ => artifacts::get_in(&roots.artifacts, id).ok().map(|a| (a.summary, a.tags)),
+    }
+    .filter(|(s, _)| !s.trim().is_empty())
+}
+
+/// Every item whose AI summary is not in its project's language, from the
+/// index as last synced.
+pub fn language_mismatches(roots: &Roots, index: &LibraryIndex) -> Result<Vec<LanguageMismatch>, String> {
+    let rows: Vec<(String, String, String, String)> = {
+        let mut stmt = index
+            .conn()
+            .prepare("SELECT kind, item_id, title, project FROM items WHERE summary_version != '' ORDER BY project, updated_ms DESC")
+            .map_err(|e| format!("prepare: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map_err(|e| format!("query: {e}"))?;
+        rows.flatten().collect()
+    };
+    let mut langs: std::collections::HashMap<String, classify::Language> = Default::default();
+    let mut out = Vec::new();
+    for (kind, id, title, project) in rows {
+        let Some((summary, _)) = ai_summary(roots, &kind, &id) else { continue };
+        let lang = *langs
+            .entry(project.clone())
+            .or_insert_with(|| index.project_language(&project, &[]));
+        if summary_language_mismatch(&summary, lang) {
+            out.push(LanguageMismatch {
+                kind,
+                id,
+                title,
+                project,
+                project_language: lang_code(lang).to_string(),
+                summary,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// One summary as it was before a re-summarize overwrote it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryBackup {
+    pub kind: String,
+    pub id: String,
+    pub summary: String,
+    pub tags: Vec<String>,
+    /// A doc's whole sidecar (version and time included); `None` for an
+    /// artifact.
+    #[serde(default)]
+    pub doc: Option<wiki::DocSummary>,
+}
+
+/// The result of [`resummarize_in`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResummarizeReport {
+    pub planned: usize,
+    pub done: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub cost_usd: f64,
+    /// Where the summaries it replaced are kept; [`restore_summaries_in`]
+    /// puts them back. `None` when there was nothing to do.
+    pub backup: Option<std::path::PathBuf>,
+    pub failures: Vec<BackfillFailure>,
+}
+
+/// Back-ups of replaced summaries, one file per re-summarize run.
+fn backup_dir(roots: &Roots) -> std::path::PathBuf {
+    roots.library.join("summary-backups")
+}
+
+/// Rewrite the summaries of `targets` (`(kind, id)`), `concurrency` at a
+/// time and at most `limit` of them, after writing every summary it is about
+/// to replace to a backup file. Not counted against the hourly budget: the
+/// caller asked for exactly these. `on_tick` gets each finished item.
+pub fn resummarize_in(
+    roots: &Roots,
+    targets: &[(String, String)],
+    concurrency: usize,
+    limit: Option<usize>,
+    brain: &dyn Brain,
+    on_tick: &(dyn Fn(&BackfillTick) + Sync),
+) -> Result<ResummarizeReport, String> {
+    let db = crate::library_index::db_path(roots);
+    let index = LibraryIndex::open_at(&db)?;
+    index.sync(roots)?;
+    // A text artifact is summarized from its extracted text.
+    while index.extract_pending(roots, Duration::from_secs(60))? > 0 {}
+    let mut due: Vec<Due> = Vec::new();
+    for (kind, id) in targets.iter().take(limit.unwrap_or(usize::MAX)) {
+        let d = index
+            .conn()
+            .query_row(
+                "SELECT id, kind, item_id, title, version, artifact_kind, body, project FROM items
+                 WHERE kind = ?1 AND item_id = ?2",
+                params![kind, id],
+                |r| {
+                    Ok(Due {
+                        rowid: r.get(0)?,
+                        kind: r.get(1)?,
+                        item_id: r.get(2)?,
+                        title: r.get(3)?,
+                        version: r.get(4)?,
+                        artifact_kind: r.get(5)?,
+                        body: r.get(6)?,
+                        project: r.get(7)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| format!("look up {kind} {id}: {e}"))?;
+        match d {
+            Some(d) if mode_of(&d).is_some() => due.push(d),
+            _ => return Err(format!("{kind} '{id}' is not in the library or has nothing to summarize")),
+        }
+    }
+    let mut report = ResummarizeReport {
+        planned: due.len(),
+        done: 0,
+        failed: 0,
+        skipped: 0,
+        cost_usd: 0.0,
+        backup: None,
+        failures: Vec::new(),
+    };
+    if due.is_empty() {
+        return Ok(report);
+    }
+
+    let backups: Vec<SummaryBackup> = due
+        .iter()
+        .map(|d| {
+            let (summary, tags) = ai_summary(roots, &d.kind, &d.item_id).unwrap_or_default();
+            SummaryBackup {
+                kind: d.kind.clone(),
+                id: d.item_id.clone(),
+                summary,
+                tags,
+                doc: (d.kind == ITEM_DOC).then(|| wiki::read_summary_in(&roots.wiki, &d.item_id)).flatten(),
+            }
+        })
+        .collect();
+    let path = backup_dir(roots).join(format!("{}.json", now_ms()));
+    std::fs::create_dir_all(backup_dir(roots)).map_err(|e| format!("backup dir: {e}"))?;
+    let body = serde_json::to_vec_pretty(&backups).map_err(|e| e.to_string())?;
+    crate::atomic_json::write_atomic(&path, &body).map_err(|e| format!("write backup: {e}"))?;
+    report.backup = Some(path);
+
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let report = std::sync::Mutex::new(report);
+    std::thread::scope(|s| {
+        for _ in 0..concurrency.clamp(1, BACKFILL_CONCURRENCY) {
+            s.spawn(|| {
+                let Ok(index) = LibraryIndex::open_at(&db) else { return };
+                loop {
+                    let Some(d) = due.get(next.fetch_add(1, Ordering::SeqCst)) else { break };
+                    let mut spent = 0.0;
+                    let result = summarize_one(roots, &index, d, brain, &mut spent, true);
+                    if matches!(result, Ok(Summarized::Done)) {
+                        mark_summarized(&index, d.rowid, &d.version);
+                    }
+                    let mut r = report.lock().unwrap_or_else(|e| e.into_inner());
+                    r.cost_usd += spent;
+                    let (error, skipped) = match result {
+                        Ok(Summarized::Done) => {
+                            r.done += 1;
+                            (None, None)
+                        }
+                        Ok(Summarized::Skipped(why)) => {
+                            r.skipped += 1;
+                            (None, Some(why))
+                        }
+                        Err(e) => {
+                            r.failed += 1;
+                            r.failures.push(BackfillFailure {
+                                kind: d.kind.clone(),
+                                id: d.item_id.clone(),
+                                title: d.title.clone(),
+                                error: e.clone(),
+                            });
+                            (Some(e), None)
+                        }
+                    };
+                    let run = BackfillRun {
+                        state: BackfillState::Running,
+                        started_ms: 0,
+                        updated_ms: now_ms(),
+                        finished_ms: None,
+                        segment_started_ms: 0,
+                        elapsed_ms: 0,
+                        concurrency,
+                        planned: r.planned,
+                        done: r.done,
+                        failed: r.failed,
+                        skipped: r.skipped,
+                        cost_usd: r.cost_usd,
+                        resumes: 0,
+                        stop_requested: false,
+                        failures: Vec::new(),
+                    };
+                    drop(r);
+                    on_tick(&BackfillTick {
+                        kind: d.kind.clone(),
+                        id: d.item_id.clone(),
+                        title: d.title.clone(),
+                        cost_usd: spent,
+                        error,
+                        skipped,
+                        run,
+                    });
+                }
+            });
+        }
+    });
+    let _ = index.sync(roots);
+    Ok(report.into_inner().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Put the summaries a [`resummarize_in`] backup holds back. Returns how many
+/// were restored.
+pub fn restore_summaries_in(roots: &Roots, backup: &std::path::Path) -> Result<usize, String> {
+    let body = std::fs::read_to_string(backup).map_err(|e| format!("read {}: {e}", backup.display()))?;
+    let items: Vec<SummaryBackup> = serde_json::from_str(&body).map_err(|e| format!("parse backup: {e}"))?;
+    let mut restored = 0;
+    for b in &items {
+        match b.kind.as_str() {
+            ITEM_DOC => {
+                let Some(doc) = &b.doc else { continue };
+                wiki::write_summary_in(&roots.wiki, &b.id, doc)?;
+            }
+            _ => {
+                artifacts::edit_in(&roots.artifacts, &b.id, |a| {
+                    a.summary = b.summary.clone();
+                    a.tags = b.tags.clone();
+                })?;
+            }
+        }
+        restored += 1;
+    }
+    if let Ok(index) = LibraryIndex::open_at(&crate::library_index::db_path(roots)) {
+        let _ = index.sync(roots);
+    }
+    Ok(restored)
 }
 
 static WORKER: AtomicBool = AtomicBool::new(false);
@@ -1133,6 +1567,174 @@ mod tests {
         let run = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &|_| {}).unwrap();
         assert_eq!(run.state, BackfillState::Done);
         release.join().unwrap();
+    }
+
+    #[test]
+    fn a_summary_clearly_in_the_other_language_is_a_mismatch() {
+        use classify::Language::{Chinese, English};
+        assert!(summary_language_mismatch(
+            "A technical spike proposal for Fleet's cloud API and hosted UX architecture.",
+            Chinese
+        ));
+        // Chinese prose full of identifiers is still Chinese.
+        assert!(!summary_language_mismatch(
+            "酒店收据，由Air Masters Travel Limited（旅行社）为Insnap Technology Limited开具，记录入住信息。",
+            Chinese
+        ));
+        assert!(summary_language_mismatch("一份装修合同，记录了工期与付款节点。", English));
+        // Too little to tell either way.
+        assert!(!summary_language_mismatch("v4 vs v5", Chinese));
+        assert!(!summary_language_mismatch("", English));
+    }
+
+    /// Answers every call with a Chinese summary; records the vision prompts
+    /// and whether the poster was in the directory it was handed.
+    #[derive(Default)]
+    struct ChineseBrain {
+        calls: std::sync::atomic::AtomicUsize,
+        vision_prompts: std::sync::Mutex<Vec<(String, bool)>>,
+    }
+
+    const ZH_ANSWER: &str = r#"{"summary":"一段重新生成的中文摘要，说明这份资料的内容。","tags":["中文"]}"#;
+
+    impl Brain for ChineseBrain {
+        fn text(&self, _slot: crate::llm_provider::ModelSlot, _prompt: &str) -> Option<classify::CallOutcome> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Some(classify::CallOutcome { text: ZH_ANSWER.into(), cost_usd: 0.01, ..Default::default() })
+        }
+        fn vision(&self, dir: &std::path::Path, prompt: &str) -> Result<classify::CallOutcome, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let poster = dir.join(POSTER_FILE);
+            let is_jpeg = std::fs::read(&poster).is_ok_and(|b| b.starts_with(&[0xFF, 0xD8]));
+            self.vision_prompts.lock().unwrap().push((prompt.to_string(), is_jpeg));
+            Ok(classify::CallOutcome { text: ZH_ANSWER.into(), cost_usd: 0.02, ..Default::default() })
+        }
+    }
+
+    #[test]
+    fn mismatched_summaries_are_found_rewritten_with_a_backup_and_restorable() {
+        let tmp = TempDir::new().unwrap();
+        let (roots, ws) = roots(&tmp);
+        let publish = |slug: &str, title: &str, body: &str| {
+            wiki::publish_text_in(&roots.wiki, slug, Some(title), body, &ws, wiki::TextPublishMode::Replace).unwrap()
+        };
+        let en_doc = publish("spike", "云端架构探索", "Fleet 云端 API 与托管体验的架构探索，记录了几种方案的取舍");
+        let zh_doc = publish("notes", "构建笔记", "这是一份关于构建流程的中文笔记，记录了几次失败");
+        publish("deploy", "部署记录", "上线步骤与回滚预案，以及值班联系人");
+        let write = |slug: &str, version: &str, summary: &str, tag: &str| {
+            wiki::write_summary_in(
+                &roots.wiki,
+                slug,
+                &wiki::DocSummary { summary: summary.into(), tags: vec![tag.into()], version: version.into(), generated_ms: 7 },
+            )
+            .unwrap()
+        };
+        let en_summary = "A technical spike proposal for the cloud API and hosted UX architecture.";
+        write("spike", &en_doc.current_version, en_summary, "architecture");
+        write("notes", &zh_doc.current_version, "关于构建流程的中文笔记。", "构建");
+        let src = ws.join("store.txt");
+        std::fs::write(&src, "Store listing copy for the mobile app, in English, final draft").unwrap();
+        let art = artifacts::add_in(&roots.artifacts, &src, Some("商店描述文案"), None, &ws, None).unwrap();
+        artifacts::edit_in(&roots.artifacts, &art.id, |a| {
+            a.summary = "Store listing copy for Fleet, a mobile app for coding agents.".into();
+            a.tags = vec!["store".into()];
+        })
+        .unwrap();
+
+        let index = LibraryIndex::open_at(&crate::library_index::db_path(&roots)).unwrap();
+        index.sync(&roots).unwrap();
+        let found = language_mismatches(&roots, &index).unwrap();
+        let mut ids: Vec<&str> = found.iter().map(|m| m.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, [art.id.as_str(), "spike"], "{found:?}");
+        assert!(found.iter().all(|m| m.project_language == "zh"));
+
+        let brain = ChineseBrain::default();
+        let targets: Vec<(String, String)> = found.iter().map(|m| (m.kind.clone(), m.id.clone())).collect();
+        let report = resummarize_in(&roots, &targets, 2, None, &brain, &|_| {}).unwrap();
+        assert_eq!((report.planned, report.done, report.failed), (2, 2, 0), "{report:?}");
+        assert!((report.cost_usd - 0.02).abs() < 1e-9);
+        let doc = wiki::read_summary_in(&roots.wiki, "spike").unwrap();
+        assert!(doc.summary.starts_with("一段重新生成") && doc.version == en_doc.current_version);
+        let a = artifacts::get_in(&roots.artifacts, &art.id).unwrap();
+        assert_eq!((a.summary.starts_with("一段重新生成"), a.tags), (true, vec!["中文".to_string()]), "forced over the old one");
+        assert!(language_mismatches(&roots, &index).unwrap().is_empty());
+
+        let backup = report.backup.unwrap();
+        assert_eq!(restore_summaries_in(&roots, &backup).unwrap(), 2);
+        let doc = wiki::read_summary_in(&roots.wiki, "spike").unwrap();
+        assert_eq!((doc.summary.as_str(), doc.generated_ms), (en_summary, 7));
+        assert_eq!(artifacts::get_in(&roots.artifacts, &art.id).unwrap().tags, vec!["store".to_string()]);
+        assert_eq!(language_mismatches(&roots, &index).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_video_prompt_carries_its_title_file_folder_and_note() {
+        let v = VideoBrief {
+            title: "露里子修复前后".into(),
+            file_name: "kick_before_after.mp4".into(),
+            folder: "录屏/布料".into(),
+            note: "上=修前，下=修后".into(),
+        };
+        let p = video_summary_prompt(&v, classify::Language::Chinese);
+        for part in ["露里子修复前后", "kick_before_after.mp4", "录屏/布料", "上=修前，下=修后", POSTER_FILE] {
+            assert!(p.contains(part), "missing {part}: {p}");
+        }
+        assert!(p.contains(classify::Language::Chinese.rule()));
+        let bare = video_summary_prompt(&VideoBrief { title: "t".into(), file_name: "t.mp4".into(), ..Default::default() }, classify::Language::English);
+        assert!(!bare.contains("Folder:") && !bare.contains("Note from"));
+    }
+
+    #[test]
+    fn videos_are_summarized_from_their_poster_and_ones_without_one_are_skipped() {
+        let tmp = TempDir::new().unwrap();
+        let _home = crate::paths::fleet_home_guard(tmp.path().join("home"));
+        let (roots, ws) = roots(&tmp);
+        let add = |name: &str, bytes: &[u8], note: &str| {
+            let src = ws.join(name);
+            std::fs::write(&src, bytes).unwrap();
+            let a = artifacts::add_in(&roots.artifacts, &src, Some("走路循环对比"), None, &ws, None).unwrap();
+            artifacts::edit_in(&roots.artifacts, &a.id, |a| a.note = note.into()).unwrap()
+        };
+        let broken = add("broken.mp4", b"definitely not an mp4", "坏文件");
+        assert_eq!(broken.kind, "video");
+        let ffmpeg = crate::process_util::which("ffmpeg");
+        let clip = ffmpeg.as_ref().and_then(|ff| {
+            let out = ws.join("src.mp4");
+            let ok = crate::process_util::command(ff)
+                .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=10:duration=1"])
+                .args(["-pix_fmt", "yuv420p", "-y"])
+                .arg(&out)
+                .status()
+                .ok()?
+                .success();
+            ok.then(|| add("walk.mp4", &std::fs::read(&out).unwrap(), "左旧右新，同一段动作"))
+        });
+
+        let index = LibraryIndex::open_at(&crate::library_index::db_path(&roots)).unwrap();
+        index.meta_set("activated_ms", "0").unwrap();
+        index.sync(&roots).unwrap();
+        assert!(is_due(&index, ITEM_ARTIFACT, &broken.id), "a video is due like an image");
+        let plan = backfill_plan(&index).unwrap();
+        assert_eq!(plan.image_artifacts, 0);
+
+        let brain = ChineseBrain::default();
+        let run = run_backfill_in(&roots, &BackfillOpts::default(), &brain, &|_| {}).unwrap();
+        assert_eq!(run.failed, 0, "a video without a poster is not a failure: {run:?}");
+        assert_eq!(run.skipped, 1);
+        assert!(!is_due(&index, ITEM_ARTIFACT, &broken.id), "settled, not retried every pass");
+        assert!(artifacts::get_in(&roots.artifacts, &broken.id).unwrap().summary.is_empty());
+
+        let Some(clip) = clip else { return };
+        assert_eq!(run.done, 1);
+        let prompts = brain.vision_prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 1, "only the decodable video costs a call");
+        let (prompt, saw_jpeg) = &prompts[0];
+        assert!(saw_jpeg, "the poster was handed over as a JPEG");
+        assert!(prompt.contains("walk.mp4") && prompt.contains("左旧右新") && prompt.contains("走路循环对比"));
+        let a = artifacts::get_in(&roots.artifacts, &clip.id).unwrap();
+        assert!(a.summary.starts_with("一段重新生成") && a.tags == vec!["中文".to_string()]);
+        assert!(!is_due(&index, ITEM_ARTIFACT, &clip.id));
     }
 
     /// Per-call cost of real summaries, read-only: point
