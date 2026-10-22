@@ -14,7 +14,7 @@ import type {
 } from "../../../shared-ts/libraryIngest";
 import type { LibraryFolderOrigin } from "../../../shared-ts/libraryTree";
 import { MOCK_ARTIFACTS, MOCK_WIKI_DOCS } from "./data";
-import { FIXTURE_ARTIFACTS, FIXTURE_DOCS, FIXTURE_FOLDERS } from "./libraryFixtures";
+import { FIXTURE_ARTIFACTS, FIXTURE_DOCS, FIXTURE_FOLDERS } from "../../../shared-ts/libraryFixtures";
 
 // The library-only projects join the shared fixtures once, so the 文档 / 产出
 // pages, the preview pane and search all see the same items as the tree.
