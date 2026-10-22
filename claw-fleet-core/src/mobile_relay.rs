@@ -2632,6 +2632,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         // 资料 writes. Folder edits and moves land the same way twice; the
         // rest would not (a second batch, an undo of an undone item), so a
         // resend of a lost reply replays the first answer.
+        "library_folder_create" => serve_library_folder_create(params),
         "library_folder_accept" => serve_library_folder_accept(params),
         "library_folder_rename" => {
             idempotent_write(method, params, || serve_library_folder_rename(params))

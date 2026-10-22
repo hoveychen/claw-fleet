@@ -148,3 +148,36 @@
   font-size: var(--t-aux, 12px);
   overflow-wrap: anywhere;
 }
+
+/* ── New folder sheet ─────────────────────────────────────────────────────── */
+
+.parentWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-input);
+  color: var(--color-text-dim);
+}
+
+.parentLabel {
+  flex-shrink: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+}
+
+.parent {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 10px 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+}

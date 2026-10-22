@@ -17,6 +17,7 @@ import {
   Folder,
   FolderInput,
   FolderOpen,
+  FolderPlus,
   Inbox,
   MoreHorizontal,
   Sparkles,
@@ -49,7 +50,9 @@ import {
   type LibraryTypeGroup,
 } from "../libraryApi";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { libraryErrorOf, type LibraryErrorView } from "../libraryErrors";
 import { KIND_ICON } from "./ArtifactsView";
+import { LibraryErrorNote } from "./LibraryErrorNote";
 import { timeAgo } from "./TasksView";
 import { awaitingFolders } from "./LibraryTree";
 import { EmptyState } from "./EmptyState";
@@ -67,10 +70,6 @@ export const TYPE_LABEL: Record<LibraryTypeGroup, string> = {
   audio: "音频",
   other: "其他",
 };
-
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
 
 // ── Project list ────────────────────────────────────────────────────────────
 
@@ -131,12 +130,15 @@ export function ProjectOverview({
   onOpenFolder,
   onOpenEntry,
   onFolderMenu,
+  onNewFolder,
 }: {
   project: LibraryProjectTree;
   /** `""` opens the unfiled bucket. */
   onOpenFolder: (path: string) => void;
   onOpenEntry: (e: LibraryEntry) => void;
   onFolderMenu: (f: LibraryFolderRec) => void;
+  /** Open the new-folder sheet at the top level; absent = offline. */
+  onNewFolder?: () => void;
 }) {
   const view = useMemo(() => buildLibraryTree(project), [project]);
   const cards = useMemo(() => folderCards(view), [view]);
@@ -180,6 +182,12 @@ export function ProjectOverview({
           onMenu={onFolderMenu}
         />
       ))}
+      {onNewFolder && (
+        <button type="button" className={styles.newFolder} onClick={onNewFolder} data-new-folder>
+          <FolderPlus size={16} strokeWidth={1.6} />
+          {t("新建目录")}
+        </button>
+      )}
       {view.unfiledTotal > 0 && (
         <FolderCard
           node={{
@@ -265,7 +273,16 @@ function FolderCard({
   );
 }
 
-function SubfolderChips({ nodes, onOpen }: { nodes: LibraryFolderNode[]; onOpen: (path: string) => void }) {
+function SubfolderChips({
+  nodes,
+  onOpen,
+  onNew,
+}: {
+  nodes: LibraryFolderNode[];
+  onOpen: (path: string) => void;
+  /** Adds a trailing "new subfolder" chip. */
+  onNew?: () => void;
+}) {
   return (
     <div className={styles.subChips}>
       {nodes.map((c) => (
@@ -275,6 +292,12 @@ function SubfolderChips({ nodes, onOpen }: { nodes: LibraryFolderNode[]; onOpen:
           <span className={styles.subCount}>{c.total}</span>
         </button>
       ))}
+      {onNew && (
+        <button type="button" className={`${styles.subChip} ${styles.subChipNew}`} onClick={onNew} data-new-subfolder>
+          <FolderPlus size={12} strokeWidth={1.6} />
+          {t("新建子目录")}
+        </button>
+      )}
     </div>
   );
 }
@@ -290,11 +313,14 @@ export function FolderContent({
   onOpenFolder,
   onOpenEntry,
   onMoveEntry,
+  onNewFolder,
 }: {
   client: FleetTransport | null;
   project: LibraryProjectTree;
   /** `""` = the unfiled bucket. */
   path: string;
+  /** Open the new-folder sheet under `parent`; absent = offline. */
+  onNewFolder?: (parent: string) => void;
   /** Bumped by the parent after a move or a finished upload: fetch again. */
   reloadKey: number;
   busy: ReadonlySet<string>;
@@ -305,7 +331,7 @@ export function FolderContent({
   const view = useMemo(() => buildLibraryTree(project), [project]);
   const node = path ? findLibraryFolder(view.folders, path) : null;
   const [items, setItems] = useState<LibraryEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LibraryErrorView | null>(null);
   const [group, setGroup] = useState<LibraryTypeGroup | null>(null);
   const [sort, setSort] = useState<LibrarySort>("newest");
 
@@ -320,7 +346,7 @@ export function FolderContent({
       .then((got) => alive && setItems(got ?? []))
       .catch((e) => {
         if (!alive) return;
-        setError(errText(e));
+        setError(libraryErrorOf(e, t("加载资料")));
         setItems((prev) => prev ?? []);
       });
     return () => {
@@ -339,7 +365,13 @@ export function FolderContent({
   return (
     <div className={styles.level} data-library-folder={path}>
       {node?.description && <div className={styles.folderDesc}>{node.description}</div>}
-      {node && node.children.length > 0 && <SubfolderChips nodes={node.children} onOpen={onOpenFolder} />}
+      {node && (node.children.length > 0 || onNewFolder) && (
+        <SubfolderChips
+          nodes={node.children}
+          onOpen={onOpenFolder}
+          onNew={onNewFolder ? () => onNewFolder(node.path) : undefined}
+        />
+      )}
       {items && rows.length > 0 && (
         <div className={styles.filterBar}>
           <div className={styles.typeChips} role="tablist">
@@ -378,7 +410,7 @@ export function FolderContent({
           </select>
         </div>
       )}
-      {error && <div className={styles.error}>{t("资料加载失败：{0}", error)}</div>}
+      <LibraryErrorNote error={error} className={styles.error} />
       {items === null ? (
         <SkeletonList rows={5} avatar />
       ) : rows.length === 0 ? (

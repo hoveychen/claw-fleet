@@ -42,9 +42,11 @@ import {
   type LibraryProjectTree,
   type UploadOutcome,
 } from "../libraryApi";
+import { libraryErrorOf, type LibraryErrorView } from "../libraryErrors";
 import { ArtifactDetail } from "./ArtifactsView";
+import { LibraryErrorNote } from "./LibraryErrorNote";
 import { BatchRows, BatchView, BATCH_POLL_MS } from "./LibraryBatch";
-import { FolderSheet } from "./LibraryTree";
+import { FolderSheet, NewFolderSheet } from "./LibraryTree";
 import { FolderContent, ProjectOverview, ProjectRows, SearchCards, projectName } from "./LibraryBrowse";
 import { UploadSheet } from "./LibraryUpload";
 import { recentWorkspaceRows } from "./Composer";
@@ -62,33 +64,40 @@ interface Props {
   onOpenDoc: (doc: WikiDoc) => void;
 }
 
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
 /** Debounced `library_search`; answers nothing under two characters. */
 function useLibrarySearch(client: FleetTransport | null, query: string, workspace: string) {
   const [hits, setHits] = useState<LibraryHit[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<LibraryErrorView | null>(null);
   const seq = useRef(0);
   useEffect(() => {
     const q = query.trim();
     if (!client || q.length < 2) {
       setHits(null);
       setSearching(false);
+      setError(null);
       return;
     }
     setSearching(true);
     const mine = ++seq.current;
     const timer = window.setTimeout(() => {
       searchLibrary(client, q, workspace || undefined)
-        .then((h) => mine === seq.current && setHits(h ?? []))
-        .catch(() => mine === seq.current && setHits([]))
+        .then((h) => {
+          if (mine !== seq.current) return;
+          setHits(h ?? []);
+          setError(null);
+        })
+        .catch((e) => {
+          if (mine !== seq.current) return;
+          // A failed search is not "no matches": say so instead of an empty list.
+          setHits(null);
+          setError(libraryErrorOf(e, t("搜索")));
+        })
         .finally(() => mine === seq.current && setSearching(false));
     }, 300);
     return () => window.clearTimeout(timer);
   }, [client, query, workspace]);
-  return { hits, searching };
+  return { hits, searching, error };
 }
 
 export function LibraryView({ client, sessions, onOpenDoc }: Props) {
@@ -100,21 +109,21 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
 
   // Every project, light: folders and counts, no items.
   const [projects, setProjects] = useState<LibraryProjectTree[] | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
+  const [listError, setListError] = useState<LibraryErrorView | null>(null);
   const loadProjects = useCallback(async () => {
     if (!client) return;
     try {
       setProjects(await fetchLibraryOutline(client, undefined, 0));
       setListError(null);
     } catch (e) {
-      setListError(errText(e));
+      setListError(libraryErrorOf(e, t("加载资料")));
       setProjects((prev) => prev ?? []);
     }
   }, [client]);
 
   // The open project: its outline with the newest few items per folder.
   const [current, setCurrent] = useState<LibraryProjectTree | null>(null);
-  const [currentError, setCurrentError] = useState<string | null>(null);
+  const [currentError, setCurrentError] = useState<LibraryErrorView | null>(null);
   const loadCurrent = useCallback(async () => {
     if (!client || !project) return;
     try {
@@ -122,7 +131,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
       setCurrent(got.find((p) => p.workspacePath === project) ?? got[0] ?? emptyProject(project));
       setCurrentError(null);
     } catch (e) {
-      setCurrentError(errText(e));
+      setCurrentError(libraryErrorOf(e, t("加载资料")));
     }
   }, [client, project]);
   /** Bumped to make an open folder fetch its items again. */
@@ -169,7 +178,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
     wasRunning.current = anyRunning;
   }, [anyRunning, refreshAll]);
 
-  const { hits, searching } = useLibrarySearch(client, query, project);
+  const { hits, searching, error: searchError } = useLibrarySearch(client, query, project);
   const showSearching = useDelayedFlag(query.trim().length >= 2 && searching);
 
   const uploadChoices = useMemo(
@@ -182,9 +191,11 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
   const [openBatch, setOpenBatch] = useState<{ id: string; skipped?: UploadOutcome["skipped"] } | null>(null);
   const [batchesOpen, setBatchesOpen] = useState(false);
   const [folderSheet, setFolderSheet] = useState<LibraryFolderRec | null>(null);
+  /** The new-folder sheet's parent (`""` = top level); null = closed. */
+  const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [moving, setMoving] = useState<Set<string>>(new Set());
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<LibraryErrorView | null>(null);
 
   // An item's record is fetched when it is tapped, not listed up front.
   const openEntry = async (e: { kind: string; id: string }) => {
@@ -196,7 +207,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
       if (e.kind === "doc") onOpenDoc(await fetchWikiDoc(client, e.id));
       else setArtifact(await fetchArtifactRecord(client, e.id));
     } catch (err) {
-      setActionError(errText(err));
+      setActionError(libraryErrorOf(err, t("打开资料")));
     } finally {
       setOpening(null);
     }
@@ -212,7 +223,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
       await loadCurrent();
       setReloadKey((k) => k + 1);
     } catch (err) {
-      setActionError(errText(err));
+      setActionError(libraryErrorOf(err, t("移动资料")));
     } finally {
       setMoving((prev) => {
         const next = new Set(prev);
@@ -288,7 +299,9 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
   let body: ReactNode;
   if (searchMode) {
     body =
-      hits === null ? (
+      searchError ? (
+        <LibraryErrorNote error={searchError} className={styles.error} />
+      ) : hits === null ? (
         <SkeletonList rows={4} />
       ) : hits.length === 0 ? (
         <EmptyState compact icon={SearchX} title={t("没有匹配的资料")} />
@@ -306,6 +319,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
         onOpenFolder={setFolder}
         onOpenEntry={(e) => void openEntry(e)}
         onMoveEntry={(e, f) => void moveEntry(e, f)}
+        onNewFolder={client ? setNewFolderParent : undefined}
       />
     ) : (
       <SkeletonList rows={5} avatar />
@@ -318,6 +332,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
           onOpenFolder={setFolder}
           onOpenEntry={(e) => void openEntry(e)}
           onFolderMenu={setFolderSheet}
+          onNewFolder={client ? () => setNewFolderParent("") : undefined}
         />
         {batchEntry}
       </>
@@ -379,7 +394,7 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
       )}
 
       {searchBox}
-      {error && <div className={styles.error}>{t("资料加载失败：{0}", error)}</div>}
+      <LibraryErrorNote error={error} className={styles.error} onDismiss={actionError ? () => setActionError(null) : undefined} />
       {opening && (
         <div className={styles.opening}>
           <Spinner size={12} /> {t("正在打开…")}
@@ -419,6 +434,24 @@ export function LibraryView({ client, sessions, onOpenDoc }: Props) {
             folder={folderSheet}
             onClose={() => setFolderSheet(null)}
             onChanged={() => {
+              void loadCurrent();
+              void loadProjects();
+            }}
+            onNewSubfolder={(parent) => {
+              setFolderSheet(null);
+              setNewFolderParent(parent);
+            }}
+          />
+        )}
+      </Presence>
+      <Presence when={newFolderParent !== null && !!current}>
+        {newFolderParent !== null && current && (
+          <NewFolderSheet
+            client={client}
+            project={current}
+            parent={newFolderParent}
+            onClose={() => setNewFolderParent(null)}
+            onCreated={() => {
               void loadCurrent();
               void loadProjects();
             }}

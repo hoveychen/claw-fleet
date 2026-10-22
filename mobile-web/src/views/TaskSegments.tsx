@@ -28,6 +28,8 @@ import { EmptyState } from "./EmptyState";
 import { SkeletonList } from "./loading";
 import { SubtaskRecoveryBanner } from "./SubtaskRecovery";
 import styles from "./TaskSegments.module.css";
+import { libraryErrorOf, type LibraryErrorView } from "../libraryErrors";
+import { LibraryErrorNote } from "./LibraryErrorNote";
 
 export type TaskSegment = "chat" | "subtasks" | "steps" | "library";
 
@@ -305,7 +307,7 @@ export function TaskLibraryPane({
     [sessions, session],
   );
   const [items, setItems] = useState<TaskLibraryItems | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LibraryErrorView | null>(null);
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [opening, setOpening] = useState(false);
 
@@ -317,7 +319,7 @@ export function TaskLibraryPane({
       .then((r) => live && setItems(r))
       .catch((e) => {
         if (!live) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(libraryErrorOf(e, t("加载资料")));
         setItems((prev) => prev ?? { outputs: [], docs: [] });
       });
     return () => {
@@ -334,7 +336,7 @@ export function TaskLibraryPane({
       if (e.kind === "doc") onOpenDoc(await fetchWikiDoc(client, e.id));
       else setArtifact(await fetchArtifactRecord(client, e.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(libraryErrorOf(err, t("打开资料")));
     } finally {
       setOpening(false);
     }
@@ -345,7 +347,7 @@ export function TaskLibraryPane({
   const home = repoRootPath(session.workspacePath);
   return (
     <div className={styles.libraryPane} data-task-library>
-      {error && <div className={styles.error}>{t("资料加载失败：{0}", error)}</div>}
+      <LibraryErrorNote error={error} className={styles.error} />
       <div className={styles.groupHead}>{t("本任务产出")}</div>
       {items.outputs.length > 0 ? (
         <EntryCards client={client} entries={items.outputs} homeProject={home} onOpen={open} />
