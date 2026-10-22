@@ -1777,6 +1777,7 @@ pub fn run() {
             library_tree,
             library_folder_items,
             library_search,
+            library_export,
             library_create_folder,
             library_describe_folder,
             library_accept_folder,

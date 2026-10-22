@@ -772,6 +772,11 @@ async function handleIPC(
       return mockLibraryFolderItems(args);
     case "library_search":
       return mockLibrarySearch(args);
+    case "library_export": {
+      const spec = args.spec as { items?: string[] } | undefined;
+      const n = spec?.items?.length ?? 12;
+      return { filename: "export.zip", itemCount: n, fileCount: n + 2, totalBytes: n * 180_000, skipped: [] };
+    }
     case "library_create_folder":
       return mockLibraryCreateFolder(args);
     case "library_describe_folder":

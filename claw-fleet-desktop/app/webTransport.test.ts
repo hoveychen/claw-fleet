@@ -224,6 +224,10 @@ const KNOWN_WEB_GAPS = [
   // archive down as a download (`downloadFolderZip`) rather than asking a tab
   // for a destination path it cannot write to.
   "export_artifact_folder",
+  // The 资料 page's folder / selection / whole-project zip. Same shape: the
+  // browser build follows a link to `/library_export` (`downloadLibraryZip`)
+  // and lets the browser stream it to disk.
+  "library_export",
   // Saves one member of a zip artifact, whose bytes the webview already holds.
   // Same gap and same escape hatch: `exportMemberBytes` hands the tab an
   // <a download> instead of asking for a path it cannot write to.

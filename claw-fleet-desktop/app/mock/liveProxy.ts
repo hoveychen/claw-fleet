@@ -1856,6 +1856,46 @@ export async function downloadFolderZip(
   );
 }
 
+/**
+ * Download a 资料 export (a folder, a selection or a whole project) — the
+ * browser build's replacement for the desktop's save-dialog + `library_export`.
+ *
+ * A link the browser follows rather than a fetch into a Blob: a whole project
+ * can be gigabytes of renders, and the browser's own download streams it to
+ * disk (with its own progress) where a Blob would first hold it all in the tab.
+ * `/library_export` answers a `filename*` disposition, so the CJK name survives.
+ */
+export function downloadLibraryZip(
+  query: {
+    workspacePath: string;
+    scope: string;
+    folder?: string;
+    items?: string[];
+    unfiledLabel?: string;
+  },
+  filename: string,
+): void {
+  const url = probeUrl({
+    method: "GET",
+    path: "/library_export",
+    query: {
+      workspace_path: query.workspacePath,
+      scope: query.scope,
+      folder: query.folder,
+      items: query.items?.join(","),
+      unfiled_label: query.unfiledLabel,
+      filename,
+    },
+  });
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 export async function downloadWikiExport(
   slug: string,
   version: string,

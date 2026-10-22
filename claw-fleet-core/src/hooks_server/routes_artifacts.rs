@@ -287,7 +287,7 @@ pub(crate) fn route_artifact_folder_zip(
 /// not portable — so non-ASCII collapses to `_` here and the browser falls
 /// back to the URL's own name. Quotes, backslashes and control characters
 /// would let the value break out of its quoting, so they go too.
-fn ascii_fallback(name: &str) -> String {
+pub(super) fn ascii_fallback(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| {
@@ -499,7 +499,7 @@ pub(crate) fn route_artifact_blob(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn header(name: &str, value: &str) -> tiny_http::Header {
+pub(super) fn header(name: &str, value: &str) -> tiny_http::Header {
     // Both sides are ours (route constants and store-derived mimes), so a
     // parse failure would be a bug, not bad input.
     format!("{name}: {value}").parse().expect("static header")
