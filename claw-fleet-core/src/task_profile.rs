@@ -287,7 +287,7 @@ fn set_in(
 /// Where a session sits: its own line's task id, and the top-level task it
 /// rolls up to when it is a sub-task.
 pub fn place_of(session_id: &str) -> crate::task_model::TaskPlace {
-    crate::task_model::TaskGraph::load().place(session_id)
+    crate::task_model::place_session(session_id)
 }
 
 /// The top-level task a session belongs to — its own task for a main

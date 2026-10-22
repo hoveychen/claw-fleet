@@ -95,34 +95,67 @@ impl TaskGraph {
     /// Place one session. Cycles in the spawn edges (which only corrupt notes
     /// could produce) stop the walk at the last line not yet seen.
     pub fn place(&self, id: &str) -> TaskPlace {
-        let own = self.line_root_of(id).to_string();
-        let mut top = own.clone();
-        let mut seen: HashSet<String> = HashSet::from([own.clone()]);
-        let mut cursor = id.to_string();
-        while let Some(parent) = self.spawning_session(&cursor) {
-            let parent_root = self.line_root_of(parent).to_string();
-            if !seen.insert(parent_root.clone()) {
-                break;
-            }
-            top = parent_root;
-            cursor = parent.to_string();
-        }
-        TaskPlace {
-            parent_task_id: (top != own).then_some(top),
-            task_id: own,
-        }
+        place_with(
+            id,
+            &|s| self.line_root_of(s).to_string(),
+            &|s| self.spawning_session(s).map(str::to_string),
+        )
     }
+}
+
+/// The walk behind [`TaskGraph::place`], over injected lookups: `line_root`
+/// maps a session to the first hop of its relay chain (itself when on none),
+/// `spawner` maps a session to the session that spawned its line.
+pub fn place_with(
+    id: &str,
+    line_root: &dyn Fn(&str) -> String,
+    spawner: &dyn Fn(&str) -> Option<String>,
+) -> TaskPlace {
+    let own = line_root(id);
+    let mut top = own.clone();
+    let mut seen: HashSet<String> = HashSet::from([own.clone()]);
+    let mut cursor = id.to_string();
+    while let Some(parent) = spawner(&cursor) {
+        let parent_root = line_root(&parent);
+        if !seen.insert(parent_root.clone()) {
+            break;
+        }
+        top = parent_root;
+        cursor = parent;
+    }
+    TaskPlace {
+        parent_task_id: (top != own).then_some(top),
+        task_id: own,
+    }
+}
+
+/// [`TaskGraph::place`] for one session without loading the whole graph: reads
+/// only the launch notes on the walk up (one file per hop) instead of every
+/// note on disk. `fleet mcp` answers `tools/list` with this on every session
+/// start — with ~7k notes a cold full read took ~7s, and under disk contention
+/// on 2026-10-22 it pushed `tools/list` past Claude Code's 30s timeout, leaving
+/// a resumed session with no Fleet tools at all.
+pub fn place_session(id: &str) -> TaskPlace {
+    let line_root = |s: &str| {
+        crate::handoff::chain_containing(s)
+            .and_then(|c| c.session_ids().into_iter().next())
+            .unwrap_or_else(|| s.to_string())
+    };
+    let note_spawner =
+        |s: &str| crate::launch_spec::get(s).and_then(|spec| spec.spawned_by_session_id);
+    place_with(id, &line_root, &|s| {
+        note_spawner(&line_root(s)).or_else(|| note_spawner(s))
+    })
 }
 
 /// Whether `session_id` is a sub-task: it was dispatched to a step of another
 /// session's plan, or its line rolls up under another task. The launch note is
-/// read first; the graph (every relay chain and launch note) only when it
-/// says nothing.
+/// read first; the spawn walk ([`place_session`]) only when it says nothing.
 pub fn is_subtask(session_id: &str) -> bool {
     if crate::launch_spec::get(session_id).is_some_and(|s| s.spawned_for_plan.is_some()) {
         return true;
     }
-    TaskGraph::load().place(session_id).parent_task_id.is_some()
+    place_session(session_id).parent_task_id.is_some()
 }
 
 /// The spawner's plan and step `session_id`'s line was dispatched to
@@ -611,6 +644,42 @@ mod tests {
     fn nested_spawns_flatten_to_the_outermost_task() {
         let g = TaskGraph::new(vec![], vec![edge("b", "a"), edge("c", "b")]);
         assert_eq!(g.place("c"), place("c", Some("a")));
+    }
+
+    #[test]
+    fn place_session_matches_the_full_graph_off_disk() {
+        let _guard = crate::session::fleet_home_lock();
+        let base = std::env::temp_dir().join(format!(
+            "fleet-place-session-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", &base) };
+
+        // a spawned b, b spawned c; d is unrelated; e spawned itself.
+        crate::launch_spec::note_spawned_by("b", "a");
+        crate::launch_spec::note_spawned_by("c", "b");
+        crate::launch_spec::record("d", None, None);
+        crate::launch_spec::note_spawned_by("e", "e");
+        let graph = TaskGraph::load();
+        let got: Vec<_> = ["a", "b", "c", "d", "e", "unknown"]
+            .iter()
+            .map(|id| (place_session(id), graph.place(id)))
+            .collect();
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        for (lazy, full) in &got {
+            assert_eq!(lazy, full);
+        }
+        assert_eq!(got[2].0, place("c", Some("a")));
+        assert_eq!(got[3].0, place("d", None));
     }
 
     #[test]

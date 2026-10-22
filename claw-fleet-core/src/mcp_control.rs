@@ -2335,6 +2335,8 @@ mod tests {
     /// otherwise an agent reads "nothing published" and stops looking.
     #[test]
     fn wiki_scoped_empty_results_mention_the_all_flag() {
+        // Reads the wiki under FLEET_HOME, which other tests swap out.
+        let _guard = crate::session::fleet_home_lock();
         let tmp = tempfile::tempdir().unwrap();
         let out = handle("fleet__wiki", &json!({"action": "list"}), None, tmp.path()).unwrap();
         assert!(out.contains("all:true"), "{out}");
