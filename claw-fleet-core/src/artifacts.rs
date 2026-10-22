@@ -1247,11 +1247,24 @@ pub fn export_folder_zip(
     directory: &str,
     dest: &Path,
 ) -> Result<FolderZip, String> {
+    // Validate before creating the file, so a bad request leaves nothing behind.
+    normalize_dir_path(directory)?;
+    let file = fs::File::create(dest).map_err(|e| format!("create '{}': {e}", dest.display()))?;
+    write_folder_zip(root, workspace_path, directory, std::io::BufWriter::new(file))
+}
+
+/// [`export_folder_zip`] into any sink — `fleet serve` streams it straight
+/// into the response body. The sink needs no `Seek`.
+pub fn write_folder_zip<W: std::io::Write>(
+    root: &Path,
+    workspace_path: &str,
+    directory: &str,
+    sink: W,
+) -> Result<FolderZip, String> {
     let directory = normalize_dir_path(directory)?;
     let members = folder_members(root, workspace_path, &directory);
 
-    let file = fs::File::create(dest).map_err(|e| format!("create '{}': {e}", dest.display()))?;
-    let mut zip = crate::zip_stream::ZipStream::new(std::io::BufWriter::new(file));
+    let mut zip = crate::zip_stream::ZipStream::new(sink);
     let mut used = std::collections::HashSet::new();
     let mut report = FolderZip {
         filename: zip_filename(&directory, workspace_path),
@@ -1303,7 +1316,7 @@ pub fn export_folder_zip(
 
 /// Suggested archive name: the folder's last segment, or the workspace's name
 /// when exporting its root.
-fn zip_filename(directory: &str, workspace_path: &str) -> String {
+pub(crate) fn zip_filename(directory: &str, workspace_path: &str) -> String {
     let stem = if directory.is_empty() {
         crate::wiki::workspace_name_of(workspace_path)
     } else {

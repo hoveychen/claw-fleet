@@ -217,13 +217,8 @@ pub(crate) fn route_artifact_folder_zip_plan(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
-/// `GET /artifact_folder_zip?workspace_path=…&directory=…` — the archive.
-///
-/// Packed to a temporary file first, then sent, rather than written straight
-/// into the socket: tiny_http needs a length or a reader up front, and a
-/// half-sent archive whose length was guessed is worse than a brief pause. The
-/// temp file is what keeps peak memory flat — the whole point of the streaming
-/// writer — and it is removed as soon as the response is handed off.
+/// `GET /artifact_folder_zip?workspace_path=…&directory=…` — the archive,
+/// streamed while it is packed (see [`send_zip`]).
 pub(crate) fn route_artifact_folder_zip(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -237,13 +232,11 @@ pub(crate) fn route_artifact_folder_zip(
         let _ = request.respond(tiny_http::Response::empty(500));
         return;
     };
-
-    let tmp = std::env::temp_dir().join(format!("fleet-folder-{}.zip", uuid::Uuid::new_v4()));
-    let report = match crate::artifacts::export_folder_zip(&root, &workspace_path, &directory, &tmp)
-    {
-        Ok(r) => r,
+    // The only request error the writer can hit; caught here so it is still
+    // a JSON 400 rather than a 200 that ends early.
+    let normalized = match crate::artifacts::normalize_dir_path(&directory) {
+        Ok(d) => d,
         Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
             let body = serde_json::json!({ "error": e }).to_string();
             let _ = request.respond(
                 tiny_http::Response::from_string(body)
@@ -253,29 +246,111 @@ pub(crate) fn route_artifact_folder_zip(
             return;
         }
     };
+    let filename = crate::artifacts::zip_filename(&normalized, &workspace_path);
+    let headers = vec![
+        header("Content-Type", "application/zip"),
+        header(
+            "Content-Disposition",
+            &format!("attachment; filename=\"{}\"", ascii_fallback(&filename)),
+        ),
+    ];
+    send_zip(request, headers, "artifact-folder-zip", move |sink| {
+        crate::artifacts::write_folder_zip(&root, &workspace_path, &directory, sink).map(|_| ())
+    });
+}
 
-    match std::fs::File::open(&tmp).and_then(|f| f.metadata().map(|m| (f, m.len()))) {
+/// Whether tiny_http will send a body of unknown length as it is produced.
+///
+/// It chunks one for an HTTP/1.1 client, but for an HTTP/1.0 client — or one
+/// whose `TE` asks for identity — it needs a `Content-Length` and gets it by
+/// `read_to_end` of the whole body into memory first
+/// (`tiny_http::Response::raw_print`). For a multi-gigabyte archive that is
+/// far worse than a temporary file, so those clients keep the old path.
+/// Browsers and curl speak 1.1; the case this guards is a proxy in front of a
+/// cloud container that talks 1.0 upstream (nginx's default).
+pub(super) fn can_stream(request: &tiny_http::Request) -> bool {
+    if *request.http_version() <= (1, 0) {
+        return false;
+    }
+    !request
+        .headers()
+        .iter()
+        .any(|h| h.field.equiv("TE") && h.value.as_str().to_ascii_lowercase().contains("identity"))
+}
+
+/// Answer `200` with `headers` and a body written by `produce`.
+///
+/// Streamed where the client allows it ([`can_stream`]): `produce` runs on its
+/// own thread writing into a bounded [`crate::stream_pipe`], and tiny_http
+/// sends the read half chunked, so nothing touches the disk, memory stays at a
+/// few 64 KiB chunks however large the archive, the first byte leaves at
+/// once, and a slow client slows the packer down rather than piling bytes up.
+/// The price, accepted when this replaced the temp file: no `Content-Length`
+/// (the browser shows no percentage), and an error after the first byte can
+/// only truncate the download — the archive then lacks its central directory
+/// and no extractor will open it.
+///
+/// Every request error must be caught *before* calling this: once it is
+/// called the status is already `200`.
+pub(super) fn send_zip<F>(request: tiny_http::Request, headers: Vec<tiny_http::Header>, label: &str, produce: F)
+where
+    F: FnOnce(&mut dyn std::io::Write) -> Result<(), String> + Send + 'static,
+{
+    if !can_stream(&request) {
+        send_zip_via_temp_file(request, headers, label, produce);
+        return;
+    }
+    let (reader, handle) = match crate::stream_pipe::spawn(label, move |w| produce(w)) {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("[fleet serve] {label}: cannot start packer thread: {e}");
+            let _ = request.respond(tiny_http::Response::empty(500));
+            return;
+        }
+    };
+    let resp = tiny_http::Response::new(tiny_http::StatusCode(200), headers, reader, None, None);
+    // Returns once the body is sent, the client is gone, or the packer failed.
+    // Either way the reader is dropped by now, so the packer is finished or
+    // fails on its next write — the join cannot wait on the client.
+    let sent = request.respond(resp);
+    match handle.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("[fleet serve] {label} stopped early: {e}"),
+        Err(_) => eprintln!("[fleet serve] {label}: packer thread panicked"),
+    }
+    if let Err(e) = sent {
+        eprintln!("[fleet serve] {label}: response not completed: {e}");
+    }
+}
+
+/// The pre-streaming path, kept for clients [`can_stream`] rules out: pack
+/// into a temporary file, then send it with its length.
+fn send_zip_via_temp_file<F>(request: tiny_http::Request, headers: Vec<tiny_http::Header>, label: &str, produce: F)
+where
+    F: FnOnce(&mut dyn std::io::Write) -> Result<(), String>,
+{
+    let tmp = std::env::temp_dir().join(format!("fleet-{label}-{}.zip", uuid::Uuid::new_v4()));
+    let written = std::fs::File::create(&tmp)
+        .map_err(|e| format!("create '{}': {e}", tmp.display()))
+        .and_then(|f| {
+            let mut w = std::io::BufWriter::new(f);
+            produce(&mut w)?;
+            std::io::Write::flush(&mut w).map_err(|e| e.to_string())
+        })
+        .and_then(|()| {
+            std::fs::File::open(&tmp)
+                .and_then(|f| f.metadata().map(|m| (f, m.len())))
+                .map_err(|e| e.to_string())
+        });
+    match written {
         Ok((file, len)) => {
-            let resp = tiny_http::Response::new(
-                tiny_http::StatusCode(200),
-                vec![
-                    header("Content-Type", "application/zip"),
-                    header(
-                        "Content-Disposition",
-                        &format!(
-                            "attachment; filename=\"{}\"",
-                            ascii_fallback(&report.filename)
-                        ),
-                    ),
-                ],
-                file,
-                Some(len as usize),
-                None,
-            );
+            let resp = tiny_http::Response::new(tiny_http::StatusCode(200), headers, file, Some(len as usize), None);
             let _ = request.respond(resp);
         }
-        Err(_) => {
-            let _ = request.respond(tiny_http::Response::empty(500));
+        Err(e) => {
+            eprintln!("[fleet serve] {label} failed: {e}");
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(tiny_http::Response::from_string(body).with_status_code(500));
         }
     }
     let _ = std::fs::remove_file(&tmp);
@@ -550,5 +625,160 @@ fn respond_json_result<T: serde::Serialize>(
                     .with_header(json_header),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpStream;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn server() -> (Arc<tiny_http::Server>, u16) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        (Arc::new(server), port)
+    }
+
+    fn get(port: u16, version: &str) -> TcpStream {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        write!(s, "GET /zip {version}\r\nHost: x\r\nConnection: close\r\n\r\n").unwrap();
+        s
+    }
+
+    /// Status line and headers (lower-cased names), leaving the body unread.
+    fn read_head(r: &mut BufReader<TcpStream>) -> (String, Vec<(String, String)>) {
+        let mut status = String::new();
+        r.read_line(&mut status).unwrap();
+        let mut headers = Vec::new();
+        loop {
+            let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            let line = line.trim_end();
+            if line.is_empty() {
+                break;
+            }
+            let (k, v) = line.split_once(':').unwrap();
+            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
+        }
+        (status, headers)
+    }
+
+    fn read_chunked(r: &mut BufReader<TcpStream>) -> Vec<u8> {
+        let mut body = Vec::new();
+        loop {
+            let mut size = String::new();
+            r.read_line(&mut size).unwrap();
+            let n = usize::from_str_radix(size.trim(), 16).unwrap();
+            if n == 0 {
+                return body;
+            }
+            let mut chunk = vec![0u8; n + 2];
+            r.read_exact(&mut chunk).unwrap();
+            body.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    /// Several members, the big one spanning many pipe chunks.
+    fn pack(sink: &mut dyn Write) -> Result<(), String> {
+        let big: Vec<u8> = (0..crate::stream_pipe::CHUNK * 10 + 123).map(|i| (i % 241) as u8).collect();
+        let mut zip = crate::zip_stream::ZipStream::new(sink);
+        zip.add("big.bin", big.len() as u64, &mut &big[..]).map_err(|e| e.to_string())?;
+        zip.add("small.txt", 5, &mut &b"hello"[..]).map_err(|e| e.to_string())?;
+        zip.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn packed() -> Vec<u8> {
+        let mut v = Vec::new();
+        pack(&mut v).unwrap();
+        v
+    }
+
+    #[test]
+    fn an_http11_client_gets_the_archive_chunked_byte_for_byte() {
+        let (srv, port) = server();
+        let s2 = srv.clone();
+        let t = std::thread::spawn(move || {
+            let rq = s2.recv().unwrap();
+            send_zip(rq, vec![header("Content-Type", "application/zip")], "t", pack);
+        });
+        let mut r = BufReader::new(get(port, "HTTP/1.1"));
+        let (status, headers) = read_head(&mut r);
+        assert!(status.contains(" 200 "), "{status}");
+        assert!(headers.iter().any(|(k, v)| k == "transfer-encoding" && v == "chunked"), "{headers:?}");
+        assert!(!headers.iter().any(|(k, _)| k == "content-length"), "{headers:?}");
+        assert_eq!(read_chunked(&mut r), packed());
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn an_http10_client_falls_back_to_a_sized_body() {
+        let (srv, port) = server();
+        let s2 = srv.clone();
+        let t = std::thread::spawn(move || {
+            let rq = s2.recv().unwrap();
+            send_zip(rq, vec![header("Content-Type", "application/zip")], "t", pack);
+        });
+        let mut r = BufReader::new(get(port, "HTTP/1.0"));
+        let (_, headers) = read_head(&mut r);
+        let expected = packed();
+        assert!(
+            headers.iter().any(|(k, v)| k == "content-length" && *v == expected.len().to_string()),
+            "{headers:?}"
+        );
+        let mut body = Vec::new();
+        r.read_to_end(&mut body).unwrap();
+        assert_eq!(body, expected);
+        t.join().unwrap();
+    }
+
+    /// The case the bounded pipe is for: the client goes away mid-download.
+    /// The packer must notice and stop, the handler must return, and the
+    /// server must go on answering.
+    #[test]
+    fn a_client_that_disconnects_stops_the_packer_and_the_server_carries_on() {
+        let (srv, port) = server();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let s2 = srv.clone();
+        let flag = stopped.clone();
+        let t = std::thread::spawn(move || {
+            let rq = s2.recv().unwrap();
+            send_zip(rq, vec![], "t", move |sink| {
+                // An endless member: only a failed write ends it.
+                let chunk = vec![7u8; 64 * 1024];
+                let res = loop {
+                    if let Err(e) = sink.write_all(&chunk) {
+                        break Err(e.to_string());
+                    }
+                };
+                flag.store(true, Ordering::SeqCst);
+                res
+            });
+            // Still serving.
+            let rq = s2.recv().unwrap();
+            let _ = rq.respond(tiny_http::Response::from_string("ok"));
+        });
+
+        let mut r = BufReader::new(get(port, "HTTP/1.1"));
+        let _ = read_head(&mut r);
+        let mut some = vec![0u8; 256 * 1024];
+        r.read_exact(&mut some).unwrap();
+        drop(r);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !stopped.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "packer kept running after the client left");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let mut r = BufReader::new(get(port, "HTTP/1.1"));
+        let (status, _) = read_head(&mut r);
+        assert!(status.contains(" 200 "), "{status}");
+        t.join().unwrap();
     }
 }

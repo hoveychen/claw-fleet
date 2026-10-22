@@ -99,6 +99,53 @@ enum Source {
     Missing,
 }
 
+/// A resolved export: everything a bad request could fail on has already
+/// failed, and what remains is copying bytes.
+///
+/// Split from the write so `fleet serve` can answer a JSON error before it
+/// commits to a streamed `200`, and can name the item counts in headers
+/// before the first byte — they are fixed here, not discovered while packing.
+pub struct PreparedExport {
+    filename: String,
+    members: Vec<Member>,
+}
+
+impl PreparedExport {
+    /// Suggested archive name.
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+
+    /// Items that will be packed (the final [`LibraryZip::item_count`]).
+    pub fn item_count(&self) -> usize {
+        self.members.iter().filter(|m| !matches!(m.source, Source::Missing)).count()
+    }
+
+    /// Titles of items whose bytes are missing (the final
+    /// [`LibraryZip::skipped`]).
+    pub fn skipped(&self) -> Vec<String> {
+        self.members
+            .iter()
+            .filter(|m| matches!(m.source, Source::Missing))
+            .map(|m| m.title.clone())
+            .collect()
+    }
+
+    pub fn write<W: Write>(self, sink: W) -> Result<LibraryZip, String> {
+        write_zip(self.filename, &self.members, sink)
+    }
+}
+
+/// Resolve `spec` against the library under the home directory.
+pub fn prepare(spec: &ExportSpec) -> Result<PreparedExport, String> {
+    prepare_in(&Roots::home()?, spec)
+}
+
+pub fn prepare_in(roots: &Roots, spec: &ExportSpec) -> Result<PreparedExport, String> {
+    let (filename, members) = plan(roots, spec)?;
+    Ok(PreparedExport { filename, members })
+}
+
 /// Pack `spec` into a zip at `dest`.
 pub fn export_to_file(spec: &ExportSpec, dest: &Path) -> Result<LibraryZip, String> {
     export_to_file_in(&Roots::home()?, spec, dest)
@@ -106,9 +153,13 @@ pub fn export_to_file(spec: &ExportSpec, dest: &Path) -> Result<LibraryZip, Stri
 
 pub fn export_to_file_in(roots: &Roots, spec: &ExportSpec, dest: &Path) -> Result<LibraryZip, String> {
     // Resolve before creating the file, so a bad request leaves nothing behind.
-    let (filename, members) = plan(roots, spec)?;
+    prepared_to_file(prepare_in(roots, spec)?, dest)
+}
+
+/// Write an already-resolved export to `dest`, removing it on failure.
+pub fn prepared_to_file(prepared: PreparedExport, dest: &Path) -> Result<LibraryZip, String> {
     let file = fs::File::create(dest).map_err(|e| format!("create '{}': {e}", dest.display()))?;
-    let result = write_zip(filename, &members, std::io::BufWriter::new(file));
+    let result = prepared.write(std::io::BufWriter::new(file));
     if result.is_err() {
         let _ = fs::remove_file(dest);
     }
@@ -117,8 +168,7 @@ pub fn export_to_file_in(roots: &Roots, spec: &ExportSpec, dest: &Path) -> Resul
 
 /// Pack `spec` into any sink.
 pub fn export_in<W: Write>(roots: &Roots, spec: &ExportSpec, sink: W) -> Result<LibraryZip, String> {
-    let (filename, members) = plan(roots, spec)?;
-    write_zip(filename, &members, sink)
+    prepare_in(roots, spec)?.write(sink)
 }
 
 /// The suggested archive name and the members, in archive order.
@@ -559,6 +609,12 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let (report, members) = e.export(e.spec(SCOPE_PROJECT, "", &[]));
         assert_eq!(names(&members), vec!["f/here.bin", "g/Moved.md"]);
         assert_eq!(report.skipped, vec!["gone.bin".to_string()]);
+
+        // `fleet serve` sends these as headers before packing, so the plan's
+        // numbers must be the ones the write ends up reporting.
+        let prepared = prepare_in(&e.roots, &e.spec(SCOPE_PROJECT, "", &[])).unwrap();
+        assert_eq!(prepared.item_count(), report.item_count);
+        assert_eq!(prepared.skipped(), report.skipped);
     }
 
     #[test]
