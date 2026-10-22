@@ -15,6 +15,12 @@ struct FakeBrain {
     no_draft: bool,
     /// Propose a different new folder for every property-fee bill.
     spray: bool,
+    /// Read each receipt image differently (see `vision`), the way separate
+    /// calls split one kind of file in a real upload.
+    split_receipts: bool,
+    /// Answer the consolidation pass by grouping every receipt into
+    /// 票据/收据; otherwise answer it with nothing usable.
+    regroup: bool,
 }
 
 const DRAFT: &str = r#"```json
@@ -31,8 +37,38 @@ impl FakeBrain {
     }
 }
 
+impl FakeBrain {
+    fn consolidation(&self, prompt: &str) -> String {
+        if !self.regroup {
+            return "{}".into();
+        }
+        let files: Vec<serde_json::Value> = prompt
+            .lines()
+            .filter(|l| l.starts_with("- i") && l.contains(" · filed in: "))
+            .map(|l| {
+                let id = l[2..].split(" · ").next().unwrap();
+                let placed = l.rsplit(" · filed in: ").next().unwrap();
+                let folder = if l.contains("收据") {
+                    "票据/收据"
+                } else if placed == "(unfiled)" {
+                    ""
+                } else {
+                    placed.trim_end_matches(" (proposed)")
+                };
+                serde_json::json!({"id": id, "folder": folder})
+            })
+            .collect();
+        serde_json::json!({"new_folders": [], "files": files}).to_string()
+    }
+}
+
 impl Brain for FakeBrain {
     fn text(&self, slot: ModelSlot, prompt: &str) -> Option<CallOutcome> {
+        if prompt.starts_with(classify::CONSOLIDATE_HEAD) {
+            self.calls.lock().unwrap().push("consolidate".into());
+            let text = self.consolidation(prompt);
+            return Some(CallOutcome { text, cost_usd: 0.01, provider: "fake".into(), model: "fake".into() });
+        }
         let first = {
             let mut calls = self.calls.lock().unwrap();
             calls.push(if slot == ModelSlot::Standard { "draft".into() } else { "classify".into() });
@@ -80,6 +116,25 @@ impl Brain for FakeBrain {
         self.calls.lock().unwrap().push("vision".into());
         let file = prompt.split('`').nth(1).unwrap();
         assert!(dir.join(file).exists(), "vision reads a staged file: {}", dir.join(file).display());
+        if self.split_receipts {
+            // As in the 2026-10-21 phone upload: one receipt into an existing
+            // folder, one into a folder of its own, one left unfiled.
+            let (who, placement) = if file.contains("uber") {
+                ("Uber", r#""folder":"票据""#)
+            } else if file.contains("coffee") {
+                (
+                    "咖啡",
+                    r#""folder":"","new_folder":{"path":"票据/收据","key":"shouju","description":"小票","reason":"票据太宽"}"#,
+                )
+            } else {
+                ("酒店", r#""folder":"""#)
+            };
+            return Ok(CallOutcome {
+                text: format!(r#"{{{placement},"title":"{who} 收据","summary":"{who} 消费收据。","tags":["收据"],"text":""}}"#),
+                cost_usd: 0.02,
+                ..Default::default()
+            });
+        }
         Ok(CallOutcome {
             text: r#"{"folder":"票据","title":"建材收据 ¥3,486.00","summary":"瓷砖与填缝剂。","tags":["收据"],"text":"金盛建材 合计 3486.00"}"#.into(),
             cost_usd: 0.02,
@@ -189,12 +244,13 @@ fn a_drop_into_a_schemaless_project_drafts_a_schema_and_files_everything() {
     assert!(old.artifact_id.is_some());
 
     // One draft, one classification chunk, one image (the last two run in
-    // parallel); the duplicate cost nothing.
+    // parallel), then one review of the batch as a whole, since the chunk
+    // and the image were classified apart; the duplicate cost nothing.
     let mut kinds = brain.kinds();
     kinds.sort();
-    assert_eq!(kinds, ["classify", "draft", "vision"]);
-    assert_eq!(b.llm_calls, 3);
-    assert!((b.cost_usd - 0.04).abs() < 1e-9);
+    assert_eq!(kinds, ["classify", "consolidate", "draft", "vision"]);
+    assert_eq!(b.llm_calls, 4);
+    assert!((b.cost_usd - 0.05).abs() < 1e-9);
 
     // The artifacts carry what the batch decided, and the text for search.
     let a = artifacts::get_in(&e.roots.artifacts, r.artifact_id.as_ref().unwrap()).unwrap();
@@ -451,4 +507,83 @@ fn an_upload_adds_at_most_a_few_folders_and_leaves_the_rest_unfiled() {
     let unfiled: Vec<&IngestItem> = b.items.iter().filter(|i| i.folder.is_none()).collect();
     assert_eq!(unfiled.len(), 2);
     assert!(unfiled.iter().all(|i| i.status == ItemStatus::Filed && i.error.as_deref().unwrap_or("").contains("new folder")));
+}
+
+fn jpeg(name: &str) -> Vec<u8> {
+    [b"\xff\xd8\xff\xe0 ".as_slice(), name.as_bytes()].concat()
+}
+
+#[test]
+fn receipts_classified_in_separate_calls_end_up_in_one_folder() {
+    let e = env();
+    let c = e.file("合同.md", "# 施工合同".as_bytes());
+    let shots: Vec<PathBuf> = ["uber.jpg", "coffee.jpg", "hotel.jpg"].iter().map(|n| e.file(n, &jpeg(n))).collect();
+    let mut all = vec![&c];
+    all.extend(shots.iter());
+    let brain = FakeBrain { split_receipts: true, regroup: true, ..Default::default() };
+    let b = queue_paths_in(&e.roots, &e.ws(), &paths(&all)).unwrap();
+    run_worker(&e.roots, &b.id, &brain);
+    let b = get_batch_in(&e.roots, &b.id).unwrap();
+    assert_eq!(b.status, BatchStatus::Done, "{:?}", b.error);
+
+    for rel in ["uber.jpg", "coffee.jpg", "hotel.jpg"] {
+        let it = e.item(&b, rel);
+        assert_eq!((it.status, it.folder.as_deref()), (ItemStatus::Filed, Some("票据/收据")), "{rel}");
+    }
+    assert_eq!(e.item(&b, "合同.md").folder.as_deref(), Some("合同"), "a file alone in its kind stays");
+    let s = b.summary();
+    assert_eq!(s.new_folders.len(), 1);
+    assert_eq!((s.new_folders[0].path.as_str(), s.new_folders[0].items), ("票据/收据", 3));
+    assert_eq!(brain.kinds().iter().filter(|k| *k == "consolidate").count(), 1);
+
+    // The same per-file answers without a usable review scatter the receipts
+    // three ways: the review is what groups them.
+    let e2 = env();
+    let shots2: Vec<PathBuf> = ["uber.jpg", "coffee.jpg", "hotel.jpg"].iter().map(|n| e2.file(n, &jpeg(n))).collect();
+    let brain2 = FakeBrain { split_receipts: true, ..Default::default() };
+    let b2 = queue_paths_in(&e2.roots, &e2.ws(), &paths(&shots2.iter().collect::<Vec<_>>())).unwrap();
+    run_worker(&e2.roots, &b2.id, &brain2);
+    let b2 = get_batch_in(&e2.roots, &b2.id).unwrap();
+    let mut placed: Vec<Option<String>> = b2.items.iter().map(|i| i.folder.clone()).collect();
+    placed.sort();
+    assert_eq!(placed, [None, Some("票据".into()), Some("票据/收据".into())]);
+}
+
+#[test]
+fn batch_counts_follow_items_moved_or_deleted_in_the_folder_tree() {
+    let e = env();
+    let bill1 = e.file("物业-9月.md", "# 物业费 9 月".as_bytes());
+    let bill2 = e.file("物业-10月.md", "# 物业费 10 月".as_bytes());
+    let note = e.file("notes.txt", b"plain notes");
+    let brain = FakeBrain::default();
+    let b = queue_paths_in(&e.roots, &e.ws(), &paths(&[&bill1, &bill2, &note])).unwrap();
+    run_worker(&e.roots, &b.id, &brain);
+    let b = get_batch_in(&e.roots, &b.id).unwrap();
+    let s = b.summary();
+    assert_eq!((s.filed, s.unfiled, s.undone, s.new_folders[0].items), (3, 0, 0, 2));
+    let art = |rel: &str| e.item(&b, rel).artifact_id.clone().unwrap();
+
+    // In the tree, not through the batch: one bill out of its folder, the
+    // other into another folder, the notes deleted.
+    library::move_item_in(&e.roots, library::ITEM_ARTIFACT, &art("物业-9月.md"), "").unwrap();
+    library::move_item_in(&e.roots, library::ITEM_ARTIFACT, &art("物业-10月.md"), "合同").unwrap();
+    artifacts::delete_in(&e.roots.artifacts, &art("notes.txt")).unwrap();
+
+    let s = list_batches_in(&e.roots, Some(&e.ws())).remove(0);
+    assert_eq!((s.filed, s.unfiled, s.undone), (2, 1, 1));
+    assert_eq!(s.new_folders[0].items, 0, "the AI folder no longer holds this batch's bills");
+    let now = get_batch_in(&e.roots, &b.id).unwrap();
+    assert_eq!(e.item(&now, "物业-9月.md").folder, None);
+    assert_eq!(e.item(&now, "物业-10月.md").folder.as_deref(), Some("合同"));
+    assert_eq!(e.item(&now, "notes.txt").status, ItemStatus::Undone);
+
+    // Moving back through the batch and undoing one item agree with it.
+    let after = move_item_in(&e.roots, &b.id, &e.item(&b, "物业-9月.md").id, "票据/物业费").unwrap();
+    assert_eq!(after.summary().new_folders[0].items, 1);
+    let after = undo_item_in(&e.roots, &b.id, &e.item(&b, "物业-10月.md").id).unwrap();
+    let s = after.summary();
+    assert_eq!((s.filed, s.unfiled, s.undone), (1, 0, 2));
+    // The whole batch still undoes cleanly with an artifact already gone.
+    let undone = undo_batch_in(&e.roots, &b.id).unwrap();
+    assert!(undone.items.iter().all(|i| i.status == ItemStatus::Undone));
 }

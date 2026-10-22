@@ -615,7 +615,7 @@ pub fn list_batches_in(roots: &Roots, workspace: Option<&str>) -> Vec<BatchSumma
     let mut out: Vec<BatchSummary> = all_batches(roots)
         .into_iter()
         .filter(|b| key.as_ref().is_none_or(|k| *k == b.workspace_path))
-        .map(|b| b.summary())
+        .map(|b| as_it_stands(roots, b).summary())
         .collect();
     out.sort_by(|a, b| b.created_ms.cmp(&a.created_ms).then_with(|| b.id.cmp(&a.id)));
     out
@@ -638,7 +638,36 @@ pub fn get_batch(batch_id: &str) -> Result<IngestBatch, String> {
 }
 
 pub fn get_batch_in(roots: &Roots, batch_id: &str) -> Result<IngestBatch, String> {
-    load(roots, batch_id)
+    load(roots, batch_id).map(|b| as_it_stands(roots, b))
+}
+
+/// `batch` with its filed items where the library holds them now. The batch
+/// records where it filed each item, but the user may since have moved one in
+/// the folder tree or deleted it there — neither goes through the batch — and
+/// its counts should say where things are, not where they went first.
+fn as_it_stands(roots: &Roots, mut batch: IngestBatch) -> IngestBatch {
+    if !batch.items.iter().any(|i| i.status == ItemStatus::Filed && i.artifact_id.is_some()) {
+        return batch;
+    }
+    let schema: Vec<String> = library::list_folders_in(roots, &batch.workspace_path)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    for item in batch.items.iter_mut().filter(|i| i.status == ItemStatus::Filed) {
+        let Some(artifact) = item.artifact_id.as_deref() else { continue };
+        match artifacts::get_in(&roots.artifacts, artifact) {
+            Ok(a) => item.folder = Some(a.path).filter(|p| schema.contains(p)),
+            // Deleted by hand: for an upload that is the same as undoing it.
+            // A re-filed item's artifact was the user's to begin with, so its
+            // record is left alone.
+            Err(_) if item.refile.is_none() && !roots.artifacts.join(artifact).exists() => {
+                item.status = ItemStatus::Undone;
+            }
+            Err(_) => {}
+        }
+    }
+    batch
 }
 
 /// Take one filed item back out of the library (its artifact is deleted).
@@ -659,6 +688,7 @@ pub fn undo_item_in(roots: &Roots, batch_id: &str, item_id: &str) -> Result<Inge
         undo_one(roots, item)?;
         Ok(b.clone())
     })
+    .map(|b| as_it_stands(roots, b))
 }
 
 fn undo_one(roots: &Roots, item: &mut IngestItem) -> Result<(), String> {
@@ -708,6 +738,7 @@ pub fn undo_batch_in(roots: &Roots, batch_id: &str) -> Result<IngestBatch, Strin
         b.status = BatchStatus::Undone;
         Ok(b.clone())
     })
+    .map(|b| as_it_stands(roots, b))
 }
 
 /// Re-file one item into another schema folder (`""` = unfiled).
@@ -739,6 +770,7 @@ pub fn move_item_in(
         item.folder = moved.folder;
         Ok(b.clone())
     })
+    .map(|b| as_it_stands(roots, b))
 }
 
 /// Forget a finished batch (what it filed stays filed).
@@ -1352,7 +1384,74 @@ fn classify_all(roots: &Roots, id: &str, brain: &dyn Brain) -> Result<(), String
             });
         }
     });
+    // Files classified in one call already saw each other; across calls they
+    // did not, so the batch is reviewed as a whole.
+    if text_chunks.len() + vision.len() >= 2 {
+        consolidate(roots, id, brain, &folders)?;
+    }
     Ok(())
+}
+
+/// Most files one consolidation call reviews. A bigger batch keeps the
+/// per-call decisions as they are.
+const CONSOLIDATE_MAX_ITEMS: usize = 200;
+
+/// Put files of one kind in one folder: show the model every decision the
+/// separate classification calls made and apply where it regroups them. Best
+/// effort — no answer, or an unusable one, leaves the decisions as they were.
+fn consolidate(roots: &Roots, id: &str, brain: &dyn Brain, folders: &[LibraryFolder]) -> Result<(), String> {
+    if folders.is_empty() {
+        return Ok(());
+    }
+    let batch = load(roots, id)?;
+    // Files the classifier could not read have nothing to group by.
+    let items: Vec<&IngestItem> = batch
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::Classified && !i.summary.is_empty())
+        .collect();
+    if items.len() < 2 {
+        return Ok(());
+    }
+    if items.len() > CONSOLIDATE_MAX_ITEMS {
+        crate::log_debug(&format!("[library_ingest] batch {id}: {} files, not consolidated", items.len()));
+        return Ok(());
+    }
+    let mut proposed: Vec<classify::ProposedFolder> = Vec::new();
+    for p in items.iter().filter(|i| i.folder.is_none()).filter_map(|i| i.new_folder.as_ref()) {
+        if !proposed.iter().any(|q| q.path == p.path) {
+            proposed.push(p.clone());
+        }
+    }
+    let briefs: Vec<classify::PlacedBrief> = items
+        .iter()
+        .map(|i| classify::PlacedBrief {
+            id: i.id.clone(),
+            rel_path: i.rel_path.clone(),
+            title: i.title.clone(),
+            summary: i.summary.clone(),
+            folder: i.folder.clone(),
+            new_folder: i.new_folder.as_ref().map(|p| p.path.clone()),
+        })
+        .collect();
+    let ids: Vec<String> = briefs.iter().map(|b| b.id.clone()).collect();
+    let Some(out) = brain.text(ModelSlot::Standard, &classify::consolidate_prompt(folders, &proposed, &briefs)) else {
+        return Ok(());
+    };
+    add_cost(roots, id, &out);
+    let placements = classify::parse_consolidation(&out.text, folders, &proposed, &ids);
+    if placements.is_empty() {
+        return Ok(());
+    }
+    update(roots, id, |b| {
+        for p in &placements {
+            if let Some(i) = b.items.iter_mut().find(|i| i.id == p.id && i.status == ItemStatus::Classified) {
+                i.folder = p.folder.clone();
+                i.new_folder = p.new_folder.clone();
+            }
+        }
+        Ok(())
+    })
 }
 
 // ── Stage 5: filing ──────────────────────────────────────────────────────────

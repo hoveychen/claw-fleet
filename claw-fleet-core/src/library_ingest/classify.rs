@@ -379,6 +379,132 @@ fn new_folder_rule(folders: &[LibraryFolder]) -> String {
     }
 }
 
+/// One classified file of a batch, as the consolidation pass sees it.
+#[derive(Clone, Debug, Default)]
+pub struct PlacedBrief {
+    pub id: String,
+    pub rel_path: String,
+    pub title: String,
+    pub summary: String,
+    /// The schema folder it was filed in, if any.
+    pub folder: Option<String>,
+    /// With `folder` `None`: the folder its classifier proposed.
+    pub new_folder: Option<String>,
+}
+
+/// The first line of [`consolidate_prompt`], which tells it apart from the
+/// other prompts.
+pub const CONSOLIDATE_HEAD: &str = "These files were uploaded together in one batch.";
+
+/// Prompt reviewing a whole batch's filing at once. Files are classified in
+/// separate calls (one per image, one per text chunk) that cannot see each
+/// other's choices, so files of one kind can land in different folders — or
+/// one in a folder and its siblings unfiled. This pass sees every decision
+/// and puts each group in one folder.
+pub fn consolidate_prompt(folders: &[LibraryFolder], proposed: &[ProposedFolder], items: &[PlacedBrief]) -> String {
+    let mut p = String::new();
+    p.push_str(CONSOLIDATE_HEAD);
+    p.push_str(
+        " Each was filed on its own, without seeing the others, so files of the same kind may have \
+been split up. Check the filing of the batch as a whole.\n\n",
+    );
+    p.push_str("Existing folders (path — what belongs there):\n");
+    p.push_str(&folder_list(folders));
+    if !proposed.is_empty() {
+        p.push_str("\n\nFolders proposed for this batch (not created yet):\n");
+        for f in proposed {
+            if f.description.is_empty() {
+                p.push_str(&format!("- {}\n", f.path));
+            } else {
+                p.push_str(&format!("- {} — {}\n", f.path, f.description));
+            }
+        }
+    }
+    p.push_str("\n\nFiles (id · original path · title — summary · filed in):\n");
+    for it in items {
+        let summary: String = it.summary.split_whitespace().collect::<Vec<_>>().join(" ");
+        let summary = clip(&summary, 200);
+        let placed = match (&it.folder, &it.new_folder) {
+            (Some(f), _) => f.clone(),
+            (None, Some(n)) => format!("{n} (proposed)"),
+            (None, None) => "(unfiled)".to_string(),
+        };
+        p.push_str(&format!("- {} · {} · {} — {summary} · filed in: {placed}\n", it.id, it.rel_path, it.title.trim()));
+    }
+    p.push_str(
+        "\nRules:\n\
+- Files of the same kind (receipts, invoices, contracts, meeting notes, photos of one site, …) \
+belong in ONE folder. When such a group is split across folders, or some of it is unfiled, put \
+the whole group into the single folder that fits it best: an existing folder, a proposed one, or \
+a new folder you declare.\n\
+- A new folder: at most 2 levels deep, usually a subfolder extending an existing one, named in \
+the existing folders' language. Declare it once in \"new_folders\" with a reason; use it only \
+when no existing folder fits the group.\n\
+- Leave a file that has no siblings of its kind where it is, unless its folder is clearly wrong. \
+Never leave a file unfiled when a folder fits it.\n\n\
+Reply with JSON only, giving every file's final folder (an existing path, a new_folders path, \
+or \"\" for unfiled):\n\
+{\"new_folders\":[{\"path\":\"...\",\"key\":\"short-ascii-slug\",\"description\":\"...\",\
+\"reason\":\"...\"}],\"files\":[{\"id\":\"...\",\"folder\":\"...\"}]}\n",
+    );
+    p
+}
+
+/// Where the consolidation pass put one file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub id: String,
+    /// An existing schema folder; `None` with `new_folder` `None` = unfiled.
+    pub folder: Option<String>,
+    pub new_folder: Option<ProposedFolder>,
+}
+
+/// Placements of a [`consolidate_prompt`] answer, for the ids in `expected`.
+/// A row naming a folder that is neither in the schema, nor declared in the
+/// answer's `new_folders`, nor among the classifier's `proposed` ones is
+/// dropped — that file keeps what its own classification decided.
+pub fn parse_consolidation(
+    text: &str,
+    folders: &[LibraryFolder],
+    proposed: &[ProposedFolder],
+    expected: &[String],
+) -> Vec<Placement> {
+    let Some(value) = parse_value(text) else {
+        return Vec::new();
+    };
+    let (declared, rows): (Vec<ProposedFolder>, Vec<Value>) = match &value {
+        Value::Object(m) => (
+            m.get("new_folders")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(proposal_from).collect())
+                .unwrap_or_default(),
+            m.get("files").and_then(Value::as_array).cloned().unwrap_or_default(),
+        ),
+        Value::Array(a) => (Vec::new(), a.clone()),
+        _ => return Vec::new(),
+    };
+    let known = |path: &str| -> Option<ProposedFolder> {
+        declared.iter().chain(proposed).find(|p| p.path == path).cloned()
+    };
+    expected
+        .iter()
+        .filter_map(|id| {
+            let row = rows.iter().find(|r| str_field(r, "id").trim() == id)?;
+            let raw = str_field(row, "folder");
+            if norm_path(&raw).is_empty() {
+                return Some(Placement { id: id.clone(), folder: None, new_folder: None });
+            }
+            if let Some(f) = match_folder(folders, &raw) {
+                return Some(Placement { id: id.clone(), folder: Some(f), new_folder: None });
+            }
+            let path = norm_path(&raw);
+            let segs: Vec<&str> = path.split('/').collect();
+            let p = known(&segs[..segs.len().min(2)].join("/"))?;
+            Some(Placement { id: id.clone(), folder: None, new_folder: Some(p) })
+        })
+        .collect()
+}
+
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
 /// The first balanced JSON array or object in `text`, skipping code fences
@@ -1062,6 +1188,47 @@ mod tests {
         assert!(classify_prompt(&folders, std::slice::from_ref(&brief), Language::Chinese).contains("\"new_folder\""));
         assert!(vision_prompt(&folders, &brief, "a.jpg", Language::Chinese).contains("\"new_folder\""));
         assert!(!classify_prompt(&[], std::slice::from_ref(&brief), Language::Chinese).contains("new_folder"));
+    }
+
+    #[test]
+    fn a_consolidation_regroups_onto_known_folders_only() {
+        let folders = vec![folder("票据", "发票"), folder("合同", "")];
+        let proposed = vec![ProposedFolder {
+            path: "票据/收据".into(),
+            reason: "r".into(),
+            ..Default::default()
+        }];
+        let briefs = vec![
+            PlacedBrief { id: "i1".into(), title: "Uber 收据".into(), summary: "车费".into(), folder: Some("票据".into()), ..Default::default() },
+            PlacedBrief { id: "i2".into(), title: "咖啡收据".into(), new_folder: Some("票据/收据".into()), ..Default::default() },
+            PlacedBrief { id: "i3".into(), title: "酒店收据".into(), ..Default::default() },
+        ];
+        let p = consolidate_prompt(&folders, &proposed, &briefs);
+        assert!(p.starts_with(CONSOLIDATE_HEAD));
+        assert!(p.contains("- i1 ·  · Uber 收据 — 车费 · filed in: 票据"), "{p}");
+        assert!(p.contains("filed in: 票据/收据 (proposed)") && p.contains("filed in: (unfiled)"));
+        assert!(p.contains("Folders proposed for this batch") && p.contains("- 票据/收据"));
+
+        let ids: Vec<String> = ["i1", "i2", "i3", "i4", "i5"].iter().map(|s| s.to_string()).collect();
+        let answer = r#"```json
+{"new_folders":[{"path":"差旅/酒店","key":"hotel","description":"住宿","reason":"差旅单独放"},{"path":"无理由"}],
+ "files":[{"id":"i1","folder":"票据/收据"},{"id":"i2","folder":"/票据/收据/"},
+          {"id":"i3","folder":"差旅/酒店"},{"id":"i4","folder":"无理由"},{"id":"i5","folder":""}]}
+```"#;
+        let got = parse_consolidation(answer, &folders, &proposed, &ids);
+        let at = |id: &str| got.iter().find(|p| p.id == id).cloned();
+        assert_eq!(at("i1").unwrap().new_folder.unwrap().path, "票据/收据", "a proposed folder");
+        assert_eq!(at("i2").unwrap().new_folder.unwrap().path, "票据/收据");
+        let hotel = at("i3").unwrap().new_folder.unwrap();
+        assert_eq!((hotel.path.as_str(), hotel.key.as_str()), ("差旅/酒店", "hotel"), "a declared folder");
+        assert_eq!(at("i4"), None, "a folder neither known nor declared with a reason is dropped");
+        assert_eq!(at("i5").unwrap(), Placement { id: "i5".into(), folder: None, new_folder: None });
+        assert_eq!(
+            parse_consolidation(r#"[{"id":"i1","folder":"合同"}]"#, &folders, &[], &ids)[0].folder.as_deref(),
+            Some("合同"),
+            "a bare array of files is accepted"
+        );
+        assert!(parse_consolidation("no idea", &folders, &[], &ids).is_empty());
     }
 
     #[test]
