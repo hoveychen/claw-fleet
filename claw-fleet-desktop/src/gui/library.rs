@@ -34,6 +34,23 @@ pub(crate) fn library_folder_items(
     state.backend.library_folder_items(&workspace_path, &folder)
 }
 
+/// Pack a folder, a selection or a whole project — docs and artifacts — into
+/// a zip at `dest`. Slow by nature (it copies every byte), hence the probe.
+#[tauri::command(async)]
+pub(crate) fn library_export(
+    spec: claw_fleet_core::library_export::ExportSpec,
+    dest: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::library_export::LibraryZip, String> {
+    let probe = crate::cmd_probe::CmdProbe::start("library_export", &spec.scope);
+    let result = state.backend.library_export(&spec, &dest);
+    probe.done(|| match &result {
+        Ok(r) => format!("{} item(s), {} file(s) → {dest}", r.item_count, r.file_count),
+        Err(e) => e.clone(),
+    });
+    result
+}
+
 /// Full-text search over both stores, ranked; `workspace` scopes it to one
 /// project.
 #[tauri::command(async)]

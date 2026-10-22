@@ -47,11 +47,13 @@ import {
   type WebUploadFile,
 } from "../libraryUpload";
 import { isWebBuild } from "../hostEnv";
+import { formatBytes } from "../formatBytes";
+import { exportLibraryZip, type LibraryExportSpec } from "../libraryExport";
 import type { RegisteredProject } from "../projectList";
 import type { AuxCardTail } from "./auxDocMenu";
 import { ArtifactTabPane } from "./ArtifactTabPane";
 import { BATCH_POLL_MS, BatchDetail } from "./LibraryBatch";
-import { LibraryContent, type ContentMode } from "./LibraryContent";
+import { LibraryContent, type ContentMode, type ExportRequest } from "./LibraryContent";
 import { DROP_ATTR, LibraryFolderRail, UPLOAD_ATTR } from "./LibraryFolderRail";
 import { WikiTabPane } from "./WikiTabPane";
 import { EmptyState } from "./EmptyState";
@@ -102,6 +104,7 @@ export function LibraryView() {
   const [projects, setProjects] = useState<LibraryProjectTree[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Bumped by every reload, so the open folder's items are refetched with it.
   const [rev, setRev] = useState(0);
@@ -479,6 +482,54 @@ export function LibraryView() {
     [mutate, selectedKey, set],
   );
 
+  // ── Export to a zip ───────────────────────────────────────────────────────
+  // One at a time: `exporting` is the key of the export running (a folder
+  // path, "selection" or "project"), so its button shows the spinner.
+  const [exporting, setExporting] = useState<string | null>(null);
+  const exportGuard = useRef(false);
+  const onExport = useCallback(
+    async (req: ExportRequest) => {
+      if (exportGuard.current || !activeProject) return;
+      exportGuard.current = true;
+      setExporting(req.key);
+      try {
+        const spec: LibraryExportSpec = {
+          workspacePath: activeProject,
+          scope: req.scope,
+          folder: req.folder,
+          items: req.items,
+          unfiledLabel: t("library.unfiled", "未归档"),
+        };
+        const done = await exportLibraryZip(spec, `${req.name}.zip`);
+        if (done === null) return;
+        setError(null);
+        if (done === "download") {
+          setNotice(t("library.export_started", "已开始下载「{{name}}」，进度见浏览器的下载栏", { name: `${req.name}.zip` }));
+        } else {
+          const text = t("library.export_done", "已导出 {{items}} 条资料（{{files}} 个文件，{{size}}）", {
+            items: done.itemCount,
+            files: done.fileCount,
+            size: formatBytes(done.totalBytes),
+          });
+          setNotice(
+            done.skipped.length === 0
+              ? text
+              : `${text} · ${t("library.export_skipped", "跳过 {{n}} 条（存储的文件已不在）：{{names}}", {
+                  n: done.skipped.length,
+                  names: done.skipped.join("、"),
+                })}`,
+          );
+        }
+      } catch (e) {
+        setError(t("library.export_failed", "导出失败：{{error}}", { error: String(e) }));
+      } finally {
+        setExporting(null);
+        exportGuard.current = false;
+      }
+    },
+    [activeProject, t],
+  );
+
   // ── Drag a card onto a rail folder to file it ─────────────────────────────
   // Pointer events, not HTML5 DnD (inert in this webview — see usePointerDrag).
   const pressed = useRef<{ entry: LibraryEntry; project: string } | null>(null);
@@ -600,6 +651,8 @@ export function LibraryView() {
             onDeleteFolder,
             onDescribeFolder,
             onAcceptFolder,
+            onExportFolder: (path, label) => void onExport({ key: path, scope: "folder", folder: path, name: label }),
+            exporting,
           }}
         />
       )}
@@ -632,6 +685,11 @@ export function LibraryView() {
           {error && (
             <div className={styles.error} onClick={() => setError(null)}>
               {error}
+            </div>
+          )}
+          {notice && (
+            <div className={styles.notice} onClick={() => setNotice(null)} data-library-notice>
+              {notice}
             </div>
           )}
           {dropProject && (
@@ -686,6 +744,8 @@ export function LibraryView() {
                 uploading: webUpload?.project === activeProject ? webUpload : null,
                 onRefile: () => void onRefile(activeProject),
                 refiling: projectRunning.some(isRefileBatch) || refilePending === activeProject,
+                onExport: (req) => void onExport(req),
+                exporting,
               }}
             />
           )}

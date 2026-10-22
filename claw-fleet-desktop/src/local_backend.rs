@@ -3002,6 +3002,15 @@ impl LocalBackend {
         crate::library::folder_items(workspace_path, folder)
     }
 
+    /// Pack a folder, a selection or a whole project into a zip at `dest`.
+    pub fn library_export(
+        &self,
+        spec: &crate::library_export::ExportSpec,
+        dest: &str,
+    ) -> Result<crate::library_export::LibraryZip, String> {
+        crate::library_export::export_to_file(spec, std::path::Path::new(dest))
+    }
+
     pub fn library_search(
         &self,
         query: &str,

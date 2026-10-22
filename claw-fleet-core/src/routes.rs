@@ -194,6 +194,11 @@ pub const LIBRARY_FOLDER_ACCEPT: &str = "/library_folder_accept";
 pub const LIBRARY_FOLDER_DELETE: &str = "/library_folder_delete";
 pub const LIBRARY_FOLDER_RENAME: &str = "/library_folder_rename";
 pub const LIBRARY_MOVE: &str = "/library_move";
+/// A folder, a selection or a whole project packed as a zip of its docs and
+/// artifacts (`crate::library_export`):
+/// `?workspace_path=&scope=folder|items|project&folder=&items=<k1>,<k2>&unfiled_label=&filename=`,
+/// `items` being `doc:<slug>` / `artifact:<id>` keys. Answers the archive bytes.
+pub const LIBRARY_EXPORT: &str = "/library_export";
 /// Full-text search over both stores (`crate::library_index`):
 /// `?q=&workspace=&kind=doc|artifact&limit=` → ranked `LibraryHit`s.
 pub const LIBRARY_SEARCH: &str = "/library_search";

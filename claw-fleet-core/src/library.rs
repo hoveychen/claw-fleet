@@ -1001,6 +1001,40 @@ pub fn folder_items_in(
         .collect())
 }
 
+/// One project's raw records with the schema folder each is filed in — what
+/// [`tree_in`] places, before it is reduced to [`LibraryItem`]s. For callers
+/// that need more than the listing carries (a doc's version, an artifact's
+/// blob), such as `library_export`.
+pub(crate) struct ProjectRecords {
+    pub key: String,
+    pub docs: Vec<(WikiDoc, Option<String>)>,
+    pub artifacts: Vec<(Artifact, Option<String>)>,
+}
+
+pub(crate) fn project_records_in(roots: &Roots, workspace: &str) -> Result<ProjectRecords, String> {
+    import_legacy_artifact_folders(roots);
+    let key = checked_key(workspace)?;
+    let folders = project_folders(roots, &key);
+    let mut keys = KeyCache::default();
+    let docs = wiki::list_docs_in(&roots.wiki)
+        .into_iter()
+        .filter(|d| keys.key(&d.workspace_path) == key)
+        .map(|d| {
+            let folder = doc_folder(&folders, &d.slug);
+            (d, folder)
+        })
+        .collect();
+    let artifacts = artifacts::list_in(&roots.artifacts)
+        .into_iter()
+        .filter(|a| keys.key(&a.workspace_path) == key)
+        .map(|a| {
+            let folder = artifact_folder(&folders, &a);
+            (a, folder)
+        })
+        .collect();
+    Ok(ProjectRecords { key, docs, artifacts })
+}
+
 /// A task's 资料, as [`task_items`] answers it.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

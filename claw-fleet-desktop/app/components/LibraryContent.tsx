@@ -6,6 +6,7 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  Download,
   Film,
   FileSpreadsheet,
   FileText,
@@ -16,9 +17,11 @@ import {
   FolderUp,
   Image as ImageIcon,
   Inbox,
+  ListChecks,
   Music,
   Presentation,
   Sparkles,
+  X,
 } from "lucide-react";
 
 import {
@@ -110,12 +113,27 @@ export interface ContentCtx {
   entryDrag: (e: LibraryEntry) => { onPointerDown: (ev: React.PointerEvent) => void };
 }
 
-/** The upload / re-file verbs of the open project. */
+/** One export to a zip, as the page runs it (`exportLibraryZip`). */
+export interface ExportRequest {
+  /** What is exporting, for its button's spinner: a folder path, "" for the
+   *  unfiled bucket, "selection" or "project". */
+  key: string;
+  scope: "folder" | "items" | "project";
+  folder?: string;
+  items?: string[];
+  /** The archive's name, without `.zip`. */
+  name: string;
+}
+
+/** The upload / re-file / export verbs of the open project. */
 export interface ContentVerbs {
   onUpload: (kind: PickKind) => void;
   uploading: { sent: number; total: number } | null;
   onRefile: () => void;
   refiling: boolean;
+  onExport: (req: ExportRequest) => void;
+  /** The key of the export running, if any. */
+  exporting: string | null;
 }
 
 export type ContentMode = "search" | "batches" | "overview" | "folder";
@@ -159,7 +177,8 @@ export function LibraryContent(props: {
   if (mode === "batches") return <BatchList {...props} />;
   if (!props.project || !props.view) return <SkeletonList rows={6} />;
   if (mode === "overview") return <Overview {...props} project={props.project} view={props.view} />;
-  return <FolderContent {...props} project={props.project} view={props.view} />;
+  // Keyed by folder: a selection belongs to the listing it was made in.
+  return <FolderContent key={props.folder ?? ""} {...props} project={props.project} view={props.view} />;
 }
 
 type Props = Parameters<typeof LibraryContent>[0];
@@ -212,6 +231,36 @@ function UploadVerbs({ verbs, showRefile }: { verbs: ContentVerbs; showRefile: b
   );
 }
 
+function ExportButton({
+  label,
+  hint,
+  running,
+  disabled,
+  onClick,
+  testId,
+}: {
+  label: string;
+  hint: string;
+  running: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={styles.upload_btn}
+      title={hint}
+      onClick={onClick}
+      disabled={disabled || running}
+      data-library-export={testId}
+    >
+      {running ? <Spinner size={11} /> : <Download size={13} strokeWidth={1.6} />}
+      {label}
+    </button>
+  );
+}
+
 // ── Overview ────────────────────────────────────────────────────────────────
 
 function Overview(props: Props & { project: LibraryProjectTree; view: LibraryTreeView }) {
@@ -237,7 +286,19 @@ function Overview(props: Props & { project: LibraryProjectTree; view: LibraryTre
       <div className={styles.content_head}>
         <div className={styles.content_title_row}>
           <h2 className={styles.content_title}>{project.workspaceName}</h2>
-          <UploadVerbs verbs={verbs} showRefile={unfiled > 0} />
+          <span className={styles.content_verbs}>
+            <ExportButton
+              label={t("library.export_project", "导出整个项目")}
+              hint={t("library.export_project_hint", "把这个项目的全部文档和产出（含未归档）按目录结构打成一个 zip")}
+              running={verbs.exporting === "project"}
+              disabled={verbs.exporting !== null || projectTotals(project).total === 0}
+              onClick={() =>
+                verbs.onExport({ key: "project", scope: "project", name: project.workspaceName })
+              }
+              testId="project"
+            />
+            <UploadVerbs verbs={verbs} showRefile={unfiled > 0} />
+          </span>
         </div>
         <p className={styles.content_desc}>
           {t("library.overview_stats", "{{items}} 条资料 · {{folders}} 个目录 · 未归档 {{unfiled}} 条", {
@@ -403,6 +464,25 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
   const group = typeGroup && chips.includes(typeGroup) ? typeGroup : null;
   const shown = useMemo(() => filterListing(rows, group, sort), [rows, group, sort]);
 
+  // Multi-select for "导出所选": while on, a card click toggles it instead
+  // of opening it, and cards are not draggable.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const toggle = useCallback((key: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const stopSelecting = () => {
+    setSelecting(false);
+    setPicked(new Set());
+  };
+  const shownKeys = shown.map((r) => libraryEntryKey(r.entry));
+  const allShownPicked = shownKeys.length > 0 && shownKeys.every((k) => picked.has(k));
+
   const crumbs = folder ? folder.split("/") : [];
   const label = node ? node.label : t("library.unfiled", "未归档");
   const description = node ? node.description : t("library.unfiled_desc", "不在任何目录里的资料，拖进文件夹即可归档");
@@ -431,7 +511,24 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
             {label}
             <span className={styles.content_count}>{total}</span>
           </h2>
-          <UploadVerbs verbs={verbs} showRefile={!node && view.unfiledTotal > 0} />
+          <span className={styles.content_verbs}>
+            <ExportButton
+              label={t("library.export_folder", "导出")}
+              hint={t("library.export_folder_hint", "把这个目录（含子目录）的文档和产出按目录结构打成一个 zip")}
+              running={verbs.exporting === (folder ?? "")}
+              // The unfiled bucket is no folder: it goes out as the listed items.
+              disabled={verbs.exporting !== null || total === 0 || (!node && loading)}
+              onClick={() =>
+                verbs.onExport(
+                  node
+                    ? { key: node.path, scope: "folder", folder: node.path, name: label }
+                    : { key: "", scope: "items", folder: "", items: rows.map((r) => libraryEntryKey(r.entry)), name: label },
+                )
+              }
+              testId="folder"
+            />
+            <UploadVerbs verbs={verbs} showRefile={!node && view.unfiledTotal > 0} />
+          </span>
         </div>
         {description && <p className={styles.content_desc}>{description}</p>}
         {node && node.children.length > 0 && (
@@ -476,6 +573,17 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
                 </span>
               ))}
             </div>
+            <button
+              type="button"
+              className={`${styles.type_chip}${selecting ? ` ${styles.type_chip_on}` : ""}`}
+              onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+              title={t("library.select_hint", "勾选几条资料，一起导出")}
+              aria-pressed={selecting}
+              data-library-select
+            >
+              <ListChecks size={12} strokeWidth={1.7} />
+              {t("library.select", "多选")}
+            </button>
             <select
               className={styles.select}
               value={sort}
@@ -488,6 +596,46 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
           </div>
         )}
       </div>
+      {selecting && (
+        <div className={styles.select_bar} data-library-select-bar>
+          <span className={styles.select_count}>
+            {t("library.selected_n", "已选 {{n}} 项", { n: picked.size })}
+          </span>
+          <button
+            type="button"
+            className={styles.select_link}
+            onClick={() => setPicked(allShownPicked ? new Set() : new Set(shownKeys))}
+          >
+            {allShownPicked ? t("library.select_none", "全不选") : t("library.select_all", "全选")}
+          </button>
+          <span className={styles.select_spacer} />
+          <ExportButton
+            label={t("library.export_selected", "导出所选")}
+            hint={t("library.export_selected_hint", "把勾选的资料打成一个 zip，保留它们的目录结构")}
+            running={verbs.exporting === "selection"}
+            disabled={verbs.exporting !== null || picked.size === 0}
+            onClick={() =>
+              verbs.onExport({
+                key: "selection",
+                scope: "items",
+                folder: folder ?? "",
+                items: [...picked],
+                name: t("library.export_selection_name", "{{name}}（{{n}} 项）", { name: label, n: picked.size }),
+              })
+            }
+            testId="selection"
+          />
+          <button
+            type="button"
+            className={styles.select_close}
+            onClick={stopSelecting}
+            title={t("library.select_done", "退出多选")}
+            aria-label={t("library.select_done", "退出多选")}
+          >
+            <X size={13} strokeWidth={1.8} />
+          </button>
+        </div>
+      )}
       {loading ? (
         <SkeletonList rows={Math.min(Math.max(total, 2), 6)} />
       ) : rows.length === 0 ? (
@@ -498,9 +646,18 @@ function FolderContent(props: Props & { project: LibraryProjectTree; view: Libra
         </div>
       ) : (
         <div className={`${styles.cards}${props.narrow ? ` ${styles.cards_narrow}` : ""}`}>
-          {shown.map(({ entry, sub }) => (
-            <ItemCard key={libraryEntryKey(entry)} entry={entry} where={sub} ctx={props.ctx} />
-          ))}
+          {shown.map(({ entry, sub }) => {
+            const key = libraryEntryKey(entry);
+            return (
+              <ItemCard
+                key={key}
+                entry={entry}
+                where={sub}
+                ctx={props.ctx}
+                select={selecting ? { checked: picked.has(key), onToggle: () => toggle(key) } : undefined}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -629,6 +786,7 @@ function ItemCard({
   snippet,
   hitInSummary = false,
   ctx,
+  select,
 }: {
   entry: LibraryEntry;
   /** The subfolder (in a folder listing) or the folder (in search results). */
@@ -637,10 +795,12 @@ function ItemCard({
   snippet?: string;
   hitInSummary?: boolean;
   ctx: ContentCtx;
+  /** Multi-select is on: a click toggles the card instead of opening it. */
+  select?: { checked: boolean; onToggle: () => void };
 }) {
   const { t } = useTranslation();
   const key = libraryEntryKey(entry);
-  const active = ctx.selectedKey === key;
+  const active = !select && ctx.selectedKey === key;
   const text = snippet ?? entry.summary ?? "";
   const tags = entry.tags ?? [];
   // Only a picture earns the thumbnail well; everything else gets a small
@@ -653,12 +813,18 @@ function ItemCard({
       type="button"
       className={`${styles.card}${active ? ` ${styles.card_active}` : ""}${
         ctx.draggingKey === key ? ` ${styles.row_dragging}` : ""
-      }`}
-      onClick={() => ctx.onOpen(entry)}
+      }${select?.checked ? ` ${styles.card_checked}` : ""}`}
+      onClick={() => (select ? select.onToggle() : ctx.onOpen(entry))}
       aria-current={active ? "true" : undefined}
+      aria-pressed={select ? select.checked : undefined}
       data-library-item={key}
-      {...ctx.entryDrag(entry)}
+      {...(select ? {} : ctx.entryDrag(entry))}
     >
+      {select && (
+        <span className={styles.card_check} data-checked={select.checked || undefined} aria-hidden>
+          {select.checked && <Check size={11} strokeWidth={2.4} />}
+        </span>
+      )}
       {media && <Thumb entry={entry} media={media} />}
       <span className={styles.card_body}>
         <span className={styles.card_title_row}>
