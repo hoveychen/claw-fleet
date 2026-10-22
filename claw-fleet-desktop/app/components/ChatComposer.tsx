@@ -55,6 +55,32 @@ function timestampedPasteName(ext: string): string {
   return `pasted-${hms}${ms}.${ext}`;
 }
 
+/**
+ * Size a textarea to its content. Collapsing it to 0 first makes scrollHeight
+ * report the content height rather than the current box — but for that instant
+ * every scrollable ancestor is shorter, so a container scrolled near its bottom
+ * gets its scrollTop clamped down. Restoring the height then leaves the content
+ * shifted, and the browser scrolls the caret back into view by the minimum, so
+ * each keystroke in a long answer parked the caret on the container's bottom
+ * edge and pushed the rest of the composer out of sight (the inline decision
+ * card in SessionDetail). Ancestors' scroll offsets are put back afterwards.
+ */
+export function fitTextareaHeight(el: HTMLTextAreaElement): void {
+  const saved: Array<[Element, number]> = [];
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (p.scrollTop !== 0) saved.push([p, p.scrollTop]);
+  }
+  const doc = document.scrollingElement;
+  if (doc && doc.scrollTop !== 0 && !saved.some(([n]) => n === doc)) {
+    saved.push([doc, doc.scrollTop]);
+  }
+  el.style.height = "0px";
+  el.style.height = `${el.scrollHeight}px`;
+  for (const [node, top] of saved) {
+    if (node.scrollTop !== top) node.scrollTop = top;
+  }
+}
+
 function readImageDimensions(url: string): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -395,10 +421,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // documented as the short-circuit; it was assigned on every call and then
     // used as the value to write, so it was always equal to the fresh reading
     // and short-circuited nothing.)
-    const grow = () => {
-      el.style.height = "0px";
-      el.style.height = `${el.scrollHeight}px`;
-    };
+    const grow = () => fitTextareaHeight(el);
     grow();
     const ro = new ResizeObserver(grow);
     ro.observe(el);
@@ -802,13 +825,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         mentions.sync(e.currentTarget);
       }}
       onPaste={handlePaste}
-      onInput={(e) => {
-        const el = e.currentTarget;
-        // Collapse to 0 before measuring so scrollHeight reflects content, not
-        // the current box (see the auto-grow effect above).
-        el.style.height = "0px";
-        el.style.height = `${el.scrollHeight}px`;
-      }}
+      onInput={(e) => fitTextareaHeight(e.currentTarget)}
       // Clicking or arrowing out of an `@…` run must close the picker.
       onSelect={(e) => mentions.sync(e.currentTarget)}
       onKeyDown={handleKeyDown}
