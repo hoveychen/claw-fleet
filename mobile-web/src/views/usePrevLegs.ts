@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FleetTransport } from "../transport";
 import type { HandoffChain, RawMessage, SessionInfo } from "../types";
-import { legTitle, nextLeg, type LoadedLeg } from "../../../shared-ts/prevLeg";
+import { hasSuccessor, legTitle, nextLeg, successorLeg, type LoadedLeg } from "../../../shared-ts/prevLeg";
 
 /** Raw lines fetched per page of a prepended leg — the same steps the
  *  current leg's own "加载更早的消息" uses. */
@@ -128,4 +128,43 @@ export function usePrevLegs(
     /** Paging for the topmost prepended leg, while it has earlier lines. */
     earlier: top && !top.fullyLoaded ? loadEarlierTop : null,
   };
+}
+
+/**
+ * The open session's successor on its relay chain, or null while it has none.
+ * A view left open across a handoff otherwise ends on the last reply with
+ * nothing pointing at where the work went. Re-reads the chain whenever the
+ * snapshot reports it grew.
+ */
+export function useSuccessorLeg(
+  client: FleetTransport | null,
+  session: SessionInfo,
+  sessions: SessionInfo[],
+): { sessionId: string; hop: number; title: string } | null {
+  const handoff = session.handoff ?? null;
+  const want = !!client && hasSuccessor(handoff);
+  const chainLen = handoff?.chainLen ?? 0;
+  const [chain, setChain] = useState<{ sessionId: string; chain: HandoffChain } | null>(null);
+
+  useEffect(() => {
+    if (!want || !client) return;
+    let live = true;
+    const sessionId = session.id;
+    client
+      .request<HandoffChain | null>("handoff_chain", { sessionId })
+      .then((c) => {
+        // The relay resolves a null reply to an empty object; a real chain
+        // carries a chainId.
+        if (live && c && c.chainId) setChain({ sessionId, chain: c });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [want, client, session.id, chainLen]);
+
+  return useMemo(() => {
+    if (!want || !handoff || chain?.sessionId !== session.id) return null;
+    return successorLeg({ links: chain.chain.links, sessionId: session.id, hop: handoff.hop, sessions });
+  }, [want, handoff, chain, session.id, sessions]);
 }

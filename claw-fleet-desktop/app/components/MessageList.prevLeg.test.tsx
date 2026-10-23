@@ -191,3 +191,28 @@ describe("load previous relay leg", () => {
     expect(container!.querySelector('[data-testid="leg-heading"]')).toBeNull();
   });
 });
+
+describe("handed-off tail", () => {
+  const idle = [user("u1", "go"), { ...reply("a1", "done"), message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" } } as RawMessage];
+
+  it("says which leg took over instead of waiting for input, and opens it", () => {
+    const onOpen = vi.fn();
+    render({ messages: idle, status: "waitingInput", successor: { hop: 3, title: "Next leg", onOpen } });
+    const row = container!.querySelector('[data-testid="handed-off"]');
+    expect(row?.textContent).toContain("已接力给第 3 棒 · Next leg");
+    expect(container!.textContent).not.toContain("等待输入");
+    act(() => (row!.querySelector("button") as HTMLButtonElement).click());
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the waiting row when the session has not handed off", () => {
+    render({ messages: idle, status: "waitingInput" });
+    expect(container!.querySelector('[data-testid="handed-off"]')).toBeNull();
+    expect(container!.textContent).toContain("等待输入");
+  });
+
+  it("yields to the working indicator while the session still runs", () => {
+    render({ messages: idle, status: "thinking", successor: { hop: 3, title: "Next leg", onOpen: () => {} } });
+    expect(container!.querySelector('[data-testid="handed-off"]')).toBeNull();
+  });
+});

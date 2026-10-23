@@ -3,8 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type { HandoffChain, RawMessage, SessionInfo } from "./types";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useSessionsStore } from "./store";
 import {
+  hasSuccessor,
   legTitle,
   nextLeg,
+  successorLeg,
   prependedCount,
   stitchLegs,
   type LoadedLeg,
@@ -183,4 +185,44 @@ export function usePrevLegs(current: CurrentLeg) {
     isLoadingEarlier: top ? loading : current.isLoadingEarlier,
     offer,
   };
+}
+
+/** The leg that took over from the open session, once it handed off. */
+export interface SuccessorLeg {
+  sessionId: string;
+  hop: number;
+  title: string;
+}
+
+/**
+ * The open session's successor on its relay chain, or null while it has none.
+ * A pane left open across a handoff otherwise just reads "waiting for input"
+ * with nothing pointing at where the work went. Re-reads the chain whenever
+ * the scan reports it grew.
+ */
+export function useSuccessorLeg(session: SessionInfo | null | undefined): SuccessorLeg | null {
+  const sessions = useSessionsStore((s) => s.sessions);
+  const sessionId = session?.id ?? null;
+  const handoff = session?.handoff ?? null;
+  const want = !!sessionId && hasSuccessor(handoff);
+  const chainLen = handoff?.chainLen ?? 0;
+  const [chain, setChain] = useState<{ sessionId: string; chain: HandoffChain } | null>(null);
+
+  useEffect(() => {
+    if (!want || !sessionId) return;
+    let live = true;
+    invoke<HandoffChain | null>("get_handoff_chain", { sessionId })
+      .then((c) => {
+        if (live && c && c.chainId) setChain({ sessionId, chain: c });
+      })
+      .catch((e) => console.error("Failed to read the handoff chain:", e));
+    return () => {
+      live = false;
+    };
+  }, [want, sessionId, chainLen]);
+
+  return useMemo(() => {
+    if (!want || !sessionId || !handoff || chain?.sessionId !== sessionId) return null;
+    return successorLeg({ links: chain.chain.links, sessionId, hop: handoff.hop, sessions });
+  }, [want, sessionId, handoff, chain, sessions]);
 }

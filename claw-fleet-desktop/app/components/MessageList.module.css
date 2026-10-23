@@ -601,6 +601,38 @@
   font-size: var(--t-ui, 12px);
 }
 
+/* Idle tail of a session that handed off: where the work went. */
+.handed_off {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 12px);
+}
+
+.handed_off_label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handed_off_btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.handed_off_btn:hover {
+  background: var(--color-bg-hover);
+}
+
 /* A turn that failed instead of replying. Deliberately not an assistant
    bubble — the model never said this. */
 .turn_error {

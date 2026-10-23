@@ -143,6 +143,23 @@
   font-size: var(--t-aux, 12px);
 }
 
+/* Tail of a session that handed off: where the work went. */
+.handedOff {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+}
+
+.handedOffLabel {
+  max-width: 90%;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .userRow {
   display: flex;
   flex-direction: column;

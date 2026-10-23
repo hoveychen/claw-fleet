@@ -11,7 +11,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { usePrevLegs } from "../usePrevLegs";
+import { usePrevLegs, useSuccessorLeg } from "../usePrevLegs";
 import { CalendarClock, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, PendingDecision, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
@@ -561,6 +561,15 @@ export function SessionDetail({
       ? timelineMessages
       : [...timelineMessages, ...pendingOptimistic.map(optimisticToMessage)],
     [timelineMessages, pendingOptimistic],
+  );
+  // The leg this session handed off to, offered at the transcript's idle tail.
+  const successor = useSuccessorLeg(liveSession);
+  const successorOffer = useMemo(
+    () =>
+      successor && onOpenSession
+        ? { hop: successor.hop, title: successor.title, onOpen: () => onOpenSession(successor.sessionId) }
+        : null,
+    [successor, onOpenSession],
   );
   // Earlier relay legs the reader chose to prepend. Display-only: everything
   // above that acts on this session keeps reading `displayedMessages`.
@@ -2117,6 +2126,7 @@ export function SessionDetail({
                       prevLeg={prevLegs.offer}
                       readOnlyPrefix={prevLegs.readOnlyPrefix}
                       toolResultPaths={prevLegs.toolResultPaths}
+                      successor={successorOffer}
                       paths={pathLinks}
                       // Use the live-refreshed session (same source every other
                       // jsonlPath consumer here uses); `session` is the possibly-

@@ -589,6 +589,8 @@ const DICT: Record<string, string> = {
   "加载第 {0} 棒": "Load leg {0}",
   "第 {0} 棒 · {1} · {2} 开始": "Leg {0} · {1} · started {2}",
   "第 {0} 棒（当前）· {1} · {2} 开始": "Leg {0} (current) · {1} · started {2}",
+  "已接力给第 {0} 棒 · {1}": "Handed off to leg {0} · {1}",
+  "前往下一棒": "Go to next leg",
   "[图片]": "[image]",
   思考: "Thinking",
   "正在思考…": "Thinking…",

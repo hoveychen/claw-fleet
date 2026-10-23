@@ -31,6 +31,32 @@ export function predecessorLink<L extends LegLinkShape>(
   return links.find((l) => l.toSessionId === sessionId) ?? null;
 }
 
+/** True once a later leg has joined the chain behind this session, i.e. it
+ *  handed off and its successor is running. The backend recomputes `chainLen`
+ *  on every scan, so an open pane learns this without re-reading anything. */
+export function hasSuccessor(handoff: { hop: number; chainLen: number } | null | undefined): boolean {
+  return !!handoff && handoff.hop < handoff.chainLen;
+}
+
+/** The leg that took over from `sessionId`, for the "go to the next leg"
+ *  control. The title falls back to the id while the successor is not yet in
+ *  this client's scan. Null for the chain's last leg. */
+export function successorLeg(args: {
+  links: readonly LegLinkShape[];
+  sessionId: string;
+  hop: number;
+  sessions: readonly { id: string; titleOverride?: string | null; aiTitle?: string | null }[];
+}): { sessionId: string; hop: number; title: string } | null {
+  const link = args.links.find((l) => l.fromSessionId === args.sessionId);
+  if (!link) return null;
+  const s = args.sessions.find((x) => x.id === link.toSessionId);
+  return {
+    sessionId: link.toSessionId,
+    hop: args.hop + 1,
+    title: legTitle(s ?? { id: link.toSessionId }),
+  };
+}
+
 /** The leg a "load leg N" control would prepend next, or null when none is
  *  on offer: the topmost loaded leg (the current one when nothing is
  *  prepended) must reach its first message, the chain must name its

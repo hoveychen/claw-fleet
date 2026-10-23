@@ -489,6 +489,22 @@ function WaitingIndicator() {
   );
 }
 
+/** The idle tail of a session that handed off: which leg took over, and a
+ *  button that opens it. */
+function HandedOffIndicator({ successor }: { successor: SuccessorOffer }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.handed_off} data-testid="handed-off">
+      <span className={styles.handed_off_label}>
+        {t("detail.handed_off", { hop: successor.hop, title: successor.title })}
+      </span>
+      <button type="button" className={styles.handed_off_btn} onClick={successor.onOpen}>
+        {t("detail.open_successor")} →
+      </button>
+    </div>
+  );
+}
+
 // ── Live activity indicator ───────────────────────────────────────────────────
 
 /** Animated "still working" indicator pinned under the newest message while
@@ -575,6 +591,16 @@ interface Props {
   /** Transcript of a prepended leg's truncated tool output, by tool_use_id;
    *  everything else falls back to `jsonlPath`. */
   toolResultPaths?: Map<string, string>;
+  /** Set once this session handed off: the idle tail says where the work
+   *  went and links there, instead of "waiting for input". */
+  successor?: SuccessorOffer | null;
+}
+
+/** The leg that took over from this session, and how to open it. */
+export interface SuccessorOffer {
+  hop: number;
+  title: string;
+  onOpen: () => void;
 }
 
 /** Messages revealed per click, and the initial size of the render window. */
@@ -603,6 +629,7 @@ export function MessageList({
   prevLeg = null,
   readOnlyPrefix = 0,
   toolResultPaths,
+  successor = null,
 }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -1074,6 +1101,8 @@ export function MessageList({
         // doing; during the resume gap it hasn't flipped yet, so fall back to
         // the generic "Processing…" spinner.
         <WorkingIndicator status={status && WORKING_STATUSES.has(status) ? status : "processing"} />
+      ) : successor ? (
+        <HandedOffIndicator successor={successor} />
       ) : (
         trailing === "waiting" && <WaitingIndicator />
       )}
