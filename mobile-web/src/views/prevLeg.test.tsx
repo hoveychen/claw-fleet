@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { LegRule, PrevLegBlock } from "./SessionDetailView";
 import type { PrevLeg } from "./usePrevLegs";
 import type { RawMessage } from "../types";
-import { legHeading, nextLeg } from "../../../shared-ts/prevLeg";
+import { hasSuccessor, legHeading, nextLeg, successorLeg } from "../../../shared-ts/prevLeg";
 
 const LINKS = [
   { fromSessionId: "s1", toSessionId: "s2", handedAt: 1000 },
@@ -27,6 +27,28 @@ describe("nextLeg", () => {
     expect(
       nextLeg({ links: LINKS, topId: "s3", topHop: 3, topFullyLoaded: true, sessions: [{ id: "s3" }] }),
     ).toBeNull();
+  });
+});
+
+describe("successorLeg", () => {
+  it("names the leg that took over, titled from the scan", () => {
+    const sessions = [{ id: "s1" }, { id: "s2", aiTitle: "Second leg" }];
+    expect(successorLeg({ links: LINKS, sessionId: "s1", hop: 1, sessions })).toEqual({
+      sessionId: "s2",
+      hop: 2,
+      title: "Second leg",
+    });
+  });
+
+  it("falls back to the id before the successor is scanned, and is null on the last leg", () => {
+    expect(successorLeg({ links: LINKS, sessionId: "s2", hop: 2, sessions: [] })?.title).toBe("s3…");
+    expect(successorLeg({ links: LINKS, sessionId: "s3", hop: 3, sessions: SESSIONS })).toBeNull();
+  });
+
+  it("is only looked up once the chain grew past this leg", () => {
+    expect(hasSuccessor(null)).toBe(false);
+    expect(hasSuccessor({ hop: 3, chainLen: 3 })).toBe(false);
+    expect(hasSuccessor({ hop: 2, chainLen: 3 })).toBe(true);
   });
 });
 

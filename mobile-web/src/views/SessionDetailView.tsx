@@ -111,7 +111,7 @@ import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
 import { buildStatusPills, type DetailPane, type PillTarget } from "./sessionStatusPills";
 import { filterMainRows } from "./mainRows";
-import { usePrevLegs, type PrevLeg } from "./usePrevLegs";
+import { usePrevLegs, useSuccessorLeg, type PrevLeg } from "./usePrevLegs";
 import { legHeading, legTitle, type LegHeadingInfo } from "../../../shared-ts/prevLeg";
 import { SelectionAskBar } from "./SelectionAskBar";
 import { SessionExplainsTab } from "./SessionExplainsTab";
@@ -1701,6 +1701,7 @@ export function SessionDetailView({
   // Earlier relay legs the reader chose to prepend (display-only; the poller,
   // composer and optimistic echo never see them).
   const prevLegs = usePrevLegs(client, session, sessions, messages !== null && !hasEarlier);
+  const successor = useSuccessorLeg(client, session, sessions);
   /** Distance from the bottom saved before a prepend, so the rows the reader
    *  was looking at stay put when a leg lands above them. */
   const prependAnchor = useRef<number | null>(null);
@@ -2422,6 +2423,16 @@ export function SessionDetailView({
               {t("正在思考…")}
             </div>
             <div className={styles.liveThinkingBody}>{shownLiveThinking.thinking}</div>
+          </div>
+        )}
+        {successor && !working && !shownLiveThinking && (
+          <div className={styles.handedOff} data-testid="handed-off">
+            <span className={styles.handedOffLabel}>
+              {t("已接力给第 {0} 棒 · {1}", successor.hop, successor.title)}
+            </span>
+            <button className={styles.loadMore} onClick={() => onOpenSessionId(successor.sessionId)}>
+              {t("前往下一棒")} →
+            </button>
           </div>
         )}
         {messages !== null && mainRows.length === 0 && !shownLiveThinking && (

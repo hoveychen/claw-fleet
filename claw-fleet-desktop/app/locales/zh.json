@@ -1747,6 +1747,8 @@
     "loading_prev_leg": "正在加载第 {{hop}} 棒…",
     "leg_heading": "第 {{hop}} 棒 · {{title}} · {{time}} 开始",
     "leg_heading_current": "第 {{hop}} 棒（当前）· {{title}} · {{time}} 开始",
+    "handed_off": "已接力给第 {{hop}} 棒 · {{title}}",
+    "open_successor": "前往下一棒",
     "syncing_latest": "正在同步最新消息…",
     "live_agents": "运行中的 Agent · {{count}}",
     "live_agents_more": "另有 {{count}} 个未展开",
