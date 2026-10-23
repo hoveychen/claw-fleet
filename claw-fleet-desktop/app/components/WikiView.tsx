@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   useCallback,
   useEffect,
@@ -349,6 +350,16 @@ export function WikiView() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Docs published by agents (another process) land while this page is open;
+  // the desktop's library watcher reports them.
+  useEffect(() => {
+    // No event bridge outside the app shell (the browser build, tests).
+    const unlisten = listen("library-changed", () => void load()).catch(() => null);
+    return () => {
+      void unlisten.then((f) => f?.());
+    };
   }, [load]);
 
   // Distinct workspaces for the filter dropdown, stable order.

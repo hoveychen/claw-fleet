@@ -441,6 +441,9 @@ impl LocalBackend {
         crate::fleet_dir_gate::start();
         step!("fleet dir gate started");
 
+        crate::library_watch::start(app.clone());
+        step!("library watch started");
+
         // Shared analyzing set — prevents duplicate analysis when both the
         // filesystem watcher and the polling thread detect the same transition.
         let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));

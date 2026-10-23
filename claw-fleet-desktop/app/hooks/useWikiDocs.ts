@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { useUIStore } from "../store";
 import type { WikiDoc } from "../components/WikiView";
@@ -22,6 +23,9 @@ interface WikiDocsState {
    *  an existing doc looks like data loss. */
   loaded: boolean;
   inFlight: boolean;
+  /** A fetch was asked for while one was in flight; run once more after it, so
+   *  a change that landed mid-read is not lost. */
+  again: boolean;
   /** Fetch the list. Concurrent callers (several tabs mounting at once) share
    *  the one call in flight. */
   fetch: () => Promise<void>;
@@ -31,9 +35,13 @@ export const useWikiDocsStore = create<WikiDocsState>((set, get) => ({
   docs: [],
   loaded: false,
   inFlight: false,
+  again: false,
   fetch: async () => {
-    if (get().inFlight) return;
-    set({ inFlight: true });
+    if (get().inFlight) {
+      set({ again: true });
+      return;
+    }
+    set({ inFlight: true, again: false });
     try {
       const docs = await invoke<WikiDoc[]>("list_wiki_docs");
       set({ docs: docs ?? [], loaded: true });
@@ -44,16 +52,36 @@ export const useWikiDocsStore = create<WikiDocsState>((set, get) => ({
     } finally {
       set({ inFlight: false });
     }
+    if (get().again) void get().fetch();
   },
 }));
 
 /**
+ * Re-read the list whenever the desktop's library watcher reports a change on
+ * disk (`library-changed`, see `library_watch.rs`). Without it the list is the
+ * snapshot taken when the app opened: a doc republished under the same slug
+ * keeps showing its old version — the slug is found, so the missing-slug
+ * re-fetch below never fires either. Installed once, on first use; the browser
+ * build has no such event and keeps the old behaviour.
+ */
+let changeListenerInstalled = false;
+export function installChangeListener(): void {
+  if (changeListenerInstalled) return;
+  changeListenerInstalled = true;
+  listen("library-changed", () => {
+    if (useWikiDocsStore.getState().loaded) void useWikiDocsStore.getState().fetch();
+  }).catch(() => {
+    changeListenerInstalled = false;
+  });
+}
+
+/**
  * Slugs a consumer already missed once and re-fetched the list for.
  *
- * The fetch below runs only while `loaded` is false, so the list is a snapshot
- * of whatever existed when the app opened. A doc published *afterwards*—the
- * common case, since the agent publishing runs in your current session—is
- * missing forever, and a tab for that slug shows "Document not published or
+ * The list is re-read on `library-changed`, but the watcher behind that event
+ * exists only in the desktop app, and an event can arrive after a tab has
+ * already rendered its miss. Without a re-read, a doc published after the
+ * last fetch would stay missing, and a tab for that slug shows "Document not published or
  * deleted" for a doc that exists. `refetchForMissingSlug` gives a consumer one
  * re-fetch before treating the miss as real.
  *
@@ -95,6 +123,7 @@ export function useWikiDocs(): {
   const inFlight = useWikiDocsStore((s) => s.inFlight);
   const fetch = useWikiDocsStore((s) => s.fetch);
   useEffect(() => {
+    installChangeListener();
     if (!loaded) void fetch();
   }, [loaded, fetch]);
   return { docs, loaded, inFlight, refetchForMissingSlug: refetchWikiDocsForMissingSlug };

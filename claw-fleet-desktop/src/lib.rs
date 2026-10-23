@@ -11,6 +11,7 @@ pub mod fleet_binary;
 mod fleet_dir_gate;
 mod gui;
 pub mod keep_awake;
+mod library_watch;
 pub mod local_backend;
 mod main_thread_probe;
 pub mod rca_provision;

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Library, ScanText, Square } from "lucide-react";
@@ -128,6 +129,17 @@ export function LibraryView() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // A publish or artifact add by an agent (another process) changes the tree
+  // under us; the desktop's library watcher reports it. The doc list behind the
+  // preview refreshes itself on the same event (see useWikiDocs).
+  useEffect(() => {
+    // No event bridge outside the app shell (the browser build, tests).
+    const unlisten = listen("library-changed", () => void load()).catch(() => null);
+    return () => {
+      void unlisten.then((f) => f?.());
+    };
   }, [load]);
 
   // Registered projects that have no library yet: listed in the rail so a

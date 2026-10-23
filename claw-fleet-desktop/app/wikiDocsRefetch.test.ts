@@ -8,8 +8,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => []) }));
+const eventHandlers = vi.hoisted(() => new Map<string, () => void>());
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (name: string, cb: () => void) => {
+    eventHandlers.set(name, cb);
+    return () => {};
+  }),
+}));
 
 import {
+  installChangeListener,
   refetchWikiDocsForMissingSlug,
   resetWikiRefetchGuard,
   useWikiDocsStore,
@@ -23,7 +31,7 @@ describe("wiki doc list re-read on a missing slug", () => {
     vi.mocked(invoke).mockClear();
     vi.mocked(invoke).mockResolvedValue([] as never);
     resetWikiRefetchGuard();
-    useWikiDocsStore.setState({ docs: [], loaded: false, inFlight: false });
+    useWikiDocsStore.setState({ docs: [], loaded: false, inFlight: false, again: false });
   });
 
   it("re-reads the list, so a doc published after the first fetch appears", async () => {
@@ -60,5 +68,42 @@ describe("wiki doc list re-read on a missing slug", () => {
     settled();
     refetchWikiDocsForMissingSlug("research/whatever");
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("wiki doc list re-read on library-changed", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValue([] as never);
+    useWikiDocsStore.setState({ docs: [], loaded: false, inFlight: false, again: false });
+  });
+
+  it("picks up a new version of a doc that is already in the list", async () => {
+    // The missing-slug re-read never fires here: the slug is found, only its
+    // current version is stale. That is the case the watcher event exists for.
+    settled([{ slug: "research/report", currentVersion: "v1" }]);
+    installChangeListener();
+    await vi.waitFor(() => expect(eventHandlers.has("library-changed")).toBe(true));
+    const fresh = [{ slug: "research/report", currentVersion: "v2" }];
+    vi.mocked(invoke).mockResolvedValueOnce(fresh as never);
+
+    eventHandlers.get("library-changed")!();
+    await vi.waitFor(() => expect(useWikiDocsStore.getState().docs).toEqual(fresh));
+  });
+
+  it("re-reads once more when a change lands while a read is in flight", async () => {
+    settled();
+    let release!: (v: unknown) => void;
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise((r) => (release = r)) as never);
+    const fresh = [{ slug: "research/late" }];
+    vi.mocked(invoke).mockResolvedValueOnce(fresh as never);
+
+    const first = useWikiDocsStore.getState().fetch();
+    void useWikiDocsStore.getState().fetch();
+    release([]);
+    await first;
+
+    await vi.waitFor(() => expect(useWikiDocsStore.getState().docs).toEqual(fresh));
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });
