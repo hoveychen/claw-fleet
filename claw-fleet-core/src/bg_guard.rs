@@ -164,6 +164,17 @@ pub fn running_tasks(payload: &StopPayload) -> Vec<&BackgroundTask> {
         .collect()
 }
 
+/// Is a background subagent/workflow still running — one whose completion
+/// will re-invoke the model? Ending the turn is then the correct way to wait
+/// for it: Claude Code has no tool that blocks on a background subagent, and
+/// `claude -p` stays alive until it finishes (see module docs). The plan gate
+/// treats this as a legitimate exit.
+pub fn awaits_waited_task(payload: &StopPayload) -> bool {
+    running_tasks(payload)
+        .iter()
+        .any(|t| !t.doomed_on_headless_exit())
+}
+
 /// Should this Stop be refused, and what should the agent be told?
 ///
 /// `is_headless` gates the whole guard: only a `claude -p` process kills its
@@ -192,9 +203,7 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
     // the parent's `background_tasks` with no owner field — on 2026-10-01 session
     // 704c0f82 was blocked over two shells its PARITY subagent had started, and
     // the "wait in the foreground" advice sent it into a `sleep 10` polling loop.
-    let any_waited = running_tasks(payload)
-        .iter()
-        .any(|t| !t.doomed_on_headless_exit());
+    let any_waited = awaits_waited_task(payload);
     let running: Vec<&BackgroundTask> = if any_waited {
         Vec::new()
     } else {
@@ -425,6 +434,31 @@ mod tests {
         }"#;
         let p = parse_stop_payload(json).unwrap();
         assert_eq!(block_reason(&p, true), None);
+    }
+
+    /// The plan gate's exit: only a *running* subagent/workflow counts. A lone
+    /// shell does not (it dies with the turn), nor does a finished subagent.
+    #[test]
+    fn awaits_waited_task_only_for_running_subagents_or_workflows() {
+        let with = |tasks: &str| {
+            parse_stop_payload(&format!(
+                r#"{{"session_id":"s1","background_tasks":[{tasks}]}}"#
+            ))
+            .unwrap()
+        };
+        assert!(awaits_waited_task(&with(
+            r#"{"id":"a1","type":"subagent","status":"running"}"#
+        )));
+        assert!(awaits_waited_task(&with(
+            r#"{"id":"w1","type":"workflow","status":"running"}"#
+        )));
+        assert!(!awaits_waited_task(&with(
+            r#"{"id":"a1","type":"subagent","status":"completed"}"#
+        )));
+        assert!(!awaits_waited_task(&with(
+            r#"{"id":"b1","type":"shell","status":"running"}"#
+        )));
+        assert!(!awaits_waited_task(&with("")));
     }
 
     /// Real payload (session 704c0f82, 2026-10-01, trimmed): both shells were

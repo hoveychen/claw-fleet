@@ -31,9 +31,13 @@ use crate::task_progress::TaskProgressRecord;
 /// 2. `has_registered_exit` — the agent took one of the legitimate exits the
 ///    refusal text and Rule 4 name: a registered relay (ending the turn is
 ///    exactly how a handoff fires), an armed watch (it resumes the session
-///    when its condition or target sessions settle), or a decision card still
-///    waiting for the boss's answer. Blocking any of these forces a pointless
-///    second stop, and nudges the agent toward busy-work while it waits.
+///    when its condition or target sessions settle), a decision card still
+///    waiting for the boss's answer, or a running background subagent/workflow
+///    (its completion re-invokes the model, and no tool can block on it — see
+///    [`crate::bg_guard::awaits_waited_task`]). Blocking any of these forces a
+///    pointless second stop, and nudges the agent toward busy-work while it
+///    waits. Observed 2026-10-23: a research session that fanned out three
+///    background subagents was refused three times, with no exit it could take.
 /// 3. A focus record not touched *this turn* — `focus.updated` before
 ///    `turn_start` means the session has run no `fleet plan` command since the
 ///    current user prompt arrived, so it isn't executing that plan right now.
@@ -150,7 +154,8 @@ pub fn gate_reason_scoped(
              • 需要老板拍板 → 出决策卡问他(真正的工作方向问题,不是进度汇报)\n\
              • 上下文快满了 → `fleet handoff --note \"...\" --plan {plan_id} --next <P>` 登记接力\n\
              • 在等外部条件(CI/构建/部署) → `fleet watch create --until '...'`;\
-             在等派出去的子任务 → `fleet watch create --sessions <id,...>`\n\
+             在等派出去的子任务 → `fleet watch create --sessions <id,...>`;\
+             在等 Agent 工具派出的后台子代理 → 直接结束 turn,它交回时会自动唤醒你\n\
              • 这个 plan 真的被外部阻塞(等账号/等资源) → 说明阻塞点并请示老板改派{research_exit}"
         ));
     }
@@ -176,7 +181,15 @@ pub fn gate_reason_scoped(
 /// and before `handoff::consume_and_spawn` (which would take the pending relay
 /// the second hatch looks for). Both hold in `fleet session idle`, where this
 /// sits next to the [`crate::bg_guard`] check.
-pub fn gate_reason(cwd: &Path, session_id: &str, stop_hook_active: bool) -> Option<String> {
+///
+/// `awaiting_background` is [`crate::bg_guard::awaits_waited_task`] over the
+/// Stop payload.
+pub fn gate_reason(
+    cwd: &Path,
+    session_id: &str,
+    stop_hook_active: bool,
+    awaiting_background: bool,
+) -> Option<String> {
     if !crate::resume_triggers::ResumeTriggersConfig::load().plan_gate {
         return None;
     }
@@ -187,7 +200,7 @@ pub fn gate_reason(cwd: &Path, session_id: &str, stop_hook_active: bool) -> Opti
         focus.as_ref(),
         turn_start,
         stop_hook_active,
-        has_registered_exit(session_id),
+        awaiting_background || has_registered_exit(session_id),
         &GateSession {
             // Read off the relay chain's first hop: a handoff successor's own
             // launch note carries no assignment.

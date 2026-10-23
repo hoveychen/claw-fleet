@@ -77,9 +77,12 @@ pub(crate) fn cmd_session_idle() {
         } else {
             std::path::PathBuf::from(&payload.cwd)
         };
-        if let Some(reason) =
-            claw_fleet_core::plan_gate::gate_reason(&cwd, &sid, payload.stop_hook_active)
-        {
+        if let Some(reason) = claw_fleet_core::plan_gate::gate_reason(
+            &cwd,
+            &sid,
+            payload.stop_hook_active,
+            claw_fleet_core::bg_guard::awaits_waited_task(payload),
+        ) {
             timing.end(
                 2,
                 serde_json::json!({
