@@ -628,10 +628,11 @@ mod host {
             eprintln!("[fleet-claude-host] write prompt: {e}");
         }
 
-        let mut sidecar = spec
+        let sidecar_path = spec
             .sidecar_dir
             .as_ref()
-            .and_then(|d| std::fs::File::create(d.join(format!("pid-{claude_pid}.jsonl"))).ok());
+            .map(|d| d.join(format!("pid-{claude_pid}.jsonl")));
+        let mut sidecar = sidecar_path.as_ref().and_then(|p| std::fs::File::create(p).ok());
 
         let state: State = Arc::new(Mutex::new(Shared {
             turn: Turn::default(),
@@ -710,6 +711,12 @@ mod host {
         state.lock().unwrap_or_else(|e| e.into_inner()).stdin = None;
         let status = child.wait().map_err(|e| format!("wait claude: {e}"))?;
         let _ = std::fs::remove_file(&sock);
+        // An incognito turn's streamed text does not outlive the turn. The
+        // Stop hook removes it on a normal turn end; this covers a killed one.
+        if let Some(p) = sidecar_path.filter(|_| crate::incognito::is_incognito(&spec.session_id)) {
+            drop(sidecar);
+            let _ = std::fs::remove_file(p);
+        }
         // Only our own entry: a later turn's host may have replaced it.
         if let Ok(raw) = std::fs::read_to_string(&record) {
             if serde_json::from_str::<HostRecord>(&raw).is_ok_and(|r| r.host_pid == my_pid) {
