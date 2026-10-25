@@ -974,10 +974,11 @@ mod tests {
         ] {
             let args = fleet_launch_args_local(&existing, "/tmp");
             let path = value_after(&args, "--settings").unwrap();
-            assert!(path.contains("incognito-"), "{existing:?} → {path}");
+            assert!(path.ends_with("incognito-settings.json"), "{existing:?} → {path}");
         }
         let args = fleet_launch_args_local(&argv(&["--session-id", "plain"]), "/tmp");
-        assert!(!value_after(&args, "--settings").unwrap().contains("incognito-"));
+        let path = value_after(&args, "--settings").unwrap();
+        assert!(Path::new(path).file_name().unwrap() == "settings.json", "{path}");
     }
 
     #[test]
