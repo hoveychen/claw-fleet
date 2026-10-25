@@ -360,7 +360,7 @@ impl DshSource {
     ) -> Result<Value, String> {
         let through = self.history_cursor(id, cursor_budget)?;
         let mut request = json!({
-            "address": { "kind": "session", "sessionId": id },
+            "address": crate::dsh_events::session_address(id),
             "throughSeq": through,
         });
         if let Some(before) = before_seq {
@@ -1051,11 +1051,20 @@ fn roster_subagent(item: &Value, projections: &Value) -> Option<SubagentIdentity
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
+    let parent_session_id = item
+        .get("parentSessionId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    // Reads of this child's log must name its parent — see
+    // `dsh_events::session_address`.
+    if let (Some(child), Some(parent)) = (
+        item.get("sessionId").and_then(Value::as_str),
+        parent_session_id.as_deref(),
+    ) {
+        crate::dsh_events::note_subagent(child, parent, text("mode").as_deref());
+    }
     Some(SubagentIdentity {
-        parent_session_id: item
-            .get("parentSessionId")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        parent_session_id,
         // dsh has no named agent roster (`agent-loop.agents` ships empty), so
         // the delegation `mode` — `one-shot` today — is the only type-shaped
         // fact there is. It feeds the same ⎇ chip Claude fills with an agent
@@ -3351,6 +3360,22 @@ mod tests {
         assert_eq!(
             info.agent_description.as_deref(),
             Some("Read secret.txt token")
+        );
+    }
+
+    /// dsh 0.2 refuses a subagent's follow/page under a plain session address,
+    /// so scanning one must leave behind the parent address its reads use.
+    #[test]
+    fn a_scanned_subagent_is_read_under_its_parent_address() {
+        session_info_from_list_item(&subagent_list_item()).expect("mapped");
+        assert_eq!(
+            crate::dsh_events::session_address("7d2a072f-443c-478e-be9b-5a9d671ed5ee"),
+            json!({
+                "kind": "subagent",
+                "parentSessionId": "session-9ba2e49d-36d8-49d1-90bd-500d81a9a433",
+                "childSessionId": "7d2a072f-443c-478e-be9b-5a9d671ed5ee",
+                "mode": "one-shot",
+            })
         );
     }
 

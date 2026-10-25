@@ -32,7 +32,7 @@ export function SessionAuxAgent({
 }) {
   const { t } = useTranslation();
   const live = isLiveMember(agent);
-  const { messages, isLoading, stalled, retry } = useAgentTranscript(
+  const { messages, isLoading, stalled, loadError, retry } = useAgentTranscript(
     agent.jsonlPath,
     live,
   );
@@ -48,6 +48,7 @@ export function SessionAuxAgent({
           messages={messages}
           isLoading={isLoading}
           stalled={stalled}
+          loadError={loadError}
           onRetry={retry}
           // Drives the activity indicator under the newest message, so a
           // thinking agent reads as thinking rather than as stopped.
