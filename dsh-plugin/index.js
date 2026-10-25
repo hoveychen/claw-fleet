@@ -363,6 +363,12 @@ export function readContextPressure(agent) {
  * may be the user's own later choice, and re-appending ours every step would
  * silently overrule him.
  *
+ * Only a `sandbox/mode` after the first `turn/start` counts as such a choice.
+ * dsh writes its own defaults (`permission/preset`, `sandbox/mode`,
+ * `approval/policy`) when it creates a session, before any turn; counting that
+ * one meant no Fleet session was ever escalated (74 of 74 on 2026-10-25), and
+ * every write outside the workspace asked for approval.
+ *
  * Defensive throughout, like {@link sessionEvents}: this runs inside
  * `agent/pre-step`, where a `TypeError` does not degrade the injection but ends
  * the turn.
@@ -374,7 +380,11 @@ export function readContextPressure(agent) {
 export function ensureSandboxMode(agent, mode) {
   const session = agent?.session
   if (typeof session?.append !== 'function') return false
-  if (sessionEvents(session).some((e) => e?.type === 'sandbox/mode')) return false
+  const events = sessionEvents(session)
+  const firstTurn = events.findIndex((e) => e?.type === 'turn/start')
+  if (firstTurn >= 0 && events.slice(firstTurn).some((e) => e?.type === 'sandbox/mode')) {
+    return false
+  }
   try {
     session.append('sandbox/mode', { mode })
     return true

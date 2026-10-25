@@ -568,7 +568,7 @@ describe('startsTurn', () => {
 
 describe('ensureSandboxMode', () => {
   /** An agent double whose session records what was appended to its log. */
-  function appendingAgent(events = []) {
+  function appendingAgent(events = [{ type: 'turn/start', data: { turn: 1 } }]) {
     const appended = []
     return {
       appended,
@@ -605,10 +605,28 @@ describe('ensureSandboxMode', () => {
 
   test("leaves the user's own later switch alone", () => {
     const { agent, appended } = appendingAgent([
+      { type: 'turn/start', data: { turn: 1 } },
       { type: 'sandbox/mode', data: { mode: 'read-only' } },
     ])
     assert.equal(ensureSandboxMode(agent, 'danger-full-access'), false)
     assert.equal(appended.length, 0)
+  })
+
+  test("escalates past dsh's own creation-time defaults", () => {
+    // Verbatim head of a real Fleet-spawned session log: dsh records its
+    // defaults before the first turn. Treating that as the user's choice is
+    // what kept every Fleet session on workspace-write.
+    const { agent, appended } = appendingAgent([
+      { type: 'permission/preset', data: { preset: 'workspace-write' } },
+      { type: 'sandbox/mode', data: { mode: 'workspace-write' } },
+      { type: 'approval/policy', data: { policy: 'ask' } },
+      { type: 'turn/start', data: { turn: 1 } },
+    ])
+    assert.equal(ensureSandboxMode(agent, 'danger-full-access'), true)
+    assert.deepEqual(appended, [
+      { type: 'sandbox/mode', data: { mode: 'danger-full-access' } },
+    ])
+    assert.equal(ensureSandboxMode(agent, 'danger-full-access'), false)
   })
 
   test('a session with no append method costs the escalation, not the turn', () => {
@@ -665,7 +683,7 @@ describe('fetchContext sandbox mode', () => {
       'steady',
       `echo '{"sections":[{"name":"fleet-prd","text":"SAME"}],"sandboxMode":"danger-full-access"}'`,
     )
-    const events = [injected('fleet-prd', 'SAME')]
+    const events = [{ type: 'turn/start', data: { turn: 1 } }, injected('fleet-prd', 'SAME')]
     const appended = []
     const agent = {
       session: {
