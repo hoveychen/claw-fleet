@@ -923,6 +923,7 @@ pub fn parse_session_info(
     // every spawn. Lets the Tasks list reject a `claude -p` child that only
     // inherited a Fleet `CLAUDE_CODE_ENTRYPOINT` from its parent's environment.
     let fleet_spawned = crate::launch_spec::was_fleet_spawned(&session_id);
+    let incognito = crate::incognito::is_incognito(&session_id);
 
     Some(SessionInfo {
         id: session_id,
@@ -931,6 +932,7 @@ pub fn parse_session_info(
         entrypoint,
         is_subagent,
         fleet_spawned,
+        incognito,
         parent_session_id,
         agent_type,
         agent_description,

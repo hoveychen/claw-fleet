@@ -105,6 +105,9 @@ export interface SessionInfo {
   /** How the last turn ended (core `TurnEnd`): a stopped sub-task reads
    *  "reported back" only on a clean end. Absent on codex / dsh rows. */
   lastTurnEnd?: TurnEnd | null;
+  /** Launched incognito (Claude only): kept out of other sessions, search and
+   *  reports. Absent from older desktop builds' snapshots. */
+  incognito?: boolean;
   isSubagent: boolean;
   /** Subagent drill-down: on a subagent row (id `agent-<uuid>`, isSubagent),
    *  the owning main session's id — the phone attaches the subagent under it and

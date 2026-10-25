@@ -503,6 +503,13 @@
   background: var(--color-bg-card-hover);
 }
 
+/* Incognito toggle chip, switched on. */
+.resumeChip[data-on] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
 /* 附件缩略图行。只在真有附件时渲染，所以这里不设 min-height —— 空着就该是 0。 */
 .resumeThumbs {
   display: flex;

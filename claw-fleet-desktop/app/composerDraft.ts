@@ -20,6 +20,8 @@ export interface ComposerDraft {
   /** New-session only: which agent tool to launch ("" / "claude" / "codex").
    *  Empty is treated as "claude". Resume composers leave it empty. */
   tool: string;
+  /** New-session only: start the session incognito (Claude only). */
+  incognito?: boolean;
 }
 
 const EMPTY_DRAFT: ComposerDraft = {

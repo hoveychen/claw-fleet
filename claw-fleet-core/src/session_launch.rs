@@ -155,6 +155,10 @@ pub struct SpawnSessionRequest {
     /// Older callers omit it → `"claude"`, preserving prior behaviour.
     #[serde(default)]
     pub tool: Option<String>,
+    /// Start the session incognito ([`crate::incognito`]). Claude only; any
+    /// other `tool` is refused. Older callers omit it → a regular session.
+    #[serde(default)]
+    pub incognito: bool,
 }
 
 /// Bring a caller-supplied workspace path into the shape the spawn gate

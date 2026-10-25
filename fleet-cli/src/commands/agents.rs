@@ -5,9 +5,16 @@ use crate::fmt::*;
 use claw_fleet_core::agent_source::build_sources;
 use claw_fleet_core::session::{scan_all_sources, SessionInfo, SessionStatus};
 
+/// The scanned roster. Incognito sessions stay listed — the user can tell
+/// them apart by their `incognito` flag — but with their content redacted,
+/// since an agent can run this command too.
 pub(crate) fn load_sessions() -> Vec<SessionInfo> {
     let sources = build_sources();
-    scan_all_sources(&sources)
+    let mut sessions = scan_all_sources(&sources);
+    for s in sessions.iter_mut().filter(|s| s.incognito) {
+        claw_fleet_core::incognito::redact_content(s);
+    }
+    sessions
 }
 
 pub(crate) fn cmd_agents(show_all: bool, as_json: bool) {
@@ -151,6 +158,9 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
         kv("Thinking:", thinking);
     }
     kv("Subagent:", if s.is_subagent { "Yes" } else { "No" });
+    if s.incognito {
+        kv("Incognito:", "Yes");
+    }
     if let Some(ref parent) = s.parent_session_id {
         kv("Parent Session:", short_id(parent));
     }

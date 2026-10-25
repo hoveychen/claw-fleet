@@ -625,9 +625,19 @@ fn for_each_record_on_date(date: &str, mut f: impl FnMut(&DecisionHistoryRecord)
     let Ok(entries) = fs::read_dir(&dir) else {
         return;
     };
+    // Incognito sessions' cards stay with their own session view; nothing
+    // day-wide (stats, lessons) reads them.
+    let incognito = crate::incognito::session_id_set();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|sid| incognito.contains(sid))
+        {
             continue;
         }
         if let Some(start) = start_sys {
@@ -705,6 +715,9 @@ pub fn collect_other_picks_for_sessions(
 ) -> Vec<OtherPickContext> {
     let mut out: Vec<OtherPickContext> = Vec::new();
     for sid in session_ids {
+        if crate::incognito::is_incognito(sid) {
+            continue;
+        }
         for rec in list_session_records(sid) {
             push_other_pick(&rec, None, max, &mut out);
         }
@@ -818,7 +831,7 @@ fn history_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("decision-history"))
 }
 
-fn history_file(session_id: &str) -> Option<PathBuf> {
+pub(crate) fn history_file(session_id: &str) -> Option<PathBuf> {
     if session_id.is_empty() || session_id.contains('/') || session_id.contains('\\') {
         return None;
     }

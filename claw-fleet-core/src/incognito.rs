@@ -30,6 +30,7 @@
 //! for [`IDLE_PURGE`] is deleted with its marker ([`purge_idle`], run on every
 //! new incognito spawn).
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -234,6 +235,80 @@ pub fn all_session_ids() -> Vec<String> {
         .collect()
 }
 
+/// [`all_session_ids`] as a set, for filtering a session list in one pass.
+pub fn session_id_set() -> HashSet<String> {
+    all_session_ids().into_iter().collect()
+}
+
+/// Whether `path` lies under an incognito config dir — a transcript (main or
+/// subagent) of some incognito session.
+pub fn is_incognito_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty() && configs_root().is_some_and(|root| path.starts_with(root))
+}
+
+/// Whether a scanned session is incognito: its own marker, or a transcript
+/// under an incognito config dir (that catches its subagents, whose ids carry
+/// no marker). `ids` is [`session_id_set`].
+pub fn session_is_incognito(s: &crate::session::SessionInfo, ids: &HashSet<String>) -> bool {
+    ids.contains(&s.id) || is_incognito_path(Path::new(&s.jsonl_path))
+}
+
+/// Stamp [`crate::session::SessionInfo::incognito`] on a scanned list.
+pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
+    let ids = session_id_set();
+    for s in sessions.iter_mut() {
+        s.incognito = session_is_incognito(s, &ids);
+    }
+}
+
+/// Drop incognito sessions (and their subagents) from a session list — the
+/// filter every cross-session reader applies.
+pub fn retain_visible(sessions: &mut Vec<crate::session::SessionInfo>) {
+    let ids = session_id_set();
+    sessions.retain(|s| !s.incognito && !session_is_incognito(s, &ids));
+}
+
+/// Clear what an incognito row says about the conversation — titles, last
+/// message, queued messages, background task text — for listings an agent can
+/// read (`fleet agents`). Id, workspace, status and token counts stay.
+pub fn redact_content(s: &mut crate::session::SessionInfo) {
+    s.ai_title = None;
+    s.title_override = None;
+    s.slug = None;
+    s.last_message_preview = None;
+    s.agent_description = None;
+    s.last_outcome = None;
+    s.pending_messages.clear();
+    for t in &mut s.background_tasks {
+        t.description.clear();
+        t.command = None;
+    }
+}
+
+/// Delete what Fleet keeps per session outside the config dir — the
+/// decision-card archive (which also copies the user's prompts), the pinned
+/// title, follow-up explanations, the MCP call trace and the stream-json
+/// sidecars behind live thinking. Once the marker is gone nothing could tell
+/// these apart from a regular session's.
+fn remove_traces(session_id: &str) {
+    if !valid_id(session_id) {
+        return;
+    }
+    let files = [
+        crate::decision_history::history_file(session_id),
+        crate::session_title::title_dir().map(|d| d.join(format!("{session_id}.json"))),
+        crate::call_trace::trace_path(session_id),
+        crate::call_trace::rotated_path(session_id),
+    ];
+    for f in files.into_iter().flatten() {
+        let _ = fs::remove_file(f);
+    }
+    if let Some(d) = crate::session_explain::explain_dir() {
+        let _ = fs::remove_dir_all(d.join(session_id));
+    }
+    crate::live_thinking::remove_for_session(session_id);
+}
+
 /// Newest mtime under `path` (files only, depth-limited), or `None` when
 /// nothing could be read.
 fn newest_mtime(path: &Path, depth: usize) -> Option<SystemTime> {
@@ -276,6 +351,7 @@ fn purge_idle_older_than(age: Duration) {
         }
         if fs::remove_dir_all(&dir).is_ok() {
             for r in owners {
+                remove_traces(&r.session_id);
                 if let Some(p) = record_path(&r.session_id) {
                     let _ = fs::remove_file(p);
                 }
@@ -899,6 +975,72 @@ mod tests {
         assert!(!dir.exists(), "idle session must be purged");
         assert!(!is_incognito("old"));
         let _ = fs::remove_dir_all(h.home());
+    }
+
+    #[test]
+    fn scanned_rows_of_an_incognito_session_and_its_subagents_are_flagged_and_filtered() {
+        let h = home("enrich");
+        let dir = register_new("inc").unwrap();
+        let row = |id: &str, jsonl: String| crate::session::SessionInfo {
+            id: id.to_string(),
+            jsonl_path: jsonl,
+            ..Default::default()
+        };
+        let mut rows = vec![
+            row("inc", dir.join("projects/-w/inc.jsonl").to_string_lossy().into_owned()),
+            // A subagent: no marker of its own, transcript under the config dir.
+            row("agent-1", dir.join("projects/-w/inc/subagents/agent-1.jsonl").to_string_lossy().into_owned()),
+            row("plain", h.home().join(".claude/projects/-w/plain.jsonl").to_string_lossy().into_owned()),
+        ];
+        enrich_sessions(&mut rows);
+        let flags: Vec<bool> = rows.iter().map(|s| s.incognito).collect();
+        assert_eq!(flags, vec![true, true, false]);
+        retain_visible(&mut rows);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "plain");
+        let _ = fs::remove_dir_all(h.home());
+    }
+
+    #[test]
+    fn the_idle_purge_also_drops_what_fleet_kept_per_session() {
+        let h = home("traces");
+        let dir = register_new("gone").unwrap();
+        fs::create_dir_all(dir.join("projects")).unwrap();
+        let title = crate::session_title::title_dir().unwrap().join("gone.json");
+        let history = crate::decision_history::history_file("gone").unwrap();
+        let explain = crate::session_explain::explain_dir().unwrap().join("gone");
+        for f in [&title, &history] {
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(f, "{}").unwrap();
+        }
+        fs::create_dir_all(&explain).unwrap();
+        let sidecars = crate::live_thinking::ensure_sidecar_dir().unwrap();
+        let mine = sidecars.join("pid-1.jsonl");
+        let other = sidecars.join("pid-2.jsonl");
+        fs::write(&mine, "{\"type\":\"system\",\"session_id\":\"gone\"}\n").unwrap();
+        fs::write(&other, "{\"type\":\"system\",\"session_id\":\"kept\"}\n").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        purge_idle_older_than(Duration::from_millis(1));
+        assert!(!dir.exists() && !title.exists() && !history.exists() && !explain.exists());
+        assert!(!mine.exists() && other.exists());
+        let _ = fs::remove_dir_all(h.home());
+    }
+
+    #[test]
+    fn redaction_keeps_identity_and_drops_conversation_text() {
+        let mut s = crate::session::SessionInfo {
+            id: "inc".into(),
+            workspace_name: "w".into(),
+            ai_title: Some("zqcanary".into()),
+            last_message_preview: Some("zqcanary".into()),
+            title_override: Some("zqcanary".into()),
+            incognito: true,
+            ..Default::default()
+        };
+        redact_content(&mut s);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("zqcanary"), "{json}");
+        assert!(s.incognito && s.id == "inc" && s.workspace_name == "w");
     }
 
     fn fence() -> (Fence, PathBuf) {

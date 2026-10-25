@@ -96,6 +96,7 @@ import { SelectionToolbar } from "./SelectionToolbar";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
+import { IncognitoBadge } from "./IncognitoBadge";
 import styles from "./SessionDetail.module.css";
 import { DecisionRecordsLoadedContext } from "./DecisionHistory";
 import { SkeletonNumber, Spinner } from "./loading";
@@ -1949,6 +1950,7 @@ export function SessionDetail({
                   <div className={styles.meta_row} data-tauri-drag-region>
                     {task ? (
                       <>
+                        {liveSession.incognito && <IncognitoBadge />}
                         <span className={styles.workspace_chip} title={task.projectPath}>
                           {task.projectName}
                         </span>
@@ -1978,6 +1980,7 @@ export function SessionDetail({
                       </>
                     ) : (
                     <>
+                    {liveSession.incognito && <IncognitoBadge />}
                     {/* Only when the title line isn't already the workspace name. */}
                     {preferredTitle && preferredTitle !== liveSession.workspaceName && (
                       <span

@@ -2495,6 +2495,7 @@ impl LocalBackend {
         effort: Option<String>,
         permission_mode: Option<String>,
         tool: Option<String>,
+        incognito: bool,
     ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
         let tool = tool.unwrap_or_default();
         // The "new session" button preassigns no id and uses the default entrypoint;
@@ -2510,7 +2511,8 @@ impl LocalBackend {
             images: Vec::new(),
             spawned_by: None,
         };
-        let resp = claw_fleet_core::session_refs::spawn_session(&tool, &spec)?;
+        let resp =
+            claw_fleet_core::session_refs::spawn_session_maybe_incognito(&tool, &spec, incognito)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
         // in the session list without waiting for the next scheduled scan.
         let app = self.app.clone();
@@ -4527,6 +4529,9 @@ fn detect_waiting_transitions(
             let jsonl_path = sess.jsonl_path.clone();
             let last_text = sess.last_message_preview.clone().unwrap_or_default();
             let agent_source = sess.agent_source.clone();
+            // An incognito session's text is never sent off for a summary;
+            // its alert takes the generic fallback wording.
+            let incognito = sess.incognito;
             let wa = waiting_alerts.clone();
             let so = session_outcomes.clone();
             let an = analyzing.clone();
@@ -4539,13 +4544,17 @@ fn detect_waiting_transitions(
                 let analysis_text =
                     extract_last_assistant_text(&jsonl_path, 1000).unwrap_or(last_text);
 
-                let result = crate::claude_analyze::analyze_session_outcome_routed(
-                    &cfg,
-                    &analysis_text,
-                    &lang,
-                    &session_id,
-                    &title,
-                );
+                let result = (!incognito)
+                    .then(|| {
+                        crate::claude_analyze::analyze_session_outcome_routed(
+                            &cfg,
+                            &analysis_text,
+                            &lang,
+                            &session_id,
+                            &title,
+                        )
+                    })
+                    .flatten();
                 an.lock().unwrap().remove(&session_id);
 
                 // Always store outcome tags for the mascot.
@@ -4936,6 +4945,7 @@ mod tests {
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
             entrypoint: None,
+            incognito: false,
             is_subagent: false,
             parent_session_id: None,
             agent_type: None,

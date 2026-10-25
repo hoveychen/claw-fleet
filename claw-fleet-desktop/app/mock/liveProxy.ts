@@ -1563,6 +1563,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
       permissionMode: a.permissionMode ?? null,
       sessionId: null,
       tool: a.tool ?? null,
+      incognito: a.incognito ?? false,
     },
   }),
 

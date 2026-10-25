@@ -359,8 +359,11 @@ pub(crate) fn route_spawn_session(
                 images: Vec::new(),
                 spawned_by: None,
             };
-            match crate::session_refs::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)
-            {
+            match crate::session_refs::spawn_session_maybe_incognito(
+                req.tool.as_deref().unwrap_or("claude"),
+                &spec,
+                req.incognito,
+            ) {
                 Ok(resp) => {
                     // The roster the routes serve is a snapshot; without
                     // this the caller's own new session would not appear

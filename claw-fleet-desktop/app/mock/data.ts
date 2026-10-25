@@ -34,7 +34,8 @@ const MOCK_SESSIONS_SEED: Array<
     | "agentLastActivityMs"
     | "runningSubagentCount"
     | "fleetSpawned"
-  > & { reasoningOutputTokens?: number }
+    | "incognito"
+  > & { reasoningOutputTokens?: number; incognito?: boolean }
 > = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
   {
@@ -345,6 +346,7 @@ const MOCK_SESSIONS_SEED: Array<
   // ── 5. Waiting for input: "web-frontend" ──
   {
     id: "sess-web-waiting",
+    incognito: true,
     workspacePath: "/Users/demo/workspace/web-frontend",
     workspaceName: "web-frontend",
     entrypoint: "claw-fleet-newsession",
@@ -574,6 +576,7 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   pendingMessages: [],
   // Fleet-owned mock sessions: the launchpad seed is all "New Session"-style tasks.
   fleetSpawned: true,
+  incognito: false,
   // Mocks don't model a live subagent tree, so the aggregate activity just
   // tracks the session's own and nothing is "running".
   agentLastActivityMs: s.lastActivityMs,
@@ -594,6 +597,7 @@ function mkSession(
     entrypoint: "claw-fleet-newsession",
     isSubagent: false,
     fleetSpawned: true,
+    incognito: false,
     parentSessionId: null,
     agentType: null,
     agentDescription: null,

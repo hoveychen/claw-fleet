@@ -152,6 +152,11 @@ impl SearchIndex {
         if jsonl_path.contains("://") {
             return Ok(());
         }
+        // An incognito transcript is never indexed; rows an older build wrote
+        // for one are dropped on the next pass.
+        if crate::incognito::is_incognito_path(std::path::Path::new(jsonl_path)) {
+            return self.remove_session(jsonl_path);
+        }
 
         let meta = fs::metadata(jsonl_path).map_err(|e| format!("stat {jsonl_path}: {e}"))?;
         let file_size = meta.len() as i64;
@@ -366,6 +371,9 @@ impl SearchIndex {
             .map_err(|e| format!("search query: {e}"))?;
 
         for hit in rows.flatten() {
+            if crate::incognito::is_incognito_path(std::path::Path::new(&hit.jsonl_path)) {
+                continue;
+            }
             let key = hit.jsonl_path.clone();
             if seen.insert(key) {
                 results.push(hit);
@@ -640,6 +648,24 @@ mod tests {
 
         let _ = fs::remove_file(&jsonl);
         let _ = fs::remove_file(&db);
+    }
+
+    #[test]
+    fn an_incognito_transcript_is_never_indexed() {
+        let h = crate::paths::fleet_home_guard_with(|| {
+            let d = std::env::temp_dir().join(format!("fleet-search-incognito-{}", std::process::id()));
+            let _ = fs::create_dir_all(&d);
+            d
+        });
+        let dir = crate::incognito::register_new("inc-1").unwrap().join("projects/-w");
+        fs::create_dir_all(&dir).unwrap();
+        let jsonl = dir.join("inc-1.jsonl");
+        fs::write(&jsonl, "{\"type\":\"user\",\"message\":{\"content\":\"zqcanary private\"}}\n").unwrap();
+
+        let idx = SearchIndex::open_at(&h.home().join("idx.db")).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "inc-1").unwrap();
+        assert!(idx.search("zqcanary", 10).unwrap().is_empty());
+        let _ = fs::remove_dir_all(h.home());
     }
 
     #[test]

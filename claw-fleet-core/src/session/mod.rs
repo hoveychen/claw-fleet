@@ -133,6 +133,11 @@ pub struct SessionInfo {
     /// rather than erroring.
     #[serde(default)]
     pub fleet_spawned: bool,
+    /// An incognito session ([`crate::incognito`]): shown in the live lists
+    /// with a badge, kept out of every cross-session reader (recent-sessions,
+    /// search, reports). Stamped at scan time from the marker.
+    #[serde(default)]
+    pub incognito: bool,
     pub parent_session_id: Option<String>,
     pub agent_type: Option<String>,
     pub agent_description: Option<String>,
@@ -891,6 +896,7 @@ mod tests {
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
+            incognito: false,
             parent_session_id: None,
             agent_type: None,
             agent_description: None,

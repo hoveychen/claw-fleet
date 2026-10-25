@@ -125,6 +125,7 @@ mod tests {
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
+            incognito: false,
             parent_session_id: None,
             agent_type: None,
             agent_description: None,

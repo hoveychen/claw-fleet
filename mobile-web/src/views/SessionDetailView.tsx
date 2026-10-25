@@ -2120,6 +2120,11 @@ export function SessionDetailView({
             {session.isSubagent && (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
             )}
+            {session.incognito && (
+              <span className={styles.subagentBadge} data-testid="detail-incognito">
+                {t("隐身")}
+              </span>
+            )}
             {/* The title is the tap target for the session detail sheet. The
                 ellipsis hides what the sheet shows (full title, workspace, model,
                 various ids). It used to expand an inline panel, whose height had to

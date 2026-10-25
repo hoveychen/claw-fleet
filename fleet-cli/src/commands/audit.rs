@@ -22,7 +22,9 @@ pub(crate) fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
         }
     };
 
-    let sessions = load_sessions();
+    let mut sessions = load_sessions();
+    // An incognito session's commands are not another reader's business.
+    claw_fleet_core::incognito::retain_visible(&mut sessions);
     let sources = build_sources();
 
     // Optionally filter sessions

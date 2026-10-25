@@ -165,6 +165,8 @@ pub fn append_hook_event(reader: &mut impl std::io::Read) -> Result<(), String> 
     if line.is_empty() {
         return Ok(());
     }
+    let stripped = strip_incognito_event(line);
+    let line = stripped.as_deref().unwrap_or(line);
     let path = hooks_events_path().ok_or("cannot determine home dir")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
@@ -176,6 +178,39 @@ pub fn append_hook_event(reader: &mut impl std::io::Read) -> Result<(), String> 
         .open(&path)
         .map_err(|e| format!("open {}: {e}", path.display()))?;
     writeln!(f, "{line}").map_err(|e| format!("append {}: {e}", path.display()))
+}
+
+/// An incognito session's hook event cut down to what [`parse_event_line`]
+/// reads — no prompt, tool input or tool output reaches the shared log.
+/// `None` for a regular session's event (logged as is).
+fn strip_incognito_event(line: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    let sid = v.get("session_id").and_then(Value::as_str);
+    if !crate::incognito::current_is_incognito(sid) {
+        return None;
+    }
+    let mut out = Map::new();
+    for key in ["session_id", "hook_event_name", "timestamp", "tool_name"] {
+        if let Some(x) = v.get(key) {
+            out.insert(key.to_string(), x.clone());
+        }
+    }
+    if let Some(Value::Array(tasks)) = v.get("background_tasks") {
+        let slim: Vec<Value> = tasks
+            .iter()
+            .map(|t| {
+                let mut m = Map::new();
+                for key in ["id", "type", "status"] {
+                    if let Some(x) = t.get(key) {
+                        m.insert(key.to_string(), x.clone());
+                    }
+                }
+                Value::Object(m)
+            })
+            .collect();
+        out.insert("background_tasks".to_string(), Value::Array(slim));
+    }
+    Some(Value::Object(out).to_string())
 }
 
 // ── Plan (dry-run) ───────────────────────────────────────────────────────────
@@ -1211,6 +1246,17 @@ pub(crate) fn launch_hooks(
     Value::Object(hooks)
 }
 
+/// The event-log hooks of an incognito launch: `fleet hook-event` on every
+/// event, never the `cat >>` one-liner, so [`append_hook_event`] strips the
+/// payload before it lands in the shared `hooks.jsonl`.
+pub(crate) fn incognito_event_hooks(fleet_bin: &str) -> impl Iterator<Item = (&'static str, Value)> + '_ {
+    FLEET_HOOK_EVENTS.iter().map(move |&event| {
+        let mut entry = fleet_subcommand_hook_with(cfg!(windows), fleet_bin, "hook-event");
+        entry["async"] = json!(true);
+        (event, json!({ "hooks": [entry] }))
+    })
+}
+
 /// The tools `fleet incognito-guard` screens in an incognito session: the
 /// shell, and every built-in tool that reads or writes a path.
 pub(crate) const INCOGNITO_GUARD_MATCHER: &str =
@@ -1606,6 +1652,33 @@ fn parse_event_line(line: &str) -> Option<HookEvent> {
 #[cfg(test)]
 mod fleet_subcommand_hook_tests {
     use super::*;
+
+    #[test]
+    fn an_incognito_event_is_stripped_to_what_the_scanner_reads() {
+        let h = crate::paths::fleet_home_guard_with(|| {
+            let d = std::env::temp_dir().join(format!("fleet-hook-incognito-{}", std::process::id()));
+            let _ = fs::create_dir_all(&d);
+            d
+        });
+        crate::incognito::register_new("inc-ev").unwrap();
+        let ev = json!({
+            "session_id": "inc-ev", "hook_event_name": "Stop", "tool_name": "Bash",
+            "tool_input": {"command": "echo zqcanary"}, "prompt": "zqcanary",
+            "background_tasks": [{"id": "b1", "type": "shell", "status": "running",
+                "description": "zqcanary", "command": "sleep 9"}]
+        })
+        .to_string();
+        let slim = strip_incognito_event(&ev).expect("incognito event is stripped");
+        assert!(!slim.contains("zqcanary") && !slim.contains("sleep 9"), "{slim}");
+        let parsed = parse_event_line(&slim).unwrap();
+        assert_eq!(parsed.session_id, "inc-ev");
+        assert_eq!(parsed.tool_name.as_deref(), Some("Bash"));
+        assert_eq!(parsed.background_tasks.len(), 1);
+        assert_eq!(parsed.background_tasks[0].status, "running");
+        // A regular session's event is logged untouched.
+        assert!(strip_incognito_event(&ev.replace("inc-ev", "plain")).is_none());
+        let _ = fs::remove_dir_all(h.home());
+    }
 
     #[test]
     fn unix_shape_is_the_fault_tolerant_sh_wrapper() {

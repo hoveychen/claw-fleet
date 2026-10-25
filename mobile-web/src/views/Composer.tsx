@@ -18,6 +18,7 @@ import {
   Plus,
   Send,
   SlidersHorizontal,
+  VenetianMask,
   X,
 } from "lucide-react";
 import { randomId } from "../clientId";
@@ -813,6 +814,9 @@ const NEW_SESSION_DEFAULT = {
   // acceptEdits by default: headless -p sessions in default mode can't approve
   // file edits (same default as desktop launcher). Ignored for Codex / dsh.
   permissionMode: "acceptEdits",
+  // Incognito launch (Claude only): a private config dir, kept out of other
+  // sessions, search and reports. Mirrors the desktop NewSessionForm pill.
+  incognito: false,
 };
 
 /**
@@ -935,6 +939,10 @@ export function NewSessionSheet({
   // them — leftover Claude models would otherwise enter `codex exec -m` (and
   // vice versa). Mirrors the desktop NewSessionForm.
   const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
+  // Incognito exists for Claude Code only; a stale "on" from a Claude draft is
+  // not carried over to Codex / dsh.
+  const incognitoAvailable = tool === "claude";
+  const incognito = incognitoAvailable && !!draft.incognito;
 
   // Only offer the agent tools whose source is actually being monitored (source
   // enabled AND CLI installed on the desktop host). Mirrors the desktop
@@ -1034,6 +1042,7 @@ export function NewSessionSheet({
       ...(effort ? { effort } : {}),
       // Codex / dsh have no --permission-mode equivalent; only send to Claude.
       ...(sendsPermissionMode && permissionMode ? { permissionMode } : {}),
+      ...(incognito ? { incognito: true } : {}),
     };
     setBusy(true);
     // On confirmation (ack / reply / snapshot), optimistically conclude once;
@@ -1171,6 +1180,11 @@ export function NewSessionSheet({
               {t("高风险：Agent 将不再请求命令或文件操作确认")}
             </span>
           )}
+          {incognito && (
+            <span className={styles.permissionHint}>
+              {t("隐身任务：不加载全局 CLAUDE.md、记忆和其他会话；它也不会出现在其他会话的上下文、搜索和日报里。项目自己的 CLAUDE.md 照常加载。")}
+            </span>
+          )}
         </div>
 
         {/* Bottom mirrors the resume composer's pill shape: config chip row +
@@ -1191,6 +1205,19 @@ export function NewSessionSheet({
                 configSummary.title
               )}
             </button>
+            {incognitoAvailable && (
+              <button
+                type="button"
+                className={styles.resumeChip}
+                data-on={incognito || undefined}
+                aria-pressed={incognito}
+                onClick={() => patch({ incognito: !incognito })}
+                data-testid="incognito-chip"
+              >
+                <VenetianMask size={13} />
+                {t("隐身")}
+              </button>
+            )}
           </div>
           {(attachments.length > 0 || pending.length > 0 || refState.refs.length > 0) &&
             !voice.active && (

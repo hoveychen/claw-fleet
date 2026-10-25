@@ -137,6 +137,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     aiTitle: "Extract the settlement ledger into its own module",
     slug: null,
     status: "waitingInput",
+    incognito: true,
     isSubagent: false,
     lastMessagePreview: "Split ledger.rs into ledger/{mod,posting,balance}.rs; tests green.",
     lastActivityMs: NOW - 6 * MIN,

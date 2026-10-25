@@ -394,7 +394,14 @@ pub fn task_sessions(session_id: &str) -> Vec<String> {
 }
 
 fn run_review(session_id: &str, workspace_path: &str, outcome: TaskOutcome) -> Result<(), String> {
-    let session_ids = task_sessions(session_id);
+    // An incognito session's content is never summarised or remembered.
+    let session_ids: Vec<String> = task_sessions(session_id)
+        .into_iter()
+        .filter(|sid| !crate::incognito::is_incognito(sid))
+        .collect();
+    if session_ids.is_empty() {
+        return Ok(());
+    }
     let root = session_ids
         .first()
         .cloned()

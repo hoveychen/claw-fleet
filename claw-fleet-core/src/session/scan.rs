@@ -1011,6 +1011,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         entrypoint: None,
         is_subagent: false,
         fleet_spawned: false,
+        incognito: false,
         parent_session_id: None,
         agent_type: None,
         agent_description: None,
@@ -1076,6 +1077,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
 /// back off disk with these fields unset, so skipping an enricher silently
 /// clears whatever the human had set.
 pub fn enrich_all(sessions: &mut [SessionInfo]) {
+    crate::incognito::enrich_sessions(sessions);
     crate::handoff::enrich_sessions(sessions);
     crate::task_model::enrich_sessions(sessions);
     crate::watch::enrich_sessions(sessions);

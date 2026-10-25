@@ -472,6 +472,16 @@
   color: var(--color-text-dim);
 }
 
+/* "Incognito" mark on a task launched incognito. */
+.incognito {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
 .subagents {
   display: inline-flex;
   align-items: center;
