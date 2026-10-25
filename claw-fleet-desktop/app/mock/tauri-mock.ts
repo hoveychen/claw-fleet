@@ -1517,6 +1517,7 @@ async function handleIPC(
         runningSubagentCount: 0,
         createdAtMs: Date.now(),
         jsonlPath: `/Users/demo/.claude/projects/${name}/${id}.jsonl`,
+        incognito: args.incognito === true,
         contextPercent: 0.01,
         handoff: null,
       };

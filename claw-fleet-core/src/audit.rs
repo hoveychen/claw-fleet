@@ -1887,7 +1887,11 @@ impl AuditHistory {
     /// Merge events from sessions that just went idle (evicted from the
     /// in-memory cache).  Only events from sessions not already in the history
     /// are added.  Triggers a save to disk if new events were added.
-    pub fn persist_evicted(&mut self, evicted_events: Vec<AuditEvent>) {
+    pub fn persist_evicted(&mut self, mut evicted_events: Vec<AuditEvent>) {
+        // The live audit view covers an incognito session while it runs; its
+        // commands are not kept in the long-term history.
+        let incognito = crate::incognito::session_id_set();
+        evicted_events.retain(|e| !incognito.contains(&e.session_id));
         if let Some(path) = history_file_path() {
             self.persist_evicted_to(&path, evicted_events);
         }

@@ -3,7 +3,7 @@ import { appendPromptRefs, type PromptRef } from "../../../shared-ts/sessionMent
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
+import { FileText, Folder, FolderOpen, MessageCircle, Server, VenetianMask } from "lucide-react";
 import { openSettings, useSessionsStore, useUIStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
@@ -276,6 +276,10 @@ export function NewSessionForm({
   const setModel = (v: string) => patch({ model: v });
   const setEffort = (v: string) => patch({ effort: v });
   const setPermissionMode = (v: string) => patch({ permissionMode: v });
+  // Incognito exists for Claude Code only; the pill hides for other harnesses
+  // and a stale "on" from a Claude draft is not carried over to them.
+  const incognitoAvailable = tool === "claude";
+  const incognito = incognitoAvailable && !!draft.incognito;
   // `chosenByUser` freezes the seeding effect below — see it for why an
   // auto-seeded chat fallback is provisional and a picked one never is.
   const chosenByUser = useRef(false);
@@ -593,6 +597,7 @@ export function NewSessionForm({
           effort: effort || null,
           permissionMode: permissionMode || null,
           tool,
+          incognito,
         },
       );
       // Remember the launched repo so the next new-session form defaults to it
@@ -743,7 +748,23 @@ export function NewSessionForm({
     />
   );
 
+  const incognitoPill = incognitoAvailable && (
+    <button
+      type="button"
+      className={`${pillStyles.ghost_pill} ${incognito ? styles.incognito_pill_on : ""}`}
+      aria-pressed={incognito}
+      disabled={submitting}
+      onClick={() => patch({ incognito: !incognito })}
+      title={t("new_session.incognito_sub")}
+      data-testid="incognito-pill"
+    >
+      <VenetianMask size={13} strokeWidth={1.7} />
+      <span className={pillStyles.pill_label}>{t("new_session.incognito")}</span>
+    </button>
+  );
+
   const optionPills = (
+    <>
     <SessionOptionPills
       model={model}
       effort={effort}
@@ -756,6 +777,8 @@ export function NewSessionForm({
       onPermissionModeChange={setPermissionMode}
       disabled={submitting}
     />
+    {incognitoPill}
+    </>
   );
 
   return (
@@ -825,6 +848,8 @@ export function NewSessionForm({
       <p className={styles.hint}>
         {seedPending ? (
           <Skeleton inline width={180} height={9} />
+        ) : incognito ? (
+          t("new_session.hint_incognito")
         ) : isChat ? (
           t("new_session.hint_chat")
         ) : workspace ? (

@@ -1121,6 +1121,8 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // the entrypoint check so a `claude -p` child that only inherited a Fleet
     // CLAUDE_CODE_ENTRYPOINT stops showing up as a task (mirrors desktop).
     "fleetSpawned",
+    // Incognito badge on the phone's rows and detail header.
+    "incognito",
     // Task model: the line root and, on a sub-task, the task it rolls up to.
     // The task list keeps only rows without a parent; the task view gathers
     // the rest under it.
@@ -3870,7 +3872,11 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
         images: Vec::new(),
         spawned_by: None,
     };
-    let resp = crate::session_refs::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
+    let resp = crate::session_refs::spawn_session_maybe_incognito(
+        req.tool.as_deref().unwrap_or("claude"),
+        &spec,
+        req.incognito,
+    )?;
     record_if_dedupable(preassigned.as_deref(), resp.session_id.as_deref(), resp.pid);
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
@@ -6975,6 +6981,7 @@ mod tests {
                 "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null,
                 "titleOverride": "手动重命名", "effort": "high",
                 "outOfCredits": "Your workspace is out of credits.",
+                "incognito": true,
                 "entrypoint": NEW_SESSION_ENTRYPOINT
             },
             {
@@ -7019,6 +7026,8 @@ mod tests {
         // the phone shows a row that looks like it simply finished — and the
         // phone is where the refill happens.
         assert_eq!(list[1]["outOfCredits"], "Your workspace is out of credits.");
+        // The phone's incognito badge reads this; trimmed, the row looks regular.
+        assert_eq!(list[1]["incognito"], true);
         // Long previews are truncated with an ellipsis.
         let preview = list[0]["lastMessagePreview"].as_str().unwrap();
         assert_eq!(preview.chars().count(), SNAPSHOT_PREVIEW_CHARS + 1);

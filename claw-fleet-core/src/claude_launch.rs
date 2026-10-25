@@ -343,16 +343,22 @@ fn incognito_settings(mut v: Value, fleet_bin: Option<&str>) -> Value {
     v["permissions"]["deny"] = Value::Array(deny);
     if let Some(bin) = fleet_bin {
         let role_only = is_enabled(Feature::InteractionMode);
-        let mut hooks = crate::hooks::launch_hooks(bin, true, role_only, |f| match f {
+        let mut hooks = crate::hooks::launch_hooks(bin, false, role_only, |f| match f {
             Feature::PrdContextHook | Feature::RecentSessions => false,
             Feature::NotesHint => true,
             other => is_enabled(other),
         });
-        let pre = hooks
-            .as_object_mut()
-            .map(|m| m.entry("PreToolUse").or_insert_with(|| json!([])));
-        if let Some(Value::Array(groups)) = pre {
-            groups.insert(0, crate::hooks::incognito_guard_group(bin));
+        if let Some(m) = hooks.as_object_mut() {
+            // The event log goes through `fleet hook-event`, which strips an
+            // incognito payload down to the fields the scanner reads.
+            for (event, group) in crate::hooks::incognito_event_hooks(bin) {
+                if let Some(groups) = m.entry(event).or_insert_with(|| json!([])).as_array_mut() {
+                    groups.insert(0, group);
+                }
+            }
+            if let Some(Value::Array(groups)) = m.get_mut("PreToolUse") {
+                groups.insert(0, crate::hooks::incognito_guard_group(bin));
+            }
         }
         v["hooks"] = hooks;
     }
@@ -943,10 +949,12 @@ mod tests {
         assert!(settings_path.ends_with("incognito-settings.json"), "{settings_path}");
         let settings = read_json(settings_path);
         let hooks = subcommands(&settings);
-        for kept in ["incognito-guard", "\" guard;", "elicitation", "session idle", "notes-hint", ".fleet/hooks.jsonl"] {
+        for kept in ["incognito-guard", "\" guard;", "elicitation", "session idle", "notes-hint", "hook-event"] {
             assert!(hooks.contains(kept), "missing `{kept}` in {hooks}");
         }
-        for dropped in ["recent-sessions", "ctx-reminder"] {
+        // The raw `cat >>` event log would carry full payloads; `hook-event`
+        // strips them.
+        for dropped in ["recent-sessions", "ctx-reminder", ".fleet/hooks.jsonl"] {
             assert!(!hooks.contains(dropped), "`{dropped}` must be off: {hooks}");
         }
         // prd-context only as the role-line hook.

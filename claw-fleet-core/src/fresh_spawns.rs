@@ -70,6 +70,7 @@ pub fn provisional_claude_row(
         workspace_name: crate::session::workspace_name(workspace_path),
         entrypoint: Some(entrypoint.to_string()),
         fleet_spawned: true,
+        incognito: crate::incognito::is_incognito(session_id),
         status: SessionStatus::Processing,
         last_activity_ms: now,
         agent_last_activity_ms: now,

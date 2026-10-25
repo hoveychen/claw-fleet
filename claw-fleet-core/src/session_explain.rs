@@ -183,7 +183,7 @@ pub struct ExplainRecord {
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 
-fn explain_dir() -> Option<PathBuf> {
+pub(crate) fn explain_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("explain"))
 }
 

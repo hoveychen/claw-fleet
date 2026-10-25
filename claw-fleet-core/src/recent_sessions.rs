@@ -94,10 +94,15 @@ fn activity_ms(session: &SessionInfo) -> u64 {
 
 /// Select the workspace's recent sessions, newest first.
 pub fn select<'a>(sessions: &'a [SessionInfo], query: &RecentQuery<'_>) -> Vec<&'a SessionInfo> {
+    let incognito = crate::incognito::session_id_set();
     let mut picked: Vec<&SessionInfo> = sessions
         .iter()
         .filter(|s| {
             if !query.include_subagents && s.is_subagent {
+                return false;
+            }
+            // A private window is never another session's background.
+            if s.incognito || crate::incognito::session_is_incognito(s, &incognito) {
                 return false;
             }
             if query.exclude_session_id == Some(s.id.as_str()) {
@@ -601,6 +606,16 @@ mod tests {
         let got = select(&all, &RecentQuery::new("/w/proj"));
         let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn leaves_incognito_sessions_out() {
+        let mut private = session("private", "/w/proj", 9);
+        private.incognito = true;
+        let all = vec![private, session("open", "/w/proj", 1)];
+        let got = select(&all, &RecentQuery::new("/w/proj"));
+        let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["open"]);
     }
 
     #[test]

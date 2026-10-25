@@ -543,6 +543,11 @@ export function rowAgentSource(row: HomeRow): string | null {
   return row.kind === "card" ? (row.session?.agentSource ?? null) : row.tip.agentSource;
 }
 
+/** Whether the row's open hop is an incognito session. */
+export function rowIncognito(row: HomeRow): boolean {
+  return row.kind === "card" ? !!row.session?.incognito : !!row.tip.incognito;
+}
+
 /** True when the rows come from more than one agent, the only case a source
  *  glyph tells one row from another. */
 export function mixedAgentSources(rows: HomeRow[]): boolean {

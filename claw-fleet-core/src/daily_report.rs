@@ -768,6 +768,15 @@ pub fn generate_report_from_sessions(
     timezone: &str,
     sessions: &[&crate::session::SessionInfo],
 ) -> DailyReport {
+    // Incognito sessions are left out whole — titles, previews and their
+    // token rows alike. The account usage views still count their tokens.
+    let incognito = crate::incognito::session_id_set();
+    let sessions: Vec<&crate::session::SessionInfo> = sessions
+        .iter()
+        .copied()
+        .filter(|s| !s.incognito && !crate::incognito::session_is_incognito(s, &incognito))
+        .collect();
+    let sessions = sessions.as_slice();
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1620,9 +1629,13 @@ pub fn task_reviews_for_date(date: &str) -> Vec<crate::task_review::TaskReview> 
     let Some((from_ms, to_ms)) = local_day_bounds_ms(date) else {
         return Vec::new();
     };
-    crate::task_review::TaskReviewStore::open()
+    let mut reviews = crate::task_review::TaskReviewStore::open()
         .and_then(|s| s.list_in_range(from_ms, to_ms))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // `run_review` never writes one for an incognito task; this drops any an
+    // older build did.
+    reviews.retain(|r| !crate::incognito::is_incognito(&r.root_session_id));
+    reviews
 }
 
 /// `[start, start + 24h)` in epoch ms for local calendar day `date`
@@ -2035,6 +2048,7 @@ fn make_session_info_for_date(
         is_subagent,
         // Reporting projection with no entrypoint — never a launchpad task.
         fleet_spawned: false,
+        incognito: false,
         parent_session_id: None,
         agent_type: None,
         agent_description: None,
@@ -2888,6 +2902,7 @@ mod tests {
             entrypoint: None,
             is_subagent: false,
             fleet_spawned: false,
+            incognito: false,
             parent_session_id: None,
             agent_type: None,
             agent_description: None,
@@ -2953,6 +2968,7 @@ mod tests {
             entrypoint: None,
             is_subagent: true,
             fleet_spawned: false,
+            incognito: false,
             parent_session_id: Some("s1".to_string()),
             agent_type: None,
             agent_description: None,

@@ -64,8 +64,12 @@ pub fn control_tool_def() -> Value {
 
 // ── shared helpers ───────────────────────────────────────────────────────────
 
+/// Every session an agent may inspect: incognito sessions are hidden whole —
+/// not even their workspace or status is another session's business.
 fn load_sessions() -> Vec<SessionInfo> {
-    crate::session::scan_all_sources(&crate::agent_source::build_sources())
+    let mut sessions = crate::session::scan_all_sources(&crate::agent_source::build_sources());
+    crate::incognito::retain_visible(&mut sessions);
+    sessions
 }
 
 fn status_label(s: &SessionStatus) -> &'static str {

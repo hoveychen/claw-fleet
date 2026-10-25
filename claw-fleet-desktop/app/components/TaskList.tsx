@@ -9,6 +9,7 @@ import type { SessionInfo } from "../types";
 import { timeAgo } from "./timeAgo";
 import {
   rowAgentSource,
+  rowIncognito,
   rowDetail,
   rowPreview,
   rowActiveSubtasks,
@@ -24,6 +25,7 @@ import {
 import { AgentSourceIcon } from "./SessionCard";
 import { WatchRing } from "./WatchRing";
 import { TaskTypeChip } from "./TaskProfileBar";
+import { IncognitoBadge } from "./IncognitoBadge";
 import styles from "./TaskList.module.css";
 
 /** The dot a state wears, in the row and its section heading. Tokens only:
@@ -297,6 +299,7 @@ const TaskListRow = memo(function TaskListRow({
         <span className={styles.title} title={titleTip}>
           {row.title}
         </span>
+        {rowIncognito(row) && <IncognitoBadge compact />}
         {row.kind === "task" && <TaskTypeChip profile={profile} />}
         {subagents + subtasks > 0 && (
           <span

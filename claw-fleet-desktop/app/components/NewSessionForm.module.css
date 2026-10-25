@@ -69,6 +69,20 @@
   background: rgba(var(--color-accent-rgb), 0.2);
 }
 
+/* Incognito on: the dim, inverted look of a private window rather than the
+   accent the chat pill uses, so the two never read as the same switch. */
+.incognito_pill_on.incognito_pill_on {
+  background: var(--color-text);
+  border-color: var(--color-text);
+  color: var(--color-bg);
+}
+
+.incognito_pill_on.incognito_pill_on:hover:not(:disabled) {
+  background: var(--color-text);
+  color: var(--color-bg);
+  opacity: 0.88;
+}
+
 .hint {
   margin: 0;
   font-size: 11px;

@@ -81,7 +81,9 @@ pub fn parse_mentions(text: &str) -> Vec<Mention> {
             continue;
         };
         let id = &id_part[..end];
-        if is_plain_id(id) && seen.insert(id.to_string()) {
+        // A mention of an incognito session stays plain text: its content is
+        // never inlined into, nor granted to, another session.
+        if is_plain_id(id) && !crate::incognito::is_incognito(id) && seen.insert(id.to_string()) {
             out.push(Mention {
                 title: title.trim().to_string(),
                 session_id: id.to_string(),
@@ -191,7 +193,13 @@ pub fn history_scope(session_id: &str) -> Vec<String> {
     let Some(dir) = grants_dir() else {
         return own;
     };
-    history_scope_with(own, |s| read_grants_in(&dir, s), crate::handoff::chain_containing)
+    // Grants an older build recorded for an incognito session do not count.
+    let grants_of = |s: &str| {
+        let mut g = read_grants_in(&dir, s);
+        g.retain(|r| !crate::incognito::is_incognito(r));
+        g
+    };
+    history_scope_with(own, grants_of, crate::handoff::chain_containing)
 }
 
 /// Pure core of [`history_scope`].
@@ -342,6 +350,21 @@ pub fn spawn_session(
         None => crate::log_debug("[session_refs] spawned session has no id; mentions not granted"),
     }
     Ok(resp)
+}
+
+/// [`spawn_session`], or an incognito spawn when `incognito` is set. An
+/// incognito session is cut off from other sessions, so its prompt's mentions
+/// are neither inlined nor granted — they reach it as plain text.
+pub fn spawn_session_maybe_incognito(
+    tool: &str,
+    spec: &crate::agent_source::SpawnSpec,
+    incognito: bool,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    if incognito {
+        crate::agent_source::spawn_incognito_session(tool, spec)
+    } else {
+        spawn_session(tool, spec)
+    }
 }
 
 /// Record `session_id`'s history grant for every mention in `text`.

@@ -97,11 +97,14 @@ pub(crate) async fn spawn_new_claude_session(
     permission_mode: Option<String>,
     // Which agent tool to launch: "claude" (or omitted) / "codex".
     tool: Option<String>,
+    // Start the session incognito (Claude only); omitted → a regular one.
+    incognito: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
     let backend = state.backend.clone();
+    let incognito = incognito.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
-        backend.spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
+        backend.spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool, incognito)
     })
     .await
     .map_err(|e| format!("join: {e}"))?
