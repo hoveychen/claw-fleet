@@ -346,6 +346,7 @@ const MOCK_SESSIONS_SEED: Array<
   // ── 5. Waiting for input: "web-frontend" ──
   {
     id: "sess-web-waiting",
+    incognito: true,
     workspacePath: "/Users/demo/workspace/web-frontend",
     workspaceName: "web-frontend",
     entrypoint: "claw-fleet-newsession",

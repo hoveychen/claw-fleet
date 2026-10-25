@@ -898,6 +898,9 @@ const DICT: Record<string, string> = {
   "按 Agent 默认权限运行": "Uses the agent's default permissions",
   "高风险：Agent 将不再请求命令或文件操作确认":
     "High risk: The agent won't ask before commands or file operations",
+  隐身: "Incognito",
+  "隐身任务：不加载全局 CLAUDE.md、记忆和其他会话；它也不会出现在其他会话的上下文、搜索和日报里。项目自己的 CLAUDE.md 照常加载。":
+    "Incognito task: no global CLAUDE.md, memory or other sessions, and it won't appear in other sessions' context, search or daily reports. The project's own CLAUDE.md still loads.",
   "Agent 只分析和规划，不修改项目文件":
     "The agent only analyzes and plans; it won't modify project files",
   "Agent 可以修改项目文件；执行命令仍按权限规则处理":

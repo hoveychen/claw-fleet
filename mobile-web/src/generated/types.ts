@@ -38,7 +38,8 @@ detectedAtMs: number, };
 
 export type SessionInfo = { id: string, workspacePath: string, workspaceName: string, 
 entrypoint: string | null, isSubagent: boolean, 
-fleetSpawned: boolean, parentSessionId: string | null, agentType: string | null, agentDescription: string | null, slug: string | null, aiTitle: string | null, status: SessionStatus, tokenSpeed: number, 
+fleetSpawned: boolean, 
+incognito: boolean, parentSessionId: string | null, agentType: string | null, agentDescription: string | null, slug: string | null, aiTitle: string | null, status: SessionStatus, tokenSpeed: number, 
 agentTokenSpeed: number, totalOutputTokens: number, 
 reasoningOutputTokens: number, 
 totalInputTokens: number, 

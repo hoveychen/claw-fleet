@@ -20,6 +20,7 @@ import {
   Search,
   SearchX,
   Radar,
+  VenetianMask,
   WifiOff,
   X,
   XCircle,
@@ -677,6 +678,12 @@ export function TasksView({
             <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
               <AgentSourceIcon source={tip.agentSource} />
             </span>
+            {tip.incognito && (
+              <span className={styles.incognito} data-testid="task-row-incognito">
+                <VenetianMask size={11} />
+                {t("隐身")}
+              </span>
+            )}
             <TaskTypeChip profile={tip.taskSummary?.profile} />
             {watchToken && (
               <span
