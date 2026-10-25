@@ -111,6 +111,8 @@ const ALL_KEYS = [
   "model-guidance-enabled",
   "session-title-guidance-enabled",
   "recent-sessions-enabled",
+  "notes-hint-enabled",
+  "lessons-enabled",
   "plan-approval-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
@@ -238,6 +240,8 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "model-guidance-enabled": true,
   "session-title-guidance-enabled": true,
   "recent-sessions-enabled": true,
+  "notes-hint-enabled": true,
+  "lessons-enabled": true,
   "auto-update-check": true,
   "daily-report-auto-popup": true,
   // Default OFF.

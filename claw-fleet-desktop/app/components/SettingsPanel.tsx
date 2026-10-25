@@ -664,6 +664,50 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
+  // ── Session-notes summary state (default on) ───────────────────────────
+  const [notesHintState, setNotesHintState] = useState<FeatureState>(
+    () => getFeatureState("notes-hint-enabled"),
+  );
+
+  const handleToggleNotesHint = useCallback(async (state: FeatureState) => {
+    setNotesHintState(state);
+    setFeatureState("notes-hint-enabled", state);
+    const enabled = resolveFeatureState(state, "notes-hint-enabled");
+    try {
+      if (enabled) {
+        await invoke("apply_notes_hint");
+      } else {
+        await invoke("remove_notes_hint");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("notes hint toggle failed:", e);
+    }
+  }, []);
+
+  // ── Daily-report lessons injection state (default on) ──────────────────
+  const [lessonsState, setLessonsState] = useState<FeatureState>(
+    () => getFeatureState("lessons-enabled"),
+  );
+
+  const handleToggleLessons = useCallback(async (state: FeatureState) => {
+    setLessonsState(state);
+    setFeatureState("lessons-enabled", state);
+    const enabled = resolveFeatureState(state, "lessons-enabled");
+    try {
+      if (enabled) {
+        await invoke("apply_lessons");
+      } else {
+        await invoke("remove_lessons");
+      }
+      // Codex and dsh carry the lessons in AGENTS.md.
+      await reconcileCodexGuidance();
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("lessons toggle failed:", e);
+    }
+  }, [reconcileCodexGuidance]);
+
   // ── Wiki guidance state (default on) ───────────────────────────────────
   const [wikiGuidanceState, setWikiGuidanceState] = useState<FeatureState>(
     () => getFeatureState("wiki-guidance-enabled"),
@@ -792,6 +836,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setModelGuidanceState(states["model-guidance-enabled"]);
         setSessionTitleGuidanceState(states["session-title-guidance-enabled"]);
         setRecentSessionsState(states["recent-sessions-enabled"]);
+        setNotesHintState(states["notes-hint-enabled"]);
+        setLessonsState(states["lessons-enabled"]);
       })
       .catch(() => {})
       .finally(() => setPrefsSettled(true));
@@ -2553,6 +2599,40 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       value={recentSessionsState}
                       defaultOn={featureDefault("recent-sessions-enabled")}
                       onChange={handleToggleRecentSessions}
+                    />
+                  ) : (
+                    <TriStateSkeleton />
+                  )}
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.notes_hint_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.notes_hint_enabled")}</span>
+                  {prefsSettled ? (
+                    <TriStateToggle
+                      value={notesHintState}
+                      defaultOn={featureDefault("notes-hint-enabled")}
+                      onChange={handleToggleNotesHint}
+                    />
+                  ) : (
+                    <TriStateSkeleton />
+                  )}
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.lessons_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.lessons_enabled")}</span>
+                  {prefsSettled ? (
+                    <TriStateToggle
+                      value={lessonsState}
+                      defaultOn={featureDefault("lessons-enabled")}
+                      onChange={handleToggleLessons}
                     />
                   ) : (
                     <TriStateSkeleton />

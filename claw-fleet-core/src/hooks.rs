@@ -102,6 +102,11 @@ pub struct HookSetupPlan {
     /// `fleet serve` probes deserializable.
     #[serde(default)]
     pub recent_sessions_installed: bool,
+    /// Whether the daily-report lessons are on (or, for the global probe,
+    /// `@import`ed from `~/.claude/CLAUDE.md`). `default` keeps payloads from
+    /// older `fleet serve` probes deserializable.
+    #[serde(default)]
+    pub lessons_installed: bool,
 }
 
 /// The "cooked" state derived from the most recent hook events for a session.
@@ -199,7 +204,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         plan_approval_installed: is_enabled(Feature::PlanApprovalHook),
         interaction_mode_installed: is_enabled(Feature::InteractionMode),
         prd_context_installed: is_enabled(Feature::PrdContextHook),
-        notes_hint_installed: is_enabled(Feature::PrdContextHook),
+        notes_hint_installed: is_enabled(Feature::NotesHint),
         prd_discipline_installed: is_enabled(Feature::PrdDiscipline),
         wiki_guidance_installed: is_enabled(Feature::WikiGuidance),
         model_guidance_installed: is_enabled(Feature::ModelGuidance),
@@ -207,6 +212,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         idle_hooks_installed: is_enabled(Feature::IdleHooks),
         wakeup_guard_installed: is_enabled(Feature::WakeupGuardHook),
         recent_sessions_installed: is_enabled(Feature::RecentSessions),
+        lessons_installed: is_enabled(Feature::Lessons),
     }
 }
 
@@ -248,6 +254,7 @@ pub fn global_hook_setup() -> HookSetupPlan {
     let idle_hooks_installed = has_idle_hooks(&hooks_obj);
     let wakeup_guard_installed = has_wakeup_guard_hook(&hooks_obj);
     let recent_sessions_installed = has_recent_sessions_hook(&hooks_obj);
+    let lessons_installed = crate::lessons_store::import_installed();
 
     HookSetupPlan {
         to_add,
@@ -266,6 +273,7 @@ pub fn global_hook_setup() -> HookSetupPlan {
         idle_hooks_installed,
         wakeup_guard_installed,
         recent_sessions_installed,
+        lessons_installed,
     }
 }
 
@@ -374,9 +382,8 @@ fn is_plan_approval_group(group: &Value) -> bool {
 
 /// Switch the PRD-context hooks on for Fleet-started sessions: the
 /// UserPromptSubmit `fleet prd-context` (re-injects the workspace's `TASKS.md`
-/// so compaction can't erase the macro plan), and its companions — the
-/// SessionStart `notes-hint` and the PostToolUse `ctx-reminder`. See
-/// [`launch_hooks_for`].
+/// so compaction can't erase the macro plan), and its PostToolUse
+/// `ctx-reminder` companion. See [`launch_hooks_for`].
 pub fn apply_prd_context_hook() -> Result<(), String> {
     crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdContextHook, true)
 }
@@ -403,20 +410,18 @@ pub fn remove_prd_context_hook() -> Result<(), String> {
     crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdContextHook, false)
 }
 
-/// All three parts must be present in the global settings.json: the
-/// UserPromptSubmit injection, its SessionStart notes-hint companion, and the
-/// PostToolUse context-pressure reminder. A partial set reads as "not
-/// installed", so [`crate::claude_launch`] carries the whole feature on the
-/// launch instead of trusting a half-installed global copy. The recent-sessions
-/// hook older builds installed alongside is its own feature now
-/// ([`Feature::RecentSessions`](crate::control_plane_prefs::Feature)).
+/// Both parts must be present in the global settings.json: the
+/// UserPromptSubmit injection and the PostToolUse context-pressure reminder. A
+/// partial set reads as "not installed", so [`crate::claude_launch`] carries
+/// the whole feature on the launch instead of trusting a half-installed global
+/// copy. The notes-hint and recent-sessions hooks older builds installed
+/// alongside are features of their own now.
 fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
     hooks_obj
         .get("UserPromptSubmit")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
         .unwrap_or(false)
-        && has_notes_hint_hook(hooks_obj)
         && has_ctx_reminder_hook(hooks_obj)
 }
 
@@ -446,6 +451,16 @@ fn has_notes_hint_hook(hooks_obj: &Map<String, Value>) -> bool {
 
 fn is_notes_hint_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "notes-hint")
+}
+
+/// Switch the SessionStart notes summary on for Fleet-started sessions.
+pub fn apply_notes_hint() -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::NotesHint, true)
+}
+
+/// Switch the SessionStart notes summary off for Fleet-started sessions.
+pub fn remove_notes_hint() -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::NotesHint, false)
 }
 
 fn has_recent_sessions_hook(hooks_obj: &Map<String, Value>) -> bool {
@@ -1102,9 +1117,14 @@ fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [L
     )];
     const PRD_CONTEXT: &[LaunchHook] = &[
         hook("UserPromptSubmit", None, "prd-context", 10_000),
-        hook("SessionStart", Some(NOTES_HINT_MATCHER), "notes-hint", 10_000),
         hook("PostToolUse", None, "ctx-reminder", 10_000),
     ];
+    const NOTES_HINT: &[LaunchHook] = &[hook(
+        "SessionStart",
+        Some(NOTES_HINT_MATCHER),
+        "notes-hint",
+        10_000,
+    )];
     const RECENT_SESSIONS: &[LaunchHook] = &[hook(
         "SessionStart",
         Some(RECENT_SESSIONS_MATCHER),
@@ -1129,11 +1149,13 @@ fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [L
         Feature::WakeupGuardHook => WAKEUP_GUARD,
         Feature::IdleHooks => IDLE,
         Feature::RecentSessions => RECENT_SESSIONS,
+        Feature::NotesHint => NOTES_HINT,
         Feature::InteractionMode
         | Feature::PrdDiscipline
         | Feature::WikiGuidance
         | Feature::ModelGuidance
-        | Feature::SessionTitleGuidance => &[],
+        | Feature::SessionTitleGuidance
+        | Feature::Lessons => &[],
     }
 }
 
@@ -1741,8 +1763,9 @@ mod tests {
     }
 
     /// The notes-hint group lives under SessionStart next to whatever the user
-    /// put there; its marker must catch only itself, and `has_prd_context_hook`
-    /// must demand both halves so an upgraded host gets healed.
+    /// put there; its marker must catch only itself. `has_prd_context_hook`
+    /// demands its own two halves (prompt + PostToolUse) and not notes-hint,
+    /// which is a feature of its own.
     #[test]
     fn notes_hint_marker_and_prd_context_pairing() {
         let bin = "/x/fleet";
@@ -1758,12 +1781,12 @@ mod tests {
         assert!(!is_idle_resume_group(&hint));
         assert!(!is_wakeup_guard_group(&hint));
 
-        // Old-build shape: prd-context present, no SessionStart companion.
+        // Old-build shape: prd-context alone.
         let mut hooks = Map::new();
         hooks.insert("UserPromptSubmit".into(), json!([prd.clone()]));
         assert!(
             !has_prd_context_hook(&hooks),
-            "must read as not installed until the companion exists"
+            "must read as not installed until the PostToolUse half exists"
         );
         assert!(!has_notes_hint_hook(&hooks));
 
@@ -1803,7 +1826,7 @@ mod tests {
         assert!(has_ctx_reminder_hook(&hooks));
         assert!(
             has_prd_context_hook(&hooks),
-            "recent-sessions is its own feature, not a PRD-context companion"
+            "notes-hint and recent-sessions are features of their own, not PRD-context companions"
         );
         assert!(!has_recent_sessions_hook(&hooks));
 

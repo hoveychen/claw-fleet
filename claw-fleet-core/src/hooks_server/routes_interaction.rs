@@ -453,19 +453,14 @@ pub(crate) fn route_reconcile_codex_guidance(
     }
 }
 
-/// Switch the recent-sessions block on (`on`) or off for Fleet-started
-/// sessions. Takes no body: unlike the guidance switches there is nothing to
-/// render, only the preference to record.
-pub(crate) fn route_set_recent_sessions(
+/// Answer a context-injection switch (recent sessions, notes hint, lessons)
+/// with the outcome of flipping it. Takes no body: unlike the guidance
+/// switches there is nothing to render, only the preference to record.
+pub(crate) fn route_set_switch(
     request: tiny_http::Request,
     json_header: tiny_http::Header,
-    on: bool,
+    result: Result<(), String>,
 ) {
-    let result = if on {
-        hooks::apply_recent_sessions()
-    } else {
-        hooks::remove_recent_sessions()
-    };
     match result {
         Ok(()) => {
             let _ = request.respond(

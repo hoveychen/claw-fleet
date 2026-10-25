@@ -1082,8 +1082,10 @@ fn maybe_prepend_active_plans(
     // With PRD off the plans stay out, but a sub-task's role line does not:
     // it belongs to the task-roles rules, and a sub-task that never hears it
     // raises report cards as if it were the coordinator.
+    // `PrdContextHook`, the switch Claude's `fleet prd-context` hook reads —
+    // not `PrdDiscipline`, which governs the standing guidance text.
     let prd_off =
-        crate::control_plane_prefs::is_disabled(crate::control_plane_prefs::Feature::PrdDiscipline);
+        crate::control_plane_prefs::is_disabled(crate::control_plane_prefs::Feature::PrdContextHook);
     let (reminder, nudge) = if prd_off {
         (crate::task_roles_guidance::render_role_only_reminder(session_id), None)
     } else {
@@ -1148,7 +1150,7 @@ fn maybe_prepend_fresh_session(
     prompt: &str,
 ) -> String {
     let reminder = if crate::control_plane_prefs::is_disabled(
-        crate::control_plane_prefs::Feature::PrdDiscipline,
+        crate::control_plane_prefs::Feature::PrdContextHook,
     ) {
         None
     } else {
@@ -2014,7 +2016,7 @@ mod tests {
         let ws = ws.to_string_lossy().to_string();
 
         let on = maybe_prepend_active_plans(&ws, None, "do it");
-        crate::control_plane_prefs::mark_disabled(crate::control_plane_prefs::Feature::PrdDiscipline)
+        crate::control_plane_prefs::mark_disabled(crate::control_plane_prefs::Feature::PrdContextHook)
             .unwrap();
         let off = maybe_prepend_active_plans(&ws, None, "do it");
 

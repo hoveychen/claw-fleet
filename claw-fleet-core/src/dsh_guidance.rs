@@ -965,7 +965,9 @@ pub fn dsh_guidance_set(dsh_present: bool) -> DshGuidanceSet {
         interaction: is_enabled(Feature::InteractionMode),
         wiki: is_enabled(Feature::WikiGuidance),
         model: is_enabled(Feature::ModelGuidance),
-        lessons: dsh_present && !crate::lessons_store::list_lessons().is_empty(),
+        lessons: dsh_present
+            && is_enabled(Feature::Lessons)
+            && !crate::lessons_store::list_lessons().is_empty(),
     }
 }
 

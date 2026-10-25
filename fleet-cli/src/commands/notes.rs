@@ -97,6 +97,13 @@ pub(crate) fn cmd_notes_hint() {
     // process with a new socket and a new token). Runs before the notes early
     // return — most sessions have no notes, but every session needs this.
     claw_fleet_core::live_inject::record_session_token(&sid);
+    // The summary has its own switch; the token above does not, which is why
+    // launches carry this hook even with the switch off.
+    if !claw_fleet_core::control_plane_prefs::is_enabled(
+        claw_fleet_core::control_plane_prefs::Feature::NotesHint,
+    ) {
+        return;
+    }
     let Some(hint) = claw_fleet_core::session_notes::render_hint(&sid) else {
         return;
     };

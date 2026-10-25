@@ -242,7 +242,7 @@ fn system_prompt_text(
     subtask: bool,
     subtask_layer: Option<TaskType>,
 ) -> Option<String> {
-    let lessons = if global.lessons {
+    let lessons = if global.lessons || !is_enabled(Feature::Lessons) {
         String::new()
     } else {
         crate::lessons_store::managed_file_content().unwrap_or_default()
@@ -277,8 +277,16 @@ fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
         let role_only = is_enabled(Feature::InteractionMode)
             && !is_enabled(Feature::PrdContextHook)
             && !global.has(Feature::PrdContextHook);
+        // The notes-hint hook is carried whether or not its summary is
+        // switched on: the same firing records the session's messaging token
+        // (`live_inject`), which every session needs. With `NotesHint` off the
+        // command records the token and prints nothing.
         v["hooks"] = crate::hooks::launch_hooks(bin, !global.plan.already_installed, role_only, |f| {
-            global.wants(f)
+            if f == Feature::NotesHint {
+                !global.has(f)
+            } else {
+                global.wants(f)
+            }
         });
     }
     v
@@ -704,12 +712,26 @@ mod tests {
         let prompt_hooks = settings["hooks"]["UserPromptSubmit"].to_string();
         assert_eq!(prompt_hooks.matches("prd-context").count(), 1, "{prompt_hooks}");
         let hooks = subcommands(&settings);
-        assert!(!hooks.contains("notes-hint"), "companions stay off: {hooks}");
+        assert!(!hooks.contains("ctx-reminder"), "companions stay off: {hooks}");
+        assert!(hooks.contains("notes-hint"), "token recording rides on notes-hint: {hooks}");
 
         crate::control_plane_prefs::mark_disabled(Feature::InteractionMode).unwrap();
         let args = launch_args_with(&[], Some(BIN), &none());
         let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
         assert!(!hooks.contains("prd-context"), "no interaction rules, no role line: {hooks}");
+    }
+
+    #[test]
+    fn notes_hint_hook_stays_on_for_token_recording_when_its_summary_is_off() {
+        // The switch silences the summary inside `fleet notes-hint`; the hook
+        // itself must stay, or the session's messaging token is never recorded.
+        let _h = Home::new("notesoff");
+        crate::control_plane_prefs::mark_disabled(Feature::NotesHint).unwrap();
+        let args = launch_args_with(&[], Some(BIN), &none());
+        let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
+        assert!(hooks.contains("notes-hint"), "hook must stay for the token: {hooks}");
+        assert!(hooks.contains("prd-context"), "plan injection stays on: {hooks}");
+        assert!(hooks.contains("recent-sessions"), "recent sessions stay on: {hooks}");
     }
 
     #[test]

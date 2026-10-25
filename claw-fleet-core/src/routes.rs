@@ -20,6 +20,8 @@ pub const APPLY_SESSION_TITLE_GUIDANCE: &str = "/apply_session_title_guidance";
 pub const APPLY_PLAN_APPROVAL_HOOK: &str = "/apply_plan_approval_hook";
 pub const APPLY_PRD_MODE: &str = "/apply_prd_mode";
 pub const APPLY_RECENT_SESSIONS: &str = "/apply_recent_sessions";
+pub const APPLY_NOTES_HINT: &str = "/apply_notes_hint";
+pub const APPLY_LESSONS: &str = "/apply_lessons";
 pub const APPLY_WIKI_GUIDANCE: &str = "/apply_wiki_guidance";
 /// Artifact store (the output/deliverables page). `ARTIFACT_BLOB` is the only route here that
 /// answers bytes rather than JSON, and the only one in this file that honours
@@ -310,6 +312,8 @@ pub const REMOVE_SESSION_TITLE_GUIDANCE: &str = "/remove_session_title_guidance"
 pub const REMOVE_PLAN_APPROVAL_HOOK: &str = "/remove_plan_approval_hook";
 pub const REMOVE_PRD_MODE: &str = "/remove_prd_mode";
 pub const REMOVE_RECENT_SESSIONS: &str = "/remove_recent_sessions";
+pub const REMOVE_NOTES_HINT: &str = "/remove_notes_hint";
+pub const REMOVE_LESSONS: &str = "/remove_lessons";
 pub const REMOVE_WIKI_GUIDANCE: &str = "/remove_wiki_guidance";
 pub const RESUME_SESSION: &str = "/resume_session";
 pub const SCRATCHPAD_DIR: &str = "/scratchpad_dir";

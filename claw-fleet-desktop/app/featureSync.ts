@@ -16,6 +16,8 @@ export interface FeatureSwitches {
   modelGuidanceInstalled: boolean;
   sessionTitleGuidanceInstalled: boolean;
   recentSessionsInstalled: boolean;
+  notesHintInstalled: boolean;
+  lessonsInstalled: boolean;
 }
 
 /** The localStorage key each settings toggle is stored under, and the switch it drives. */
@@ -29,6 +31,8 @@ export const FEATURE_SWITCH_FIELDS = {
   "model-guidance-enabled": "modelGuidanceInstalled",
   "session-title-guidance-enabled": "sessionTitleGuidanceInstalled",
   "recent-sessions-enabled": "recentSessionsInstalled",
+  "notes-hint-enabled": "notesHintInstalled",
+  "lessons-enabled": "lessonsInstalled",
 } as const satisfies Record<string, keyof FeatureSwitches>;
 
 export type FeatureSwitchKey = keyof typeof FEATURE_SWITCH_FIELDS;
