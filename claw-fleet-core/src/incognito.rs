@@ -346,6 +346,13 @@ fn launch_env_with(
     Ok(Some(vec![
         ("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned()),
         ("CLAUDE_CODE_OAUTH_TOKEN", token),
+        // Claude Code's start-of-session git snapshot carries a `Git user:`
+        // line, and the same switch that drops its commit/PR instructions
+        // drops the snapshot (`includeGitInstructions`, read from this env
+        // var first — strings of Claude Code 2.1.310). The first incognito
+        // probe (session 949fd648) reported that line as the identity leak
+        // left in its context.
+        ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1".to_string()),
         (ENV, "1".to_string()),
     ]))
 }
@@ -856,6 +863,7 @@ mod tests {
         );
         assert_eq!(get(&spawn, "CLAUDE_CODE_OAUTH_TOKEN").as_deref(), Some("tok-123"));
         assert_eq!(get(&spawn, ENV).as_deref(), Some("1"));
+        assert_eq!(get(&spawn, "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS").as_deref(), Some("1"));
 
         let resume = launch_env_with(&argv(&["-p", "go", "--resume", "orig"]), tok)
             .unwrap()
