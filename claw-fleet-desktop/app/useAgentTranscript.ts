@@ -21,6 +21,9 @@ export interface AgentTranscript {
   isLoading: boolean;
   /** The fetch failed or blew past its first attempt with nothing to show. */
   stalled: boolean;
+  /** Why the fetch rejected, so the pane can say so instead of blaming a
+   *  timeout on a backend that answered in milliseconds. */
+  loadError: string | null;
   retry: () => void;
 }
 
@@ -50,6 +53,7 @@ export function useAgentTranscript(
   const [messages, setMessages] = useState<RawMessage[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [stalled, setStalled] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const offsetRef = useRef<number | null>(null);
 
@@ -64,12 +68,14 @@ export function useAgentTranscript(
       setMessages([]);
       setLoading(false);
       setStalled(false);
+      setLoadError(null);
       return;
     }
     let cancelled = false;
     setMessages([]);
     setLoading(true);
     setStalled(false);
+    setLoadError(null);
     void invoke<TailDelta>("get_messages_since", { jsonlPath, offset: null })
       .then((d) => {
         if (!cancelled && d.offset > 0) offsetRef.current = d.offset;
@@ -86,10 +92,11 @@ export function useAgentTranscript(
         setMessages(msgs ?? []);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         if (cancelled) return;
         setLoading(false);
         setStalled(true);
+        setLoadError(String(e));
       });
     return () => {
       cancelled = true;
@@ -144,5 +151,5 @@ export function useAgentTranscript(
     };
   }, [jsonlPath, live]);
 
-  return { messages, isLoading, stalled, retry };
+  return { messages, isLoading, stalled, loadError, retry };
 }

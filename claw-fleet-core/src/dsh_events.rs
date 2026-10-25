@@ -1038,6 +1038,51 @@ impl Drop for DshEventWatcher {
 type DshWs =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+/// Subagent children the roster has reported: child id → (parent id, mode).
+fn subagent_parents() -> &'static Mutex<HashMap<String, (String, String)>> {
+    static SLOT: std::sync::OnceLock<Mutex<HashMap<String, (String, String)>>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Record that `child` is a subagent of `parent`, so its log reads go out
+/// under the address dsh accepts for it — see [`session_address`].
+///
+/// `mode` is the roster descriptor's delegation mode; anything dsh's address
+/// schema does not name (including a descriptor not written yet) becomes
+/// `unknown`, which the host accepts for any child.
+pub fn note_subagent(child: &str, parent: &str, mode: Option<&str>) {
+    let mode = match mode {
+        Some(m @ ("one-shot" | "continuable")) => m,
+        _ => "unknown",
+    };
+    subagent_parents()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(child.to_string(), (parent.to_string(), mode.to_string()));
+}
+
+/// The `SessionAddress` a `session/follow` or `session/page` must name.
+///
+/// dsh 0.2 refuses a subagent child addressed as a plain session
+/// (`session/agent-busy: subagent Sessions require their durable parent
+/// address`); it wants `{kind:"subagent", parentSessionId, childSessionId,
+/// mode}`. Every other session keeps the plain form.
+pub fn session_address(session_id: &str) -> Value {
+    let parents = subagent_parents()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match parents.get(session_id) {
+        Some((parent, mode)) => serde_json::json!({
+            "kind": "subagent",
+            "parentSessionId": parent,
+            "childSessionId": session_id,
+            "mode": mode,
+        }),
+        None => serde_json::json!({ "kind": "session", "sessionId": session_id }),
+    }
+}
+
 /// Build one `{"type":"open",…}` request for a logical stream.
 ///
 /// The host validates these keys exactly — an extra or missing one is refused
@@ -1050,7 +1095,7 @@ fn open_frame(stream_id: &str, kind: &StreamKind) -> String {
             "session/follow",
             serde_json::json!({
                 "request": {
-                    "address": { "kind": "session", "sessionId": session_id },
+                    "address": session_address(session_id),
                     // Only the snapshot's `cursor` is kept — its records are
                     // history `session/page` reads on demand — so ask for the
                     // smallest window dsh will build rather than one nobody
@@ -1645,6 +1690,30 @@ mod tests {
             follow["payload"]["args"]["request"]["address"],
             json!({ "kind": "session", "sessionId": "session-a" })
         );
+    }
+
+    #[test]
+    fn a_noted_subagent_is_followed_under_its_parent_address() {
+        note_subagent("child-addr-test", "parent-addr-test", Some("continuable"));
+        let frame: Value =
+            serde_json::from_str(&open_frame("s-3", &follow("child-addr-test"))).unwrap();
+        assert_eq!(
+            frame["payload"]["args"]["request"]["address"],
+            json!({
+                "kind": "subagent",
+                "parentSessionId": "parent-addr-test",
+                "childSessionId": "child-addr-test",
+                "mode": "continuable",
+            })
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_subagent_mode_is_sent_as_unknown() {
+        note_subagent("child-mode-test", "parent-mode-test", Some("forked"));
+        assert_eq!(session_address("child-mode-test")["mode"], "unknown");
+        note_subagent("child-mode-test-2", "parent-mode-test", None);
+        assert_eq!(session_address("child-mode-test-2")["mode"], "unknown");
     }
 
     #[test]
