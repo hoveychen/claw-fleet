@@ -1020,6 +1020,30 @@ fn roster_preview(projections: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The card line for a stopped session whose last turn dsh gave up on with a
+/// permanent error, or `None` when the turn did not end that way.
+///
+/// Without this the card keeps quoting the agent's last words ("now re-running
+/// the full flow…") and a turn that died on the provider reads as a session
+/// that silently stalled — session 46f6d3d5 stopped on OpenRouter's 402
+/// `in_flight_budget_exhausted` and looked like a crash. Transient failures are
+/// not covered: those become `ServerErrored` and get retried.
+fn failure_preview(verdict: &crate::session_probe::TailVerdict) -> Option<String> {
+    let crate::session_probe::TailVerdict::Fatal(e) = verdict else {
+        return None;
+    };
+    // Matched on the human message, not on `metadata.reason`
+    // (`in_flight_budget_exhausted`): the verdict keeps only the first 200
+    // characters of the error, and the reason sits past that cut.
+    if e.contains("402") && e.contains("in-flight requests") {
+        return Some(
+            "OpenRouter 在飞预算耗尽（402）：余额不够覆盖同时进行的请求，充值或等其他会话跑完后再续跑"
+                .to_string(),
+        );
+    }
+    Some(format!("API 错误：{e}"))
+}
+
 /// A roster item's subagent identity, or `None` when the item is a main
 /// session.
 ///
@@ -1320,7 +1344,10 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         created_at_ms: updated_at,
         jsonl_path: format!("{DSH_URI_PREFIX}{id}"),
         agent_source: "dsh".to_string(),
-        last_message_preview: roster_preview(&projections),
+        last_message_preview: verdict
+            .as_ref()
+            .and_then(failure_preview)
+            .or_else(|| roster_preview(&projections)),
         is_subagent: subagent.is_some(),
         parent_session_id: subagent.as_ref().and_then(|s| s.parent_session_id.clone()),
         agent_type: subagent.as_ref().and_then(|s| s.agent_type.clone()),
@@ -3168,6 +3195,28 @@ mod tests {
         }
         // No log read (not Fleet's session): the roster's plain reading.
         assert_eq!(roster_status(false, None), SessionStatus::Idle);
+    }
+
+    #[test]
+    fn a_permanent_last_turn_failure_replaces_the_card_preview() {
+        use crate::session_probe::TailVerdict as V;
+        // Verbatim turn/end from session 46f6d3d5 (OpenRouter 402).
+        let line: Value = serde_json::from_str(
+            r#"{"type":"turn/end","seq":1402,"time":1792908183416,"data":{"turn":3,"reason":{"kind":"error","error":{"message":"402: {\"message\":\"This request would exceed your available credits given your current in-flight requests. Retry after in-flight requests settle, or add credits.\",\"code\":402,\"metadata\":{\"reason\":\"in_flight_budget_exhausted\",\"limit_source\":\"openrouter_in_flight_budget\",\"headers\":{\"Retry-After\":\"120\"},\"provider_name\":null}}","code":"PI_AI_ERROR"}}}}"#,
+        )
+        .unwrap();
+        let verdict = crate::session_probe::dsh_tail_verdict(&[line]);
+        let preview = failure_preview(&verdict).expect("a 402 turn end gets a preview");
+        assert!(preview.starts_with("OpenRouter 在飞预算耗尽（402）"), "{preview}");
+
+        assert_eq!(
+            failure_preview(&V::Fatal("AUTH: invalid api key".into())).as_deref(),
+            Some("API 错误：AUTH: invalid api key")
+        );
+        // Anything that is not a permanent failure keeps the agent's last words.
+        for v in [V::ServerError, V::RateLimited, V::Ended, V::Interrupted, V::InFlight] {
+            assert_eq!(failure_preview(&v), None, "{v:?}");
+        }
     }
 
     #[test]
