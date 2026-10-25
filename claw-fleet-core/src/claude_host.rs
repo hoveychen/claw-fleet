@@ -776,6 +776,14 @@ mod host {
         crate::process_util::detach_process_group(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| format!("spawn claude failed: {e}"))?;
         drop(cmd);
+        // The interrupt's CTRL_C goes to every process on claude's console.
+        // That should not include the host, but if it ever does, the host
+        // must outlive it to reap claude and clean up. Only after the spawn:
+        // children created later inherit the ignore flag, and claude must not.
+        #[cfg(windows)]
+        unsafe {
+            let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(None, true);
+        }
         let claude_pid = child.id();
         let mut stdin = child.stdin.take().ok_or("claude stdin missing")?;
         let stdout = child.stdout.take().ok_or("claude stdout missing")?;
