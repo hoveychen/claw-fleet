@@ -25,7 +25,9 @@
 //! this machine's transcripts. Those carry no `origin` at all, and rendering
 //! them would bury the conversation under tool bookkeeping. The gate is
 //! therefore `origin.kind == "peer"`, which is what the socket path hardcodes
-//! for every message it delivers.
+//! for every message it delivers — plus the origin-less `commandMode: "prompt"`
+//! row the CLI writes for a user message that arrived on its stdin (the
+//! `claude_host` path).
 
 use serde_json::{json, Value};
 
@@ -45,7 +47,7 @@ pub fn unfold(message: &mut Value) {
     if attachment.get("type").and_then(Value::as_str) != Some("queued_command") {
         return;
     }
-    if attachment["origin"].get("kind").and_then(Value::as_str) != Some("peer") {
+    if !is_conversation(attachment) {
         return;
     }
     let Some(prompt) = attachment.get("prompt").and_then(Value::as_str) else {
@@ -75,6 +77,22 @@ pub fn unfold(message: &mut Value) {
     // what lets a client mark the bubble as mid-turn delivered.
     obj.remove("isMeta");
     obj.insert("fleetMidTurn".into(), json!(true));
+}
+
+/// Whether a `queued_command` is someone speaking rather than the harness.
+///
+/// Two shapes qualify: a socket delivery (`origin.kind == "peer"`), and a user
+/// message written to the CLI's stdin mid-turn by `claude_host`, which the CLI
+/// records with no `origin` at all and `commandMode: "prompt"`. Harness
+/// wake-ups always carry an origin (`task-notification`, `coordinator`) or a
+/// different mode, so they stay folded (tallied over this machine's
+/// transcripts, 2026-10-25: every origin-less prompt-mode row was a stdin
+/// follow-up).
+fn is_conversation(attachment: &Value) -> bool {
+    match attachment.get("origin") {
+        Some(origin) => origin.get("kind").and_then(Value::as_str) == Some("peer"),
+        None => attachment.get("commandMode").and_then(Value::as_str) == Some("prompt"),
+    }
 }
 
 /// The CLI's opening line for a socket-delivered message that starts a turn.
@@ -276,6 +294,44 @@ mod tests {
         let before = msg.clone();
         unfold(&mut msg);
         assert_eq!(msg, before);
+    }
+
+    /// Captured from CLI 2.1.310 (probe fb963505): a follow-up written to the
+    /// stdin of a running `--input-format stream-json` turn.
+    #[test]
+    fn a_stdin_follow_up_becomes_a_bubble() {
+        let mut msg = json!({
+            "type": "attachment",
+            "uuid": "u2",
+            "attachment": {
+                "type": "queued_command",
+                "prompt": "stop and check the logs",
+                "commandMode": "prompt",
+            },
+        });
+        unfold(&mut msg);
+        assert_eq!(msg["type"], "user");
+        assert_eq!(msg["message"]["content"][0]["text"], "stop and check the logs");
+        assert_eq!(msg["fleetMidTurn"], true);
+    }
+
+    #[test]
+    fn harness_wake_ups_stay_folded_whatever_their_mode() {
+        for attachment in [
+            json!({"type": "queued_command", "prompt": "<task-notification>x</task-notification>",
+                   "commandMode": "task-notification"}),
+            json!({"type": "queued_command", "prompt": "<task-notification>x</task-notification>",
+                   "commandMode": "task-notification",
+                   "origin": {"kind": "task-notification", "producer": "session-task"}}),
+            json!({"type": "queued_command", "prompt": "note", "origin": {"kind": "coordinator"}}),
+            json!({"type": "queued_command", "prompt": "note", "commandMode": "prompt",
+                   "origin": {"kind": "coordinator"}}),
+        ] {
+            let mut msg = json!({"type": "attachment", "attachment": attachment});
+            let before = msg.clone();
+            unfold(&mut msg);
+            assert_eq!(msg, before);
+        }
     }
 
     /// The signature is guidance for the agent; showing it back to the person

@@ -10,6 +10,14 @@ fn main() {
         if args.len() >= 3 && args[1] == claw_fleet_core::proc_runner::HOST_ARGV_MARKER {
             claw_fleet_core::proc_runner::host_main(&args[2]);
         }
+        // Per-turn stdin holder for headless claude sessions (see
+        // `claw_fleet_core::claude_host`).
+        if args.len() >= 2 && args[1] == claw_fleet_core::claude_host::HOST_ARGV_MARKER {
+            claw_fleet_core::claude_host::host_main();
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            claw_fleet_core::claude_host::register_host_exe(exe);
+        }
     }
 
     // Thread panics in a GUI app are otherwise invisible: stderr goes nowhere

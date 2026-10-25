@@ -524,8 +524,10 @@ pub fn spawn_claude_detached_with_envs(
     // Unix — the child keeps writing to the same inode via its held fd. Best
     // effort: if the sidecar can't be created we fall back to discarding stdout
     // so a filesystem hiccup never blocks session launch.
-    let mut sidecar_tmp: Option<PathBuf> = None;
-    let stdout_stdio = if live_thinking {
+    let open_sidecar = || -> (Option<PathBuf>, std::process::Stdio) {
+        if !live_thinking {
+            return (None, std::process::Stdio::null());
+        }
         let opened = crate::live_thinking::ensure_sidecar_dir()
             .ok()
             .and_then(|dir| {
@@ -537,21 +539,25 @@ pub fn spawn_claude_detached_with_envs(
                 std::fs::File::create(&tmp).ok().map(|f| (tmp, f))
             });
         match opened {
-            Some((tmp, file)) => {
-                sidecar_tmp = Some(tmp);
-                std::process::Stdio::from(file)
-            }
-            None => std::process::Stdio::null(),
+            Some((tmp, file)) => (Some(tmp), std::process::Stdio::from(file)),
+            None => (None, std::process::Stdio::null()),
         }
+    };
+
+    // Stdin holder (see `claude_host`): a local live-thinking launch goes
+    // through a per-turn host so a mid-turn user follow-up can be written to
+    // the CLI's stdin. Not for rca: its stderr monitor needs this process to
+    // own the pipe.
+    let host_plan = if live_thinking && rca_wrap.is_none() {
+        crate::claude_host::plan(claude_path, args, workspace_path, session_id_from_args(args))
     } else {
-        std::process::Stdio::null()
+        None
     };
 
     let mut cmd = crate::process_util::command(claude_path);
     cmd.args(args)
         .current_dir(workspace_path)
         .stdin(std::process::Stdio::null())
-        .stdout(stdout_stdio)
         .stderr(stderr_stdio);
     // Own process group: a terminal Ctrl-C / group signal at the spawner must
     // not interrupt the agent's in-flight turn (see process_util docs).
@@ -624,10 +630,33 @@ pub fn spawn_claude_detached_with_envs(
             cmd.env_remove(crate::incognito::ENV);
         }
     }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn claude failed: {e}"))?;
-    let pid = child.id();
+    let hosted = match &host_plan {
+        Some((exe, spec)) => match crate::claude_host::spawn(exe, spec, &cmd, stderr_log)? {
+            crate::claude_host::Spawned::Host { host, claude_pid } => Some((host, claude_pid)),
+            crate::claude_host::Spawned::Fallback(why) => {
+                if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(stderr_log) {
+                    let _ = writeln!(f, "[fleet] claude host unavailable, launching directly: {why}");
+                }
+                None
+            }
+        },
+        None => None,
+    };
+    // `child` is whatever must be reaped: the host when there is one (it
+    // exits with claude's code), else claude itself. `pid` is always claude's
+    // — launch notes, kill and SIGINT all address the CLI.
+    let (mut child, pid, sidecar_tmp) = match hosted {
+        Some((host, claude_pid)) => (host, claude_pid, None),
+        None => {
+            let (tmp, stdout_stdio) = open_sidecar();
+            cmd.stdout(stdout_stdio);
+            let child = cmd
+                .spawn()
+                .map_err(|e| format!("spawn claude failed: {e}"))?;
+            let pid = child.id();
+            (child, pid, tmp)
+        }
+    };
     // Counted until the reaper below sees the child exit; see `agent_slots`.
     let slot = crate::agent_slots::track();
 
