@@ -74,10 +74,20 @@ fn installed_anywhere(feature: Feature, plan: &crate::hooks::HookSetupPlan) -> b
 /// Phase 1. Returns the steps it took; empty on a host with nothing to record.
 fn snapshot() -> Vec<Step> {
     let plan = crate::hooks::global_hook_setup();
-    let installed: Vec<(Feature, bool)> = Feature::ALL
+    let mut installed: Vec<(Feature, bool)> = Feature::ALL
         .iter()
         .map(|&f| (f, installed_anywhere(f, &plan)))
         .collect();
+    // The recent-sessions hook was part of the PRD-context feature in the
+    // global era, so any PRD-context part means the user had it on. Reading
+    // the hook alone would switch it off on hosts whose copy predates it.
+    if installed_anywhere(Feature::PrdContextHook, &plan) {
+        for (f, on) in installed.iter_mut() {
+            if *f == Feature::RecentSessions {
+                *on = true;
+            }
+        }
+    }
     let mut steps = Vec::new();
 
     // A host with none of Fleet's global config never had anything switched
@@ -455,6 +465,7 @@ mod tests {
             Feature::GuardHook,
             Feature::IdleHooks,
             Feature::PrdContextHook,
+            Feature::RecentSessions,
             Feature::InteractionMode,
         ] {
             assert!(!is_disabled(on), "{} was installed", on.key());

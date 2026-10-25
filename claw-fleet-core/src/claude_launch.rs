@@ -713,6 +713,23 @@ mod tests {
     }
 
     #[test]
+    fn recent_sessions_switches_independently_of_plan_injection() {
+        let _h = Home::new("recentoff");
+        crate::control_plane_prefs::mark_disabled(Feature::RecentSessions).unwrap();
+        let args = launch_args_with(&[], Some(BIN), &none());
+        let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
+        assert!(!hooks.contains("recent-sessions"), "recent-sessions must be off: {hooks}");
+        assert!(hooks.contains("prd-context"), "plan injection stays on: {hooks}");
+        assert!(hooks.contains("notes-hint"), "notes hint stays on: {hooks}");
+
+        crate::control_plane_prefs::mark_enabled(Feature::RecentSessions).unwrap();
+        crate::control_plane_prefs::mark_disabled(Feature::PrdContextHook).unwrap();
+        let args = launch_args_with(&[], Some(BIN), &none());
+        let hooks = subcommands(&read_json(value_after(&args, "--settings").unwrap()));
+        assert!(hooks.contains("recent-sessions"), "survives PRD-context off: {hooks}");
+    }
+
+    #[test]
     fn without_a_fleet_binary_no_mcp_or_prompt_tool_is_named() {
         // Naming an unresolvable permission-prompt tool aborts the CLI.
         let _h = Home::new("nobin");

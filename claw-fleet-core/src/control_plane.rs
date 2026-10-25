@@ -59,6 +59,7 @@ pub fn is_installed(feature: Feature, plan: &HookSetupPlan) -> bool {
         Feature::WikiGuidance => plan.wiki_guidance_installed,
         Feature::ModelGuidance => plan.model_guidance_installed,
         Feature::SessionTitleGuidance => plan.session_title_guidance_installed,
+        Feature::RecentSessions => plan.recent_sessions_installed,
     }
 }
 
@@ -129,6 +130,7 @@ mod tests {
             session_title_guidance_installed: true,
             idle_hooks_installed: true,
             wakeup_guard_installed: true,
+            recent_sessions_installed: true,
         }
     }
 

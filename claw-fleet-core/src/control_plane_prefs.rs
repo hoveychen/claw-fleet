@@ -47,6 +47,11 @@ pub enum Feature {
     WikiGuidance,
     ModelGuidance,
     SessionTitleGuidance,
+    /// The `<fleet_recent_sessions>` block — what else this repository has
+    /// been worked on lately — handed to a fresh context window. Split out of
+    /// [`Feature::PrdContextHook`], which carried it until 2026-10-25, so it
+    /// can be switched off without losing the TASKS.md reinjection.
+    RecentSessions,
 }
 
 impl Feature {
@@ -66,11 +71,12 @@ impl Feature {
             Feature::WikiGuidance => "wiki_guidance",
             Feature::ModelGuidance => "model_guidance",
             Feature::SessionTitleGuidance => "session_title_guidance",
+            Feature::RecentSessions => "recent_sessions",
         }
     }
 
     /// Every feature heal knows how to install.
-    pub const ALL: [Feature; 11] = [
+    pub const ALL: [Feature; 12] = [
         Feature::GuardHook,
         Feature::ElicitationHook,
         Feature::PlanApprovalHook,
@@ -82,6 +88,7 @@ impl Feature {
         Feature::WikiGuidance,
         Feature::ModelGuidance,
         Feature::SessionTitleGuidance,
+        Feature::RecentSessions,
     ];
 }
 

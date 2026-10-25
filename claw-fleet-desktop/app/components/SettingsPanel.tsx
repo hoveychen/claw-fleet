@@ -643,6 +643,27 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }, [reconcileCodexGuidance]);
 
+  // ── Recent-sessions block state (default on) ───────────────────────────
+  const [recentSessionsState, setRecentSessionsState] = useState<FeatureState>(
+    () => getFeatureState("recent-sessions-enabled"),
+  );
+
+  const handleToggleRecentSessions = useCallback(async (state: FeatureState) => {
+    setRecentSessionsState(state);
+    setFeatureState("recent-sessions-enabled", state);
+    const enabled = resolveFeatureState(state, "recent-sessions-enabled");
+    try {
+      if (enabled) {
+        await invoke("apply_recent_sessions");
+      } else {
+        await invoke("remove_recent_sessions");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("recent sessions toggle failed:", e);
+    }
+  }, []);
+
   // ── Wiki guidance state (default on) ───────────────────────────────────
   const [wikiGuidanceState, setWikiGuidanceState] = useState<FeatureState>(
     () => getFeatureState("wiki-guidance-enabled"),
@@ -770,6 +791,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setWikiGuidanceState(states["wiki-guidance-enabled"]);
         setModelGuidanceState(states["model-guidance-enabled"]);
         setSessionTitleGuidanceState(states["session-title-guidance-enabled"]);
+        setRecentSessionsState(states["recent-sessions-enabled"]);
       })
       .catch(() => {})
       .finally(() => setPrefsSettled(true));
@@ -2514,6 +2536,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       value={prdModeState}
                       defaultOn={featureDefault("prd-mode-enabled")}
                       onChange={handleTogglePrdMode}
+                    />
+                  ) : (
+                    <TriStateSkeleton />
+                  )}
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.recent_sessions_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.recent_sessions_enabled")}</span>
+                  {prefsSettled ? (
+                    <TriStateToggle
+                      value={recentSessionsState}
+                      defaultOn={featureDefault("recent-sessions-enabled")}
+                      onChange={handleToggleRecentSessions}
                     />
                   ) : (
                     <TriStateSkeleton />

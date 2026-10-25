@@ -110,6 +110,7 @@ const ALL_KEYS = [
   "wiki-guidance-enabled",
   "model-guidance-enabled",
   "session-title-guidance-enabled",
+  "recent-sessions-enabled",
   "plan-approval-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
@@ -236,6 +237,7 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "wiki-guidance-enabled": true,
   "model-guidance-enabled": true,
   "session-title-guidance-enabled": true,
+  "recent-sessions-enabled": true,
   "auto-update-check": true,
   "daily-report-auto-popup": true,
   // Default OFF.

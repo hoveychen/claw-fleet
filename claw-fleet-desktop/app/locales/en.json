@@ -2171,6 +2171,8 @@
     "model_guidance_enabled": "Enable model-selection guidance",
     "session_title_guidance_desc": "Ask the agent to name its own task once the topic is clear, via the fleet__set_session_title tool, so task cards read as titles instead of the first prompt. A title you set by hand always wins. Applies to both Claude and Fleet-launched Codex tasks.",
     "session_title_guidance_enabled": "Let agents title their own tasks",
+    "recent_sessions_desc": "When a session opens (and after a resume or context compaction), hand it the titles of up to 40 other recent sessions in the same repository, plus a few task summaries, so the agent knows what else is being worked on and who is touching the same files right now. Titles and summaries only — never conversation content. Applies to Claude, Codex and dsh tasks.",
+    "recent_sessions_enabled": "Give new sessions a list of recent sessions",
     "skill_autosync_enabled": "Enable automatic skill interop",
     "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into Fleet Docs (`fleet wiki publish`) so they show up in Docs instead of getting lost in project folders. Applies to both Claude and Fleet-launched Codex tasks.",
     "wiki_guidance_enabled": "Enable Docs publish guidance",

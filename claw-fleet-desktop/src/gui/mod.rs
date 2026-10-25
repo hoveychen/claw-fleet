@@ -1887,6 +1887,8 @@ pub fn run() {
             test_fleet_ask_via_claude_cli,
             apply_prd_mode,
             remove_prd_mode,
+            apply_recent_sessions,
+            remove_recent_sessions,
             reconcile_codex_guidance,
             respond_to_elicitation,
             respond_to_fleet_ask,

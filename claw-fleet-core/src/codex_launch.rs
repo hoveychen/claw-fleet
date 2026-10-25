@@ -1111,8 +1111,12 @@ fn maybe_prepend_active_plans(
 /// because one codex thread is one context window: the block describes the
 /// repo, not the turn, and nothing in it is worth ~5 KB on every resume.
 ///
-/// Silent when the workspace has no other sessions to report.
+/// Silent when the workspace has no other sessions to report, or when the
+/// user switched the block off.
 fn prepend_recent_sessions(workspace_path: &str, prompt: &str) -> String {
+    if !crate::control_plane_prefs::is_enabled(crate::control_plane_prefs::Feature::RecentSessions) {
+        return prompt.to_string();
+    }
     // Scan only local transcript sources: dsh's session/list is unrelated to
     // launching Codex and must not even be requested on this path. Bound the
     // remaining file scan for cold or unusually large histories.
