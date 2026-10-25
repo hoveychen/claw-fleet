@@ -1020,6 +1020,8 @@ pub(crate) fn claude_fork_ask(
         cmd.env("HOME", home);
     }
     cmd.env("CLAUDE_CODE_ENTRYPOINT", &entrypoint);
+    // A fork of an incognito session runs in its origin's config dir.
+    crate::incognito::apply_launch_env(&mut cmd, &args)?;
 
     let mut fold = ClaudeStreamFold::default();
     let exit = drive_fork_process(cmd, "claude", &mut |line| {

@@ -99,6 +99,13 @@ impl AgentSource for ClaudeCodeSource {
         if projects.is_dir() {
             paths.push(projects);
         }
+        // Incognito sessions' transcripts live under their own config dirs;
+        // created up front so the watch exists before the first one spawns.
+        if let Some(root) = crate::incognito::configs_root() {
+            if std::fs::create_dir_all(&root).is_ok() {
+                paths.push(root);
+            }
+        }
         paths
     }
 

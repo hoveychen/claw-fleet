@@ -263,11 +263,10 @@ fn read_registrations(dir: &Path) -> Vec<SessionRegistration> {
 /// dead session look alive here; callers use this only where "alive" is the
 /// safe answer (the plan reviver then simply does not spawn).
 pub(crate) fn live_registered_session_ids() -> std::collections::HashSet<String> {
-    let Some(dir) = sessions_dir() else {
-        return Default::default();
-    };
-    read_registrations(&dir)
-        .into_iter()
+    // Incognito sessions register under their own config dir.
+    crate::incognito::claude_sessions_dirs(sessions_dir())
+        .iter()
+        .flat_map(|dir| read_registrations(dir))
         .filter(|r| crate::session::is_process_alive(r.pid))
         .map(|r| r.session_id)
         .collect()
@@ -285,7 +284,9 @@ pub fn resolve(session_id: &str) -> Option<LiveTarget> {
     if session_id.is_empty() {
         return None;
     }
-    let dir = sessions_dir()?;
+    let dir = crate::incognito::config_dir(session_id)
+        .map(|d| d.join("sessions"))
+        .or_else(sessions_dir)?;
     let reg = read_registrations(&dir)
         .into_iter()
         .find(|r| r.session_id == session_id)?;

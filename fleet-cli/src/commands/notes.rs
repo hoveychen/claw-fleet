@@ -101,7 +101,8 @@ pub(crate) fn cmd_notes_hint() {
     // launches carry this hook even with the switch off.
     if !claw_fleet_core::control_plane_prefs::is_enabled(
         claw_fleet_core::control_plane_prefs::Feature::NotesHint,
-    ) {
+    ) || claw_fleet_core::incognito::current_is_incognito(Some(&sid))
+    {
         return;
     }
     let Some(hint) = claw_fleet_core::session_notes::render_hint(&sid) else {

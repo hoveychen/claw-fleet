@@ -540,6 +540,53 @@ pub fn spawn_session(
     tool: &str,
     spec: &SpawnSpec,
 ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    // A session started from inside an incognito session is incognito too.
+    if spec
+        .spawned_by
+        .as_deref()
+        .is_some_and(crate::incognito::is_incognito)
+    {
+        return spawn_incognito_session(tool, spec);
+    }
+    spawn_session_inner(tool, spec)
+}
+
+/// [`spawn_session`] as an incognito session ([`crate::incognito`]): a fresh
+/// private `CLAUDE_CONFIG_DIR`, no cross-session injections, a fenced tool
+/// set. Claude Code only — any other harness is refused. The session id is
+/// pre-assigned (or `spec.session_id` is used) so the marker exists before the
+/// first launch reads it.
+pub fn spawn_incognito_session(
+    tool: &str,
+    spec: &SpawnSpec,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    let tool = normalize_tool(tool);
+    if tool != "claude" {
+        return Err(crate::incognito::unsupported_harness(tool));
+    }
+    let sid = crate::session_launch::resolve_new_session_id(spec.session_id.as_deref())?;
+    crate::incognito::purge_idle();
+    crate::incognito::register_new(&sid)?;
+    // Recorded before the launch, as `spawn_session_inner` does for a
+    // pre-signed sub-task, so the first launch already renders as a sub-task.
+    if let Some(parent) = spec.spawned_by.as_deref() {
+        crate::launch_spec::note_spawned_by(&sid, parent);
+    }
+    let spec = SpawnSpec {
+        session_id: Some(sid.clone()),
+        ..spec.clone()
+    };
+    spawn_session_inner(tool, &spec).inspect_err(|_| {
+        if spec.spawned_by.is_some() {
+            crate::launch_spec::forget(&sid);
+        }
+    })
+}
+
+fn spawn_session_inner(
+    tool: &str,
+    spec: &SpawnSpec,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
     let tool = normalize_tool(tool);
     let sources = sources_for_tool(tool);
     let source = find_source_by_api_name(&sources, tool)

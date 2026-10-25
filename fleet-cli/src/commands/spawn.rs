@@ -28,6 +28,7 @@ pub(crate) fn cmd_spawn(
     step: Option<&str>,
     plan: Option<&str>,
     session: Option<&str>,
+    incognito: bool,
 ) {
     let prompt = prompt.trim();
     if prompt.is_empty() {
@@ -71,7 +72,12 @@ pub(crate) fn cmd_spawn(
         None => None,
     };
 
-    let resp = match claw_fleet_core::agent_source::spawn_session(
+    let spawn = if incognito {
+        claw_fleet_core::agent_source::spawn_incognito_session
+    } else {
+        claw_fleet_core::agent_source::spawn_session
+    };
+    let resp = match spawn(
         &route.agent_source,
         &claw_fleet_core::agent_source::SpawnSpec {
             workspace_path: workspace_path.clone(),

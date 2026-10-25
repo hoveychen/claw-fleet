@@ -492,6 +492,9 @@ fn registered_claude_transcripts(
         if spec.source.as_deref() != Some("claude") {
             continue;
         }
+        // An incognito session writes under its own config dir.
+        let incognito_projects = crate::incognito::projects_dir(&id);
+        let projects_dir = incognito_projects.as_deref().unwrap_or(projects_dir);
         let found = match spec.transcript.as_deref() {
             Some(stored) => Some(PathBuf::from(stored)).filter(|p| p.is_file()),
             None => {

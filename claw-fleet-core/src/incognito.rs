@@ -126,6 +126,21 @@ pub fn projects_dir(session_id: &str) -> Option<PathBuf> {
     config_dir(session_id).map(|d| d.join("projects"))
 }
 
+/// The `projects/` dir a Claude session's transcript lives in: its incognito
+/// config dir's, else the real Claude dir's.
+pub fn claude_projects_dir_for(session_id: &str) -> Option<PathBuf> {
+    projects_dir(session_id)
+        .or_else(|| crate::session::get_claude_dir().map(|d| d.join("projects")))
+}
+
+/// The `sessions/` dirs Claude Code registers live processes in: the real
+/// Claude dir's and every incognito config dir's.
+pub fn claude_sessions_dirs(real: Option<PathBuf>) -> Vec<PathBuf> {
+    real.into_iter()
+        .chain(all_config_dirs().into_iter().map(|d| d.join("sessions")))
+        .collect()
+}
+
 fn write_record(rec: &Record) -> Result<(), String> {
     let path = record_path(&rec.session_id).ok_or("invalid session id")?;
     if let Some(parent) = path.parent() {
@@ -683,6 +698,32 @@ impl Fence {
             _ => None,
         }
     }
+}
+
+/// The `fleet incognito-guard` PreToolUse hook: the hook's stdout for one
+/// payload — a deny decision, or `None` to stay silent and let the call run.
+pub fn guard_hook_output(payload: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(payload).ok()?;
+    let sid = v.get("session_id").and_then(Value::as_str);
+    let fence = Fence::for_session(sid)?;
+    let tool = v.get("tool_name").and_then(Value::as_str)?;
+    let cwd = v
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())?;
+    let input = v.get("tool_input").cloned().unwrap_or(Value::Null);
+    let reason = fence.check_tool(tool, &input, &cwd)?;
+    Some(
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        })
+        .to_string(),
+    )
 }
 
 /// The `fleet` subcommands a shell command line invokes, by a rough split on
