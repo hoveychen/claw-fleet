@@ -18,6 +18,7 @@ pub mod chat_workspace;
 pub mod claude_analyze;
 pub mod claude_binary;
 pub mod claude_cli;
+pub mod claude_host;
 pub(crate) mod claude_md_block;
 pub mod claude_md_lock;
 pub mod claude_source;

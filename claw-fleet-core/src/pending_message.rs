@@ -261,6 +261,14 @@ pub fn enqueue(
     // Only the injected copy is signed. The queue path is drained through
     // `claude --resume`, where the text *is* the user's prompt and no framing
     // has to be undone.
+    // Best path for the user's own words: the turn's stdin holder writes them to
+    // the CLI as a real user message (no peer framing, no signature needed) and
+    // backgrounds whatever foreground task is blocking the tool boundary, so the
+    // message is read within seconds instead of when that task ends.
+    if sender == Sender::User && crate::claude_host::send_user_message(session_id, text).is_ok() {
+        crate::ask_preempt::touch_inbox(session_id, sender);
+        return Ok(Delivery::Injected);
+    }
     let signed;
     let injected_text = match sender {
         Sender::User => {
