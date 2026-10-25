@@ -612,7 +612,8 @@
       "approved-with-edits": "approved with edits",
       "rejected": "rejected",
       "task-completed": "task finished",
-      "task-abandoned": "task abandoned"
+      "task-abandoned": "task abandoned",
+      "withdrawn": "withdrawn by agent"
     },
     "other_label": "Other",
     "edited_plan": "Edited proposal:",
@@ -1858,6 +1859,7 @@
     "decision_timeout": "Timed out",
     "decision_cancelled": "Cancelled",
     "decision_heartbeat_lost": "Disconnected",
+    "decision_withdrawn": "Withdrawn by agent",
     "user_image": "Attached image",
     "attachments": "Attachments",
     "result_image": "Image returned by the tool",

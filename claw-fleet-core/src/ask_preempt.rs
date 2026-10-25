@@ -173,6 +173,13 @@ pub fn is_detached(request_id: &str) -> bool {
     detached_path(request_id).is_some_and(|p| p.is_file())
 }
 
+/// [`is_detached`], also true while [`sweep_idle`] holds the record under its
+/// claim name — the sweep calls the orphan recovery from inside that claim.
+pub fn was_detached(request_id: &str) -> bool {
+    detached_path(request_id)
+        .is_some_and(|p| p.is_file() || p.with_extension("sweeping").is_file())
+}
+
 fn list_detached() -> Vec<DetachedCard> {
     let Some(dir) = detached_dir() else {
         return Vec::new();

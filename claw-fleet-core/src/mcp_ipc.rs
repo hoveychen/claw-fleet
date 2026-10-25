@@ -280,13 +280,18 @@ pub fn try_read_response(id: &str) -> Option<FleetAskResponse> {
 /// writing and resume the Fleet-owned session with the answer instead of
 /// leaving an unconsumed response forever.
 pub fn write_response(resp: &FleetAskResponse) -> Result<(), String> {
-    // Only a live pending request may be answered — see guard::write_response.
-    if !request_path(&resp.id).map(|p| p.exists()).unwrap_or(false) {
-        return Err(format!("no pending request for id {}", resp.id));
-    }
+    let req_path = request_path(&resp.id).ok_or("cannot determine home dir")?;
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))?;
+    // Only a live pending request may be answered — see guard::write_response.
+    // The check and the write share `withdraw`'s lock, so a withdraw can never
+    // remove the card between them and drop this answer on the floor.
+    crate::atomic_json::with_file_lock(&req_path, || {
+        if !req_path.exists() {
+            return Err(format!("no pending request for id {}", resp.id));
+        }
+        fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))
+    })?;
     if !recover_orphaned_response(&resp.id)? {
         // A detached card has no producer polling for this file; tell the
         // live turn to fetch it (see `ask_preempt`).
@@ -416,6 +421,10 @@ where
     if resp.cancelled {
         cleanup(id);
     } else {
+        // Read before `cleanup` drops the record: a card that stepped aside was
+        // left by a turn that ended on its own, not one cut off by a timeout,
+        // and the resume prompt has to say so.
+        let stepped_aside = crate::ask_preempt::was_detached(id);
         let model = crate::session::resolve_session_model_spec(&req.session_id);
         let effort = crate::launch_spec::effort_of(&req.session_id);
         crate::parked::park_with(
@@ -427,6 +436,9 @@ where
             model.as_deref(),
             effort.as_deref(),
         )?;
+        if stepped_aside {
+            crate::parked::mark_stepped_aside(id)?;
+        }
         // From here the parked copy is authoritative. Removing the live pair
         // prevents the stale response from being rediscovered after restart.
         cleanup(id);
@@ -464,12 +476,58 @@ where
 /// the MCP server once it has consumed the response.
 pub fn cleanup(id: &str) {
     if let Some(p) = request_path(id) {
+        let _ = fs::remove_file(lock_path(&p));
         let _ = fs::remove_file(p);
     }
     if let Some(p) = response_path(id) {
         let _ = fs::remove_file(p);
     }
     crate::ask_preempt::clear_detached(id);
+}
+
+/// The sibling file [`crate::atomic_json::with_file_lock`] locks for `path`.
+fn lock_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// What [`withdraw`] found.
+#[derive(Debug)]
+pub enum WithdrawOutcome {
+    /// The card is closed: request and any detached record are gone.
+    Withdrawn,
+    /// The boss answered first. The card is left open with its response, for
+    /// the caller to consume like any answer.
+    Answered(FleetAskResponse),
+    /// No open card with this id.
+    Gone,
+}
+
+/// Close a card unless an answer is already in, atomically with respect to
+/// [`write_response`]: both run under the request's lock, and the request is
+/// renamed away before the response check, so a writer that would land after
+/// the check finds no request and fails instead of being silently dropped.
+pub fn withdraw(id: &str) -> WithdrawOutcome {
+    let Some(req_path) = request_path(id) else {
+        return WithdrawOutcome::Gone;
+    };
+    let claimed = req_path.with_extension("withdrawing");
+    let outcome = crate::atomic_json::with_file_lock(&req_path, || {
+        if fs::rename(&req_path, &claimed).is_err() {
+            return WithdrawOutcome::Gone;
+        }
+        if let Some(resp) = try_read_response(id) {
+            let _ = fs::rename(&claimed, &req_path);
+            return WithdrawOutcome::Answered(resp);
+        }
+        let _ = fs::remove_file(&claimed);
+        WithdrawOutcome::Withdrawn
+    });
+    if matches!(outcome, WithdrawOutcome::Withdrawn) {
+        cleanup(id);
+    }
+    outcome
 }
 
 /// Soft list of pending request ids; returns empty on any failure.
@@ -1571,6 +1629,137 @@ mod tests {
         .unwrap());
         assert!(!request_path(&req.id).unwrap().exists());
         assert!(!response_path(&req.id).unwrap().exists());
+    }
+
+    /// Recover `id` (already planted with an answer) and return the resume prompt.
+    fn recover_prompt(id: &str) -> String {
+        let mut prompt = None;
+        assert!(recover_orphaned_response_with(
+            id,
+            |_| false,
+            |_, _, p, _, _, _| {
+                prompt = Some(p.to_string());
+                Ok(())
+            },
+        )
+        .unwrap());
+        prompt.expect("orphan must resume")
+    }
+
+    #[test]
+    fn detached_orphan_resumes_with_the_stepped_aside_header() {
+        let home = TmpHome::new("orphan-detached");
+        let workspace = home.dir.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let session_id = "019f6aba-6dd8-7c90-a70e-c969ea896bd4";
+        home.plant_codex_session(session_id, &workspace);
+        let plant = |id: &str| {
+            let mut req = empty_request(id);
+            req.session_id = session_id.into();
+            write_request(&req).unwrap();
+            let response = FleetAskResponse {
+                id: id.into(),
+                answers: BTreeMap::from([("q".into(), "继续".into())]),
+                cancelled: false,
+                task_outcome: None,
+            };
+            std::fs::write(response_path(id).unwrap(), serde_json::to_vec(&response).unwrap())
+                .unwrap();
+        };
+
+        // A card that timed out keeps the timeout wording.
+        plant("plain-1");
+        let prompt = recover_prompt("plain-1");
+        assert!(prompt.starts_with(crate::parked::RESUME_PROMPT_HEADER), "{prompt}");
+
+        // A card that stepped aside and whose turn then ended: write-time path.
+        plant("aside-1");
+        crate::ask_preempt::mark_detached("aside-1", session_id);
+        let prompt = recover_prompt("aside-1");
+        assert!(prompt.starts_with(crate::parked::STEPPED_ASIDE_RESUME_HEADER), "{prompt}");
+        assert!(!prompt.contains("等待超时"), "{prompt}");
+        assert!(!prompt.contains("被中断"), "{prompt}");
+        assert!(prompt.contains("【老板的选择】继续"), "{prompt}");
+        assert!(!crate::ask_preempt::is_detached("aside-1"));
+
+        // Same through the sweep, which holds the record under its claim name.
+        plant("aside-2");
+        crate::ask_preempt::mark_detached("aside-2", session_id);
+        let dir = home.dir.join(".fleet/fleet-ask-detached");
+        std::fs::rename(dir.join("aside-2.json"), dir.join("aside-2.sweeping")).unwrap();
+        let prompt = recover_prompt("aside-2");
+        assert!(prompt.starts_with(crate::parked::STEPPED_ASIDE_RESUME_HEADER), "{prompt}");
+    }
+
+    #[test]
+    fn withdraw_returns_an_answer_that_is_already_in() {
+        let _home = TmpHome::new("withdraw-answered");
+        write_request(&empty_request("w-ans")).unwrap();
+        write_response_file_for_test("w-ans", 0);
+        match withdraw("w-ans") {
+            WithdrawOutcome::Answered(resp) => assert_eq!(resp.answers["q"], "a"),
+            other => panic!("expected the answer, got {other:?}"),
+        }
+        assert!(read_request("w-ans").is_some(), "the card stays open for the caller to consume");
+        assert!(try_read_response("w-ans").is_some());
+        assert!(matches!(withdraw("w-missing"), WithdrawOutcome::Gone));
+    }
+
+    #[test]
+    fn answer_after_withdraw_is_refused_not_dropped() {
+        let home = TmpHome::new("withdraw-then-answer");
+        write_request(&empty_request("w-1")).unwrap();
+        assert!(matches!(withdraw("w-1"), WithdrawOutcome::Withdrawn));
+        assert!(read_request("w-1").is_none());
+        let err = write_response(&FleetAskResponse {
+            id: "w-1".into(),
+            answers: BTreeMap::from([("q".into(), "late".into())]),
+            cancelled: false,
+            task_outcome: None,
+        })
+        .unwrap_err();
+        assert!(err.contains("no pending request"), "{err}");
+        assert!(try_read_response("w-1").is_none());
+        // No claim file or lock is left that a listing could mistake for a card.
+        let names: Vec<String> = std::fs::read_dir(home.dir.join(".fleet/fleet-ask"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("w-1") && !n.ends_with(".lock"))
+            .collect();
+        assert!(names.is_empty(), "{names:?}");
+    }
+
+    /// Race a real writer against withdraw. Whatever the interleaving, the
+    /// answer either comes back from `withdraw` or its write fails — it is never
+    /// accepted and then lost.
+    #[test]
+    fn withdraw_and_answer_race_never_loses_the_answer() {
+        let _home = TmpHome::new("withdraw-race");
+        for i in 0..40 {
+            let id = format!("race-{i}");
+            write_request(&empty_request(&id)).unwrap();
+            let writer_id = id.clone();
+            let writer = std::thread::spawn(move || {
+                write_response(&FleetAskResponse {
+                    id: writer_id,
+                    answers: BTreeMap::from([("q".into(), "a".into())]),
+                    cancelled: false,
+                    task_outcome: None,
+                })
+            });
+            let outcome = withdraw(&id);
+            let written = writer.join().unwrap();
+            match outcome {
+                WithdrawOutcome::Answered(_) => assert!(written.is_ok(), "{id}"),
+                WithdrawOutcome::Withdrawn => {
+                    assert!(written.is_err(), "{id}: answer accepted after the withdraw");
+                    assert!(try_read_response(&id).is_none(), "{id}: stray response");
+                }
+                WithdrawOutcome::Gone => panic!("{id}: card vanished"),
+            }
+            cleanup(&id);
+        }
     }
 
     #[test]

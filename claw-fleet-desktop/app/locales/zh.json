@@ -609,7 +609,8 @@
       "approved-with-edits": "批准并改写",
       "rejected": "已驳回",
       "task-completed": "已结束任务",
-      "task-abandoned": "已放弃任务"
+      "task-abandoned": "已放弃任务",
+      "withdrawn": "AI 已撤回"
     },
     "other_label": "其他",
     "edited_plan": "改写后的方案：",
@@ -1855,6 +1856,7 @@
     "decision_timeout": "已超时",
     "decision_cancelled": "已取消",
     "decision_heartbeat_lost": "连接中断",
+    "decision_withdrawn": "AI 已撤回",
     "user_image": "附带的图片",
     "attachments": "附件",
     "result_image": "工具返回的图片",

@@ -94,6 +94,10 @@ pub enum FleetAskOutcome {
     HeartbeatLost,
     /// Configured wait_seconds elapsed without any response.
     Timeout,
+    /// The agent took its own card back (`fleet__ask action=withdraw`) after it
+    /// stepped aside for a message. Not a refusal by the boss, so it stays out
+    /// of `declined`.
+    Withdrawn,
 }
 
 impl FleetAskOutcome {
@@ -429,6 +433,9 @@ pub struct DecisionTypeStats {
     pub heartbeat_lost: u32,
     /// Wait window elapsed with no response.
     pub timeout: u32,
+    /// fleet-ask cards the agent withdrew itself — the boss never refused them.
+    #[serde(default)]
+    pub withdrawn: u32,
     /// Answered cards whose first question presented an explicit
     /// `(Recommended)` option — the denominator for the hit rate.
     pub with_recommendation: u32,
@@ -582,6 +589,7 @@ fn accumulate_record(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord,
             FleetAskOutcome::TaskAbandoned => s.task_abandoned += 1,
             FleetAskOutcome::HeartbeatLost => s.heartbeat_lost += 1,
             FleetAskOutcome::Timeout => s.timeout += 1,
+            FleetAskOutcome::Withdrawn => s.withdrawn += 1,
         },
         DecisionHistoryRecord::PlanApproval(r) => match r.outcome {
             PlanApprovalOutcome::Approved | PlanApprovalOutcome::ApprovedWithEdits => {
@@ -1956,6 +1964,40 @@ mod tests {
         assert_eq!(s.with_recommendation, 2);
         assert_eq!(s.recommended_hit, 1);
         assert_eq!(s.other_pick, 1);
+    }
+
+    #[test]
+    fn stats_keep_withdrawn_fleet_ask_out_of_declined() {
+        let mut stats = DecisionCardStats::default();
+        for (id, outcome) in [
+            ("w1", FleetAskOutcome::Withdrawn),
+            ("c1", FleetAskOutcome::Cancelled),
+        ] {
+            let req = sample_fleet_ask_request("s", id);
+            let rec = build_fleet_ask_record(
+                &req,
+                outcome,
+                BTreeMap::new(),
+                "2026-05-28T00:00:04Z".into(),
+            );
+            accumulate_self(&mut stats, &DecisionHistoryRecord::FleetAsk(rec));
+        }
+        let s = &stats.by_type["fleet-ask"];
+        assert_eq!(s.triggered, 2);
+        assert_eq!(s.withdrawn, 1);
+        assert_eq!(s.declined, 1, "only the boss's dismissal is a refusal");
+        assert_eq!(
+            serde_json::to_value(FleetAskOutcome::Withdrawn).unwrap(),
+            serde_json::json!("withdrawn")
+        );
+        // Stats written before the counter existed still parse.
+        let old: DecisionTypeStats = serde_json::from_value(serde_json::json!({
+            "triggered": 1, "answered": 1, "declined": 0, "heartbeatLost": 0,
+            "timeout": 0, "withRecommendation": 0, "recommendedHit": 0,
+            "otherPick": 0, "latencySecsSum": 0.0, "latencyCount": 0
+        }))
+        .unwrap();
+        assert_eq!(old.withdrawn, 0);
     }
 
     #[test]

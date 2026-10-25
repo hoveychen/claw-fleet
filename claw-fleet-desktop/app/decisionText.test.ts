@@ -88,6 +88,10 @@ describe("decisionTerminalOutcome", () => {
     );
   });
 
+  it("reports a card the agent withdrew as its own outcome, not a cancel", () => {
+    expect(decisionTerminalOutcome(rec("fleet-ask", "withdrawn"), false)).toBe("withdrawn");
+  });
+
   it("returns null for an answered record", () => {
     expect(decisionTerminalOutcome(rec("elicitation", "answered"), false)).toBeNull();
   });

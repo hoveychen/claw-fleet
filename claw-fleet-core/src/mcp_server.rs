@@ -1266,7 +1266,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     match args.get("action").and_then(Value::as_str).unwrap_or("ask") {
         "ask" => run_fleet_ask(params, |_| {}),
         "wait" => handle_fleet_ask_wait(params, &args),
-        "withdraw" => handle_fleet_ask_withdraw(&args),
+        "withdraw" => handle_fleet_ask_withdraw(params, &args),
         other => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown `action` {other:?}: expected ask, wait or withdraw"),
@@ -1322,23 +1322,43 @@ fn handle_fleet_ask_wait(params: &Value, args: &Value) -> Result<Value, JsonRpcE
 }
 
 /// `fleet__ask action=withdraw`: take a card the agent no longer needs off the
-/// boss's screen. An answer that is already in is never swallowed.
-fn handle_fleet_ask_withdraw(args: &Value) -> Result<Value, JsonRpcError> {
+/// boss's screen. An answer that is already in is never swallowed: the check
+/// and the removal are one step ([`crate::mcp_ipc::withdraw`]), and an answer
+/// found there is handed back exactly as `wait` would have returned it.
+fn handle_fleet_ask_withdraw(params: &Value, args: &Value) -> Result<Value, JsonRpcError> {
     let req = match owned_open_card(args) {
         Ok(req) => req,
         Err(e) => return Ok(tool_error(e)),
     };
-    if crate::mcp_ipc::try_read_response(&req.id).is_some() {
-        return Ok(tool_error(format!(
-            "The boss already resolved card {}; call fleet__ask with {{\"action\":\"wait\",\"request_id\":\"{}\"}} to get the result instead of withdrawing it.",
-            req.id, req.id
-        )));
+    match crate::mcp_ipc::withdraw(&req.id) {
+        crate::mcp_ipc::WithdrawOutcome::Withdrawn => {}
+        crate::mcp_ipc::WithdrawOutcome::Answered(_) => {
+            let mut result = handle_fleet_ask_wait(params, args)?;
+            let note = format!(
+                "Card {} was not withdrawn: the boss had already resolved it. Act on their response above.",
+                req.id
+            );
+            // Appended, never prepended: agents parse the first block of an
+            // answered result as the answers JSON.
+            if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
+                content.push(json!({ "type": "text", "text": note }));
+            }
+            if let Some(structured) = result.get_mut("structuredContent").and_then(Value::as_object_mut) {
+                structured.insert("withdrawRefused".into(), json!(note));
+            }
+            return Ok(result);
+        }
+        crate::mcp_ipc::WithdrawOutcome::Gone => {
+            return Ok(tool_error(format!(
+                "No open card {} for this session (it may already be answered/delivered or withdrawn).",
+                req.id
+            )));
+        }
     }
-    crate::mcp_ipc::cleanup(&req.id);
     crate::task_kickoff::take_pending(&req.id);
     persist_fleet_ask_history(
         &req,
-        crate::decision_history::FleetAskOutcome::Cancelled,
+        crate::decision_history::FleetAskOutcome::Withdrawn,
         std::collections::BTreeMap::new(),
     );
     Ok(json!({
@@ -3634,12 +3654,41 @@ mod tests {
         assert!(!crate::ask_preempt::is_detached("r-open"));
         assert!(!crate::mcp_ipc::list_pending_requests().contains(&"r-open".to_string()));
 
+        // A withdraw is the agent retracting its own card, not the boss
+        // refusing it: it is recorded as its own outcome.
+        let outcomes: Vec<_> = crate::decision_history::list_session_records("s-me")
+            .into_iter()
+            .filter_map(|r| match r {
+                crate::decision_history::DecisionHistoryRecord::FleetAsk(r) => {
+                    Some((r.id, r.outcome))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![(
+                "r-open".to_string(),
+                crate::decision_history::FleetAskOutcome::Withdrawn
+            )]
+        );
+
+        // An answer that landed first is handed back instead of being dropped.
         queue_card("r-answered", "s-me");
         crate::mcp_ipc::write_response_file_for_test("r-answered", 0);
         let out = card_action("withdraw", "r-answered");
-        assert!(is_error(&out));
-        assert!(out.to_string().contains("wait"), "{out}");
-        assert!(crate::mcp_ipc::read_request("r-answered").is_some());
+        assert!(!is_error(&out), "{out}");
+        assert_eq!(out["structuredContent"]["answers"]["q"], "a", "{out}");
+        assert_eq!(out["content"][0]["text"], r#"{"q":"a"}"#, "answers stay block one");
+        assert!(out.to_string().contains("was not withdrawn"), "{out}");
+        assert!(crate::mcp_ipc::read_request("r-answered").is_none(), "consumed like a wait");
+        let answered = crate::decision_history::list_session_records("s-me")
+            .into_iter()
+            .any(|r| matches!(r,
+                crate::decision_history::DecisionHistoryRecord::FleetAsk(r)
+                    if r.id == "r-answered"
+                        && r.outcome == crate::decision_history::FleetAskOutcome::Answered));
+        assert!(answered, "the answer is recorded as answered, not withdrawn");
     }
 
     #[test]

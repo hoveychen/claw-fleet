@@ -87,6 +87,10 @@ function outcomeClass(outcome: string): string {
       return styles.outcome_timeout;
     case "heartbeat-lost":
       return styles.outcome_heartbeat_lost;
+    // The agent took its own card back after it stepped aside for a message:
+    // neither an answer nor the boss refusing it, so no verdict colour.
+    case "withdrawn":
+      return "";
     case "approved":
       return styles.outcome_approved;
     case "approved-with-edits":
