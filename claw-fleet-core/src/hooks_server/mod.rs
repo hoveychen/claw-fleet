@@ -1924,6 +1924,15 @@ fn handle_request(
                 route_remove_prd_mode(ctx, request, &query, json_header, path)
             }
 
+            // ── Recent-sessions block switch ─────────────────────────────────
+            crate::routes::APPLY_RECENT_SESSIONS => {
+                route_set_recent_sessions(request, json_header, true)
+            }
+
+            crate::routes::REMOVE_RECENT_SESSIONS => {
+                route_set_recent_sessions(request, json_header, false)
+            }
+
             // ── Codex guidance endpoint (writes remote ~/.codex/AGENTS.md) ────
             crate::routes::RECONCILE_CODEX_GUIDANCE => {
                 route_reconcile_codex_guidance(ctx, request, &query, json_header, path)

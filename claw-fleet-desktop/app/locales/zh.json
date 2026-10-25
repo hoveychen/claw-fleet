@@ -2168,6 +2168,8 @@
     "model_guidance_enabled": "启用模型选择速查指引",
     "session_title_guidance_desc": "让 Agent 在话题清楚后用 fleet__set_session_title 给自己的任务起名，任务卡上显示的是标题而不是第一条 prompt。你手动改过的名字永远优先。同时对 Claude 与 Fleet 启动的 Codex 任务生效。",
     "session_title_guidance_enabled": "让 Agent 自己给任务起标题",
+    "recent_sessions_desc": "新会话开场（以及续接、上下文压缩后）附上同一仓库最近 40 个其他会话的标题清单和少量任务摘要，让 Agent 知道别人最近在做什么、谁正在改同一批文件。只传标题和摘要，不传对话内容。同时对 Claude、Codex 与 dsh 任务生效。",
+    "recent_sessions_enabled": "给新会话附上最近会话清单",
     "skill_autosync_enabled": "启用 Skill 自动互通",
     "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进文档，在「文档」板块统一浏览，不再散落在项目目录里。同时对 Claude 与 Fleet 启动的 Codex 任务生效。",
     "wiki_guidance_enabled": "启用文档归档指引",

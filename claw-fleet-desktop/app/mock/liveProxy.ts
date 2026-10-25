@@ -290,6 +290,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { user_title: hostPrefs().userTitle, locale: hostPrefs().locale },
   }),
 
+  apply_recent_sessions: () => ({
+    method: "POST",
+    path: "/apply_recent_sessions",
+    empty: true,
+  }),
+
   apply_wiki_guidance: () => ({
     method: "POST",
     path: "/apply_wiki_guidance",
@@ -1284,6 +1290,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   remove_prd_mode: () => ({
     method: "POST",
     path: "/remove_prd_mode",
+    empty: true,
+  }),
+
+  remove_recent_sessions: () => ({
+    method: "POST",
+    path: "/remove_recent_sessions",
     empty: true,
   }),
 

@@ -3824,6 +3824,14 @@ impl LocalBackend {
         Ok(())
     }
 
+    pub fn apply_recent_sessions(&self) -> Result<(), String> {
+        crate::hooks::apply_recent_sessions()
+    }
+
+    pub fn remove_recent_sessions(&self) -> Result<(), String> {
+        crate::hooks::remove_recent_sessions()
+    }
+
     pub fn remove_prd_mode(&self) -> Result<(), String> {
         // Remove all three halves regardless of which fails — best effort, then
         // surface the first error if any so the UI can re-try.

@@ -135,7 +135,10 @@ pub(crate) fn cmd_dsh_context(
     // longer cold — overrunning would drop every guidance section in this
     // reply, not just this one. A render that misses the budget hands its claim
     // back so the next step can try again.
-    if let Some(sid) = session.as_deref() {
+    let recent_on = claw_fleet_core::control_plane_prefs::is_enabled(
+        claw_fleet_core::control_plane_prefs::Feature::RecentSessions,
+    );
+    if let Some(sid) = session.as_deref().filter(|_| recent_on) {
         if claw_fleet_core::recent_sessions::claim_once(sid) {
             match claw_fleet_core::recent_sessions::render_within(
                 &cwd.to_string_lossy(),

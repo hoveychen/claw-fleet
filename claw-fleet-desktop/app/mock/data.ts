@@ -3477,6 +3477,7 @@ export const MOCK_HOOKS_PLAN = {
   wikiGuidanceInstalled: true,
   modelGuidanceInstalled: true,
   sessionTitleGuidanceInstalled: true,
+  recentSessionsInstalled: true,
 };
 
 // ── Audit events ───────────────────────────────────────────────────────────

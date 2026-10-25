@@ -97,6 +97,11 @@ pub struct HookSetupPlan {
     /// deserializable, like the two guidance flags above.
     #[serde(default)]
     pub wakeup_guard_installed: bool,
+    /// Whether the recent-sessions block (SessionStart `fleet recent-sessions`,
+    /// plus its codex and dsh arms) is on. `default` keeps payloads from older
+    /// `fleet serve` probes deserializable.
+    #[serde(default)]
+    pub recent_sessions_installed: bool,
 }
 
 /// The "cooked" state derived from the most recent hook events for a session.
@@ -201,6 +206,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         session_title_guidance_installed: is_enabled(Feature::SessionTitleGuidance),
         idle_hooks_installed: is_enabled(Feature::IdleHooks),
         wakeup_guard_installed: is_enabled(Feature::WakeupGuardHook),
+        recent_sessions_installed: is_enabled(Feature::RecentSessions),
     }
 }
 
@@ -241,6 +247,7 @@ pub fn global_hook_setup() -> HookSetupPlan {
         crate::session_title_guidance::is_session_title_guidance_installed();
     let idle_hooks_installed = has_idle_hooks(&hooks_obj);
     let wakeup_guard_installed = has_wakeup_guard_hook(&hooks_obj);
+    let recent_sessions_installed = has_recent_sessions_hook(&hooks_obj);
 
     HookSetupPlan {
         to_add,
@@ -258,6 +265,7 @@ pub fn global_hook_setup() -> HookSetupPlan {
         session_title_guidance_installed,
         idle_hooks_installed,
         wakeup_guard_installed,
+        recent_sessions_installed,
     }
 }
 
@@ -366,9 +374,9 @@ fn is_plan_approval_group(group: &Value) -> bool {
 
 /// Switch the PRD-context hooks on for Fleet-started sessions: the
 /// UserPromptSubmit `fleet prd-context` (re-injects the workspace's `TASKS.md`
-/// so compaction can't erase the macro plan), and its companions — the two
-/// SessionStart blocks (`notes-hint`, `recent-sessions`) and the PostToolUse
-/// `ctx-reminder`. See [`launch_hooks_for`].
+/// so compaction can't erase the macro plan), and its companions — the
+/// SessionStart `notes-hint` and the PostToolUse `ctx-reminder`. See
+/// [`launch_hooks_for`].
 pub fn apply_prd_context_hook() -> Result<(), String> {
     crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdContextHook, true)
 }
@@ -395,11 +403,13 @@ pub fn remove_prd_context_hook() -> Result<(), String> {
     crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::PrdContextHook, false)
 }
 
-/// All four parts must be present in the global settings.json: the
-/// UserPromptSubmit injection, its two SessionStart companions (notes hint,
-/// recent sessions), and the PostToolUse context-pressure reminder. A partial
-/// set reads as "not installed", so [`crate::claude_launch`] carries the whole
-/// feature on the launch instead of trusting a half-installed global copy.
+/// All three parts must be present in the global settings.json: the
+/// UserPromptSubmit injection, its SessionStart notes-hint companion, and the
+/// PostToolUse context-pressure reminder. A partial set reads as "not
+/// installed", so [`crate::claude_launch`] carries the whole feature on the
+/// launch instead of trusting a half-installed global copy. The recent-sessions
+/// hook older builds installed alongside is its own feature now
+/// ([`Feature::RecentSessions`](crate::control_plane_prefs::Feature)).
 fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
     hooks_obj
         .get("UserPromptSubmit")
@@ -407,7 +417,6 @@ fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
         .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
         .unwrap_or(false)
         && has_notes_hint_hook(hooks_obj)
-        && has_recent_sessions_hook(hooks_obj)
         && has_ctx_reminder_hook(hooks_obj)
 }
 
@@ -449,6 +458,18 @@ fn has_recent_sessions_hook(hooks_obj: &Map<String, Value>) -> bool {
 
 fn is_recent_sessions_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "recent-sessions")
+}
+
+/// Switch the recent-sessions block on for Fleet-started sessions — the Claude
+/// SessionStart hook and the codex / dsh arms alike (they read the same
+/// switch).
+pub fn apply_recent_sessions() -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::RecentSessions, true)
+}
+
+/// Switch the recent-sessions block off for Fleet-started sessions.
+pub fn remove_recent_sessions() -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::RecentSessions, false)
 }
 
 // ── Wakeup guard hook (ScheduleWakeup / CronCreate interception) ────────
@@ -1082,14 +1103,14 @@ fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [L
     const PRD_CONTEXT: &[LaunchHook] = &[
         hook("UserPromptSubmit", None, "prd-context", 10_000),
         hook("SessionStart", Some(NOTES_HINT_MATCHER), "notes-hint", 10_000),
-        hook(
-            "SessionStart",
-            Some(RECENT_SESSIONS_MATCHER),
-            "recent-sessions",
-            20_000,
-        ),
         hook("PostToolUse", None, "ctx-reminder", 10_000),
     ];
+    const RECENT_SESSIONS: &[LaunchHook] = &[hook(
+        "SessionStart",
+        Some(RECENT_SESSIONS_MATCHER),
+        "recent-sessions",
+        20_000,
+    )];
     const WAKEUP_GUARD: &[LaunchHook] = &[hook(
         "PreToolUse",
         Some(crate::wakeup_guard::WAKEUP_GUARD_MATCHER),
@@ -1107,6 +1128,7 @@ fn launch_hooks_for(feature: crate::control_plane_prefs::Feature) -> &'static [L
         Feature::PrdContextHook => PRD_CONTEXT,
         Feature::WakeupGuardHook => WAKEUP_GUARD,
         Feature::IdleHooks => IDLE,
+        Feature::RecentSessions => RECENT_SESSIONS,
         Feature::InteractionMode
         | Feature::PrdDiscipline
         | Feature::WikiGuidance
@@ -1780,13 +1802,14 @@ mod tests {
         hooks.insert("PostToolUse".into(), json!([logging, ctx]));
         assert!(has_ctx_reminder_hook(&hooks));
         assert!(
-            !has_prd_context_hook(&hooks),
-            "still not installed until the recent-sessions companion exists"
+            has_prd_context_hook(&hooks),
+            "recent-sessions is its own feature, not a PRD-context companion"
         );
+        assert!(!has_recent_sessions_hook(&hooks));
 
-        // Current shape: all four. The two SessionStart companions are separate
-        // entries; each marker must catch only its own, or installing one would
-        // evict the other on every apply.
+        // An older global copy that also carries recent-sessions. The two
+        // SessionStart entries are separate; each marker must catch only its
+        // own, or installing one would evict the other on every apply.
         let recent = recent_sessions_group_for(bin);
         assert!(is_recent_sessions_group(&recent));
         assert!(!is_recent_sessions_group(&hint));

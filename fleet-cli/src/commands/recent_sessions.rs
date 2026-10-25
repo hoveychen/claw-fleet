@@ -22,6 +22,13 @@ use std::path::PathBuf;
 /// that cannot say anything useful must not say anything at all.
 pub(crate) fn cmd_recent_sessions() {
     use std::io::Read;
+    // A launch with the block switched off carries no hook, but a copy left in
+    // the global settings.json by an older build still fires this command.
+    if !claw_fleet_core::control_plane_prefs::is_enabled(
+        claw_fleet_core::control_plane_prefs::Feature::RecentSessions,
+    ) {
+        return;
+    }
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let parsed = serde_json::from_str::<Value>(&input).ok();

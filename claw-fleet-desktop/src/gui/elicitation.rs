@@ -134,6 +134,16 @@ pub(crate) fn apply_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), St
 }
 
 #[tauri::command(async)]
+pub(crate) fn apply_recent_sessions(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.apply_recent_sessions()
+}
+
+#[tauri::command]
+pub(crate) fn remove_recent_sessions(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.remove_recent_sessions()
+}
+
+#[tauri::command]
 pub(crate) fn remove_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.remove_prd_mode()
 }
