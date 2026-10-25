@@ -287,7 +287,34 @@ pub fn write_response(resp: &FleetAskResponse) -> Result<(), String> {
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))?;
-    recover_orphaned_response(&resp.id).map(|_| ())
+    if !recover_orphaned_response(&resp.id)? {
+        // A detached card has no producer polling for this file; tell the
+        // live turn to fetch it (see `ask_preempt`).
+        crate::ask_preempt::notify_resolved_if_detached(&resp.id);
+    }
+    Ok(())
+}
+
+/// How long ago the response for `id` was written, or `None` when there is
+/// none. `ask_preempt::sweep_idle` waits this out before it takes over.
+pub fn response_age_ms(id: &str) -> Option<u64> {
+    let modified = fs::metadata(response_path(id)?).ok()?.modified().ok()?;
+    Some(
+        std::time::SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    )
+}
+
+/// Write a bare answered response for `id`, back-dated by `age_ms`.
+#[cfg(test)]
+pub(crate) fn write_response_file_for_test(id: &str, age_ms: u64) {
+    let path = response_path(id).unwrap();
+    fs::write(&path, r#"{"id":"x","answers":{"q":"a"}}"#).unwrap();
+    let f = fs::File::options().write(true).open(&path).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_millis(age_ms))
+        .unwrap();
 }
 
 /// The single seam every `fleet__ask` response path goes through — the desktop
@@ -433,8 +460,8 @@ where
     Ok(true)
 }
 
-/// Remove the request + response pair. Called by the MCP server once it has
-/// consumed the response.
+/// Remove the request + response pair (and any detached-card record). Called by
+/// the MCP server once it has consumed the response.
 pub fn cleanup(id: &str) {
     if let Some(p) = request_path(id) {
         let _ = fs::remove_file(p);
@@ -442,6 +469,7 @@ pub fn cleanup(id: &str) {
     if let Some(p) = response_path(id) {
         let _ = fs::remove_file(p);
     }
+    crate::ask_preempt::clear_detached(id);
 }
 
 /// Soft list of pending request ids; returns empty on any failure.
@@ -886,6 +914,15 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["ask", "wait", "withdraw"],
+                "description": "Default `ask` (raise a card; `questions` required). A card steps aside when a new message reaches your turn and comes back with its request id: `wait` resumes waiting on it (returns at once if the boss already answered), `withdraw` takes it off the boss's screen when the message made it obsolete. Both need `request_id`.",
+            },
+            "request_id": {
+                "type": "string",
+                "description": "For action `wait` / `withdraw`: the id of the card that stepped aside.",
+            },
             "taskComplete": {
                 "type": "boolean",
                 "description": "Is the task this session was given now FINISHED? Default false. This does NOT add an option — every card already carries a permanent terminal button, and this flag only decides what it says. `true` renders it as 「结束任务 / Finish task」 and closes the session as a SUCCESS when the user presses it; `false` renders 「放弃任务 / Abandon task」, which closes it as UNFINISHED. Set it true only on a card you raise after the work is actually done (final report, nothing left to do). NEVER hand-write your own \"任务结束\" / \"done\" / \"收工\" option into `options` — that is the pre-v3 convention and it records no terminal state; use this field instead.",
@@ -985,8 +1022,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                     "required": ["kind", "ref"]
                 }
             }
-        },
-        "required": ["questions"]
+        }
     })
 }
 
