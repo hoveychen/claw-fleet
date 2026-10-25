@@ -689,6 +689,18 @@ fn mark_host_failed(dir: &Path, id: &str, _err: &str) {
 /// file logic, shared by the Windows host loop and unit-tested everywhere.
 #[cfg(any(not(unix), test))]
 fn drain_control_file(path: &Path, offset: u64) -> (Vec<ControlMsg>, u64) {
+    let (lines, next) = drain_lines(path, offset);
+    let msgs = lines
+        .iter()
+        .filter_map(|l| serde_json::from_slice::<ControlMsg>(l).ok())
+        .collect();
+    (msgs, next)
+}
+
+/// The transport under [`drain_control_file`]: the complete, non-empty lines
+/// appended to `path` since `offset`, and the offset just past the last one.
+/// Also tails `claude_host`'s Windows control file.
+pub(crate) fn drain_lines(path: &Path, offset: u64) -> (Vec<Vec<u8>>, u64) {
     use std::io::{Read, Seek, SeekFrom};
 
     let Ok(mut f) = fs::File::open(path) else {
@@ -707,12 +719,12 @@ fn drain_control_file(path: &Path, offset: u64) -> (Vec<ControlMsg>, u64) {
     let Some(last_newline) = buf.iter().rposition(|&b| b == b'\n') else {
         return (Vec::new(), start);
     };
-    let msgs = buf[..=last_newline]
+    let lines = buf[..=last_newline]
         .split(|&b| b == b'\n')
         .filter(|l| !l.is_empty())
-        .filter_map(|l| serde_json::from_slice::<ControlMsg>(l).ok())
+        .map(<[u8]>::to_vec)
         .collect();
-    (msgs, start + last_newline as u64 + 1)
+    (lines, start + last_newline as u64 + 1)
 }
 
 /// Windows host loop: `cmd /S /C <command>` on plain pipes. stdout+stderr are

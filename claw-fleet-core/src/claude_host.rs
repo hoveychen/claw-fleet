@@ -26,13 +26,18 @@
 //!
 //! The host is the same binary re-exec'd with [`HOST_ARGV_MARKER`] (desktop app
 //! or `fleet` CLI, both register themselves via [`register_host_exe`]); it is
-//! `setsid`-detached so quitting the spawner does not end the turn. The host
-//! also takes over the live-thinking sidecar: it copies the CLI's stdout into
-//! `live-thinking/pid-<claude pid>.jsonl` line by line, the format the reader
-//! already understands.
+//! detached so quitting the spawner does not end the turn (`setsid` on unix; on
+//! Windows a child outlives its parent anyway and `CREATE_NO_WINDOW` gives it
+//! a hidden console of its own). The host also takes over the live-thinking
+//! sidecar: it copies the CLI's stdout into `live-thinking/pid-<claude
+//! pid>.jsonl` line by line, the format the reader already understands.
 //!
-//! Unix only. On Windows the spawn path stays the direct `claude -p` launch —
-//! there is no live socket injection there either, so nothing regresses.
+//! Clients reach the host through one of two transports, named in its
+//! [`HostRecord`]: a unix socket, or — on Windows, where there is none — an
+//! append-only JSON-lines control file the host tails every 50ms (the same
+//! shape as `proc_runner`'s `<id>.ctl`), answered through a per-request reply
+//! file. The file transport compiles everywhere and [`TRANSPORT_ENV`] selects
+//! it on unix, so it is tested on every platform.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -47,6 +52,22 @@ pub const SPEC_ENV: &str = "FLEET_CLAUDE_HOST_SPEC";
 
 /// Kill switch: `FLEET_CLAUDE_HOST=0` launches claude directly, as before.
 pub const DISABLE_ENV: &str = "FLEET_CLAUDE_HOST";
+
+/// `FLEET_CLAUDE_HOST_TRANSPORT=file` makes a unix host serve the control
+/// file instead of the socket (Windows always does).
+pub const TRANSPORT_ENV: &str = "FLEET_CLAUDE_HOST_TRANSPORT";
+
+/// How long a client waits for the host to answer a follow-up.
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A control-file request older than this is refused instead of delivered:
+/// its client may already have timed out and queued the text, and delivering
+/// it as well would give the session the same message twice. Shorter than
+/// [`CLIENT_TIMEOUT`] so the two cannot both happen.
+const FILE_REQUEST_TTL: Duration = Duration::from_secs(4);
+
+/// Host-side poll interval of the control file (proc_runner uses the same).
+const FILE_POLL: Duration = Duration::from_millis(50);
 
 /// A foreground task that started less than this long ago is given the rest
 /// of the window before it is backgrounded: a follow-up is often followed by a
@@ -81,15 +102,45 @@ pub struct HostSpec {
     pub registry_dir: PathBuf,
 }
 
-/// The host's entry in [`registry_dir`]: how a client finds the socket of the
-/// turn that is running right now.
+/// The host's entry in [`registry_dir`]: how a client reaches the turn that is
+/// running right now.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct HostRecord {
     pub session_id: String,
     pub host_pid: u32,
     pub host_start_time: Option<u64>,
     pub claude_pid: u32,
+    /// Unix control socket; empty when the host serves [`Self::ctl`] instead.
+    #[serde(default)]
     pub sock: PathBuf,
+    /// Append-only control file (Windows, or [`TRANSPORT_ENV`]` = file`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ctl: Option<PathBuf>,
+}
+
+/// One control request, a JSON line on either transport.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct Request {
+    op: String,
+    #[serde(default)]
+    text: String,
+    /// Control file only: names the reply file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    /// Control file only: when the client wrote it, ms since the epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sent_ms: Option<u64>,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn use_file_transport() -> bool {
+    cfg!(not(unix)) || std::env::var(TRANSPORT_ENV).as_deref() == Ok("file")
 }
 
 pub fn registry_dir() -> Option<PathBuf> {
@@ -131,7 +182,6 @@ pub fn rewrite_args(args: &[String]) -> Option<(Vec<String>, String)> {
 }
 
 /// Decide whether this launch goes through a host, and with which spec.
-#[cfg(unix)]
 pub(crate) fn plan(
     claude_path: &str,
     args: &[String],
@@ -159,16 +209,6 @@ pub(crate) fn plan(
     ))
 }
 
-#[cfg(not(unix))]
-pub(crate) fn plan(
-    _claude_path: &str,
-    _args: &[String],
-    _cwd: &str,
-    _session_id: Option<String>,
-) -> Option<(PathBuf, HostSpec)> {
-    None
-}
-
 /// Result of [`spawn`].
 pub(crate) enum Spawned {
     /// The host is up and claude is running under it.
@@ -181,7 +221,6 @@ pub(crate) enum Spawned {
 /// Start a host for `spec`, carrying over every env change `template` (the
 /// command the caller would otherwise have run) makes. Blocks until the host
 /// reports claude's pid.
-#[cfg(unix)]
 pub(crate) fn spawn(
     exe: &Path,
     spec: &HostSpec,
@@ -189,14 +228,16 @@ pub(crate) fn spawn(
     stderr_log: &Path,
 ) -> Result<Spawned, String> {
     use std::io::BufRead;
-    use std::os::unix::process::CommandExt;
 
     let spec_json = serde_json::to_string(spec).map_err(|e| format!("encode host spec: {e}"))?;
     let stderr_file = std::fs::OpenOptions::new()
         .append(true)
         .open(stderr_log)
         .map_err(|e| format!("reopen stderr log {}: {e}", stderr_log.display()))?;
-    let mut cmd = std::process::Command::new(exe);
+    // CREATE_NO_WINDOW on Windows: no conhost flash, and a hidden console of
+    // the host's own, so closing or Ctrl-C-ing the spawner's console does not
+    // reach the turn.
+    let mut cmd = crate::process_util::command(exe);
     cmd.arg(HOST_ARGV_MARKER);
     for (k, v) in template.get_envs() {
         match v {
@@ -212,8 +253,11 @@ pub(crate) fn spawn(
         .stderr(stderr_file);
     // Own session: quitting the desktop app / `fleet serve` must not end the
     // turn. No `process_group(0)` here — setsid already makes it a group
-    // leader, and setsid on an existing group leader fails.
+    // leader, and setsid on an existing group leader fails. Windows needs
+    // nothing: a child is not killed with its parent (no job object).
+    #[cfg(unix)]
     unsafe {
+        use std::os::unix::process::CommandExt;
         cmd.pre_exec(|| {
             libc::setsid();
             Ok(())
@@ -255,16 +299,6 @@ pub(crate) fn spawn(
     }))
 }
 
-#[cfg(not(unix))]
-pub(crate) fn spawn(
-    _exe: &Path,
-    _spec: &HostSpec,
-    _template: &std::process::Command,
-    _stderr_log: &Path,
-) -> Result<Spawned, String> {
-    Ok(Spawned::Fallback("claude host is unix-only".into()))
-}
-
 /// Receipt for a delivered follow-up.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Reply {
@@ -280,12 +314,13 @@ pub struct Reply {
 ///
 /// `Err` whenever there is no live host for the session or its turn is over;
 /// the caller falls back to the socket injection / the queue.
-#[cfg(unix)]
 pub fn send_user_message(session_id: &str, text: &str) -> Result<Reply, String> {
-    use std::io::{BufRead, Write};
-
     let dir = registry_dir().ok_or("no fleet dir")?;
-    let raw = std::fs::read_to_string(record_path(&dir, session_id))
+    send_user_message_in(&dir, session_id, text)
+}
+
+fn send_user_message_in(dir: &Path, session_id: &str, text: &str) -> Result<Reply, String> {
+    let raw = std::fs::read_to_string(record_path(dir, session_id))
         .map_err(|_| "no claude host for this session".to_string())?;
     let rec: HostRecord = serde_json::from_str(&raw).map_err(|e| format!("host record: {e}"))?;
     if crate::session::process_start_time(rec.host_pid) != rec.host_start_time
@@ -293,10 +328,25 @@ pub fn send_user_message(session_id: &str, text: &str) -> Result<Reply, String> 
     {
         return Err("claude host is gone".into());
     }
-    let stream = std::os::unix::net::UnixStream::connect(&rec.sock)
+    let reply = match &rec.ctl {
+        Some(ctl) => file_request(ctl, text)?,
+        None => socket_request(&rec.sock, text)?,
+    };
+    if reply.ok {
+        Ok(reply)
+    } else {
+        Err(reply.error.unwrap_or_else(|| "claude host refused".into()))
+    }
+}
+
+#[cfg(unix)]
+fn socket_request(sock: &Path, text: &str) -> Result<Reply, String> {
+    use std::io::{BufRead, Write};
+
+    let stream = std::os::unix::net::UnixStream::connect(sock)
         .map_err(|e| format!("connect claude host: {e}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_read_timeout(Some(CLIENT_TIMEOUT)).ok();
+    stream.set_write_timeout(Some(CLIENT_TIMEOUT)).ok();
     let mut req = serde_json::to_string(&serde_json::json!({"op": "user", "text": text}))
         .map_err(|e| e.to_string())?;
     req.push('\n');
@@ -307,18 +357,107 @@ pub fn send_user_message(session_id: &str, text: &str) -> Result<Reply, String> 
     std::io::BufReader::new(&stream)
         .read_line(&mut line)
         .map_err(|e| format!("read claude host: {e}"))?;
-    let reply: Reply =
-        serde_json::from_str(line.trim()).map_err(|e| format!("claude host reply: {e}"))?;
-    if reply.ok {
-        Ok(reply)
-    } else {
-        Err(reply.error.unwrap_or_else(|| "claude host refused".into()))
-    }
+    serde_json::from_str(line.trim()).map_err(|e| format!("claude host reply: {e}"))
 }
 
 #[cfg(not(unix))]
-pub fn send_user_message(_session_id: &str, _text: &str) -> Result<Reply, String> {
-    Err("claude host is unix-only".into())
+fn socket_request(_sock: &Path, _text: &str) -> Result<Reply, String> {
+    Err("claude host record names no control file".into())
+}
+
+/// `h<pid>.ctl` → `h<pid>.<id>.reply`.
+fn reply_path(ctl: &Path, id: &str) -> PathBuf {
+    ctl.with_extension(format!("{id}.reply"))
+}
+
+/// Request ids become file names: keep them to a safe alphabet.
+fn valid_request_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+fn new_request_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!(
+        "{:x}-{:x}-{:x}-{:x}",
+        std::process::id(),
+        now_ms(),
+        nanos,
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Client side of the control-file transport: append one request line, then
+/// wait for the host to rename its answer into place.
+fn file_request(ctl: &Path, text: &str) -> Result<Reply, String> {
+    use std::io::Write;
+
+    let id = new_request_id();
+    let req = Request {
+        op: "user".into(),
+        text: text.into(),
+        id: Some(id.clone()),
+        sent_ms: Some(now_ms()),
+    };
+    let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+    line.push('\n');
+    // No `create`: the host makes the file at start and removes it at exit,
+    // so a missing file means there is nobody to read the request.
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(ctl)
+        .map_err(|e| format!("open claude host control file: {e}"))?;
+    // One write: the host only consumes complete lines, and an append-mode
+    // write lands at the end as a unit, so concurrent clients do not interleave.
+    f.write_all(line.as_bytes())
+        .map_err(|e| format!("write claude host control file: {e}"))?;
+    drop(f);
+
+    let reply_path = reply_path(ctl, &id);
+    let deadline = std::time::Instant::now() + CLIENT_TIMEOUT;
+    loop {
+        if let Ok(raw) = std::fs::read(&reply_path) {
+            let _ = std::fs::remove_file(&reply_path);
+            return serde_json::from_slice(&raw).map_err(|e| format!("claude host reply: {e}"));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!("claude host did not answer within {CLIENT_TIMEOUT:?}"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Host side of the control-file transport: tail `ctl` and answer each
+/// request through its reply file until the file is removed (host exit).
+fn serve_file(ctl: &Path, mut handle: impl FnMut(&Request) -> Reply) {
+    let mut offset = 0;
+    while ctl.exists() {
+        let (lines, next) = crate::proc_runner::drain_lines(ctl, offset);
+        offset = next;
+        for line in lines {
+            let Ok(req) = serde_json::from_slice::<Request>(&line) else { continue };
+            // Without a usable id there is nowhere to answer; the client
+            // times out and falls back.
+            let Some(id) = req.id.as_deref().filter(|id| valid_request_id(id)) else { continue };
+            let age = req.sent_ms.map(|t| now_ms().saturating_sub(t));
+            let reply = if age.is_none_or(|a| a > FILE_REQUEST_TTL.as_millis() as u64) {
+                Reply { ok: false, error: Some("request expired".into()), backgrounded: vec![] }
+            } else {
+                handle(&req)
+            };
+            let path = reply_path(ctl, id);
+            let tmp = path.with_extension("tmp");
+            let body = serde_json::to_vec(&reply).unwrap_or_default();
+            if std::fs::write(&tmp, body).and_then(|()| std::fs::rename(&tmp, &path)).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
+        std::thread::sleep(FILE_POLL);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,7 +610,6 @@ impl Turn {
 /// Entry point both binaries call when `argv[1] == HOST_ARGV_MARKER`.
 /// Exits with claude's exit code; never returns.
 pub fn host_main() -> ! {
-    #[cfg(unix)]
     let code = match host::run() {
         Ok(code) => code,
         Err(e) => {
@@ -481,19 +619,12 @@ pub fn host_main() -> ! {
             70
         }
     };
-    #[cfg(not(unix))]
-    let code = {
-        println!("err claude host is unix-only");
-        70
-    };
     std::process::exit(code)
 }
 
-#[cfg(unix)]
 mod host {
     use super::*;
     use std::io::{BufRead, Write};
-    use std::os::unix::process::CommandExt;
     use std::process::ChildStdin;
     use std::sync::{Arc, Mutex};
 
@@ -553,43 +684,66 @@ mod host {
         }
     }
 
-    fn serve(state: State, listener: std::os::unix::net::UnixListener) {
-        for conn in listener.incoming() {
-            let Ok(stream) = conn else { continue };
-            let state = state.clone();
-            std::thread::spawn(move || {
-                stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
-                let mut line = String::new();
-                if std::io::BufReader::new(&stream).read_line(&mut line).is_err() {
-                    return;
-                }
-                let reply = handle(&state, line.trim());
-                let mut out = serde_json::to_string(&reply).unwrap_or_default();
-                out.push('\n');
-                let _ = (&stream).write_all(out.as_bytes());
-            });
-        }
+    #[cfg(unix)]
+    fn listen_socket(state: &State, sock: &Path) -> Result<(), String> {
+        let _ = std::fs::remove_file(sock);
+        let listener = std::os::unix::net::UnixListener::bind(sock).map_err(|e| e.to_string())?;
+        let state = state.clone();
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                let Ok(stream) = conn else { continue };
+                let state = state.clone();
+                std::thread::spawn(move || {
+                    stream.set_read_timeout(Some(CLIENT_TIMEOUT)).ok();
+                    let mut line = String::new();
+                    if std::io::BufReader::new(&stream).read_line(&mut line).is_err() {
+                        return;
+                    }
+                    let reply = match serde_json::from_str::<Request>(line.trim()) {
+                        Ok(req) => handle(&state, &req),
+                        Err(e) => Reply {
+                            ok: false,
+                            error: Some(format!("bad request: {e}")),
+                            backgrounded: vec![],
+                        },
+                    };
+                    let mut out = serde_json::to_string(&reply).unwrap_or_default();
+                    out.push('\n');
+                    let _ = (&stream).write_all(out.as_bytes());
+                });
+            }
+        });
+        Ok(())
     }
 
-    fn handle(state: &State, request: &str) -> Reply {
+    #[cfg(not(unix))]
+    fn listen_socket(_state: &State, _sock: &Path) -> Result<(), String> {
+        Err("no unix sockets on this platform".into())
+    }
+
+    fn listen_file(state: &State, ctl: &Path) -> Result<(), String> {
+        // Fresh and empty: the tail starts at offset 0.
+        std::fs::File::create(ctl).map_err(|e| e.to_string())?;
+        let state = state.clone();
+        let ctl = ctl.to_path_buf();
+        std::thread::spawn(move || serve_file(&ctl, |req| handle(&state, req)));
+        Ok(())
+    }
+
+    fn handle(state: &State, req: &Request) -> Reply {
         let fail = |e: String| Reply { ok: false, error: Some(e), backgrounded: vec![] };
-        let req: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return fail(format!("bad request: {e}")),
-        };
-        if req.get("op").and_then(|o| o.as_str()) != Some("user") {
+        if req.op != "user" {
             return fail("unknown op".into());
         }
-        let Some(text) = req.get("text").and_then(|t| t.as_str()).filter(|t| !t.trim().is_empty())
-        else {
+        if req.text.trim().is_empty() {
             return fail("empty text".into());
-        };
+        }
         let orders = {
             let mut shared = state.lock().unwrap_or_else(|e| e.into_inner());
             if shared.turn.over {
                 return fail("turn over".into());
             }
-            if let Err(e) = write_stdin(&mut shared, &user_line(text)) {
+            if let Err(e) = write_stdin(&mut shared, &user_line(&req.text)) {
                 return fail(e);
             }
             shared.turn.on_user_message(std::time::Instant::now())
@@ -603,19 +757,33 @@ mod host {
     pub(super) fn run() -> Result<i32, String> {
         let raw = std::env::var(SPEC_ENV).map_err(|_| format!("{SPEC_ENV} not set"))?;
         let spec: HostSpec = serde_json::from_str(&raw).map_err(|e| format!("bad host spec: {e}"))?;
+        run_spec(&spec, use_file_transport())
+    }
 
+    pub(super) fn run_spec(spec: &HostSpec, file_transport: bool) -> Result<i32, String> {
         let mut cmd = crate::process_util::command(&spec.claude_path);
         cmd.args(&spec.args)
             .current_dir(&spec.cwd)
             .env_remove(SPEC_ENV)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
-            // Same as the direct launch: a group signal aimed at the host
-            // does not interrupt the turn.
-            .process_group(0);
+            .stderr(std::process::Stdio::inherit());
+        // Same as the direct launch. Unix: own process group, so a group
+        // signal aimed at the host does not interrupt the turn. Windows:
+        // CREATE_NO_WINDOW (process_util::command) gives claude a hidden
+        // console of its own — the one `fleet win-interrupt` attaches to for
+        // CTRL_C — so an interrupt reaches claude and its tools, not the host.
+        crate::process_util::detach_process_group(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| format!("spawn claude failed: {e}"))?;
         drop(cmd);
+        // The interrupt's CTRL_C goes to every process on claude's console.
+        // That should not include the host, but if it ever does, the host
+        // must outlive it to reap claude and clean up. Only after the spawn:
+        // children created later inherit the ignore flag, and claude must not.
+        #[cfg(windows)]
+        unsafe {
+            let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(None, true);
+        }
         let claude_pid = child.id();
         let mut stdin = child.stdin.take().ok_or("claude stdin missing")?;
         let stdout = child.stdout.take().ok_or("claude stdout missing")?;
@@ -640,37 +808,41 @@ mod host {
             next_request: 0,
         }));
 
-        // Control socket + registry entry. A failure here only costs the fast
-        // path: clients find no host and fall back to the socket injection.
+        // Control endpoint + registry entry. A failure here only costs the
+        // fast path: clients find no host and fall back to the socket
+        // injection / the queue.
         let my_pid = std::process::id();
         let sock = spec.registry_dir.join(format!("h{my_pid}.sock"));
+        let ctl = spec.registry_dir.join(format!("h{my_pid}.ctl"));
         let record = record_path(&spec.registry_dir, &spec.session_id);
         let listening = std::fs::create_dir_all(&spec.registry_dir)
             .map_err(|e| e.to_string())
             .and_then(|()| {
-                let _ = std::fs::remove_file(&sock);
-                std::os::unix::net::UnixListener::bind(&sock).map_err(|e| e.to_string())
+                if file_transport {
+                    listen_file(&state, &ctl)
+                } else {
+                    listen_socket(&state, &sock)
+                }
             })
-            .and_then(|listener| {
+            .and_then(|()| {
                 let rec = HostRecord {
                     session_id: spec.session_id.clone(),
                     host_pid: my_pid,
                     host_start_time: crate::session::process_start_time(my_pid),
                     claude_pid,
-                    sock: sock.clone(),
+                    sock: if file_transport { PathBuf::new() } else { sock.clone() },
+                    ctl: file_transport.then(|| ctl.clone()),
                 };
                 let tmp = record.with_extension("json.tmp");
                 std::fs::write(&tmp, serde_json::to_vec(&rec).unwrap_or_default())
                     .and_then(|()| std::fs::rename(&tmp, &record))
-                    .map_err(|e| e.to_string())?;
-                Ok(listener)
+                    .map_err(|e| e.to_string())
             });
-        match listening {
-            Ok(listener) => {
-                let state = state.clone();
-                std::thread::spawn(move || serve(state, listener));
-            }
-            Err(e) => eprintln!("[fleet-claude-host] control socket unavailable: {e}"),
+        if let Err(e) = listening {
+            eprintln!(
+                "[fleet-claude-host] control {} unavailable: {e}",
+                if file_transport { "file" } else { "socket" }
+            );
         }
 
         // Handshake: the spawner records claude's pid as the session's.
@@ -710,7 +882,19 @@ mod host {
 
         state.lock().unwrap_or_else(|e| e.into_inner()).stdin = None;
         let status = child.wait().map_err(|e| format!("wait claude: {e}"))?;
+        // Removing the control file also ends the thread tailing it.
         let _ = std::fs::remove_file(&sock);
+        let _ = std::fs::remove_file(&ctl);
+        // Answers nobody collected (their client timed out).
+        let prefix = format!("h{my_pid}.");
+        if let Ok(entries) = std::fs::read_dir(&spec.registry_dir) {
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with(&prefix) && (name.ends_with(".reply") || name.ends_with(".tmp")) {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
         // An incognito turn's streamed text does not outlive the turn. The
         // Stop hook removes it on a normal turn end; this covers a killed one.
         if let Some(p) = sidecar_path.filter(|_| crate::incognito::is_incognito(&spec.session_id)) {
@@ -723,8 +907,13 @@ mod host {
                 let _ = std::fs::remove_file(&record);
             }
         }
-        use std::os::unix::process::ExitStatusExt;
-        Ok(status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0)))
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            Ok(status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0)))
+        }
+        #[cfg(not(unix))]
+        Ok(status.code().unwrap_or(1))
     }
 }
 
@@ -855,5 +1044,175 @@ mod tests {
         };
         let back: HostSpec = serde_json::from_str(&serde_json::to_string(&spec).unwrap()).unwrap();
         assert_eq!(back, spec);
+    }
+
+    #[test]
+    fn a_record_from_before_the_file_transport_still_reads() {
+        let old = r#"{"session_id":"s","host_pid":1,"host_start_time":2,"claude_pid":3,"sock":"/r/h1.sock"}"#;
+        let rec: HostRecord = serde_json::from_str(old).unwrap();
+        assert_eq!(rec.ctl, None);
+        assert_eq!(rec.sock, PathBuf::from("/r/h1.sock"));
+        let file_only = r#"{"session_id":"s","host_pid":1,"host_start_time":2,"claude_pid":3,"ctl":"/r/h1.ctl"}"#;
+        let rec: HostRecord = serde_json::from_str(file_only).unwrap();
+        assert_eq!(rec.ctl, Some(PathBuf::from("/r/h1.ctl")));
+    }
+
+    #[test]
+    fn request_ids_are_unique_and_file_safe() {
+        let a = new_request_id();
+        let b = new_request_id();
+        assert_ne!(a, b);
+        assert!(valid_request_id(&a), "{a}");
+        for bad in ["", "../x", "a/b", "a.b", &"x".repeat(65)] {
+            assert!(!valid_request_id(bad), "{bad}");
+        }
+        assert_eq!(reply_path(Path::new("/r/h7.ctl"), "ab-1"), PathBuf::from("/r/h7.ab-1.reply"));
+    }
+
+    /// The Windows transport, exercised on every platform: requests go in as
+    /// lines of the control file, answers come back through reply files, and
+    /// removing the file stops the tail.
+    #[test]
+    fn control_file_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctl = dir.path().join("h1.ctl");
+        std::fs::File::create(&ctl).unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let server = {
+            let ctl = ctl.clone();
+            let seen = seen.clone();
+            std::thread::spawn(move || {
+                serve_file(&ctl, |req| {
+                    seen.lock().unwrap().push(req.text.clone());
+                    Reply { ok: true, error: None, backgrounded: vec![format!("bg-{}", req.text)] }
+                })
+            })
+        };
+
+        // Two clients at once: each gets its own answer.
+        let c1 = {
+            let ctl = ctl.clone();
+            std::thread::spawn(move || file_request(&ctl, "one"))
+        };
+        let r2 = file_request(&ctl, "two").unwrap();
+        let r1 = c1.join().unwrap().unwrap();
+        assert_eq!(r1.backgrounded, vec!["bg-one".to_string()]);
+        assert_eq!(r2.backgrounded, vec!["bg-two".to_string()]);
+
+        // A request the client may have given up on is refused, not handled.
+        let stale = Request {
+            op: "user".into(),
+            text: "late".into(),
+            id: Some("stale-1".into()),
+            sent_ms: Some(now_ms() - 10_000),
+        };
+        let unsafe_id = Request { id: Some("../evil".into()), sent_ms: Some(now_ms()), ..stale.clone() };
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().append(true).open(&ctl).unwrap();
+            for r in [&unsafe_id, &stale] {
+                writeln!(f, "{}", serde_json::to_string(r).unwrap()).unwrap();
+            }
+        }
+        let stale_reply = reply_path(&ctl, "stale-1");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !stale_reply.exists() {
+            assert!(std::time::Instant::now() < deadline, "no answer to the stale request");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let reply: Reply = serde_json::from_slice(&std::fs::read(&stale_reply).unwrap()).unwrap();
+        assert_eq!(reply.error.as_deref(), Some("request expired"));
+        let mut handled = seen.lock().unwrap().clone();
+        handled.sort();
+        assert_eq!(handled, vec!["one".to_string(), "two".to_string()]);
+        assert!(!dir.path().join("evil.reply").exists());
+
+        std::fs::remove_file(&ctl).unwrap();
+        server.join().unwrap();
+        assert!(file_request(&ctl, "gone").is_err(), "no control file, no host");
+    }
+
+    /// The whole host against a fake CLI: prompt in on stdin, a foreground
+    /// task, a follow-up delivered as a user line plus a `background_tasks`
+    /// request for that task, stdin closed at the first `result`.
+    #[cfg(unix)]
+    fn host_runs_a_turn(file_transport: bool) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("stdin.log");
+        let script = dir.path().join("fake-claude.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+read -r prompt; echo "$prompt" > "$1"
+echo '{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"toolu_1","is_backgrounded":false}'
+read -r msg; echo "$msg" >> "$1"
+read -r ctl; echo "$ctl" >> "$1"
+echo '{"type":"result","subtype":"success"}'
+while read -r rest; do echo "$rest" >> "$1"; done
+exit 3
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let registry = dir.path().join("hosts");
+        let sidecars = dir.path().join("sidecars");
+        std::fs::create_dir_all(&sidecars).unwrap();
+        let spec = HostSpec {
+            claude_path: script.to_string_lossy().into_owned(),
+            args: vec![log.to_string_lossy().into_owned()],
+            cwd: dir.path().to_string_lossy().into_owned(),
+            prompt: "opening".into(),
+            session_id: "sess-1".into(),
+            sidecar_dir: Some(sidecars.clone()),
+            registry_dir: registry.clone(),
+        };
+        let host = std::thread::spawn(move || host::run_spec(&spec, file_transport));
+
+        let record = record_path(&registry, "sess-1");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !record.exists() {
+            assert!(std::time::Instant::now() < deadline, "host never registered");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let rec: HostRecord = serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+        assert_eq!(rec.ctl.is_some(), file_transport);
+        let reply = send_user_message_in(&registry, "sess-1", "stop that").unwrap();
+        assert!(reply.ok);
+
+        assert_eq!(host.join().unwrap().unwrap(), 3, "host exits with claude's code");
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert_eq!(lines[0]["message"]["content"], "opening");
+        assert_eq!(lines[1]["type"], "user");
+        assert_eq!(lines[1]["message"]["content"], "stop that");
+        assert_eq!(lines[2]["request"]["subtype"], "background_tasks");
+        assert_eq!(lines[2]["request"]["tool_use_id"], "toolu_1");
+
+        // Cleaned up: no record, no endpoint; the turn is over for clients.
+        assert!(!record.exists());
+        let left: Vec<_> = std::fs::read_dir(&registry).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert!(left.is_empty(), "{left:?}");
+        assert!(send_user_message_in(&registry, "sess-1", "late").is_err());
+        // The sidecar carries the CLI's stdout.
+        let side = std::fs::read_dir(&sidecars).unwrap().flatten().next().unwrap().path();
+        assert!(std::fs::read_to_string(side).unwrap().contains("task_started"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_runs_a_turn_over_the_socket() {
+        host_runs_a_turn(false);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_runs_a_turn_over_the_control_file() {
+        host_runs_a_turn(true);
     }
 }
