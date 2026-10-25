@@ -78,21 +78,27 @@ fn snapshot() -> Vec<Step> {
         .iter()
         .map(|&f| (f, installed_anywhere(f, &plan)))
         .collect();
-    // The recent-sessions hook was part of the PRD-context feature in the
-    // global era, so any PRD-context part means the user had it on. Reading
-    // the hook alone would switch it off on hosts whose copy predates it.
-    if installed_anywhere(Feature::PrdContextHook, &plan) {
-        for (f, on) in installed.iter_mut() {
-            if *f == Feature::RecentSessions {
-                *on = true;
-            }
+    // Features split out after the global era have no global trace of their
+    // own to read. The notes-hint and recent-sessions hooks were part of the
+    // PRD-context feature, so any PRD-context part means the user had them on;
+    // the lessons import only existed once a lesson did, so its absence never
+    // meant "off". Reading their own traces alone would switch them off.
+    // Decided on the real traces, before the overrides below: a lone "lessons
+    // on" must not make a bare host look like a Fleet host.
+    let any_installed = installed.iter().any(|&(_, on)| on);
+    let prd_on = installed_anywhere(Feature::PrdContextHook, &plan);
+    for (f, on) in installed.iter_mut() {
+        match f {
+            Feature::RecentSessions | Feature::NotesHint => *on |= prd_on,
+            Feature::Lessons => *on = true,
+            _ => {}
         }
     }
     let mut steps = Vec::new();
 
     // A host with none of Fleet's global config never had anything switched
     // on *or* off — recording every feature as off would leave it bare.
-    if installed.iter().any(|&(_, on)| on) {
+    if any_installed {
         for &(feature, on) in &installed {
             if !on && !is_disabled(feature) {
                 steps.push(Step {
@@ -466,6 +472,8 @@ mod tests {
             Feature::IdleHooks,
             Feature::PrdContextHook,
             Feature::RecentSessions,
+            Feature::NotesHint,
+            Feature::Lessons,
             Feature::InteractionMode,
         ] {
             assert!(!is_disabled(on), "{} was installed", on.key());

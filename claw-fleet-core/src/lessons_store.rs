@@ -449,6 +449,18 @@ pub fn managed_file_content() -> Option<String> {
     has_any_block(&content).then_some(content)
 }
 
+/// Hand the lessons to the sessions Fleet starts again. Codex and dsh carry
+/// them in AGENTS.md, so callers follow this with a guidance reconcile.
+pub fn apply_lessons() -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::Lessons, true)
+}
+
+/// Stop handing the lessons to the sessions Fleet starts. The lessons stay on
+/// file; only the injection stops.
+pub fn remove_lessons() -> Result<(), String> {
+    crate::control_plane_prefs::set_enabled(crate::control_plane_prefs::Feature::Lessons, false)
+}
+
 /// Whether `~/.claude/CLAUDE.md` still carries the lessons `@import`.
 pub fn import_installed() -> bool {
     claude_md_path()

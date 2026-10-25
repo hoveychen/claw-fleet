@@ -60,6 +60,8 @@ pub fn is_installed(feature: Feature, plan: &HookSetupPlan) -> bool {
         Feature::ModelGuidance => plan.model_guidance_installed,
         Feature::SessionTitleGuidance => plan.session_title_guidance_installed,
         Feature::RecentSessions => plan.recent_sessions_installed,
+        Feature::NotesHint => plan.notes_hint_installed,
+        Feature::Lessons => plan.lessons_installed,
     }
 }
 
@@ -131,6 +133,7 @@ mod tests {
             idle_hooks_installed: true,
             wakeup_guard_installed: true,
             recent_sessions_installed: true,
+            lessons_installed: true,
         }
     }
 

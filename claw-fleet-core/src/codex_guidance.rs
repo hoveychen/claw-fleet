@@ -966,7 +966,9 @@ pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Resu
         interaction: is_enabled(Feature::InteractionMode),
         wiki: is_enabled(Feature::WikiGuidance),
         model: is_enabled(Feature::ModelGuidance),
-        lessons: codex_present && !crate::lessons_store::list_lessons().is_empty(),
+        lessons: codex_present
+            && is_enabled(Feature::Lessons)
+            && !crate::lessons_store::list_lessons().is_empty(),
     };
     reconcile_codex_agents_md(set, user_title, locale)
 }

@@ -3832,6 +3832,22 @@ impl LocalBackend {
         crate::hooks::remove_recent_sessions()
     }
 
+    pub fn apply_notes_hint(&self) -> Result<(), String> {
+        crate::hooks::apply_notes_hint()
+    }
+
+    pub fn remove_notes_hint(&self) -> Result<(), String> {
+        crate::hooks::remove_notes_hint()
+    }
+
+    pub fn apply_lessons(&self) -> Result<(), String> {
+        crate::lessons_store::apply_lessons()
+    }
+
+    pub fn remove_lessons(&self) -> Result<(), String> {
+        crate::lessons_store::remove_lessons()
+    }
+
     pub fn remove_prd_mode(&self) -> Result<(), String> {
         // Remove all three halves regardless of which fails — best effort, then
         // surface the first error if any so the UI can re-try.

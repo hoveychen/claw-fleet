@@ -111,11 +111,18 @@ pub(crate) fn cmd_dsh_context(
         }));
     }
 
+    // The switch Claude's `fleet prd-context` and `ctx-reminder` hooks ride
+    // on; the plan and context-pressure sections below are their dsh arms.
+    let prd_context_on = claw_fleet_core::control_plane_prefs::is_enabled(
+        claw_fleet_core::control_plane_prefs::Feature::PrdContextHook,
+    );
+
     // PRD / TASKS.md — the same renderer the Claude hook and the codex
     // prompt-prepend path use. `None` means no TASKS.md, or a clean file with
     // no active plan: inject nothing rather than an empty header.
-    if let Some(reminder) =
-        claw_fleet_core::prd_tasks::render_active_plans_reminder(&cwd, session.as_deref())
+    if let Some(reminder) = prd_context_on
+        .then(|| claw_fleet_core::prd_tasks::render_active_plans_reminder(&cwd, session.as_deref()))
+        .flatten()
     {
         sections.push(serde_json::json!({ "name": "fleet-prd", "text": reminder }));
     }
@@ -165,7 +172,9 @@ pub(crate) fn cmd_dsh_context(
     // the section is emitted here. A plugin that then drops it (an aborted
     // step) loses that one announcement rather than repeating it forever; the
     // tiers above it still fire, and a compaction re-arms all of them.
-    if let (Some(used), Some(window), Some(session)) = (ctx_used, ctx_window, session.as_deref()) {
+    if let (true, Some(used), Some(window), Some(session)) =
+        (prd_context_on, ctx_used, ctx_window, session.as_deref())
+    {
         let pressure = claw_fleet_core::context_pressure::ContextPressure {
             used,
             window,

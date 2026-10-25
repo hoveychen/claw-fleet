@@ -52,6 +52,16 @@ pub enum Feature {
     /// [`Feature::PrdContextHook`], which carried it until 2026-10-25, so it
     /// can be switched off without losing the TASKS.md reinjection.
     RecentSessions,
+    /// The SessionStart `fleet notes-hint` summary of the session's notes
+    /// (its own and those inherited along a handoff chain). Split out of
+    /// [`Feature::PrdContextHook`] on 2026-10-25 for the same reason as
+    /// [`Feature::RecentSessions`]. Claude only — neither codex nor dsh has a
+    /// notes arm.
+    NotesHint,
+    /// The daily-report lessons Fleet adds to every harness's standing
+    /// guidance: Claude's appended system prompt, codex's AGENTS.md, dsh's
+    /// AGENTS.md and plugin section.
+    Lessons,
 }
 
 impl Feature {
@@ -72,11 +82,13 @@ impl Feature {
             Feature::ModelGuidance => "model_guidance",
             Feature::SessionTitleGuidance => "session_title_guidance",
             Feature::RecentSessions => "recent_sessions",
+            Feature::NotesHint => "notes_hint",
+            Feature::Lessons => "lessons",
         }
     }
 
     /// Every feature heal knows how to install.
-    pub const ALL: [Feature; 12] = [
+    pub const ALL: [Feature; 14] = [
         Feature::GuardHook,
         Feature::ElicitationHook,
         Feature::PlanApprovalHook,
@@ -89,6 +101,8 @@ impl Feature {
         Feature::ModelGuidance,
         Feature::SessionTitleGuidance,
         Feature::RecentSessions,
+        Feature::NotesHint,
+        Feature::Lessons,
     ];
 }
 

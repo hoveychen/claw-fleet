@@ -3478,6 +3478,8 @@ export const MOCK_HOOKS_PLAN = {
   modelGuidanceInstalled: true,
   sessionTitleGuidanceInstalled: true,
   recentSessionsInstalled: true,
+  notesHintInstalled: true,
+  lessonsInstalled: true,
 };
 
 // ── Audit events ───────────────────────────────────────────────────────────

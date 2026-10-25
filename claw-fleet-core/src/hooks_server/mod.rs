@@ -1924,13 +1924,29 @@ fn handle_request(
                 route_remove_prd_mode(ctx, request, &query, json_header, path)
             }
 
-            // ── Recent-sessions block switch ─────────────────────────────────
+            // ── Context-injection switches (no guidance to render) ───────────
             crate::routes::APPLY_RECENT_SESSIONS => {
-                route_set_recent_sessions(request, json_header, true)
+                route_set_switch(request, json_header, hooks::apply_recent_sessions())
             }
 
             crate::routes::REMOVE_RECENT_SESSIONS => {
-                route_set_recent_sessions(request, json_header, false)
+                route_set_switch(request, json_header, hooks::remove_recent_sessions())
+            }
+
+            crate::routes::APPLY_NOTES_HINT => {
+                route_set_switch(request, json_header, hooks::apply_notes_hint())
+            }
+
+            crate::routes::REMOVE_NOTES_HINT => {
+                route_set_switch(request, json_header, hooks::remove_notes_hint())
+            }
+
+            crate::routes::APPLY_LESSONS => {
+                route_set_switch(request, json_header, crate::lessons_store::apply_lessons())
+            }
+
+            crate::routes::REMOVE_LESSONS => {
+                route_set_switch(request, json_header, crate::lessons_store::remove_lessons())
             }
 
             // ── Codex guidance endpoint (writes remote ~/.codex/AGENTS.md) ────

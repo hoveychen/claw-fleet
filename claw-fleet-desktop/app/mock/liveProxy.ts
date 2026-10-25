@@ -296,6 +296,18 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     empty: true,
   }),
 
+  apply_notes_hint: () => ({
+    method: "POST",
+    path: "/apply_notes_hint",
+    empty: true,
+  }),
+
+  apply_lessons: () => ({
+    method: "POST",
+    path: "/apply_lessons",
+    empty: true,
+  }),
+
   apply_wiki_guidance: () => ({
     method: "POST",
     path: "/apply_wiki_guidance",
@@ -1296,6 +1308,18 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   remove_recent_sessions: () => ({
     method: "POST",
     path: "/remove_recent_sessions",
+    empty: true,
+  }),
+
+  remove_notes_hint: () => ({
+    method: "POST",
+    path: "/remove_notes_hint",
+    empty: true,
+  }),
+
+  remove_lessons: () => ({
+    method: "POST",
+    path: "/remove_lessons",
     empty: true,
   }),
 
