@@ -447,7 +447,17 @@ pub fn spawn_resume_tracked_prompt(
     // Hooks, permissions and the fleet MCP server are read per process, so a
     // resume that omitted them would run as a plain `claude`. Here rather than
     // in `spawn_resume_with_path`, whose test drives a stand-in binary.
-    let launch = crate::claude_launch::fleet_launch_args_for(&override_args, workspace_path);
+    //
+    // The launch files are picked by the session's id — whether it is a
+    // sub-task, whether it is incognito — so the renderer must see the
+    // `--resume` too. Without it an incognito session resumed with the
+    // regular hooks and MCP tool set (seen on the first incognito probe,
+    // session 949fd648: recent sessions injected, withheld tools back).
+    let role_args: Vec<String> = ["--resume".to_string(), session_id.to_string()]
+        .into_iter()
+        .chain(override_args.iter().cloned())
+        .collect();
+    let launch = crate::claude_launch::fleet_launch_args_for(&role_args, workspace_path);
     override_args.extend(launch);
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
