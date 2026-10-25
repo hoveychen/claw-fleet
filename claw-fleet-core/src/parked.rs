@@ -73,6 +73,11 @@ pub struct ParkedCard {
     /// Reasoning effort the session was running; same rationale as `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The card had stepped aside for a message (see [`crate::ask_preempt`]) and
+    /// its turn then ended on its own, so the resume must not claim a timeout
+    /// interrupted it. Set by the orphan recovery via [`mark_stepped_aside`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stepped_aside: bool,
     /// The original request payload (`FleetAskRequest`, `ElicitationRequest`,
     /// `A2uiRenderRequest` or `PlanApprovalRequest`), verbatim.
     pub request: Value,
@@ -167,12 +172,22 @@ pub fn park_with(
         parked_at: chrono::Utc::now().to_rfc3339(),
         model: model.map(str::to_string),
         effort: effort.map(str::to_string),
+        stepped_aside: false,
         request: payload,
     };
     let path = card_path(id).unwrap();
     let json = serde_json::to_string_pretty(&card).map_err(|e| format!("serialize card: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write parked card: {e}"))?;
     Ok(card)
+}
+
+/// Flag a just-parked card as one that had stepped aside, so [`answer`] resumes
+/// it with [`STEPPED_ASIDE_RESUME_HEADER`].
+pub fn mark_stepped_aside(id: &str) -> Result<(), String> {
+    let mut card = get(id).ok_or_else(|| format!("no parked card {id}"))?;
+    card.stepped_aside = true;
+    let json = serde_json::to_string_pretty(&card).map_err(|e| format!("serialize card: {e}"))?;
+    fs::write(card_path(id).unwrap(), json).map_err(|e| format!("write parked card: {e}"))
 }
 
 pub fn get(id: &str) -> Option<ParkedCard> {
@@ -977,12 +992,29 @@ fn record_resolution(card: &ParkedCard, response: &Value, dismissed: bool) {
 pub(crate) const RESUME_PROMPT_HEADER: &str =
     "[Fleet] 你上一轮通过决策卡向老板提问，等待超时，那一轮已被中断。老板现在回复了：\n\n";
 
+/// Opening line when the card had stepped aside for a message and the agent then
+/// ended its turn itself — nothing timed out and nothing was interrupted.
+pub(crate) const STEPPED_ASIDE_RESUME_HEADER: &str =
+    "[Fleet] 你之前发出的决策卡曾为一条新消息让路，之后那一轮由你自己结束了，卡一直留在老板的屏幕上。老板现在回答了这张卡：\n\n";
+
+/// Whether `text` is a resume prompt [`build_resume_prompt`] wrote, under either
+/// header. The single matcher behind [`crate::fleet_event::classify`].
+pub(crate) fn is_resume_prompt(text: &str) -> bool {
+    [RESUME_PROMPT_HEADER, STEPPED_ASIDE_RESUME_HEADER]
+        .iter()
+        .any(|h| text.starts_with(h.trim_end()))
+}
+
 /// Render "here is what you asked, here is what the boss said" for the resume
 /// prompt. The agent reads this as a fresh user turn, so it has to carry enough
 /// context to stand alone — the tool call it came from was interrupted and never
 /// produced a result.
 fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
-    let mut out = String::from(RESUME_PROMPT_HEADER);
+    let mut out = String::from(if card.stepped_aside {
+        STEPPED_ASIDE_RESUME_HEADER
+    } else {
+        RESUME_PROMPT_HEADER
+    });
     match card.kind {
         ParkedKind::FleetAsk | ParkedKind::Elicitation => {
             render_question_answers(&mut out, &card.request, response);
@@ -1013,8 +1045,12 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
             }
         }
     }
-    out.push_str("\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。");
-    out.push_str(RESUME_PROMPT_INTERRUPT_NOTE);
+    if card.stepped_aside {
+        out.push_str("\n请直接基于这个回复继续之前的工作——不要重新问一遍同样的问题。");
+    } else {
+        out.push_str("\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。");
+        out.push_str(RESUME_PROMPT_INTERRUPT_NOTE);
+    }
     out
 }
 

@@ -50,11 +50,11 @@ pub fn classify(text: &str) -> Option<Value> {
     {
         return Some(json!({ "kind": "handoff", "status": "successor" }));
     }
-    // A Decision Card the user answered after it timed out: `parked::answer`
-    // resumes the session with the question and the reply, because the tool call
-    // that raised the card was SIGINTed and never returned a result. See
-    // `parked::build_resume_prompt` for the template.
-    if text.starts_with(crate::parked::RESUME_PROMPT_HEADER.trim_end()) {
+    // A Decision Card the user answered after its turn was gone — it timed out
+    // and the turn was SIGINTed, or it stepped aside for a message and the turn
+    // then ended: `parked::answer` resumes the session with the question and the
+    // reply. See `parked::build_resume_prompt` for both templates.
+    if crate::parked::is_resume_prompt(text) {
         return Some(json!({ "kind": "decision", "status": "answered" }));
     }
     if text.contains("\n\n---\n（这是 Fleet 循环 `")
@@ -112,6 +112,20 @@ mod tests {
         let got = classify(&decision).unwrap();
         assert_eq!(got["kind"], "decision");
         assert_eq!(got["status"], "answered");
+    }
+
+    #[test]
+    fn classifies_both_decision_resume_headers() {
+        for header in [
+            crate::parked::RESUME_PROMPT_HEADER,
+            crate::parked::STEPPED_ASIDE_RESUME_HEADER,
+        ] {
+            let prompt = header.to_string() + "【问题 1】发版？\n【回答】发";
+            let got = classify(&prompt).unwrap_or_else(|| panic!("not classified: {header}"));
+            assert_eq!(got["kind"], "decision", "{header}");
+            assert_eq!(got["status"], "answered", "{header}");
+        }
+        assert!(classify("老板现在回答了这张卡").is_none());
     }
 
     #[test]

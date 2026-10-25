@@ -139,6 +139,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   "task-abandoned": "已放弃任务",
   timeout: "超时",
   "heartbeat-lost": "面板掉线",
+  withdrawn: "AI 已撤回",
   approved: "已批准",
   "approved-with-edits": "批准（有编辑）",
   rejected: "已驳回",

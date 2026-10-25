@@ -23,7 +23,8 @@ export type DecisionTerminalOutcome =
   | "cancelled"
   | "task-completed"
   | "task-abandoned"
-  | "heartbeat-lost";
+  | "heartbeat-lost"
+  | "withdrawn";
 
 /**
  * The resolved-but-not-answered state of a decision card, or `null` when it was
