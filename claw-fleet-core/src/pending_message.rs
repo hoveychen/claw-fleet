@@ -270,6 +270,8 @@ pub fn enqueue(
         Sender::Agent => text,
     };
     if crate::live_inject::inject(session_id, injected_text).is_ok() {
+        // A turn blocked on a decision card polls this to step aside.
+        crate::ask_preempt::touch_inbox(session_id, sender);
         return Ok(Delivery::Injected);
     }
     append_to_queue(session_id, workspace_path, text).map(|()| Delivery::Queued)

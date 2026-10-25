@@ -1835,11 +1835,14 @@ fn interrupt_if_live(session_id: &str) -> bool {
 
 /// Hand the fired event to a session whose turn is still working, instead of
 /// interrupting it. `None` when the session is not running, or is running but
-/// blocked on the user (a pending decision card / guard prompt) — those fall
-/// through to interrupt-then-resume.
+/// blocked on the user (a guard prompt, or a decision card that cannot step
+/// aside) — those fall through to interrupt-then-resume.
 fn defer_to_live_turn(rec: &WatchRecord, prompt: &str) -> Option<Result<String, String>> {
-    if !crate::parked::session_alive(&rec.session_id)
-        || crate::codex_source::session_has_pending_decision(&rec.session_id)
+    if !crate::parked::session_alive(&rec.session_id) {
+        return None;
+    }
+    if crate::codex_source::session_has_pending_decision(&rec.session_id)
+        && !card_steps_aside(&rec.session_id)
     {
         return None;
     }
@@ -1854,6 +1857,15 @@ fn defer_to_live_turn(rec: &WatchRecord, prompt: &str) -> Option<Result<String, 
         )
         .map(|d| format!("{d:?}")),
     )
+}
+
+/// A turn whose only pending decision is a `fleet__ask` card, on a session that
+/// takes live injects, needs no interrupt: the inject makes the card step aside
+/// (see [`crate::ask_preempt`]) and the event is handled in this turn. Codex has
+/// no inject socket, so it keeps the interrupt.
+fn card_steps_aside(session_id: &str) -> bool {
+    !crate::codex_source::session_has_unpreemptible_decision(session_id)
+        && crate::live_inject::can_inject(session_id)
 }
 
 fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, ClaimError> {

@@ -454,7 +454,7 @@ fn client_name_has_native_image_gen(name: &str) -> bool {
 fn fleet_ask_tool_def() -> Value {
     json!({
         "name": "fleet__ask",
-        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is dropped from the card automatically and its intent folded into `taskComplete`.",
+        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is dropped from the card automatically and its intent folded into `taskComplete`. If a new message reaches your turn while the card waits, the call returns early with the card still open: handle the message, then call `fleet__ask` with `action: \"wait\"` (or `\"withdraw\"`) and that `request_id` before raising any other card.",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
     })
 }
@@ -1262,7 +1262,96 @@ fn strip_hand_rolled_end_options(
 }
 
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
-    run_fleet_ask(params, |_| {})
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    match args.get("action").and_then(Value::as_str).unwrap_or("ask") {
+        "ask" => run_fleet_ask(params, |_| {}),
+        "wait" => handle_fleet_ask_wait(params, &args),
+        "withdraw" => handle_fleet_ask_withdraw(&args),
+        other => Err(JsonRpcError {
+            code: -32602,
+            message: format!("Unknown `action` {other:?}: expected ask, wait or withdraw"),
+        }),
+    }
+}
+
+/// The request of a card this session may `wait` on or `withdraw`: its request
+/// file still exists and it was raised by the calling session.
+fn owned_open_card(args: &Value) -> Result<crate::mcp_ipc::FleetAskRequest, String> {
+    let id = args
+        .get("request_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if id.is_empty() {
+        return Err("`request_id` is required for action wait / withdraw.".into());
+    }
+    let session_id = current_session_id();
+    match crate::mcp_ipc::read_request(id) {
+        Some(req) if !session_id.is_empty() && req.session_id == session_id => Ok(req),
+        _ => Err(format!(
+            "No open card {id} for this session (it may already be answered/delivered or withdrawn)."
+        )),
+    }
+}
+
+/// `fleet__ask action=wait`: go back to waiting on a card that stepped aside
+/// for a message (see [`crate::ask_preempt`]). Returns at once when the boss
+/// already answered it.
+fn handle_fleet_ask_wait(params: &Value, args: &Value) -> Result<Value, JsonRpcError> {
+    let req = match owned_open_card(args) {
+        Ok(req) => req,
+        Err(e) => return Ok(tool_error(e)),
+    };
+    if !crate::parked::register_inflight_ask(&req.session_id, &req.id) {
+        return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+    let _inflight = InflightGuard::new(&req.session_id, &req.id);
+    crate::ask_preempt::clear_detached(&req.id);
+    let stripped = StrippedEndOptions {
+        labels: Vec::new(),
+        implies_complete: false,
+    };
+    let result = await_card(&req, &stripped, params)?;
+    // A kickoff card that stepped aside kept its record for this moment.
+    if !crate::ask_preempt::is_detached(&req.id) && !crate::parked::is_parked(&req.id) {
+        if let Some(pending) = crate::task_kickoff::take_pending(&req.id) {
+            return finish_kickoff(result, &pending);
+        }
+    }
+    Ok(result)
+}
+
+/// `fleet__ask action=withdraw`: take a card the agent no longer needs off the
+/// boss's screen. An answer that is already in is never swallowed.
+fn handle_fleet_ask_withdraw(args: &Value) -> Result<Value, JsonRpcError> {
+    let req = match owned_open_card(args) {
+        Ok(req) => req,
+        Err(e) => return Ok(tool_error(e)),
+    };
+    if crate::mcp_ipc::try_read_response(&req.id).is_some() {
+        return Ok(tool_error(format!(
+            "The boss already resolved card {}; call fleet__ask with {{\"action\":\"wait\",\"request_id\":\"{}\"}} to get the result instead of withdrawing it.",
+            req.id, req.id
+        )));
+    }
+    crate::mcp_ipc::cleanup(&req.id);
+    crate::task_kickoff::take_pending(&req.id);
+    persist_fleet_ask_history(
+        &req,
+        crate::decision_history::FleetAskOutcome::Cancelled,
+        std::collections::BTreeMap::new(),
+    );
+    Ok(json!({
+        "content": [{ "type": "text", "text": format!("Card {} withdrawn; it is no longer on the boss's screen.", req.id) }],
+        "isError": false,
+    }))
+}
+
+/// Refusal for a new card while an earlier one stepped aside and is still open.
+fn detached_card_refusal(open: &str) -> Value {
+    tool_error(format!(
+        "Card {open} is still open on the boss's screen. Call fleet__ask with {{\"action\":\"wait\",\"request_id\":\"{open}\"}} or {{\"action\":\"withdraw\",\"request_id\":\"{open}\"}} first, then raise a new card."
+    ))
 }
 
 /// `fleet__task action=kickoff`: raise the kickoff card through the ordinary
@@ -1307,12 +1396,35 @@ fn handle_task_kickoff_call(args: &Value) -> Result<Value, JsonRpcError> {
         }
         queued = Some(request_id.to_string());
     })?;
-    // A parked card keeps its record for whoever answers it later.
+    // A parked card keeps its record for whoever answers it later, and one that
+    // stepped aside for a message keeps it for the `wait` that picks it up.
     if let Some(request_id) = queued.as_deref() {
+        if crate::ask_preempt::is_detached(request_id) {
+            return Ok(result);
+        }
         if !crate::parked::is_parked(request_id) {
             tk::take_pending(request_id);
         }
     }
+    finish_kickoff(result, &pending)
+}
+
+/// Act on a kickoff card's resolved result: settle the task on 开工, otherwise
+/// hand the answer back with the not-started note.
+fn finish_kickoff(
+    result: Value,
+    pending: &crate::task_kickoff::PendingKickoff,
+) -> Result<Value, JsonRpcError> {
+    use crate::task_kickoff as tk;
+    let crate::task_kickoff::PendingKickoff {
+        session_id,
+        cwd,
+        question: question_text,
+        title,
+        locale,
+        kickoff,
+    } = pending;
+    let cwd = std::path::Path::new(cwd);
     if result.get("isError").and_then(Value::as_bool).unwrap_or(false) {
         return Ok(result);
     }
@@ -1326,18 +1438,18 @@ fn handle_task_kickoff_call(args: &Value) -> Result<Value, JsonRpcError> {
     // research layer (or the not-started note) would never reach it. Seen in
     // trial session 8c57567d: the kickoff result arrived as
     // `{"answers":…,"started":true}` with no research layer.
-    let answer = tk::answer_of(&answers, &question_text).unwrap_or("");
+    let answer = tk::answer_of(&answers, question_text).unwrap_or("");
     if !tk::is_start_answer(answer) {
         let mut result = result;
         if let Some(obj) = result.as_object_mut() {
             obj.remove("structuredContent");
         }
         if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
-            content.push(json!({ "type": "text", "text": tk::not_started_note(&locale) }));
+            content.push(json!({ "type": "text", "text": tk::not_started_note(locale) }));
         }
         return Ok(result);
     }
-    match tk::apply_start(&session_id, &cwd, &kickoff, &title, &locale) {
+    match tk::apply_start(session_id, cwd, kickoff, title, locale) {
         Ok(text) => Ok(json!({
             "content": [{ "type": "text", "text": text }],
             "isError": false,
@@ -1472,6 +1584,12 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
         return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
     }
 
+    // One open card per session also while an earlier card stepped aside for a
+    // message: it has to be waited on or withdrawn first.
+    if let Some(open) = crate::ask_preempt::detached_for_session(&session_id) {
+        return Ok(detached_card_refusal(&open));
+    }
+
     // A dropped 「收工」-style option *was* the agent's terminal intent, so fold
     // it into the flag the permanent button actually reads. An explicit
     // `taskComplete: true` still wins over a dropped 「放弃任务」.
@@ -1556,23 +1674,41 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
     }
     on_queued(&request_id);
 
+    await_card(&req, &stripped, params)
+}
+
+/// Wait for the boss to resolve `req` and turn the outcome into the tool
+/// result. Shared by the first ask and every `wait` on it; the timeout clock
+/// starts afresh with each wait.
+///
+/// The wait steps aside when a message is injected into the turn (see
+/// [`crate::ask_preempt`]): the card stays open and detached, nothing is
+/// written to the decision history, and the agent is told to handle the
+/// message, then `wait` or `withdraw`.
+fn await_card(
+    req: &crate::mcp_ipc::FleetAskRequest,
+    stripped: &StrippedEndOptions,
+    params: &Value,
+) -> Result<Value, JsonRpcError> {
+    let request_id = req.id.as_str();
     // Poll for the response, watching the consumer heartbeat so we exit
     // promptly if the desktop / fleet serve dies mid-flight.
     let timeout = fleet_ask_timeout();
     let liveness = heartbeat_window();
     let poll = std::time::Duration::from_millis(200);
     let started = Instant::now();
+    let mut preempt = crate::ask_preempt::Preempter::new(&req.session_id);
     let response = loop {
-        if let Some(r) = crate::mcp_ipc::try_read_response(&request_id) {
+        if let Some(r) = crate::mcp_ipc::try_read_response(request_id) {
             break Some(r);
         }
         if started.elapsed() > timeout {
             break None;
         }
         if !crate::consumer_heartbeat::consumer_status(liveness).is_alive() {
-            crate::mcp_ipc::cleanup(&request_id);
+            crate::mcp_ipc::cleanup(request_id);
             persist_fleet_ask_history(
-                &req,
+                req,
                 crate::decision_history::FleetAskOutcome::HeartbeatLost,
                 std::collections::BTreeMap::new(),
             );
@@ -1580,14 +1716,27 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
                 "Fleet consumer heartbeat lost while waiting for your answer.".into(),
             ));
         }
+        if preempt.poll() {
+            crate::ask_preempt::mark_detached(request_id, &req.session_id);
+            // An answer that landed before the record existed got no resolved
+            // notice; take it here instead of detaching.
+            if let Some(r) = crate::mcp_ipc::try_read_response(request_id) {
+                crate::ask_preempt::clear_detached(request_id);
+                break Some(r);
+            }
+            return Ok(json!({
+                "content": [{ "type": "text", "text": crate::ask_preempt::detached_notice(request_id) }],
+                "isError": false,
+            }));
+        }
         std::thread::sleep(poll);
     };
 
-    crate::mcp_ipc::cleanup(&request_id);
+    crate::mcp_ipc::cleanup(request_id);
 
     let Some(resp) = response else {
         persist_fleet_ask_history(
-            &req,
+            req,
             crate::decision_history::FleetAskOutcome::Timeout,
             std::collections::BTreeMap::new(),
         );
@@ -1597,10 +1746,10 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
         // CLI right after this result is recorded, so the stop notice is the
         // last thing the turn reads.
         if crate::parked::park_and_stop(
-            &request_id,
+            request_id,
             crate::parked::ParkedKind::FleetAsk,
             &req.session_id,
-            &req,
+            req,
             client_tool_use_id(params),
         ) {
             return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
@@ -1613,7 +1762,7 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
 
     if resp.cancelled {
         persist_fleet_ask_history(
-            &req,
+            req,
             crate::decision_history::FleetAskOutcome::for_resolution(true, resp.task_outcome),
             std::collections::BTreeMap::new(),
         );
@@ -1621,12 +1770,12 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
     }
 
     persist_fleet_ask_history(
-        &req,
+        req,
         crate::decision_history::FleetAskOutcome::Answered,
         resp.answers.clone(),
     );
 
-    Ok(answered_result(&resp.answers, &stripped))
+    Ok(answered_result(&resp.answers, stripped))
 }
 
 /// The tool result for an answered `fleet__ask` card.
@@ -1734,6 +1883,10 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     // Same re-entry guard as fleet__ask: one parked question per session.
     if crate::parked::has_parked_for_session(&session_id) {
         return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+    // A fleet__ask card that stepped aside is still open: no second card.
+    if let Some(open) = crate::ask_preempt::detached_for_session(&session_id) {
+        return Ok(detached_card_refusal(&open));
     }
 
     let request_id = crate::guard::new_request_id();
@@ -3387,6 +3540,125 @@ mod tests {
     /// mid-flight makes those tests resolve an empty session id and fall
     /// through their guards. The wrong-name var is also cleared to prove the
     /// value comes from the right source.
+    /// Private `FLEET_HOME` plus a fixed `CLAUDE_CODE_SESSION_ID`, restored on drop.
+    struct CardOwnerEnv {
+        dir: std::path::PathBuf,
+        prev_home: Option<std::ffi::OsString>,
+        prev_sid: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CardOwnerEnv {
+        fn new(tag: &str, session_id: &str) -> Self {
+            let lock = crate::session::fleet_home_lock();
+            let dir = std::env::temp_dir().join(format!(
+                "fleet-ask-owner-{tag}-{}-{}",
+                std::process::id(),
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let prev_home = std::env::var_os("FLEET_HOME");
+            let prev_sid = std::env::var_os("CLAUDE_CODE_SESSION_ID");
+            unsafe {
+                std::env::set_var("FLEET_HOME", &dir);
+                std::env::set_var("CLAUDE_CODE_SESSION_ID", session_id);
+            }
+            Self { dir, prev_home, prev_sid, _lock: lock }
+        }
+    }
+
+    impl Drop for CardOwnerEnv {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev_home {
+                    Some(v) => std::env::set_var("FLEET_HOME", v),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+                match &self.prev_sid {
+                    Some(v) => std::env::set_var("CLAUDE_CODE_SESSION_ID", v),
+                    None => std::env::remove_var("CLAUDE_CODE_SESSION_ID"),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn queue_card(id: &str, session_id: &str) {
+        let req = crate::mcp_ipc::FleetAskRequest {
+            id: id.into(),
+            session_id: session_id.into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            task: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            parked: false,
+            task_complete: false,
+            questions: Vec::new(),
+            review_docs: Vec::new(),
+        };
+        crate::mcp_ipc::write_request(&req).unwrap();
+    }
+
+    fn card_action(action: &str, id: &str) -> Value {
+        let params = json!({ "arguments": { "action": action, "request_id": id } });
+        handle_fleet_ask_call(&params).unwrap()
+    }
+
+    fn is_error(v: &Value) -> bool {
+        v["isError"].as_bool().unwrap_or(false)
+    }
+
+    #[test]
+    fn wait_and_withdraw_refuse_unknown_and_foreign_cards() {
+        let _env = CardOwnerEnv::new("foreign", "s-me");
+        queue_card("r-other", "s-other");
+        for action in ["wait", "withdraw"] {
+            assert!(is_error(&card_action(action, "r-missing")), "{action} unknown id");
+            assert!(is_error(&card_action(action, "r-other")), "{action} foreign id");
+            assert!(is_error(&card_action(action, "")), "{action} empty id");
+        }
+        assert!(
+            crate::mcp_ipc::read_request("r-other").is_some(),
+            "a refused withdraw must leave another session's card alone"
+        );
+    }
+
+    #[test]
+    fn withdraw_closes_an_open_card_but_never_swallows_an_answer() {
+        let _env = CardOwnerEnv::new("withdraw", "s-me");
+        queue_card("r-open", "s-me");
+        crate::ask_preempt::mark_detached("r-open", "s-me");
+        let out = card_action("withdraw", "r-open");
+        assert!(!is_error(&out), "{out}");
+        assert!(crate::mcp_ipc::read_request("r-open").is_none());
+        assert!(!crate::ask_preempt::is_detached("r-open"));
+        assert!(!crate::mcp_ipc::list_pending_requests().contains(&"r-open".to_string()));
+
+        queue_card("r-answered", "s-me");
+        crate::mcp_ipc::write_response_file_for_test("r-answered", 0);
+        let out = card_action("withdraw", "r-answered");
+        assert!(is_error(&out));
+        assert!(out.to_string().contains("wait"), "{out}");
+        assert!(crate::mcp_ipc::read_request("r-answered").is_some());
+    }
+
+    #[test]
+    fn unknown_action_is_rejected() {
+        let params = json!({ "arguments": { "action": "pause" } });
+        assert!(handle_fleet_ask_call(&params).is_err());
+    }
+
+    #[test]
+    fn ask_schema_offers_wait_and_withdraw_without_requiring_questions() {
+        let schema = crate::mcp_ipc::fleet_ask_input_schema();
+        assert_eq!(schema["properties"]["action"]["enum"], json!(["ask", "wait", "withdraw"]));
+        assert!(schema["properties"]["request_id"].is_object());
+        assert!(
+            schema.get("required").is_none(),
+            "`questions` is checked in code so wait/withdraw can omit it"
+        );
+    }
+
     #[test]
     fn current_session_id_reads_claude_code_session_id() {
         let _guard = crate::session::fleet_home_lock();

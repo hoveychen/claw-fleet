@@ -146,6 +146,10 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 判据不是「纯文本能不能表达」（永远能），而是「更丰富的渲染对{title_zh}是不是更好的答案」：要 diff 表 / 截图网格用 `html`，要展示本地图片用 `images`，要结构化输入用 `formFields`，可以复合。视觉呈现本身就是{title_zh}所求时（一幅画、带样式的 diff、一张图表），大方用 `html`，别退回 ASCII。需要 tab / 模态框 / 视频 / 音频这类超出上述词汇的布局时，改调 `fleet__render_a2ui`（A2UI v0.9 消息树，顶层 `{{ \"messageTree\": … }}`，返回 `{{ actionName, actionContext }}`；Fleet 不校验这棵树，无效的树产出空卡）。\n\
 \n\
+### 卡片让路：`wait` / `withdraw`\n\
+\n\
+卡在等答复时若有新消息进来（老板追问、watch 触发、别的会话 send），`fleet__ask` 会提前返回、说明卡片 `request_id` 仍挂在{title_zh}屏幕上——先处理紧随其后的那条消息。处理完后卡仍需要答复，就调 `fleet__ask` 传 `{{\"action\":\"wait\",\"request_id\":\"…\"}}` 继续等；新消息已让它过时就传 `\"withdraw\"` 撤下。这张卡 wait 或 withdraw 之前不许再发新卡；收到「卡已被处理」的通知时同样用 `wait` 取回结果。\n\
+\n\
 ### 提到的资料必须挂进 `reviewDocs`\n\
 \n\
 卡片顶层还有一个 `reviewDocs` 字段（整张卡一份，不属于某个问题）：`[{{ \"kind\": \"wiki\"|\"file\"|\"dir\"|\"url\"|\"artifact\", \"ref\": \"…\", \"title\"?: \"<标签>\" }}]`。列进去的每份资料会出现在会话旁的资料栏里，{title_zh}点一下就能打开，读到的是磁盘上的当前内容。\n\
@@ -251,6 +255,10 @@ Each `label` must be a concrete next action or answer, not a meta-choice like \"
 - `formFields`: structured inputs (`text`/`textarea`/`number`/`select`/`radio`/`checkbox`/`date`/`datetime`/`time`/`range`); answers come back keyed by field `name`.\n\
 \n\
 The test is not \"could plain text express this?\" (it always can) but \"is the richer rendering a better answer for {title_en}?\": a diff table or screenshot grid wants `html`, a local image wants `images`, structured input wants `formFields`, and they compose. When the visual IS the deliverable — a drawing, a styled diff, a chart — reach for `html` rather than falling back to ASCII. For layouts beyond that vocabulary (tabs, modals, video, audio) call `fleet__render_a2ui` instead (an A2UI v0.9 message tree, top-level `{{ \"messageTree\": … }}`, returning `{{ actionName, actionContext }}`; Fleet does not validate the tree, and an invalid one yields an empty card).\n\
+\n\
+### When a card steps aside: `wait` / `withdraw`\n\
+\n\
+If a new message reaches your turn while a card waits ({title_en} following up, a watch firing, another session's send), `fleet__ask` returns early saying card `request_id` is still on {title_en}'s screen — handle the message that follows first. Then, if the card still matters, call `fleet__ask` with `{{\"action\":\"wait\",\"request_id\":\"…\"}}`; if the message made it obsolete, pass `\"withdraw\"`. Raise no other card until it is waited on or withdrawn; a \"card was resolved\" notice also means `wait` to fetch the result.\n\
 \n\
 ### Material you mention goes in `reviewDocs`\n\
 \n\

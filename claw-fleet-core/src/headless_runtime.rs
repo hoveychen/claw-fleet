@@ -58,6 +58,9 @@ pub fn maybe_drain_pending_messages(sessions: &Arc<Mutex<Vec<SessionInfo>>>) {
     // Snapshot under the lock, then drain without holding it — draining spawns a
     // detached `claude`, which must not run inside the sessions mutex.
     let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
+    // A detached decision card answered after its turn ended resumes the
+    // session with the answer, ahead of any queued follow-up.
+    crate::ask_preempt::sweep_idle();
     for session in &snapshot {
         crate::pending_message::maybe_drain(session);
     }
