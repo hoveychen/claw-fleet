@@ -254,11 +254,30 @@ fn system_prompt_text(
     (!text.is_empty()).then_some(text)
 }
 
+/// An incognito session's system prompt: the incognito block first, then only
+/// the guidance that points at nothing outside this session — the card rules
+/// (or the sub-task rules), the model sheet and the title rule. Lessons, PRD
+/// discipline and the wiki guidance are left out: they are distilled from, or
+/// steer the agent towards, the user's other sessions and stored knowledge.
+/// `chat` keeps only the incognito block (the chat brief is its doctrine).
+fn incognito_system_prompt_text(subtask: bool, chat: bool) -> String {
+    let (title, locale) = guidance_voice();
+    let kept = render_guidance_with(&title, &locale, subtask, None, |f| {
+        !chat
+            && matches!(
+                f,
+                Feature::InteractionMode | Feature::ModelGuidance | Feature::SessionTitleGuidance
+            )
+            && is_enabled(f)
+    });
+    join_sections(vec![crate::incognito::render_guidance(&title, &locale), kept])
+}
+
 // ── Settings / MCP files ─────────────────────────────────────────────────────
 
 /// The `--settings` document. `fleet_bin` is `None` when no fleet binary
 /// resolves, in which case only the settings that need no binary are kept.
-fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
+fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers, incognito: bool) -> Value {
     let mut v = json!({
         "permissions": { "allow": crate::permissions_injector::INJECT_RULES },
         // Both spellings. Measured against Claude Code 2.1.263 on 2026-09-10:
@@ -270,6 +289,9 @@ fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
         "includeCoAuthoredBy": false,
         "attribution": { "commitTrailers": false, "sessionUrl": false },
     });
+    if incognito {
+        return incognito_settings(v, fleet_bin);
+    }
     if let Some(bin) = fleet_bin {
         // A sub-task's per-turn role line rides the prd-context hook. With that
         // hook switched off (and not installed globally either), keep the hook
@@ -288,6 +310,51 @@ fn settings_value(fleet_bin: Option<&str>, global: &GlobalCarriers) -> Value {
                 global.wants(f)
             }
         });
+    }
+    v
+}
+
+/// Paths an incognito session's file tools are denied by Claude Code's own
+/// permission layer — a backstop for `fleet incognito-guard` that needs no
+/// fleet binary. `~/.fleet` is not listed: the session's own config dir lives
+/// under it (tool-result spill files are read from there), and only the hook
+/// can tell that dir apart from the rest.
+const INCOGNITO_DENY_PATHS: [&str; 5] = [
+    "~/.claude/**",
+    "~/.claude.json",
+    "~/.codex/**",
+    "~/.dsh/**",
+    "~/Library/Keychains/**",
+];
+
+/// The incognito `--settings`: no global carriers apply (the session's config
+/// dir is empty), so every kept hook is handed over here. Dropped: the
+/// recent-sessions block, plan re-injection and its context-pressure companion
+/// (which points at handoff). The notes-hint hook stays because it records the
+/// messaging token; under [`crate::incognito::ENV`] it prints nothing, and the
+/// prd-context hook prints only a sub-task's role line.
+fn incognito_settings(mut v: Value, fleet_bin: Option<&str>) -> Value {
+    let mut deny = Vec::new();
+    for tool in ["Read", "Edit"] {
+        for p in INCOGNITO_DENY_PATHS {
+            deny.push(json!(format!("{tool}({p})")));
+        }
+    }
+    v["permissions"]["deny"] = Value::Array(deny);
+    if let Some(bin) = fleet_bin {
+        let role_only = is_enabled(Feature::InteractionMode);
+        let mut hooks = crate::hooks::launch_hooks(bin, true, role_only, |f| match f {
+            Feature::PrdContextHook | Feature::RecentSessions => false,
+            Feature::NotesHint => true,
+            other => is_enabled(other),
+        });
+        let pre = hooks
+            .as_object_mut()
+            .map(|m| m.entry("PreToolUse").or_insert_with(|| json!([])));
+        if let Some(Value::Array(groups)) = pre {
+            groups.insert(0, crate::hooks::incognito_guard_group(bin));
+        }
+        v["hooks"] = hooks;
     }
     v
 }
@@ -343,7 +410,7 @@ struct Shape {
     /// each other's file between write and read. A sub-task's system prompt
     /// differs from its coordinator's, so it gets its own prefix for the same
     /// reason.
-    file_prefix: &'static str,
+    file_prefix: String,
     /// The session is a sub-task (see [`launch_subtask_parent`]): sub-task
     /// guidance, and the native `AskUserQuestion` disallowed.
     subtask: bool,
@@ -353,6 +420,11 @@ struct Shape {
     /// prompt froze, so only a sub-task — whose task is typed before it is
     /// spawned — carries one; the main conversation gets its layer per turn.
     subtask_layer: Option<TaskType>,
+    /// The session is incognito ([`crate::incognito`]): its own settings,
+    /// system prompt and launch files, and no global carriers.
+    incognito: bool,
+    /// The chat workspace's launch.
+    chat: bool,
 }
 
 /// The session id a launch argv runs as, for picking its role. `--resume`
@@ -479,6 +551,9 @@ fn delegate_if_newer(
 /// delegated. The `fleet launch-args` command calls this.
 pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec<String> {
     let chat = crate::chat_workspace::is_chat_workspace(workspace_path);
+    // Recognised from the argv's session id, so every launch of the session —
+    // first spawn, resume, revive, fork — renders the same incognito files.
+    let incognito = launch_session_id(existing).is_some_and(crate::incognito::is_incognito);
     let isolated = chat || excludes_user_settings(existing);
     let parent_task = (!chat).then(|| launch_subtask_parent(existing)).flatten();
     let subtask = parent_task.is_some();
@@ -487,17 +562,22 @@ pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec
     let subtask_layer = parent_task
         .as_deref()
         .and_then(subtask_layer_for)
-        .filter(|_| !crate::task_workflow_guidance::flow_block_off(Path::new(workspace_path)));
+        .filter(|_| !crate::task_workflow_guidance::flow_block_off(Path::new(workspace_path)))
+        .filter(|_| !incognito);
     let shape = Shape {
-        global: if isolated {
+        // The incognito config dir carries nothing global, whatever the
+        // user's real one does.
+        global: if isolated || incognito {
             GlobalCarriers::default()
         } else {
             GlobalCarriers::probe()
         },
-        system_prompt: !chat,
-        file_prefix: file_prefix(isolated, subtask, subtask_layer),
+        system_prompt: !chat || incognito,
+        file_prefix: file_prefix(isolated, subtask, subtask_layer, incognito),
         subtask,
         subtask_layer,
+        incognito,
+        chat,
     };
     let fleet_bin = crate::hooks::resolve_fleet_binary();
     launch_args_shaped(existing, fleet_bin.as_deref(), &shape)
@@ -505,16 +585,20 @@ pub fn fleet_launch_args_local(existing: &[String], workspace_path: &str) -> Vec
 
 /// One launch-file prefix per distinct file content, so two launches starting
 /// at once never overwrite each other's file between write and read.
-fn file_prefix(isolated: bool, subtask: bool, layer: Option<TaskType>) -> &'static str {
+fn file_prefix(isolated: bool, subtask: bool, layer: Option<TaskType>, incognito: bool) -> String {
     let research = subtask && layer == Some(TaskType::Research);
-    match (isolated, subtask, research) {
-        (false, false, _) => "",
-        (true, false, _) => "isolated-",
-        (false, true, false) => "subtask-",
-        (true, true, false) => "isolated-subtask-",
-        (false, true, true) => "subtask-research-",
-        (true, true, true) => "isolated-subtask-research-",
+    let mut prefix = String::new();
+    for (on, part) in [
+        (incognito, "incognito-"),
+        (isolated, "isolated-"),
+        (subtask, "subtask-"),
+        (research, "research-"),
+    ] {
+        if on {
+            prefix.push_str(part);
+        }
     }
+    prefix
 }
 
 #[cfg(test)]
@@ -526,9 +610,11 @@ fn launch_args_with(
     let shape = Shape {
         global: global.clone(),
         system_prompt: true,
-        file_prefix: "",
+        file_prefix: String::new(),
         subtask: false,
         subtask_layer: None,
+        incognito: false,
+        chat: false,
     };
     launch_args_shaped(existing, fleet_bin, &shape)
 }
@@ -555,7 +641,8 @@ fn launch_args_shaped(existing: &[String], fleet_bin: Option<&str>, shape: &Shap
     };
 
     let settings =
-        serde_json::to_string_pretty(&settings_value(fleet_bin, global)).unwrap_or_default();
+        serde_json::to_string_pretty(&settings_value(fleet_bin, global, shape.incognito))
+            .unwrap_or_default();
     emit("--settings", SETTINGS_FILE, settings);
 
     // A second server under the same `fleet` key would clash with the global one.
@@ -565,11 +652,15 @@ fn launch_args_shaped(existing: &[String], fleet_bin: Option<&str>, shape: &Shap
             emit("--mcp-config", MCP_FILE, mcp)
         });
 
-    if let Some(text) = shape
-        .system_prompt
-        .then(|| system_prompt_text(global, shape.subtask, shape.subtask_layer))
-        .flatten()
-    {
+    let prompt = if shape.incognito {
+        Some(incognito_system_prompt_text(shape.subtask, shape.chat))
+    } else {
+        shape
+            .system_prompt
+            .then(|| system_prompt_text(global, shape.subtask, shape.subtask_layer))
+            .flatten()
+    };
+    if let Some(text) = prompt {
         emit("--append-system-prompt-file", SYSTEM_PROMPT_FILE, text);
     }
 
@@ -811,9 +902,11 @@ mod tests {
         let shape = Shape {
             global: none(),
             system_prompt: true,
-            file_prefix: "subtask-",
+            file_prefix: "subtask-".to_string(),
             subtask: true,
             subtask_layer: None,
+            incognito: false,
+            chat: false,
         };
         let args = launch_args_shaped(&[], Some(BIN), &shape);
         let path = value_after(&args, "--append-system-prompt-file").unwrap();
@@ -830,6 +923,64 @@ mod tests {
     }
 
     #[test]
+    fn an_incognito_launch_drops_history_injections_and_fences_its_tools() {
+        let _h = Home::new("incognito");
+        reconcile_guidance("老板", "zh").unwrap();
+        let shape = Shape {
+            // Even a host whose global config still carries Fleet's MCP entry:
+            // the incognito config dir does not, so the server is passed here.
+            global: none(),
+            system_prompt: true,
+            file_prefix: file_prefix(false, false, None, true),
+            subtask: false,
+            subtask_layer: None,
+            incognito: true,
+            chat: false,
+        };
+        let args = launch_args_shaped(&[], Some(BIN), &shape);
+
+        let settings_path = value_after(&args, "--settings").unwrap();
+        assert!(settings_path.ends_with("incognito-settings.json"), "{settings_path}");
+        let settings = read_json(settings_path);
+        let hooks = subcommands(&settings);
+        for kept in ["incognito-guard", "\" guard;", "elicitation", "session idle", "notes-hint", ".fleet/hooks.jsonl"] {
+            assert!(hooks.contains(kept), "missing `{kept}` in {hooks}");
+        }
+        for dropped in ["recent-sessions", "ctx-reminder"] {
+            assert!(!hooks.contains(dropped), "`{dropped}` must be off: {hooks}");
+        }
+        // prd-context only as the role-line hook.
+        assert_eq!(settings["hooks"]["UserPromptSubmit"].to_string().matches("prd-context").count(), 1);
+        let deny = settings["permissions"]["deny"].to_string();
+        assert!(deny.contains("Read(~/.claude/**)"), "{deny}");
+
+        assert!(value_after(&args, "--mcp-config").is_some());
+        let text = fs::read_to_string(value_after(&args, "--append-system-prompt-file").unwrap()).unwrap();
+        assert!(text.starts_with("# Fleet 隐身模式"), "{text}");
+        assert!(text.contains(crate::interaction_mode::render_guidance("老板", "zh").trim_end()));
+        assert!(!text.contains(crate::prd_discipline::render_guidance("老板", "zh").trim_end()));
+        assert!(!text.contains(crate::wiki_guidance::render_guidance("zh").trim_end()));
+    }
+
+    #[test]
+    fn an_incognito_session_is_recognised_from_its_argv() {
+        let _h = Home::new("incognito-argv");
+        crate::incognito::register_new("inc-1").unwrap();
+        let argv = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for existing in [
+            argv(&["-p", "x", "--session-id", "inc-1"]),
+            argv(&["-p", "x", "--resume", "inc-1"]),
+            argv(&["--resume", "inc-1", "--fork-session", "--session-id", "f"]),
+        ] {
+            let args = fleet_launch_args_local(&existing, "/tmp");
+            let path = value_after(&args, "--settings").unwrap();
+            assert!(path.contains("incognito-"), "{existing:?} → {path}");
+        }
+        let args = fleet_launch_args_local(&argv(&["--session-id", "plain"]), "/tmp");
+        assert!(!value_after(&args, "--settings").unwrap().contains("incognito-"));
+    }
+
+    #[test]
     fn a_research_subtask_gets_the_research_layer_in_its_own_file() {
         let _h = Home::new("research-sub");
         reconcile_guidance("老板", "zh").unwrap();
@@ -837,9 +988,11 @@ mod tests {
         let shape = Shape {
             global: none(),
             system_prompt: true,
-            file_prefix: file_prefix(false, true, layer),
+            file_prefix: file_prefix(false, true, layer, false),
             subtask: true,
             subtask_layer: layer,
+            incognito: false,
+            chat: false,
         };
         let args = launch_args_shaped(&[], Some(BIN), &shape);
         let path = value_after(&args, "--append-system-prompt-file").unwrap();
@@ -866,9 +1019,11 @@ mod tests {
         let plain = Shape {
             global: none(),
             system_prompt: true,
-            file_prefix: file_prefix(false, true, None),
+            file_prefix: file_prefix(false, true, None, false),
             subtask: true,
             subtask_layer: None,
+            incognito: false,
+            chat: false,
         };
         let args = launch_args_shaped(&[], Some(BIN), &plain);
         let plain_path = value_after(&args, "--append-system-prompt-file").unwrap();
@@ -879,16 +1034,19 @@ mod tests {
     #[test]
     fn every_launch_shape_writes_its_own_files() {
         let mut seen = std::collections::HashSet::new();
-        for isolated in [false, true] {
-            for (subtask, layer) in [(false, None), (true, None), (true, Some(TaskType::Research))] {
-                assert!(
-                    seen.insert(file_prefix(isolated, subtask, layer)),
-                    "shared prefix for isolated={isolated} subtask={subtask} layer={layer:?}"
-                );
+        for incognito in [false, true] {
+            for isolated in [false, true] {
+                for (subtask, layer) in [(false, None), (true, None), (true, Some(TaskType::Research))] {
+                    assert!(
+                        seen.insert(file_prefix(isolated, subtask, layer, incognito)),
+                        "shared prefix for incognito={incognito} isolated={isolated} \
+                         subtask={subtask} layer={layer:?}"
+                    );
+                }
             }
         }
         // A layer only means something on a sub-task.
-        assert_eq!(file_prefix(false, false, Some(TaskType::Research)), "");
+        assert_eq!(file_prefix(false, false, Some(TaskType::Research), false), "");
     }
 
     #[test]

@@ -1211,6 +1211,20 @@ pub(crate) fn launch_hooks(
     Value::Object(hooks)
 }
 
+/// The tools `fleet incognito-guard` screens in an incognito session: the
+/// shell, and every built-in tool that reads or writes a path.
+pub(crate) const INCOGNITO_GUARD_MATCHER: &str =
+    "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Grep|Glob|LS";
+
+/// The PreToolUse group that runs `fleet incognito-guard` (see
+/// [`crate::incognito::Fence`]). Independent of the guard feature switch: an
+/// incognito session is fenced whether or not command approval is on.
+pub(crate) fn incognito_guard_group(fleet_bin: &str) -> Value {
+    let mut entry = fleet_subcommand_hook_with(cfg!(windows), fleet_bin, "incognito-guard");
+    entry["timeout"] = json!(10_000);
+    json!({ "matcher": INCOGNITO_GUARD_MATCHER, "hooks": [entry] })
+}
+
 // ── Private helpers ──────────────────────────────────────────────────────────
 
 fn read_settings() -> Option<Value> {

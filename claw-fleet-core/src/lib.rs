@@ -76,6 +76,7 @@ pub mod hooks;
 pub mod hooks_server;
 pub mod host_identity;
 pub mod idle;
+pub mod incognito;
 pub mod idle_spin;
 pub mod commit_trailer;
 pub mod reward_hack;
