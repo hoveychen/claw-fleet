@@ -4945,6 +4945,7 @@ mod tests {
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
             entrypoint: None,
+            incognito: false,
             is_subagent: false,
             parent_session_id: None,
             agent_type: None,
