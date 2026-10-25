@@ -482,8 +482,10 @@ pub fn unsupported_harness(tool: &str) -> String {
 /// (cards, title, permission prompt, image) stay too; everything else — the
 /// history, inspect, notes, wiki, artifact, handoff, control, loop, schedule
 /// and task tools — reads other sessions or the user's past, or starts
-/// sessions that would not be incognito.
-pub const KEPT_CONTROL_TOOLS: [&str; 4] = ["fleet__spawn", "fleet__plan", "fleet__watch", "fleet__job"];
+/// sessions that would not be incognito. `fleet__plan` is withheld as well:
+/// it writes the workspace-shared TASKS.md, where every other session in the
+/// workspace reads the plan titles.
+pub const KEPT_CONTROL_TOOLS: [&str; 3] = ["fleet__spawn", "fleet__watch", "fleet__job"];
 
 /// Whether an incognito session may see / call the Fleet MCP tool `name`.
 pub fn allows_tool(name: &str) -> bool {
@@ -493,7 +495,6 @@ pub fn allows_tool(name: &str) -> bool {
 /// The `fleet` CLI subcommands an incognito session may run: the faces of the
 /// kept tools, plus the internal commands its own hooks and MCP server use.
 const CLI_ALLOWED: &[&str] = &[
-    "plan",
     "job",
     "watch",
     "spawn",
@@ -524,7 +525,7 @@ pub fn cli_allows(subcommand: &str) -> bool {
 /// The refusal printed by the `fleet` CLI for a subcommand [`cli_allows`] rejects.
 pub fn cli_refusal(subcommand: &str) -> String {
     format!(
-        "fleet {subcommand}: 本会话是隐身会话，不能读取其他会话、历史、记忆或用户身份。可用的 fleet 命令只有 plan / job / watch / spawn。"
+        "fleet {subcommand}: 本会话是隐身会话，不能读取其他会话、历史、记忆或用户身份。可用的 fleet 命令只有 job / watch / spawn。"
     )
 }
 
@@ -856,7 +857,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 - **不调查{t}是谁**：不为了弄清身份去看 git 的 user.name / user.email、`git log` 的作者、home 目录下的点文件、路径里的用户名或任何账号信息。提交代码时让 git 自己用它的配置，但不要把这些信息拿来推断、复述或记下。\n\
 - **不做个性化**：不根据{t}过去的习惯、偏好或其他项目来推测他想要什么。把他当成一位匿名用户，只依据本次对话里他亲口说的话和当前项目里的内容做事。\n\
 - **当前项目照常可用**：cwd 下的代码、项目 CLAUDE.md、项目 `.claude/`、仓库内容和它的 git 历史都可以读，这是工作本身需要的。\n\
-- **可用的 Fleet 工具**：决策卡（本会话若有）、`fleet__plan`、`fleet__job`、`fleet__watch`、`fleet__spawn`（派出的会话同样是隐身的）和会话标题。`fleet__history`、`fleet__inspect`、`fleet__notes`、`fleet__wiki`、`fleet__artifact`、`fleet__handoff`、`fleet__control`、`fleet__loop`、`fleet__schedule`、`fleet__task` 和用量 / 账号查询在本会话都不存在；其他指引里提到它们的地方在这里一律不适用。\n\
+- **可用的 Fleet 工具**：决策卡（本会话若有）、`fleet__job`、`fleet__watch`、`fleet__spawn`（派出的会话同样是隐身的）和会话标题。`fleet__plan`（以及 TASKS.md 计划）、`fleet__history`、`fleet__inspect`、`fleet__notes`、`fleet__wiki`、`fleet__artifact`、`fleet__handoff`、`fleet__control`、`fleet__loop`、`fleet__schedule`、`fleet__task` 和用量 / 账号查询在本会话都不存在；其他指引里提到它们的地方在这里一律不适用。\n\
 - **被拦下时**：guard 和工具层会拒绝触碰上述位置的命令。被拒就换一种不需要这些信息的做法，不要换个写法绕过去；确实缺某个信息，就直接向你的汇报对象要。\n\
 - **被问到你知道{t}什么**：如实说你看不到他的身份、记忆和其他会话。\n"
         )
@@ -871,7 +872,7 @@ This session is **incognito**, like a browser's private window: {t} opened it pr
 - **Do not research who {t} is**: do not read git's user.name / user.email, `git log` authors, home-directory dotfiles, the username in paths or any account details to work out their identity. Let git use its own config when committing, but never infer from, repeat or record that information.\n\
 - **No personalisation**: do not infer what {t} wants from past habits, preferences or other projects. Treat them as an anonymous user and work only from what they say in this conversation and what is in the current project.\n\
 - **The current project is fine**: the code under the cwd, the project CLAUDE.md, the project `.claude/`, the repository and its git history are part of the work.\n\
-- **Fleet tools available**: decision cards (if this session has them), `fleet__plan`, `fleet__job`, `fleet__watch`, `fleet__spawn` (the sessions it starts are incognito too) and the session title. `fleet__history`, `fleet__inspect`, `fleet__notes`, `fleet__wiki`, `fleet__artifact`, `fleet__handoff`, `fleet__control`, `fleet__loop`, `fleet__schedule`, `fleet__task` and usage / account queries do not exist here; wherever other guidance mentions them, it does not apply.\n\
+- **Fleet tools available**: decision cards (if this session has them), `fleet__job`, `fleet__watch`, `fleet__spawn` (the sessions it starts are incognito too) and the session title. `fleet__plan` (and TASKS.md plans), `fleet__history`, `fleet__inspect`, `fleet__notes`, `fleet__wiki`, `fleet__artifact`, `fleet__handoff`, `fleet__control`, `fleet__loop`, `fleet__schedule`, `fleet__task` and usage / account queries do not exist here; wherever other guidance mentions them, it does not apply.\n\
 - **When something is denied**: the guard and the tool layer refuse commands that touch the places above. Find a way that does not need that information instead of rephrasing around the denial; if you truly need something, ask whoever you report to.\n\
 - **If asked what you know about {t}**: say plainly that you cannot see their identity, memory or other sessions.\n"
         )
@@ -1085,6 +1086,7 @@ mod tests {
             "echo $CLAUDE_CODE_OAUTH_TOKEN",
             "fleet history search foo",
             "cd /tmp && fleet wiki list --all",
+            "fleet plan check incognito P1",
             "~/.fleet/bin/fleet inspect list",
         ] {
             assert!(f.check_command(cmd).is_some(), "must deny: {cmd}");
@@ -1093,7 +1095,6 @@ mod tests {
             "cargo test -p claw-fleet-core",
             "cat .claude/settings.local.json",
             &format!("cat {h}/.fleet/incognito/cfg/me/projects/x/tool-results/a.txt"),
-            "fleet plan check incognito P1",
             "fleet job run --command 'make'",
             "git log --oneline -3",
             "ls ~/work",
@@ -1103,12 +1104,12 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_list_keeps_only_cards_plan_job_watch_spawn() {
+    fn the_tool_list_keeps_only_cards_job_watch_spawn() {
         for t in KEPT_CONTROL_TOOLS {
             assert!(crate::mcp_control::is_control_tool(t), "{t} is not a control tool");
             assert!(allows_tool(t));
         }
-        for t in ["fleet__history", "fleet__inspect", "fleet__notes", "fleet__wiki", "fleet__handoff"] {
+        for t in ["fleet__plan", "fleet__history", "fleet__inspect", "fleet__notes", "fleet__wiki", "fleet__handoff"] {
             assert!(!allows_tool(t), "{t} must be withheld");
         }
         for t in crate::mcp_server::ALWAYS_ON_TOOL_NAMES {
@@ -1118,10 +1119,10 @@ mod tests {
 
     #[test]
     fn the_cli_refuses_history_subcommands() {
-        for s in ["plan", "job", "watch", "spawn", "guard", "notes-hint", "--version"] {
+        for s in ["job", "watch", "spawn", "guard", "notes-hint", "prd-context", "session", "--version"] {
             assert!(cli_allows(s), "{s}");
         }
-        for s in ["history", "notes", "wiki", "agents", "agent", "search", "memory", "account", "handoff", "report"] {
+        for s in ["plan", "history", "notes", "wiki", "agents", "agent", "search", "memory", "account", "handoff", "report"] {
             assert!(!cli_allows(s), "{s}");
         }
     }

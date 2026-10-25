@@ -493,6 +493,11 @@ pub fn resolve_spawn_step(
     step: &str,
     spawner_session_id: Option<&str>,
 ) -> Result<(String, String), String> {
+    // TASKS.md is shared with every session of the workspace; an incognito
+    // spawner neither reads it nor hangs its sub-task under someone's plan.
+    if crate::incognito::current_is_incognito(spawner_session_id) {
+        return Err("incognito sessions have no plans: spawn without step / plan".to_string());
+    }
     let focus = spawner_session_id
         .and_then(crate::task_progress::read)
         .map(|r| r.plan_id);
@@ -534,6 +539,20 @@ fn resolve_spawn_step_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_incognito_spawner_cannot_hang_a_sub_task_under_a_plan() {
+        let home = tempfile::tempdir().unwrap();
+        let _h = crate::paths::fleet_home_guard(home.path());
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        create(cwd, "demo", "Demo", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        add(cwd, "demo", "P1", "first").unwrap();
+        crate::incognito::register_new("inc-spawner").unwrap();
+        let err = resolve_spawn_step(cwd, Some("demo"), "P1", Some("inc-spawner")).unwrap_err();
+        assert!(err.contains("incognito"), "{err}");
+        assert!(resolve_spawn_step(cwd, Some("demo"), "P1", Some("plain")).is_ok());
+    }
 
     #[test]
     fn spawn_step_resolves_against_the_focused_plan() {

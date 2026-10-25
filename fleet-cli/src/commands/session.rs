@@ -96,6 +96,15 @@ pub(crate) fn cmd_session_idle() {
         }
     }
 
+    // The turn is over, so the live view no longer needs an incognito
+    // session's live-thinking sidecar — the one Fleet store holding its
+    // streamed text. A child still writing keeps an unlinked inode, which
+    // goes with its last fd.
+    if claw_fleet_core::incognito::current_is_incognito(Some(&sid)) {
+        claw_fleet_core::live_thinking::remove_for_session(&sid);
+        timing.phase("incognito_sidecar");
+    }
+
     // Record what is still running: a Stop that leaves subagents behind is not
     // the session's last turn, and the session watch must not read it as one.
     let background = stop_payload

@@ -462,6 +462,7 @@ pub fn spawn_claude_detached_with_envs(
     // Incognito: resolved from the argv before the rca rewrite, at this
     // chokepoint so every resume path re-reads the current OAuth token.
     let incognito_env = crate::incognito::launch_env(args)?;
+    let incognito_launch = incognito_env.is_some();
     if incognito_env.is_some() && rca_wrap.is_some() {
         return Err(format!(
             "incognito sessions cannot run in a remote (rca) workspace: {workspace_path}"
@@ -663,11 +664,17 @@ pub fn spawn_claude_detached_with_envs(
 
     // Now that we have the pid, give the sidecar its stable pid-keyed name.
     // The child's held fd is unaffected by the rename.
+    let mut sidecar_final: Option<PathBuf> = None;
     if let Some(tmp) = sidecar_tmp {
         if let Some(final_path) = crate::live_thinking::sidecar_path_for_pid(pid) {
-            let _ = std::fs::rename(&tmp, &final_path);
+            if std::fs::rename(&tmp, &final_path).is_ok() {
+                sidecar_final = Some(final_path);
+            }
         }
     }
+    // An incognito turn's sidecar goes when its process does. The Stop hook
+    // removes it on a normal turn end; this covers a killed or crashed turn.
+    let incognito_sidecar = sidecar_final.filter(|_| incognito_launch);
 
     let label_owned = label.to_string();
     let detail_owned = detail.to_string();
@@ -681,6 +688,9 @@ pub fn spawn_claude_detached_with_envs(
     std::thread::spawn(move || {
         let result = child.wait();
         drop(slot);
+        if let Some(p) = &incognito_sidecar {
+            let _ = std::fs::remove_file(p);
+        }
         let success = matches!(&result, Ok(status) if status.success());
         // After the child is gone, so nothing can still be writing: anything in
         // the local mirror is output that was meant for the remote host.

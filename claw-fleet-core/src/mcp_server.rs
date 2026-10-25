@@ -352,7 +352,8 @@ fn session_is_incognito() -> bool {
 }
 
 /// An incognito session's tool list: only what [`crate::incognito::allows_tool`]
-/// keeps.
+/// keeps, and `fleet__spawn` without its plan-step arguments (an incognito
+/// session has no plans).
 fn incognito_tools(mut list: Value) -> Value {
     if let Some(tools) = list.get_mut("tools").and_then(Value::as_array_mut) {
         tools.retain(|t| {
@@ -360,6 +361,18 @@ fn incognito_tools(mut list: Value) -> Value {
                 .and_then(Value::as_str)
                 .is_some_and(crate::incognito::allows_tool)
         });
+        for t in tools.iter_mut() {
+            if t.get("name").and_then(Value::as_str) != Some("fleet__spawn") {
+                continue;
+            }
+            if let Some(props) = t
+                .pointer_mut("/inputSchema/properties")
+                .and_then(Value::as_object_mut)
+            {
+                props.remove("step");
+                props.remove("plan");
+            }
+        }
     }
     list
 }
@@ -2564,7 +2577,7 @@ mod tests {
     }
 
     #[test]
-    fn incognito_tool_list_keeps_cards_title_and_four_control_tools() {
+    fn incognito_tool_list_keeps_cards_title_and_three_control_tools() {
         let list = super::incognito_tools(tools_list_result(true, false));
         let names: Vec<&str> = list["tools"]
             .as_array()
@@ -2572,10 +2585,18 @@ mod tests {
             .iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
-        for kept in ["fleet__ask", "fleet__set_session_title", "fleet__plan", "fleet__job", "fleet__watch", "fleet__spawn"] {
+        for kept in ["fleet__ask", "fleet__set_session_title", "fleet__job", "fleet__watch", "fleet__spawn"] {
             assert!(names.contains(&kept), "{kept} missing from {names:?}");
         }
-        for gone in ["fleet__history", "fleet__inspect", "fleet__notes", "fleet__wiki", "fleet__handoff", "fleet__task"] {
+        let spawn = list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "fleet__spawn")
+            .unwrap();
+        let props = &spawn["inputSchema"]["properties"];
+        assert!(props.get("prompt").is_some() && props.get("step").is_none() && props.get("plan").is_none());
+        for gone in ["fleet__plan", "fleet__history", "fleet__inspect", "fleet__notes", "fleet__wiki", "fleet__handoff", "fleet__task"] {
             assert!(!names.contains(&gone), "{gone} leaked into {names:?}");
         }
     }
