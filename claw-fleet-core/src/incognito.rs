@@ -287,8 +287,9 @@ pub fn redact_content(s: &mut crate::session::SessionInfo) {
 
 /// Delete what Fleet keeps per session outside the config dir — the
 /// decision-card archive (which also copies the user's prompts), the pinned
-/// title, follow-up explanations and the MCP call trace. Once the marker is
-/// gone nothing could tell these apart from a regular session's.
+/// title, follow-up explanations, the MCP call trace and the stream-json
+/// sidecars behind live thinking. Once the marker is gone nothing could tell
+/// these apart from a regular session's.
 fn remove_traces(session_id: &str) {
     if !valid_id(session_id) {
         return;
@@ -305,6 +306,7 @@ fn remove_traces(session_id: &str) {
     if let Some(d) = crate::session_explain::explain_dir() {
         let _ = fs::remove_dir_all(d.join(session_id));
     }
+    crate::live_thinking::remove_for_session(session_id);
 }
 
 /// Newest mtime under `path` (files only, depth-limited), or `None` when
@@ -1012,9 +1014,15 @@ mod tests {
             fs::write(f, "{}").unwrap();
         }
         fs::create_dir_all(&explain).unwrap();
+        let sidecars = crate::live_thinking::ensure_sidecar_dir().unwrap();
+        let mine = sidecars.join("pid-1.jsonl");
+        let other = sidecars.join("pid-2.jsonl");
+        fs::write(&mine, "{\"type\":\"system\",\"session_id\":\"gone\"}\n").unwrap();
+        fs::write(&other, "{\"type\":\"system\",\"session_id\":\"kept\"}\n").unwrap();
         std::thread::sleep(Duration::from_millis(20));
         purge_idle_older_than(Duration::from_millis(1));
         assert!(!dir.exists() && !title.exists() && !history.exists() && !explain.exists());
+        assert!(!mine.exists() && other.exists());
         let _ = fs::remove_dir_all(h.home());
     }
 

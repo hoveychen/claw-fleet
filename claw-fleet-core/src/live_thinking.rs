@@ -257,6 +257,32 @@ pub fn prune_old(max_age_secs: u64) {
     }
 }
 
+/// Delete every sidecar whose stream belongs to `session_id`, whatever its
+/// age. A session's first stamped event names it, so each file costs one or
+/// two lines to rule out.
+pub fn remove_for_session(session_id: &str) {
+    let Some(dir) = sidecar_dir() else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if stream_session(&path).as_deref() == Some(session_id) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// The session id the first stamped event of a sidecar carries.
+fn stream_session(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    BufReader::new(file).lines().map_while(Result::ok).find_map(|line| {
+        let v: serde_json::Value = serde_json::from_str(&line).ok()?;
+        v.get("session_id")?.as_str().map(str::to_string)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
