@@ -10,7 +10,7 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::time::UNIX_EPOCH;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -155,7 +155,7 @@ impl SearchIndex {
         // An incognito transcript is never indexed; rows an older build wrote
         // for one are dropped on the next pass.
         if crate::incognito::is_incognito_path(std::path::Path::new(jsonl_path)) {
-            return self.remove_session(jsonl_path);
+            return self.purge_incognito(jsonl_path);
         }
 
         let meta = fs::metadata(jsonl_path).map_err(|e| format!("stat {jsonl_path}: {e}"))?;
@@ -298,6 +298,44 @@ impl SearchIndex {
             )
             .map_err(|e| format!("meta delete: {e}"))?;
         Ok(())
+    }
+
+    /// Drop what an older build indexed for an incognito transcript, with
+    /// `secure_delete` on so the deleted text is zeroed rather than left in
+    /// free pages. An FTS5 delete only appends a tombstone, so the terms stay
+    /// in the old index segments until a merge rewrites them; `optimize` does
+    /// that now. Keyed on `index_meta` first: nothing indexed (the normal case,
+    /// since this build never indexes one) costs one primary-key lookup.
+    fn purge_incognito(&self, jsonl_path: &str) -> Result<(), String> {
+        let indexed = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM index_meta WHERE jsonl_path = ?1",
+                params![jsonl_path],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| format!("meta lookup: {e}"))?
+            .is_some();
+        if !indexed {
+            return Ok(());
+        }
+        let previous: i64 = self
+            .conn
+            .query_row("PRAGMA secure_delete", [], |row| row.get(0))
+            .map_err(|e| format!("secure_delete read: {e}"))?;
+        self.conn
+            .execute_batch("PRAGMA secure_delete = ON;")
+            .map_err(|e| format!("secure_delete on: {e}"))?;
+        let removed = self.remove_session(jsonl_path).and_then(|()| {
+            self.conn
+                .execute_batch("INSERT INTO session_fts(session_fts) VALUES('optimize');")
+                .map_err(|e| format!("fts optimize: {e}"))
+        });
+        let _ = self
+            .conn
+            .execute_batch(&format!("PRAGMA secure_delete = {previous};"));
+        removed
     }
 
     /// Remove index entries for sessions that no longer exist on disk.
@@ -648,6 +686,47 @@ mod tests {
 
         let _ = fs::remove_file(&jsonl);
         let _ = fs::remove_file(&db);
+    }
+
+    #[test]
+    fn rows_an_older_build_indexed_for_an_incognito_transcript_are_zeroed_on_delete() {
+        let h = crate::paths::fleet_home_guard_with(|| {
+            let d = std::env::temp_dir().join(format!("fleet-search-incog-purge-{}", std::process::id()));
+            let _ = fs::create_dir_all(&d);
+            d
+        });
+        let dir = crate::incognito::register_new("inc-old").unwrap().join("projects/-w");
+        fs::create_dir_all(&dir).unwrap();
+        let jsonl = dir.join("inc-old.jsonl");
+        fs::write(&jsonl, "{}\n").unwrap();
+        let path = jsonl.to_str().unwrap();
+        let db = h.home().join("idx.db");
+        let idx = SearchIndex::open_at(&db).unwrap();
+        // What an older build left behind.
+        let text = "zqvelvetcanary ".repeat(400);
+        idx.conn
+            .execute(
+                "INSERT INTO session_fts (session_id, jsonl_path, content, raw, line_no) VALUES ('inc-old', ?1, ?2, ?2, 1)",
+                params![path, text],
+            )
+            .unwrap();
+        idx.conn
+            .execute(
+                "INSERT INTO index_meta (jsonl_path, session_id, mtime_ms, byte_offset, line_count) VALUES (?1, 'inc-old', 0, 0, 1)",
+                params![path],
+            )
+            .unwrap();
+        idx.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+
+        idx.index_session(path, "inc-old").unwrap();
+        idx.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        let bytes = fs::read(&db).unwrap();
+        let needle = b"zqvelvetcanary";
+        assert!(!bytes.windows(needle.len()).any(|w| w == needle), "deleted text left in the db file");
+        assert!(idx.search("zqvelvetcanary", 10).unwrap().is_empty());
+        let mode: i64 = idx.conn.query_row("PRAGMA secure_delete", [], |r| r.get(0)).unwrap();
+        assert_eq!(mode, 0, "secure_delete must be restored after the purge");
+        let _ = fs::remove_dir_all(h.home());
     }
 
     #[test]

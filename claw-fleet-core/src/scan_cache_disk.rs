@@ -83,6 +83,11 @@ pub fn load() -> HashMap<String, (u64, SessionInfo)> {
 
 /// Atomically persist the cache. Writes to `<path>.tmp` then renames so a
 /// crashed process can't leave a half-written file behind.
+///
+/// Incognito sessions (and their subagents) stay in memory only: an entry
+/// carries the transcript's ai-title and last-message preview, and the disk
+/// copy would outlive the session. Their few transcripts are simply re-parsed
+/// on a cold start.
 pub fn save(cache: &HashMap<String, (u64, SessionInfo)>) -> io::Result<()> {
     let p = cache_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no fleet dir"))?;
     if let Some(parent) = p.parent() {
@@ -90,6 +95,9 @@ pub fn save(cache: &HashMap<String, (u64, SessionInfo)>) -> io::Result<()> {
     }
     let entries: HashMap<String, DiskEntry> = cache
         .iter()
+        .filter(|(k, (_, info))| {
+            !info.incognito && !crate::incognito::is_incognito_path(std::path::Path::new(k.as_str()))
+        })
         .map(|(k, (mtime, info))| {
             (
                 k.clone(),
@@ -288,6 +296,27 @@ mod tests {
             now,
             Duration::from_secs(30)
         ));
+    }
+
+    #[test]
+    fn incognito_entries_are_never_written_to_disk() {
+        let (_lock, _env, _tmp) = with_temp_home();
+        let inc_dir = crate::incognito::configs_root().unwrap().join("inc/projects/-w");
+        let mut flagged = sample_info("flagged");
+        flagged.incognito = true;
+        flagged.ai_title = Some("zqcanary".into());
+        let mut by_path = sample_info("inc");
+        by_path.last_message_preview = Some("zqcanary".into());
+        let mut cache: HashMap<String, (u64, SessionInfo)> = HashMap::new();
+        cache.insert("/a/plain.jsonl".into(), (1, sample_info("plain")));
+        cache.insert("/a/flagged.jsonl".into(), (2, flagged));
+        cache.insert(inc_dir.join("inc.jsonl").to_string_lossy().into_owned(), (3, by_path));
+        save(&cache).expect("save ok");
+        let text = fs::read_to_string(cache_path().unwrap()).unwrap();
+        assert!(!text.contains("zqcanary"), "{text}");
+        let loaded = load();
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.contains_key("/a/plain.jsonl"));
     }
 
     #[test]

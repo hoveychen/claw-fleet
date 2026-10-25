@@ -193,6 +193,11 @@ pub fn gate_reason(
     if !crate::resume_triggers::ResumeTriggersConfig::load().plan_gate {
         return None;
     }
+    // An incognito session has no plan tool, so it could never tick the box
+    // the gate would point it at.
+    if crate::incognito::current_is_incognito(Some(session_id)) {
+        return None;
+    }
     let focus = crate::task_progress::read(session_id);
     let turn_start = crate::idle::read_turn_start(session_id);
     gate_reason_scoped(

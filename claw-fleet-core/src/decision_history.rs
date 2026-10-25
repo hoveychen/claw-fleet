@@ -853,7 +853,14 @@ pub(crate) fn history_file(session_id: &str) -> Option<PathBuf> {
 /// the `fleet` CLI in another process — slip its bytes in between, producing a
 /// line like `{…}{…}\n` that `read_persisted_records` then discards as
 /// malformed. One `O_APPEND` write keeps each record intact.
+///
+/// An incognito session's cards are not recorded: the record copies the
+/// questions and answers, and the session's own transcript already carries
+/// them for the live view (`toolUseResult`).
 pub fn append_record(record: &DecisionHistoryRecord) -> Result<(), String> {
+    if crate::incognito::is_incognito(record.session_id()) {
+        return Ok(());
+    }
     let dir = history_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create decision-history dir: {e}"))?;
     let path = history_file(record.session_id())
@@ -975,6 +982,10 @@ const INJECTED_TEXT_PREFIXES: &[&str] = &["<ide_opened_file>", "<ide_selection>"
 /// to `~/.fleet/decision-history/<session_id>.jsonl` as `UserPrompt` records.
 /// Existing record uuids are loaded once and used for de-dup.
 pub fn sync_user_prompts_from_jsonl(session_id: &str, jsonl_path: &Path) -> Result<(), String> {
+    // An incognito session's prompts stay in its own transcript only.
+    if crate::incognito::is_incognito(session_id) {
+        return Ok(());
+    }
     // Serialise the read-then-append below. `list_session_decisions` used to be
     // a synchronous Tauri command, so the main thread was the de-facto lock;
     // now it runs on a threadpool and two cards mounting for the same session
@@ -1328,6 +1339,32 @@ mod tests {
         );
         assert!(rec.answers.is_empty());
         assert_eq!(rec.outcome, ElicitationOutcome::Declined);
+    }
+
+    #[test]
+    fn an_incognito_session_leaves_no_history_file() {
+        let tmp = temp_dir("incognito");
+        let _home = crate::paths::fleet_home_guard(&tmp);
+        crate::incognito::register_new("inc-dh").unwrap();
+        let req = sample_request("inc-dh", "req-1");
+        let mut answers = HashMap::new();
+        answers.insert("Pick one?".into(), "zqcanary".into());
+        let rec = build_elicitation_record(
+            &req,
+            ElicitationOutcome::Answered,
+            &answers,
+            "2026-04-28T00:00:01Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::Elicitation(rec)).unwrap();
+        let jsonl = tmp.join("inc.jsonl");
+        fs::write(
+            &jsonl,
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-04-28T00:00:00Z","message":{"role":"user","content":"zqcanary"}}"#,
+        )
+        .unwrap();
+        sync_user_prompts_from_jsonl("inc-dh", &jsonl).unwrap();
+        assert!(!history_file("inc-dh").unwrap().exists());
+        assert!(list_session_records("inc-dh").is_empty());
     }
 
     #[test]
