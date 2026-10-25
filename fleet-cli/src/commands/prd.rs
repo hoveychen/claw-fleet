@@ -59,9 +59,11 @@ pub(crate) fn cmd_prd_context() {
     // with no active plan and no structural problem).
     // With the plan injection switched off this hook is only installed for a
     // sub-task's role line (`hooks::launch_hooks`'s `role_only`).
+    // An incognito session carries this hook for the role line only: the
+    // workspace's plans are other sessions' context.
     let plans_off = claw_fleet_core::control_plane_prefs::is_disabled(
         claw_fleet_core::control_plane_prefs::Feature::PrdContextHook,
-    );
+    ) || claw_fleet_core::incognito::current_is_incognito(session_id.as_deref());
     let reminder = if plans_off {
         claw_fleet_core::task_roles_guidance::render_role_only_reminder(session_id.as_deref())
     } else {

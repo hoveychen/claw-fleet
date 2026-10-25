@@ -55,10 +55,9 @@ pub fn provisional_claude_row(
     entrypoint: &str,
     prompt: &str,
 ) -> SessionInfo {
-    let jsonl_path = crate::session::get_claude_dir()
+    let jsonl_path = crate::incognito::claude_projects_dir_for(session_id)
         .map(|d| {
-            d.join("projects")
-                .join(crate::session::encode_workspace_path(workspace_path))
+            d.join(crate::session::encode_workspace_path(workspace_path))
                 .join(format!("{session_id}.jsonl"))
                 .to_string_lossy()
                 .into_owned()

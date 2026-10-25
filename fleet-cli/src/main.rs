@@ -346,6 +346,10 @@ enum Commands {
     /// [internal] Wakeup guard — denies ScheduleWakeup/CronCreate in Fleet sessions
     #[command(hide = true)]
     WakeupGuard,
+    /// [internal] Incognito guard — keeps an incognito session's shell and file
+    /// tools out of the user's history, memory and credential stores
+    #[command(name = "incognito-guard", hide = true)]
+    IncognitoGuard,
     /// [internal] Event-log hook — appends the hook JSON from stdin to
     /// ~/.fleet/hooks.jsonl (exec-form replacement for the unix `cat >>`
     /// one-liner, used on Windows where hooks may run under PowerShell)
@@ -434,6 +438,12 @@ enum Commands {
         /// here when your harness has no per-session environment.
         #[arg(long)]
         session: Option<String>,
+        /// Start the session incognito: a private Claude config dir, none of
+        /// the user's memory, history or other sessions, and a fenced tool set.
+        /// Claude Code only. A session spawned from an incognito session is
+        /// always incognito.
+        #[arg(long)]
+        incognito: bool,
     },
     /// Register a session handoff: when this session next ends its turn, Fleet
     /// spawns a fresh successor session in the same workspace to continue the
@@ -1673,6 +1683,23 @@ fn trace_agent_facing_invocation() {
     );
 }
 
+/// Inside an incognito session (its environment carries
+/// `claw_fleet_core::incognito::ENV`), refuse every subcommand that reads other
+/// sessions, history, memory or the account — the CLI faces of the MCP tools
+/// the session does not get.
+fn refuse_in_incognito() {
+    if std::env::var_os(claw_fleet_core::incognito::ENV).is_none_or(|v| v.is_empty()) {
+        return;
+    }
+    let Some(sub) = std::env::args().nth(1) else {
+        return;
+    };
+    if !claw_fleet_core::incognito::cli_allows(&sub) {
+        eprintln!("{}", claw_fleet_core::incognito::cli_refusal(&sub));
+        std::process::exit(1);
+    }
+}
+
 fn main() {
     claw_fleet_core::console::init_utf8();
 
@@ -1687,6 +1714,7 @@ fn main() {
     }
 
     trace_agent_facing_invocation();
+    refuse_in_incognito();
 
     let cli = Cli::parse();
 
@@ -1780,6 +1808,14 @@ fn main() {
             ctx_model,
         ),
         Commands::WakeupGuard => commands::guard::cmd_wakeup_guard(),
+        Commands::IncognitoGuard => {
+            use std::io::Read;
+            let mut input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut input);
+            if let Some(out) = claw_fleet_core::incognito::guard_hook_output(&input) {
+                println!("{out}");
+            }
+        }
         // Best-effort like the unix `cat >>` hook it replaces: a failed append
         // must not surface as a hook error to Claude Code.
         Commands::HookEvent => {
@@ -1831,7 +1867,7 @@ fn main() {
         Commands::Plan { action, workspace, session } => {
             commands::plan::cmd_plan(action, workspace.as_deref(), session.as_deref())
         }
-        Commands::Spawn { prompt, workspace, title, model, effort, step, plan, session } => {
+        Commands::Spawn { prompt, workspace, title, model, effort, step, plan, session, incognito } => {
             commands::spawn::cmd_spawn(
                 &prompt,
                 workspace.as_deref(),
@@ -1841,6 +1877,7 @@ fn main() {
                 step.as_deref(),
                 plan.as_deref(),
                 session.as_deref(),
+                incognito,
             )
         }
         Commands::Handoff {

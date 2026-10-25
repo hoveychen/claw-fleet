@@ -24,9 +24,11 @@ pub(crate) fn cmd_recent_sessions() {
     use std::io::Read;
     // A launch with the block switched off carries no hook, but a copy left in
     // the global settings.json by an older build still fires this command.
+    // Nor does an incognito launch; the env check covers a stray global copy.
     if !claw_fleet_core::control_plane_prefs::is_enabled(
         claw_fleet_core::control_plane_prefs::Feature::RecentSessions,
-    ) {
+    ) || claw_fleet_core::incognito::current_is_incognito(None)
+    {
         return;
     }
     let mut input = String::new();

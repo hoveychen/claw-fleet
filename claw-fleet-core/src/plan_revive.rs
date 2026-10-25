@@ -1119,7 +1119,7 @@ fn workspace_label(ws: &str) -> String {
 }
 
 fn transcript_of(sid: &str) -> Option<String> {
-    let projects = crate::session::get_claude_dir()?.join("projects");
+    let projects = crate::incognito::claude_projects_dir_for(sid)?;
     for dir in std::fs::read_dir(projects).ok()?.flatten() {
         let p = dir.path().join(format!("{sid}.jsonl"));
         if p.exists() {

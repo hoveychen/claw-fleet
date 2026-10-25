@@ -396,7 +396,7 @@ pub(crate) fn extract_model(last_lines: &[Value]) -> Option<String> {
 /// derived from the workspace path, which the caller usually doesn't have, so
 /// scan the project dirs rather than reconstructing the encoding.
 pub fn find_session_jsonl(session_id: &str) -> Option<PathBuf> {
-    let projects = get_claude_dir()?.join("projects");
+    let projects = crate::incognito::claude_projects_dir_for(session_id)?;
     let name = format!("{session_id}.jsonl");
     fs::read_dir(projects)
         .ok()?

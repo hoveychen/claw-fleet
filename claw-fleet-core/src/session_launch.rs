@@ -455,6 +455,14 @@ pub fn spawn_claude_detached_with_envs(
     // handoff, loop, chat relaunch.
     let rca_wrap = crate::remote_workspace::wrap_launch(workspace_path, claude_path, args)
         .map_err(|e| format!("remote workspace {workspace_path}: {e}"))?;
+    // Incognito: resolved from the argv before the rca rewrite, at this
+    // chokepoint so every resume path re-reads the current OAuth token.
+    let incognito_env = crate::incognito::launch_env(args)?;
+    if incognito_env.is_some() && rca_wrap.is_some() {
+        return Err(format!(
+            "incognito sessions cannot run in a remote (rca) workspace: {workspace_path}"
+        ));
+    }
     let (claude_path, args): (&str, &[String]) = match &rca_wrap {
         Some(w) => (&w.program, &w.args),
         None => (claude_path, args),
@@ -599,6 +607,18 @@ pub fn spawn_claude_detached_with_envs(
     }
     for (k, v) in extra_envs {
         cmd.env(k, v);
+    }
+    // Last, so nothing can point an incognito session back at the real config
+    // dir; a regular session never inherits the incognito flag.
+    match incognito_env {
+        Some(env) => {
+            for (k, v) in env {
+                cmd.env(k, v);
+            }
+        }
+        None => {
+            cmd.env_remove(crate::incognito::ENV);
+        }
     }
     let mut child = cmd
         .spawn()

@@ -697,15 +697,15 @@ fn backfill_pids(pids: &std::collections::HashMap<String, u32>) {
     }
 }
 
-/// Every `~/.claude/projects/*/<id>.jsonl`, keyed by id.
+/// Every `~/.claude/projects/*/<id>.jsonl` — and every incognito config dir's
+/// `projects/*/<id>.jsonl` — keyed by id.
 fn claude_transcripts() -> std::collections::HashMap<String, PathBuf> {
     let mut out = std::collections::HashMap::new();
-    let Some(projects) = crate::session::get_claude_dir().map(|d| d.join("projects")) else {
-        return out;
-    };
-    let Ok(dirs) = fs::read_dir(projects) else {
-        return out;
-    };
+    let roots = crate::session::get_claude_dir()
+        .into_iter()
+        .chain(crate::incognito::all_config_dirs())
+        .map(|d| d.join("projects"));
+    let dirs = roots.filter_map(|p| fs::read_dir(p).ok()).flatten();
     for dir in dirs.flatten() {
         let Ok(files) = fs::read_dir(dir.path()) else {
             continue;

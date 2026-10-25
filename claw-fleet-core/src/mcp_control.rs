@@ -870,6 +870,15 @@ fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
     }
     let ws_name = crate::wiki::workspace_name_of(&workspace);
     Ok(match resp.session_id.as_deref() {
+        // An incognito caller has no fleet__control, and its child is
+        // incognito too; say so instead of pointing at a missing tool.
+        Some(new_sid) if crate::incognito::is_incognito(new_sid) => format!(
+            "ok: incognito session {new_sid} started in {ws_name} ({workspace}), model={}{}, pid {}。\
+             它同样是隐身会话。要等它跑完，用 fleet__watch（sessions=[{new_sid}]）。",
+            route.model.as_deref().unwrap_or("<CLI 默认>"),
+            route.switch_note(),
+            resp.pid,
+        ),
         Some(new_sid) => format!(
             "ok: session {new_sid} started in {ws_name} ({workspace}), model={}{}, pid {}。\
              要转达或打断它用 fleet__control（send / interrupt，id={new_sid}）。",
