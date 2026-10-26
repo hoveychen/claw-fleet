@@ -5639,7 +5639,11 @@ pub fn interrupt_stalled_codex_turn(stall: &StalledCodexTurn) -> Result<(), Stri
         .map(|q| {
             q.messages
                 .iter()
-                .any(|m| m.starts_with(CODEX_STALL_NOTE_PREFIX))
+                .any(|m| {
+                    crate::live_inject::strip_agent_frame(m)
+                        .unwrap_or(m)
+                        .starts_with(CODEX_STALL_NOTE_PREFIX)
+                })
         })
         .unwrap_or(false);
     if already_noted {

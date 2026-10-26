@@ -225,7 +225,9 @@ pub enum Sender {
     /// A person typing in a Fleet surface — desktop composer, browser, phone.
     User,
     /// Another agent steering this session (`fleet send`, `fleet__control`).
-    /// The peer framing the CLI applies is already correct; say nothing.
+    /// The peer framing the CLI applies is already correct; say nothing. A
+    /// message that has to wait in the queue is stored in Fleet's own agent
+    /// frame instead, since the resume prompt it becomes carries no framing.
     Agent,
 }
 
@@ -292,7 +294,20 @@ pub fn enqueue(
         crate::ask_preempt::touch_inbox(session_id, sender);
         return Ok(Delivery::Injected);
     }
-    append_to_queue(session_id, workspace_path, text).map(|()| Delivery::Queued)
+    // The queue is drained as a plain resume prompt, which would hand an agent's
+    // words to the receiver — and to every transcript view — as the user's own.
+    // Store it in Fleet's agent frame, as the stdin path delivers it: the agent
+    // is told who is speaking, and `fleet_event::unframe_agent_row` turns the
+    // row into an event instead of a user bubble.
+    let framed;
+    let queued_text = match sender {
+        Sender::User => text,
+        Sender::Agent => {
+            framed = crate::live_inject::frame_as_agent(text);
+            framed.as_str()
+        }
+    };
+    append_to_queue(session_id, workspace_path, queued_text).map(|()| Delivery::Queued)
 }
 
 /// [`enqueue`] without the Fleet-owned gate, for text that has already passed
@@ -366,7 +381,13 @@ pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
     let map = all_pending();
     for s in sessions.iter_mut() {
         match map.get(&s.id) {
-            Some(msgs) => s.pending_messages = msgs.clone(),
+            // A chip shows the message, not the frame an agent's one is kept in.
+            Some(msgs) => {
+                s.pending_messages = msgs
+                    .iter()
+                    .map(|m| crate::live_inject::strip_agent_frame(m).unwrap_or(m).to_string())
+                    .collect()
+            }
             None if !s.pending_messages.is_empty() => s.pending_messages.clear(),
             None => {}
         }
@@ -988,6 +1009,13 @@ mod tests {
                 },
             )
             .unwrap();
+
+            // A queued agent message is stored framed; its chip shows the body.
+            append_to_queue("sess-c", "/ws", &crate::live_inject::frame_as_agent("from-agent")).unwrap();
+            let mut c = vec![base_session("sess-c", SessionStatus::Executing, true)];
+            enrich_sessions(&mut c);
+            assert_eq!(c[0].pending_messages, vec!["from-agent".to_string()]);
+            clear("sess-c").unwrap();
 
             enrich_sessions(&mut list);
             assert!(

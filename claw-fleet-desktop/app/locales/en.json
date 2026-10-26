@@ -7,12 +7,15 @@
       "loop": "Fleet repeating routine",
       "schedule": "Fleet routine",
       "decision": "Decision card reply",
+      "notice": "Fleet notice",
       "status": {
         "fired": "Triggered",
         "timeout": "Timed out",
         "successor": "Continued",
         "manual": "Manual run",
-        "answered": "Answered"
+        "answered": "Answered",
+        "delivered": "Delivered",
+        "revived": "Revived"
       }
     },
     "kind": {

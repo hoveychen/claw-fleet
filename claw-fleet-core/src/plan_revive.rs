@@ -1159,12 +1159,15 @@ fn died_on_account_error(transcript: &Path) -> Option<String> {
     found
 }
 
+/// First line of [`revive_prompt`]; `fleet_event::classify` keys on it.
+pub const REVIVE_PROMPT_HEADER: &str = "（Fleet 自动唤醒 —— 这是 Fleet 发起的接手，不是老板刚打的字）\n\n";
+
 /// The revived session's opening prompt. Product text (Chinese).
 pub fn revive_prompt(view: &PlanView, boss_note: Option<&str>, previous: Option<&str>) -> String {
     let pending = view.total.saturating_sub(view.done);
     let next = view.next_task.as_deref().unwrap_or("第一个未完成的 P");
     let mut s = format!(
-        "（Fleet 自动唤醒 —— 这是 Fleet 发起的接手，不是老板刚打的字）\n\n\
+        "{REVIVE_PROMPT_HEADER}\
          计划 {label} 还有 {pending} 个 P-task 没完成（{done}/{total}），下一个是：{next}。\
          但已经超过 30 分钟没有任何会话在负责它：没有活着的进程、没有挂着的 watch/schedule、\
          没有等答复的决策卡、也没有登记中的接力。你是 Fleet 为它起的新会话，已经归属到这个计划。\n\n\
@@ -2755,5 +2758,7 @@ mod tests {
         assert!(p.contains("snooze"));
         assert!(p.contains("/t/s.jsonl"));
         assert!(p.contains("先做 P3"));
+        // The transcript views fold it as a Fleet event, not the boss's bubble.
+        assert_eq!(crate::fleet_event::classify(&p).unwrap()["status"], "revived");
     }
 }

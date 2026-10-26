@@ -377,10 +377,11 @@ export interface RawMessage {
   /** Harness-injected user record (skill body, hook output). Skill bodies also
    *  carry `sourceToolUseID`; see `skillInjection.ts`. */
   isMeta?: boolean;
-  /** Fleet-owned automation prompt persisted by the harness as role=user. */
+  /** Fleet-owned automation prompt persisted by the harness as role=user;
+   *  `notice` is any other message Fleet or an agent delivered into the turn. */
   fleetEvent?: {
-    kind: "watch" | "handoff" | "loop" | "schedule" | "decision";
-    status: "fired" | "timeout" | "successor" | "manual" | "answered";
+    kind: "watch" | "handoff" | "loop" | "schedule" | "decision" | "notice";
+    status: "fired" | "timeout" | "successor" | "manual" | "answered" | "delivered" | "revived";
     id?: string | null;
   };
   sourceToolUseID?: string;

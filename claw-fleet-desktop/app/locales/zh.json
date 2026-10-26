@@ -7,12 +7,15 @@
       "loop": "Fleet 重复定时",
       "schedule": "Fleet 定时",
       "decision": "Fleet 决策卡答复",
+      "notice": "Fleet 通知",
       "status": {
         "fired": "已触发",
         "timeout": "已超时",
         "successor": "已续接",
         "manual": "手动运行",
-        "answered": "老板已回复"
+        "answered": "老板已回复",
+        "delivered": "已送达",
+        "revived": "已唤醒"
       }
     },
     "kind": {
