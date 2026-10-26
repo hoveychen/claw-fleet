@@ -351,6 +351,8 @@ mod tests {
 
     #[test]
     fn a_regular_job_is_not_forgotten() {
+        // Both sides read FLEET_HOME, which sibling tests redirect.
+        let _lock = crate::session::fleet_home_lock();
         let dir = proc_runner::require_dir_for(None).unwrap();
         assert_eq!(Some(dir), proc_runner::procs_dir());
         assert!(!forget_if_private(&exited("pnever-written")));

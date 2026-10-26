@@ -162,8 +162,28 @@ fn meta_path(dir: &Path, id: &str) -> PathBuf {
 fn out_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.out"))
 }
+/// `sockaddr_un` caps a socket path at 104 bytes on macOS (108 on Linux).
+const MAX_SOCK_PATH: usize = 100;
+
+/// The control socket of proc `id`: next to its record, unless that path is
+/// too long to bind — an incognito session's private store
+/// (`~/.fleet/incognito/cfg/<uuid>/fleet-procs`) is — in which case it goes in
+/// a short per-user dir under `/tmp`. The socket carries only the id. `/tmp`,
+/// not `$TMPDIR`: the host is detached and may not share the spawner's TMPDIR.
 fn sock_path(dir: &Path, id: &str) -> PathBuf {
-    dir.join(format!("{id}.sock"))
+    let beside = dir.join(format!("{id}.sock"));
+    if beside.as_os_str().len() <= MAX_SOCK_PATH {
+        return beside;
+    }
+    short_sock_dir().join(format!("{id}.sock"))
+}
+
+fn short_sock_dir() -> PathBuf {
+    #[cfg(unix)]
+    let uid = unsafe { libc::getuid() };
+    #[cfg(not(unix))]
+    let uid = 0;
+    PathBuf::from(format!("/tmp/fleet-proc-{uid}"))
 }
 /// Windows control transport: `send_control` appends JSON lines here and the
 /// host tails it (there is no unix socket to connect to). Defined on every
@@ -956,6 +976,9 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
     //    BEFORE the command spawns — a bind failure must not leave an
     //    unmanaged command behind.
     let sock = sock_path(dir, id);
+    if let Some(parent) = sock.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     let _ = fs::remove_file(&sock);
     let listener = std::os::unix::net::UnixListener::bind(&sock)
         .map_err(|e| format!("bind {}: {e}", sock.display()))?;
@@ -1287,6 +1310,25 @@ mod tests {
             "interactive shell produced no output: {text:?}"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn host_runs_in_a_store_too_deep_for_a_socket_beside_it() {
+        // As deep as an incognito session's private store.
+        let base = temp_dir("deep");
+        let dir = base.join("incognito/cfg/0d19e226-377c-4ff3-9941-3fcea2dba4d9/fleet-procs");
+        fs::create_dir_all(&dir).unwrap();
+        let rec = seed_record(&dir, "echo deep-store-ok; exit 4", &std::env::temp_dir());
+        assert!(dir.join(format!("{}.sock", rec.id)).as_os_str().len() > MAX_SOCK_PATH);
+        let sock = sock_path(&dir, &rec.id);
+        assert!(sock.as_os_str().len() <= MAX_SOCK_PATH, "{}", sock.display());
+
+        assert_eq!(run_host(&dir, &rec.id).unwrap(), 0);
+        let after = read_record(&dir, &rec.id).unwrap();
+        assert_eq!(after.exit_code, Some(4));
+        assert!(!sock.exists());
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
