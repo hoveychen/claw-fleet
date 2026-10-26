@@ -685,8 +685,13 @@ pub fn resume_session_with_pending(
     let source = find_source_by_api_name(&sources, tool)
         .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
     refuse_if_retired(&spec.session_id, driver)?;
-    let lease = crate::session_driver::acquire(&spec.session_id, driver, own_pending)
-        .map_err(|r| format!("drive lease: {r}"))?;
+    let lease = match crate::session_driver::acquire(&spec.session_id, driver, own_pending) {
+        Ok(lease) => lease,
+        Err(refusal) if manual_may_end_idle_turn(driver, &refusal) => {
+            end_idle_turn_then_acquire(&spec.session_id, driver, own_pending, refusal)?
+        }
+        Err(refusal) => return Err(format!("drive lease: {refusal}")),
+    };
     source.resume(
         spec,
         Box::new(move |success| {
@@ -694,6 +699,41 @@ pub fn resume_session_with_pending(
             on_exit(success);
         }),
     )
+}
+
+/// How long a manual resume waits for an idle turn it ended to exit. The CLI
+/// takes about three seconds on SIGTERM; `kill_pid_tree` escalates at two.
+const END_IDLE_EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A turn whose process outlives its `result` (waiting on a background
+/// command that never exits) holds the lease of whoever started it, so the
+/// boss's own retry is refused while nothing visibly happens. Only a manual
+/// resume may end such a turn; automatic drivers keep waiting.
+fn manual_may_end_idle_turn(
+    driver: crate::session_driver::Driver,
+    refusal: &crate::session_driver::Refusal,
+) -> bool {
+    use crate::session_driver::Refusal;
+    driver.class == crate::session_driver::DriverClass::Manual
+        && matches!(refusal, Refusal::Running { .. } | Refusal::ProcessAlive)
+}
+
+fn end_idle_turn_then_acquire(
+    session_id: &str,
+    driver: crate::session_driver::Driver,
+    own_pending: Option<&str>,
+    refusal: crate::session_driver::Refusal,
+) -> Result<crate::session_driver::Lease, String> {
+    if let Err(e) = crate::claude_host::end_idle_turn(session_id) {
+        crate::log_debug(&format!("resume_session: {session_id} not ended ({e}); {refusal}"));
+        return Err(format!("drive lease: {refusal}"));
+    }
+    crate::log_debug(&format!("resume_session: ended idle turn of {session_id} for {}", driver.mechanism));
+    let deadline = std::time::Instant::now() + END_IDLE_EXIT_WAIT;
+    while crate::parked::session_alive(session_id) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    crate::session_driver::acquire(session_id, driver, own_pending).map_err(|r| format!("drive lease: {r}"))
 }
 
 /// Prefix of the error [`resume_session`] returns for a retired session.
