@@ -497,10 +497,14 @@ fn with_reply_address(text: &str, sender: Option<(&str, Option<&SessionInfo>)>) 
         None => id.to_string(),
     };
     format!(
-        "{text}\n\n---\n（这条消息来自 Fleet 会话 {from}。要回复它，用 \
+        "{text}{REPLY_ADDRESS_LEAD}{from}。要回复它，用 \
          `fleet__control action=send id={id} text=<回复>`（CLI：`fleet send {id} <回复>`）。）"
     )
 }
+
+/// Opening of the footer [`with_reply_address`] appends. A turn carrying it is
+/// mail, which the clients draw as a mail card (`shared-ts/agentMail.ts`).
+pub const REPLY_ADDRESS_LEAD: &str = "\n\n---\n（这条消息来自 Fleet 会话 ";
 
 pub fn handle_control(args: &Value, action: &str) -> Result<String, String> {
     let id = crate::mcp_control::req(args, "id")?;
@@ -508,7 +512,15 @@ pub fn handle_control(args: &Value, action: &str) -> Result<String, String> {
         return send_message(&id, &crate::mcp_control::req(args, "text")?);
     }
     if action == "resume" {
-        return crate::subtask_recovery::resume_child(&id, args["text"].as_str());
+        // An agent waking its sub-task: the resume prompt is not the boss
+        // speaking, so it travels in Fleet's agent frame like a queued `send`.
+        let text = args["text"]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or(crate::subtask_recovery::DEFAULT_RESUME_PROMPT);
+        let framed = crate::live_inject::frame_as_agent(text);
+        return crate::subtask_recovery::resume_child(&id, Some(&framed));
     }
     let sessions = load_sessions();
     let target = resolve(&sessions, &id)?;

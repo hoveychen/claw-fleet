@@ -25,4 +25,17 @@ describe("FleetEventCard", () => {
     expect(html).toContain("Answered");
     expect(html).not.toContain("【回答】发版");
   });
+
+  it("folds a Fleet notice (e.g. a resolved decision card) instead of a boss bubble", () => {
+    const html = renderToStaticMarkup(
+      <FleetEventCard
+        event={{ kind: "notice", status: "delivered" }}
+        text="[fleet] 决策卡 `r1` 老板已经处理了。"
+      />,
+    );
+    expect(html).toContain('data-kind="notice"');
+    expect(html).toContain("Fleet notice");
+    expect(html).toContain("Delivered");
+    expect(html).not.toContain("老板已经处理了");
+  });
 });

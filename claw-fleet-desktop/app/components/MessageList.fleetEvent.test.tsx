@@ -30,6 +30,24 @@ describe("MessageList Fleet automation events", () => {
     expect(container.textContent).toContain("w1");
   });
 
+  it("renders a mid-turn Fleet notice as a folded card, not a user bubble", () => {
+    const msg: RawMessage = {
+      type: "user",
+      fleetMidTurn: true,
+      fleetEvent: { kind: "notice", status: "delivered" },
+      message: { role: "user", content: [{ type: "text", text: "[fleet] 决策卡 `r1` 老板已经处理了。" }] },
+    };
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<MessageList messages={[msg]} isLoading={false} />));
+
+    const card = container.querySelector('[data-testid="fleet-event-card"]');
+    expect(card?.getAttribute("data-kind")).toBe("notice");
+    expect(container.querySelector('[class*="user_text"]')).toBeNull();
+    expect(container.textContent).not.toContain("老板已经处理了");
+  });
+
   // The three records a timed-out Decision Card leaves behind, in transcript
   // order. Together they used to occupy a bubble, a filler row and a wall of
   // text; the assertions below pin what each collapses to.

@@ -422,10 +422,11 @@ export interface RawMessage {
   isApiErrorMessage?: boolean;
   error?: string;
   quotaLimits?: Record<string, unknown>;
-  /** Fleet-owned automation prompt persisted by the harness as role=user. */
+  /** Fleet-owned automation prompt persisted by the harness as role=user;
+   *  `notice` is any other message Fleet or an agent delivered into the turn. */
   fleetEvent?: {
-    kind: "watch" | "handoff" | "loop" | "schedule" | "decision";
-    status: "fired" | "timeout" | "successor" | "manual" | "answered";
+    kind: "watch" | "handoff" | "loop" | "schedule" | "decision" | "notice";
+    status: "fired" | "timeout" | "successor" | "manual" | "answered" | "delivered" | "revived";
     id?: string | null;
   };
   sourceToolUseID?: string;

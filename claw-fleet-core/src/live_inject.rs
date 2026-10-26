@@ -372,6 +372,38 @@ pub fn strip_agent_frame(text: &str) -> Option<&str> {
     text.strip_prefix(AGENT_FRAME_HEAD)?.strip_suffix(AGENT_FRAME_TAIL)
 }
 
+/// Text with every [`frame_as_agent`] frame in it replaced by its message, and
+/// whether nothing but frames was there. `None` when `text` holds no frame.
+///
+/// A queued agent message is stored framed, and the queue drain joins every
+/// waiting message into one resume prompt (`pending_message::drain_if_idle`),
+/// so one turn can hold several frames — or frames next to the user's own
+/// words, in which case the turn is still the user's.
+pub fn strip_agent_frames(text: &str) -> Option<(String, bool)> {
+    let mut out = String::new();
+    let mut rest = text;
+    let mut found = false;
+    let mut only_frames = true;
+    while let Some(at) = rest.find(AGENT_FRAME_HEAD) {
+        let after_head = &rest[at + AGENT_FRAME_HEAD.len()..];
+        let Some(end) = after_head.find(AGENT_FRAME_TAIL) else {
+            break;
+        };
+        let before = &rest[..at];
+        only_frames &= before.trim().is_empty();
+        out.push_str(before);
+        out.push_str(&after_head[..end]);
+        rest = &after_head[end + AGENT_FRAME_TAIL.len()..];
+        found = true;
+    }
+    if !found {
+        return None;
+    }
+    only_frames &= rest.trim().is_empty();
+    out.push_str(rest);
+    Some((out.trim().to_string(), only_frames))
+}
+
 /// Serialise the one line written to the socket.
 fn encode_frame(text: &str) -> Result<Vec<u8>, String> {
     let frame = UserFrame {

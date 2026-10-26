@@ -382,6 +382,8 @@ const DICT: Record<string, string> = {
   "Fleet 重复定时": "Fleet loop",
   "Fleet 定时": "Fleet schedule",
   老板已回复: "Answered",
+  "Fleet 通知": "Fleet notice",
+  已送达: "Delivered",
   "{0} 段": "{0} parts",
   "第 {0} 步": "step {0}",
   "由「{0}」派出": "spawned by \"{0}\"",

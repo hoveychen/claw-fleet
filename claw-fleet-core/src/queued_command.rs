@@ -60,13 +60,24 @@ pub fn unfold(message: &mut Value) {
     // carries Fleet's own peer frame instead; dropping it leaves the same row
     // the socket path produces, so the clients' mail / event classifiers see
     // the body exactly as they do on unix.
-    let prompt = match crate::live_inject::strip_agent_frame(prompt) {
-        Some(body) => body.to_string(),
-        None => crate::live_inject::strip_user_signature(prompt.trim_end()).to_string(),
+    //
+    // Which of the two it was is the row's origin, and it is lost once the row
+    // is a plain user record — so it is settled here: a peer delivery without
+    // the user's signature, or a framed stdin one, is an agent or Fleet itself
+    // speaking and must not render as the user's bubble.
+    let (prompt, from_agent) = match crate::live_inject::strip_agent_frame(prompt) {
+        Some(body) => (body.to_string(), true),
+        None => {
+            let unsigned = crate::live_inject::strip_user_signature(prompt.trim_end());
+            let signed = unsigned.len() != prompt.trim_end().len();
+            let peer = attachment["origin"].get("kind").and_then(Value::as_str) == Some("peer");
+            (unsigned.to_string(), peer && !signed)
+        }
     };
     if prompt.trim().is_empty() {
         return;
     }
+    let event = if from_agent { crate::fleet_event::agent_event(&prompt) } else { None };
 
     let Some(obj) = message.as_object_mut() else {
         return;
@@ -83,6 +94,9 @@ pub fn unfold(message: &mut Value) {
     // what lets a client mark the bubble as mid-turn delivered.
     obj.remove("isMeta");
     obj.insert("fleetMidTurn".into(), json!(true));
+    if let Some(event) = event {
+        obj.insert("fleetEvent".into(), event);
+    }
 }
 
 /// Whether a `queued_command` is someone speaking rather than the harness.
@@ -117,7 +131,7 @@ const PEER_TURN_HEADER: &str = "Another Claude session sent a message:\n";
 /// Only rows carrying Fleet's user signature are rewritten. A real peer
 /// session's `SendMessage` is not the user speaking and stays folded.
 fn unfold_peer_turn(message: &mut Value) {
-    unframe_agent_turn(message);
+    crate::fleet_event::unframe_agent_row(message);
     if message.get("isMeta").and_then(Value::as_bool) != Some(true)
         || message["origin"].get("kind").and_then(Value::as_str) != Some("peer")
     {
@@ -164,36 +178,6 @@ fn unfold_peer_turn(message: &mut Value) {
     obj.insert("message".into(), json!({"role": "user", "content": blocks}));
     // A turn opener, not a mid-turn delivery, so no `fleetMidTurn`.
     obj.remove("isMeta");
-}
-
-/// Drop Fleet's agent frame from a plain `user` row's text blocks.
-///
-/// An agent message written to a turn's stdin is normally absorbed mid-turn as
-/// a `queued_command` (handled by [`unfold`]); one that lands as the row of a
-/// user turn instead keeps the frame in its text, which would otherwise show
-/// up verbatim in the bubble and hide a mail footer or event header from the
-/// classifiers that key on how the body starts.
-fn unframe_agent_turn(message: &mut Value) {
-    let Some(blocks) = message["message"]["content"].as_array_mut() else {
-        if let Some(body) = message["message"]["content"]
-            .as_str()
-            .and_then(crate::live_inject::strip_agent_frame)
-            .map(str::to_string)
-        {
-            message["message"]["content"] = json!(body);
-        }
-        return;
-    };
-    for block in blocks.iter_mut() {
-        if let Some(body) = block
-            .get("text")
-            .and_then(Value::as_str)
-            .and_then(crate::live_inject::strip_agent_frame)
-            .map(str::to_string)
-        {
-            block["text"] = json!(body);
-        }
-    }
 }
 
 /// Surface a message Fleet injected on the user's behalf that the agent has
@@ -302,12 +286,14 @@ mod tests {
 
     #[test]
     fn peer_prompt_becomes_a_plain_user_bubble() {
-        let mut msg = row(json!({"kind": "peer", "from": "unknown"}), "make it blue");
+        let signed = crate::live_inject::sign_as_user("make it blue");
+        let mut msg = row(json!({"kind": "peer", "from": "unknown"}), &signed);
         unfold(&mut msg);
         assert_eq!(msg["type"], "user");
         assert_eq!(msg["message"]["role"], "user");
         assert_eq!(msg["message"]["content"][0]["text"], "make it blue");
         assert_eq!(msg["fleetMidTurn"], true);
+        assert!(msg.get("fleetEvent").is_none());
         // Identity and ordering fields are the row's own and must survive.
         assert_eq!(msg["uuid"], "u1");
         assert_eq!(msg["parentUuid"], "p1");
@@ -315,6 +301,44 @@ mod tests {
         // A meta row is folded away by the frontends, so the flag has to go.
         assert!(msg.get("isMeta").is_none());
         assert!(msg.get("attachment").is_none());
+    }
+
+    /// The P8 case: `ask_preempt::notify_resolved_if_detached` injects an
+    /// unsigned notice over the socket. Peer origin without the user's
+    /// signature is Fleet or another agent speaking — never the user's bubble.
+    #[test]
+    fn an_unsigned_peer_prompt_is_an_agent_notice() {
+        let notice = crate::ask_preempt::resolved_notice("req-1");
+        let mut msg = row(json!({"kind": "peer", "from": "unknown"}), &notice);
+        unfold(&mut msg);
+        assert_eq!(msg["type"], "user");
+        assert_eq!(msg["message"]["content"][0]["text"], notice.as_str());
+        assert_eq!(msg["fleetMidTurn"], true);
+        assert_eq!(msg["fleetEvent"]["kind"], "notice");
+        assert_eq!(msg["fleetEvent"]["status"], "delivered");
+
+        // `fleet send` mail keeps no event, so the clients draw a mail card.
+        let mail = "看下日志\n\n---\n（这条消息来自 Fleet 会话 s1（ws）。要回复它，用 `fleet__control action=send id=s1 text=<回复>`（CLI：`fleet send s1 <回复>`）。）";
+        let mut msg = row(json!({"kind": "peer", "from": "unknown"}), mail);
+        unfold(&mut msg);
+        assert!(msg.get("fleetEvent").is_none());
+    }
+
+    /// The same notice on Windows reaches the turn through its stdin holder,
+    /// framed; the row has no origin at all.
+    #[test]
+    fn a_framed_stdin_notice_is_an_agent_notice() {
+        let framed = crate::live_inject::frame_as_agent(&crate::ask_preempt::resolved_notice("r"));
+        let mut msg = json!({"type": "attachment", "attachment": {
+            "type": "queued_command", "prompt": framed, "commandMode": "prompt"}});
+        unfold(&mut msg);
+        assert_eq!(msg["fleetEvent"]["kind"], "notice");
+
+        // The user's own stdin follow-up is unframed and stays a bubble.
+        let mut msg = json!({"type": "attachment", "attachment": {
+            "type": "queued_command", "prompt": "[fleet] 决策卡 x 老板已经处理了", "commandMode": "prompt"}});
+        unfold(&mut msg);
+        assert!(msg.get("fleetEvent").is_none());
     }
 
     #[test]
@@ -450,11 +474,14 @@ mod tests {
             r#"{{"type":"user","uuid":"a","message":{{"role":"user","content":"first"}}}}"#
         )
         .unwrap();
-        writeln!(
-            f,
-            r#"{{"parentUuid":"a","isSidechain":false,"attachment":{{"type":"queued_command","prompt":"mid-turn ask","source_uuid":"s","commandMode":"prompt","origin":{{"kind":"peer","from":"unknown"}},"timestamp":"2026-09-20T00:24:32.263Z","isMeta":true}},"type":"attachment","uuid":"b","timestamp":"2026-09-20T00:26:55.161Z"}}"#
+        // Signed as Fleet signs composer messages today; an unsigned peer
+        // prompt is an agent's (see `an_unsigned_peer_prompt_is_an_agent_notice`).
+        let mut absorbed: Value = serde_json::from_str(
+            r#"{"parentUuid":"a","isSidechain":false,"attachment":{"type":"queued_command","prompt":"","source_uuid":"s","commandMode":"prompt","origin":{"kind":"peer","from":"unknown"},"timestamp":"2026-09-20T00:24:32.263Z","isMeta":true},"type":"attachment","uuid":"b","timestamp":"2026-09-20T00:26:55.161Z"}"#,
         )
         .unwrap();
+        absorbed["attachment"]["prompt"] = json!(crate::live_inject::sign_as_user("mid-turn ask"));
+        writeln!(f, "{absorbed}").unwrap();
         drop(f);
 
         let source = crate::claude_source::ClaudeCodeSource::new();
