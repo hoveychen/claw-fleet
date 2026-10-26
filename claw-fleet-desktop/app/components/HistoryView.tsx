@@ -1238,9 +1238,6 @@ export function HistoryView() {
             >
               <NewSessionForm
                 key={formEpoch}
-                // On the resting pane there is nothing to close back to, so no
-                // `onCancel` (the × is hidden with it).
-                onCancel={pane.kind === "draft" ? cancelDraft : undefined}
                 onLaunching={handleLaunching}
                 onLaunchFailed={handleLaunchFailed}
                 onCreated={handleCreated}

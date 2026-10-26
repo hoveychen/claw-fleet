@@ -104,7 +104,7 @@ async function mount() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<NewSessionForm onCreated={() => {}} onCancel={() => {}} />);
+    root!.render(<NewSessionForm onCreated={() => {}} />);
   });
   await act(async () => {
     await Promise.resolve();
