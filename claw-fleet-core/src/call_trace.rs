@@ -96,6 +96,11 @@ fn clamp(v: &Value) -> Value {
 }
 
 fn append(session_id: &str, record: &Value) {
+    // An incognito session's calls carry its conversation (a card's
+    // questions and answers, spawn briefs); none of it is kept on disk.
+    if crate::incognito::current_is_incognito(Some(session_id)) {
+        return;
+    }
     let (Some(path), Some(dir)) = (trace_path(session_id), call_trace_dir()) else {
         return;
     };
@@ -217,6 +222,17 @@ mod tests {
             assert_eq!(recs[1]["phase"], "end");
             assert_eq!(recs[1]["outcome"], "ok");
             assert_eq!(recs[0]["call"], recs[1]["call"]);
+        });
+    }
+
+    #[test]
+    fn an_incognito_session_records_nothing() {
+        with_home(|| {
+            crate::incognito::register_new("inc-trace").unwrap();
+            CallTrace::begin("inc-trace", "mcp", "fleet__ask", &json!({"q": "zqcanary"}))
+                .end(false, &json!({"a": "zqcanary"}));
+            assert!(read("inc-trace").is_empty());
+            assert!(!trace_path("inc-trace").unwrap().exists());
         });
     }
 
