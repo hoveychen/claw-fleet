@@ -1760,7 +1760,24 @@ fn merge_incremental_sessions(
             continue;
         }
         let age_secs = now_ms.saturating_sub(sess.last_activity_ms) as f64 / 1000.0;
+        let before = sess.status.clone();
         crate::session::age_out_status(sess, age_secs);
+        // The cache-hit path follows its age-out with `apply_pid_liveness`, which
+        // holds a Fleet-spawned session whose process is alive at Executing
+        // through a long tool call (a `fleet__job wait` blocks for up to 9 min
+        // writing nothing). Skipping it here demoted that session to Idle on every
+        // dsh/codex tick and the next claude-code rescan promoted it back, so the
+        // detail pane's "Running tools…" band and its stop button blinked. The
+        // retain branch has no hooks.jsonl read; the status the last scan derived
+        // stands in for the hook signal it was derived from. `proc_alive` is that
+        // scan's liveness bit.
+        let hook = match before {
+            SessionStatus::Executing => Some(claw_fleet_core::hooks::HookState::ToolExecuting),
+            SessionStatus::Thinking => Some(claw_fleet_core::hooks::HookState::ModelProcessing),
+            _ => None,
+        };
+        let proc_alive = sess.proc_alive;
+        crate::session::apply_pid_liveness(sess, proc_alive, hook.as_ref(), age_secs);
         // Same pairing as the claude-code scan's cache-hit path: a subagent in a
         // long tool call writes nothing, so the age-out alone demotes it to Idle
         // on every other source's tick and its rail card blinks out. A subagent
@@ -5162,6 +5179,65 @@ mod tests {
             status_of("agent-2"),
             Some(SessionStatus::Idle),
             "without a live parent the age-out must still apply",
+        );
+    }
+
+    /// A Fleet-spawned main session parked in one long tool call must survive
+    /// the retain branch, the main-session counterpart of the subagent case.
+    ///
+    /// Observed 2026-10-26: a handoff session blocked in `fleet__job wait`
+    /// alternated between "Running tools…" and nothing in the detail pane, its
+    /// stop button flipping with it, while `fleet agents` read Executing
+    /// throughout.
+    #[test]
+    fn incremental_rescan_keeps_live_main_session_in_long_tool_call() {
+        let _lock = claw_fleet_core::paths::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        // As the last claude-code scan left it: two minutes into a tool call,
+        // its own process alive.
+        let mut live = mk_session("main-1", "claude-code");
+        live.entrypoint = Some(claw_fleet_core::handoff::HANDOFF_ENTRYPOINT.into());
+        live.status = SessionStatus::Executing;
+        live.pending_tool_batch = true;
+        live.proc_alive = true;
+        live.pid = Some(4242);
+        live.last_activity_ms = 0;
+        let now_ms = 2 * 60 * 1000;
+
+        // The same session after its process has gone away.
+        let mut dead = live.clone();
+        dead.id = "main-2".into();
+        dead.jsonl_path = "/tmp/main-2.jsonl".into();
+        dead.proc_alive = false;
+        dead.pid = None;
+
+        let sources: Vec<Box<dyn AgentSource>> = vec![
+            Box::new(MockSource {
+                watch_fs: true,
+                ..MockSource::new("claude-code", "claude", "")
+            }),
+            Box::new(MockSource::new("dsh", "dsh", "dsh://")),
+        ];
+        let out = build_incremental_sessions(&sources, &[live, dead], &HashSet::from([1]), now_ms);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+
+        let status_of = |id: &str| out.iter().find(|s| s.id == id).map(|s| s.status.clone());
+        assert_eq!(
+            status_of("main-1"),
+            Some(SessionStatus::Executing),
+            "a live session mid tool call was aged out by another source's tick",
+        );
+        assert_eq!(
+            status_of("main-2"),
+            Some(SessionStatus::Idle),
+            "without a live process the age-out must still apply",
         );
     }
 
