@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ClaudeIcon, CodexIcon, DshIcon, FoxyIcon } from "./SessionCard";
@@ -488,6 +488,16 @@ function DshUsageSection() {
 
 // ── Rail popover ─────────────────────────────────────────────────────────────
 
+const POPOVER_MARGIN = 8;
+
+/** CSS `bottom` for the rail popover: aligned with the tile's bottom edge,
+ *  but never so high that a panel `height` px tall leaves the window's top. */
+export function popoverBottom(anchorBottom: number, height: number, viewport: number): number {
+  const aligned = viewport - anchorBottom;
+  const highestFitting = viewport - POPOVER_MARGIN - height;
+  return Math.max(POPOVER_MARGIN, Math.min(aligned, highestFitting));
+}
+
 /** The full usage panel, floated beside the rail tile that opened it. Portaled
  *  to the body because the rail clips its overflow. The history modals the
  *  sections open are React children of the panel, so their clicks stop at the
@@ -513,12 +523,26 @@ function UsageDetailsPopover({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  // The panel's height is only known after its sections mount (and changes as
+  // their data loads), so measure it and slide the panel down when bottom-
+  // aligning it with the tile would push its top out of the window.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    setHeight(el.offsetHeight);
+    const ro = new ResizeObserver(() => setHeight(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const style: React.CSSProperties = anchor
-    ? { left: anchor.right + 8, bottom: Math.max(8, window.innerHeight - anchor.bottom) }
+    ? { left: anchor.right + 8, bottom: popoverBottom(anchor.bottom, height, window.innerHeight) }
     : { left: 72, bottom: 8 };
   return createPortal(
     <div className={styles.popover_backdrop} data-exiting={exiting || undefined} onClick={onClose}>
       <div
+        ref={panelRef}
         className={styles.popover}
         style={style}
         role="dialog"
