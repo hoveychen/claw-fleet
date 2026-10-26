@@ -41,11 +41,19 @@ const WAIT_POLL: Duration = Duration::from_millis(500);
 
 /// Start `command` in `workspace` as a detached job. `host_exe` is the binary
 /// that intercepts [`proc_runner::HOST_ARGV_MARKER`] (the caller's own exe).
-pub fn run(host_exe: &Path, workspace: &str, command: &str) -> Result<ProcRecord, String> {
+/// `owner` is the calling session: an incognito one keeps its jobs in its
+/// private dir ([`proc_runner::require_dir_for`]).
+pub fn run(
+    host_exe: &Path,
+    workspace: &str,
+    command: &str,
+    owner: Option<&str>,
+) -> Result<ProcRecord, String> {
     if command.trim().is_empty() {
         return Err("command is empty".into());
     }
-    proc_runner::spawn_proc(host_exe, workspace, command, JOB_COLS, JOB_ROWS)
+    let dir = proc_runner::require_dir_for(owner)?;
+    proc_runner::spawn_proc_in(&dir, host_exe, workspace, command, JOB_COLS, JOB_ROWS)
 }
 
 pub fn is_done(rec: &ProcRecord) -> bool {
@@ -55,7 +63,7 @@ pub fn is_done(rec: &ProcRecord) -> bool {
 /// Block until the job exits or `max_secs` (clamped to [`MAX_WAIT_SECS`])
 /// passes. Returns the latest record either way; check [`is_done`].
 pub fn wait(id: &str, max_secs: u64) -> Result<ProcRecord, String> {
-    let dir = procs_dir()?;
+    let dir = proc_runner::dir_of(id)?;
     wait_in(&dir, id, Duration::from_secs(max_secs.min(MAX_WAIT_SECS)))
 }
 
@@ -79,20 +87,60 @@ pub fn stop(id: &str) -> Result<(), String> {
 }
 
 /// Jobs (any proc) started in `workspace` or below it (a plan's
-/// `.worktrees/<id>` checkout), newest first.
-pub fn list(workspace: &str) -> Vec<ProcRecord> {
-    proc_runner::list_procs()
+/// `.worktrees/<id>` checkout), newest first. An incognito `owner` sees only
+/// its own jobs.
+pub fn list(workspace: &str, owner: Option<&str>) -> Vec<ProcRecord> {
+    let procs = match owner.filter(|s| crate::incognito::is_incognito(s)) {
+        Some(_) => proc_runner::require_dir_for(owner)
+            .map(|d| proc_runner::list_procs_in(&d))
+            .unwrap_or_default(),
+        None => proc_runner::list_procs(),
+    };
+    procs
         .into_iter()
         .filter(|r| Path::new(&r.workspace_path).starts_with(workspace))
         .collect()
 }
 
 pub fn log_path(id: &str) -> Result<PathBuf, String> {
-    Ok(proc_runner::output_file_in(&procs_dir()?, id))
+    Ok(proc_runner::output_file_in(&proc_runner::dir_of(id)?, id))
 }
 
-fn procs_dir() -> Result<PathBuf, String> {
-    proc_runner::procs_dir().ok_or_else(|| "cannot determine home dir".to_string())
+/// After an exited job's result has been handed back, delete it when it
+/// belongs to an incognito session — its command and output must not outlive
+/// their use. Returns whether it was deleted.
+pub fn forget_if_private(rec: &ProcRecord) -> bool {
+    if !is_done(rec) {
+        return false;
+    }
+    match proc_runner::dir_of(&rec.id) {
+        Ok(dir) if proc_runner::is_private_dir(&dir) => {
+            proc_runner::clear_proc_in(&dir, &rec.id).is_ok()
+        }
+        _ => false,
+    }
+}
+
+/// At the end of an incognito session's turn: delete its exited jobs that
+/// nobody is still going to collect — every one except those a live wake
+/// watch of the session will report. Running jobs stay. Returns how many went.
+pub fn forget_finished_private(session_id: &str) -> usize {
+    if !crate::incognito::is_incognito(session_id) {
+        return 0;
+    }
+    let Ok(dir) = proc_runner::require_dir_for(Some(session_id)) else {
+        return 0;
+    };
+    let pending: Vec<String> = crate::watch::list()
+        .into_iter()
+        .filter(|w| w.session_id == session_id)
+        .flat_map(|w| [w.until_cmd, w.capture_cmd.unwrap_or_default()])
+        .collect();
+    proc_runner::list_procs_in(&dir)
+        .into_iter()
+        .filter(|r| is_done(r) && !pending.iter().any(|c| c.contains(&r.id)))
+        .filter(|r| proc_runner::clear_proc_in(&dir, &r.id).is_ok())
+        .count()
 }
 
 fn now_ms() -> u64 {
@@ -252,6 +300,82 @@ mod tests {
             serde_json::to_string(rec).unwrap(),
         )
         .unwrap();
+    }
+
+    fn private_home() -> crate::paths::FleetHomeGuard {
+        crate::paths::fleet_home_guard_with(|| {
+            let dir = std::env::temp_dir().join(format!("fleet-job-inc-{}-{}", std::process::id(), now_ms()));
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        })
+    }
+
+    fn exited(id: &str) -> ProcRecord {
+        ProcRecord {
+            id: id.into(),
+            workspace_path: "/ws".into(),
+            command: "echo zqcanary".into(),
+            status: ProcStatus::Exited,
+            child_pid: None,
+            host_pid: None,
+            host_start_time: None,
+            exit_code: Some(0),
+            started_ms: 1,
+            finished_ms: Some(2),
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    #[test]
+    fn an_incognito_job_lives_privately_and_goes_once_delivered() {
+        let home = private_home();
+        let cfg = crate::incognito::register_new("inc-job").unwrap();
+        let dir = proc_runner::require_dir_for(Some("inc-job")).unwrap();
+        assert!(dir.starts_with(&cfg));
+        let id = format!("pinc{}", now_ms());
+        let rec = exited(&id);
+        write(&dir, &rec);
+        std::fs::write(proc_runner::output_file_in(&dir, &id), "zqcanary\n").unwrap();
+        assert_eq!(proc_runner::dir_of(&id).unwrap(), dir);
+        assert_eq!(get(&id).unwrap().command, "echo zqcanary");
+
+        let mut running = rec.clone();
+        running.status = ProcStatus::Running;
+        assert!(!forget_if_private(&running));
+        assert!(forget_if_private(&rec));
+        assert!(!proc_runner::output_file_in(&dir, &id).exists());
+        assert!(get(&id).is_err());
+        let _ = std::fs::remove_dir_all(home.home());
+    }
+
+    #[test]
+    fn a_regular_job_is_not_forgotten() {
+        let dir = proc_runner::require_dir_for(None).unwrap();
+        assert_eq!(Some(dir), proc_runner::procs_dir());
+        assert!(!forget_if_private(&exited("pnever-written")));
+    }
+
+    #[test]
+    fn turn_end_drops_an_incognito_sessions_finished_jobs_but_not_running_ones() {
+        let home = private_home();
+        crate::incognito::register_new("inc-turn").unwrap();
+        let dir = proc_runner::require_dir_for(Some("inc-turn")).unwrap();
+        let t = now_ms();
+        write(&dir, &exited(&format!("pa{t}")));
+        write(&dir, &exited(&format!("pb{t}")));
+        let pid = std::process::id();
+        let mut live = exited(&format!("pc{t}"));
+        live.status = ProcStatus::Running;
+        live.exit_code = None;
+        live.host_pid = Some(pid);
+        live.host_start_time = crate::session::process_start_time(pid);
+        write(&dir, &live);
+        assert_eq!(forget_finished_private("inc-turn"), 2);
+        let left: Vec<String> = proc_runner::list_procs_in(&dir).into_iter().map(|r| r.id).collect();
+        assert_eq!(left, vec![live.id]);
+        assert_eq!(forget_finished_private("not-incognito"), 0);
+        let _ = std::fs::remove_dir_all(home.home());
     }
 
     /// The real detached host is exercised end to end in

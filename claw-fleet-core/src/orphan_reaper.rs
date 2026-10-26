@@ -134,11 +134,14 @@ pub fn reap_orphaned_session_processes(dead_sessions: &HashSet<String>) -> usize
 
     let doomed = select_reapable(&candidates, dead_sessions);
     for pid in &doomed {
-        let cmd = candidates
-            .iter()
-            .find(|c| c.pid == *pid)
-            .map(|c| c.cmd.as_str())
-            .unwrap_or("");
+        let doomed_proc = candidates.iter().find(|c| c.pid == *pid);
+        let cmd = match doomed_proc {
+            Some(c) if c.session_id.as_deref().is_some_and(crate::incognito::is_incognito) => {
+                "<incognito session>"
+            }
+            Some(c) => c.cmd.as_str(),
+            None => "",
+        };
         crate::log_debug(&format!(
             "orphan_reaper: killing leftover pid={pid} from a finished session ({})",
             &cmd[..cmd.len().min(120)]

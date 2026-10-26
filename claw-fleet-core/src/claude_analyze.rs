@@ -140,6 +140,11 @@ pub fn analyze_session_outcome_routed(
     session_id: &str,
     user_title: &str,
 ) -> Option<AnalysisResult> {
+    // An incognito session's text is never sent off for a summary, whichever
+    // client asks (the desktop already skips it; `/analyze` takes any id).
+    if crate::incognito::is_incognito(session_id) {
+        return None;
+    }
     let sid = &session_id[..session_id.len().min(12)];
     let truncated: String = last_text.chars().take(MAX_INPUT_CHARS).collect();
     let prompt = build_prompt(&truncated, locale, user_title);

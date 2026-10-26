@@ -672,11 +672,33 @@ pub fn new_handle() -> String {
 /// Deliberately under Fleet's own directory, not `$CODEX_HOME`: these are not
 /// Codex's output any more, and a user who logs out of Codex or clears its home
 /// should not lose them.
+///
+/// An incognito session's pictures live in its private config dir instead
+/// ([`private_images_root`]); a handle found there resolves there, so every
+/// reader keeps working while the session lives.
 pub fn handle_dir(handle: &str) -> Option<PathBuf> {
     if !handle_is_safe(handle) {
         return None;
     }
-    crate::session::get_fleet_dir().map(|d| d.join("generated_images").join(handle))
+    let shared = crate::session::get_fleet_dir().map(|d| d.join("generated_images").join(handle));
+    if shared.as_ref().is_some_and(|d| d.is_dir()) {
+        return shared;
+    }
+    crate::incognito::all_config_dirs()
+        .into_iter()
+        .map(|d| d.join(PRIVATE_IMAGES_SUBDIR).join(handle))
+        .find(|d| d.is_dir())
+        .or(shared)
+}
+
+/// Subdirectory of an incognito session's config dir holding its pictures.
+const PRIVATE_IMAGES_SUBDIR: &str = "fleet-images";
+
+/// Where an incognito `owner`'s generations go: inside its private config
+/// dir, so they are purged with the session rather than kept in the shared
+/// store. `None` for a regular session.
+fn private_images_root(owner: &str) -> Option<PathBuf> {
+    crate::incognito::config_dir(owner).map(|d| d.join(PRIVATE_IMAGES_SUBDIR))
 }
 
 /// Filename recording which session asked for this handle's images.
@@ -705,14 +727,12 @@ pub fn images_owned_by_session(session: &str) -> Vec<crate::codex_image::Generat
     if session.is_empty() {
         return Vec::new();
     }
-    let Some(root) = crate::session::get_fleet_dir().map(|d| d.join("generated_images")) else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return Vec::new();
-    };
+    let roots = crate::session::get_fleet_dir()
+        .map(|d| d.join("generated_images"))
+        .into_iter()
+        .chain(private_images_root(session));
     let mut out = Vec::new();
-    for entry in entries.flatten() {
+    for entry in roots.filter_map(|r| std::fs::read_dir(r).ok()).flatten().flatten() {
         let Some(handle) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
@@ -735,7 +755,14 @@ pub fn save_images(
     output_format: Option<&str>,
     owner: Option<&str>,
 ) -> Result<Vec<crate::codex_image::GeneratedImage>, String> {
-    let dir = handle_dir(handle).ok_or_else(|| format!("invalid image handle '{handle}'"))?;
+    let private = owner
+        .map(str::trim)
+        .and_then(private_images_root)
+        .filter(|_| handle_is_safe(handle))
+        .map(|root| root.join(handle));
+    let dir = private
+        .or_else(|| handle_dir(handle))
+        .ok_or_else(|| format!("invalid image handle '{handle}'"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     if let Some(owner) = owner.map(str::trim).filter(|o| !o.is_empty()) {
         // Best-effort: a picture that cannot be attributed is still a picture,
@@ -894,6 +921,30 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, b"\x89PNG\r\n\x1a\n").unwrap();
         path
+    }
+
+    #[test]
+    fn an_incognito_owners_images_stay_in_its_config_dir() {
+        let home = crate::paths::fleet_home_guard_with(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "fleet-img-inc-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        });
+        let cfg = crate::incognito::register_new("inc-img").unwrap();
+        let handle = new_handle();
+        let img = ImageBytes { bytes: vec![1, 2, 3], generation_id: None };
+        let saved = save_images(&handle, &[img], None, Some("inc-img")).unwrap();
+        assert!(Path::new(&saved[0].path).starts_with(&cfg));
+        assert!(handle_dir(&handle).unwrap().starts_with(&cfg));
+        assert_eq!(owner_of(&handle).as_deref(), Some("inc-img"));
+        assert_eq!(images_owned_by_session("inc-img").len(), 1);
+        let shared = crate::session::get_fleet_dir().unwrap().join("generated_images");
+        assert!(!shared.join(&handle).exists());
+        let _ = std::fs::remove_dir_all(home.home());
     }
 
     #[test]

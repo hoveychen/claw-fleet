@@ -827,9 +827,15 @@ fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
     // that pinned FLEET_IMAGE_BACKEND=codex, and one still passing a routing
     // model like `gpt-5.6-luna` — which is what every caller written against
     // the old tool passes.
-    if !crate::image_api::wants_codex_backend(model.as_deref()) {
+    // An incognito session never takes the Codex path: `codex exec` records
+    // the prompt in its own session store under `~/.codex`.
+    let incognito = crate::incognito::current_is_incognito(None);
+    if incognito || !crate::image_api::wants_codex_backend(model.as_deref()) {
         let mut req = image_request_from_args(&description, &args);
         req.images = images.iter().map(std::path::PathBuf::from).collect();
+        if req.model.as_deref().is_some_and(|m| !m.trim().starts_with("gpt-image")) {
+            req.model = None;
+        }
         let owner = current_session_id();
         return match crate::image_api::run(&req, Some(owner.as_str())) {
             Ok(result) => Ok(render_image_result(&result)),
@@ -874,6 +880,11 @@ fn handle_image_edit_call(params: &Value) -> Result<Value, JsonRpcError> {
         };
     }
 
+    if crate::incognito::current_is_incognito(None) {
+        return Ok(tool_error(format!(
+            "'{thread_id}' is not an image this incognito session generated; pass the thread_id fleet__image returned"
+        )));
+    }
     match crate::codex_image::edit_image(
         &workspace.to_string_lossy(),
         &thread_id,

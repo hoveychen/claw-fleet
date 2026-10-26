@@ -653,6 +653,16 @@ fn register_job_wake(
     ))
 }
 
+/// A report that showed an exited job's output is its delivery: an incognito
+/// session's job is deleted right after. `tail == 0` (the wake watch's
+/// progress probe) shows no output, so it delivers nothing.
+fn deliver_job(mut report: String, rec: &crate::proc_runner::ProcRecord, tail: usize) -> String {
+    if tail > 0 && crate::job::forget_if_private(rec) {
+        report.push_str("(incognito: this job's record and log are deleted now that its result is delivered)\n");
+    }
+    report
+}
+
 fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, String> {
     use crate::job;
     let tail = usize_arg(args, "tail", job::DEFAULT_TAIL_LINES)?;
@@ -667,7 +677,7 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                 None => cwd.to_path_buf(),
             };
             let exe = std::env::current_exe().map_err(|e| format!("cannot locate fleet: {e}"))?;
-            let rec = job::run(&exe, &dir.to_string_lossy(), &command)?;
+            let rec = job::run(&exe, &dir.to_string_lossy(), &command, sid)?;
             if flag(args, "wake") {
                 let wake = match register_job_wake(sid, &exe, &rec, arg(args, "note").as_deref()) {
                     Ok(t) => t,
@@ -709,9 +719,12 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                     "still running — call action=wait id={id} again.\n"
                 ));
             }
-            Ok(out)
+            Ok(deliver_job(out, &rec, tail))
         }
-        "status" => Ok(job::render(&job::get(&req(args, "id")?)?, tail)),
+        "status" => {
+            let rec = job::get(&req(args, "id")?)?;
+            Ok(deliver_job(job::render(&rec, tail), &rec, tail))
+        }
         "stop" => {
             let id = req(args, "id")?;
             job::stop(&id)?;
@@ -719,7 +732,7 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
         }
         "list" => {
             let ws = cwd.to_string_lossy();
-            let jobs = job::list(&ws);
+            let jobs = job::list(&ws, sid);
             if jobs.is_empty() {
                 return Ok(format!("no jobs under {ws}"));
             }

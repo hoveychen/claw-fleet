@@ -1001,13 +1001,23 @@ pub(crate) fn claude_fork_ask(
     let entrypoint = crate::session::session_entrypoint(&spec.session_id)
         .filter(|e| !e.trim().is_empty())
         .unwrap_or_else(|| FORK_ENTRYPOINT_FALLBACK.to_string());
-    let stderr = fork_stderr_sink(
-        &format!(
-            "claude fork session={} cwd={} entrypoint={entrypoint}",
-            spec.session_id, spec.workspace_path
+    // A fork of an incognito session writes its stderr into that session's
+    // private dir, not the shared log.
+    let stderr = match crate::incognito::private_stderr_log(&args) {
+        Some(p) => fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(p)
+            .map(std::process::Stdio::from)
+            .unwrap_or_else(|_| std::process::Stdio::null()),
+        None => fork_stderr_sink(
+            &format!(
+                "claude fork session={} cwd={} entrypoint={entrypoint}",
+                spec.session_id, spec.workspace_path
+            ),
+            &flags_without_prompt(&args, "-p"),
         ),
-        &flags_without_prompt(&args, "-p"),
-    );
+    };
 
     let mut cmd = crate::process_util::command(&claude);
     cmd.args(&args)

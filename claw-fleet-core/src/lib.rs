@@ -299,7 +299,25 @@ pub mod zip_stream;
 
 use std::fs;
 
+/// Append `msg` to the debug log. For work owned by an incognito session
+/// ([`incognito::log_redaction`]) only the call site is written: the messages
+/// interpolate commands, prompts, titles and tool arguments, and the log
+/// outlives the session.
+#[track_caller]
 pub fn log_debug(msg: &str) {
+    let withheld;
+    let msg = match incognito::log_redaction() {
+        Some(owner) => {
+            let at = std::panic::Location::caller();
+            withheld = format!(
+                "[incognito {owner}] {}:{} (message withheld)",
+                at.file(),
+                at.line()
+            );
+            withheld.as_str()
+        }
+        None => msg,
+    };
     if let Some(log_path) = debug_log_path() {
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         let line = format!("[{timestamp}] {msg}\n");
