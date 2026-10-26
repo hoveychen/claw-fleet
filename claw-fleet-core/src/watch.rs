@@ -1901,6 +1901,9 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
         let rec = match read_in(&dir, id) {
             Ok(Some(rec)) => {
                 unreadable_streak = 0;
+                // This process serves one watch, so one incognito owner
+                // covers every log line it writes — the resume included.
+                crate::incognito::redact_process_logs(&rec.session_id);
                 rec
             }
             Ok(None) => {

@@ -1063,10 +1063,16 @@ impl LocalBackend {
                             // New request — read it and emit a Tauri event.
                             if let Some(mut req) = crate::guard::read_request(id) {
                                 claw_fleet_core::pending_decisions::decorate(&mut req, &sess_guard.lock().unwrap());
-                                crate::log_debug(&format!(
-                                    "[guard] new request: {} cmd={}",
-                                    id, req.command_summary
-                                ));
+                                if claw_fleet_core::incognito::is_incognito(&req.session_id) {
+                                    crate::log_debug(&format!(
+                                        "[guard] new request: {id} (incognito session)"
+                                    ));
+                                } else {
+                                    crate::log_debug(&format!(
+                                        "[guard] new request: {} cmd={}",
+                                        id, req.command_summary
+                                    ));
+                                }
                                 let _ = app_guard.emit("guard-request", &req);
                                 publish_mobile_decision(
                                     "guard",

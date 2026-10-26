@@ -99,9 +99,10 @@ pub(crate) fn cmd_session_idle() {
     // The turn is over, so the live view no longer needs an incognito
     // session's live-thinking sidecar — the one Fleet store holding its
     // streamed text. A child still writing keeps an unlinked inode, which
-    // goes with its last fd.
+    // goes with its last fd. Exited jobs nobody will collect go too.
     if claw_fleet_core::incognito::current_is_incognito(Some(&sid)) {
         claw_fleet_core::live_thinking::remove_for_session(&sid);
+        claw_fleet_core::job::forget_finished_private(&sid);
         timing.phase("incognito_sidecar");
     }
 

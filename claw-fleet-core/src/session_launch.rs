@@ -463,6 +463,11 @@ pub fn spawn_claude_detached_with_envs(
     // chokepoint so every resume path re-reads the current OAuth token.
     let incognito_env = crate::incognito::launch_env(args)?;
     let incognito_launch = incognito_env.is_some();
+    // Its stderr and this thread's log lines stay out of the shared logs.
+    let private_stderr = crate::incognito::private_stderr_log(args);
+    let stderr_log = private_stderr.as_deref().unwrap_or(stderr_log);
+    let _log_scope = crate::incognito::launch_session(args)
+        .map(|sid| crate::incognito::redact_logs_for(&sid));
     if incognito_env.is_some() && rca_wrap.is_some() {
         return Err(format!(
             "incognito sessions cannot run in a remote (rca) workspace: {workspace_path}"
@@ -907,6 +912,7 @@ pub(crate) fn spawn_new_session_impl(
     // Resolve the session id before any CLI/filesystem work so a malformed
     // caller-provided id fails fast and identically on every host.
     let session_id = resolve_new_session_id(session_id)?;
+    let _log_scope = crate::incognito::redact_logs_for(&session_id);
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());

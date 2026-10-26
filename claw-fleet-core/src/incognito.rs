@@ -117,6 +117,74 @@ pub fn current_is_incognito(session_id: Option<&str>) -> bool {
         || session_id.is_some_and(is_incognito)
 }
 
+// ── Debug log redaction ──────────────────────────────────────────────────────
+
+static PROCESS_LOG_OWNER: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+thread_local! {
+    static THREAD_LOG_OWNER: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn log_label(session_id: &str) -> String {
+    session_id.chars().take(8).collect()
+}
+
+/// Withhold every [`crate::log_debug`] message of this process from now on:
+/// it is working for incognito `session_id` alone (a watch timer, say). No-op
+/// for a regular session.
+pub fn redact_process_logs(session_id: &str) {
+    if is_incognito(session_id) {
+        if let Ok(mut owner) = PROCESS_LOG_OWNER.lock() {
+            *owner = Some(log_label(session_id));
+        }
+    }
+}
+
+/// While the guard lives, [`crate::log_debug`] on this thread withholds its
+/// message when `session_id` is incognito — for a shared process (the desktop,
+/// `fleet serve`) handling one session's work.
+pub fn redact_logs_for(session_id: &str) -> LogScope {
+    let prev = is_incognito(session_id).then(|| {
+        THREAD_LOG_OWNER.with(|o| o.borrow_mut().replace(log_label(session_id)))
+    });
+    LogScope { prev }
+}
+
+/// Guard of [`redact_logs_for`]; restores the previous scope on drop.
+pub struct LogScope {
+    /// `None` when the scope changed nothing.
+    prev: Option<Option<String>>,
+}
+
+impl Drop for LogScope {
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            THREAD_LOG_OWNER.with(|o| *o.borrow_mut() = prev);
+        }
+    }
+}
+
+/// Whose content a debug log line must not carry right now: the session the
+/// calling thread or process works for, when that is an incognito session.
+/// A process started by an incognito session inherits [`ENV`] and is covered
+/// without anyone calling [`redact_process_logs`].
+pub fn log_redaction() -> Option<String> {
+    if let Some(owner) = THREAD_LOG_OWNER.with(|o| o.borrow().clone()) {
+        return Some(owner);
+    }
+    if let Some(owner) = PROCESS_LOG_OWNER.lock().ok().and_then(|o| o.clone()) {
+        return Some(owner);
+    }
+    std::env::var_os(ENV).filter(|v| !v.is_empty()).map(|_| {
+        ["FLEET_SESSION_ID", "CLAUDE_CODE_SESSION_ID"]
+            .iter()
+            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+            .map(|sid| log_label(&sid))
+            .unwrap_or_else(|| "?".into())
+    })
+}
+
 /// The `CLAUDE_CONFIG_DIR` of an incognito session.
 pub fn config_dir(session_id: &str) -> Option<PathBuf> {
     record(session_id).map(|r| PathBuf::from(r.config_dir))
@@ -392,6 +460,15 @@ pub fn launch_session(args: &[String]) -> Option<String> {
         .filter(|r| is_incognito(r))
         .or(new.filter(|n| is_incognito(n)))
         .map(str::to_string)
+}
+
+/// Where an incognito launch's stderr goes instead of Fleet's shared
+/// `*_stderr.log` files: `<config dir>/fleet-stderr.log`, which lives and dies
+/// with the session. `None` for a regular launch.
+pub fn private_stderr_log(args: &[String]) -> Option<PathBuf> {
+    launch_session(args)
+        .and_then(|sid| config_dir(&sid))
+        .map(|d| d.join("fleet-stderr.log"))
 }
 
 /// The environment an incognito launch needs, or `None` for a regular launch.
@@ -1125,6 +1202,36 @@ mod tests {
         for s in ["plan", "history", "notes", "wiki", "agents", "agent", "search", "memory", "account", "handoff", "report"] {
             assert!(!cli_allows(s), "{s}");
         }
+    }
+
+    #[test]
+    fn log_lines_are_withheld_inside_an_incognito_scope_only() {
+        let h = home("logscope");
+        register_new("inc-log-1").unwrap();
+        assert_eq!(log_redaction(), None);
+        {
+            let _regular = redact_logs_for("regular-session");
+            assert_eq!(log_redaction(), None);
+            {
+                let _inc = redact_logs_for("inc-log-1");
+                assert_eq!(log_redaction().as_deref(), Some("inc-log-"));
+            }
+            assert_eq!(log_redaction(), None);
+        }
+        assert_eq!(log_redaction(), None);
+        let _ = fs::remove_dir_all(h.home());
+    }
+
+    #[test]
+    fn an_incognito_launch_keeps_its_stderr_in_its_config_dir() {
+        let h = home("stderr");
+        let dir = register_new("inc-err").unwrap();
+        assert_eq!(
+            private_stderr_log(&argv(&["--resume", "inc-err", "-p", "x"])),
+            Some(dir.join("fleet-stderr.log"))
+        );
+        assert_eq!(private_stderr_log(&argv(&["--resume", "regular", "-p", "x"])), None);
+        let _ = fs::remove_dir_all(h.home());
     }
 
     #[test]

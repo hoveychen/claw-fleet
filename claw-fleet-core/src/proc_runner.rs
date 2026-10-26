@@ -210,6 +210,42 @@ fn require_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Subdirectory of an incognito session's private config dir holding the
+/// procs it starts, so their command and output live and die with the session
+/// instead of sitting in the shared [`procs_dir`] that every client lists.
+const INCOGNITO_PROCS_SUBDIR: &str = "fleet-procs";
+
+/// The store for procs started on behalf of `owner`: its private dir when it
+/// is an incognito session, [`procs_dir`] otherwise. Created if missing.
+pub fn require_dir_for(owner: Option<&str>) -> Result<PathBuf, String> {
+    let Some(cfg) = owner.and_then(crate::incognito::config_dir) else {
+        return require_dir();
+    };
+    let dir = cfg.join(INCOGNITO_PROCS_SUBDIR);
+    fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Whether `dir` is an incognito session's private proc store.
+pub fn is_private_dir(dir: &Path) -> bool {
+    crate::incognito::is_incognito_path(dir)
+}
+
+/// The store holding proc `id`: the shared one, else whichever incognito
+/// session's private store has it. Falls back to the shared one, so a missing
+/// id reports "not found" as before.
+pub fn dir_of(id: &str) -> Result<PathBuf, String> {
+    let shared = require_dir()?;
+    if meta_path(&shared, id).is_file() {
+        return Ok(shared);
+    }
+    Ok(crate::incognito::all_config_dirs()
+        .into_iter()
+        .map(|d| d.join(INCOGNITO_PROCS_SUBDIR))
+        .find(|d| meta_path(d, id).is_file())
+        .unwrap_or(shared))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API — spawn / list / kill / io (callers: LocalBackend + hooks_server)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,12 +396,20 @@ pub fn spawn_proc_in(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("spawn proc host {}: {e}", host_exe.display()))?;
-    crate::log_debug(&format!(
-        "proc_runner: spawned host pid={} for proc {} ({})",
-        child.id(),
-        rec.id,
-        rec.command
-    ));
+    if is_private_dir(dir) {
+        crate::log_debug(&format!(
+            "proc_runner: spawned host pid={} for incognito proc {}",
+            child.id(),
+            rec.id
+        ));
+    } else {
+        crate::log_debug(&format!(
+            "proc_runner: spawned host pid={} for proc {} ({})",
+            child.id(),
+            rec.id,
+            rec.command
+        ));
+    }
     // Reap the direct child so it doesn't linger as a zombie; the host
     // keeps running detached regardless.
     std::thread::spawn(move || {
@@ -399,7 +443,7 @@ pub fn list_procs_in(dir: &Path) -> Vec<ProcRecord> {
 
 /// One proc's current record, self-healed like [`list_procs`] does.
 pub fn get_proc(id: &str) -> Result<ProcRecord, String> {
-    let dir = require_dir()?;
+    let dir = dir_of(id)?;
     get_proc_in(&dir, id)
 }
 
@@ -451,7 +495,7 @@ fn heal_stale(dir: &Path, rec: &mut ProcRecord) -> bool {
 /// Kill the command's whole process group (`killpg`), SIGTERM first with a 2s
 /// SIGKILL escalation, or SIGKILL straight away when `force`.
 pub fn kill_proc(id: &str, force: bool) -> Result<(), String> {
-    let dir = require_dir()?;
+    let dir = dir_of(id)?;
     kill_proc_in(&dir, id, force)
 }
 
@@ -501,7 +545,7 @@ pub fn kill_proc_in(dir: &Path, id: &str, force: bool) -> Result<(), String> {
 /// Incremental output read. `offset = None` tails: the first attach replays
 /// at most the last [`OUTPUT_CHUNK`] bytes instead of the whole log.
 pub fn proc_output(id: &str, offset: Option<u64>) -> Result<ProcOutputChunk, String> {
-    let dir = require_dir()?;
+    let dir = dir_of(id)?;
     proc_output_in(&dir, id, offset)
 }
 
@@ -543,7 +587,7 @@ pub fn proc_output_in(
 
 /// Forward raw stdin bytes (base64) to the command's pty.
 pub fn proc_input(id: &str, data_b64: &str) -> Result<(), String> {
-    let dir = require_dir()?;
+    let dir = dir_of(id)?;
     send_control(
         &dir,
         id,
@@ -555,7 +599,7 @@ pub fn proc_input(id: &str, data_b64: &str) -> Result<(), String> {
 
 /// Resize the command's pty.
 pub fn proc_resize(id: &str, cols: u16, rows: u16) -> Result<(), String> {
-    let dir = require_dir()?;
+    let dir = dir_of(id)?;
     send_control(&dir, id, &ControlMsg::Resize { cols, rows })
 }
 
@@ -601,7 +645,7 @@ fn send_control(dir: &Path, id: &str, msg: &ControlMsg) -> Result<(), String> {
 
 /// Remove one exited proc's registry files. Refuses while running.
 pub fn clear_proc(id: &str) -> Result<(), String> {
-    let dir = require_dir()?;
+    let dir = dir_of(id)?;
     clear_proc_in(&dir, id)
 }
 

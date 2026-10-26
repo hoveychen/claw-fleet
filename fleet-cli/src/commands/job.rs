@@ -11,10 +11,12 @@ use serde_json::json;
 pub(crate) fn cmd_job(action: JobCommands) {
     let args = match action {
         JobCommands::Done { id } => {
-            // The wake watch's condition: exit 0 once the job has exited.
+            // The wake watch's condition: exit 0 once the job has exited — or
+            // once its record is gone (cleared from a client, or an incognito
+            // job already collected by `wait`), since no exit is coming then.
             let done = claw_fleet_core::job::get(&id)
                 .map(|r| claw_fleet_core::job::is_done(&r))
-                .unwrap_or(false);
+                .unwrap_or(true);
             std::process::exit(if done { 0 } else { 1 });
         }
         JobCommands::Run { command, cwd, wake } => {
