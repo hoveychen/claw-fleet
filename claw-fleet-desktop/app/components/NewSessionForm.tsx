@@ -64,11 +64,6 @@ export interface NewSessionFormProps {
   /** The spawn invoke failed. The draft is untouched and the error is already
    *  set on the form, so the host only has to show the form again. */
   onLaunchFailed?: () => void;
-  /** Fired when the user backs out of the form without creating a session.
-   *  Omitted where the form is the pane's *resting* state rather than something
-   *  the user opened — an empty editor group — since there is nothing to back
-   *  out to. The close button is then hidden along with it. */
-  onCancel?: () => void;
 }
 
 function basename(p: string): string {
@@ -237,7 +232,6 @@ export function defaultWorkspace(
 
 export function NewSessionForm({
   onCreated,
-  onCancel,
   onLaunching,
   onLaunchFailed,
 }: NewSessionFormProps) {
@@ -785,20 +779,6 @@ export function NewSessionForm({
     <div className={styles.form}>
       <div className={styles.header}>
         <h3>{t("new_session.title")}</h3>
-        {onCancel && (
-          <button
-            type="button"
-            className={styles.close_btn}
-            onClick={() => {
-              clear();
-              onCancel();
-            }}
-            disabled={submitting}
-            aria-label={t("cancel")}
-          >
-            ×
-          </button>
-        )}
       </div>
 
       <ChatComposer

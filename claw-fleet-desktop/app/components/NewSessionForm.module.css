@@ -32,27 +32,6 @@
   color: var(--color-text);
 }
 
-.close_btn {
-  background: transparent;
-  border: none;
-  color: var(--color-text-dim);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: var(--radius-xs);
-}
-
-.close_btn:hover:not(:disabled) {
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-}
-
-.close_btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 /* Chat mode's switch — PillMenu's `ghost_pill` shape (it is exported for
    exactly this) with an accent-filled "on" state, so a mode reads as held down
    rather than as one more dropdown sitting in the context row.
