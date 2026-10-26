@@ -431,9 +431,14 @@ fn is_drainable(session: &crate::session::SessionInfo) -> bool {
 /// `spawn` runs, not after: the desktop tick can fire again within a second,
 /// before the freshly-spawned `claude` shows up as `proc_alive`, so a
 /// clear-after would risk a *second* resume on the same transcript — the one
-/// corruption this whole module exists to avoid. The trade-off is that a `spawn`
-/// failure loses the queued text (logged); a message the user can retype is the
-/// cheaper loss.
+/// corruption this whole module exists to avoid.
+///
+/// A resume the drive lease (or the retired-session gate) turns away started
+/// nothing, so its messages go back to the head of the queue and the next tick
+/// tries again — that refusal is exactly "someone else is driving, wait your
+/// turn". Any other `spawn` failure still loses the queued text (logged):
+/// retrying a spawn that cannot start would loop forever, and a message the
+/// user can retype is the cheaper loss.
 pub fn drain_if_idle<S>(session: &crate::session::SessionInfo, spawn: S)
 where
     S: FnOnce(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>) -> Result<(), String>,
@@ -526,15 +531,50 @@ where
         effort.as_deref(),
         None,
     ) {
-        crate::log_debug(&format!(
-            "pending_message: resume {} failed: {e} (queued text lost)",
-            session.id
-        ));
+        if is_refusal(&e) {
+            match requeue_at_head(&session.id, &q) {
+                Ok(()) => crate::log_debug(&format!(
+                    "pending_message: resume {} refused ({e}); {} msg(s) back in the queue",
+                    session.id,
+                    q.messages.len()
+                )),
+                Err(w) => crate::log_debug(&format!(
+                    "pending_message: resume {} refused ({e}) and requeue failed: {w} (queued text lost)",
+                    session.id
+                )),
+            }
+        } else {
+            crate::log_debug(&format!(
+                "pending_message: resume {} failed: {e} (queued text lost)",
+                session.id
+            ));
+        }
     }
     // The claim has done its job either way — a successful spawn owns the turn
-    // now, and a failed one already lost the text (see doc). Leaving the file
-    // behind would only be dead weight the next enqueue has to step around.
+    // now, a refused one is back in the queue file, and a failed one already
+    // lost the text (see doc). Leaving the file behind would only be dead
+    // weight the next enqueue has to step around.
     release_claim(&session.id);
+}
+
+/// Whether a resume error means "not now" rather than "cannot": the drive lease
+/// or the retired gate refused before any process was started.
+fn is_refusal(err: &str) -> bool {
+    err.starts_with("drive lease:") || err.starts_with(crate::agent_source::RETIRED_ERR_PREFIX)
+}
+
+/// Put a claimed queue back, ahead of anything enqueued while it was claimed,
+/// so delivery order stays the order the messages were sent in.
+fn requeue_at_head(session_id: &str, claimed: &PendingQueue) -> Result<(), String> {
+    let path = queue_path(session_id).ok_or("bad session id")?;
+    let mut q = claimed.clone();
+    if let Some(newer) = get(session_id) {
+        if !newer.workspace_path.trim().is_empty() {
+            q.workspace_path = newer.workspace_path;
+        }
+        q.messages.extend(newer.messages);
+    }
+    write_queue(&path, &q)
 }
 
 /// [`drain_if_idle`] with the real resume spawn wired in. This is what the
@@ -900,6 +940,62 @@ mod tests {
             assert_eq!(fired[0].0, "sess-idle");
             assert_eq!(fired[0].1, "first\n\nsecond", "messages joined in order");
             assert!(get("sess-idle").is_none(), "queue cleared after firing");
+        });
+    }
+
+    /// 2026-10-26, session 5c9b9a59: a watch event queued behind a stale drive
+    /// lease was claimed by the drain, refused by the same lease, and dropped.
+    /// A refusal starts nothing, so the text must survive for the next tick —
+    /// ahead of whatever arrived meanwhile — and be delivered exactly once.
+    #[test]
+    fn lease_refusal_requeues_and_next_drain_delivers_once() {
+        with_temp_home(|| {
+            let path = queue_path("sess-lease").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-lease".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["first".into(), "second".into()],
+                },
+            )
+            .unwrap();
+            let s = base_session("sess-lease", SessionStatus::WaitingInput, false);
+            drain_if_idle(&s, |sid, ws, _, _, _, _| {
+                // Another sender enqueues while the drain holds the claim.
+                append_to_queue(sid, ws, "newer").unwrap();
+                Err("drive lease: session is already being driven by watch".into())
+            });
+            let q = get("sess-lease").expect("refused drain must keep the queue");
+            assert_eq!(q.messages, vec!["first", "second", "newer"], "claimed messages go back first");
+            assert!(!claim_path("sess-lease").unwrap().exists(), "claim released");
+
+            let log = std::cell::RefCell::new(Vec::new());
+            drain_if_idle(&s, recording_spawn(&log));
+            drain_if_idle(&s, recording_spawn(&log));
+            let fired = log.borrow();
+            assert_eq!(fired.len(), 1, "delivered once, not once per tick");
+            assert_eq!(fired[0].1, "first\n\nsecond\n\nnewer");
+            assert!(get("sess-lease").is_none(), "queue cleared after delivery");
+        });
+    }
+
+    #[test]
+    fn non_refusal_spawn_failure_still_drops_the_queue() {
+        with_temp_home(|| {
+            let path = queue_path("sess-fail").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-fail".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["x".into()],
+                },
+            )
+            .unwrap();
+            let s = base_session("sess-fail", SessionStatus::WaitingInput, false);
+            drain_if_idle(&s, |_, _, _, _, _, _| Err("spawn claude: No such file".into()));
+            assert!(get("sess-fail").is_none(), "an unstartable spawn must not retry forever");
         });
     }
 

@@ -1776,9 +1776,13 @@ fn fire_in_with_defer(
 }
 
 /// Reanimate the session via its agent source, mirroring how auto-resume fires
-/// `claude --resume <id> -p <prompt>` — but untracked (no concurrency slot to
-/// free), so a no-op `on_exit`.
-fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
+/// `claude --resume <id> -p <prompt>`. `on_exit` fires when the resumed turn
+/// ends; the drive lease is released just before it, inside the same reaper.
+fn spawn_resume(
+    rec: &WatchRecord,
+    prompt: &str,
+    on_exit: Box<dyn FnOnce(bool) + Send>,
+) -> Result<(), String> {
     crate::agent_source::resume_session(
         rec.agent_source.as_deref().unwrap_or("claude"),
         &crate::agent_source::ResumeSpec {
@@ -1791,7 +1795,7 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
             images: Vec::new(),
         },
         crate::session_driver::Driver::continue_("watch"),
-        Box::new(|_| {}),
+        on_exit,
     )
 }
 
@@ -1800,8 +1804,12 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
 /// instead of losing it: the queue drain delivers it once the session is free.
 /// A retired session's event goes the same way, and `enqueue` re-addresses it
 /// to the session that took the work over.
-fn resume_or_queue(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
-    match spawn_resume(rec, prompt) {
+fn resume_or_queue(
+    rec: &WatchRecord,
+    prompt: &str,
+    on_exit: Box<dyn FnOnce(bool) + Send>,
+) -> Result<(), String> {
+    match spawn_resume(rec, prompt, on_exit) {
         Err(e) if e.starts_with("drive lease:") || e.starts_with(crate::agent_source::RETIRED_ERR_PREFIX) => {
             // `Agent`: the event is Fleet speaking, never the user's approval.
             let how = crate::pending_message::enqueue(
@@ -1871,9 +1879,22 @@ fn card_steps_aside(session_id: &str) -> bool {
                 && crate::claude_host::has_live_host(session_id)))
 }
 
+/// Fire the watch and, when it resumed the session, block until that turn
+/// ends.
+///
+/// The timer process is the drive-lease holder of the resume it starts, and the
+/// lease is released by the resume's reaper thread — which lives in this
+/// process. Returning right after the spawn (as this used to) let the process
+/// exit with the lease still on disk, where it counted as live for the whole
+/// [`crate::session_driver::SPAWN_GRACE_MS`] whatever the turn did. A second
+/// watch or a queued message arriving after a short resumed turn ended, but
+/// inside that window, was refused by a turn that no longer existed; the queue
+/// drain then dropped the text (seen 2026-10-26 on session 5c9b9a59). Waiting
+/// here frees the session the moment its turn really ends.
 fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, ClaimError> {
     let dir = watches_dir().ok_or(ClaimError::Gone)?;
-    fire_in_with_defer(
+    let (turn_done, turn_ended) = std::sync::mpsc::channel::<()>();
+    let fired = fire_in_with_defer(
         &dir,
         id,
         generation,
@@ -1881,8 +1902,27 @@ fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, 
         &capture_event,
         &defer_to_live_turn,
         &interrupt_if_live,
-        &|rec, prompt| resume_or_queue(rec, prompt),
-    )
+        &|rec, prompt| {
+            let done = turn_done.clone();
+            resume_or_queue(rec, prompt, Box::new(move |_| {
+                let _ = done.send(());
+            }))
+        },
+    );
+    drop(turn_done);
+    wait_for_resumed_turn(&turn_ended, id);
+    fired
+}
+
+/// Block until the resume started by [`fire_real`] ends. Returns at once when
+/// nothing was resumed: a refused or failed resume drops its `on_exit` unrun,
+/// which disconnects the channel. Bounded by the lease's own ceiling so a
+/// source that never reports the turn's end cannot pin the timer forever.
+fn wait_for_resumed_turn(turn_ended: &std::sync::mpsc::Receiver<()>, id: &str) {
+    let ceiling = std::time::Duration::from_millis(crate::session_driver::RUNNING_MAX_MS);
+    if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = turn_ended.recv_timeout(ceiling) {
+        crate::log_debug(&format!("watch {id}: resumed turn never reported its end; timer exiting"));
+    }
 }
 
 /// The blocking timer loop — the body of `fleet watch fire <id> <gen>`. Polls the
@@ -1971,7 +2011,10 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                         id,
                         generation,
                         &interrupt_if_live,
-                        &|rec, prompt| resume_or_queue(rec, prompt),
+                        // The timer keeps running after a check-in, so the
+                        // resume's reaper stays in this process and releases
+                        // the lease when that turn ends.
+                        &|rec, prompt| resume_or_queue(rec, prompt, Box::new(|_| {})),
                     ) {
                         crate::log_debug(&format!("watch {id}: check-in refused ({e})"));
                     }
@@ -2129,6 +2172,63 @@ fn arm_timer_with(fleet_bin: &str, rec: &WatchRecord) -> Result<u32, String> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// The timer process holds the drive lease of the resume it fires, and the
+    /// resume's reaper thread releases it. Before the fix the timer exited right
+    /// after the spawn, so the lease outlived the turn and refused the next
+    /// watch / queued message for the rest of the spawn grace (2026-10-26,
+    /// session 5c9b9a59). The timer now waits for the turn: once the wait
+    /// returns, the session must be free for the next driver.
+    #[test]
+    fn timer_wait_outlasts_the_resumed_turn_and_frees_its_lease() {
+        use crate::session_driver::{acquire, Driver};
+        let _home = crate::paths::fleet_home_guard_with(|| {
+            let d = std::env::temp_dir()
+                .join(format!("fleet-watch-lease-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
+            let _ = std::fs::create_dir_all(&d);
+            d
+        });
+        let sid = "sess-lease-wait";
+        let (turn_done, turn_ended) = std::sync::mpsc::channel::<()>();
+        // What `resume_session` builds: the lease rides inside the exit callback.
+        let lease = acquire(sid, Driver::continue_("watch"), None).expect("first resume granted");
+        let done = turn_done.clone();
+        let on_exit: Box<dyn FnOnce(bool) + Send> = Box::new(move |_| {
+            drop(lease);
+            let _ = done.send(());
+        });
+        drop(turn_done);
+        // The reaper: the turn runs for a while, then the process exits.
+        let reaper = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            on_exit(true);
+        });
+        assert!(
+            acquire(sid, Driver::answer("pending_message"), None).is_err(),
+            "while the turn runs, the session is taken"
+        );
+        let started = std::time::Instant::now();
+        wait_for_resumed_turn(&turn_ended, "w-lease");
+        assert!(started.elapsed() >= std::time::Duration::from_millis(200), "waited for the turn");
+        reaper.join().unwrap();
+        drop(acquire(sid, Driver::answer("pending_message"), None).expect("lease released at turn end"));
+    }
+
+    /// A refused or failed resume drops its `on_exit` unrun; the timer must not
+    /// wait on a turn that never started.
+    #[test]
+    fn timer_wait_returns_at_once_when_nothing_was_resumed() {
+        let (turn_done, turn_ended) = std::sync::mpsc::channel::<()>();
+        let done = turn_done.clone();
+        let on_exit: Box<dyn FnOnce(bool) + Send> = Box::new(move |_| {
+            let _ = done.send(());
+        });
+        drop(turn_done);
+        drop(on_exit);
+        let started = std::time::Instant::now();
+        wait_for_resumed_turn(&turn_ended, "w-none");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
