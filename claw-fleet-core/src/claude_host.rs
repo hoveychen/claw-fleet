@@ -345,6 +345,10 @@ const OP_AGENT: &str = "agent";
 /// it keeps working after the turn's first `result` closes stdin.
 pub const AGENT_MESSAGES_VIA_HOST: bool = cfg!(not(unix));
 
+/// Control op that ends claude when its turn is over and it is only waiting
+/// for background tasks. Refused while the model is working.
+const OP_END_IDLE: &str = "end_idle";
+
 /// Write `text` into `session_id`'s running turn as the user's own message.
 ///
 /// `Err` whenever there is no live host for the session or its turn is over;
@@ -363,6 +367,22 @@ pub fn send_user_message(session_id: &str, text: &str) -> Result<Reply, String> 
 pub fn send_agent_message(session_id: &str, text: &str) -> Result<Reply, String> {
     let dir = registry_dir().ok_or("no fleet dir")?;
     send_in(&dir, session_id, OP_AGENT, &crate::live_inject::frame_as_agent(text))
+}
+
+/// End `session_id`'s claude if its turn already produced its `result` and
+/// the CLI is only waiting for background tasks to finish.
+///
+/// That wait has no ceiling in Fleet sessions, so a background command that
+/// never exits (a log stream, a dev server) keeps the process — and with it
+/// the session's drive lease — alive for as long as the command's own
+/// timeout, while nothing visibly happens. On SIGTERM the CLI marks its
+/// background tasks killed and exits within seconds (measured on 2.1.310).
+///
+/// `Err` when there is no live host, the turn is still working, or the host
+/// predates this op ("unknown op").
+pub fn end_idle_turn(session_id: &str) -> Result<(), String> {
+    let dir = registry_dir().ok_or("no fleet dir")?;
+    send_in(&dir, session_id, OP_END_IDLE, "").map(|_| ())
 }
 
 /// Whether `session_id` has a live host right now — the host-side analogue
@@ -531,13 +551,17 @@ enum Event {
     /// boundary, which is where it absorbs queued input.
     ToolResults(Vec<String>),
     Result,
+    /// The model is working: a token delta, an assistant row, an API retry.
+    /// After a `result` this means a background task woke the agent for
+    /// another round, so the turn is no longer idle.
+    Activity,
     Other,
 }
 
 fn classify(line: &str) -> Event {
-    // The bulk of the stream is token deltas; skip them without parsing.
+    // The bulk of the stream is token deltas; classify them without parsing.
     if line.starts_with(r#"{"type":"stream_event""#) {
-        return Event::Other;
+        return Event::Activity;
     }
     let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
         return Event::Other;
@@ -585,6 +609,7 @@ fn classify(line: &str) -> Event {
             }
         }
         (Some("result"), _) => Event::Result,
+        (Some("assistant"), _) | (Some("system"), Some("api_retry")) => Event::Activity,
         _ => Event::Other,
     }
 }
@@ -612,6 +637,10 @@ struct Turn {
     awaiting_boundary: bool,
     /// The first `result` has been seen and stdin closed.
     over: bool,
+    /// The last thing the CLI reported was a `result`: it is only waiting for
+    /// background tasks (with Fleet's unlimited wait ceiling, possibly for
+    /// hours) and nothing would be lost by ending it.
+    idle: bool,
 }
 
 impl Turn {
@@ -630,6 +659,7 @@ impl Turn {
     fn on_event(&mut self, ev: Event, now: std::time::Instant) -> (Vec<BgOrder>, bool) {
         match ev {
             Event::TaskStarted { task_id, tool_use_id, foreground: true } if !tool_use_id.is_empty() => {
+                self.idle = false;
                 let f = Foreground { task_id, tool_use_id, started: now };
                 let orders = if self.awaiting_boundary { vec![Self::order_for(&f, now)] } else { vec![] };
                 self.foreground.push(f);
@@ -640,15 +670,25 @@ impl Turn {
                 (vec![], false)
             }
             Event::ToolResults(ids) => {
+                self.idle = false;
                 self.foreground.retain(|f| !ids.contains(&f.tool_use_id));
                 self.awaiting_boundary = false;
                 (vec![], false)
             }
             Event::Result if !self.over => {
                 self.over = true;
+                self.idle = true;
                 self.foreground.clear();
                 self.awaiting_boundary = false;
                 (vec![], true)
+            }
+            Event::Result => {
+                self.idle = true;
+                (vec![], false)
+            }
+            Event::Activity => {
+                self.idle = false;
+                (vec![], false)
             }
             _ => (vec![], false),
         }
@@ -687,6 +727,7 @@ mod host {
 
     struct Shared {
         turn: Turn,
+        claude_pid: u32,
         stdin: Option<ChildStdin>,
         next_request: u64,
     }
@@ -789,6 +830,20 @@ mod host {
 
     fn handle(state: &State, req: &Request) -> Reply {
         let fail = |e: String| Reply { ok: false, error: Some(e), backgrounded: vec![] };
+        if req.op == OP_END_IDLE {
+            let shared = state.lock().unwrap_or_else(|e| e.into_inner());
+            if !shared.turn.idle {
+                return fail("turn is still working".into());
+            }
+            // Under the lock, so a wake-up cannot slip in between the check and
+            // the signal. The tree, not just claude: its background commands are
+            // what kept it alive.
+            eprintln!("[fleet-claude-host] end_idle: terminating claude {}", shared.claude_pid);
+            return match crate::session::kill_pid_tree(shared.claude_pid, false) {
+                Ok(()) => Reply { ok: true, error: None, backgrounded: vec![] },
+                Err(e) => fail(e),
+            };
+        }
         let from_user = match req.op.as_str() {
             OP_USER => true,
             OP_AGENT => false,
@@ -869,6 +924,7 @@ mod host {
 
         let state: State = Arc::new(Mutex::new(Shared {
             turn: Turn::default(),
+            claude_pid,
             stdin: Some(stdin),
             next_request: 0,
         }));
@@ -1040,7 +1096,6 @@ mod tests {
         let result_row = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}"#;
         assert_eq!(classify(result_row), Event::ToolResults(vec!["toolu_1".into()]));
         assert_eq!(classify(r#"{"type":"result","subtype":"success"}"#), Event::Result);
-        assert_eq!(classify(r#"{"type":"stream_event","event":{}}"#), Event::Other);
         assert_eq!(classify(r#"{"type":"user","message":{"role":"user","content":"hi"}}"#), Event::Other);
         assert_eq!(classify("not json"), Event::Other);
     }
@@ -1094,6 +1149,34 @@ mod tests {
         assert_eq!(turn.on_event(Event::Result, t0), (vec![], true));
         assert!(!turn.still_due("a"));
         assert_eq!(turn.on_event(Event::Result, t0), (vec![], false));
+    }
+
+    #[test]
+    fn idle_from_a_result_until_the_model_works_again() {
+        let t0 = Instant::now();
+        let mut turn = Turn::default();
+        assert!(!turn.idle, "a turn that has not finished is not idle");
+        turn.on_event(Event::Activity, t0);
+        turn.on_event(Event::Result, t0);
+        assert!(turn.idle);
+        // A background task finishing does not wake the model by itself.
+        turn.on_event(Event::TaskReleased { task_id: "b".into() }, t0);
+        assert!(turn.idle);
+        // Its notification woke the agent for another round.
+        turn.on_event(Event::Activity, t0);
+        assert!(!turn.idle);
+        turn.on_event(Event::Result, t0);
+        assert!(turn.idle, "every result, not only the first, ends the work");
+        turn.on_event(started("c"), t0);
+        assert!(!turn.idle);
+    }
+
+    #[test]
+    fn model_output_and_api_retries_are_activity() {
+        assert_eq!(classify(r#"{"type":"stream_event","event":{}}"#), Event::Activity);
+        assert_eq!(classify(r#"{"type":"assistant","message":{"content":[]}}"#), Event::Activity);
+        assert_eq!(classify(r#"{"type":"system","subtype":"api_retry","attempt":2}"#), Event::Activity);
+        assert_eq!(classify(r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#), Event::Other);
     }
 
     #[test]
