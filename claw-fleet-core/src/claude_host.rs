@@ -84,6 +84,26 @@ pub fn register_host_exe(exe: PathBuf) {
     let _ = HOST_EXE.set(exe);
 }
 
+/// The binary the desktop app should register as its host: itself, except on
+/// Windows, where it is the `fleet` CLI shipped beside it when there is one.
+///
+/// Tauri's NSIS installer (`CheckIfAppIsRunning "${MAINBINARYNAME}.exe"` in
+/// tauri-bundler's `installer.nsi`, used by both the Install and Uninstall
+/// sections) looks up every process named after the app's main binary and
+/// `TerminateProcess`es all of them. A host running as that exe would be
+/// killed mid-turn by every update. The sidecar is only copied over, never
+/// looked up by name. A running sidecar makes that copy fail rather than kill
+/// anything — and every running Fleet turn already holds it as its `fleet mcp`
+/// server, so hosting turns on it adds no new case.
+pub fn desktop_host_exe(current_exe: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        if let Some(fleet) = current_exe.parent().and_then(crate::fleet_cli::sidecar_in) {
+            return fleet;
+        }
+    }
+    current_exe
+}
+
 /// What the host needs to start the turn. Crosses a process boundary as JSON.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct HostSpec {
@@ -310,16 +330,48 @@ pub struct Reply {
     pub backgrounded: Vec<String>,
 }
 
+/// Control op for a message the user typed: delivered as their own words, and
+/// it backgrounds whatever foreground task blocks the next tool boundary.
+const OP_USER: &str = "user";
+
+/// Control op for a message from another agent (`Sender::Agent`): delivered in
+/// Fleet's peer frame and absorbed at the next tool boundary on its own, the
+/// way the CLI socket delivers it — no task is backgrounded for it.
+const OP_AGENT: &str = "agent";
+
+/// Whether agent messages go through the host. Only where the CLI's own
+/// socket ([`crate::live_inject`]) is unavailable, i.e. Windows: on unix the
+/// socket already delivers them with a real peer origin, and unlike the host
+/// it keeps working after the turn's first `result` closes stdin.
+pub const AGENT_MESSAGES_VIA_HOST: bool = cfg!(not(unix));
+
 /// Write `text` into `session_id`'s running turn as the user's own message.
 ///
 /// `Err` whenever there is no live host for the session or its turn is over;
 /// the caller falls back to the socket injection / the queue.
 pub fn send_user_message(session_id: &str, text: &str) -> Result<Reply, String> {
     let dir = registry_dir().ok_or("no fleet dir")?;
-    send_user_message_in(&dir, session_id, text)
+    send_in(&dir, session_id, OP_USER, text)
 }
 
-fn send_user_message_in(dir: &Path, session_id: &str, text: &str) -> Result<Reply, String> {
+/// Write another agent's `text` into `session_id`'s running turn, wrapped in
+/// [`crate::live_inject::frame_as_agent`] so neither the receiving model nor
+/// the transcript readers take it for the user's words.
+///
+/// `Err` as for [`send_user_message`]; a host from before this op existed
+/// answers "unknown op", which the caller treats like any other miss.
+pub fn send_agent_message(session_id: &str, text: &str) -> Result<Reply, String> {
+    let dir = registry_dir().ok_or("no fleet dir")?;
+    send_in(&dir, session_id, OP_AGENT, &crate::live_inject::frame_as_agent(text))
+}
+
+/// Whether `session_id` has a live host right now — the host-side analogue
+/// of [`crate::live_inject::can_inject`].
+pub fn has_live_host(session_id: &str) -> bool {
+    registry_dir().is_some_and(|dir| live_record(&dir, session_id).is_ok())
+}
+
+fn live_record(dir: &Path, session_id: &str) -> Result<HostRecord, String> {
     let raw = std::fs::read_to_string(record_path(dir, session_id))
         .map_err(|_| "no claude host for this session".to_string())?;
     let rec: HostRecord = serde_json::from_str(&raw).map_err(|e| format!("host record: {e}"))?;
@@ -328,9 +380,14 @@ fn send_user_message_in(dir: &Path, session_id: &str, text: &str) -> Result<Repl
     {
         return Err("claude host is gone".into());
     }
+    Ok(rec)
+}
+
+fn send_in(dir: &Path, session_id: &str, op: &str, text: &str) -> Result<Reply, String> {
+    let rec = live_record(dir, session_id)?;
     let reply = match &rec.ctl {
-        Some(ctl) => file_request(ctl, text)?,
-        None => socket_request(&rec.sock, text)?,
+        Some(ctl) => file_request(ctl, op, text)?,
+        None => socket_request(&rec.sock, op, text)?,
     };
     if reply.ok {
         Ok(reply)
@@ -340,14 +397,14 @@ fn send_user_message_in(dir: &Path, session_id: &str, text: &str) -> Result<Repl
 }
 
 #[cfg(unix)]
-fn socket_request(sock: &Path, text: &str) -> Result<Reply, String> {
+fn socket_request(sock: &Path, op: &str, text: &str) -> Result<Reply, String> {
     use std::io::{BufRead, Write};
 
     let stream = std::os::unix::net::UnixStream::connect(sock)
         .map_err(|e| format!("connect claude host: {e}"))?;
     stream.set_read_timeout(Some(CLIENT_TIMEOUT)).ok();
     stream.set_write_timeout(Some(CLIENT_TIMEOUT)).ok();
-    let mut req = serde_json::to_string(&serde_json::json!({"op": "user", "text": text}))
+    let mut req = serde_json::to_string(&serde_json::json!({"op": op, "text": text}))
         .map_err(|e| e.to_string())?;
     req.push('\n');
     (&stream)
@@ -361,7 +418,7 @@ fn socket_request(sock: &Path, text: &str) -> Result<Reply, String> {
 }
 
 #[cfg(not(unix))]
-fn socket_request(_sock: &Path, _text: &str) -> Result<Reply, String> {
+fn socket_request(_sock: &Path, _op: &str, _text: &str) -> Result<Reply, String> {
     Err("claude host record names no control file".into())
 }
 
@@ -393,12 +450,12 @@ fn new_request_id() -> String {
 
 /// Client side of the control-file transport: append one request line, then
 /// wait for the host to rename its answer into place.
-fn file_request(ctl: &Path, text: &str) -> Result<Reply, String> {
+fn file_request(ctl: &Path, op: &str, text: &str) -> Result<Reply, String> {
     use std::io::Write;
 
     let id = new_request_id();
     let req = Request {
-        op: "user".into(),
+        op: op.into(),
         text: text.into(),
         id: Some(id.clone()),
         sent_ms: Some(now_ms()),
@@ -732,9 +789,11 @@ mod host {
 
     fn handle(state: &State, req: &Request) -> Reply {
         let fail = |e: String| Reply { ok: false, error: Some(e), backgrounded: vec![] };
-        if req.op != "user" {
-            return fail("unknown op".into());
-        }
+        let from_user = match req.op.as_str() {
+            OP_USER => true,
+            OP_AGENT => false,
+            _ => return fail("unknown op".into()),
+        };
         if req.text.trim().is_empty() {
             return fail("empty text".into());
         }
@@ -746,10 +805,16 @@ mod host {
             if let Err(e) = write_stdin(&mut shared, &user_line(&req.text)) {
                 return fail(e);
             }
-            shared.turn.on_user_message(std::time::Instant::now())
+            // An agent message waits for the next tool boundary like a socket
+            // delivery does; only the user's words cut a running task short.
+            if from_user {
+                shared.turn.on_user_message(std::time::Instant::now())
+            } else {
+                Vec::new()
+            }
         };
         let backgrounded = orders.iter().map(|o| o.tool_use_id.clone()).collect();
-        eprintln!("[fleet-claude-host] user message delivered, background {backgrounded:?}");
+        eprintln!("[fleet-claude-host] {} message delivered, background {backgrounded:?}", req.op);
         dispatch(state, orders);
         Reply { ok: true, error: None, backgrounded }
     }
@@ -1092,9 +1157,9 @@ mod tests {
         // Two clients at once: each gets its own answer.
         let c1 = {
             let ctl = ctl.clone();
-            std::thread::spawn(move || file_request(&ctl, "one"))
+            std::thread::spawn(move || file_request(&ctl, OP_USER, "one"))
         };
-        let r2 = file_request(&ctl, "two").unwrap();
+        let r2 = file_request(&ctl, OP_USER, "two").unwrap();
         let r1 = c1.join().unwrap().unwrap();
         assert_eq!(r1.backgrounded, vec!["bg-one".to_string()]);
         assert_eq!(r2.backgrounded, vec!["bg-two".to_string()]);
@@ -1129,7 +1194,7 @@ mod tests {
 
         std::fs::remove_file(&ctl).unwrap();
         server.join().unwrap();
-        assert!(file_request(&ctl, "gone").is_err(), "no control file, no host");
+        assert!(file_request(&ctl, OP_USER, "gone").is_err(), "no control file, no host");
     }
 
     /// The whole host against a fake CLI: prompt in on stdin, a foreground
@@ -1178,7 +1243,7 @@ exit 3
         }
         let rec: HostRecord = serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
         assert_eq!(rec.ctl.is_some(), file_transport);
-        let reply = send_user_message_in(&registry, "sess-1", "stop that").unwrap();
+        let reply = send_in(&registry, "sess-1", OP_USER, "stop that").unwrap();
         assert!(reply.ok);
 
         assert_eq!(host.join().unwrap().unwrap(), 3, "host exits with claude's code");
@@ -1198,7 +1263,7 @@ exit 3
         assert!(!record.exists());
         let left: Vec<_> = std::fs::read_dir(&registry).unwrap().flatten().map(|e| e.file_name()).collect();
         assert!(left.is_empty(), "{left:?}");
-        assert!(send_user_message_in(&registry, "sess-1", "late").is_err());
+        assert!(send_in(&registry, "sess-1", OP_USER, "late").is_err());
         // The sidecar carries the CLI's stdout.
         let side = std::fs::read_dir(&sidecars).unwrap().flatten().next().unwrap().path();
         assert!(std::fs::read_to_string(side).unwrap().contains("task_started"));
@@ -1214,5 +1279,64 @@ exit 3
     #[test]
     fn host_runs_a_turn_over_the_control_file() {
         host_runs_a_turn(true);
+    }
+
+    /// The Windows agent path, over the control file: the message reaches
+    /// stdin in Fleet's peer frame and no `background_tasks` follows, even
+    /// with a foreground task running well past the grace window.
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_message_is_framed_and_backgrounds_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("stdin.log");
+        let script = dir.path().join("fake-claude.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+read -r prompt; echo "$prompt" > "$1"
+echo '{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"toolu_1","is_backgrounded":false}'
+read -r msg; printf '%s\n' "$msg" >> "$1"
+sleep 3
+echo '{"type":"result","subtype":"success"}'
+while read -r rest; do printf '%s\n' "$rest" >> "$1"; done
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let registry = dir.path().join("hosts");
+        let spec = HostSpec {
+            claude_path: script.to_string_lossy().into_owned(),
+            args: vec![log.to_string_lossy().into_owned()],
+            cwd: dir.path().to_string_lossy().into_owned(),
+            prompt: "opening".into(),
+            session_id: "sess-a".into(),
+            sidecar_dir: None,
+            registry_dir: registry.clone(),
+        };
+        let host = std::thread::spawn(move || host::run_spec(&spec, true));
+        let record = record_path(&registry, "sess-a");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !record.exists() {
+            assert!(std::time::Instant::now() < deadline, "host never registered");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Let the task_started line reach the host before the message.
+        std::thread::sleep(Duration::from_millis(300));
+        let framed = crate::live_inject::frame_as_agent("watch fired");
+        let reply = send_in(&registry, "sess-a", OP_AGENT, &framed).unwrap();
+        assert!(reply.ok && reply.backgrounded.is_empty(), "{reply:?}");
+
+        assert_eq!(host.join().unwrap().unwrap(), 0);
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2, "nothing but the prompt and the message: {lines:?}");
+        assert_eq!(lines[1]["type"], "user");
+        let text = lines[1]["message"]["content"].as_str().unwrap();
+        assert_eq!(crate::live_inject::strip_agent_frame(text), Some("watch fired"));
     }
 }

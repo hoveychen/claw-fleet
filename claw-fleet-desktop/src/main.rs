@@ -16,7 +16,9 @@ fn main() {
             claw_fleet_core::claude_host::host_main();
         }
         if let Ok(exe) = std::env::current_exe() {
-            claw_fleet_core::claude_host::register_host_exe(exe);
+            claw_fleet_core::claude_host::register_host_exe(
+                claw_fleet_core::claude_host::desktop_host_exe(exe),
+            );
         }
     }
 

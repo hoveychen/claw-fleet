@@ -56,8 +56,14 @@ pub fn unfold(message: &mut Value) {
     // Fleet signs the messages it injects on the user's behalf, to undo the
     // CLI's "not typed by your user" framing (see `live_inject::USER_SIGNATURE`).
     // That line is addressed to the agent, not to the reader — the bubble shows
-    // what the user actually typed.
-    let prompt = crate::live_inject::strip_user_signature(prompt.trim_end()).to_string();
+    // what the user actually typed. An agent message that came in over stdin
+    // carries Fleet's own peer frame instead; dropping it leaves the same row
+    // the socket path produces, so the clients' mail / event classifiers see
+    // the body exactly as they do on unix.
+    let prompt = match crate::live_inject::strip_agent_frame(prompt) {
+        Some(body) => body.to_string(),
+        None => crate::live_inject::strip_user_signature(prompt.trim_end()).to_string(),
+    };
     if prompt.trim().is_empty() {
         return;
     }
@@ -111,6 +117,7 @@ const PEER_TURN_HEADER: &str = "Another Claude session sent a message:\n";
 /// Only rows carrying Fleet's user signature are rewritten. A real peer
 /// session's `SendMessage` is not the user speaking and stays folded.
 fn unfold_peer_turn(message: &mut Value) {
+    unframe_agent_turn(message);
     if message.get("isMeta").and_then(Value::as_bool) != Some(true)
         || message["origin"].get("kind").and_then(Value::as_str) != Some("peer")
     {
@@ -157,6 +164,36 @@ fn unfold_peer_turn(message: &mut Value) {
     obj.insert("message".into(), json!({"role": "user", "content": blocks}));
     // A turn opener, not a mid-turn delivery, so no `fleetMidTurn`.
     obj.remove("isMeta");
+}
+
+/// Drop Fleet's agent frame from a plain `user` row's text blocks.
+///
+/// An agent message written to a turn's stdin is normally absorbed mid-turn as
+/// a `queued_command` (handled by [`unfold`]); one that lands as the row of a
+/// user turn instead keeps the frame in its text, which would otherwise show
+/// up verbatim in the bubble and hide a mail footer or event header from the
+/// classifiers that key on how the body starts.
+fn unframe_agent_turn(message: &mut Value) {
+    let Some(blocks) = message["message"]["content"].as_array_mut() else {
+        if let Some(body) = message["message"]["content"]
+            .as_str()
+            .and_then(crate::live_inject::strip_agent_frame)
+            .map(str::to_string)
+        {
+            message["message"]["content"] = json!(body);
+        }
+        return;
+    };
+    for block in blocks.iter_mut() {
+        if let Some(body) = block
+            .get("text")
+            .and_then(Value::as_str)
+            .and_then(crate::live_inject::strip_agent_frame)
+            .map(str::to_string)
+        {
+            block["text"] = json!(body);
+        }
+    }
 }
 
 /// Surface a message Fleet injected on the user's behalf that the agent has
@@ -313,6 +350,45 @@ mod tests {
         assert_eq!(msg["type"], "user");
         assert_eq!(msg["message"]["content"][0]["text"], "stop and check the logs");
         assert_eq!(msg["fleetMidTurn"], true);
+    }
+
+    /// The Windows path for `Sender::Agent`: written to stdin in Fleet's peer
+    /// frame, absorbed as an origin-less prompt row. It must come out as the
+    /// same row the socket path yields — body only — so a mail footer still
+    /// becomes a mail card and a watch prompt still becomes an event card.
+    #[test]
+    fn a_framed_agent_message_from_stdin_unfolds_like_a_socket_peer() {
+        let body = "你注册的 Fleet watch `w1` 触发了——等待的条件已满足。\n\n---\n（这是 Fleet watch 在后台轮询到条件后自动 resume 本会话的，不是用户消息。）";
+        let framed = crate::live_inject::frame_as_agent(body);
+        let mut socket_row = row(json!({"kind": "peer", "from": "unknown"}), body);
+        let mut stdin_row = socket_row.clone();
+        stdin_row["attachment"] =
+            json!({"type": "queued_command", "prompt": framed, "commandMode": "prompt"});
+        unfold(&mut stdin_row);
+        unfold(&mut socket_row);
+        assert_eq!(stdin_row["message"], socket_row["message"]);
+        assert_eq!(stdin_row["fleetMidTurn"], true);
+
+        // And through the event classifier the clients rely on.
+        crate::fleet_event::annotate(&mut stdin_row);
+        crate::fleet_event::annotate(&mut socket_row);
+        assert_eq!(stdin_row["fleetEvent"]["kind"], "watch");
+        assert_eq!(stdin_row, socket_row);
+    }
+
+    #[test]
+    fn a_framed_agent_message_that_opens_a_turn_loses_its_frame() {
+        let framed = crate::live_inject::frame_as_agent("mail body");
+        for content in [json!(framed.clone()), json!([{"type": "text", "text": framed}])] {
+            let mut msg = json!({"type": "user", "message": {"role": "user", "content": content}});
+            unfold(&mut msg);
+            let text = msg["message"]["content"]
+                .as_str()
+                .or_else(|| msg["message"]["content"][0]["text"].as_str())
+                .unwrap()
+                .to_string();
+            assert_eq!(text, "mail body");
+        }
     }
 
     #[test]

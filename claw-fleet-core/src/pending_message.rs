@@ -282,6 +282,16 @@ pub fn enqueue(
         crate::ask_preempt::touch_inbox(session_id, sender);
         return Ok(Delivery::Injected);
     }
+    // Windows has no socket path, so another agent's message goes through the
+    // turn's stdin holder instead, in Fleet's own peer frame and without
+    // backgrounding anything — the same semantics the socket gives it on unix.
+    if sender == Sender::Agent
+        && crate::claude_host::AGENT_MESSAGES_VIA_HOST
+        && crate::claude_host::send_agent_message(session_id, text).is_ok()
+    {
+        crate::ask_preempt::touch_inbox(session_id, sender);
+        return Ok(Delivery::Injected);
+    }
     append_to_queue(session_id, workspace_path, text).map(|()| Delivery::Queued)
 }
 

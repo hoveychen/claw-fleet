@@ -37,7 +37,7 @@ pub fn fleet_bin_dir() -> Option<PathBuf> {
 /// The CLI as shipped in `exe_dir`, if it is there at all. A `cargo run` of the
 /// desktop app has no sidecar beside it, which is why callers treat a missing
 /// one as "nothing to publish" rather than an error.
-fn sidecar_in(exe_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn sidecar_in(exe_dir: &Path) -> Option<PathBuf> {
     SIDECAR_NAMES
         .iter()
         .map(|n| exe_dir.join(n))
