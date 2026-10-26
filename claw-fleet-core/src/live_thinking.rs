@@ -159,7 +159,7 @@ fn parse_sidecar(path: &Path, want_session: &str) -> Option<LiveThinking> {
 
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
-            "result" | "message_stop" => saw_result = true,
+            "result" => saw_result = true,
             "stream_event" => {
                 let event = match v.get("event") {
                     Some(e) => e,
@@ -173,6 +173,13 @@ fn parse_sidecar(path: &Path, want_session: &str) -> Option<LiveThinking> {
                         last_thinking_index = None;
                         saw_result = false;
                     }
+                    // The assistant message is complete, so its reasoning is no
+                    // longer streaming: from here until the next `message_start`
+                    // the agent is running tools. stream-json only emits
+                    // `message_stop` nested inside a `stream_event`, never at the
+                    // top level, so without this arm a tool call kept reporting
+                    // `streaming` and the stale block hid the working indicator.
+                    "message_stop" => saw_result = true,
                     "content_block_start" => {
                         let idx = event.get("index").and_then(|i| i.as_i64()).unwrap_or(0);
                         let is_thinking = event
@@ -374,6 +381,27 @@ mod tests {
             parse_sidecar(&path, "stale").is_none(),
             "sidecar older than the grace window must be skipped without parsing"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn nested_message_stop_ends_streaming_until_next_message() {
+        let tmp = std::env::temp_dir().join(format!("lt-test4-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let head = [
+            r#"{"type":"stream_event","event":{"type":"message_start"},"session_id":"m"}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}},"session_id":"m"}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}},"session_id":"m"}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"},"session_id":"m"}"#,
+        ];
+        let path = write_sidecar(&tmp, "pid-4.jsonl", &head);
+        let lt = parse_sidecar(&path, "m").unwrap();
+        assert!(!lt.streaming, "a finished message (tool running) is not streaming");
+
+        let mut resumed = head.to_vec();
+        resumed.push(r#"{"type":"stream_event","event":{"type":"message_start"},"session_id":"m"}"#);
+        let path = write_sidecar(&tmp, "pid-4.jsonl", &resumed);
+        assert!(parse_sidecar(&path, "m").unwrap().streaming, "next message streams again");
         let _ = std::fs::remove_file(&path);
     }
 
