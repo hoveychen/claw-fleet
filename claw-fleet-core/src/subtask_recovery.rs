@@ -524,8 +524,10 @@ fn refusal(class: RecoveryClass) -> &'static str {
         }
         RecoveryClass::Running => "a turn is in flight (or about to start) — nothing to recover",
         RecoveryClass::Blocked => {
-            "Fleet is still retrying it by itself (rate limit / server error), or the failure is \
-             too recent to call — leave it to the scheduler"
+            "it is NOT dead — Fleet is still retrying it by itself (rate limit / server error, \
+             including a transient 403 \"Request not allowed\" or an expired OAuth session), or \
+             the failure is too recent to call. Do not spawn a replacement: it would run the same \
+             work twice once the retry succeeds. Wait for it with fleet__watch (sessions=[<id>])"
         }
         RecoveryClass::Parked => "it is waiting for the boss on a decision card",
         RecoveryClass::UserInterrupted => {
@@ -812,6 +814,11 @@ mod tests {
             assert!(!refusal(c).is_empty(), "{c:?}");
         }
         assert!(refusal(RecoveryClass::Done).contains("never woken"));
+        // An orchestrator read a Blocked refusal on a transient 403 as "dead" and
+        // spawned duplicates of three sub-tasks Fleet revived minutes later.
+        let blocked = refusal(RecoveryClass::Blocked);
+        assert!(blocked.contains("NOT dead") && blocked.contains("Do not spawn a replacement"));
+        assert!(blocked.contains("fleet__watch"));
     }
 
     fn s(v: &str) -> String {
