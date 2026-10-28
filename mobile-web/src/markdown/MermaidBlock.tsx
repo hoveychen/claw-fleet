@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SkeletonCard } from "../views/loading";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
@@ -6,6 +6,27 @@ import { applyDiagramWidth } from "./mermaidFit";
 import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 
 let seq = 0;
+
+/**
+ * Finished SVGs keyed by theme + source, so a remount paints synchronously
+ * instead of flashing the skeleton (and shifting the prose below) while
+ * mermaid re-renders. Same fix as the desktop MermaidBlock.
+ */
+const svgCache = new Map<string, string>();
+const SVG_CACHE_MAX = 64;
+
+function cacheKey(theme: MermaidMode, code: string): string {
+  return `${theme}\u0000${code}`;
+}
+
+function rememberSvg(key: string, svg: string): void {
+  svgCache.delete(key);
+  svgCache.set(key, svg);
+  if (svgCache.size > SVG_CACHE_MAX) {
+    const oldest = svgCache.keys().next().value;
+    if (oldest !== undefined) svgCache.delete(oldest);
+  }
+}
 
 /** `theme.ts` always stamps `html[data-theme]`; if absent, dark mode is assumed. */
 function currentTheme(): MermaidMode {
@@ -20,10 +41,16 @@ function currentTheme(): MermaidMode {
  * A diagram that fails to parse shows its source instead of blanking the message.
  */
 export function MermaidBlock({ code }: { code: string }) {
-  const [svg, setSvg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState(currentTheme);
+  const [svg, setSvg] = useState<string | null>(
+    () => svgCache.get(cacheKey(theme, code)) ?? null,
+  );
+  const [error, setError] = useState<string | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  // One object per SVG string: React 19 rewrites innerHTML whenever this prop
+  // object is new, which swapped in a fresh <svg> on every parent re-render and
+  // dropped the width applyDiagramWidth had pinned on the old one.
+  const html = useMemo(() => (svg === null ? null : { __html: svg }), [svg]);
 
   useEffect(() => {
     const obs = new MutationObserver(() => setTheme(currentTheme()));
@@ -35,6 +62,13 @@ export function MermaidBlock({ code }: { code: string }) {
   }, []);
 
   useEffect(() => {
+    const key = cacheKey(theme, code);
+    const cached = svgCache.get(key);
+    if (cached !== undefined) {
+      setSvg(cached);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -53,7 +87,9 @@ export function MermaidBlock({ code }: { code: string }) {
         // Contrast self-healing baked into the SVG string: diagrams hard-coded with
         // dark-mode `style X fill:#4a3728` would show labels in theme color #333 under
         // light mode, resulting in dark text on dark background (see mermaidContrast).
-        setSvg(repairMermaidContrastInSvg(svg));
+        const repaired = repairMermaidContrastInSvg(svg);
+        rememberSvg(key, repaired);
+        setSvg(repaired);
         setError(null);
       } catch (e) {
         if (cancelled) return;
@@ -110,7 +146,7 @@ export function MermaidBlock({ code }: { code: string }) {
       ref={hostRef}
       className={styles.diagram}
       // Trusted: mermaid's own strict-mode renderer sanitized this, not the model.
-      dangerouslySetInnerHTML={{ __html: svg }}
+      dangerouslySetInnerHTML={html ?? undefined}
     />
   );
 }
