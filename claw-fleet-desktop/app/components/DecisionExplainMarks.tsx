@@ -18,6 +18,8 @@ import {
   cardReviewRunning,
   cardReviewSelection,
   cardReviewSubject,
+  markCardReviewScroll,
+  takeCardReviewScroll,
   flipConditionsQuote,
   groupExplainThreads,
   steelmanQuote,
@@ -331,6 +333,7 @@ function CardReviewButton({
         e.stopPropagation();
         if (waiting) return;
         setPosting(true);
+        markCardReviewScroll(preset, quote);
         Promise.resolve(explain.ask(cardReviewSelection(quote, msgIdx), preset)).finally(() => setPosting(false));
       }}
       disabled={waiting}
@@ -453,7 +456,14 @@ export function DecisionExplainAnswers({
         // A card review ask is headed by what it asks, not its long quote.
         const subject = cardReviewSubject(first);
         return (
-          <div key={id} className={styles.card} data-testid="decision-explain-thread">
+          <div
+            key={id}
+            className={styles.card}
+            data-testid="decision-explain-thread"
+            ref={(el) => {
+              if (el && takeCardReviewScroll(last)) el.scrollIntoView?.({ block: "start", behavior: "smooth" });
+            }}
+          >
             <div className={styles.head}>
               {subject ? (
                 <span className={styles.title} title={first.quote}>
