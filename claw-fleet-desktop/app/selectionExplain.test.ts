@@ -75,6 +75,22 @@ describe("readAssistantSelection", () => {
   });
 });
 
+describe("nested explain scopes", () => {
+  it("leaves a card question inside the transcript to the card's own bar", () => {
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<div data-role="assistant" data-msg-idx="3" data-explain-scope=""><p>pick the rollout window please</p></div>';
+    document.body.appendChild(root);
+    const card = root.firstElementChild as HTMLElement;
+    const text = card.querySelector("p")!.firstChild!;
+    expect(readAssistantSelection(root, select(text, 0, text, 15)), "the transcript's bar stays out").toBeNull();
+    expect(readAssistantSelection(card, select(text, 0, text, 15))?.quote, "the card's own bar answers").toBe(
+      "pick the rollou",
+    );
+    root.remove();
+  });
+});
+
 describe("selectQuoteIn", () => {
   it("re-selects a quote that markdown split across nodes, folding whitespace", () => {
     const root = transcript();

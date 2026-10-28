@@ -174,6 +174,7 @@ describe("card review asks (steelman / flip conditions)", () => {
     expect(thread, "the answer lands under the question").not.toBeNull();
     // The test locale is English: "Steelman" is detail.explain_preset_steelman.
     expect(thread!.textContent).toContain("Steelman · 直接全量");
+    expect(thread!.textContent?.includes("这段话是什么意思？"), "the preset prompt is not shown").toBe(false);
   });
 
   it("flip conditions sends the question at once, headed by the ask", async () => {

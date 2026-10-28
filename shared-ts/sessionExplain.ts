@@ -181,6 +181,10 @@ function rowOf(node: Node | null): HTMLElement | null {
   return el?.closest?.("[data-msg-idx][data-role='assistant']") ?? null;
 }
 
+/** Marks an element that owns its own ask bar (a decision card's question
+ *  body); a bar whose root merely contains it leaves selections there alone. */
+export const EXPLAIN_SCOPE_ATTR = "data-explain-scope";
+
 /**
  * The current selection, if it is a quotable passage of agent prose inside
  * `root`. `null` for everything else: collapsed, outside the transcript, not
@@ -196,6 +200,11 @@ export function readAssistantSelection(
   const startRow = rowOf(range.startContainer);
   const endRow = rowOf(range.endContainer);
   if (!startRow || startRow !== endRow) return null;
+  // A nested scope with a bar of its own — a decision card's question rendered
+  // inside the transcript — is not the outer bar's to answer: both would show,
+  // and the outer one is sized to the transcript, not the card.
+  const scope = startRow.closest(`[${EXPLAIN_SCOPE_ATTR}]`);
+  if (scope && scope !== root && root.contains(scope)) return null;
   // A selection that started in the row's own controls (copy / read buttons)
   // is not prose either.
   if (

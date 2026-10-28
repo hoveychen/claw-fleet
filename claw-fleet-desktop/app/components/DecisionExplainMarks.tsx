@@ -497,7 +497,9 @@ export function DecisionExplainAnswers({
             </div>
             {records.map((rec) => (
               <div key={rec.id} className={multi ? styles.turn : undefined}>
-                {rec.question && <div className={styles.question}>{rec.question}</div>}
+                {/* A card review turn's question is the host's long preset prompt;
+                    the heading already says what was asked. */}
+                {rec.question && !cardReviewSubject(rec) && <div className={styles.question}>{rec.question}</div>}
                 {rec.text ? (
                   <div className={styles.answer}>
                     <TextBlock text={rec.text} isPartial={rec.status === "running"} />

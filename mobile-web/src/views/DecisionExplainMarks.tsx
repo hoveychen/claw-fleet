@@ -355,7 +355,9 @@ function ExplainTurn({ rec }: { rec: ExplainRecord }) {
   const running = rec.status === "running";
   return (
     <div className={styles.turn}>
-      {rec.question && <div className={styles.question}>{rec.question}</div>}
+      {/* A card review turn's question is the host's long preset prompt; the
+          heading already says what was asked. */}
+      {rec.question && !cardReviewSubject(rec) && <div className={styles.question}>{rec.question}</div>}
       {rec.text ? (
         <div className={styles.answer} data-partial={running || undefined}>
           <Md text={rec.text} />

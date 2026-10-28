@@ -741,6 +741,7 @@ function ElicitationCard({
           className={`${styles.elicitation_question_text} ${explainStyles.body}`}
           data-role="assistant"
           data-msg-idx={step}
+          data-explain-scope=""
         >
           <SelectionToolbar
             pane={questionBodyRef}
@@ -1670,6 +1671,7 @@ export function FleetAskCard({
           className={`${styles.elicitation_question_text} ${explainStyles.body}`}
           data-role="assistant"
           data-msg-idx={step}
+          data-explain-scope=""
         >
           <SelectionToolbar
             pane={questionBodyRef}

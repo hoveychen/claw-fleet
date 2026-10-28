@@ -69,7 +69,7 @@ describe("card review answers", () => {
   it("are headed by what was asked, not the raw quote", () => {
     const html = renderToStaticMarkup(
       <DecisionExplainAnswers
-        answers={[record({ quote: steelmanQuote(QUESTION, OPTION) }) as ExplainRecord]}
+        answers={[record({ quote: steelmanQuote(QUESTION, OPTION), question: "请针对【原文】……" }) as ExplainRecord]}
         busy={false}
         onDismiss={vi.fn()}
         onFollowUp={vi.fn()}
@@ -77,5 +77,6 @@ describe("card review answers", () => {
     );
     expect(html).toContain(`${t("反方论证")} · 直接全量`);
     expect(html).not.toContain(QUESTION);
+    expect(html, "the preset prompt is not shown").not.toContain("请针对");
   });
 });
