@@ -77,6 +77,11 @@ describe("StopControl for a source with no per-session process", () => {
     expect(stopMode(dshSession())).toBe("interrupt");
   });
 
+  it("still offers the interrupt when the dsh row carries no pid", () => {
+    // What the scan actually reports for a dsh session: `pid: null`.
+    expect(stopMode(dshSession({ pid: null }))).toBe("interrupt");
+  });
+
   it("offers nothing once the dsh session is idle — a turn cancel needs a turn", () => {
     expect(stopMode(dshSession({ status: "idle" }))).toBe("spent");
   });

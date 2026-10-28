@@ -247,6 +247,24 @@ pub fn enqueue(
     if text.is_empty() {
         return Err("empty message".into());
     }
+    // dsh keeps its own inbox and takes a prompt mid-turn, so there is nothing
+    // to park here — and its sessions have no claude transcript or codex
+    // rollout, so the Fleet-owned gate below would refuse every one of them.
+    // The launch note's `source` is what identifies them: dsh has no other
+    // Fleet-readable ownership record.
+    if is_dsh_session(session_id) {
+        let framed;
+        let body = match sender {
+            Sender::User => text,
+            Sender::Agent => {
+                framed = crate::live_inject::frame_as_agent(text);
+                framed.as_str()
+            }
+        };
+        crate::dsh_source::DshSource::new().send_follow_up(session_id, body)?;
+        crate::ask_preempt::touch_inbox(session_id, sender);
+        return Ok(Delivery::Injected);
+    }
     if crate::parked::parkable_workspace(session_id).is_none() {
         return Err("session is not Fleet-owned; cannot queue a follow-up".into());
     }
@@ -308,6 +326,10 @@ pub fn enqueue(
         }
     };
     append_to_queue(session_id, workspace_path, queued_text).map(|()| Delivery::Queued)
+}
+
+fn is_dsh_session(session_id: &str) -> bool {
+    crate::launch_spec::get(session_id).and_then(|s| s.source).as_deref() == Some("dsh")
 }
 
 /// [`enqueue`] without the Fleet-owned gate, for text that has already passed

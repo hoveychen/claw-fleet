@@ -92,3 +92,28 @@ describe("runStop", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("dsh sessions (no per-session process)", () => {
+  // What the scan reports for a dsh session: no pid, a dsh:// uri.
+  const dsh: SessionInfo = {
+    ...base,
+    agentSource: "dsh",
+    entrypoint: "claw-fleet-newsession",
+    jsonlPath: "dsh://session-abc",
+  };
+
+  it("offers the interrupt mid-turn even without a pid", () => {
+    expect(stopMode(dsh)).toBe("interrupt");
+  });
+
+  it("offers nothing once idle", () => {
+    expect(stopMode({ ...dsh, status: "idle" })).toBe("spent");
+  });
+
+  it("cancels by session uri, never by pid", async () => {
+    const { transport, calls } = fakeTransport();
+    const ok = await runStop(transport, { ...dsh, pid: 4242 }, async () => true);
+    expect(ok).toBe(true);
+    expect(calls).toEqual([{ method: "interrupt", params: { path: "dsh://session-abc" } }]);
+  });
+});
