@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SkeletonCard } from "../components/loading";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import styles from "./MermaidBlock.module.css";
@@ -10,6 +10,31 @@ import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 let seq = 0;
 
 /**
+ * Finished SVGs keyed by theme + source, so a remount paints synchronously.
+ *
+ * The block remounts whenever a markdown renderer hands react-markdown a new
+ * `components` map (the element type changes, so React drops the subtree) —
+ * the wiki reader did that every time its doc list reloaded, i.e. whenever any
+ * agent published. Without this the diagram fell back to the skeleton for the
+ * frames mermaid needs to re-render, and the prose below jumped up and back.
+ */
+const svgCache = new Map<string, string>();
+const SVG_CACHE_MAX = 64;
+
+function cacheKey(theme: MermaidMode, code: string): string {
+  return `${theme}\u0000${code}`;
+}
+
+function rememberSvg(key: string, svg: string): void {
+  svgCache.delete(key);
+  svgCache.set(key, svg);
+  if (svgCache.size > SVG_CACHE_MAX) {
+    const oldest = svgCache.keys().next().value;
+    if (oldest !== undefined) svgCache.delete(oldest);
+  }
+}
+
+/**
  * A ```mermaid fenced block, rendered to SVG.
  *
  * mermaid is ~1MB, so it is imported lazily on first use rather than bundled
@@ -18,13 +43,26 @@ let seq = 0;
  * emits a slightly-off diagram must not blank out the message carrying it.
  */
 export function MermaidBlock({ code }: { code: string }) {
-  const [svg, setSvg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   // Re-renders on theme flips so a diagram doesn't stay dark-on-paper.
   const theme: MermaidMode = useDocumentTheme();
+  const [svg, setSvg] = useState<string | null>(
+    () => svgCache.get(cacheKey(theme, code)) ?? null,
+  );
+  const [error, setError] = useState<string | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  // One object per SVG string: React 19 rewrites innerHTML whenever this prop
+  // object is new, which swapped in a fresh <svg> on every parent re-render and
+  // dropped the width applyDiagramWidth had pinned on the old one.
+  const html = useMemo(() => (svg === null ? null : { __html: svg }), [svg]);
 
   useEffect(() => {
+    const key = cacheKey(theme, code);
+    const cached = svgCache.get(key);
+    if (cached !== undefined) {
+      setSvg(cached);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -46,7 +84,9 @@ export function MermaidBlock({ code }: { code: string }) {
         // Contrast self-healing is baked into the string: a diagram hard-coded
         // for dark theme with `style X fill:#4a3728` becomes unreadable on light
         // theme where labels stay at theme color #333 (see mermaidContrast).
-        setSvg(repairMermaidContrastInSvg(svg));
+        const repaired = repairMermaidContrastInSvg(svg);
+        rememberSvg(key, repaired);
+        setSvg(repaired);
         setError(null);
       } catch (e) {
         if (cancelled) return;
@@ -104,7 +144,7 @@ export function MermaidBlock({ code }: { code: string }) {
       className={styles.diagram}
       // Trusted: the SVG string comes straight out of mermaid's own sanitizing
       // renderer (securityLevel "strict"), not from the model.
-      dangerouslySetInnerHTML={{ __html: svg }}
+      dangerouslySetInnerHTML={html ?? undefined}
     />
   );
 }

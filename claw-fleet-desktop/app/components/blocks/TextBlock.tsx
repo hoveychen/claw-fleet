@@ -110,18 +110,13 @@ export const TextBlock = memo(function TextBlock({
     [wiki],
   );
 
-  // Memoised because ProgressiveMarkdown hands this straight to every chunk: a
-  // fresh object each render would defeat the per-chunk memo and re-parse the
-  // whole document on every re-render — the very thing being fixed.
-  const components: Components = useMemo(
+  // Memoised separately from the rest of the map, on `paths` alone. A new
+  // function here is a new element type to React, which unmounts every code
+  // block and mermaid diagram under it; keyed on `wiki` too, that happened on
+  // every wiki-list reload (any agent publishing), and each diagram flashed its
+  // skeleton while it re-rendered.
+  const codeComponents: Pick<Components, "pre" | "code"> = useMemo(
     () => ({
-          // Search term highlighting in text-bearing elements
-          ...(highlight ? {
-            p: ({ children }) => <p>{highlight(children)}</p>,
-            li: ({ children }) => <li>{highlight(children)}</li>,
-            td: ({ children }) => <td>{highlight(children)}</td>,
-            th: ({ children }) => <th>{highlight(children)}</th>,
-          } : {}),
           // The fenced-code branch below renders its own <pre>; unwrap the
           // outer <pre> so the resulting HTML stays valid (no nested <pre>)
           // and clipboard pastes preserve newlines.
@@ -211,6 +206,23 @@ export const TextBlock = memo(function TextBlock({
               </code>
             );
           },
+    }),
+    [paths],
+  );
+
+  // Memoised because ProgressiveMarkdown hands this straight to every chunk: a
+  // fresh object each render would defeat the per-chunk memo and re-parse the
+  // whole document on every re-render — the very thing being fixed.
+  const components: Components = useMemo(
+    () => ({
+          // Search term highlighting in text-bearing elements
+          ...(highlight ? {
+            p: ({ children }) => <p>{highlight(children)}</p>,
+            li: ({ children }) => <li>{highlight(children)}</li>,
+            td: ({ children }) => <td>{highlight(children)}</td>,
+            th: ({ children }) => <th>{highlight(children)}</th>,
+          } : {}),
+          ...codeComponents,
           // External URLs open in the system browser; relative paths are inert
           // so the Tauri webview never navigates (see markdown/safeLinks.ts).
           // Wiki docs upgrade slug refs to in-app navigation instead.
@@ -224,7 +236,7 @@ export const TextBlock = memo(function TextBlock({
           // the webview origin and break. See markdown/localImages.
       img: localImageComponent(paths),
     }),
-    [highlight, paths, wiki],
+    [highlight, codeComponents, paths, wiki],
   );
 
   return (
