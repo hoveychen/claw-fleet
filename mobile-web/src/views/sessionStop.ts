@@ -24,9 +24,18 @@ const WORKING: SessionStatus[] = [
 
 export type StopMode = "interrupt" | "stop" | "spent";
 
+/** dsh runs every session inside one shared `dsh web`, so there is no
+ *  per-session process to signal: its stop is a turn cancel through the source,
+ *  addressed by session uri. Mirrors the desktop's `usesSourceInterrupt`. */
+export function usesSourceInterrupt(s: SessionInfo): boolean {
+  return s.agentSource === "dsh";
+}
+
 /** Same escalation as the desktop StopControl: interrupt only for Fleet-owned
  *  sessions with a precise pid mid-turn; otherwise kill; no pid → dead. */
 export function stopMode(s: SessionInfo): StopMode {
+  // Before the pid test: a dsh row has no pid, and only a turn to cancel.
+  if (usesSourceInterrupt(s)) return WORKING.includes(s.status) ? "interrupt" : "spent";
   if (s.pid == null) return "spent";
   if (isFleetOwnedEntrypoint(s.entrypoint) && s.pidPrecise && WORKING.includes(s.status)) {
     return "interrupt";
@@ -51,6 +60,10 @@ export async function runStop(
 ): Promise<boolean> {
   const mode = stopMode(s);
   if (mode === "spent") return false;
+  if (usesSourceInterrupt(s)) {
+    await transport.request("interrupt", { path: s.jsonlPath });
+    return true;
+  }
   if (mode === "interrupt") {
     await transport.request("interrupt", { pid: s.pid });
     return true;

@@ -54,12 +54,14 @@ export function usesSourceInterrupt(s: SessionInfo): boolean {
 }
 
 export function stopMode(s: SessionInfo): StopMode {
-  if (s.pid === null) return "spent";
   // The source-level stop only ever cancels a turn, so there is nothing to
   // offer once the session is idle — and nothing that could be a hard kill.
+  // Checked before the pid: a dsh row carries no pid at all, and the pid test
+  // would hide the stop button on every running dsh session.
   if (usesSourceInterrupt(s)) {
     return TURN_IN_FLIGHT.has(s.status) ? "interrupt" : "spent";
   }
+  if (s.pid === null) return "spent";
   if (
     isFleetOwnedEntrypoint(s.entrypoint) &&
     s.pidPrecise &&

@@ -3960,6 +3960,12 @@ fn serve_cancel_pending_message(params: &Value) -> Result<Value, String> {
 // pid 0 would signal the desktop's own process group — reject before
 // it ever reaches kill() (same guard as the `/interrupt` endpoint).
 fn serve_interrupt(params: &Value) -> Result<Value, String> {
+    // A source with no per-session process (dsh) is stopped through the source
+    // by its session uri — its pid, if any, is a shared server's.
+    if let Some(path) = params.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()) {
+        crate::agent_source::interrupt_session_at(path)?;
+        return Ok(json!({ "ok": true }));
+    }
     let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
     if pid == 0 {
         return Err("missing or invalid pid".into());

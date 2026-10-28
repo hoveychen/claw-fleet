@@ -697,6 +697,20 @@ impl DshSource {
         .map_err(Into::into)
     }
 
+    /// Hand a follow-up to a session that may be mid-turn.
+    ///
+    /// Fleet's own follow-up queue (`pending_message`) exists because a claude
+    /// or codex turn cannot take input until it ends. A dsh session can:
+    /// `session/prompt` in `"queue"` mode appends to the session's inbox while a
+    /// turn runs, so the message goes straight to dsh instead.
+    pub(crate) fn send_follow_up(&self, session_id: &str, text: &str) -> Result<(), String> {
+        let id = Self::session_id_of(session_id).unwrap_or(session_id);
+        if id.is_empty() {
+            return Err("dsh follow-up: session_id is required".into());
+        }
+        self.with_client(|client| Self::prompt(client, id, text))
+    }
+
     /// Receive every raw follow item of `session_id` until the handle drops
     /// (see [`crate::dsh_events::LiveView::tap`]). Brings the server and its
     /// follower up first: the tap registry lives on the watcher.
