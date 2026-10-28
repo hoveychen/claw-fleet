@@ -1561,13 +1561,10 @@ fn hoist_misplaced_images(args: &mut Value) {
 /// exist (`ingest_images` skips those silently). Absolute URLs, `data:` URIs
 /// and root-relative paths are the agent's own business and are ignored.
 fn unresolved_image_refs(q: &crate::mcp_ipc::FleetAskQuestion) -> Vec<String> {
-    static IMG_SRC: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r#"(?i)<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']"#).unwrap()
-    });
     let Some(html) = q.html.as_deref() else { return Vec::new() };
     let mut missing = Vec::new();
-    for cap in IMG_SRC.captures_iter(html) {
-        let src = cap[1].trim();
+    for src in img_srcs(html) {
+        let src = src.trim();
         if src.is_empty() || src.contains(':') || src.starts_with('/') || src.starts_with('#') {
             continue;
         }
@@ -1580,6 +1577,43 @@ fn unresolved_image_refs(q: &crate::mcp_ipc::FleetAskQuestion) -> Vec<String> {
         }
     }
     missing
+}
+
+/// Quoted `src` values of every `<img>` tag. A plain scan, not an HTML parser:
+/// enough for the hand-written previews agents send.
+fn img_srcs(html: &str) -> Vec<&str> {
+    let lower = html.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(off) = lower[from..].find("<img") {
+        let start = from + off + 4;
+        let end = lower[start..].find('>').map_or(lower.len(), |e| start + e);
+        let tag = &lower[start..end];
+        let mut i = 0;
+        while let Some(p) = tag[i..].find("src") {
+            let at = i + p;
+            i = at + 3;
+            if at > 0 && !tag.as_bytes()[at - 1].is_ascii_whitespace() {
+                continue;
+            }
+            let rest = tag[i..].trim_start();
+            let Some(rest) = rest.strip_prefix('=') else { continue };
+            let rest = rest.trim_start();
+            let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+                continue;
+            };
+            let val_start = start + (tag.len() - rest.len()) + 1;
+            if let Some(len) = html[val_start..end].find(quote) {
+                out.push(&html[val_start..val_start + len]);
+            }
+            break;
+        }
+        from = end.min(lower.len());
+        if from == lower.len() {
+            break;
+        }
+    }
+    out
 }
 
 /// The `fleet__ask` producer. `on_queued` runs with the request id once the
