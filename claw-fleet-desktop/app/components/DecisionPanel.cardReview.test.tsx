@@ -194,6 +194,27 @@ describe("card review asks (steelman / flip conditions)", () => {
     expect(req.quote).toBe("上线计划：先 [?灰度到 5%]，再全量。");
   });
 
+  it("opens on the first press when the priming selectionchange beats React's commit (WebKit)", async () => {
+    // In WKWebView the `selectionchange` from the bar's own removeAllRanges()
+    // arrives after the prime effect queued its state but before React
+    // committed it; jsdom never fires one. It must not close the bar.
+    const original = Selection.prototype.removeAllRanges;
+    const spy = vi.spyOn(Selection.prototype, "removeAllRanges").mockImplementation(function (this: Selection) {
+      original.call(this);
+      queueMicrotask(() => document.dispatchEvent(new Event("selectionchange")));
+    });
+    try {
+      const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
+      await act(async () => {});
+
+      await press(el.querySelector<HTMLElement>("[data-testid='card-flip-btn']")!);
+      expect(bar(el), "flip opens the bar on the first press").not.toBeNull();
+      expect(bar(el)!.querySelector("button[aria-pressed='true']")?.getAttribute("data-preset")).toBe("flip_conditions");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("offers both new presets on a plain selection bar too", async () => {
     const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
     const mark = el.querySelector<HTMLElement>("[data-explain-quote][role='button']")!;
