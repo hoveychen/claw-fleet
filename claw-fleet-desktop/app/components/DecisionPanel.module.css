@@ -783,6 +783,21 @@
   overscroll-behavior: contain;
 }
 
+/* All previews share one cell; the hidden ones still take up space so the box
+   never changes height on hover (see SharedOptionsBlock). */
+.elicitation_preview {
+  display: grid;
+}
+
+.elicitation_preview_layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.elicitation_preview_layer_hidden {
+  visibility: hidden;
+}
+
 .elicitation_preview pre,
 .elicitation_preview code {
   font-family: inherit;
