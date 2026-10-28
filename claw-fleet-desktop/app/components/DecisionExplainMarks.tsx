@@ -1,4 +1,4 @@
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Shuffle, Swords } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -15,8 +15,11 @@ import {
 import {
   cacheHitRatio,
   costLabel,
+  flipConditionsQuote,
   groupExplainThreads,
+  steelmanQuote,
   type AssistantSelection,
+  type ExplainPrime,
 } from "../selectionExplain";
 import { useSessionsStore } from "../store";
 import { TextBlock } from "./blocks/TextBlock";
@@ -282,6 +285,88 @@ export function useDecisionExplainMarks(
     loading: listing,
     dismiss,
   };
+}
+
+/**
+ * The card review asks — "steelman this option" and "what would flip it".
+ *
+ * A press never sends: it hands the card's `SelectionToolbar` a quote and a
+ * preset to preselect (`prime`), and the reader confirms there. `reset`
+ * clears it when the card steps to another question.
+ */
+export function useCardReview(): {
+  prime: ExplainPrime | null;
+  steelman: (question: string, option: { label: string; description?: string | null }) => void;
+  flip: (question: string) => void;
+  reset: () => void;
+} {
+  const [prime, setPrime] = useState<ExplainPrime | null>(null);
+  const steelman = useCallback(
+    (question: string, option: { label: string; description?: string | null }) =>
+      setPrime((p) => ({
+        quote: steelmanQuote(question, option),
+        preset: "steelman",
+        caption: option.label,
+        nonce: (p?.nonce ?? 0) + 1,
+      })),
+    [],
+  );
+  const flip = useCallback(
+    (question: string) =>
+      setPrime((p) => ({
+        quote: flipConditionsQuote(question),
+        preset: "flip_conditions",
+        caption: "",
+        nonce: (p?.nonce ?? 0) + 1,
+      })),
+    [],
+  );
+  const reset = useCallback(() => setPrime(null), []);
+  return { prime, steelman, flip, reset };
+}
+
+/** The question-level "what would flip it" button, under the question. */
+export function FlipConditionsButton({ onPress }: { onPress: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.review_row}>
+      <button
+        type="button"
+        className={styles.review_btn}
+        // Keep the mousedown from reaching the bar's outside-press close.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onPress}
+        title={t("detail.explain_flip_hint", "什么证据出现时结论会翻转？先在追问浮条里确认再发")}
+        data-testid="card-flip-btn"
+      >
+        <Shuffle size={11} strokeWidth={1.8} aria-hidden="true" />
+        {t("detail.explain_flip_btn", "翻转条件")}
+      </button>
+    </div>
+  );
+}
+
+/** The per-option "steelman" button, beside the option's pencil. */
+export function SteelmanButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const { t } = useTranslation();
+  const hint = t("detail.explain_steelman_hint", "反方论证：不同意这个选项的专家会怎么说");
+  return (
+    <button
+      type="button"
+      className={styles.steelman_btn}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onPress();
+      }}
+      title={hint}
+      aria-label={`${hint} — ${label}`}
+      data-testid="card-steelman-btn"
+    >
+      <Swords size={11} strokeWidth={1.8} aria-hidden="true" />
+      {t("detail.explain_steelman_btn", "反方")}
+    </button>
+  );
 }
 
 /**

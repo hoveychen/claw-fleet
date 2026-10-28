@@ -1,12 +1,14 @@
-import { Languages, MessageCircleQuestion, PencilLine, Scale } from "lucide-react";
+import { Languages, MessageCircleQuestion, PencilLine, Scale, Shuffle, Swords } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExplainPreset } from "../explainApi";
 import {
   EXPLAIN_MARK_SELECT_EVENT,
+  primedSelection,
   readAssistantSelection,
   type AssistantSelection,
+  type ExplainPrime,
 } from "../selectionExplain";
 import styles from "./SelectionToolbar.module.css";
 import { Presence } from "./Presence";
@@ -21,16 +23,42 @@ const BAR_HEIGHT = 30;
 /** Space between the bar and the selection's box. */
 const BAR_GAP = 6;
 
+/** The presets the bar offers, in order; `custom` is the pencil after them. */
+const PRESETS: { preset: ExplainPreset; icon: typeof Scale; key: string; fallback: string }[] = [
+  { preset: "explain", icon: MessageCircleQuestion, key: "detail.explain_preset_explain", fallback: "解释" },
+  { preset: "translate", icon: Languages, key: "detail.explain_preset_translate", fallback: "翻译" },
+  { preset: "rationale", icon: Scale, key: "detail.explain_preset_rationale", fallback: "为什么" },
+  { preset: "steelman", icon: Swords, key: "detail.explain_preset_steelman", fallback: "反方论证" },
+  { preset: "flip_conditions", icon: Shuffle, key: "detail.explain_preset_flip_conditions", fallback: "翻转条件" },
+];
+
+/** The nearest ancestor that scrolls, so a primed bar can sit at the bottom of
+ *  what is visible of the pane rather than below the fold. */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if (o === "auto" || o === "scroll") return p;
+  }
+  return null;
+}
+
 /**
  * The floating "ask about this" bar that appears over a selection of agent
  * prose.
  *
- * Three canned questions and a free one. It answers the moment a reader
+ * Five canned questions and a free one. It answers the moment a reader
  * finishes a drag inside an assistant row (`readAssistantSelection` decides
  * what qualifies) and goes away when the selection collapses, the pane
  * scrolls, or Escape is pressed. Choosing the custom question turns the bar
  * into an input; focusing it collapses the document selection, so the passage
  * is snapshotted at mouseup and the collapse is ignored while the input is up.
+ *
+ * `prime` opens it without a selection: a decision card's "steelman" /
+ * "what would flip it" buttons hand over a quote they built and a preset. The
+ * bar then only *preselects* that preset — a click on a preset changes the
+ * choice and nothing is sent until the reader presses the send button (or
+ * submits a custom question). It sits at the bottom of the pane's visible
+ * part, right above the options the buttons live next to.
  *
  * Positioned in `pane`'s coordinate space (the pane is `position: relative`),
  * centred above the selection's box and clamped to the pane's width.
@@ -41,6 +69,8 @@ export function SelectionToolbar({
   enabled,
   busy,
   onAsk,
+  prime,
+  primeIdx = 0,
 }: {
   /** The element the bar is positioned inside. */
   pane: RefObject<HTMLElement | null>;
@@ -54,13 +84,27 @@ export function SelectionToolbar({
   /** A question is being submitted; the buttons wait. */
   busy: boolean;
   onAsk: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+  /** A card review ask to preselect; a new `nonce` re-opens the bar. */
+  prime?: ExplainPrime | null;
+  /** The `msgIdx` a primed ask carries (the card's question index). */
+  primeIdx?: number;
 }) {
   const { t } = useTranslation();
-  const [shown, setShown] = useState<{ sel: AssistantSelection; x: number; y: number; place: Place } | null>(
-    null,
-  );
+  const [shown, setShown] = useState<{
+    sel: AssistantSelection;
+    x: number;
+    y: number;
+    place: Place;
+    /** Set when opened by `prime`: what the caption names. */
+    caption?: string;
+  } | null>(null);
   const [custom, setCustom] = useState(false);
   const [question, setQuestion] = useState("");
+  // The preset a primed bar will send; `null` for a selection bar, where a
+  // preset click sends at once.
+  const [chosen, setChosen] = useState<ExplainPreset | null>(null);
+  const chosenRef = useRef(chosen);
+  chosenRef.current = chosen;
   // The preset whose ask is still being posted, so a bar reopened during the
   // wait shows which one is in flight instead of a row of greyed buttons.
   const [pending, setPending] = useState<ExplainPreset | null>(null);
@@ -70,10 +114,12 @@ export function SelectionToolbar({
   const customRef = useRef(custom);
   customRef.current = custom;
   const inputRef = useRef<HTMLInputElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!enabled) {
       setShown(null);
+      setChosen(null);
       return;
     }
     const read = () => {
@@ -82,7 +128,9 @@ export function SelectionToolbar({
       if (!root || !host) return;
       const sel = readAssistantSelection(root);
       if (!sel) {
-        if (!customRef.current) setShown(null);
+        // A primed bar has no selection to lose: the click that opened it
+        // produces a mouseup (and maybe a collapse) of its own.
+        if (!customRef.current && !chosenRef.current) setShown(null);
         return;
       }
       const hostRect = host.getBoundingClientRect();
@@ -100,27 +148,40 @@ export function SelectionToolbar({
       const y = place === "above" ? above : sel.rect.bottom - hostRect.top + BAR_GAP;
       setCustom(false);
       setQuestion("");
+      setChosen(null);
       setShown({ sel, x, y, place });
+    };
+    const close = () => {
+      setShown(null);
+      setChosen(null);
     };
     // Read after the browser has settled the selection for this gesture.
     const onUp = () => requestAnimationFrame(read);
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setShown(null);
+        close();
         return;
       }
       if (e.shiftKey && e.key.startsWith("Arrow")) requestAnimationFrame(read);
     };
     const onSelChange = () => {
-      if (customRef.current) return;
+      if (customRef.current || chosenRef.current) return;
       const s = window.getSelection();
       if (!s || s.isCollapsed) setShown(null);
     };
     const onScroll = () => {
-      if (!customRef.current) setShown(null);
+      if (!customRef.current && !chosenRef.current) setShown(null);
+    };
+    // A primed bar has no selection whose collapse would close it; a press
+    // anywhere else does (another card button re-primes it right after).
+    const onDown = (e: MouseEvent) => {
+      if (!chosenRef.current || customRef.current) return;
+      if (barRef.current && e.target instanceof Node && barRef.current.contains(e.target)) return;
+      close();
     };
     const root = scroller.current;
     document.addEventListener("mouseup", onUp);
+    document.addEventListener("mousedown", onDown);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("selectionchange", onSelChange);
     // A click (or Enter) on one of the agent's `[?text]` marks selects the mark
@@ -130,12 +191,38 @@ export function SelectionToolbar({
     root?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener(EXPLAIN_MARK_SELECT_EVENT, onUp);
       document.removeEventListener("selectionchange", onSelChange);
       root?.removeEventListener("scroll", onScroll);
     };
   }, [enabled, pane, scroller]);
+
+  // Open on a card review press: preselect, never send.
+  useEffect(() => {
+    if (!prime || !enabled) return;
+    const host = pane.current;
+    if (!host) return;
+    const hostRect = host.getBoundingClientRect();
+    const clip = scrollParent(host)?.getBoundingClientRect();
+    const bottom = clip ? Math.min(hostRect.bottom, clip.bottom) : hostRect.bottom;
+    const margin = 8;
+    const x = Math.min(Math.max(hostRect.width / 2, margin + 120), Math.max(hostRect.width - margin - 120, margin + 120));
+    window.getSelection()?.removeAllRanges();
+    setCustom(false);
+    setQuestion("");
+    setChosen(prime.preset);
+    setShown({
+      sel: primedSelection(prime.quote, primeIdx),
+      x,
+      y: Math.max(bottom - hostRect.top - BAR_GAP, margin + BAR_HEIGHT),
+      place: "above",
+      caption: prime.caption,
+    });
+    // Only a new press re-opens; `primeIdx` rides along with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prime?.nonce, enabled]);
 
   useEffect(() => {
     if (custom) inputRef.current?.focus();
@@ -147,7 +234,13 @@ export function SelectionToolbar({
     onAsk(shown.sel, preset, q);
     setShown(null);
     setCustom(false);
+    setChosen(null);
     setQuestion("");
+  };
+  // A preset button sends on a selection bar and only re-chooses on a primed one.
+  const press = (preset: ExplainPreset) => {
+    if (chosen) setChosen(preset);
+    else fire(preset);
   };
   // Buttons swallow mousedown so the click does not collapse the selection
   // the bar is about; the input does not, it needs the focus.
@@ -158,9 +251,11 @@ export function SelectionToolbar({
   return (
     <Presence when={!!shown}>{shown && (
     <div
+      ref={barRef}
       className={styles.toolbar}
       style={{ left: shown.x, top: shown.y }}
       data-place={shown.place}
+      data-primed={chosen ? "true" : undefined}
       role="toolbar"
       aria-label={t("detail.explain_toolbar", "对选中内容追问")}
       data-testid="selection-toolbar"
@@ -184,6 +279,7 @@ export function SelectionToolbar({
                 e.stopPropagation();
                 setShown(null);
                 setCustom(false);
+                setChosen(null);
               }
             }}
             placeholder={t("detail.explain_custom_placeholder", "就这段话问点什么…")}
@@ -196,30 +292,27 @@ export function SelectionToolbar({
         </form>
       ) : (
         <>
-          <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("explain")} disabled={busy}>
-            {pending === "explain" ? (
-              <Spinner size={12} />
-            ) : (
-              <MessageCircleQuestion size={12} strokeWidth={1.8} aria-hidden="true" />
-            )}
-            {t("detail.explain_preset_explain", "解释")}
-          </button>
-          <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("translate")} disabled={busy}>
-            {pending === "translate" ? (
-              <Spinner size={12} />
-            ) : (
-              <Languages size={12} strokeWidth={1.8} aria-hidden="true" />
-            )}
-            {t("detail.explain_preset_translate", "翻译")}
-          </button>
-          <button type="button" className={styles.btn} onMouseDown={keep} onClick={() => fire("rationale")} disabled={busy}>
-            {pending === "rationale" ? (
-              <Spinner size={12} />
-            ) : (
-              <Scale size={12} strokeWidth={1.8} aria-hidden="true" />
-            )}
-            {t("detail.explain_preset_rationale", "为什么")}
-          </button>
+          {shown.caption && (
+            <span className={styles.caption} title={shown.caption}>
+              {shown.caption}
+            </span>
+          )}
+          {PRESETS.map(({ preset, icon: Icon, key, fallback }) => (
+            <button
+              key={preset}
+              type="button"
+              className={styles.btn}
+              data-preset={preset}
+              data-chosen={chosen === preset ? "true" : undefined}
+              aria-pressed={chosen ? chosen === preset : undefined}
+              onMouseDown={keep}
+              onClick={() => press(preset)}
+              disabled={busy}
+            >
+              {pending === preset ? <Spinner size={12} /> : <Icon size={12} strokeWidth={1.8} aria-hidden="true" />}
+              {t(key, fallback)}
+            </button>
+          ))}
           <button
             type="button"
             className={styles.btn}
@@ -234,6 +327,18 @@ export function SelectionToolbar({
             )}
             {t("detail.explain_custom", "自定义提问")}
           </button>
+          {chosen && (
+            <button
+              type="button"
+              className={`${styles.btn} ${styles.send}`}
+              onMouseDown={keep}
+              onClick={() => fire(chosen)}
+              disabled={busy}
+              data-testid="selection-toolbar-send"
+            >
+              {t("detail.explain_send", "发送")}
+            </button>
+          )}
         </>
       )}
     </div>

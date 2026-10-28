@@ -68,3 +68,32 @@
 }
 
 
+/* A primed bar (opened by a card's steelman / flip button): the preselected
+   preset reads as chosen, and nothing goes out until the send button. */
+.btn[data-chosen="true"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px rgba(var(--color-accent-rgb), 0.45);
+}
+
+.send {
+  margin-left: 2px;
+  background: var(--color-accent);
+  color: #fff;
+  font-weight: 600;
+}
+.send:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+/* What a primed ask is about (the option name, or the question). */
+.caption {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+  color: var(--color-text-dim);
+  padding: 0 6px 0 4px;
+  margin-right: 2px;
+  border-right: 1px solid var(--color-border);
+}

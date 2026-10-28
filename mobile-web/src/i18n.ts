@@ -1134,6 +1134,7 @@ const DICT: Record<string, string> = {
   自定义提问: "Ask your own",
   反方论证: "Steelman the other side",
   翻转条件: "What would flip it",
+  反方: "Steelman",
   "就这段话问点什么…": "Ask something about this passage…",
   发送: "Send",
   追问中: "Asking…",

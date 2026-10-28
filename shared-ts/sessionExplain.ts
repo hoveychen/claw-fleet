@@ -220,6 +220,61 @@ export function readAssistantSelection(
   };
 }
 
+// ── Card review asks (steelman / flip conditions) ────────────────────────────
+//
+// A decision card offers two asks about the card itself rather than about a
+// passage: "steelman this option" next to each option and "what would flip
+// it" on the question. They do not go out on click — the button opens the
+// card's ask bar with the preset already chosen, and the reader confirms
+// there (or picks another preset, or types their own question). The quote is
+// built here so both surfaces send the same shape: the host's answer digest
+// (`session_explain::digest_subject`) names the option by finding exactly one
+// option label in the quote.
+
+/** What a card review button hands its ask bar: the quote it built, the preset
+ *  to preselect, and a short caption naming what is being asked about. */
+export interface ExplainPrime {
+  quote: string;
+  preset: "steelman" | "flip_conditions";
+  caption: string;
+  /** Bumped on every press, so pressing the same button twice re-opens the bar. */
+  nonce: number;
+  /** Viewport box of the button pressed, for surfaces that hang the bar on it. */
+  rect?: DOMRect | null;
+}
+
+/** The tag that marks the option a steelman ask is about. */
+export const STEELMAN_OPTION_TAG = "【被追问的选项】";
+
+/**
+ * `<question>\n\n【被追问的选项】<label> — <description>`. The question is cut
+ * (never the tag) when the whole would pass `MAX_QUOTE_CHARS`.
+ */
+export function steelmanQuote(question: string, option: { label: string; description?: string | null }): string {
+  const desc = option.description?.trim();
+  const tail = `\n\n${STEELMAN_OPTION_TAG}${option.label}${desc ? ` — ${desc}` : ""}`;
+  const room = Math.max(0, MAX_QUOTE_CHARS - tail.length);
+  const q = question.trim();
+  return `${q.length > room ? q.slice(0, room) : q}${tail}`;
+}
+
+/** The flip-conditions quote: the question itself, capped like any quote. */
+export function flipConditionsQuote(question: string): string {
+  const q = question.trim();
+  return q.length > MAX_QUOTE_CHARS ? q.slice(0, MAX_QUOTE_CHARS) : q;
+}
+
+/** A selection stand-in for a primed ask: a card review is not a drag, so
+ *  there is no range; the anchor is the question index like a card selection. */
+export function primedSelection(quote: string, msgIdx: number): AssistantSelection {
+  return {
+    quote,
+    msgIdx,
+    msgUuid: null,
+    rect: { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0 } as DOMRect,
+  };
+}
+
 /**
  * Fired (bubbling) on an explain mark right after `selectExplainMark` set the
  * selection to it, so the ask bars can read the selection at once instead of
