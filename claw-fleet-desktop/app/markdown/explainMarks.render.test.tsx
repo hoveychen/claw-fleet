@@ -3,7 +3,7 @@
 // through `ExplainMarkSpan`. A click does not ask — it selects exactly the
 // marked text and announces it, and the `SelectionToolbar` over that prose
 // shows its presets, the same as after a drag. Pinned on the real chain:
-// assistant row → selection + bar with the four presets; user row → inert;
+// assistant row → selection + bar with its presets; user row → inert;
 // outside any row → plain text; a decision-card body stamped like a row → bar.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, useRef, type RefObject } from "react";
@@ -73,7 +73,7 @@ const toolbarButtons = (el: HTMLElement) =>
   );
 
 describe("ExplainMarkSpan in TextBlock", () => {
-  it("selects exactly the mark's text and brings up the four presets", async () => {
+  it("selects exactly the mark's text and brings up the presets", async () => {
     const onAsk = vi.fn();
     const el = mount(<Host role="assistant" idx={7} uuid="am-7" body={<TextBlock text={MD} />} onAsk={onAsk} />);
     const mark = el.querySelector<HTMLElement>("[data-explain-quote]");
@@ -88,7 +88,7 @@ describe("ExplainMarkSpan in TextBlock", () => {
     await nextFrame();
     // 解释 / 翻译 / 为什么 / 自定义提问 — asserted by count and by what the
     // first one submits, since the test runner's locale is English.
-    expect(toolbarButtons(el)).toHaveLength(4);
+    expect(toolbarButtons(el)).toHaveLength(6);
     // Nothing was asked yet: that is the bar's job, one click later.
     expect(onAsk).not.toHaveBeenCalled();
 
@@ -125,7 +125,7 @@ describe("ExplainMarkSpan in TextBlock", () => {
     });
     expect(window.getSelection()?.toString()).toBe("acquiescence bias");
     await nextFrame();
-    expect(toolbarButtons(el)).toHaveLength(4);
+    expect(toolbarButtons(el)).toHaveLength(6);
   });
 
   it("is inert inside a user row", async () => {
@@ -154,7 +154,7 @@ describe("ExplainMarkSpan in TextBlock", () => {
     const el = mount(<Host role="assistant" idx={0} uuid={null} body={<TextBlock text={"选择窗口，注意 [?流量最低的时段]。"} />} onAsk={onAsk} />);
     act(() => el.querySelector<HTMLElement>("[data-explain-quote]")!.click());
     await nextFrame();
-    expect(toolbarButtons(el)).toHaveLength(4);
+    expect(toolbarButtons(el)).toHaveLength(6);
     act(() => el.querySelectorAll<HTMLButtonElement>("[data-testid='selection-toolbar'] button")[1].click());
     expect(onAsk.mock.calls[0][1]).toBe("translate");
     expect(onAsk.mock.calls[0][0]).toMatchObject({ quote: "流量最低的时段", msgIdx: 0, msgUuid: null });
