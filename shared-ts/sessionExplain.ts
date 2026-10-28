@@ -301,6 +301,30 @@ export function cardReviewRunning(
 }
 
 /**
+ * The card review press whose answer block has not mounted yet. The buttons sit
+ * on the question and its options while the answer lands below them (or in a
+ * side column), often off screen, so the press is remembered here and the
+ * answer block scrolls itself into view once, when it first renders.
+ */
+let pendingReviewScroll: { preset: CardReviewPreset; quote: string } | null = null;
+
+export function markCardReviewScroll(preset: CardReviewPreset, quote: string): void {
+  pendingReviewScroll = { preset, quote };
+}
+
+/**
+ * Whether `rec` answers the pending press; consumes the press when it does.
+ * Only a running record matches: pressing again under a settled answer to the
+ * same ask must scroll to the new one, not the old block that renders first.
+ */
+export function takeCardReviewScroll(rec: { preset: string; quote: string; status: string }): boolean {
+  const p = pendingReviewScroll;
+  if (!p || rec.status !== "running" || p.preset !== rec.preset || p.quote !== rec.quote) return false;
+  pendingReviewScroll = null;
+  return true;
+}
+
+/**
  * Fired (bubbling) on an explain mark right after `selectExplainMark` set the
  * selection to it, so the ask bars can read the selection at once instead of
  * waiting for a `mouseup` that a keyboard activation never produces.

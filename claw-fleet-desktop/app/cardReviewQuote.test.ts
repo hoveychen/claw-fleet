@@ -9,7 +9,9 @@ import {
   cardReviewRunning,
   cardReviewSubject,
   flipConditionsQuote,
+  markCardReviewScroll,
   steelmanQuote,
+  takeCardReviewScroll,
 } from "./selectionExplain";
 
 describe("card review quotes", () => {
@@ -52,5 +54,15 @@ describe("card review quotes", () => {
     expect(cardReviewRunning(recs, "steelman", "a")).toBe(true);
     expect(cardReviewRunning(recs, "steelman", "b")).toBe(false);
     expect(cardReviewRunning(recs, "flip_conditions", "a")).toBe(false);
+  });
+});
+
+describe("card review scroll", () => {
+  it("the pressed ask's running record takes the scroll once", () => {
+    markCardReviewScroll("steelman", "q");
+    expect(takeCardReviewScroll({ preset: "steelman", quote: "q", status: "done" })).toBe(false);
+    expect(takeCardReviewScroll({ preset: "flip_conditions", quote: "q", status: "running" })).toBe(false);
+    expect(takeCardReviewScroll({ preset: "steelman", quote: "q", status: "running" })).toBe(true);
+    expect(takeCardReviewScroll({ preset: "steelman", quote: "q", status: "running" })).toBe(false);
   });
 });
