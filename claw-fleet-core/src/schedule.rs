@@ -715,7 +715,9 @@ pub fn compose_run_now_prompt(rec: &ScheduleRecord) -> String {
     out.push_str(&format!(
         "（这是 Fleet 定时任务 `{}` 的一次**手动运行**：你在 {} 注册它、约定 {} 触发，\
          老板现在手动跑了一次。原定时任务并未消耗——它仍会在原定时间自动触发一次。\
-         你无需注册任何 cron 或 wakeup。用 `fleet schedule list` 看它的状态。）",
+         你无需注册任何 cron 或 wakeup。用 `fleet schedule list` 看它的状态。\
+         本次手动运行同样不发决策卡：直接把活干完，以纯文本汇报收尾结束回合，\
+         **不要**调用 `fleet__ask`/`AskUserQuestion` 交回控制权（交互模式对本回合豁免）。）",
         rec.id,
         fmt_local(rec.created),
         fmt_local(rec.fire_at),
@@ -1967,11 +1969,11 @@ mod tests {
         assert_eq!(calls[0].entrypoint, SCHEDULE_ENTRYPOINT);
         assert!(calls[0].prompt.contains("check the deploy"));
         assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
-        // A manual run has the user present — it is NOT exempt from the decision
-        // card, so its footer must NOT carry the unattended marker.
+        // A manual run is exempt from the decision card just like a fired one:
+        // the boss wants the work done, not a card.
         assert!(
-            !calls[0].prompt.contains("无人值守"),
-            "manual run stays interactive"
+            calls[0].prompt.contains("不发决策卡"),
+            "manual run is card-exempt"
         );
 
         // the record is byte-for-byte unchanged: still pending, no generation

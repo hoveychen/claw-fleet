@@ -596,7 +596,9 @@ pub fn compose_run_now_prompt(rec: &LoopRecord) -> String {
     out.push_str(&format!(
         "（这是 Fleet 循环 `{}` 的一次**手动运行**，每 {} 自动触发一次。\
          老板现在手动跑了一次——这次不计入迭代，也不影响下一次的自动触发时间。\
-         你无需注册任何 cron 或 wakeup。要停止这个循环用 `fleet loop stop {}`。）",
+         你无需注册任何 cron 或 wakeup。要停止这个循环用 `fleet loop stop {}`。\
+         本次手动运行同样不发决策卡：直接把活干完，以纯文本汇报收尾结束回合，\
+         **不要**调用 `fleet__ask`/`AskUserQuestion` 交回控制权（交互模式对本回合豁免）。）",
         rec.id,
         humanize_secs(rec.interval_secs),
         rec.id,
@@ -1752,10 +1754,11 @@ mod tests {
         assert_eq!(calls[0].entrypoint, LOOP_ENTRYPOINT);
         assert!(calls[0].prompt.contains("check the deploy"));
         assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
-        // Manual run has a human present — not exempt, no unattended marker.
+        // A manual run is exempt from the decision card just like a fired one:
+        // the boss wants the work done, not a card.
         assert!(
-            !calls[0].prompt.contains("无人值守"),
-            "manual run stays interactive"
+            calls[0].prompt.contains("不发决策卡"),
+            "manual run is card-exempt"
         );
 
         // next_fire_at / iterations_done / generation all unchanged — the
