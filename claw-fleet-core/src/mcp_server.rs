@@ -1819,7 +1819,11 @@ fn await_card(
         resp.answers.clone(),
     );
 
-    Ok(answered_result(&resp.answers, stripped))
+    Ok(answered_result(
+        &resp.answers,
+        stripped,
+        resp.side_question_digest.as_deref(),
+    ))
 }
 
 /// The tool result for an answered `fleet__ask` card.
@@ -1831,9 +1835,14 @@ fn await_card(
 /// `tool_result`). `structuredContent` itself stays, because the desktop's
 /// `DecisionToolCard` and the mobile relay's `tool_result_digest` read the
 /// answers out of the JSON-string `toolUseResult` it produces.
+///
+/// `side_questions` is [`crate::mcp_ipc::FleetAskResponse::side_question_digest`]:
+/// it rides beside the answers under its own key (and as its own text block),
+/// never inside the answers map the readers match options against.
 fn answered_result(
     answers: &std::collections::BTreeMap<String, String>,
     stripped: &StrippedEndOptions,
+    side_questions: Option<&str>,
 ) -> Value {
     // Pack answers as JSON so the agent can parse structured form values. For
     // clients that do read `content`, the note rides as a *second* text block,
@@ -1845,6 +1854,10 @@ fn answered_result(
         let note = stripped.note();
         content.push(json!({ "type": "text", "text": note }));
         structured["note"] = json!(note);
+    }
+    if let Some(digest) = side_questions.filter(|d| !d.trim().is_empty()) {
+        content.push(json!({ "type": "text", "text": digest }));
+        structured["sideQuestions"] = json!(digest);
     }
     json!({
         "content": content,
@@ -3149,7 +3162,7 @@ mod tests {
             labels: vec!["收工".into()],
             implies_complete: true,
         };
-        let result = answered_result(&answers, &stripped);
+        let result = answered_result(&answers, &stripped, None);
         assert_eq!(result["structuredContent"]["answers"]["Q"], "A");
         let note = result["structuredContent"]["note"]
             .as_str()
@@ -3164,9 +3177,28 @@ mod tests {
             labels: Vec::new(),
             implies_complete: false,
         };
-        let result = answered_result(&answers, &clean);
+        let result = answered_result(&answers, &clean, None);
         assert!(result["structuredContent"].get("note").is_none());
+        assert!(result["structuredContent"].get("sideQuestions").is_none());
         assert_eq!(result["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn answered_result_carries_side_question_digest_beside_the_answers() {
+        let answers: std::collections::BTreeMap<String, String> =
+            [("Q".to_string(), "A".to_string())].into();
+        let clean = StrippedEndOptions {
+            labels: Vec::new(),
+            implies_complete: false,
+        };
+        let digest = "老板作答前查看了：\n- 反方论证（A）：另一边更省事。";
+        let result = answered_result(&answers, &clean, Some(digest));
+        assert_eq!(result["structuredContent"]["sideQuestions"], digest);
+        assert_eq!(result["structuredContent"]["answers"], json!({ "Q": "A" }));
+        assert_eq!(result["content"][1]["text"], digest);
+        let first: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(first, json!({ "Q": "A" }), "answers JSON is untouched");
     }
 
     #[test]

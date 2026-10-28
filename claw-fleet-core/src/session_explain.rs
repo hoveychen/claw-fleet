@@ -75,6 +75,33 @@ pub enum ExplainPreset {
     Rationale,
     /// The user typed their own question.
     Custom,
+    /// Decision-card follow-up: the strongest case a competent expert who
+    /// disagrees would make, and the premises the current recommendation
+    /// rests on. Summarised into the card's answer (see [`pre_answer_digest`]).
+    Steelman,
+    /// Decision-card follow-up: which observable evidence or thresholds would
+    /// flip the conclusion. Summarised into the card's answer like `Steelman`.
+    FlipConditions,
+}
+
+impl ExplainPreset {
+    /// Presets whose conclusion line rides along with the boss's answer to
+    /// the decision card they were asked about.
+    pub fn is_card_review(self) -> bool {
+        matches!(self, ExplainPreset::Steelman | ExplainPreset::FlipConditions)
+    }
+
+    /// Label used in the answer digest; product copy, so Chinese.
+    fn digest_label(self) -> &'static str {
+        match self {
+            ExplainPreset::Steelman => "反方论证",
+            ExplainPreset::FlipConditions => "翻转条件",
+            ExplainPreset::Explain => "解释",
+            ExplainPreset::Translate => "翻译",
+            ExplainPreset::Rationale => "为什么",
+            ExplainPreset::Custom => "追问",
+        }
+    }
 }
 
 /// Where in the transcript the quoted passage came from, so a client can scroll
@@ -415,7 +442,110 @@ fn preset_question(preset: ExplainPreset, custom: Option<&str>) -> String {
             .filter(|q| !q.is_empty())
             .unwrap_or("请解释这段话。")
             .to_string(),
+        ExplainPreset::Steelman => STEELMAN_QUESTION.to_string(),
+        ExplainPreset::FlipConditions => FLIP_CONDITIONS_QUESTION.to_string(),
     }
+}
+
+/// Steelman prompt. The fork sees the whole card in the `fleet__ask` tool_use
+/// above it; the quote names the question and the option under scrutiny. The
+/// first line is a one-sentence conclusion that [`pre_answer_digest`] lifts.
+const STEELMAN_QUESTION: &str = "请针对【原文】里这张决策卡上的这个选项，给出另一边最有力的论证（steelman）。整张卡就是你上面那次 fleet__ask 调用。\n\
+要求：\n\
+1. 回答的第一行以「结论：」开头，用一句话说清：一个称职但不同意当前推荐的专家会选什么、最主要的理由是什么。\n\
+2. 写出这位专家的立场依赖哪些前提假设、做了哪些价值取舍。\n\
+3. 点明当前推荐依赖哪些前提，也就是一旦这些前提不成立，推荐就站不住的那几条。\n\
+4. 诚实地给出你能想到的最强论证，不要写成稻草人。你不需要改变立场，但也不要借机修改推荐、重申推荐，或在结尾评判哪一边更好。这里只陈述论证。";
+
+/// Flip-conditions prompt; same first-line contract as [`STEELMAN_QUESTION`].
+const FLIP_CONDITIONS_QUESTION: &str = "什么证据或条件出现时，你对【原文】这张决策卡的结论会翻转？整张卡就是你上面那次 fleet__ask 调用。\n\
+要求：\n\
+1. 回答的第一行以「结论：」开头，用一句话说清最关键的翻转条件。\n\
+2. 逐条列出具体、可观测的翻转条件：要看到什么证据、越过什么阈值、哪个事实成立或不成立，以及怎么去观测它。「情况变化」「需求不同」这类说不出观测手段的条件不算。\n\
+3. 如果说不出具体、可观测的条件，就直接明说，第一行写「结论：该结论主要来自先验，数据撑不住。」，然后说明缺的是哪类数据。\n\
+4. 不要借机修改推荐或重申推荐。";
+
+// ── Answer digest ────────────────────────────────────────────────────────────
+
+/// Longest conclusion line carried into a digest, in chars.
+const DIGEST_CONCLUSION_MAX: usize = 160;
+/// Longest quote excerpt used as a digest item's subject, in chars.
+const DIGEST_SUBJECT_MAX: usize = 24;
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max).collect();
+    out.push('…');
+    out
+}
+
+/// The answer's first non-empty line minus the `结论：` lead-in and any
+/// markdown emphasis the model wrapped it in.
+fn conclusion_line(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let line = line.trim_start_matches(['#', '>', '-', '*', ' ']).trim();
+    let line = line.trim_end_matches('*').trim();
+    let line = ["结论：", "结论:"]
+        .iter()
+        .find_map(|p| line.strip_prefix(p))
+        .unwrap_or(line)
+        .trim_start_matches('*')
+        .trim();
+    (!line.is_empty()).then(|| truncate_chars(line, DIGEST_CONCLUSION_MAX))
+}
+
+/// What a digest item is about: the one card option label the quote names,
+/// or else the quote's first line, shortened.
+fn digest_subject(quote: &str, option_labels: &[String]) -> String {
+    let mut hits = option_labels
+        .iter()
+        .filter(|l| !l.trim().is_empty() && quote.contains(l.trim()));
+    if let (Some(only), None) = (hits.next(), hits.next()) {
+        return only.trim().to_string();
+    }
+    let first = quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    truncate_chars(first, DIGEST_SUBJECT_MAX)
+}
+
+/// The "what the boss looked at before answering" note appended to a
+/// decision-card answer, or `None` when they asked nothing.
+///
+/// Counts finished, undismissed `Steelman` / `FlipConditions` questions asked
+/// in `session_id` at or after `since_ms` (the card's timestamp), oldest
+/// first, one line each. `option_labels` are the card's option labels, used
+/// to name the option a question was about.
+pub fn pre_answer_digest_in(
+    root: &Path,
+    session_id: &str,
+    since_ms: u64,
+    option_labels: &[String],
+) -> Option<String> {
+    let lines: Vec<String> = list_in(root, session_id)
+        .into_iter()
+        .filter(|r| r.preset.is_card_review())
+        .filter(|r| r.created_ms >= since_ms)
+        .filter(|r| r.status == ExplainStatus::Done && !r.dismissed)
+        .filter_map(|r| {
+            let conclusion = conclusion_line(&r.text)?;
+            Some(format!(
+                "- {}（{}）：{}",
+                r.preset.digest_label(),
+                digest_subject(&r.quote, option_labels),
+                conclusion
+            ))
+        })
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!("老板作答前查看了：\n{}", lines.join("\n")))
+}
+
+/// [`pre_answer_digest_in`] against the real store.
+pub fn pre_answer_digest(session_id: &str, since_ms: u64, option_labels: &[String]) -> Option<String> {
+    pre_answer_digest_in(&explain_dir()?, session_id, since_ms, option_labels)
 }
 
 /// The single-turn prompt handed to the fork. `prior` is the follow-up chain
@@ -1187,6 +1317,124 @@ mod tests {
             preset_question(ExplainPreset::Custom, Some("   ")),
             "请解释这段话。"
         );
+    }
+
+    #[test]
+    fn card_review_presets_use_snake_case_wire_names() {
+        assert_eq!(
+            serde_json::to_string(&ExplainPreset::Steelman).unwrap(),
+            "\"steelman\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ExplainPreset::FlipConditions).unwrap(),
+            "\"flip_conditions\""
+        );
+        assert!(ExplainPreset::Steelman.is_card_review());
+        assert!(ExplainPreset::FlipConditions.is_card_review());
+        assert!(!ExplainPreset::Rationale.is_card_review());
+    }
+
+    #[test]
+    fn steelman_prompt_asks_for_the_strongest_case_without_switching_sides() {
+        let q = preset_question(ExplainPreset::Steelman, Some("ignored"));
+        assert!(q.contains("第一行以「结论：」开头"));
+        assert!(q.contains("称职但不同意"));
+        assert!(q.contains("前提假设"));
+        assert!(q.contains("当前推荐依赖哪些前提"));
+        assert!(q.contains("不要借机修改推荐、重申推荐"));
+        assert!(q.contains("fleet__ask"));
+    }
+
+    #[test]
+    fn flip_prompt_demands_observable_conditions_or_admits_priors() {
+        let q = preset_question(ExplainPreset::FlipConditions, None);
+        assert!(q.contains("第一行以「结论：」开头"));
+        assert!(q.contains("可观测"));
+        assert!(q.contains("阈值"));
+        assert!(q.contains("该结论主要来自先验，数据撑不住"));
+        assert!(q.contains("不要借机修改推荐"));
+    }
+
+    fn review(id: &str, preset: ExplainPreset, created: u64, quote: &str, text: &str) -> ExplainRecord {
+        let mut r = rec(id, "s1", created);
+        r.preset = preset;
+        r.quote = quote.into();
+        r.text = text.into();
+        r
+    }
+
+    #[test]
+    fn digest_is_none_without_card_review_questions() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(pre_answer_digest_in(dir.path(), "s1", 0, &[]), None);
+        // Other presets, even on the card, are not digested.
+        write_record_in(dir.path(), &rec("a", "s1", 100)).unwrap();
+        assert_eq!(pre_answer_digest_in(dir.path(), "s1", 0, &[]), None);
+    }
+
+    #[test]
+    fn digest_lists_finished_reviews_after_the_card_one_per_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let labels = vec!["保留兼容".to_string(), "直接删除".to_string()];
+        // Asked before the card existed: belongs to an earlier card.
+        write_record_in(
+            dir.path(),
+            &review("old", ExplainPreset::Steelman, 50, "保留兼容", "结论：旧的"),
+        )
+        .unwrap();
+        write_record_in(
+            dir.path(),
+            &review(
+                "s",
+                ExplainPreset::Steelman,
+                200,
+                "要不要保留兼容？\n选项：保留兼容",
+                "**结论：** 专家会选直接删除，因为维护成本更高。\n\n细节……",
+            ),
+        )
+        .unwrap();
+        write_record_in(
+            dir.path(),
+            &review(
+                "f",
+                ExplainPreset::FlipConditions,
+                300,
+                "这里有一大段没有出现任何选项名的问题正文，长度超过二十四个字",
+                "结论：该结论主要来自先验，数据撑不住。",
+            ),
+        )
+        .unwrap();
+        // Unfinished, dismissed and empty answers are skipped.
+        let mut running = review("r", ExplainPreset::Steelman, 400, "保留兼容", "结论：半截");
+        running.status = ExplainStatus::Running;
+        write_record_in(dir.path(), &running).unwrap();
+        write_record_in(
+            dir.path(),
+            &review("d", ExplainPreset::FlipConditions, 500, "直接删除", "结论：被关掉了"),
+        )
+        .unwrap();
+        set_dismissed_in(dir.path(), "s1", "d", true).unwrap();
+        write_record_in(
+            dir.path(),
+            &review("e", ExplainPreset::Steelman, 600, "直接删除", "  \n "),
+        )
+        .unwrap();
+
+        let got = pre_answer_digest_in(dir.path(), "s1", 100, &labels).unwrap();
+        assert_eq!(
+            got,
+            "老板作答前查看了：\n\
+             - 反方论证（保留兼容）：专家会选直接删除，因为维护成本更高。\n\
+             - 翻转条件（这里有一大段没有出现任何选项名的问题正文，长度超…）：该结论主要来自先验，数据撑不住。"
+        );
+    }
+
+    #[test]
+    fn digest_subject_falls_back_to_the_quote_when_labels_are_ambiguous() {
+        let labels = vec!["A".to_string(), "B".to_string()];
+        assert_eq!(digest_subject("pick A", &labels), "A");
+        assert_eq!(digest_subject("A or B?", &labels), "A or B?");
+        assert_eq!(digest_subject("\n  first\nsecond", &[]), "first");
     }
 
     #[test]

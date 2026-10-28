@@ -8,6 +8,8 @@ import {
   PanelRightClose,
   PencilLine,
   Scale,
+  Shuffle,
+  Swords,
 } from "lucide-react";
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +30,8 @@ const PRESET_ICON: Record<ExplainPreset, typeof MessageCircleQuestion> = {
   translate: Languages,
   rationale: Scale,
   custom: PencilLine,
+  steelman: Swords,
+  flip_conditions: Shuffle,
 };
 
 /**

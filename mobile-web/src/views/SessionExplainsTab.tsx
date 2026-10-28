@@ -6,6 +6,8 @@ import {
   MessageCircleQuestion,
   PencilLine,
   Scale,
+  Shuffle,
+  Swords,
   TriangleAlert,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -24,6 +26,8 @@ const PRESET_ICON: Record<ExplainPreset, typeof MessageCircleQuestion> = {
   translate: Languages,
   rationale: Scale,
   custom: PencilLine,
+  steelman: Swords,
+  flip_conditions: Shuffle,
 };
 
 const PRESET_LABEL: Record<ExplainPreset, string> = {
@@ -31,6 +35,8 @@ const PRESET_LABEL: Record<ExplainPreset, string> = {
   translate: "翻译",
   rationale: "为什么",
   custom: "自定义提问",
+  steelman: "反方论证",
+  flip_conditions: "翻转条件",
 };
 
 /**

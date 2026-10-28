@@ -423,6 +423,7 @@ pub fn form_answer_to_fleet_ask(
         // the task — the terminal button is a Fleet-surface affordance and ACP
         // clients have no way to express it.
         task_outcome: None,
+        side_question_digest: None,
     }
 }
 

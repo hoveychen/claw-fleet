@@ -2422,6 +2422,7 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 answers,
                 cancelled,
                 task_outcome,
+                side_question_digest: None,
             };
             crate::mcp_ipc::deliver_response(&resp)
         }

@@ -155,7 +155,7 @@ sessionId: string, bytes: number, updatedMs: number, };
 export type NoteMatch = { path: string, sessionId: string, 
 line: number, text: string, };
 
-export type ExplainPreset = "explain" | "translate" | "rationale" | "custom";
+export type ExplainPreset = "explain" | "translate" | "rationale" | "custom" | "steelman" | "flip_conditions";
 
 export type ExplainAnchor = { msgUuid?: string | null, msgIdx?: number | null, };
 

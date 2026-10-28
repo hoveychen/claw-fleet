@@ -1018,6 +1018,16 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
     match card.kind {
         ParkedKind::FleetAsk | ParkedKind::Elicitation => {
             render_question_answers(&mut out, &card.request, response);
+            // See `mcp_ipc::FleetAskResponse::side_question_digest`.
+            if let Some(digest) = response
+                .get("sideQuestionDigest")
+                .and_then(|v| v.as_str())
+                .filter(|d| !d.trim().is_empty())
+            {
+                out.push('\n');
+                out.push_str(digest.trim());
+                out.push('\n');
+            }
         }
         ParkedKind::A2uiRender => {
             let action = response
@@ -1447,6 +1457,29 @@ mod tests {
         // `fleet_event::classify` by its unchanged header.
         assert!(prompt.contains("不是老板拒绝或纠正了你"), "{prompt}");
         assert!(prompt.starts_with(RESUME_PROMPT_HEADER), "{prompt}");
+        assert!(!prompt.contains("老板作答前查看了"), "{prompt}");
+    }
+
+    /// A parked card's answer reaches the agent only through the resume
+    /// prompt, so the side-question digest has to ride there too.
+    #[test]
+    fn resume_prompt_carries_side_question_digest() {
+        let _home = TmpHome::new("prompt-digest");
+        let req = fleet_ask_request("card-2d", "sess-2d");
+        let card = park("card-2d", ParkedKind::FleetAsk, "sess-2d", "/ws/a", &req).unwrap();
+        let digest = "老板作答前查看了：\n- 反方论证（保留）：删掉更省维护。\n- 翻转条件（保留）：旧客户端占比低于 1%。";
+        let resp = json!({
+            "id": "card-2d",
+            "answers": { "要不要保留向后兼容？": "保留" },
+            "cancelled": false,
+            "sideQuestionDigest": digest
+        });
+        let prompt = build_resume_prompt(&card, &resp);
+        assert!(prompt.contains(digest), "{prompt}");
+        let pick = prompt.find("【老板的选择】保留").unwrap();
+        assert!(prompt.find(digest).unwrap() > pick, "{prompt}");
+        // Not mistaken for a form field.
+        assert!(!prompt.contains("【sideQuestionDigest】"), "{prompt}");
     }
 
     /// The deferred interrupt waits for the stop notice's `tool_result` row, so
@@ -1646,6 +1679,7 @@ mod tests {
             answers,
             cancelled: false,
             task_outcome: None,
+            side_question_digest: None,
         };
         // `answer` would spawn a real `claude --resume`; the seam stands in for it.
         resolve_with(
@@ -1700,6 +1734,7 @@ mod tests {
             answers: Default::default(),
             cancelled: true,
             task_outcome: Some(crate::task_outcome::TaskOutcome::Abandoned),
+            side_question_digest: None,
         };
         assert!(try_resolve("card-h2", &serde_json::to_value(&resp).unwrap(), true).is_some());
 
