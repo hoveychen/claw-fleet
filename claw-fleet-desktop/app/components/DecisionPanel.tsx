@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { useDecisionStore } from "../store";
@@ -36,7 +37,7 @@ import { useAutoFlip } from "./useAutoFlip";
 import { AutoHeightFrame } from "./AutoHeightFrame";
 import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import styles from "./DecisionPanel.module.css";
-import { Presence } from "./Presence";
+import { Presence, useExiting } from "./Presence";
 import { SkeletonText } from "./loading";
 import { fromSubtask, isRecommendedOption, stripRecommendedSuffix } from "./dockKeys";
 
@@ -949,6 +950,29 @@ function SharedOptionsBlock({
     setFocusedLabel(firstWithPreview);
   }, [firstWithPreview]);
 
+  // Compact hosts float the preview next to the hovered option instead of
+  // laying it out under the list. Inline, the preview's height followed the
+  // hovered option, so the options moved under a still pointer and hover
+  // bounced between neighbours. A floating layer takes no layout space.
+  const [floatAnchor, setFloatAnchor] = useState<HTMLElement | null>(null);
+  const floatHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (floatHideTimer.current) clearTimeout(floatHideTimer.current);
+  }, []);
+  const focusOption = (label: string, el: HTMLElement, withPreview: boolean) => {
+    setFocusedLabel(label);
+    if (!compact) return;
+    if (floatHideTimer.current) clearTimeout(floatHideTimer.current);
+    setFloatAnchor(withPreview ? el : null);
+  };
+  // The short delay keeps the layer up while the pointer crosses the gap
+  // between two rows, so it swaps content instead of closing and reopening.
+  const blurOption = () => {
+    if (!compact) return;
+    if (floatHideTimer.current) clearTimeout(floatHideTimer.current);
+    floatHideTimer.current = setTimeout(() => setFloatAnchor(null), 120);
+  };
+
   // Only a click fills an option. A pre-filled "primary" button read as already
   // picked while Submit stayed disabled, so the recommendation is a tag instead.
   const list = (
@@ -981,8 +1005,10 @@ function SharedOptionsBlock({
               onClick={() =>
                 onToggle(decisionId, question.question, opt.label, effectiveMulti)
               }
-              onMouseEnter={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
-              onFocus={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
+              onMouseEnter={hasPreview ? (e) => focusOption(opt.label, e.currentTarget, !!opt.preview) : undefined}
+              onFocus={hasPreview ? (e) => focusOption(opt.label, e.currentTarget, !!opt.preview) : undefined}
+              onMouseLeave={hasPreview ? blurOption : undefined}
+              onBlur={hasPreview ? blurOption : undefined}
             >
               {/* The digit the dock's keyboard handler maps to this option; a
                   check once it is picked. */}
@@ -1063,27 +1089,103 @@ function SharedOptionsBlock({
       )}
     </div>
   );
-  // Compact hosts — the inline card inside SessionDetail — stack the preview
-  // under the options instead of splitting the narrow column in half. This used
-  // to open an always-on-top Tauri subwindow; stacking keeps the preview inside
-  // the card, which is where the option it belongs to is. The focused option's
-  // label is captioned because the side-by-side layout's spatial pairing is
-  // what stacking gives up.
+  // Compact hosts — the inline card inside SessionDetail — have no room to
+  // split the column, so the preview floats beside the hovered option (see
+  // focusOption). The focused option's label is captioned because the layer
+  // may sit away from the row it belongs to.
   if (compact) {
     return (
-      <div className={styles.elicitation_options_stacked_preview}>
+      <>
         {list}
-        <div className={styles.elicitation_preview_caption}>
-          {focusedLabel || t("elicitation.preview", "Preview")}
-        </div>
-        {preview}
-      </div>
+        <Presence when={floatAnchor !== null}>
+          {floatAnchor &&
+            createPortal(
+              <FloatingOptionPreview anchor={floatAnchor} caption={focusedLabel || t("elicitation.preview", "Preview")}>
+                {preview}
+              </FloatingOptionPreview>,
+              document.body,
+            )}
+        </Presence>
+      </>
     );
   }
   return (
     <div className={styles.elicitation_options_with_preview}>
       {list}
       {preview}
+    </div>
+  );
+}
+
+// Floating preview for compact hosts. It goes beside the option list (left,
+// else right) when the window has room there, else above or below the
+// hovered row. It is pointer-transparent: the pointer must keep reaching the
+// options underneath, or covering one would end its hover and close the layer.
+function FloatingOptionPreview({
+  anchor,
+  caption,
+  children,
+}: {
+  anchor: HTMLElement;
+  caption: string;
+  children: React.ReactNode;
+}) {
+  const exiting = useExiting();
+  const ref = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = ref.current;
+      if (!el || !anchor.isConnected) return;
+      const GAP = 10;
+      const MARGIN = 8;
+      const MIN_SIDE = 280;
+      const row = anchor.getBoundingClientRect();
+      const list = (anchor.closest(`.${styles.elicitation_options}`) ?? anchor).getBoundingClientRect();
+      const leftRoom = list.left - GAP - MARGIN;
+      const rightRoom = window.innerWidth - list.right - GAP - MARGIN;
+      let left: number;
+      let width: number;
+      const beside = leftRoom >= MIN_SIDE || rightRoom >= MIN_SIDE;
+      if (leftRoom >= MIN_SIDE) {
+        width = Math.min(440, leftRoom);
+        left = list.left - GAP - width;
+      } else if (rightRoom >= MIN_SIDE) {
+        width = Math.min(440, rightRoom);
+        left = list.right + GAP;
+      } else {
+        width = list.width;
+        left = list.left;
+      }
+      el.style.width = `${width}px`;
+      el.style.left = `${left}px`;
+      const height = el.offsetHeight;
+      let top: number;
+      if (beside) {
+        top = Math.min(row.top, window.innerHeight - height - MARGIN);
+      } else if (row.top - GAP - height >= MARGIN) {
+        top = row.top - GAP - height;
+      } else {
+        top = Math.min(row.bottom + GAP, window.innerHeight - height - MARGIN);
+      }
+      el.style.top = `${Math.max(MARGIN, top)}px`;
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [anchor, caption]);
+  return (
+    <div
+      ref={ref}
+      className={styles.elicitation_preview_float}
+      data-exiting={exiting || undefined}
+      aria-hidden
+    >
+      <div className={styles.elicitation_preview_caption}>{caption}</div>
+      {children}
     </div>
   );
 }
