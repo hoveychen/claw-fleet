@@ -11,7 +11,7 @@ import {
   FlipConditionsButton,
   SteelmanButton,
   useCardExplain,
-  useCardReview,
+  type DecisionExplain,
 } from "./DecisionExplainMarks";
 import explainStyles from "./DecisionExplainMarks.module.css";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -579,8 +579,6 @@ function ElicitationCard({
   // card) they stay under the question (see DecisionExplainMarks).
   const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId, decision.request.timestamp);
   const questionBodyRef = useRef<HTMLDivElement>(null);
-  // Steelman / flip buttons preselect a preset on the bar above; see useCardReview.
-  const review = useCardReview();
   const {
     submitElicitation,
     declineElicitation,
@@ -615,8 +613,6 @@ function ElicitationCard({
   const { step, request, selections, customAnswers, multiSelectOverrides, attachments } = decision;
   const total = request.questions.length;
   const q = request.questions[step];
-  const resetReview = review.reset;
-  useEffect(resetReview, [resetReview, decision.id, step]);
   const isLast = step === total - 1;
 
   // Effective multi-select: the question's own flag OR a user-forced override.
@@ -752,15 +748,13 @@ function ElicitationCard({
             enabled={explainMarks.enabled}
             busy={explainMarks.busy}
             onAsk={explainMarks.ask}
-            prime={review.prime}
-            primeIdx={step}
           />
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
-        {explainMarks.enabled && <FlipConditionsButton onPress={() => review.flip(q.question)} />}
+        {explainMarks.enabled && <FlipConditionsButton explain={explainMarks} question={q.question} msgIdx={step} />}
         {explainInline && (
           <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} onFollowUp={explainMarks.followUp} />
         )}
@@ -794,7 +788,7 @@ function ElicitationCard({
           decisionId={decision.id}
           sessionId={decision.request.sessionId}
           question={q}
-          onSteelman={explainMarks.enabled ? (opt) => review.steelman(q.question, opt) : undefined}
+          steelman={explainMarks.enabled ? { explain: explainMarks, question: q.question, msgIdx: step } : undefined}
           compact={compact}
           effectiveMulti={effectiveMulti}
           selected={selected}
@@ -912,7 +906,7 @@ function SharedOptionsBlock({
   onAddAttachment,
   onRemoveAttachment,
   onAttachmentError,
-  onSteelman,
+  steelman,
 }: {
   decisionId: string;
   sessionId: string;
@@ -932,9 +926,9 @@ function SharedOptionsBlock({
   ) => void | Promise<void>;
   onRemoveAttachment: (path: string) => void;
   onAttachmentError: (msg: string) => void;
-  /** Preselect a steelman ask about one option on the card's ask bar; absent
-   *  (the card's session cannot be forked) hides the button. */
-  onSteelman?: (opt: { label: string; description: string }) => void;
+  /** What a per-option steelman ask needs; absent (the card's session cannot
+   *  be forked) hides the button. */
+  steelman?: { explain: DecisionExplain; question: string; msgIdx: number };
 }) {
   const mdComponents = usePathMarkdown(sessionId);
   const { t } = useTranslation();
@@ -1012,7 +1006,7 @@ function SharedOptionsBlock({
                 )}
               </span>
             </button>
-            {onSteelman && <SteelmanButton label={opt.label} onPress={() => onSteelman(opt)} />}
+            {steelman && <SteelmanButton {...steelman} option={opt} />}
             <button
               type="button"
               className={styles.elicitation_option_edit}
@@ -1490,8 +1484,6 @@ export function FleetAskCard({
   // card) they stay under the question (see DecisionExplainMarks).
   const { explain: explainMarks, inline: explainInline } = useCardExplain(decision.request.sessionId, decision.request.timestamp);
   const questionBodyRef = useRef<HTMLDivElement>(null);
-  // Steelman / flip buttons preselect a preset on the bar above; see useCardReview.
-  const review = useCardReview();
   // The preview iframe is cross-origin, so the theme has to travel into it as a
   // value rather than through CSS custom properties.
   const theme = useDocumentTheme();
@@ -1538,8 +1530,6 @@ export function FleetAskCard({
   } = decision;
   const total = request.questions.length;
   const q = request.questions[step];
-  const resetReview = review.reset;
-  useEffect(resetReview, [resetReview, decision.id, step]);
   const isLast = step === total - 1;
 
   const opts = q.options ?? [];
@@ -1687,15 +1677,13 @@ export function FleetAskCard({
             enabled={explainMarks.enabled}
             busy={explainMarks.busy}
             onAsk={explainMarks.ask}
-            prime={review.prime}
-            primeIdx={step}
           />
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
           <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
-        {explainMarks.enabled && <FlipConditionsButton onPress={() => review.flip(q.question)} />}
+        {explainMarks.enabled && <FlipConditionsButton explain={explainMarks} question={q.question} msgIdx={step} />}
         {explainInline && (
           <DecisionExplainAnswers answers={explainMarks.answers} loading={explainMarks.loading} onDismiss={explainMarks.dismiss} onFollowUp={explainMarks.followUp} />
         )}
@@ -1776,7 +1764,7 @@ export function FleetAskCard({
               multiSelect: q.multiSelect,
               options: opts,
             }}
-            onSteelman={explainMarks.enabled ? (opt) => review.steelman(q.question, opt) : undefined}
+            steelman={explainMarks.enabled ? { explain: explainMarks, question: q.question, msgIdx: step } : undefined}
             compact={compact}
             effectiveMulti={effectiveMulti}
             selected={selected}

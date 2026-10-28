@@ -1781,7 +1781,7 @@
     "explain_steelman_btn": "Steelman",
     "explain_steelman_hint": "Steelman: what an expert who disagrees with this option would say",
     "explain_flip_btn": "What would flip it",
-    "explain_flip_hint": "What evidence would flip the conclusion? Confirm on the ask bar before it goes out",
+    "explain_flip_hint": "What evidence would flip the conclusion? The answer appears under the question",
     "explain_running": "Asking",
     "explain_failed": "Failed",
     "explain_locate": "Locate in transcript",

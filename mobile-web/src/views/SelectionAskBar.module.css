@@ -88,22 +88,3 @@
 .send:disabled {
   opacity: 0.5;
 }
-
-
-/* A primed bar (opened by a card's steelman / flip button): the preselected
-   preset reads as chosen; nothing goes out until 发送. */
-.btn[data-chosen="true"] {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px var(--color-accent);
-}
-
-/* What a primed ask is about (the option name). */
-.caption {
-  flex-basis: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-dim);
-  padding: 4px 10px 2px;
-}

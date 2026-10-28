@@ -224,24 +224,13 @@ export function readAssistantSelection(
 //
 // A decision card offers two asks about the card itself rather than about a
 // passage: "steelman this option" next to each option and "what would flip
-// it" on the question. They do not go out on click — the button opens the
-// card's ask bar with the preset already chosen, and the reader confirms
-// there (or picks another preset, or types their own question). The quote is
-// built here so both surfaces send the same shape: the host's answer digest
+// it" on the question. A press sends at once — no ask bar in between — and
+// the answer lands under the question like any card side question. The quote
+// is built here so both surfaces send the same shape: the host's answer digest
 // (`session_explain::digest_subject`) names the option by finding exactly one
 // option label in the quote.
 
-/** What a card review button hands its ask bar: the quote it built, the preset
- *  to preselect, and a short caption naming what is being asked about. */
-export interface ExplainPrime {
-  quote: string;
-  preset: "steelman" | "flip_conditions";
-  caption: string;
-  /** Bumped on every press, so pressing the same button twice re-opens the bar. */
-  nonce: number;
-  /** Viewport box of the button pressed, for surfaces that hang the bar on it. */
-  rect?: DOMRect | null;
-}
+export type CardReviewPreset = "steelman" | "flip_conditions";
 
 /** The tag that marks the option a steelman ask is about. */
 export const STEELMAN_OPTION_TAG = "【被追问的选项】";
@@ -264,15 +253,42 @@ export function flipConditionsQuote(question: string): string {
   return q.length > MAX_QUOTE_CHARS ? q.slice(0, MAX_QUOTE_CHARS) : q;
 }
 
-/** A selection stand-in for a primed ask: a card review is not a drag, so
- *  there is no range; the anchor is the question index like a card selection. */
-export function primedSelection(quote: string, msgIdx: number): AssistantSelection {
+/** A selection stand-in for a card review ask: a press is not a drag, so there
+ *  is no range; the anchor is the question index like a card selection. */
+export function cardReviewSelection(quote: string, msgIdx: number): AssistantSelection {
   return {
     quote,
     msgIdx,
     msgUuid: null,
     rect: { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0 } as DOMRect,
   };
+}
+
+/**
+ * What a card review answer is about, for its heading: the option a steelman
+ * names (parsed back out of `steelmanQuote`'s tag), or the flip ask. `null`
+ * for any other side question, which is headed by its quote.
+ */
+export function cardReviewSubject(
+  rec: { preset: string; quote: string },
+): { preset: "steelman"; option: string } | { preset: "flip_conditions" } | null {
+  if (rec.preset === "flip_conditions") return { preset: "flip_conditions" };
+  if (rec.preset !== "steelman") return null;
+  const at = rec.quote.lastIndexOf(STEELMAN_OPTION_TAG);
+  if (at < 0) return null;
+  const tail = rec.quote.slice(at + STEELMAN_OPTION_TAG.length);
+  const cut = tail.indexOf(" — ");
+  return { preset: "steelman", option: (cut < 0 ? tail : tail.slice(0, cut)).trim() };
+}
+
+/** Whether the ask a card review button would send is still being answered,
+ *  so the button can wait instead of forking the session a second time. */
+export function cardReviewRunning(
+  records: readonly { preset: string; quote: string; status: string }[],
+  preset: CardReviewPreset,
+  quote: string,
+): boolean {
+  return records.some((r) => r.preset === preset && r.quote === quote && r.status === "running");
 }
 
 /**

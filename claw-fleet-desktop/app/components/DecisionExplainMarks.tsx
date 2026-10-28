@@ -1,5 +1,5 @@
 import { LoaderCircle, Shuffle, Swords } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -15,11 +15,14 @@ import {
 import {
   cacheHitRatio,
   costLabel,
+  cardReviewRunning,
+  cardReviewSelection,
+  cardReviewSubject,
   flipConditionsQuote,
   groupExplainThreads,
   steelmanQuote,
   type AssistantSelection,
-  type ExplainPrime,
+  type CardReviewPreset,
 } from "../selectionExplain";
 import { useSessionsStore } from "../store";
 import { TextBlock } from "./blocks/TextBlock";
@@ -48,7 +51,7 @@ import styles from "./DecisionExplainMarks.module.css";
 export type DecisionExplain = {
   enabled: boolean;
   busy: boolean;
-  ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+  ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void | Promise<void>;
   /**
    * Continue a settled answer: same passage, the prior Q/A folded into a fresh
    * fork of the *session* (the fork itself is never resumable — see
@@ -290,82 +293,115 @@ export function useDecisionExplainMarks(
 /**
  * The card review asks — "steelman this option" and "what would flip it".
  *
- * A press never sends: it hands the card's `SelectionToolbar` a quote and a
- * preset to preselect (`prime`), and the reader confirms there. `reset`
- * clears it when the card steps to another question.
+ * A press sends at once (no ask bar in between) and the answer lands under the
+ * question with the card's other side questions. The button waits — disabled,
+ * spinning — while its own ask is being posted or answered, so a second press
+ * cannot fork the session twice for the same question.
  */
-export function useCardReview(): {
-  prime: ExplainPrime | null;
-  steelman: (question: string, option: { label: string; description?: string | null }) => void;
-  flip: (question: string) => void;
-  reset: () => void;
-} {
-  const [prime, setPrime] = useState<ExplainPrime | null>(null);
-  const steelman = useCallback(
-    (question: string, option: { label: string; description?: string | null }) =>
-      setPrime((p) => ({
-        quote: steelmanQuote(question, option),
-        preset: "steelman",
-        caption: option.label,
-        nonce: (p?.nonce ?? 0) + 1,
-      })),
-    [],
+function CardReviewButton({
+  explain,
+  preset,
+  quote,
+  msgIdx,
+  className,
+  title,
+  ariaLabel,
+  testId,
+  icon,
+  children,
+}: {
+  explain: DecisionExplain;
+  preset: CardReviewPreset;
+  quote: string;
+  msgIdx: number;
+  className: string;
+  title: string;
+  ariaLabel?: string;
+  testId: string;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  const [posting, setPosting] = useState(false);
+  const waiting = posting || cardReviewRunning(explain.answers, preset, quote);
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (waiting) return;
+        setPosting(true);
+        Promise.resolve(explain.ask(cardReviewSelection(quote, msgIdx), preset)).finally(() => setPosting(false));
+      }}
+      disabled={waiting}
+      aria-busy={waiting || undefined}
+      title={title}
+      aria-label={ariaLabel}
+      data-testid={testId}
+    >
+      {waiting ? <LoaderCircle size={11} aria-hidden="true" className={styles.spin} /> : icon}
+      {children}
+    </button>
   );
-  const flip = useCallback(
-    (question: string) =>
-      setPrime((p) => ({
-        quote: flipConditionsQuote(question),
-        preset: "flip_conditions",
-        caption: "",
-        nonce: (p?.nonce ?? 0) + 1,
-      })),
-    [],
-  );
-  const reset = useCallback(() => setPrime(null), []);
-  return { prime, steelman, flip, reset };
 }
 
 /** The question-level "what would flip it" button, under the question. */
-export function FlipConditionsButton({ onPress }: { onPress: () => void }) {
+export function FlipConditionsButton({
+  explain,
+  question,
+  msgIdx,
+}: {
+  explain: DecisionExplain;
+  question: string;
+  msgIdx: number;
+}) {
   const { t } = useTranslation();
   return (
     <div className={styles.review_row}>
-      <button
-        type="button"
+      <CardReviewButton
+        explain={explain}
+        preset="flip_conditions"
+        quote={flipConditionsQuote(question)}
+        msgIdx={msgIdx}
         className={styles.review_btn}
-        // Keep the mousedown from reaching the bar's outside-press close.
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={onPress}
-        title={t("detail.explain_flip_hint", "什么证据出现时结论会翻转？先在追问浮条里确认再发")}
-        data-testid="card-flip-btn"
+        title={t("detail.explain_flip_hint", "什么证据出现时结论会翻转？答案会出现在问题下方")}
+        testId="card-flip-btn"
+        icon={<Shuffle size={11} strokeWidth={1.8} aria-hidden="true" />}
       >
-        <Shuffle size={11} strokeWidth={1.8} aria-hidden="true" />
         {t("detail.explain_flip_btn", "翻转条件")}
-      </button>
+      </CardReviewButton>
     </div>
   );
 }
 
 /** The per-option "steelman" button, beside the option's pencil. */
-export function SteelmanButton({ label, onPress }: { label: string; onPress: () => void }) {
+export function SteelmanButton({
+  explain,
+  question,
+  option,
+  msgIdx,
+}: {
+  explain: DecisionExplain;
+  question: string;
+  option: { label: string; description?: string | null };
+  msgIdx: number;
+}) {
   const { t } = useTranslation();
   const hint = t("detail.explain_steelman_hint", "反方论证：不同意这个选项的专家会怎么说");
   return (
-    <button
-      type="button"
+    <CardReviewButton
+      explain={explain}
+      preset="steelman"
+      quote={steelmanQuote(question, option)}
+      msgIdx={msgIdx}
       className={styles.steelman_btn}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={(e) => {
-        e.stopPropagation();
-        onPress();
-      }}
       title={hint}
-      aria-label={`${hint} — ${label}`}
-      data-testid="card-steelman-btn"
+      ariaLabel={`${hint} — ${option.label}`}
+      testId="card-steelman-btn"
+      icon={<Swords size={11} strokeWidth={1.8} aria-hidden="true" />}
     >
-      <Swords size={11} strokeWidth={1.8} aria-hidden="true" />
       {t("detail.explain_steelman_btn", "反方")}
-    </button>
+    </CardReviewButton>
   );
 }
 
@@ -414,12 +450,22 @@ export function DecisionExplainAnswers({
         const hit = cacheHitRatio(last);
         const cost = costLabel(last.costUsd);
         const multi = records.length > 1;
+        // A card review ask is headed by what it asks, not its long quote.
+        const subject = cardReviewSubject(first);
         return (
           <div key={id} className={styles.card} data-testid="decision-explain-thread">
             <div className={styles.head}>
-              <span className={styles.quote} title={first.question || undefined}>
-                {first.quote}
-              </span>
+              {subject ? (
+                <span className={styles.title} title={first.quote}>
+                  {subject.preset === "steelman"
+                    ? `${t("detail.explain_preset_steelman", "反方论证")} · ${subject.option}`
+                    : t("detail.explain_preset_flip_conditions", "翻转条件")}
+                </span>
+              ) : (
+                <span className={styles.quote} title={first.question || undefined}>
+                  {first.quote}
+                </span>
+              )}
               {multi && (
                 <span className={styles.state}>
                   {t("detail.explain_turns", "{{count}} 轮", { count: records.length })}

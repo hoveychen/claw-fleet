@@ -22,7 +22,6 @@ import {
   DecisionExplainAnswers,
   FlipConditionsButton,
   SteelmanButton,
-  useCardReview,
   useDecisionExplainMarks,
 } from "./DecisionExplainMarks";
 import { SelectionAskBar } from "./SelectionAskBar";
@@ -1182,8 +1181,6 @@ function QuestionsCard({
   // answer lands under the question (see DecisionExplainMarks).
   const explainMarks = useDecisionExplainMarks(client, session);
   const questionBodyRef = useRef<HTMLDivElement>(null);
-  // Steelman / flip buttons preselect a preset on the ask bar; see useCardReview.
-  const review = useCardReview();
   // question text → selected option labels
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -1365,8 +1362,6 @@ function QuestionsCard({
   const total = request.questions.length;
   const multiQ = total > 1;
   const qi = Math.min(step, total - 1);
-  const resetReview = review.reset;
-  useEffect(resetReview, [resetReview, qi]);
   const allAnswered = request.questions.every(answeredQuestion);
   const quick =
     isQuickAnswer(request.questions) && multiOverride[request.questions[0].question] !== true;
@@ -1416,15 +1411,13 @@ function QuestionsCard({
             </ReactMarkdown>
           </div>
           {explainMarks.enabled && (
-            <FlipConditionsButton onPress={(rect) => review.flip(stripTtsDivider(q.question), rect)} />
+            <FlipConditionsButton explain={explainMarks} question={stripTtsDivider(q.question)} msgIdx={qi} />
           )}
           <SelectionAskBar
             scroller={questionBodyRef}
             enabled={explainMarks.enabled}
             busy={explainMarks.busy}
             onAsk={explainMarks.ask}
-            prime={review.prime}
-            primeIdx={qi}
           />
           <DecisionExplainAnswers
             answers={explainMarks.answers}
@@ -1482,10 +1475,12 @@ function QuestionsCard({
                   )}
                   {explainMarks.enabled && (
                     <SteelmanButton
-                      label={o.label}
+                      explain={explainMarks}
+                      question={stripTtsDivider(q.question)}
+                      option={o}
+                      msgIdx={qi}
                       variant="link"
                       className={styles.quickPreviewToggle}
-                      onPress={(rect) => review.steelman(stripTtsDivider(q.question), o, rect)}
                     />
                   )}
                   {o.preview && previewOpen[`${q.question} ${o.label}`] && (
@@ -1540,10 +1535,12 @@ function QuestionsCard({
                     )}
                     {explainMarks.enabled && (
                       <SteelmanButton
-                        label={o.label}
+                        explain={explainMarks}
+                        question={stripTtsDivider(q.question)}
+                        option={o}
+                        msgIdx={qi}
                         variant="side"
                         className={`${styles.optionSideBtn} ${styles.optionSideText}`}
-                        onPress={(rect) => review.steelman(stripTtsDivider(q.question), o, rect)}
                       />
                     )}
                     <button

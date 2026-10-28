@@ -38,6 +38,18 @@
   white-space: nowrap;
 }
 
+/* A card review answer's heading ("反方论证 · <option>" / "翻转条件"). */
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .state {
   display: inline-flex;
   align-items: center;
@@ -164,6 +176,9 @@
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
 }
-.reviewBtn:active {
+.reviewBtn:disabled {
+  opacity: 0.7;
+}
+.reviewBtn:active:not(:disabled) {
   background: var(--color-bg-card-hover);
 }

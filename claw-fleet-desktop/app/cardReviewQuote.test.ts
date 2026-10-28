@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_QUOTE_CHARS,
   STEELMAN_OPTION_TAG,
+  cardReviewRunning,
+  cardReviewSubject,
   flipConditionsQuote,
   steelmanQuote,
 } from "./selectionExplain";
@@ -30,5 +32,25 @@ describe("card review quotes", () => {
   it("flip conditions: the question itself, capped", () => {
     expect(flipConditionsQuote(" 要不要上线？\n")).toBe("要不要上线？");
     expect(flipConditionsQuote("x".repeat(MAX_QUOTE_CHARS + 5)).length).toBe(MAX_QUOTE_CHARS);
+  });
+
+  it("the answer heading reads the option back out of a steelman quote", () => {
+    const quote = steelmanQuote("先灰度还是直接全量？", { label: "直接全量", description: "跳过灰度" });
+    expect(cardReviewSubject({ preset: "steelman", quote })).toEqual({ preset: "steelman", option: "直接全量" });
+    expect(cardReviewSubject({ preset: "steelman", quote: "Q\n\n【被追问的选项】照做" })).toEqual({
+      preset: "steelman",
+      option: "照做",
+    });
+    expect(cardReviewSubject({ preset: "flip_conditions", quote: "Q" })).toEqual({ preset: "flip_conditions" });
+    // A steelman asked from a plain selection names no option: headed by its quote.
+    expect(cardReviewSubject({ preset: "steelman", quote: "灰度到 5%" })).toBeNull();
+    expect(cardReviewSubject({ preset: "explain", quote: "Q" })).toBeNull();
+  });
+
+  it("a review button waits only on its own running ask", () => {
+    const recs = [{ preset: "steelman", quote: "a", status: "running" }, { preset: "steelman", quote: "b", status: "done" }];
+    expect(cardReviewRunning(recs, "steelman", "a")).toBe(true);
+    expect(cardReviewRunning(recs, "steelman", "b")).toBe(false);
+    expect(cardReviewRunning(recs, "flip_conditions", "a")).toBe(false);
   });
 });

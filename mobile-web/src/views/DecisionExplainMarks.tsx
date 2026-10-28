@@ -10,17 +10,20 @@
 // person deciding can read it without leaving. The record is persisted like
 // every side question, so the session's 追问 pane shows it later too.
 import { LoaderCircle, Shuffle, Swords } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   cacheHitRatio,
+  cardReviewRunning,
+  cardReviewSelection,
+  cardReviewSubject,
   costLabel,
   flipConditionsQuote,
   groupExplainThreads,
   pollExplanation,
   steelmanQuote,
   type AssistantSelection,
-  type ExplainPrime,
+  type CardReviewPreset,
 } from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
 import {
@@ -37,13 +40,10 @@ import { Md } from "./DecisionQa";
 import { SkeletonText, Spinner } from "./loading";
 import styles from "./DecisionExplainMarks.module.css";
 
-export function useDecisionExplainMarks(
-  client: FleetTransport | null,
-  session: SessionInfo | undefined,
-): {
+export type DecisionExplain = {
   enabled: boolean;
   busy: boolean;
-  ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+  ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void | Promise<void>;
   /**
    * Continue a settled answer: same passage, the prior Q/A folded into a fresh
    * fork of the *session* (the fork itself is never resumed). Threading it off
@@ -52,7 +52,12 @@ export function useDecisionExplainMarks(
   followUp: (prev: ExplainRecord, question: string) => void;
   answers: ExplainRecord[];
   dismiss: (id: string) => void;
-} {
+};
+
+export function useDecisionExplainMarks(
+  client: FleetTransport | null,
+  session: SessionInfo | undefined,
+): DecisionExplain {
   const sessionId = session?.id;
   const sessionPath = session?.jsonlPath;
   const workspacePath = session?.workspacePath;
@@ -153,57 +158,78 @@ export function useDecisionExplainMarks(
 /**
  * The card review asks — "steelman this option" and "what would flip it".
  *
- * A tap never sends: it hands the card's `SelectionAskBar` a quote, a preset
- * to preselect and the button's box to hang the bar off (`prime`), and the
- * person confirms there. `reset` clears it when the card steps to another
- * question.
+ * A tap sends at once (no ask bar in between) and the answer lands under the
+ * question with the card's other side questions. The button waits — disabled,
+ * spinning — while its own ask is being posted or answered, so a second tap
+ * cannot fork the session twice for the same question.
  */
-export function useCardReview(): {
-  prime: ExplainPrime | null;
-  steelman: (question: string, option: { label: string; description?: string | null }, rect?: DOMRect) => void;
-  flip: (question: string, rect?: DOMRect) => void;
-  reset: () => void;
-} {
-  const [prime, setPrime] = useState<ExplainPrime | null>(null);
-  const steelman = useCallback(
-    (question: string, option: { label: string; description?: string | null }, rect?: DOMRect) =>
-      setPrime((p) => ({
-        quote: steelmanQuote(question, option),
-        preset: "steelman",
-        caption: option.label,
-        nonce: (p?.nonce ?? 0) + 1,
-        rect: rect ?? null,
-      })),
-    [],
+function CardReviewButton({
+  explain,
+  preset,
+  quote,
+  msgIdx,
+  className,
+  ariaLabel,
+  testId,
+  icon,
+  children,
+}: {
+  explain: DecisionExplain;
+  preset: CardReviewPreset;
+  quote: string;
+  msgIdx: number;
+  className?: string;
+  ariaLabel?: string;
+  testId: string;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  const [posting, setPosting] = useState(false);
+  const waiting = posting || cardReviewRunning(explain.answers, preset, quote);
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (waiting) return;
+        setPosting(true);
+        Promise.resolve(explain.ask(cardReviewSelection(quote, msgIdx), preset)).finally(() => setPosting(false));
+      }}
+      disabled={waiting}
+      aria-busy={waiting || undefined}
+      aria-label={ariaLabel}
+      data-testid={testId}
+    >
+      {waiting ? <LoaderCircle size={13} aria-hidden="true" className={styles.spin} /> : icon}
+      {children}
+    </button>
   );
-  const flip = useCallback(
-    (question: string, rect?: DOMRect) =>
-      setPrime((p) => ({
-        quote: flipConditionsQuote(question),
-        preset: "flip_conditions",
-        caption: "",
-        nonce: (p?.nonce ?? 0) + 1,
-        rect: rect ?? null,
-      })),
-    [],
-  );
-  const reset = useCallback(() => setPrime(null), []);
-  return { prime, steelman, flip, reset };
 }
 
 /** The question-level "what would flip it" button, under the question. */
-export function FlipConditionsButton({ onPress }: { onPress: (rect: DOMRect) => void }) {
+export function FlipConditionsButton({
+  explain,
+  question,
+  msgIdx,
+}: {
+  explain: DecisionExplain;
+  question: string;
+  msgIdx: number;
+}) {
   return (
     <div className={styles.reviewRow}>
-      <button
-        type="button"
+      <CardReviewButton
+        explain={explain}
+        preset="flip_conditions"
+        quote={flipConditionsQuote(question)}
+        msgIdx={msgIdx}
         className={styles.reviewBtn}
-        onClick={(e) => onPress(e.currentTarget.getBoundingClientRect())}
-        data-testid="card-flip-btn"
+        testId="card-flip-btn"
+        icon={<Shuffle size={13} strokeWidth={1.8} aria-hidden="true" />}
       >
-        <Shuffle size={13} strokeWidth={1.8} aria-hidden="true" />
         {t("翻转条件")}
-      </button>
+      </CardReviewButton>
     </div>
   );
 }
@@ -213,30 +239,33 @@ export function FlipConditionsButton({ onPress }: { onPress: (rect: DOMRect) => 
  * rail (beside the pencil); `variant="link"` sits under a quick-answer option.
  */
 export function SteelmanButton({
-  label,
+  explain,
+  question,
+  option,
+  msgIdx,
   variant,
   className,
-  onPress,
 }: {
-  label: string;
+  explain: DecisionExplain;
+  question: string;
+  option: { label: string; description?: string | null };
+  msgIdx: number;
   variant: "side" | "link";
   className?: string;
-  onPress: (rect: DOMRect) => void;
 }) {
   return (
-    <button
-      type="button"
+    <CardReviewButton
+      explain={explain}
+      preset="steelman"
+      quote={steelmanQuote(question, option)}
+      msgIdx={msgIdx}
       className={className}
-      onClick={(e) => {
-        e.stopPropagation();
-        onPress(e.currentTarget.getBoundingClientRect());
-      }}
-      aria-label={`${t("反方论证")} — ${label}`}
-      data-testid="card-steelman-btn"
+      ariaLabel={`${t("反方论证")} — ${option.label}`}
+      testId="card-steelman-btn"
+      icon={variant === "link" ? <Swords size={13} strokeWidth={1.8} aria-hidden="true" /> : null}
     >
-      {variant === "link" && <Swords size={13} strokeWidth={1.8} aria-hidden="true" />}
       {variant === "link" ? t("反方论证") : t("反方")}
-    </button>
+    </CardReviewButton>
   );
 }
 
@@ -277,10 +306,18 @@ export function DecisionExplainAnswers({
         const running = last.status === "running";
         const hit = cacheHitRatio(last);
         const cost = costLabel(last.costUsd);
+        // A card review ask is headed by what it asks, not its long quote.
+        const subject = cardReviewSubject(thread.records[0]);
         return (
-          <div key={thread.id} className={styles.card}>
+          <div key={thread.id} className={styles.card} data-testid="decision-explain-thread">
             <div className={styles.head}>
-              <span className={styles.quote}>{thread.records[0].quote}</span>
+              {subject ? (
+                <span className={styles.title}>
+                  {subject.preset === "steelman" ? `${t("反方论证")} · ${subject.option}` : t("翻转条件")}
+                </span>
+              ) : (
+                <span className={styles.quote}>{thread.records[0].quote}</span>
+              )}
               {running && (
                 <span className={styles.state} data-tone="live">
                   <LoaderCircle size={11} aria-hidden="true" className={styles.spin} />

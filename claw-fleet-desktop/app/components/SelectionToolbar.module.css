@@ -1,27 +1,28 @@
-/* The floating bar over a selection of agent prose. Sits above the selection's
-   box (translated up by its own height), on the same raised layer as the rail
-   cards so it is never under one. When the pane has no room above — a passage
-   on a decision card's first line — it sits below the box instead
-   (`data-place="below"`), so it is never over the selected text. */
+/* The floating bar over a selection of agent prose, on the same raised layer
+   as the rail cards so it is never under one. Placed by the component (left /
+   top in the pane's coordinates, max-width the pane's): above the selection's
+   box, or below it when the pane has no room above — a passage on a decision
+   card's first line — so it is never over the selected text. Wider than the
+   pane (a card in a narrow dock), the presets wrap onto another line. */
 .toolbar {
   composes: pop_enter from "./motion.module.css";
-  /* Sits above the selection (translate -100%), so grow from its bottom edge. */
+  /* Sits above the selection, so grow from its bottom edge. */
   transform-origin: bottom center;
   position: absolute;
   z-index: 6;
-  transform: translate(-50%, -100%);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
   padding: 3px;
+  box-sizing: border-box;
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-float);
-  white-space: nowrap;
 }
 .toolbar[data-place="below"] {
-  transform: translate(-50%, 0);
+  transform-origin: top center;
 }
 
 .btn {
@@ -36,6 +37,7 @@
   color: var(--color-text);
   padding: 5px 8px;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
   cursor: pointer;
 }
 .btn:hover:not(:disabled) {
@@ -48,12 +50,16 @@
 
 .custom {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .input {
   width: 240px;
+  min-width: 0;
+  flex: 1 1 auto;
   border: 1px solid var(--color-border);
   background: var(--color-bg-field);
   color: var(--color-text);
@@ -65,35 +71,4 @@
 .input:focus {
   outline: none;
   border-color: var(--color-accent);
-}
-
-
-/* A primed bar (opened by a card's steelman / flip button): the preselected
-   preset reads as chosen, and nothing goes out until the send button. */
-.btn[data-chosen="true"] {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px rgba(var(--color-accent-rgb), 0.45);
-}
-
-.send {
-  margin-left: 2px;
-  background: var(--color-accent);
-  color: #fff;
-  font-weight: 600;
-}
-.send:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-/* What a primed ask is about (the option name, or the question). */
-.caption {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10.5px;
-  color: var(--color-text-dim);
-  padding: 0 6px 0 4px;
-  margin-right: 2px;
-  border-right: 1px solid var(--color-border);
 }
