@@ -745,14 +745,28 @@
   min-width: 0;
 }
 
-/* Compact (narrow inline card) layout: options above, preview below. The
-   side-by-side grid needs ~400px to seat both columns above their min widths,
-   which the inline card inside SessionDetail does not have. */
-.elicitation_options_stacked_preview {
+/* Compact (narrow inline card) layout: the preview floats beside the hovered
+   option. The side-by-side grid needs ~400px to seat both columns above their
+   min widths, which the inline card inside SessionDetail does not have.
+   Position and width are set inline by FloatingOptionPreview. */
+.elicitation_preview_float {
+  composes: pop_enter from "./motion.module.css";
+  position: fixed;
+  z-index: 2100;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 0;
+  padding: 8px;
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+}
+
+.elicitation_preview_float .elicitation_preview {
+  max-height: min(60vh, 520px);
+  overflow: hidden;
 }
 
 .elicitation_preview_caption {
@@ -762,10 +776,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.elicitation_options_stacked_preview .elicitation_preview {
-  max-height: 30vh;
 }
 
 .elicitation_preview {
