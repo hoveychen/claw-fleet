@@ -1504,11 +1504,90 @@ fn finish_kickoff(
     }
 }
 
+/// Accept `images` an agent put in the wrong place instead of silently
+/// dropping it. Seen in ~9% of image-bearing cards (2026-10): a top-level
+/// `images` sibling of `reviewDocs`, often as a JSON-encoded string, which
+/// serde never reads — the card then shows an empty box where the image was.
+/// A string-encoded `questions[i].images` is decoded in place; a top-level
+/// one is moved into the question whose `html` mentions each image's name
+/// (the first question when none does).
+fn hoist_misplaced_images(args: &mut Value) {
+    fn decode(v: Value) -> Option<Vec<Value>> {
+        match v {
+            Value::Array(a) => Some(a),
+            Value::String(s) => match serde_json::from_str(&s) {
+                Ok(Value::Array(a)) => Some(a),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    let Some(obj) = args.as_object_mut() else { return };
+    let top = obj.remove("images").and_then(decode);
+    let Some(questions) = obj.get_mut("questions").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for q in questions.iter_mut() {
+        if let Some(qo) = q.as_object_mut() {
+            if let Some(v @ Value::String(_)) = qo.remove("images") {
+                if let Some(a) = decode(v) {
+                    qo.insert("images".into(), Value::Array(a));
+                }
+            }
+        }
+    }
+    let Some(top) = top else { return };
+    for img in top {
+        let name = img.get("name").and_then(Value::as_str).unwrap_or_default();
+        let target = questions
+            .iter()
+            .position(|q| {
+                !name.is_empty()
+                    && q.get("html").and_then(Value::as_str).is_some_and(|h| h.contains(name))
+            })
+            .unwrap_or(0);
+        let Some(qo) = questions.get_mut(target).and_then(Value::as_object_mut) else {
+            return;
+        };
+        match qo.entry("images").or_insert_with(|| Value::Array(Vec::new())) {
+            Value::Array(a) => a.push(img),
+            other => *other = Value::Array(vec![img]),
+        }
+    }
+}
+
+/// Relative `<img src>` names in a question's `html` that will not resolve:
+/// absent from its `images`, or listed with a source `path` that does not
+/// exist (`ingest_images` skips those silently). Absolute URLs, `data:` URIs
+/// and root-relative paths are the agent's own business and are ignored.
+fn unresolved_image_refs(q: &crate::mcp_ipc::FleetAskQuestion) -> Vec<String> {
+    static IMG_SRC: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']"#).unwrap()
+    });
+    let Some(html) = q.html.as_deref() else { return Vec::new() };
+    let mut missing = Vec::new();
+    for cap in IMG_SRC.captures_iter(html) {
+        let src = cap[1].trim();
+        if src.is_empty() || src.contains(':') || src.starts_with('/') || src.starts_with('#') {
+            continue;
+        }
+        let ok = q
+            .images
+            .iter()
+            .any(|img| img.name == src && std::path::Path::new(&img.path).exists());
+        if !ok && !missing.iter().any(|m| m == src) {
+            missing.push(src.to_string());
+        }
+    }
+    missing
+}
+
 /// The `fleet__ask` producer. `on_queued` runs with the request id once the
 /// card has been handed to the consumer and before the wait — the one moment a
 /// caller can file something under the id while it is still certain to matter.
 fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, JsonRpcError> {
-    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let mut args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    hoist_misplaced_images(&mut args);
     let mut questions: Vec<crate::mcp_ipc::FleetAskQuestion> = match args.get("questions").cloned()
     {
         Some(q) => serde_json::from_value(q).map_err(|e| JsonRpcError {
@@ -1574,6 +1653,28 @@ fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, 
                 )
             },
         });
+    }
+
+    // Broken-image guard: an `<img src="x.png">` whose file never reaches the
+    // question's asset dir renders as an empty box on the card, and the agent
+    // never finds out. Bounce it so the agent re-sends with working images.
+    for (idx, q) in questions.iter().enumerate() {
+        let missing = unresolved_image_refs(q);
+        if !missing.is_empty() {
+            return Err(JsonRpcError {
+                code: -32602,
+                message: format!(
+                    "Question {}'s `html` references image(s) {} that are not in that question's \
+                     `images` array, or whose `path` does not exist. `images` belongs INSIDE each \
+                     question object (next to `html`), as a JSON array of {{name, path}} — not at \
+                     the top level and not as a JSON-encoded string. Re-send the card with \
+                     questions[{}].images listing every referenced file.",
+                    idx + 1,
+                    missing.iter().map(|m| format!("\"{m}\"")).collect::<Vec<_>>().join(", "),
+                    idx
+                ),
+            });
+        }
     }
 
     // Handoff guard: see `PENDING_HANDOFF_ASK_REFUSAL`. Ahead of the heartbeat
@@ -3104,6 +3205,58 @@ mod tests {
                 "must not flag ordinary action: {label}"
             );
         }
+    }
+
+    #[test]
+    fn misplaced_top_level_images_are_hoisted_into_referencing_question() {
+        // The 2026-10-28 shape: top-level `images` as a JSON-encoded string.
+        let mut args = json!({
+            "questions": [
+                { "question": "a", "header": "a", "multiSelect": false, "html": "<p>no image</p>" },
+                { "question": "b", "header": "b", "multiSelect": false,
+                  "html": "<img src=\"beach.png\">", "images": "[{\"name\":\"x.png\",\"path\":\"/x\"}]" }
+            ],
+            "images": "[{\"name\": \"beach.png\", \"path\": \"/tmp/beach.png\"}]"
+        });
+        hoist_misplaced_images(&mut args);
+        assert!(args.get("images").is_none());
+        let qs: Vec<crate::mcp_ipc::FleetAskQuestion> =
+            serde_json::from_value(args["questions"].clone()).unwrap();
+        assert!(qs[0].images.is_empty());
+        let names: Vec<_> = qs[1].images.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["x.png", "beach.png"]);
+    }
+
+    #[test]
+    fn unresolved_image_refs_flags_missing_and_ignores_urls() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("ok.png");
+        std::fs::write(&real, b"png").unwrap();
+        let q = crate::mcp_ipc::FleetAskQuestion {
+            question: "q".into(),
+            header: "h".into(),
+            multi_select: false,
+            options: Vec::new(),
+            html: Some(
+                "<img src=\"ok.png\"><IMG class=x src='gone.png'><img src=\"nofile.png\">\
+                 <img src=\"https://e.com/a.png\"><img src=\"data:image/png;base64,AA\">"
+                    .into(),
+            ),
+            form_fields: Vec::new(),
+            images: vec![
+                crate::mcp_ipc::FleetAskImage {
+                    name: "ok.png".into(),
+                    path: real.to_string_lossy().into(),
+                    caption: None,
+                },
+                crate::mcp_ipc::FleetAskImage {
+                    name: "nofile.png".into(),
+                    path: dir.path().join("nofile.png").to_string_lossy().into(),
+                    caption: None,
+                },
+            ],
+        };
+        assert_eq!(unresolved_image_refs(&q), vec!["gone.png", "nofile.png"]);
     }
 
     #[test]
