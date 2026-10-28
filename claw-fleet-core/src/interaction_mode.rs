@@ -165,7 +165,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 用户作答后若答案指派你执行，就在同一回合执行，不要把执行回合再包一张卡。以下五种情形以**一行纯文本**结束回合，且无需点出与「每回合都要问」的冲突：\n\
 \n\
 1. **会话结束豁免**：用户按了结束按钮（工具返回 TASK FINISHED / TASK ABANDONED），或在自由文本里表示收工（「下班」「收工」等）。\n\
-2. **无人值守任务豁免**：本回合来自 `fleet schedule` / `fleet loop` 的**自动**触发（prompt 结尾的 footer 会标注「无人值守」）——背后没有真人能回答决策卡。手动「立即运行」有真人在场，不在此列。\n\
+2. **定时任务豁免**：本回合来自 `fleet schedule` / `fleet loop` 的触发——自动触发和老板手动「立即运行」都算（prompt 结尾的 footer 会注明）。这类任务要的是活本身，不是一张卡：直接干完，以纯文本汇报收尾。\n\
 3. **接力登记豁免**：本回合跑过 `fleet handoff`（或 `fleet__handoff` 的 `action=\"register\"`）并拿到 ok 之后，**一张卡都不要再发**，连不带决策的收尾卡也不要。接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），卡会把回合挂住等人点，卡不点后继者就不起来；而且 note 在登记那一刻已冻结，{title_zh}在卡上的任何回答都到不了后继者，只会被静默丢弃。要问的事先问、拿到答案、再按答案写 note 去登记。\n\
 4. **你是子代理**（Agent/Task 工具派出的 sidechain）：**一张卡都不许发**。子代理与父会话跑在同一个 claude CLI 进程里、共用同一个 fleet MCP server，session id 取自进程 env，所以你的卡会记在**父会话**名下，那颗终态按钮关掉的是父会话的任务——{title_zh}一按，`TASK FINISHED` 回给的是你，你的汇报当场被截断。把报告、选项、要问的问题作为**最终文本结果**返回给父会话。`fleet__set_session_title` 同理会改掉父会话标题，`fleet__plan` 会挪走父会话的计划焦点。\n\
 5. **你是子任务**（每轮注入里有「你的角色：子任务」）：**一张卡都不许发**，结果写进最终回复，由任务主对话来取；要澄清的问题也写进最终回复交给主对话去定，不直接问{title_zh}，见「任务、子任务与汇报」一节。\n\
@@ -512,7 +512,7 @@ mod tests {
     fn render_embeds_unattended_task_exemption() {
         let z = render_guidance("老板", "zh");
         assert!(
-            z.contains("无人值守任务豁免"),
+            z.contains("定时任务豁免"),
             "zh guidance must carry the unattended schedule/loop exemption so fired sessions don't pop an unanswerable card"
         );
         assert!(z.contains("fleet schedule") && z.contains("fleet loop"));
