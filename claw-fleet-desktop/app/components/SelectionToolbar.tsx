@@ -209,6 +209,12 @@ export function SelectionToolbar({
     const bottom = clip ? Math.min(hostRect.bottom, clip.bottom) : hostRect.bottom;
     const margin = 8;
     const x = Math.min(Math.max(hostRect.width / 2, margin + 120), Math.max(hostRect.width - margin - 120, margin + 120));
+    // In WebKit (the desktop app's WKWebView) the `selectionchange` this
+    // removeAllRanges() causes is delivered before React commits the state
+    // below. The refs must already read as primed by then, or onSelChange
+    // queues a setShown(null) after ours and the bar never opens.
+    chosenRef.current = prime.preset;
+    customRef.current = false;
     window.getSelection()?.removeAllRanges();
     setCustom(false);
     setQuestion("");
