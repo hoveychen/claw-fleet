@@ -92,6 +92,8 @@ const EN: Record<string, string> = {
   "这段话是什么意思？": "What does this passage mean?",
   "把这段话翻译成中文。": "Translate this passage into Chinese.",
   "为什么这么判断？有什么取舍？": "Why this call? What are the trade-offs?",
+  "给出另一边最有力的论证。": "Make the strongest case for the other side.",
+  "什么证据出现时结论会翻转？": "What evidence would flip the conclusion?",
   "这句话说的是 fork 出的子会话复用了原会话的全部前缀，所以请求命中提示词缓存，只为新增的问题付费。换句话说，追问的成本取决于原会话有多「热」：刚跑完的会话几乎全部命中，放了一天的会话则要重新写入缓存。":
     "It says the forked side session reuses the original session's whole prefix, so the request hits the prompt cache and you only pay for the new question. In other words, what a follow-up costs depends on how warm the original session is: one that just finished hits almost entirely, while one left for a day has to write the cache again.",
 };

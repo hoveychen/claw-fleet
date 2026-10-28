@@ -226,6 +226,12 @@ pub struct FleetAskResponse {
     /// plain dismissal (the pre-v3 Cancel behaviour), which records no terminal state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_outcome: Option<crate::task_outcome::TaskOutcome>,
+    /// One-line-per-item note of the steelman / flip-condition side questions
+    /// the boss read before answering, stamped by [`deliver_response`] and
+    /// shown to the agent beside the answers. Kept out of `answers` so option
+    /// matching (decision history, kickoff) never sees it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_question_digest: Option<String>,
 }
 
 // ── File-based IPC (mirror of `elicitation` module) ──────────────────────────
@@ -333,9 +339,47 @@ pub(crate) fn write_response_file_for_test(id: &str, age_ms: u64) {
 /// **parked** card that the user ends is `discard`ed, so `write_response` is
 /// never reached — putting the stamp there would have silently dropped the
 /// terminal state for exactly the cards that sat around longest.
+///
+/// It is also where the side-question digest is attached, for the same
+/// reason: both the live answer (read back by the MCP producer) and the parked
+/// resume prompt are rendered from the response this function hands on.
 pub fn deliver_response(resp: &FleetAskResponse) -> Result<(), String> {
     stamp_task_outcome(resp);
-    crate::parked::deliver(&resp.id, resp, resp.cancelled, write_response)
+    let resp = match card_request(&resp.id) {
+        Some(req) => with_side_question_digest(resp, &req, crate::session_explain::pre_answer_digest),
+        None => resp.clone(),
+    };
+    crate::parked::deliver(&resp.id, &resp, resp.cancelled, write_response)
+}
+
+/// The request behind card `id`, live or parked.
+fn card_request(id: &str) -> Option<FleetAskRequest> {
+    read_request(id).or_else(|| serde_json::from_value(crate::parked::get(id)?.request).ok())
+}
+
+/// `resp` with [`FleetAskResponse::side_question_digest`] filled from the
+/// steelman / flip-condition questions asked about `req` since it was raised.
+/// A dismissal, a card without a parseable timestamp, or a card nobody asked
+/// about comes back unchanged.
+fn with_side_question_digest<D>(resp: &FleetAskResponse, req: &FleetAskRequest, digest: D) -> FleetAskResponse
+where
+    D: FnOnce(&str, u64, &[String]) -> Option<String>,
+{
+    let mut out = resp.clone();
+    if resp.cancelled || resp.side_question_digest.is_some() || req.session_id.is_empty() {
+        return out;
+    }
+    let Ok(raised) = chrono::DateTime::parse_from_rfc3339(&req.timestamp) else {
+        return out;
+    };
+    let since_ms = raised.timestamp_millis().max(0) as u64;
+    let labels: Vec<String> = req
+        .questions
+        .iter()
+        .flat_map(|q| q.options.iter().map(|o| o.label.clone()))
+        .collect();
+    out.side_question_digest = digest(&req.session_id, since_ms, &labels);
+    out
 }
 
 /// Session id + the agent's `taskComplete` claim for a card that is being
@@ -1198,6 +1242,7 @@ mod tests {
             answers: BTreeMap::new(),
             cancelled: true,
             task_outcome: Some(crate::task_outcome::TaskOutcome::Completed),
+            side_question_digest: None,
         })
         .unwrap();
 
@@ -1293,6 +1338,7 @@ mod tests {
             answers: BTreeMap::new(),
             cancelled: true,
             task_outcome: None,
+            side_question_digest: None,
         })
         .unwrap();
 
@@ -1535,6 +1581,7 @@ mod tests {
             answers: BTreeMap::from([("q".into(), "继续".into())]),
             cancelled: false,
             task_outcome: None,
+            side_question_digest: None,
         };
         std::fs::write(
             response_path(&req.id).unwrap(),
@@ -1580,6 +1627,7 @@ mod tests {
             answers: BTreeMap::from([("q".into(), "继续".into())]),
             cancelled: false,
             task_outcome: None,
+            side_question_digest: None,
         };
         std::fs::write(
             response_path(&req.id).unwrap(),
@@ -1614,6 +1662,7 @@ mod tests {
             answers: BTreeMap::new(),
             cancelled: true,
             task_outcome: None,
+            side_question_digest: None,
         };
         std::fs::write(
             response_path(&req.id).unwrap(),
@@ -1662,6 +1711,7 @@ mod tests {
                 answers: BTreeMap::from([("q".into(), "继续".into())]),
                 cancelled: false,
                 task_outcome: None,
+                side_question_digest: None,
             };
             std::fs::write(response_path(id).unwrap(), serde_json::to_vec(&response).unwrap())
                 .unwrap();
@@ -1716,6 +1766,7 @@ mod tests {
             answers: BTreeMap::from([("q".into(), "late".into())]),
             cancelled: false,
             task_outcome: None,
+            side_question_digest: None,
         })
         .unwrap_err();
         assert!(err.contains("no pending request"), "{err}");
@@ -1746,6 +1797,7 @@ mod tests {
                     answers: BTreeMap::from([("q".into(), "a".into())]),
                     cancelled: false,
                     task_outcome: None,
+                    side_question_digest: None,
                 })
             });
             let outcome = withdraw(&id);
@@ -1776,6 +1828,104 @@ mod tests {
         assert_eq!(back, FormFieldKind::Radio);
     }
 
+    fn plant_explain(session: &str, id: &str, preset: &str, created_ms: u64, quote: &str, text: &str) {
+        let dir = crate::session_explain::explain_dir().unwrap().join(session);
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = json!({
+            "id": id, "sessionId": session, "source": "claude-code",
+            "createdMs": created_ms, "updatedMs": created_ms,
+            "preset": preset, "quote": quote, "question": "?",
+            "status": "done", "text": text
+        });
+        std::fs::write(dir.join(format!("{id}.json")), rec.to_string()).unwrap();
+    }
+
+    fn card_with_options(id: &str, session: &str, raised: chrono::DateTime<chrono::Utc>) -> FleetAskRequest {
+        let mut req = empty_request(id);
+        req.session_id = session.into();
+        req.timestamp = raised.to_rfc3339();
+        req.questions[0].options = ["保留", "删除"]
+            .iter()
+            .map(|l| FleetAskOption {
+                label: (*l).into(),
+                description: String::new(),
+                preview: None,
+            })
+            .collect();
+        req
+    }
+
+    fn answer(id: &str) -> FleetAskResponse {
+        FleetAskResponse {
+            id: id.into(),
+            answers: [("q".to_string(), "保留".to_string())].into(),
+            cancelled: false,
+            task_outcome: None,
+            side_question_digest: None,
+        }
+    }
+
+    /// Every client answers through `deliver_response`, so the digest stamped
+    /// there is what the MCP producer reads back from the response file.
+    #[test]
+    fn deliver_response_appends_side_question_digest_only_when_asked() {
+        let _home = TmpHome::new("side-digest");
+        let raised = chrono::Utc::now() - chrono::Duration::seconds(60);
+        let raised_ms = raised.timestamp_millis() as u64;
+
+        write_request(&card_with_options("card-sq1", "sess-sq1", raised)).unwrap();
+        plant_explain("sess-sq1", "e0", "steelman", raised_ms - 5_000, "保留", "结论：上一张卡的");
+        plant_explain("sess-sq1", "e1", "steelman", raised_ms + 1_000, "选项：删除", "结论：删除能省掉双写。\n细节");
+        plant_explain("sess-sq1", "e2", "flip_conditions", raised_ms + 2_000, "选项：删除", "结论：旧客户端低于 1% 时翻转。");
+        plant_explain("sess-sq1", "e3", "rationale", raised_ms + 3_000, "删除", "结论：无关");
+        deliver_response(&answer("card-sq1")).unwrap();
+        let got = try_read_response("card-sq1").unwrap();
+        assert_eq!(got.answers["q"], "保留", "answers are never rewritten");
+        assert_eq!(
+            got.side_question_digest.as_deref(),
+            Some(
+                "老板作答前查看了：\n\
+                 - 反方论证（删除）：删除能省掉双写。\n\
+                 - 翻转条件（删除）：旧客户端低于 1% 时翻转。"
+            )
+        );
+
+        // Nothing asked about this card: the response is written untouched.
+        write_request(&card_with_options("card-sq2", "sess-sq2", raised)).unwrap();
+        deliver_response(&answer("card-sq2")).unwrap();
+        let raw = std::fs::read_to_string(response_path("card-sq2").unwrap()).unwrap();
+        assert!(!raw.contains("sideQuestionDigest"), "{raw}");
+        assert_eq!(try_read_response("card-sq2").unwrap().side_question_digest, None);
+    }
+
+    #[test]
+    fn side_question_digest_skips_dismissals_and_undated_cards() {
+        let raised = chrono::Utc::now();
+        let req = card_with_options("c", "s", raised);
+        let always = |_: &str, _: u64, _: &[String]| Some("digest".to_string());
+
+        let mut dismissed = answer("c");
+        dismissed.cancelled = true;
+        assert_eq!(with_side_question_digest(&dismissed, &req, always).side_question_digest, None);
+
+        let mut undated = req.clone();
+        undated.timestamp = String::new();
+        assert_eq!(with_side_question_digest(&answer("c"), &undated, always).side_question_digest, None);
+
+        let out = with_side_question_digest(&answer("c"), &req, |sid, since, labels| {
+            assert_eq!(sid, "s");
+            assert_eq!(since, raised.timestamp_millis() as u64);
+            assert_eq!(labels, ["保留".to_string(), "删除".to_string()]);
+            Some("digest".into())
+        });
+        assert_eq!(out.side_question_digest.as_deref(), Some("digest"));
+        assert_eq!(
+            serde_json::to_value(&out).unwrap()["sideQuestionDigest"],
+            "digest",
+            "camelCase on the wire, as the parked resume prompt reads it"
+        );
+    }
+
     #[test]
     fn response_round_trip_with_form_answers() {
         let mut answers = BTreeMap::new();
@@ -1786,6 +1936,7 @@ mod tests {
             answers,
             cancelled: false,
             task_outcome: None,
+            side_question_digest: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: FleetAskResponse = serde_json::from_str(&s).unwrap();
@@ -1801,6 +1952,7 @@ mod tests {
             answers: BTreeMap::new(),
             cancelled: true,
             task_outcome: None,
+            side_question_digest: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: FleetAskResponse = serde_json::from_str(&s).unwrap();

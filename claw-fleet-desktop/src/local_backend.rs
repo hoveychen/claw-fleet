@@ -3927,6 +3927,7 @@ impl LocalBackend {
             answers,
             cancelled,
             task_outcome,
+            side_question_digest: None,
         };
         claw_fleet_core::mcp_ipc::deliver_response(&resp)
     }

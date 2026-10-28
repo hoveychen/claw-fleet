@@ -18,7 +18,13 @@ import { VoiceTextarea } from "./VoiceTextarea";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
-import { DecisionExplainAnswers, useDecisionExplainMarks } from "./DecisionExplainMarks";
+import {
+  DecisionExplainAnswers,
+  FlipConditionsButton,
+  SteelmanButton,
+  useCardReview,
+  useDecisionExplainMarks,
+} from "./DecisionExplainMarks";
 import { SelectionAskBar } from "./SelectionAskBar";
 import { fetchDecisionAsset, inlineImgSrcs } from "../decisionAsset";
 import { splitContextFiles } from "../userAttachments";
@@ -1176,6 +1182,8 @@ function QuestionsCard({
   // answer lands under the question (see DecisionExplainMarks).
   const explainMarks = useDecisionExplainMarks(client, session);
   const questionBodyRef = useRef<HTMLDivElement>(null);
+  // Steelman / flip buttons preselect a preset on the ask bar; see useCardReview.
+  const review = useCardReview();
   // question text → selected option labels
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -1357,6 +1365,8 @@ function QuestionsCard({
   const total = request.questions.length;
   const multiQ = total > 1;
   const qi = Math.min(step, total - 1);
+  const resetReview = review.reset;
+  useEffect(resetReview, [resetReview, qi]);
   const allAnswered = request.questions.every(answeredQuestion);
   const quick =
     isQuickAnswer(request.questions) && multiOverride[request.questions[0].question] !== true;
@@ -1405,11 +1415,16 @@ function QuestionsCard({
               {normalizeSvgBlankLines(stripTtsDivider(q.question))}
             </ReactMarkdown>
           </div>
+          {explainMarks.enabled && (
+            <FlipConditionsButton onPress={(rect) => review.flip(stripTtsDivider(q.question), rect)} />
+          )}
           <SelectionAskBar
             scroller={questionBodyRef}
             enabled={explainMarks.enabled}
             busy={explainMarks.busy}
             onAsk={explainMarks.ask}
+            prime={review.prime}
+            primeIdx={qi}
           />
           <DecisionExplainAnswers
             answers={explainMarks.answers}
@@ -1465,6 +1480,14 @@ function QuestionsCard({
                       {t("预览此选项")}
                     </button>
                   )}
+                  {explainMarks.enabled && (
+                    <SteelmanButton
+                      label={o.label}
+                      variant="link"
+                      className={styles.quickPreviewToggle}
+                      onPress={(rect) => review.steelman(stripTtsDivider(q.question), o, rect)}
+                    />
+                  )}
                   {o.preview && previewOpen[`${q.question} ${o.label}`] && (
                     <div className={styles.optionPreview}>
                       <ReactMarkdown
@@ -1514,6 +1537,14 @@ function QuestionsCard({
                       >
                         <Eye size={14} />
                       </button>
+                    )}
+                    {explainMarks.enabled && (
+                      <SteelmanButton
+                        label={o.label}
+                        variant="side"
+                        className={`${styles.optionSideBtn} ${styles.optionSideText}`}
+                        onPress={(rect) => review.steelman(stripTtsDivider(q.question), o, rect)}
+                      />
                     )}
                     <button
                       className={styles.optionSideBtn}

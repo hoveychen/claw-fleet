@@ -9,15 +9,18 @@
 // row) and the answer lands under the question, inside the card, where the
 // person deciding can read it without leaving. The record is persisted like
 // every side question, so the session's 追问 pane shows it later too.
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Shuffle, Swords } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   cacheHitRatio,
   costLabel,
+  flipConditionsQuote,
   groupExplainThreads,
   pollExplanation,
+  steelmanQuote,
   type AssistantSelection,
+  type ExplainPrime,
 } from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
 import {
@@ -145,6 +148,96 @@ export function useDecisionExplainMarks(
   }, []);
 
   return { enabled: Boolean(client && sessionId && sessionPath), busy, ask, followUp, answers, dismiss };
+}
+
+/**
+ * The card review asks — "steelman this option" and "what would flip it".
+ *
+ * A tap never sends: it hands the card's `SelectionAskBar` a quote, a preset
+ * to preselect and the button's box to hang the bar off (`prime`), and the
+ * person confirms there. `reset` clears it when the card steps to another
+ * question.
+ */
+export function useCardReview(): {
+  prime: ExplainPrime | null;
+  steelman: (question: string, option: { label: string; description?: string | null }, rect?: DOMRect) => void;
+  flip: (question: string, rect?: DOMRect) => void;
+  reset: () => void;
+} {
+  const [prime, setPrime] = useState<ExplainPrime | null>(null);
+  const steelman = useCallback(
+    (question: string, option: { label: string; description?: string | null }, rect?: DOMRect) =>
+      setPrime((p) => ({
+        quote: steelmanQuote(question, option),
+        preset: "steelman",
+        caption: option.label,
+        nonce: (p?.nonce ?? 0) + 1,
+        rect: rect ?? null,
+      })),
+    [],
+  );
+  const flip = useCallback(
+    (question: string, rect?: DOMRect) =>
+      setPrime((p) => ({
+        quote: flipConditionsQuote(question),
+        preset: "flip_conditions",
+        caption: "",
+        nonce: (p?.nonce ?? 0) + 1,
+        rect: rect ?? null,
+      })),
+    [],
+  );
+  const reset = useCallback(() => setPrime(null), []);
+  return { prime, steelman, flip, reset };
+}
+
+/** The question-level "what would flip it" button, under the question. */
+export function FlipConditionsButton({ onPress }: { onPress: (rect: DOMRect) => void }) {
+  return (
+    <div className={styles.reviewRow}>
+      <button
+        type="button"
+        className={styles.reviewBtn}
+        onClick={(e) => onPress(e.currentTarget.getBoundingClientRect())}
+        data-testid="card-flip-btn"
+      >
+        <Shuffle size={13} strokeWidth={1.8} aria-hidden="true" />
+        {t("翻转条件")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The per-option "steelman" button. `variant="side"` fits the option's side
+ * rail (beside the pencil); `variant="link"` sits under a quick-answer option.
+ */
+export function SteelmanButton({
+  label,
+  variant,
+  className,
+  onPress,
+}: {
+  label: string;
+  variant: "side" | "link";
+  className?: string;
+  onPress: (rect: DOMRect) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={(e) => {
+        e.stopPropagation();
+        onPress(e.currentTarget.getBoundingClientRect());
+      }}
+      aria-label={`${t("反方论证")} — ${label}`}
+      data-testid="card-steelman-btn"
+    >
+      {variant === "link" && <Swords size={13} strokeWidth={1.8} aria-hidden="true" />}
+      {variant === "link" ? t("反方论证") : t("反方")}
+    </button>
+  );
 }
 
 /**

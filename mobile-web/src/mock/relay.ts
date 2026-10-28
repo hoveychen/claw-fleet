@@ -115,6 +115,8 @@ const MOCK_EXPLAIN_QUESTION: Record<string, string> = {
   explain: "这段话是什么意思？",
   translate: "把这段话翻译成中文。",
   rationale: "为什么这么判断？有什么取舍？",
+  steelman: "给出另一边最有力的论证。",
+  flip_conditions: "什么证据出现时结论会翻转？",
 };
 const MOCK_EXPLAIN_ANSWER =
   "这句话说的是 fork 出的子会话复用了原会话的全部前缀，所以请求命中提示词缓存，只为新增的问题付费。换句话说，追问的成本取决于原会话有多「热」：刚跑完的会话几乎全部命中，放了一天的会话则要重新写入缓存。";

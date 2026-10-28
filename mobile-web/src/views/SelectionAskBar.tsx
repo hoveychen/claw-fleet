@@ -1,10 +1,12 @@
-import { Languages, MessageCircleQuestion, PencilLine, Scale, X } from "lucide-react";
+import { Languages, MessageCircleQuestion, PencilLine, Scale, Shuffle, Swords, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import {
   EXPLAIN_MARK_SELECT_EVENT,
+  primedSelection,
   readAssistantSelection,
   type AssistantSelection,
+  type ExplainPrime,
 } from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
 import type { ExplainPreset } from "../sessionExplain";
@@ -28,12 +30,29 @@ import styles from "./SelectionAskBar.module.css";
  * short grace, cancelled when a finger is on the bar. The custom question
  * turns the bar into an input; its focus collapses the selection too, which
  * is ignored while the input is up.
+ *
+ * `prime` opens it without a selection: a decision card's "steelman" /
+ * "what would flip it" buttons hand over a quote they built and a preset,
+ * and the bar hangs off the button pressed. It only *preselects* that preset
+ * — tapping a preset changes the choice, nothing is sent until the send
+ * button (or a custom question is submitted), and ✕ closes it.
  */
+/** The canned presets, in order; the pencil (custom) follows them. */
+const PRESETS: { preset: ExplainPreset; icon: typeof Scale; label: string }[] = [
+  { preset: "explain", icon: MessageCircleQuestion, label: "解释" },
+  { preset: "translate", icon: Languages, label: "翻译" },
+  { preset: "rationale", icon: Scale, label: "为什么" },
+  { preset: "steelman", icon: Swords, label: "反方论证" },
+  { preset: "flip_conditions", icon: Shuffle, label: "翻转条件" },
+];
+
 export function SelectionAskBar({
   scroller,
   enabled,
   busy,
   onAsk,
+  prime,
+  primeIdx = 0,
 }: {
   /** The element selections are read from inside of: the transcript scroller,
    *  or a decision card's question body (stamped like an assistant row). */
@@ -43,8 +62,17 @@ export function SelectionAskBar({
   /** A question is being submitted; the buttons wait. */
   busy: boolean;
   onAsk: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+  /** A card review ask to preselect; a new `nonce` re-opens the bar. */
+  prime?: ExplainPrime | null;
+  /** The `msgIdx` a primed ask carries (the card's question index). */
+  primeIdx?: number;
 }) {
-  const [shown, setShown] = useState<{ sel: AssistantSelection; rect: DOMRect } | null>(null);
+  const [shown, setShown] = useState<{ sel: AssistantSelection; rect: DOMRect; caption?: string } | null>(null);
+  // The preset a primed bar will send; `null` on a selection bar, where a
+  // preset tap sends at once.
+  const [chosen, setChosen] = useState<ExplainPreset | null>(null);
+  const chosenRef = useRef(chosen);
+  chosenRef.current = chosen;
   const [custom, setCustom] = useState(false);
   const [question, setQuestion] = useState("");
   const [pos, setPos] = useState<{ left: number; top: number; place: "above" | "below" } | null>(null);
@@ -63,6 +91,7 @@ export function SelectionAskBar({
     if (!enabled) {
       setShown(null);
       setCustom(false);
+      setChosen(null);
       return;
     }
     const cancelHide = () => {
@@ -77,15 +106,17 @@ export function SelectionAskBar({
       const sel = readAssistantSelection(root);
       if (sel) {
         cancelHide();
+        setChosen(null);
         setShown({ sel, rect: sel.rect });
         if (!customRef.current) setQuestion("");
         return;
       }
-      if (customRef.current || holding.current) return;
+      // A primed bar has no selection to lose.
+      if (customRef.current || holding.current || chosenRef.current) return;
       cancelHide();
       hideTimer.current = window.setTimeout(() => {
         hideTimer.current = null;
-        if (!holding.current && !customRef.current) setShown(null);
+        if (!holding.current && !customRef.current && !chosenRef.current) setShown(null);
       }, 260);
     };
     const onSelChange = () => {
@@ -94,7 +125,7 @@ export function SelectionAskBar({
     };
     // The selection stays put while the page scrolls under it; follow it.
     const onScroll = () => {
-      if (customRef.current) return;
+      if (customRef.current || chosenRef.current) return;
       requestAnimationFrame(read);
     };
     // A tap on one of the agent's `[?text]` marks selects the mark and
@@ -115,6 +146,24 @@ export function SelectionAskBar({
       if (readTimer.current != null) window.clearTimeout(readTimer.current);
     };
   }, [enabled, scroller]);
+
+  // Open on a card review press: preselect, never send. The bar hangs off the
+  // button pressed (its box stands in for a selection's).
+  useEffect(() => {
+    if (!prime || !enabled) return;
+    window.getSelection()?.removeAllRanges();
+    setCustom(false);
+    setQuestion("");
+    setFiring(null);
+    setChosen(prime.preset);
+    setShown({
+      sel: primedSelection(prime.quote, primeIdx),
+      rect: prime.rect ?? new DOMRect(window.innerWidth / 2, window.innerHeight / 2, 0, 0),
+      caption: prime.caption,
+    });
+    // Only a new press re-opens; `primeIdx` rides along with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prime?.nonce, enabled]);
 
   // Place the bar once it has a width: centred under the selection, kept
   // inside the viewport, flipped above when there is no room below.
@@ -153,6 +202,7 @@ export function SelectionAskBar({
       setFiring(null);
       setShown(null);
       setCustom(false);
+      setChosen(null);
       setQuestion("");
     }
   }, [firing, busy]);
@@ -167,7 +217,13 @@ export function SelectionAskBar({
     setFiring(null);
     setShown(null);
     setCustom(false);
+    setChosen(null);
     setQuestion("");
+  };
+  // A preset sends on a selection bar and only re-chooses on a primed one.
+  const press = (preset: ExplainPreset) => {
+    if (chosen) setChosen(preset);
+    else fire(preset);
   };
   const presetIcon = (preset: ExplainPreset, icon: ReactNode) =>
     firing === preset ? <Spinner size={14} /> : icon;
@@ -186,6 +242,7 @@ export function SelectionAskBar({
       ref={barRef}
       className={styles.bar}
       data-place={pos?.place ?? "below"}
+      data-primed={chosen ? "true" : undefined}
       // Unplaced (first paint, or the passage is off screen): keep it in the
       // tree for its width, out of sight.
       style={pos ? { left: pos.left, top: pos.top } : { left: 8, top: -9999, visibility: "hidden" }}
@@ -224,18 +281,22 @@ export function SelectionAskBar({
         </form>
       ) : (
         <>
-          <button type="button" className={styles.btn} onClick={() => fire("explain")} disabled={busy}>
-            {presetIcon("explain", <MessageCircleQuestion size={14} strokeWidth={1.8} aria-hidden="true" />)}
-            {t("解释")}
-          </button>
-          <button type="button" className={styles.btn} onClick={() => fire("translate")} disabled={busy}>
-            {presetIcon("translate", <Languages size={14} strokeWidth={1.8} aria-hidden="true" />)}
-            {t("翻译")}
-          </button>
-          <button type="button" className={styles.btn} onClick={() => fire("rationale")} disabled={busy}>
-            {presetIcon("rationale", <Scale size={14} strokeWidth={1.8} aria-hidden="true" />)}
-            {t("为什么")}
-          </button>
+          {shown.caption && <span className={styles.caption}>{shown.caption}</span>}
+          {PRESETS.map(({ preset, icon: Icon, label }) => (
+            <button
+              key={preset}
+              type="button"
+              className={styles.btn}
+              data-preset={preset}
+              data-chosen={chosen === preset ? "true" : undefined}
+              aria-pressed={chosen ? chosen === preset : undefined}
+              onClick={() => press(preset)}
+              disabled={busy}
+            >
+              {presetIcon(preset, <Icon size={14} strokeWidth={1.8} aria-hidden="true" />)}
+              {t(label)}
+            </button>
+          ))}
           <button
             type="button"
             className={styles.btn}
@@ -245,6 +306,22 @@ export function SelectionAskBar({
           >
             <PencilLine size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
+          {chosen && (
+            <>
+              <button
+                type="button"
+                className={styles.send}
+                onClick={() => fire(chosen)}
+                disabled={busy || !!firing}
+                data-testid="selection-ask-send"
+              >
+                {t("发送")}
+              </button>
+              <button type="button" className={styles.btn} onClick={dismiss} aria-label={t("取消")}>
+                <X size={15} strokeWidth={1.9} aria-hidden="true" />
+              </button>
+            </>
+          )}
         </>
       )}
     </div>

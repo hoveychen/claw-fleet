@@ -1119,3 +1119,15 @@
   font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
 }
+
+/* The "反方" side button: text, not an icon, but as quiet as its neighbours. */
+.optionSideText {
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* Preview toggle and steelman link under one quick option share a line. */
+.quickPreviewToggle + .quickPreviewToggle {
+  margin-left: 14px;
+}
