@@ -949,8 +949,6 @@ function SharedOptionsBlock({
     setFocusedLabel(firstWithPreview);
   }, [firstWithPreview]);
 
-  const focusedPreview = question.options.find((o) => o.label === focusedLabel)?.preview;
-
   // Only a click fills an option. A pre-filled "primary" button read as already
   // picked while Submit stayed disabled, so the recommendation is a tag instead.
   const list = (
@@ -1045,11 +1043,24 @@ function SharedOptionsBlock({
   );
 
   if (!hasPreview) return list;
+  // Every option's preview is rendered into the same grid cell and only the
+  // focused one is visible, so the box is always as tall as the tallest
+  // preview. Sizing it to the focused preview alone made hover a feedback
+  // loop: a different height shifted the options under a still pointer, which
+  // then entered a neighbour, which resized the box again — endless flicker.
   const preview = (
     <div className={styles.elicitation_preview}>
-      {focusedPreview ? (
-        <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
-      ) : null}
+      {question.options.map((opt) =>
+        opt.preview ? (
+          <div
+            key={opt.label}
+            className={`${styles.elicitation_preview_layer} ${opt.label === focusedLabel ? "" : styles.elicitation_preview_layer_hidden}`}
+            aria-hidden={opt.label !== focusedLabel}
+          >
+            <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(opt.preview)}</ReactMarkdown>
+          </div>
+        ) : null,
+      )}
     </div>
   );
   // Compact hosts — the inline card inside SessionDetail — stack the preview
