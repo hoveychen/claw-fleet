@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // The card review asks: "steelman" beside each option and "what would flip it"
-// on the question. A press must not send anything — it opens the card's ask bar
-// with the preset preselected, and only the bar's send button posts the ask.
-// The steelman quote names exactly one option so the host's answer digest can
-// say which option the boss looked at.
+// on the question. A press sends the ask at once (no ask bar in between), the
+// answer is headed by what was asked, and the button waits while its ask is
+// being answered. The steelman quote names exactly one option so the host's
+// answer digest can say which option the boss looked at. Plus the selection
+// bar, which must stay inside a narrow card.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -12,8 +13,12 @@ import type { FleetAskDecision, FleetAskRequest } from "../types";
 
 // Records `list_explanations` hands back for the card; empty by default.
 let stored: ExplainRecord[] = [];
-const invoke = vi.fn(async (cmd: string, _args?: unknown) => {
-  if (cmd === "explain_selection") return running;
+const invoke = vi.fn(async (cmd: string, args?: unknown) => {
+  // The host echoes the request's preset and quote back on the running record.
+  if (cmd === "explain_selection") {
+    const req = (args as { request: { preset: string; quote: string } }).request;
+    return { ...running, preset: req.preset, quote: req.quote };
+  }
   if (cmd === "list_explanations") return stored;
   return null;
 });
@@ -137,91 +142,104 @@ function bar(el: HTMLElement) {
   return el.querySelector<HTMLElement>("[data-testid='selection-toolbar']");
 }
 
-/** A full press: mousedown/mouseup like a real click (the bar listens to both). */
 async function press(btn: HTMLElement) {
   await act(async () => {
-    btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     btn.click();
   });
   await settle();
 }
 
+function request0() {
+  return askCalls()[0][1] as { request: { preset: string; quote: string; question?: string } };
+}
+
 describe("card review asks (steelman / flip conditions)", () => {
-  it("steelman preselects on the bar and sends only on confirm, quoting one option", async () => {
+  it("steelman sends at once, quoting one option, and heads the answer with it", async () => {
     const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
     await act(async () => {});
-    expect(bar(el), "no bar before any press").toBeNull();
 
     const buttons = el.querySelectorAll<HTMLButtonElement>("[data-testid='card-steelman-btn']");
     expect(buttons.length, "one steelman button per option").toBe(2);
     await press(buttons[1]);
 
-    const b = bar(el);
-    expect(b, "the press opens the ask bar").not.toBeNull();
-    const chosen = b!.querySelector("button[aria-pressed='true']");
-    expect(chosen?.getAttribute("data-preset")).toBe("steelman");
-    expect(b!.textContent, "the caption names the option").toContain("直接全量");
-    expect(askCalls().length, "a press alone must not ask").toBe(0);
-
-    await press(b!.querySelector<HTMLElement>("[data-testid='selection-toolbar-send']")!);
-
-    expect(askCalls().length).toBe(1);
-    const req = (askCalls()[0][1] as { request: { preset: string; quote: string; question?: string } }).request;
+    expect(bar(el), "no ask bar in between").toBeNull();
+    expect(askCalls().length, "the press itself asks").toBe(1);
+    const req = request0().request;
     expect(req.preset).toBe("steelman");
     expect(req.quote).toBe("上线计划：先 [?灰度到 5%]，再全量。\n\n【被追问的选项】直接全量 — 跳过灰度");
     expect(req.quote.includes("照做"), "only the pressed option's label is quoted").toBe(false);
     expect(req.question).toBeUndefined();
+
+    const thread = el.querySelector<HTMLElement>("[data-testid='decision-explain-thread']");
+    expect(thread, "the answer lands under the question").not.toBeNull();
+    // The test locale is English: "Steelman" is detail.explain_preset_steelman.
+    expect(thread!.textContent).toContain("Steelman · 直接全量");
+    expect(thread!.textContent?.includes("这段话是什么意思？"), "the preset prompt is not shown").toBe(false);
   });
 
-  it("flip conditions quotes the question, and another preset can be chosen before sending", async () => {
+  it("flip conditions sends the question at once, headed by the ask", async () => {
     const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
     await act(async () => {});
 
     await press(el.querySelector<HTMLElement>("[data-testid='card-flip-btn']")!);
-    const b = bar(el)!;
-    expect(b.querySelector("button[aria-pressed='true']")?.getAttribute("data-preset")).toBe("flip_conditions");
-
-    // Switching the preset on a primed bar re-chooses, it does not send.
-    const why = b.querySelector<HTMLButtonElement>("button[data-preset='rationale']")!;
-    await press(why);
-    expect(askCalls().length).toBe(0);
-    expect(bar(el)!.querySelector("button[aria-pressed='true']")?.getAttribute("data-preset")).toBe("rationale");
-
-    await press(bar(el)!.querySelector<HTMLElement>("[data-testid='selection-toolbar-send']")!);
-    const req = (askCalls()[0][1] as { request: { preset: string; quote: string } }).request;
-    expect(req.preset).toBe("rationale");
+    expect(askCalls().length).toBe(1);
+    const req = request0().request;
+    expect(req.preset).toBe("flip_conditions");
     expect(req.quote).toBe("上线计划：先 [?灰度到 5%]，再全量。");
+    const head = el.querySelector<HTMLElement>("[data-testid='decision-explain-thread']")!.textContent ?? "";
+    expect(head).toContain("What would flip it");
+    expect(head.includes("上线计划"), "the heading is not the raw quote").toBe(false);
   });
 
-  it("opens on the first press when the priming selectionchange beats React's commit (WebKit)", async () => {
-    // In WKWebView the `selectionchange` from the bar's own removeAllRanges()
-    // arrives after the prime effect queued its state but before React
-    // committed it; jsdom never fires one. It must not close the bar.
-    const original = Selection.prototype.removeAllRanges;
-    const spy = vi.spyOn(Selection.prototype, "removeAllRanges").mockImplementation(function (this: Selection) {
-      original.call(this);
-      queueMicrotask(() => document.dispatchEvent(new Event("selectionchange")));
-    });
-    try {
-      const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
-      await act(async () => {});
+  it("a button waits while its own ask is being answered; the others do not", async () => {
+    const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
+    await act(async () => {});
 
-      await press(el.querySelector<HTMLElement>("[data-testid='card-flip-btn']")!);
-      expect(bar(el), "flip opens the bar on the first press").not.toBeNull();
-      expect(bar(el)!.querySelector("button[aria-pressed='true']")?.getAttribute("data-preset")).toBe("flip_conditions");
-    } finally {
-      spy.mockRestore();
-    }
+    const steelmen = () => el.querySelectorAll<HTMLButtonElement>("[data-testid='card-steelman-btn']");
+    await press(steelmen()[1]);
+    expect(steelmen()[1].disabled, "the pressed one is busy").toBe(true);
+    expect(steelmen()[1].getAttribute("aria-busy")).toBe("true");
+    expect(steelmen()[0].disabled, "another option can still be asked about").toBe(false);
+
+    await press(steelmen()[1]);
+    expect(askCalls().length, "a second press does not fork again").toBe(1);
   });
 
-  it("offers both new presets on a plain selection bar too", async () => {
+  it("offers both new presets on a plain selection bar, which sends per preset", async () => {
     const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
     const mark = el.querySelector<HTMLElement>("[data-explain-quote][role='button']")!;
     act(() => mark.click());
     await settle();
     expect(bar(el)!.querySelector("[data-preset='steelman']")).not.toBeNull();
     expect(bar(el)!.querySelector("[data-preset='flip_conditions']")).not.toBeNull();
-    expect(bar(el)!.querySelector("[data-testid='selection-toolbar-send']"), "a selection bar sends per preset").toBeNull();
+    await press(bar(el)!.querySelector<HTMLElement>("[data-preset='steelman']")!);
+    expect(askCalls().length).toBe(1);
+    expect(request0().request.quote).toBe("灰度到 5%");
+  });
+
+  it("keeps the selection bar inside a card narrower than its row of presets", async () => {
+    // jsdom has no layout: give the question body a 300px width and the bar a
+    // natural 420px one, as a narrow dock card would have.
+    const widths = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "selection-toolbar" ? 420 : 0;
+    });
+    const client = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.role === "assistant" ? 300 : 0;
+    });
+    try {
+      const el = mount(createElement(DecisionCard, { decision: decision(), compact: true }));
+      const mark = el.querySelector<HTMLElement>("[data-explain-quote][role='button']")!;
+      act(() => mark.click());
+      await settle();
+      const b = bar(el)!;
+      expect(b.style.visibility, "placed once measured").not.toBe("hidden");
+      expect(b.style.maxWidth, "held to the pane less its edges").toBe("284px");
+      const left = parseFloat(b.style.left);
+      expect(left).toBeGreaterThanOrEqual(8);
+      expect(left + 284, "right edge inside the pane").toBeLessThanOrEqual(300 - 8);
+    } finally {
+      widths.mockRestore();
+      client.mockRestore();
+    }
   });
 });

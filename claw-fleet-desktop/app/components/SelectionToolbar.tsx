@@ -1,14 +1,12 @@
 import { Languages, MessageCircleQuestion, PencilLine, Scale, Shuffle, Swords } from "lucide-react";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExplainPreset } from "../explainApi";
 import {
   EXPLAIN_MARK_SELECT_EVENT,
-  primedSelection,
   readAssistantSelection,
   type AssistantSelection,
-  type ExplainPrime,
 } from "../selectionExplain";
 import styles from "./SelectionToolbar.module.css";
 import { Presence } from "./Presence";
@@ -17,11 +15,10 @@ import { Spinner } from "./loading";
 /** Which side of the selection the bar sits on. `above` is the default; `below`
  *  when the pane has no room above (a passage on a card's first line). */
 type Place = "above" | "below";
-/** The bar's height as laid out (buttons 5px + 11px line + 5px, bar 3px padding
- *  and a 1px border each side), used to decide whether it fits above. */
-const BAR_HEIGHT = 30;
 /** Space between the bar and the selection's box. */
 const BAR_GAP = 6;
+/** Space kept between the bar and the pane's side edges. */
+const EDGE = 8;
 
 /** The presets the bar offers, in order; `custom` is the pencil after them. */
 const PRESETS: { preset: ExplainPreset; icon: typeof Scale; key: string; fallback: string }[] = [
@@ -31,16 +28,6 @@ const PRESETS: { preset: ExplainPreset; icon: typeof Scale; key: string; fallbac
   { preset: "steelman", icon: Swords, key: "detail.explain_preset_steelman", fallback: "反方论证" },
   { preset: "flip_conditions", icon: Shuffle, key: "detail.explain_preset_flip_conditions", fallback: "翻转条件" },
 ];
-
-/** The nearest ancestor that scrolls, so a primed bar can sit at the bottom of
- *  what is visible of the pane rather than below the fold. */
-function scrollParent(el: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const o = getComputedStyle(p).overflowY;
-    if (o === "auto" || o === "scroll") return p;
-  }
-  return null;
-}
 
 /**
  * The floating "ask about this" bar that appears over a selection of agent
@@ -53,15 +40,11 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
  * into an input; focusing it collapses the document selection, so the passage
  * is snapshotted at mouseup and the collapse is ignored while the input is up.
  *
- * `prime` opens it without a selection: a decision card's "steelman" /
- * "what would flip it" buttons hand over a quote they built and a preset. The
- * bar then only *preselects* that preset — a click on a preset changes the
- * choice and nothing is sent until the reader presses the send button (or
- * submits a custom question). It sits at the bottom of the pane's visible
- * part, right above the options the buttons live next to.
- *
  * Positioned in `pane`'s coordinate space (the pane is `position: relative`),
- * centred above the selection's box and clamped to the pane's width.
+ * centred on the selection's box. Its width is measured once rendered: it is
+ * kept within the pane, and on a pane narrower than the row of presets (a
+ * decision card in a narrow dock) it wraps onto more lines instead of running
+ * off the card's edges.
  */
 export function SelectionToolbar({
   pane,
@@ -69,8 +52,6 @@ export function SelectionToolbar({
   enabled,
   busy,
   onAsk,
-  prime,
-  primeIdx = 0,
 }: {
   /** The element the bar is positioned inside. */
   pane: RefObject<HTMLElement | null>;
@@ -84,27 +65,19 @@ export function SelectionToolbar({
   /** A question is being submitted; the buttons wait. */
   busy: boolean;
   onAsk: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
-  /** A card review ask to preselect; a new `nonce` re-opens the bar. */
-  prime?: ExplainPrime | null;
-  /** The `msgIdx` a primed ask carries (the card's question index). */
-  primeIdx?: number;
 }) {
   const { t } = useTranslation();
+  // The selection and its box in the pane's coordinates; where the bar goes
+  // (`pos`) is worked out from it once the bar has a size.
   const [shown, setShown] = useState<{
     sel: AssistantSelection;
-    x: number;
-    y: number;
-    place: Place;
-    /** Set when opened by `prime`: what the caption names. */
-    caption?: string;
+    cx: number;
+    top: number;
+    bottom: number;
   } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxWidth: number; place: Place } | null>(null);
   const [custom, setCustom] = useState(false);
   const [question, setQuestion] = useState("");
-  // The preset a primed bar will send; `null` for a selection bar, where a
-  // preset click sends at once.
-  const [chosen, setChosen] = useState<ExplainPreset | null>(null);
-  const chosenRef = useRef(chosen);
-  chosenRef.current = chosen;
   // The preset whose ask is still being posted, so a bar reopened during the
   // wait shows which one is in flight instead of a row of greyed buttons.
   const [pending, setPending] = useState<ExplainPreset | null>(null);
@@ -119,7 +92,6 @@ export function SelectionToolbar({
   useEffect(() => {
     if (!enabled) {
       setShown(null);
-      setChosen(null);
       return;
     }
     const read = () => {
@@ -128,60 +100,38 @@ export function SelectionToolbar({
       if (!root || !host) return;
       const sel = readAssistantSelection(root);
       if (!sel) {
-        // A primed bar has no selection to lose: the click that opened it
-        // produces a mouseup (and maybe a collapse) of its own.
-        if (!customRef.current && !chosenRef.current) setShown(null);
+        if (!customRef.current) setShown(null);
         return;
       }
       const hostRect = host.getBoundingClientRect();
-      const margin = 8;
-      const x = Math.min(
-        Math.max(sel.rect.left + sel.rect.width / 2 - hostRect.left, margin + 120),
-        hostRect.width - margin - 120,
-      );
-      // Above the selection when the pane has room for the bar there;
-      // otherwise below it. Never over the selected text: a clamp used to
-      // park the bar at the pane's top edge, which on a decision card's
-      // first line meant right on top of the passage being asked about.
-      const above = sel.rect.top - hostRect.top - BAR_GAP;
-      const place: Place = above >= margin + BAR_HEIGHT ? "above" : "below";
-      const y = place === "above" ? above : sel.rect.bottom - hostRect.top + BAR_GAP;
       setCustom(false);
       setQuestion("");
-      setChosen(null);
-      setShown({ sel, x, y, place });
-    };
-    const close = () => {
-      setShown(null);
-      setChosen(null);
+      setShown({
+        sel,
+        cx: sel.rect.left + sel.rect.width / 2 - hostRect.left,
+        top: sel.rect.top - hostRect.top,
+        bottom: sel.rect.bottom - hostRect.top,
+      });
     };
     // Read after the browser has settled the selection for this gesture.
     const onUp = () => requestAnimationFrame(read);
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        close();
+        setShown(null);
         return;
       }
       if (e.shiftKey && e.key.startsWith("Arrow")) requestAnimationFrame(read);
     };
     const onSelChange = () => {
-      if (customRef.current || chosenRef.current) return;
+      if (customRef.current) return;
       const s = window.getSelection();
       if (!s || s.isCollapsed) setShown(null);
     };
     const onScroll = () => {
-      if (!customRef.current && !chosenRef.current) setShown(null);
-    };
-    // A primed bar has no selection whose collapse would close it; a press
-    // anywhere else does (another card button re-primes it right after).
-    const onDown = (e: MouseEvent) => {
-      if (!chosenRef.current || customRef.current) return;
-      if (barRef.current && e.target instanceof Node && barRef.current.contains(e.target)) return;
-      close();
+      if (!customRef.current) setShown(null);
     };
     const root = scroller.current;
     document.addEventListener("mouseup", onUp);
-    document.addEventListener("mousedown", onDown);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("selectionchange", onSelChange);
     // A click (or Enter) on one of the agent's `[?text]` marks selects the mark
@@ -191,7 +141,6 @@ export function SelectionToolbar({
     root?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       document.removeEventListener("mouseup", onUp);
-      document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener(EXPLAIN_MARK_SELECT_EVENT, onUp);
       document.removeEventListener("selectionchange", onSelChange);
@@ -199,36 +148,30 @@ export function SelectionToolbar({
     };
   }, [enabled, pane, scroller]);
 
-  // Open on a card review press: preselect, never send.
-  useEffect(() => {
-    if (!prime || !enabled) return;
+  // Place the bar once it has a size: no wider than the pane, centred on the
+  // selection but kept inside the pane's edges, above the selection when the
+  // pane has room for it there and below otherwise — never over the selected
+  // text (a clamp to the pane's top edge used to park it right on a card's
+  // first line).
+  useLayoutEffect(() => {
     const host = pane.current;
-    if (!host) return;
-    const hostRect = host.getBoundingClientRect();
-    const clip = scrollParent(host)?.getBoundingClientRect();
-    const bottom = clip ? Math.min(hostRect.bottom, clip.bottom) : hostRect.bottom;
-    const margin = 8;
-    const x = Math.min(Math.max(hostRect.width / 2, margin + 120), Math.max(hostRect.width - margin - 120, margin + 120));
-    // In WebKit (the desktop app's WKWebView) the `selectionchange` this
-    // removeAllRanges() causes is delivered before React commits the state
-    // below. The refs must already read as primed by then, or onSelChange
-    // queues a setShown(null) after ours and the bar never opens.
-    chosenRef.current = prime.preset;
-    customRef.current = false;
-    window.getSelection()?.removeAllRanges();
-    setCustom(false);
-    setQuestion("");
-    setChosen(prime.preset);
-    setShown({
-      sel: primedSelection(prime.quote, primeIdx),
-      x,
-      y: Math.max(bottom - hostRect.top - BAR_GAP, margin + BAR_HEIGHT),
-      place: "above",
-      caption: prime.caption,
-    });
-    // Only a new press re-opens; `primeIdx` rides along with it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prime?.nonce, enabled]);
+    const bar = barRef.current;
+    if (!shown || !host || !bar) {
+      setPos(null);
+      return;
+    }
+    const paneWidth = host.clientWidth;
+    const maxWidth = Math.max(paneWidth - 2 * EDGE, 0);
+    // Measure at the width it will be held to, so a wrapped bar reports the
+    // height it will really have.
+    bar.style.maxWidth = `${maxWidth}px`;
+    const width = Math.min(bar.offsetWidth, maxWidth);
+    const height = bar.offsetHeight;
+    const left = Math.min(Math.max(shown.cx - width / 2, EDGE), Math.max(paneWidth - EDGE - width, EDGE));
+    const above = shown.top - BAR_GAP - height;
+    const place: Place = above >= EDGE ? "above" : "below";
+    setPos({ left, top: place === "above" ? above : shown.bottom + BAR_GAP, maxWidth, place });
+  }, [shown, custom, pane]);
 
   useEffect(() => {
     if (custom) inputRef.current?.focus();
@@ -240,13 +183,7 @@ export function SelectionToolbar({
     onAsk(shown.sel, preset, q);
     setShown(null);
     setCustom(false);
-    setChosen(null);
     setQuestion("");
-  };
-  // A preset button sends on a selection bar and only re-chooses on a primed one.
-  const press = (preset: ExplainPreset) => {
-    if (chosen) setChosen(preset);
-    else fire(preset);
   };
   // Buttons swallow mousedown so the click does not collapse the selection
   // the bar is about; the input does not, it needs the focus.
@@ -259,9 +196,13 @@ export function SelectionToolbar({
     <div
       ref={barRef}
       className={styles.toolbar}
-      style={{ left: shown.x, top: shown.y }}
-      data-place={shown.place}
-      data-primed={chosen ? "true" : undefined}
+      // Unplaced (first layout): in the tree for its size, out of sight.
+      style={
+        pos
+          ? { left: pos.left, top: pos.top, maxWidth: pos.maxWidth }
+          : { left: 0, top: 0, visibility: "hidden" }
+      }
+      data-place={pos?.place ?? "above"}
       role="toolbar"
       aria-label={t("detail.explain_toolbar", "对选中内容追问")}
       data-testid="selection-toolbar"
@@ -285,7 +226,6 @@ export function SelectionToolbar({
                 e.stopPropagation();
                 setShown(null);
                 setCustom(false);
-                setChosen(null);
               }
             }}
             placeholder={t("detail.explain_custom_placeholder", "就这段话问点什么…")}
@@ -298,21 +238,14 @@ export function SelectionToolbar({
         </form>
       ) : (
         <>
-          {shown.caption && (
-            <span className={styles.caption} title={shown.caption}>
-              {shown.caption}
-            </span>
-          )}
           {PRESETS.map(({ preset, icon: Icon, key, fallback }) => (
             <button
               key={preset}
               type="button"
               className={styles.btn}
               data-preset={preset}
-              data-chosen={chosen === preset ? "true" : undefined}
-              aria-pressed={chosen ? chosen === preset : undefined}
               onMouseDown={keep}
-              onClick={() => press(preset)}
+              onClick={() => fire(preset)}
               disabled={busy}
             >
               {pending === preset ? <Spinner size={12} /> : <Icon size={12} strokeWidth={1.8} aria-hidden="true" />}
@@ -333,18 +266,6 @@ export function SelectionToolbar({
             )}
             {t("detail.explain_custom", "自定义提问")}
           </button>
-          {chosen && (
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.send}`}
-              onMouseDown={keep}
-              onClick={() => fire(chosen)}
-              disabled={busy}
-              data-testid="selection-toolbar-send"
-            >
-              {t("detail.explain_send", "发送")}
-            </button>
-          )}
         </>
       )}
     </div>
