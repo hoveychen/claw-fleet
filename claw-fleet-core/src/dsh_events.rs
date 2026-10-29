@@ -496,6 +496,10 @@ impl LiveSession {
 /// Called once when a session's turn ends; `true` when it ran to completion.
 pub type TurnEndCallback = Box<dyn FnOnce(bool) + Send>;
 
+/// Called for every session whose turn completes live — see
+/// [`LiveView::set_turn_completed_hook`].
+pub type TurnCompletedHook = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Receives every raw `session/follow` item of one session, before Fleet's
 /// phase decoding throws the payload away — see [`LiveView::tap`].
 pub type RawItemTap = Arc<dyn Fn(&Value) + Send + Sync>;
@@ -552,6 +556,8 @@ pub struct LiveView {
     taps: Mutex<HashMap<String, Vec<(u64, RawItemTap)>>>,
     /// Mints tap ids so a handle unregisters exactly its own tap.
     next_tap_id: std::sync::atomic::AtomicU64,
+    /// See [`Self::set_turn_completed_hook`].
+    turn_completed: Mutex<Option<TurnCompletedHook>>,
 }
 
 /// Handle shared between the socket follower and its owner.
@@ -569,12 +575,15 @@ impl LiveView {
                 block_type,
                 reason_kind,
             } => {
-                {
+                // A reconnect replays frames the view has already folded; only
+                // an event past the newest position seen so far is news.
+                let fresh = {
                     let mut guard = self
                         .sessions
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let entry = guard.entry(session_id.clone()).or_default();
+                    let fresh = entry.cursor.is_none_or(|c| seq > c);
                     if let Some(phase) = phase_of(&kind, block_type.as_deref()) {
                         entry.phase = phase;
                         entry.phase_at_ms = now_ms;
@@ -586,12 +595,24 @@ impl LiveView {
                     // replays frames, so neither may regress.
                     entry.last_event_at_ms =
                         Some(entry.last_event_at_ms.map_or(now_ms, |t| t.max(now_ms)));
-                }
+                    fresh
+                };
                 if kind == "turn/end" {
                     // `aborted` (session/cancel) is the one other kind observed
                     // live; treat anything that is not an outright completion as
                     // a failed turn so the caller does not record it as success.
-                    self.settle(&session_id, reason_kind.as_deref() == Some("completed"));
+                    let completed = reason_kind.as_deref() == Some("completed");
+                    self.settle(&session_id, completed);
+                    if completed && fresh {
+                        let hook = self
+                            .turn_completed
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .clone();
+                        if let Some(hook) = hook {
+                            hook(&session_id);
+                        }
+                    }
                 }
             }
             DshFrame::Status {
@@ -633,6 +654,21 @@ impl LiveView {
         for cb in waiting {
             cb(success);
         }
+    }
+
+    /// Call `hook` whenever any session's turn completes, as opposed to
+    /// [`Self::on_turn_end`], which waits on one turn Fleet itself drove.
+    ///
+    /// This is dsh's counterpart of Claude's `Stop` hook and codex's `notify`:
+    /// the moment a registered handoff relay has to fire. An aborted turn does
+    /// not count (neither of the other two fires on an interrupt), and neither
+    /// does a `turn/end` replayed by a reconnect — that turn ended long ago, and
+    /// firing on it could relay a session mid-way through its next turn.
+    pub fn set_turn_completed_hook(&self, hook: TurnCompletedHook) {
+        *self
+            .turn_completed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
     }
 
     /// Call `cb` when this session's next `turn/end` arrives.
@@ -880,6 +916,26 @@ pub struct DshEventWatcher {
     _decisions: Arc<crate::dsh_decisions::DecisionBridge>,
 }
 
+/// Fire `session_id`'s registered handoff relay, if it has one — the dsh end of
+/// what `fleet session idle` does for Claude and
+/// [`crate::codex_launch::on_codex_turn_exit`] does for codex. Without it a dsh
+/// agent could register a relay that nothing ever consumed (2026-10-29).
+///
+/// Every watcher on the machine sees the same `turn/end` (the desktop and a
+/// `fleet serve` can both run one); the pending record is claimed atomically,
+/// so only one of them spawns a successor.
+fn relay_on_turn_end(session_id: &str) {
+    match crate::handoff::consume_and_spawn(session_id) {
+        Ok(Some(to)) => crate::log_debug(&format!(
+            "dsh turn end: handoff relayed {session_id} -> {to}"
+        )),
+        Ok(None) => {}
+        Err(e) => crate::log_debug(&format!(
+            "dsh turn end: handoff relay failed for {session_id}: {e}"
+        )),
+    }
+}
+
 impl DshEventWatcher {
     /// Open the mux in a background thread and start folding frames.
     ///
@@ -887,6 +943,13 @@ impl DshEventWatcher {
     /// a server that is not answering yet costs nothing but a retry.
     pub fn start(port: u16, launch_token: &str) -> Self {
         let live: SharedLive = Arc::new(LiveView::default());
+        live.set_turn_completed_hook(Arc::new(|session_id: &str| {
+            // Off the socket thread: a relay spawns a session over the network.
+            let sid = session_id.to_string();
+            let _ = std::thread::Builder::new()
+                .name("dsh-turn-relay".into())
+                .spawn(move || relay_on_turn_end(&sid));
+        }));
         let stop = Arc::new(AtomicBool::new(false));
         let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(
             port,
@@ -1907,6 +1970,37 @@ mod tests {
         // re-settle callers who already got their answer.
         live.apply(turn_end("session-a", "completed"), 1_002);
         assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    /// The completed-turn hook is what fires a dsh session's handoff relay, so
+    /// it must see live completions only: not aborts, and not a `turn/end` a
+    /// reconnect replays, which could relay a session in the middle of its
+    /// next turn.
+    #[test]
+    fn the_turn_completed_hook_sees_only_fresh_completions() {
+        let live = LiveView::default();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = seen.clone();
+        live.set_turn_completed_hook(Arc::new(move |sid: &str| {
+            sink.lock().unwrap().push(sid.to_string())
+        }));
+        let at = |sid: &str, reason: &str, seq: u64| DshFrame::Event {
+            session_id: sid.into(),
+            kind: "turn/end".into(),
+            seq,
+            block_type: None,
+            reason_kind: Some(reason.into()),
+        };
+
+        live.apply(at("session-a", "completed", 10), 1_000);
+        live.apply(at("session-b", "aborted", 10), 1_001);
+        // Replay of the turn already folded, then of an older one.
+        live.apply(at("session-a", "completed", 10), 1_002);
+        live.apply(at("session-a", "completed", 4), 1_003);
+        // The session's next turn.
+        live.apply(at("session-a", "completed", 25), 1_004);
+
+        assert_eq!(*seen.lock().unwrap(), vec!["session-a", "session-a"]);
     }
 
     /// A cancelled turn is not a successful one — reporting it as success would
