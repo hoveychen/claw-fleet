@@ -670,6 +670,18 @@ impl DshSource {
     /// the prompt again as plain text rather than losing the turn — see
     /// [`crate::dsh_attachments::send_with_text_fallback`].
     pub(crate) fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
+        Self::prompt_in_mode(client, session_id, prompt, "queue")
+    }
+
+    /// `session/prompt` with an explicit inbox mode. `"queue"` lands in dsh's
+    /// `next-turn` lane (read once the running turn ends); `"steer"` lands in
+    /// `next-step` (read at the next step boundary, and wakes an idle agent).
+    fn prompt_in_mode(
+        client: &DshClient,
+        session_id: &str,
+        prompt: &str,
+        mode: &str,
+    ) -> Result<(), String> {
         crate::dsh_attachments::send_with_text_fallback(prompt, |content| {
             client
                 .call(
@@ -684,10 +696,7 @@ impl DshSource {
                             // send is all this needs.
                             "requestId": uuid::Uuid::new_v4().to_string(),
                             "sessionId": session_id,
-                            // "queue" appends to the session's inbox; "steer"
-                            // would cut into a turn already running, which is
-                            // not what either of Fleet's launch paths means.
-                            "mode": "queue",
+                            "mode": mode,
                             "content": content,
                         }
                     }),
@@ -700,15 +709,22 @@ impl DshSource {
     /// Hand a follow-up to a session that may be mid-turn.
     ///
     /// Fleet's own follow-up queue (`pending_message`) exists because a claude
-    /// or codex turn cannot take input until it ends. A dsh session can:
-    /// `session/prompt` in `"queue"` mode appends to the session's inbox while a
-    /// turn runs, so the message goes straight to dsh instead.
+    /// or codex turn cannot take input until it ends. A dsh session can, so the
+    /// message goes straight to dsh instead.
+    ///
+    /// It is sent as `"steer"`, not `"queue"`: `"queue"` parks it in dsh's
+    /// `next-turn` lane, which a long turn does not read until it ends — a
+    /// follow-up sent during a 40-minute download sat unread for the whole
+    /// turn while the UI said "read once the current tool finishes". `"steer"`
+    /// is the `next-step` lane dsh's own background-job notices use: absorbed
+    /// at the next step boundary without aborting the running tool, a turn
+    /// does not end while it is non-empty, and it wakes an idle agent.
     pub(crate) fn send_follow_up(&self, session_id: &str, text: &str) -> Result<(), String> {
         let id = Self::session_id_of(session_id).unwrap_or(session_id);
         if id.is_empty() {
             return Err("dsh follow-up: session_id is required".into());
         }
-        self.with_client(|client| Self::prompt(client, id, text))
+        self.with_client(|client| Self::prompt_in_mode(client, id, text, "steer"))
     }
 
     /// Receive every raw follow item of `session_id` until the handle drops
