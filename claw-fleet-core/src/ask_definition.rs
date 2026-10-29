@@ -520,6 +520,44 @@ mod tests {
         assert!(answer_reminder(&plain).is_none());
     }
 
+    /// Regression-probe helper (run by hand, `--ignored`): with
+    /// `FLEET_DEF_PROBE_DIR` set, writes the zh guidance and the `fleet__ask`
+    /// input schema there, then runs [`vet_and_fold`] over every `card-*.json`
+    /// in it and writes `<name>.verdict` (`PASS` + folded JSON, or `REJECT` +
+    /// the message). The probe asks a model to emit the card it would send for
+    /// the 2026-10-28 comeback-definition question and checks it here.
+    #[test]
+    #[ignore]
+    fn probe_vet_dir() {
+        let Ok(dir) = std::env::var("FLEET_DEF_PROBE_DIR") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::write(
+            dir.join("guidance.md"),
+            crate::interaction_mode::render_guidance("老板", "zh"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("schema.json"),
+            serde_json::to_string_pretty(&crate::mcp_ipc::fleet_ask_input_schema()).unwrap(),
+        )
+        .unwrap();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !(name.starts_with("card-") && name.ends_with(".json")) {
+                continue;
+            }
+            let raw = std::fs::read_to_string(entry.path()).unwrap();
+            let verdict = match serde_json::from_str::<Value>(&raw) {
+                Err(e) => format!("REJECT unparseable: {e}"),
+                Ok(mut args) => match vet_and_fold(&mut args, "zh") {
+                    Ok(()) => format!("PASS\n{}", serde_json::to_string_pretty(&args).unwrap()),
+                    Err(e) => format!("REJECT {e}"),
+                },
+            };
+            std::fs::write(dir.join(format!("{name}.verdict")), verdict).unwrap();
+        }
+    }
+
     #[test]
     fn english_locale_folds_in_english() {
         let mut args = rewritten_card();
