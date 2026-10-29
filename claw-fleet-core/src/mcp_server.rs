@@ -467,7 +467,7 @@ fn client_name_has_native_image_gen(name: &str) -> bool {
 fn fleet_ask_tool_def() -> Value {
     json!({
         "name": "fleet__ask",
-        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is dropped from the card automatically and its intent folded into `taskComplete`. If a new message reaches your turn while the card waits, the call returns early with the card still open: handle the message, then call `fleet__ask` with `action: \"wait\"` (or `\"withdraw\"`) and that `request_id` before raising any other card.",
+        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is dropped from the card automatically and its intent folded into `taskComplete`. When the user is choosing how a term, label, metric or cohort is defined (口径/定义/阈值/\"how do we count X\"), mark that question `kind: \"definition\"` and give every option `misjudges`, plus `expertOption` and `pendingParams` — see those fields; such a question without a `kind` is rejected. If a new message reaches your turn while the card waits, the call returns early with the card still open: handle the message, then call `fleet__ask` with `action: \"wait\"` (or `\"withdraw\"`) and that `request_id` before raising any other card.",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
     })
 }
@@ -1622,6 +1622,11 @@ fn img_srcs(html: &str) -> Vec<&str> {
 fn run_fleet_ask(params: &Value, on_queued: impl FnOnce(&str)) -> Result<Value, JsonRpcError> {
     let mut args = params.get("arguments").cloned().unwrap_or(Value::Null);
     hoist_misplaced_images(&mut args);
+    // Definition-question checks (`kind: "definition"`): see `ask_definition`
+    // for the 2026-10-28 comeback-definition card that motivated them.
+    let (_, locale) = crate::claude_launch::guidance_voice();
+    crate::ask_definition::vet_and_fold(&mut args, &locale)
+        .map_err(|message| JsonRpcError { code: -32602, message })?;
     let mut questions: Vec<crate::mcp_ipc::FleetAskQuestion> = match args.get("questions").cloned()
     {
         Some(q) => serde_json::from_value(q).map_err(|e| JsonRpcError {
@@ -1958,6 +1963,7 @@ fn await_card(
         &resp.answers,
         stripped,
         resp.side_question_digest.as_deref(),
+        crate::ask_definition::answer_reminder(&req.questions).as_deref(),
     ))
 }
 
@@ -1974,10 +1980,14 @@ fn await_card(
 /// `side_questions` is [`crate::mcp_ipc::FleetAskResponse::side_question_digest`]:
 /// it rides beside the answers under its own key (and as its own text block),
 /// never inside the answers map the readers match options against.
+///
+/// `definition_reminder` is [`crate::ask_definition::answer_reminder`]; it is
+/// merged into the `note` key next to any terminal-option repair note.
 fn answered_result(
     answers: &std::collections::BTreeMap<String, String>,
     stripped: &StrippedEndOptions,
     side_questions: Option<&str>,
+    definition_reminder: Option<&str>,
 ) -> Value {
     // Pack answers as JSON so the agent can parse structured form values. For
     // clients that do read `content`, the note rides as a *second* text block,
@@ -1985,8 +1995,13 @@ fn answered_result(
     let answers_json = serde_json::to_string(answers).unwrap_or_else(|_| "{}".into());
     let mut content = vec![json!({ "type": "text", "text": answers_json })];
     let mut structured = json!({ "answers": answers });
-    if !stripped.is_empty() {
-        let note = stripped.note();
+    let notes: Vec<String> = (!stripped.is_empty())
+        .then(|| stripped.note())
+        .into_iter()
+        .chain(definition_reminder.map(String::from))
+        .collect();
+    if !notes.is_empty() {
+        let note = notes.join("\n\n");
         content.push(json!({ "type": "text", "text": note }));
         structured["note"] = json!(note);
     }
@@ -3349,7 +3364,7 @@ mod tests {
             labels: vec!["收工".into()],
             implies_complete: true,
         };
-        let result = answered_result(&answers, &stripped, None);
+        let result = answered_result(&answers, &stripped, None, None);
         assert_eq!(result["structuredContent"]["answers"]["Q"], "A");
         let note = result["structuredContent"]["note"]
             .as_str()
@@ -3364,7 +3379,7 @@ mod tests {
             labels: Vec::new(),
             implies_complete: false,
         };
-        let result = answered_result(&answers, &clean, None);
+        let result = answered_result(&answers, &clean, None, None);
         assert!(result["structuredContent"].get("note").is_none());
         assert!(result["structuredContent"].get("sideQuestions").is_none());
         assert_eq!(result["content"].as_array().unwrap().len(), 1);
@@ -3379,7 +3394,7 @@ mod tests {
             implies_complete: false,
         };
         let digest = "老板作答前查看了：\n- 反方论证（A）：另一边更省事。";
-        let result = answered_result(&answers, &clean, Some(digest));
+        let result = answered_result(&answers, &clean, Some(digest), None);
         assert_eq!(result["structuredContent"]["sideQuestions"], digest);
         assert_eq!(result["structuredContent"]["answers"], json!({ "Q": "A" }));
         assert_eq!(result["content"][1]["text"], digest);
@@ -3440,6 +3455,53 @@ mod tests {
             msg.contains("taskComplete") && msg.contains("收工"),
             "error should name the offending label and point at taskComplete, got: {msg}"
         );
+    }
+
+    #[test]
+    fn tools_call_with_undeclared_definition_question_errors() {
+        // The 2026-10-28 comeback-definition question: it reads as a definition
+        // question but declares no `kind`, so `ask_definition` bounces it before
+        // any card is raised. FLEET_HOME is isolated as in the sibling test.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet-ask-definition-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": {
+                    "questions": [{
+                        "question": "「局内翻盘」按哪个口径定义？",
+                        "header": "翻盘口径",
+                        "multiSelect": false,
+                        "options": [
+                            {"label": "经济落后后赢", "description": "经济落后 ≥ X（比如 3k）的一方最终赢"},
+                            {"label": "两种都做", "description": "经济口径当主标签"}
+                        ]
+                    }]
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(resp["error"]["code"], -32602, "got {resp}");
+        let msg = resp["error"]["message"].as_str().unwrap_or_default();
+        assert!(msg.contains("`kind`") && msg.contains("misjudges"), "got: {msg}");
     }
 
     #[test]

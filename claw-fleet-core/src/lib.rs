@@ -4,6 +4,7 @@ pub mod agent_loop;
 pub mod agent_slots;
 pub mod agent_source;
 pub mod artifacts;
+pub mod ask_definition;
 pub mod ask_preempt;
 pub mod atomic_json;
 pub mod audit;

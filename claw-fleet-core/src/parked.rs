@@ -1028,6 +1028,20 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
                 out.push_str(digest.trim());
                 out.push('\n');
             }
+            // Same reminder a live answer carries; see `ask_definition`.
+            if let Some(reminder) = card
+                .request
+                .get("questions")
+                .cloned()
+                .and_then(|q| {
+                    serde_json::from_value::<Vec<crate::mcp_ipc::FleetAskQuestion>>(q).ok()
+                })
+                .and_then(|qs| crate::ask_definition::answer_reminder(&qs))
+            {
+                out.push('\n');
+                out.push_str(&reminder);
+                out.push('\n');
+            }
         }
         ParkedKind::A2uiRender => {
             let action = response

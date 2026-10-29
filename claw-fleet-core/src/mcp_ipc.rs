@@ -1050,10 +1050,28 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                                 "properties": {
                                     "label": { "type": "string" },
                                     "description": { "type": "string" },
-                                    "preview": { "type": "string" }
+                                    "preview": { "type": "string" },
+                                    "misjudges": {
+                                        "type": "string",
+                                        "description": "Required on every option when the question's `kind` is \"definition\": the cases this definition would wrongly count as positive or negative, in domain terms (e.g. \"a late-game composition that is behind early is counted as a comeback\"). Statistical convenience (\"plenty of samples\", \"stable\") is not a misjudgement. Shown on the card as 「会误判：…」."
+                                    }
                                 },
                                 "required": ["label", "description"]
                             }
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": ["definition", "parameter", "other"],
+                            "description": "Declare `definition` when the boss is choosing how a term, label, metric, cohort or success criterion is defined (口径/定义/标签/怎么算). The server then requires `misjudges` on every option, `expertOption`, and `pendingParams` for any numeric threshold in the options, and rejects the card otherwise. `parameter` = picking a value (a threshold, a window) for an already-agreed definition. `other` = anything else. A question whose header, ask line or option labels mention 口径/定义/阈值/怎么算/definition/threshold and that declares no `kind` is rejected and must be re-sent with one."
+                        },
+                        "expertOption": {
+                            "type": "string",
+                            "description": "For `kind: \"definition\"`: the label of the option a domain expert would choose. Ask yourself how a practitioner of the field defines this; if that definition is not on your menu, add it as an option. Must match an option label."
+                        },
+                        "pendingParams": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "For `kind: \"definition\"`: every numeric threshold or window the options leave open (e.g. \"gold-deficit threshold, candidates 2k/3k/5k\"). Shown on the card as unconfirmed; ask each one later with `kind: \"parameter\"` and keep calling it unconfirmed until the boss confirms it. Required when any option mentions a threshold."
                         },
                         "html": {
                             "type": "string",
