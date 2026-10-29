@@ -134,6 +134,9 @@ const DEFAULT_KEY_ENV: &str = "OPENROUTER_API_KEY";
 /// `@deepseek-ai/dsh-llm-deepseek`.
 const DEEPSEEK_KEY_ENV: &str = "DEEPSEEK_API_KEY";
 
+/// The same for a hand-declared Abliteration route under `llm-pi-ai`.
+const ABLITERATION_KEY_ENV: &str = "ABLITERATION_API_KEY";
+
 /// Cache file under `~/.fleet`, holding both kinds of frozen price. No entry
 /// ever expires: a generation record is immutable, and a metered price is
 /// deliberately held still — see the module docs.
@@ -635,19 +638,29 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
 /// Returns `None` when no key is configured, which is a normal state (the user
 /// may not use OpenRouter at all), not an error.
 pub fn openrouter_api_key() -> Option<String> {
+    pi_ai_provider_api_key("openrouter", DEFAULT_KEY_ENV)
+}
+
+/// Resolve the key for a hand-declared `abliteration` route, the same way as
+/// [`openrouter_api_key`].
+pub fn abliteration_api_key() -> Option<String> {
+    pi_ai_provider_api_key("abliteration", ABLITERATION_KEY_ENV)
+}
+
+/// Shared lookup for any provider declared under `llm-pi-ai.providers.<id>`.
+fn pi_ai_provider_api_key(provider_id: &str, default_var: &str) -> Option<String> {
     let dsh_home = crate::session::get_dsh_dir()?;
 
     let provider = plugin_config(&dsh_home, "llm-pi-ai")
-        .and_then(|c| c.pointer("/providers/openrouter").cloned())
+        .and_then(|c| c.pointer(&format!("/providers/{provider_id}")).cloned())
         .unwrap_or(Value::Null);
 
-    // The variable that holds the secret. `OPENROUTER_API_KEY` is the
-    // conventional name and the one a bare install uses, but honour whatever
-    // the user pointed `apiKeyEnv` at.
+    // The variable that holds the secret. `default_var` is the conventional
+    // name, but honour whatever the user pointed `apiKeyEnv` at.
     let var = provider
         .get("apiKeyEnv")
         .and_then(Value::as_str)
-        .unwrap_or(DEFAULT_KEY_ENV);
+        .unwrap_or(default_var);
 
     if let Some(key) = non_empty(std::env::var(var).ok()) {
         return Some(key);
