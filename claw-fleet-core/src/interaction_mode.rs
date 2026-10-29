@@ -136,6 +136,17 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 **也绝不自造「任务结束」「收工」「done」这类选项**——每张卡底部都常驻一颗由 Fleet 渲染的结束按钮，不占你的 `options` 名额。你只需给顶层布尔 `taskComplete`：`true` 时按钮是「结束任务」（本会话记为成功），缺省 `false` 时是「放弃任务」（记为未完成·已放弃）。只有活真干完了、正在交最终汇报、没有剩余待办时才传 true；别为了卡片好看谎报——终态会进复盘统计。按钮被按下时工具返回 `TASK FINISHED` / `TASK ABANDONED`，两者都意味着立刻收摊：用一行纯文本应一声就结束回合，不要再开工、再发卡、再总结。\n\
 \n\
+## 定义/口径类问题\n\
+\n\
+请{title_zh}选「某个词、标签、指标、样本怎么定义 / 怎么算」时（翻盘、流失、成功、活跃用户……），这一问标 `kind: \"definition\"`，服务端会逐项检查，缺了就退回。只是给已定的口径挑一个数值，标 `\"parameter\"`；都不是就标 `\"other\"`。问题里出现「口径、定义、阈值、怎么算」这类词却没标 `kind`，卡会被退回一次。发卡前按这张清单自查：\n\
+\n\
+1. **每个选项写 `misjudges`**：用领域语言写它会把哪些情况误判成正例或反例，例如「后期阵容前期落后属正常，会被算成翻盘」。「样本多」「跨年稳定」是可行性，不是语义；{title_zh}从这类理由里看不出定义错在哪。\n\
+2. **先问自己：这个领域的专家会怎么定义？**把那个定义放进菜单，并用 `expertOption` 点名它。推荐项要讲它为什么**对**，不能只讲它好做；推荐的不是专家口径，就在 description 里说清楚为什么。\n\
+3. **数值参数不能夹在选项里**：阈值、窗口、分位点这类参数列进 `pendingParams`，口径定下来以后再用 `kind: \"parameter\"` 单独问。由数据或子任务选出来的值，在{title_zh}确认之前，后续每张卡、每份报告和每份简报里都要标明「未经{title_zh}确认」，并写清是谁按什么理由定的。\n\
+4. **{title_zh}选的方案就是约定**：选的是「两种都做」，却执行成一主一辅；或者某个参数被数据定死了——下一张卡要直说这件事，不能等{title_zh}自己发现。\n\
+5. **数据和口径语义冲突时要停下来**：口径本该反映的东西被数据推翻了（落后很多的一方后期仍常赢、胜率曲线呈 U 形、大量样本落在「本不该算」的那类里），这时停下来发卡确认口径，不要在这个口径上继续往下做。\n\
+6. **下游继承口径要标来源**：给子任务写简报、开衍生任务时，写明沿用的是哪个口径、谁定的、哪些参数还没经过{title_zh}确认。\n\
+\n\
 ## 扩展字段\n\
 \n\
 `fleet__ask` 是 `AskUserQuestion` 的超集，每个问题多三个可选字段（完整 schema 见工具自身的描述，不在此重复）：\n\
@@ -245,6 +256,17 @@ This applies to Cases A, B and C alike. Never omit the divider — even if the w
 Each `label` must be a concrete next action or answer, not a meta-choice like \"Tell me more\"; `description` fills in trade-offs, scope or side-effects so {title_en} can pick without re-reading the report. Put a strong recommendation first and append \" (Recommended)\" to its label. \"Other\" is appended automatically — never add your own free-text or \"just keep using text\" option.\n\
 \n\
 **Never invent a \"finish task\" / \"wrap up\" / \"done\" option either** — every card already carries a permanent Fleet-rendered terminal button that costs none of your `options` slots. All you do is set the top-level `taskComplete` boolean: `true` renders 「结束任务 / Finish task」 and closes the session as a SUCCESS when pressed; the default `false` renders 「放弃任务 / Abandon task」, closing it as UNFINISHED. Set true only when the work is genuinely done and you are filing the final report; never inflate it — terminal state feeds the retro stats. When the button is pressed the tool returns `TASK FINISHED` or `TASK ABANDONED`, and both mean stop immediately: acknowledge in one line of plain text and end the turn.\n\
+\n\
+## Definition Questions\n\
+\n\
+When {title_en} is choosing how a term, label, metric or cohort is defined or counted (a comeback, churn, success, an active user…), mark that question `kind: \"definition\"`; the server checks the fields below and rejects the card if any is missing. A question that only picks a value for an agreed definition is `\"parameter\"`; anything else is `\"other\"`. A question that says definition / threshold / \"how do we count\" without a `kind` is bounced once. Before sending, check:\n\
+\n\
+1. **Every option carries `misjudges`** — in domain terms, the cases it would wrongly count in or out (\"a late-game composition that is behind early is counted as a comeback\"). \"Plenty of samples\" or \"stable across years\" is feasibility, not meaning; {title_en} cannot see a definition's flaw from it.\n\
+2. **Ask how a domain expert would define it.** Put that definition on the menu and name it in `expertOption`. Recommend an option for being *right*, not for being easy; if your recommendation is not the expert's definition, say why in its description.\n\
+3. **Never tuck a numeric parameter into an option.** Thresholds, windows and cut-offs go in `pendingParams` and get their own `kind: \"parameter\"` question once the definition is settled. A value picked by data or by a sub-task is labelled \"not confirmed by {title_en}\" — with who picked it and why — on every later card, report and brief until {title_en} confirms it.\n\
+4. **The option {title_en} picked is the contract.** If \"do both\" turns into one main track plus a side check, or a parameter gets fixed by data, say so on your next card instead of letting {title_en} find out.\n\
+5. **Stop when the data contradicts the definition's meaning** — the trailing side still wins often late on, a U-shaped win curve, many samples in a bucket that should not count. Raise a card about the definition before building more on it.\n\
+6. **Downstream work states where its definition came from.** A sub-task brief or a spin-off task names the definition it inherits, who settled it, and which parameters {title_en} has not confirmed.\n\
 \n\
 ## Extended Fields\n\
 \n\
@@ -680,6 +702,20 @@ mod tests {
             z.contains("被延迟列出不等于缺席"),
             "zh guidance must disambiguate a deferred fleet__ask from an absent one"
         );
+    }
+
+    /// The definition-question checklist names the exact `fleet__ask` fields
+    /// `ask_definition` enforces; a rename on either side must reach both.
+    #[test]
+    fn render_carries_the_definition_checklist_in_both_locales() {
+        for (locale, heading) in [("zh", "## 定义/口径类问题"), ("en", "## Definition Questions")] {
+            let g = render_guidance("", locale);
+            assert!(g.contains(heading), "{locale}: missing {heading}");
+            for field in ["`kind: \"definition\"`", "`misjudges`", "`expertOption`", "`pendingParams`"] {
+                assert!(g.contains(field), "{locale}: checklist must name {field}");
+            }
+            assert!(g.contains(crate::ask_definition::KIND_PARAMETER));
+        }
     }
 
     /// The inline `[?…]` marks section rides inside this file (老板's call:
