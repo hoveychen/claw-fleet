@@ -593,9 +593,22 @@ pub fn cancel_pending(session_id: &str) {
 
 fn take_pending_in(dir: &Path, session_id: &str, now: u64) -> Option<PendingHandoff> {
     let path = dir.join(format!("{session_id}.json"));
-    let rec = read_pending_in(dir, session_id)?;
-    // Remove first: even on the expired path the record must not fire twice.
-    let _ = fs::remove_file(&path);
+    // Claim by rename before reading: two processes can watch the same turn end
+    // (a dsh `turn/end` reaches the desktop and `fleet serve` alike), and only
+    // the one whose rename lands may fire. The claimed name does not end in
+    // `.json`, so nothing listing pending records sees it. Removing it before
+    // anything else means even the expired path never fires twice.
+    let claimed = dir.join(format!(
+        "{session_id}.json.claim-{}-{}",
+        std::process::id(),
+        now
+    ));
+    fs::rename(&path, &claimed).ok()?;
+    let rec = fs::read_to_string(&claimed)
+        .ok()
+        .and_then(|s| serde_json::from_str::<PendingHandoff>(&s).ok());
+    let _ = fs::remove_file(&claimed);
+    let rec = rec?;
     if now.saturating_sub(rec.created) > EXPIRY_MS {
         crate::log_debug(&format!(
             "handoff: pending record for {session_id} expired ({}ms old), discarded",
