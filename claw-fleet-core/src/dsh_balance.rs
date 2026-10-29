@@ -34,6 +34,11 @@
 //!     Reporting only the account balance would have overstated what that key
 //!     can actually spend, so the ceiling rides along and is what the panel
 //!     draws its bar from (it is the only real denominator in this module).
+//! * **Abliteration** (measured 2026-10-29) — `GET
+//!   https://api.abliteration.ai/v1/credits` with the ordinary project key
+//!   answers OpenRouter's exact shape, `{data: {total_credits, total_usage}}`
+//!   (USD), so the same parser serves it. It has no per-key endpoint
+//!   (`/v1/key` is a 404); spend limits live behind its separate Admin API.
 //!
 //! # No cache
 //!
@@ -50,10 +55,13 @@ use std::time::Duration;
 pub const DEEPSEEK_PROVIDER: &str = "deepseek-official";
 /// dsh's provider id for the OpenRouter route (served by `llm-pi-ai`).
 pub const OPENROUTER_PROVIDER: &str = "openrouter";
+/// dsh's provider id for a hand-declared Abliteration route (`llm-pi-ai`).
+pub const ABLITERATION_PROVIDER: &str = "abliteration";
 
 const DEEPSEEK_BALANCE_ENDPOINT: &str = "https://api.deepseek.com/user/balance";
 const OPENROUTER_CREDITS_ENDPOINT: &str = "https://openrouter.ai/api/v1/credits";
 const OPENROUTER_KEY_ENDPOINT: &str = "https://openrouter.ai/api/v1/key";
+const ABLITERATION_CREDITS_ENDPOINT: &str = "https://api.abliteration.ai/v1/credits";
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -250,6 +258,21 @@ fn openrouter_row(credits_body: &str, key_body: Option<&str>) -> DshProviderBala
     row
 }
 
+/// Build Abliteration's row: one credits body, OpenRouter's shape, no ceiling.
+fn abliteration_row(credits: Result<String, String>) -> DshProviderBalance {
+    let mut row = DshProviderBalance {
+        provider: ABLITERATION_PROVIDER.to_string(),
+        label: "Abliteration".to_string(),
+        currency: Some("USD".to_string()),
+        ..Default::default()
+    };
+    match credits.and_then(|body| parse_openrouter_credits(&body)) {
+        Ok(balance) => row.balance = Some(balance),
+        Err(e) => row.error = Some(e),
+    }
+    row
+}
+
 // ── Public entry point ──────────────────────────────────────────────────────
 
 /// Ask every provider dsh holds a key for what is left.
@@ -286,6 +309,13 @@ pub fn fetch_balances() -> DshUsageItem {
                 ..Default::default()
             },
         });
+    }
+
+    if let Some(key) = crate::dsh_cost::abliteration_api_key() {
+        balances.push(abliteration_row(get_json(
+            ABLITERATION_CREDITS_ENDPOINT,
+            &key,
+        )));
     }
 
     DshUsageItem { balances }
@@ -406,5 +436,25 @@ mod tests {
         assert!(row.balance.is_some());
         assert!(row.limit.is_none());
         assert!(row.error.is_none());
+    }
+
+    /// Verbatim `/v1/credits` body from a live Abliteration key (2026-10-29).
+    #[test]
+    fn abliteration_balance_is_credits_minus_usage() {
+        let body = r#"{"data":{"total_credits":21.0,"total_usage":0.336559}}"#;
+        let row = abliteration_row(Ok(body.to_string()));
+        assert_eq!(row.provider, ABLITERATION_PROVIDER);
+        assert_eq!(row.currency.as_deref(), Some("USD"));
+        assert!((row.balance.unwrap() - 20.663441).abs() < 1e-9);
+        assert!(row.limit.is_none());
+        assert!(row.error.is_none());
+    }
+
+    /// A configured key whose call fails shows the failure, not a zero.
+    #[test]
+    fn a_failed_abliteration_call_is_an_error_row() {
+        let row = abliteration_row(Err("HTTP 401 Unauthorized".to_string()));
+        assert!(row.balance.is_none());
+        assert_eq!(row.error.as_deref(), Some("HTTP 401 Unauthorized"));
     }
 }
