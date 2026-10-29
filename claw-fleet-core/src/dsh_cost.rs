@@ -183,6 +183,11 @@ pub struct DshSessionCost {
 /// `assistant/message.source.provider`.
 const DEEPSEEK_OFFICIAL: &str = "deepseek-official";
 
+/// A hand-declared Abliteration route (`llm-pi-ai.providers.abliteration`).
+/// One seller with one published list and no receipt endpoint, so it is
+/// table-priced like DeepSeek — but at flat rates, with no peak schedule.
+const ABLITERATION: &str = "abliteration";
+
 /// One model call Fleet can price from a published table instead of a receipt.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeteredCall {
@@ -296,6 +301,42 @@ const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
 /// notice the date had passed.
 const PRO_ROUTED_TO_FLASH_MS: i64 = 1_789_358_400_000;
 
+/// Abliteration's flat rates, USD per 1M tokens, read 2026-10-29 off the
+/// `pricing` object each model carries in `GET /v1/models` (`prompt`,
+/// `completion`, `input_cache_read`, there quoted per token). There is no
+/// off-peak tier, so these are applied unscaled.
+const ABLITERATION_RATES: &[PeakRates] = &[
+    PeakRates {
+        model: "abliterated-model",
+        cache_hit_input: 0.10,
+        cache_miss_input: 1.00,
+        output: 3.00,
+    },
+    PeakRates {
+        model: "abliterated-model-large",
+        cache_hit_input: 0.30,
+        cache_miss_input: 3.00,
+        output: 5.00,
+    },
+    PeakRates {
+        model: "abliterated-model-large-v2",
+        cache_hit_input: 0.30,
+        cache_miss_input: 3.00,
+        output: 5.00,
+    },
+    PeakRates {
+        model: "abliterated-model-large-flash",
+        cache_hit_input: 0.10,
+        cache_miss_input: 1.00,
+        output: 2.00,
+    },
+];
+
+/// Is `provider` priced from a published table rather than a receipt?
+fn is_table_priced(provider: &str) -> bool {
+    provider == DEEPSEEK_OFFICIAL || provider == ABLITERATION
+}
+
 /// The rate row that applies to `model` at `at_ms`.
 ///
 /// A plain table lookup for everything except `deepseek-v4-pro`, which follows
@@ -353,15 +394,27 @@ pub(crate) struct MeteredPrice {
 /// asking the provider is that a plausible-looking wrong number is worse than
 /// an absent one, and that applies just as much to a stale price table.
 fn rate_price(call: &MeteredCall) -> Option<MeteredPrice> {
+    let tokens_usd = |rates: &PeakRates| {
+        (rates.cache_miss_input * call.input_tokens as f64
+            + rates.cache_hit_input * call.cache_read_tokens as f64
+            + rates.output * call.output_tokens as f64)
+            / 1_000_000.0
+    };
+    if call.provider == ABLITERATION {
+        let rates = ABLITERATION_RATES.iter().find(|r| r.model == call.model)?;
+        // `peak` is meaningless here; the ledger reports it as `None`.
+        return Some(MeteredPrice {
+            usd: tokens_usd(rates),
+            peak: false,
+        });
+    }
     let rates = rates_for(&call.model, call.at_ms)?;
     let peak = is_peak(call.at_ms);
     let scale = if peak { 1.0 } else { 0.5 };
-    let usd = scale
-        * (rates.cache_miss_input * call.input_tokens as f64
-            + rates.cache_hit_input * call.cache_read_tokens as f64
-            + rates.output * call.output_tokens as f64)
-        / 1_000_000.0;
-    Some(MeteredPrice { usd, peak })
+    Some(MeteredPrice {
+        usd: scale * tokens_usd(rates),
+        peak,
+    })
 }
 
 /// The cache key for one call: its session and its position within it.
@@ -549,7 +602,9 @@ pub fn fold_session_cost(calls: &[PricedCall]) -> DshSessionCost {
                     table_priced += 1;
                     match call.peak {
                         Some(true) => peak_n += 1,
-                        _ => off_peak_n += 1,
+                        Some(false) => off_peak_n += 1,
+                        // A flat-rate route (Abliteration) has no tier.
+                        None => {}
                     }
                 }
             }
@@ -569,10 +624,17 @@ pub fn fold_session_cost(calls: &[PricedCall]) -> DshSessionCost {
     if unpriced > 0 {
         notes.push(format!("{unpriced} call(s) could not be priced"));
     }
-    if table_priced > 0 {
+    let deepseek_priced = peak_n + off_peak_n;
+    if deepseek_priced > 0 {
         notes.push(format!(
-            "{table_priced} call(s) priced from DeepSeek's published rates \
+            "{deepseek_priced} call(s) priced from DeepSeek's published rates \
              ({peak_n} peak / {off_peak_n} off-peak)"
+        ));
+    }
+    let flat_priced = table_priced - deepseek_priced;
+    if flat_priced > 0 {
+        notes.push(format!(
+            "{flat_priced} call(s) priced from Abliteration's published rates"
         ));
     }
     DshSessionCost {
@@ -1048,7 +1110,7 @@ fn price_ledger_with(
                 continue;
             }
         }
-        let (usd, basis, peak) = if call.provider == DEEPSEEK_OFFICIAL {
+        let (usd, basis, peak) = if is_table_priced(&call.provider) {
             // No session id and no seq are the same fact: this call has no
             // stable address, so it is priced live and never written down.
             let cache_key = (!session_id.is_empty())
@@ -1075,8 +1137,10 @@ fn price_ledger_with(
                 }
                 Some(price)
             });
+            // Only DeepSeek has a peak schedule; a flat-rate route has no tier.
+            let tier = |p: MeteredPrice| (call.provider == DEEPSEEK_OFFICIAL).then_some(p.peak);
             match price {
-                Some(p) => (Some(p.usd), Some(PriceBasis::Table), Some(p.peak)),
+                Some(p) => (Some(p.usd), Some(PriceBasis::Table), tier(p)),
                 None => (None, None, None),
             }
         } else if call.provider == OPENROUTER {
@@ -2231,5 +2295,74 @@ mod tests {
             std::fs::write(base.join(".credentials.yaml"), "{}\n").unwrap();
             assert_eq!(openrouter_api_key(), None);
         });
+    }
+
+    fn abliteration_call(seq: i64, at_ms: i64, model: &str) -> MeteredCall {
+        // Token split from a real `dsh headless` run on large-v2 (2026-10-29).
+        MeteredCall {
+            provider: ABLITERATION.into(),
+            model: model.into(),
+            seq: Some(seq),
+            at_ms,
+            input_tokens: 107,
+            cache_read_tokens: 5440,
+            output_tokens: 36,
+        }
+    }
+
+    /// Flat rates, no off-peak halving, and no tier reported.
+    #[test]
+    fn abliteration_calls_are_priced_at_flat_rates_with_no_tier() {
+        let (out, fresh) = ledger(
+            TEST_SESSION,
+            &CostCache::default(),
+            &[
+                abliteration_call(1, OFF_PEAK_MS, "abliterated-model-large-v2"),
+                abliteration_call(2, PEAK_MS, "abliterated-model-large-v2"),
+            ],
+        );
+        // 107 × $3 + 5440 × $0.30 + 36 × $5, per 1M tokens.
+        let expected = (107.0 * 3.0 + 5440.0 * 0.30 + 36.0 * 5.0) / 1_000_000.0;
+        for call in &out {
+            assert!((call.usd.unwrap() - expected).abs() < 1e-12);
+            assert_eq!(call.basis, Some(PriceBasis::Table));
+            assert_eq!(call.peak, None);
+        }
+        assert_eq!(fresh.len(), 2, "table prices are frozen like DeepSeek's");
+
+        let cost = fold_session_cost(&out);
+        assert_eq!(cost.table_priced_calls, 2);
+        assert_eq!(cost.note, "2 call(s) priced from Abliteration's published rates");
+    }
+
+    /// A model missing from the table is counted, never estimated.
+    #[test]
+    fn an_unknown_abliteration_model_is_not_priced() {
+        let (total, _, _, unpriced) =
+            priced(&[abliteration_call(1, OFF_PEAK_MS, "abliterated-model-xl")]);
+        assert_eq!(total, 0.0);
+        assert_eq!(unpriced, 1);
+    }
+
+    /// A session mixing routes keeps DeepSeek's tier counts honest.
+    #[test]
+    fn mixed_deepseek_and_abliteration_notes_stay_separate() {
+        let mut deepseek = abliteration_call(2, PEAK_MS, "deepseek-flash");
+        deepseek.provider = DEEPSEEK_OFFICIAL.into();
+        let (out, _) = ledger(
+            TEST_SESSION,
+            &CostCache::default(),
+            &[
+                abliteration_call(1, OFF_PEAK_MS, "abliterated-model-large-flash"),
+                deepseek,
+            ],
+        );
+        let cost = fold_session_cost(&out);
+        assert_eq!(cost.table_priced_calls, 2);
+        assert_eq!(
+            cost.note,
+            "1 call(s) priced from DeepSeek's published rates (1 peak / 0 off-peak); \
+             1 call(s) priced from Abliteration's published rates"
+        );
     }
 }
