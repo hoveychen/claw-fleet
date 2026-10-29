@@ -232,7 +232,7 @@ fn fold_definition(
         };
         format!(
             "\n\n{FOOTER_HEADING_ZH}\n- 领域专家口径：「{}」\n- 待定参数（未经你确认，选完口径后会单独确认）：{params}",
-            labels[expert_idx]
+            bare_label(&labels[expert_idx])
         )
     } else {
         let params = if pending.is_empty() {
@@ -242,7 +242,7 @@ fn fold_definition(
         };
         format!(
             "\n\n{FOOTER_HEADING_EN}\n- Domain-expert definition: \"{}\"\n- Open parameters (not confirmed by you; asked separately once the definition is picked): {params}",
-            labels[expert_idx]
+            bare_label(&labels[expert_idx])
         )
     };
     let text = q.get("question").and_then(Value::as_str).unwrap_or("").to_string();
@@ -309,16 +309,19 @@ fn definition_cue(q: &serde_json::Map<String, Value>) -> Option<&'static str> {
 }
 
 fn same_label(a: &str, b: &str) -> bool {
-    fn norm(s: &str) -> String {
-        let mut s = s.trim().to_lowercase();
-        for suffix in [" (recommended)", "（recommended）", " (推荐)", "（推荐）"] {
-            if let Some(stripped) = s.strip_suffix(suffix) {
-                s = stripped.to_string();
-            }
+    bare_label(a).to_lowercase() == bare_label(b).to_lowercase()
+}
+
+/// `label` without the " (Recommended)" suffix the guidance asks agents to add.
+fn bare_label(label: &str) -> &str {
+    let t = label.trim();
+    let lower = t.to_lowercase();
+    for suffix in [" (recommended)", "（recommended）", " (推荐)", "（推荐）"] {
+        if lower.ends_with(suffix) {
+            return t[..t.len() - suffix.len()].trim_end();
         }
-        s.trim().to_string()
     }
-    norm(a) == norm(b)
+    t
 }
 
 fn is_empty_misjudgement(s: &str) -> bool {
@@ -422,6 +425,7 @@ mod tests {
         assert!(q["options"][1].get("misjudges").is_none());
         let text = q["question"].as_str().unwrap();
         assert!(text.contains(FOOTER_HEADING_ZH));
+        assert!(text.contains("领域专家口径：「模型胜率低后赢」"), "{text}");
         assert!(text.contains("经济落后阈值（候选 2k/3k/5k）；胜率阈值"), "{text}");
     }
 
