@@ -123,7 +123,7 @@ export function A2uiRenderCard({ decision }: { decision: A2uiRenderDecision }) {
         )}
       </div>
 
-      {decision.request.parked === true && <ParkedBanner />}
+      {decision.request.parked === true && <ParkedBanner id={decision.id} />}
       <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}

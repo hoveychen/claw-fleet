@@ -3,7 +3,7 @@ import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyAttention, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
-import { noteRemovedLocally } from "./decisionReconcile";
+import { forgetRemovedLocally, noteRemovedLocally } from "./decisionReconcile";
 import { isHiddenWhenSimplified, NAV_HOME, navSectionOf, type NavSection } from "./components/navGroups";
 import { isViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
@@ -1480,6 +1480,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
 interface DecisionState {
   decisions: PendingDecision[];
+  /** Why the last answer to a card failed to land, by card id. */
+  answerErrors: Record<string, string>;
   /** Add a guard request to the queue and kick off LLM analysis. */
   addGuardRequest: (req: GuardRequest) => void;
   /** Add an elicitation request to the queue. */
@@ -1616,6 +1618,7 @@ interface DecisionState {
  */
 export const useDecisionStore = create<DecisionState>((set, get) => ({
   decisions: [],
+  answerErrors: {},
 
   addGuardRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
@@ -1785,7 +1788,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
         : "";
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_permission_prompt", () =>
+    fireDecisionResponse(id, "respond_to_permission_prompt", () =>
       invoke("respond_to_permission_prompt", {
         id,
         allow,
@@ -1797,7 +1800,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   approvePlan: async (id, editedPlan) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_plan_approval (approve)", () =>
+    fireDecisionResponse(id, "respond_to_plan_approval (approve)", () =>
       invoke("respond_to_plan_approval", {
         id,
         decision: "approve",
@@ -1810,7 +1813,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   rejectPlan: async (id, feedback) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_plan_approval (reject)", () =>
+    fireDecisionResponse(id, "respond_to_plan_approval (reject)", () =>
       invoke("respond_to_plan_approval", {
         id,
         decision: "reject",
@@ -1976,7 +1979,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_elicitation", () =>
+    fireDecisionResponse(id, "respond_to_elicitation", () =>
       invoke("respond_to_elicitation", { id, declined: false, answers }),
     );
   },
@@ -1984,7 +1987,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   declineElicitation: async (id, taskOutcome) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_elicitation (decline)", () =>
+    fireDecisionResponse(id, "respond_to_elicitation (decline)", () =>
       invoke("respond_to_elicitation", {
         id,
         declined: true,
@@ -2144,7 +2147,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_fleet_ask", () =>
+    fireDecisionResponse(id, "respond_to_fleet_ask", () =>
       invoke("respond_to_fleet_ask", { id, cancelled: false, answers }),
     );
   },
@@ -2152,7 +2155,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   cancelFleetAsk: async (id, taskOutcome) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_fleet_ask (cancel)", () =>
+    fireDecisionResponse(id, "respond_to_fleet_ask (cancel)", () =>
       invoke("respond_to_fleet_ask", {
         id,
         cancelled: true,
@@ -2220,7 +2223,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
         : null;
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-    fireDecisionResponse("respond_to_guard", () =>
+    fireDecisionResponse(id, "respond_to_guard", () =>
       invoke("respond_to_guard", {
         id,
         allow,
@@ -2262,8 +2265,17 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
  * rollback: re-inserting a card the user already dismissed would confuse more
  * than a rare lost response, and the blocked agent times out cleanly anyway.
  */
-function fireDecisionResponse(label: string, run: () => Promise<unknown>): void {
-  run().catch((e) => console.error(`${label} failed:`, e));
+function fireDecisionResponse(id: string, label: string, run: () => Promise<unknown>): void {
+  run().catch((e) => {
+    console.error(`${label} failed:`, e);
+    // The card was removed optimistically. Let the reconcile bring it back now
+    // instead of after the grace, and say why: a parked dsh card whose answer
+    // could not wake the session used to reappear seconds later with no hint.
+    forgetRemovedLocally(id);
+    useDecisionStore.setState((s) => ({
+      answerErrors: { ...s.answerErrors, [id]: String(e) },
+    }));
+  });
 }
 
 /** Drop a decision from the queue. */
@@ -2275,7 +2287,8 @@ function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
   // posted in the background, so the request file is still on disk for the
   // fraction of a second it takes the blocked producer to notice.
   noteRemovedLocally(id);
-  return { decisions: s.decisions.filter((d) => d.id !== id) };
+  const { [id]: _answered, ...answerErrors } = s.answerErrors;
+  return { decisions: s.decisions.filter((d) => d.id !== id), answerErrors };
 }
 
 // ── Workspace command runner ─────────────────────────────────────────────────

@@ -126,8 +126,9 @@ function computeGuardAllowPrefixes(req: GuardDecision["request"]): string[] {
  * did not carry on without an answer: Fleet interrupted that turn and is holding
  * the question. Submitting now resumes the session with the reply attached.
  */
-export function ParkedBanner() {
+export function ParkedBanner({ id }: { id: string }) {
   const { t } = useTranslation();
+  const answerError = useDecisionStore((s) => s.answerErrors[id]);
   return (
     <div className={styles.parked_banner} role="status">
       <span className={styles.parked_badge}>
@@ -137,6 +138,13 @@ export function ParkedBanner() {
         {t(
           "parked.hint",
           "No answer arrived in time, so Fleet stopped this turn and kept the question. Answering resumes the session with your reply attached.",
+        )}
+        {answerError && (
+          <span className={styles.parked_error} role="alert">
+            {t("parked.answer_failed", "Your last answer did not reach the session: {{error}}", {
+              error: answerError,
+            })}
+          </span>
         )}
       </span>
     </div>
@@ -828,7 +836,7 @@ function ElicitationCard({
           </div>
         )}
 
-        {parked && <ParkedBanner />}
+        {parked && <ParkedBanner id={decision.id} />}
         <div className={styles.actions}>
         {canTerminate && (
           <button
@@ -1271,7 +1279,7 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
         />
       )}
 
-      {decision.request.parked === true && <ParkedBanner />}
+      {decision.request.parked === true && <ParkedBanner id={decision.id} />}
       <div className={styles.actions}>
         {editing ? (
           <>
@@ -1926,7 +1934,7 @@ export function FleetAskCard({
           </div>
         )}
 
-        {parked && <ParkedBanner />}
+        {parked && <ParkedBanner id={decision.id} />}
         <div className={styles.actions}>
         {/* Sub-task cards have no terminal button: only the task's main
             conversation can end the task. */}

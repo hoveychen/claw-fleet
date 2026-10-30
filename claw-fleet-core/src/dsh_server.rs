@@ -512,6 +512,73 @@ pub fn reap_orphans() -> usize {
     .unwrap_or(0)
 }
 
+/// Kill recorded `dsh web` servers, other than `keep_pid`, that no live Fleet
+/// process owns and that are running no turn.
+///
+/// dsh hands a session's write handle to whichever server loaded it and gives
+/// it up only when that process exits: another server's `session/prompt` is
+/// refused `session/writer-held`, and no web RPC releases it. [`reap_orphans`]
+/// keeps token-bearing ownerless servers alive so the next Fleet can adopt
+/// one, but [`DshServer::adopt_existing`] adopts only the first healthy
+/// record, so the rest linger with every session they ever loaded locked. On
+/// 2026-10-30 one such leftover held 86 idle sessions, and answering a parked
+/// dsh card from the desktop failed on every click.
+///
+/// A server whose turn state cannot be read is left alone: killing it would
+/// end whatever it is running.
+pub fn retire_idle_orphans(keep_pid: u32) -> usize {
+    retire_idle_orphans_with(keep_pid, |record| {
+        let token = record.launch_token.as_deref()?;
+        let listed = DshClient::new(record.port, token)
+            .and_then(|client| client.call("session/list", serde_json::json!({ "_request": {} })))
+            .ok()?;
+        Some(roster_has_running_turn(&listed))
+    })
+}
+
+fn retire_idle_orphans_with(keep_pid: u32, busy: impl Fn(&ServerRecord) -> Option<bool>) -> usize {
+    let candidates: Vec<ServerRecord> = edit_registry(|registry| {
+        registry.servers.retain(|record| is_live(&record.server));
+        registry
+            .servers
+            .iter()
+            .filter(|record| record.server.pid != keep_pid && !is_live(&record.owner))
+            .cloned()
+            .collect()
+    })
+    .unwrap_or_default();
+
+    let mut killed = 0;
+    for record in candidates {
+        // Probed outside the registry lock: `session/list` can take seconds.
+        if busy(&record) != Some(false) {
+            continue;
+        }
+        crate::log_debug(&format!(
+            "dsh registry: retiring idle ownerless dsh web pid={} port={} (owner {} is gone)",
+            record.server.pid, record.port, record.owner.pid
+        ));
+        crate::llm_provider::kill_process(record.server.pid);
+        deregister(record.server.pid);
+        killed += 1;
+    }
+    killed
+}
+
+/// Whether a `session/list` value names any session with a turn in flight.
+fn roster_has_running_turn(listed: &serde_json::Value) -> bool {
+    let sessions = match listed {
+        serde_json::Value::Array(items) => Some(items),
+        serde_json::Value::Object(map) => map.values().find_map(serde_json::Value::as_array),
+        _ => None,
+    };
+    sessions.into_iter().flatten().any(|s| {
+        s.get("running")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    })
+}
+
 /// Kill leaked `dsh web` servers the registry never heard of.
 ///
 /// The registry is blind to a whole class of leaks: a server spawned under a
@@ -1582,6 +1649,61 @@ mod tests {
                 "expected a signalled exit, got {status:?}"
             );
         });
+    }
+
+    /// A token-bearing ownerless server is kept for adoption by `reap_orphans`,
+    /// yet it still holds the write handle of every session it loaded. Only an
+    /// idle one is retired; a busy or unreadable one keeps its turns.
+    #[test]
+    fn retire_idle_orphans_kills_only_idle_ownerless_servers() {
+        with_temp_fleet_home(|_| {
+            let spawn = || {
+                crate::process_util::command("sleep")
+                    .arg("30")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .expect("spawn a stand-in server")
+            };
+            let (mut idle, mut busy, mut unknown, mut kept) = (spawn(), spawn(), spawn(), spawn());
+            let record = |child: &Child, port: u16| ServerRecord {
+                server: HolderEntry::capture(child.id()),
+                owner: dead(),
+                port,
+                launch_token: Some("t".into()),
+                binary: None,
+                workspace: None,
+            };
+            edit_registry(|r| {
+                r.servers.push(record(&idle, 1));
+                r.servers.push(record(&busy, 2));
+                r.servers.push(record(&unknown, 3));
+                r.servers.push(record(&kept, 4));
+            });
+
+            let killed = retire_idle_orphans_with(kept.id(), |r| match r.port {
+                1 | 4 => Some(false),
+                2 => Some(true),
+                _ => None,
+            });
+            assert_eq!(killed, 1);
+            assert!(!idle.wait().expect("wait idle").success(), "idle orphan must be signalled");
+            let mut ports: Vec<u16> = read_registry().servers.iter().map(|r| r.port).collect();
+            ports.sort();
+            assert_eq!(ports, vec![2, 3, 4]);
+            for child in [&mut busy, &mut unknown, &mut kept] {
+                assert!(child.try_wait().unwrap().is_none(), "must still be running");
+                let _ = child.kill();
+            }
+        });
+    }
+
+    #[test]
+    fn roster_running_flag_is_read_from_either_list_shape() {
+        let idle = serde_json::json!({ "sessions": [{ "running": false }, {}] });
+        let busy = serde_json::json!([{ "running": false }, { "running": true }]);
+        assert!(!roster_has_running_turn(&idle));
+        assert!(roster_has_running_turn(&busy));
     }
 
     /// A server whose owner is still running belongs to a live Fleet — possibly
