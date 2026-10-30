@@ -71,6 +71,12 @@ use crate::session::SessionStatus;
 /// the polled status stands again.
 const LIVE_STATUS_TTL_MS: u64 = 30_000;
 
+/// How long a session may go without any event and still count as mid-turn for
+/// [`LiveView::sessions_in_turn`]. Long, on purpose: a turn blocked on
+/// `ask_user_question` or a long tool emits nothing while it waits, and that is
+/// exactly the turn a restart must not kill.
+const IN_TURN_QUIET_MS: u64 = 30 * 60 * 1000;
+
 /// Give up on a handshake that never completes, so a half-open socket cannot
 /// park the reconnect loop forever (the failure mode `mobile_relay` hit live).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -768,6 +774,27 @@ impl LiveView {
         }
     }
 
+    /// Sessions the sockets say are mid-turn: dsh pushed `running`, or the last
+    /// phase-bearing event left a turn open. Either only counts while the session
+    /// produced an event within [`IN_TURN_QUIET_MS`], so a turn whose `turn/end`
+    /// never arrived cannot hold the answer at "busy" forever.
+    pub fn sessions_in_turn(&self, now_ms: u64) -> Vec<String> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|(_, s)| {
+                let open = s.running
+                    || (s.phase_at_ms != 0 && s.phase != SessionStatus::WaitingInput);
+                let recent = s
+                    .last_event_at_ms
+                    .is_some_and(|t| now_ms.saturating_sub(t) <= IN_TURN_QUIET_MS);
+                open && recent
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     /// Remember that the server refused this session's follow stream — see
     /// [`Self::follow_refused`].
     pub fn mark_follow_refused(&self, session_id: &str) {
@@ -1082,6 +1109,11 @@ impl DshEventWatcher {
     /// How many sessions the socket has reported on. Diagnostics and tests.
     pub fn tracked(&self) -> usize {
         self.live.tracked()
+    }
+
+    /// See [`LiveView::sessions_in_turn`].
+    pub fn sessions_in_turn(&self) -> Vec<String> {
+        self.live.sessions_in_turn(now_ms())
     }
 }
 
@@ -1944,6 +1976,27 @@ mod tests {
         }
         assert_eq!(live.phase_of(sid, 1_004), Some(SessionStatus::Executing));
         assert_eq!(live.tracked(), 1);
+    }
+
+    /// A turn parked on `ask_user_question` emits nothing while it waits, and
+    /// it is exactly the turn a wedge restart must not kill.
+    #[test]
+    fn sessions_in_turn_covers_a_quiet_open_turn_and_drops_finished_or_stale_ones() {
+        let live = LiveView::default();
+        live.apply(event("asking", "turn/start"), 1_000);
+        live.apply(event("asking", "tool/call"), 1_001);
+        live.apply(event("done", "turn/start"), 1_000);
+        live.apply(turn_end("done", "completed"), 1_002);
+        live.apply(event("lost-end", "tool/call"), 1_000);
+
+        // Ten quiet minutes later the open turns still count.
+        let later = 1_001 + 10 * 60 * 1000;
+        let mut busy = live.sessions_in_turn(later);
+        busy.sort();
+        assert_eq!(busy, vec!["asking".to_string(), "lost-end".to_string()]);
+
+        // Past the quiet window an open phase no longer blocks anything.
+        assert!(live.sessions_in_turn(1_001 + IN_TURN_QUIET_MS + 1).is_empty());
     }
 
     /// dsh runs turns inside the shared server, so `turn/end` is the only

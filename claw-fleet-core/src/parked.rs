@@ -78,6 +78,10 @@ pub struct ParkedCard {
     /// interrupted it. Set by the orphan recovery via [`mark_stepped_aside`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stepped_aside: bool,
+    /// The card did not time out: the dsh server running its turn went away
+    /// (crash, restart) and took the turn with it. Set by [`mark_server_lost`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub server_lost: bool,
     /// The original request payload (`FleetAskRequest`, `ElicitationRequest`,
     /// `A2uiRenderRequest` or `PlanApprovalRequest`), verbatim.
     pub request: Value,
@@ -122,6 +126,21 @@ pub fn parkable_workspace(session_id: &str) -> Option<String> {
     // thread. Fall back to the Codex-native lookup, which returns the workspace
     // only when the rollout is Fleet-owned (`originator == "fleet"`).
     crate::codex_source::codex_fleet_owned_cwd(session_id)
+}
+
+/// A dsh session's workspace, when Fleet launched it. dsh keeps no transcript
+/// Fleet can read for ownership; the launch spec Fleet wrote at spawn time is
+/// the record.
+///
+/// Deliberately not part of [`parkable_workspace`]: that gate's callers pair it
+/// with [`session_alive`], which has no pid to find for a dsh session (its turns
+/// run inside the shared `dsh web`), so every live dsh card would look orphaned.
+/// dsh parks only from `dsh_decisions`, when the server under the turn is gone.
+pub(crate) fn dsh_fleet_owned_cwd(session_id: &str) -> Option<String> {
+    crate::launch_spec::get(session_id)
+        .filter(|s| s.source.as_deref() == Some("dsh"))
+        .and_then(|s| s.workspace)
+        .filter(|w| !w.trim().is_empty())
 }
 
 /// Move a timed-out request into the parked store. `request` is the channel's
@@ -173,6 +192,7 @@ pub fn park_with(
         model: model.map(str::to_string),
         effort: effort.map(str::to_string),
         stepped_aside: false,
+        server_lost: false,
         request: payload,
     };
     let path = card_path(id).unwrap();
@@ -186,6 +206,15 @@ pub fn park_with(
 pub fn mark_stepped_aside(id: &str) -> Result<(), String> {
     let mut card = get(id).ok_or_else(|| format!("no parked card {id}"))?;
     card.stepped_aside = true;
+    let json = serde_json::to_string_pretty(&card).map_err(|e| format!("serialize card: {e}"))?;
+    fs::write(card_path(id).unwrap(), json).map_err(|e| format!("write parked card: {e}"))
+}
+
+/// Flag a just-parked card as one whose turn died with its server, so
+/// [`answer`] resumes it with [`SERVER_LOST_RESUME_HEADER`].
+pub fn mark_server_lost(id: &str) -> Result<(), String> {
+    let mut card = get(id).ok_or_else(|| format!("no parked card {id}"))?;
+    card.server_lost = true;
     let json = serde_json::to_string_pretty(&card).map_err(|e| format!("serialize card: {e}"))?;
     fs::write(card_path(id).unwrap(), json).map_err(|e| format!("write parked card: {e}"))
 }
@@ -769,6 +798,9 @@ pub(crate) fn resume_session(
 fn resume_source(session_id: &str) -> &'static str {
     if crate::codex_source::codex_fleet_owned_cwd(session_id).is_some() {
         "codex"
+    } else if dsh_fleet_owned_cwd(session_id).is_some() {
+        // dsh "resumes" by taking a new prompt on the same session.
+        "dsh"
     } else {
         "claude"
     }
@@ -997,10 +1029,19 @@ pub(crate) const RESUME_PROMPT_HEADER: &str =
 pub(crate) const STEPPED_ASIDE_RESUME_HEADER: &str =
     "[Fleet] 你之前发出的决策卡曾为一条新消息让路，之后那一轮由你自己结束了，卡一直留在老板的屏幕上。老板现在回答了这张卡：\n\n";
 
-/// Whether `text` is a resume prompt [`build_resume_prompt`] wrote, under either
+/// Opening line when the dsh server under the asking turn went away: nothing
+/// timed out, the turn simply died with the process.
+pub(crate) const SERVER_LOST_RESUME_HEADER: &str =
+    "[Fleet] 你上一轮通过决策卡向老板提问时，运行这一轮的 dsh 后台进程中断了，那一轮已结束，但卡一直留在老板的屏幕上。老板现在回答了这张卡：\n\n";
+
+/// Whether `text` is a resume prompt [`build_resume_prompt`] wrote, under any
 /// header. The single matcher behind [`crate::fleet_event::classify`].
 pub(crate) fn is_resume_prompt(text: &str) -> bool {
-    [RESUME_PROMPT_HEADER, STEPPED_ASIDE_RESUME_HEADER]
+    [
+        RESUME_PROMPT_HEADER,
+        STEPPED_ASIDE_RESUME_HEADER,
+        SERVER_LOST_RESUME_HEADER,
+    ]
         .iter()
         .any(|h| text.starts_with(h.trim_end()))
 }
@@ -1012,6 +1053,8 @@ pub(crate) fn is_resume_prompt(text: &str) -> bool {
 fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
     let mut out = String::from(if card.stepped_aside {
         STEPPED_ASIDE_RESUME_HEADER
+    } else if card.server_lost {
+        SERVER_LOST_RESUME_HEADER
     } else {
         RESUME_PROMPT_HEADER
     });
@@ -1071,12 +1114,20 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
     }
     if card.stepped_aside {
         out.push_str("\n请直接基于这个回复继续之前的工作——不要重新问一遍同样的问题。");
+    } else if card.server_lost {
+        out.push_str("\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。");
+        out.push_str(SERVER_LOST_NOTE);
     } else {
         out.push_str("\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。");
         out.push_str(RESUME_PROMPT_INTERRUPT_NOTE);
     }
     out
 }
+
+/// dsh records the question its dead server never answered as an interrupted
+/// call of unknown outcome; say what actually happened so the agent neither
+/// re-asks nor reads a refusal into it.
+const SERVER_LOST_NOTE: &str = "\n\n（上一轮记录里那次提问如果显示为 interrupted 或「outcome is unknown」，是 dsh 后台进程中断造成的，不是老板拒绝了你；老板的回答就是上面这段。）";
 
 /// Older builds interrupted the turn before the stop notice could be returned,
 /// so their transcripts record the timed-out call as rejected by the user (or,
@@ -1312,6 +1363,55 @@ mod tests {
                 images: vec![],
             }],
         }
+    }
+
+    /// Write a launch spec the way Fleet records a dsh spawn.
+    fn plant_dsh_spec(home: &TmpHome, session_id: &str, workspace: &str) {
+        let dir = home.dir.join(".fleet").join("launch-spec");
+        fs::create_dir_all(&dir).unwrap();
+        let spec = json!({
+            "entrypoint": "claw-fleet-newsession",
+            "source": "dsh",
+            "workspace": workspace,
+            "kind": "new",
+        });
+        fs::write(dir.join(format!("{session_id}.json")), spec.to_string()).unwrap();
+    }
+
+    /// A dsh card parked because its server died resumes through dsh, says
+    /// what happened, and does not stay out of the general gate: that gate's
+    /// callers would read a pid-less dsh session as dead.
+    #[test]
+    fn server_lost_dsh_card_resumes_through_dsh_with_its_own_header() {
+        let home = TmpHome::new("dsh-lost");
+        plant_dsh_spec(&home, "session-dsh", "/ws/dsh");
+
+        assert_eq!(dsh_fleet_owned_cwd("session-dsh").as_deref(), Some("/ws/dsh"));
+        assert_eq!(resume_source("session-dsh"), "dsh");
+        assert_eq!(parkable_workspace("session-dsh"), None);
+        assert_eq!(dsh_fleet_owned_cwd("never-existed"), None);
+
+        let req = fleet_ask_request("q-dsh", "session-dsh");
+        park("q-dsh", ParkedKind::Elicitation, "session-dsh", "/ws/dsh", &req).unwrap();
+        mark_server_lost("q-dsh").unwrap();
+
+        let mut seen = None;
+        answer_with(
+            "q-dsh",
+            &json!({ "answers": { "要不要保留向后兼容？": "保留" } }),
+            |sid, ws, prompt, _, _, _| {
+                seen = Some((sid.to_string(), ws.to_string(), prompt.to_string()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        let (sid, ws, prompt) = seen.expect("resume spawned");
+        assert_eq!((sid.as_str(), ws.as_str()), ("session-dsh", "/ws/dsh"));
+        assert!(prompt.starts_with(SERVER_LOST_RESUME_HEADER), "{prompt}");
+        assert!(prompt.contains("【老板的选择】保留"), "{prompt}");
+        assert!(!prompt.contains("等待超时"), "{prompt}");
+        assert!(is_resume_prompt(&prompt));
+        assert!(get("q-dsh").is_none(), "answered card is discarded");
     }
 
     /// The gate: only a session Fleet launched itself may be parked. A session
