@@ -707,6 +707,62 @@ fn list_chains_in(dir: &Path) -> Vec<HandoffChain> {
     CACHE.load(dir).into_iter().map(|(_, chain)| chain).collect()
 }
 
+/// A chain file read for membership only: who is on it, without the notes.
+///
+/// Notes are nearly all of a chain's bytes, and the lookups that run hottest —
+/// `tools/list` in every session's `fleet mcp`, every desktop rescan — only ask
+/// which chain a session id sits on. Caching whole [`HandoffChain`]s for that
+/// kept the entire store resident (31 MB of JSON on 2026-10-30) in each of
+/// those processes, held twice by [`crate::json_dir_cache::JsonDirCache`] and
+/// cloned a third time per call: one `fleet mcp` went from 6 MB to ~110 MB
+/// after its first `tools/list`.
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ChainMembers {
+    chain_id: String,
+    links: Vec<MemberLink>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MemberLink {
+    from_session_id: String,
+    to_session_id: String,
+}
+
+impl ChainMembers {
+    /// Same order and dedup as [`HandoffChain::session_ids`].
+    fn session_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::with_capacity(self.links.len() + 1);
+        for l in &self.links {
+            if ids.last().map(|s| s != &l.from_session_id).unwrap_or(true) {
+                ids.push(l.from_session_id.clone());
+            }
+            ids.push(l.to_session_id.clone());
+        }
+        ids
+    }
+}
+
+/// `(file stem, members)` for every chain file in `dir`.
+fn list_members_in(dir: &Path) -> Vec<(String, ChainMembers)> {
+    static CACHE: crate::json_dir_cache::JsonDirCache<ChainMembers> =
+        crate::json_dir_cache::JsonDirCache::new();
+    CACHE.load(dir)
+}
+
+/// Ordered session ids of every recorded chain — [`list_chains`] mapped
+/// through [`HandoffChain::session_ids`], without loading any notes.
+pub fn chain_session_ids() -> Vec<Vec<String>> {
+    let Some(dir) = chain_dir() else {
+        return Vec::new();
+    };
+    list_members_in(&dir)
+        .iter()
+        .map(|(_, m)| m.session_ids())
+        .collect()
+}
+
 /// The chain a session appears on (as source or successor of any link).
 pub fn chain_containing(session_id: &str) -> Option<HandoffChain> {
     let dir = chain_dir()?;
@@ -773,7 +829,7 @@ pub fn successor_index() -> std::collections::HashMap<String, String> {
         return Default::default();
     };
     let mut map = std::collections::HashMap::new();
-    for chain in list_chains_in(&dir) {
+    for (_, chain) in list_members_in(&dir) {
         for l in &chain.links {
             // First link wins, matching `successor_of`'s `find`.
             map.entry(l.from_session_id.clone())
@@ -784,9 +840,12 @@ pub fn successor_index() -> std::collections::HashMap<String, String> {
 }
 
 fn chain_containing_in(dir: &Path, session_id: &str) -> Option<HandoffChain> {
-    list_chains_in(dir)
-        .into_iter()
-        .find(|c| c.hop_of(session_id).is_some())
+    let (stem, _) = list_members_in(dir).into_iter().find(|(_, m)| {
+        m.links
+            .iter()
+            .any(|l| l.from_session_id == session_id || l.to_session_id == session_id)
+    })?;
+    read_chain_file(&dir.join(format!("{stem}.json")))
 }
 
 /// Session-id → relay position for every session on any chain. Built once per
@@ -800,7 +859,7 @@ pub fn session_handoff_index() -> std::collections::HashMap<String, SessionHando
 
 fn session_handoff_index_in(dir: &Path) -> std::collections::HashMap<String, SessionHandoffInfo> {
     let mut map = std::collections::HashMap::new();
-    for chain in list_chains_in(dir) {
+    for (_, chain) in list_members_in(dir) {
         let ids = chain.session_ids();
         let len = ids.len() as u32;
         for (i, sid) in ids.into_iter().enumerate() {
