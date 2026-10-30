@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { stampHostClasses } from "./hostClass";
 import { markWebBuild } from "./hostEnv";
 import { localDateKey } from "./localDate";
+import { installOverflowTitles } from "./overflowTitle";
 import { primePromoStorage, promoSceneFromSearch } from "./mock/promo-scene";
 
 const params = new URLSearchParams(window.location.search);
@@ -38,6 +39,7 @@ if (isMockMode && params.has("website")) {
 }
 
 stampHostClasses();
+installOverflowTitles();
 
 // Theme-neutral grey: before storage loads, the user's theme (and App.css with
 // its tokens) is not known yet, so the boot skeleton must read on either a dark
