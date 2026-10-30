@@ -1045,6 +1045,14 @@ export function SessionDetail({
   }, [wikiDocs, wikiLoaded, wikiInFlight, openAuxDoc]);
 
   const taskPlansKey = workspacePath && sessionId ? `${workspacePath}\0${sessionId}` : null;
+  // The live plan summary rides every scan; when it moves (a step added or
+  // checked, a new plan focused) the detailed list read below is stale, so
+  // re-read it. Without this, steps added mid-run only showed after
+  // switching sessions away and back.
+  const livePlan = liveSession?.taskPlan;
+  const livePlanSig = livePlan
+    ? `${livePlan.planId ?? ""}|${livePlan.done}|${livePlan.total}|${livePlan.currentTask ?? ""}`
+    : "";
   useEffect(() => {
     if (!workspacePath || !sessionId) {
       setTaskPlans([]);
@@ -1066,7 +1074,7 @@ export function SessionDetail({
     return () => {
       cancelled = true;
     };
-  }, [workspacePath, sessionId]);
+  }, [workspacePath, sessionId, livePlanSig]);
   const hasTaskPlans = taskPlans.length > 0;
   // No session/workspace means nothing to read, which counts as settled.
   const taskPlansLoaded = taskPlansKey === null || taskPlansReadFor === taskPlansKey;

@@ -2,7 +2,7 @@
 // task plans, token breakdown, workflow runs, notes, handoff chain. Each fetches on
 // first open via its relay method and renders a compact mobile layout.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, ChevronRight, ListTodo, NotebookPen, Search, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
@@ -38,20 +38,26 @@ function useRelayData<T>(
   client: FleetTransport | null,
   method: string,
   params: Record<string, unknown>,
+  /** Re-request whenever this changes, keeping the current data on screen
+   *  instead of flashing back to the loading skeleton. */
+  refresh: string = "",
 ): RelayState<T> {
   const [state, setState] = useState<RelayState<T>>(client ? "loading" : "offline");
   const key = JSON.stringify(params);
+  const loadedKey = useRef<string | null>(null);
   useEffect(() => {
     if (!client) {
       setState("offline");
       return;
     }
     let cancelled = false;
-    setState("loading");
+    if (loadedKey.current !== key) setState("loading");
     client
       .request<T>(method, JSON.parse(key) as Record<string, unknown>)
       .then((data) => {
-        if (!cancelled) setState(data);
+        if (cancelled) return;
+        loadedKey.current = key;
+        setState(data);
       })
       .catch(() => {
         if (!cancelled) setState("error");
@@ -59,7 +65,7 @@ function useRelayData<T>(
     return () => {
       cancelled = true;
     };
-  }, [client, method, key]);
+  }, [client, method, key, refresh]);
   return state;
 }
 
@@ -295,10 +301,17 @@ export function TaskPlansTab({
   /** What to show beneath one step — the sub-tasks working on it. */
   underStep?: (planId: string | null | undefined, itemText: string, done: boolean) => React.ReactNode;
 }) {
-  const data = useRelayData<TaskPlanDetail[]>(client, "task_plans", {
-    workspacePath: session.workspacePath,
-    sessionId: session.id,
-  });
+  // The live plan summary rides every snapshot; when it moves (a step added
+  // or checked) re-read the detailed list, or new steps only show after
+  // leaving the session and coming back.
+  const plan = session.taskPlan;
+  const planSig = plan ? `${plan.planId ?? ""}|${plan.done}|${plan.total}|${plan.currentTask ?? ""}` : "";
+  const data = useRelayData<TaskPlanDetail[]>(
+    client,
+    "task_plans",
+    { workspacePath: session.workspacePath, sessionId: session.id },
+    planSig,
+  );
 
   if (isPending(data)) return <TabStatus state={data} skeleton={<SkeletonList rows={6} meta={false} />} />;
   if (data.length === 0)
