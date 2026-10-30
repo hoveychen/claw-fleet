@@ -61,8 +61,7 @@ impl TaskGraph {
 
     /// Read both edge sets off disk (cached readers on both sides).
     pub fn load() -> Self {
-        let chains = crate::handoff::list_chains().into_iter().map(|c| c.session_ids());
-        Self::new(chains, spawn_edges(crate::launch_spec::registry()))
+        Self::new(crate::handoff::chain_session_ids(), spawn_edges(crate::launch_spec::registry()))
     }
 
     /// Every spawn edge as `(child, spawner)`, so a caller that already loaded
