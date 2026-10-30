@@ -127,12 +127,12 @@
 .recTitle {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 500;
   color: var(--color-text);
   font-size: var(--t-aux, 12px);
+  /* Wraps instead of ellipsizing: this text is not tappable and has no
+     fuller view elsewhere, and phones have no hover to reveal it. */
+  overflow-wrap: anywhere;
 }
 
 .field {
@@ -217,10 +217,10 @@
 .wikiTitle {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--color-text-secondary);
+  /* Wraps instead of ellipsizing: this text is not tappable and has no
+     fuller view elsewhere, and phones have no hover to reveal it. */
+  overflow-wrap: anywhere;
 }
 
 /* ── wiki cat markdown ────────────────────────────────────────────────────── */

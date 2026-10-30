@@ -48,9 +48,16 @@
 .headerTitleText {
   flex: 1 1 auto;
   min-width: 4em;
-  white-space: nowrap;
+  /* Two lines, not one: phones have no hover, and a one-line ellipsis here
+     hid a long title behind a second tap (the session sheet). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  /* AppHeader's .title is nowrap and white-space inherits. */
+  white-space: normal;
 }
 
 /* 头部右上角开「会话详情」半屏的按钮。它顶掉的是一颗 8px 的无标签状态点加一个

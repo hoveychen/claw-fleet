@@ -65,9 +65,13 @@
 .rowTitle {
   font-size: 14px;
   color: var(--color-text);
+  /* Two lines, not one: phones have no hover, so a one-line ellipsis left
+     long titles readable nowhere short of opening the row. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .rowMeta {

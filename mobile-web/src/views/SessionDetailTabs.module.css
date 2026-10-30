@@ -345,9 +345,9 @@
   flex: 1;
   min-width: 0;
   color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Wraps instead of ellipsizing: this text is not tappable and has no
+     fuller view elsewhere, and phones have no hover to reveal it. */
+  overflow-wrap: anywhere;
 }
 
 /* Drillable workflow-agent row: opens the subagent's transcript. */
