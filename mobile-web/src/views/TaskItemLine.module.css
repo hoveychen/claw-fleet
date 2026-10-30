@@ -58,9 +58,9 @@
 /* 压成一行，点一下换成折行版。 */
 .text {
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Wraps instead of ellipsizing: this text is not tappable and has no
+     fuller view elsewhere, and phones have no hover to reveal it. */
+  overflow-wrap: anywhere;
 }
 
 .row[data-open] .text {
