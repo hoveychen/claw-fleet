@@ -161,16 +161,43 @@ fn preview_of(s: &str) -> String {
 /// once per card expand.
 pub fn extract_full_tool_result(jsonl_path: &Path, tool_use_id: &str) -> Result<Value, String> {
     let content = std::fs::read_to_string(jsonl_path).map_err(|e| e.to_string())?;
+    let records = content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok());
+    find_full_tool_result(records, tool_use_id)
+}
+
+/// [`extract_full_tool_result`] for any session path a client hands back,
+/// including the URIs of sources that keep no transcript file.
+///
+/// A dsh session's path is `dsh://<id>`: its log lives behind the dsh server,
+/// so reading the URI as a file fails with "No such file or directory". Those
+/// sources report no file via `resolve_file_path`, and their records come from
+/// `get_messages` instead — the same Claude-shaped records the conversation
+/// panel was drawn from, with image attachments already inlined as base64.
+pub fn extract_full_tool_result_at(path: &str, tool_use_id: &str) -> Result<Value, String> {
+    let sources = crate::agent_source::build_sources();
+    let Some(source) = crate::agent_source::find_source_for_path(&sources, path) else {
+        return extract_full_tool_result(Path::new(path), tool_use_id);
+    };
+    match source.resolve_file_path(path) {
+        Some(file) => extract_full_tool_result(&file, tool_use_id),
+        None => find_full_tool_result(source.get_messages(path)?, tool_use_id),
+    }
+}
+
+/// The record scan behind both extractors. The `name`/`input` pair comes from
+/// the matching `tool_use` block on the (earlier) assistant record, captured in
+/// the same single pass.
+fn find_full_tool_result(
+    records: impl IntoIterator<Item = Value>,
+    tool_use_id: &str,
+) -> Result<Value, String> {
     let mut name = Value::Null;
     let mut input = Value::Null;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(msg) = serde_json::from_str::<Value>(trimmed) else {
-            continue;
-        };
+    for msg in records {
         let Some(blocks) = msg
             .get("message")
             .and_then(|m| m.get("content"))
@@ -332,6 +359,39 @@ mod tests {
 
         assert!(extract_full_tool_result(&path, "missing").is_err());
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn extract_full_tool_result_at_reads_a_bare_path_as_a_file() {
+        let path =
+            std::env::temp_dir().join(format!("message_trim_at_test_{}.jsonl", std::process::id()));
+        let line = json!({
+            "type": "user",
+            "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "abc", "content": big(10_000)}
+            ]}
+        });
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        let full = extract_full_tool_result_at(path.to_str().unwrap(), "abc").unwrap();
+        assert_eq!(full["content"].as_str().unwrap().len(), 10_000);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn find_full_tool_result_pairs_tool_use_with_its_result() {
+        let records = vec![
+            json!({"message": {"content": [
+                {"type": "tool_use", "id": "r1", "name": "read_image", "input": {"file_path": "/tmp/a.png"}}
+            ]}}),
+            json!({"message": {"content": [
+                {"type": "tool_result", "tool_use_id": "r1", "content": [{"type": "image"}]}
+            ]}}),
+        ];
+        let full = find_full_tool_result(records, "r1").unwrap();
+        assert_eq!(full["name"], "read_image");
+        assert_eq!(full["input"]["file_path"], "/tmp/a.png");
+        assert_eq!(full["content"][0]["type"], "image");
+        assert!(find_full_tool_result(Vec::new(), "r1").is_err());
     }
 
     #[test]

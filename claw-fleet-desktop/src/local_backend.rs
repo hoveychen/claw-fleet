@@ -2158,7 +2158,7 @@ impl LocalBackend {
     /// transport (see [`crate::message_trim`]); the frontend calls this when the
     /// reader expands a card flagged `_fleetTruncated`.
     pub fn get_tool_result_full(&self, path: &str, tool_use_id: &str) -> Result<Value, String> {
-        crate::message_trim::extract_full_tool_result(std::path::Path::new(path), tool_use_id)
+        crate::message_trim::extract_full_tool_result_at(path, tool_use_id)
     }
 
     /// Registered agent loops (`fleet loop`) — recurring future tasks.

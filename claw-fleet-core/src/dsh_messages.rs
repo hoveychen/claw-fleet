@@ -399,6 +399,56 @@ fn tool_result_text(content: Option<&Value>) -> String {
         .join("\n")
 }
 
+/// The settled calls one `tool/result` message carries, each as an object with
+/// `toolCallId`, `content` and `isError`.
+///
+/// dsh has written two shapes. Older logs nest `{type:"tool-result", toolCallId,
+/// content, isError}` blocks inside a `role:"user"` message. dsh 0.2.x writes a
+/// `role:"tool"` message that *is* the result: `toolCallId` and `isError` sit on
+/// the message itself and `content` holds the output blocks directly. Every
+/// dsh log on this machine since at least 2026-10-25 uses the second shape, and
+/// reading only the first dropped every tool result — each card rendered with no
+/// output. The flat message carries the same three keys, so it stands in as the
+/// single block.
+fn tool_result_blocks(message: &Value) -> Option<Vec<&Value>> {
+    if message.get("toolCallId").and_then(Value::as_str).is_some() {
+        return Some(vec![message]);
+    }
+    let blocks = message.get("content").and_then(Value::as_array)?;
+    Some(
+        blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool-result"))
+            .collect(),
+    )
+}
+
+/// A result's content in the form the result cards read: the flattened text,
+/// or — when the output carries images (`read_image`) — Claude's block array,
+/// text first, so the image survives to be resolved into a store path by
+/// `dsh_attachments::resolve_image_blocks`.
+fn tool_result_content(content: Option<&Value>) -> Value {
+    let images: Vec<&Value> = content
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter(|b| b.get("type").and_then(Value::as_str) == Some("image"))
+                .collect()
+        })
+        .unwrap_or_default();
+    let text = tool_result_text(content);
+    if images.is_empty() {
+        return json!(text);
+    }
+    let mut out = Vec::with_capacity(images.len() + 1);
+    if !text.is_empty() {
+        out.push(json!({ "type": "text", "text": text }));
+    }
+    out.extend(images.into_iter().cloned());
+    json!(out)
+}
+
 /// One notice rendered as an assistant line, for the events that are neither
 /// speech nor tool traffic but still change what the session is doing.
 fn notice(event: &Value, text: String) -> Value {
@@ -504,17 +554,16 @@ fn normalize_event(event: &Value, delegations: &HashMap<String, Delegation>) -> 
 
         "tool/result" => {
             let message = data.get("message")?;
-            let blocks = message.get("content").and_then(Value::as_array)?;
+            let blocks = tool_result_blocks(message)?;
             let results: Vec<Value> = blocks
                 .iter()
-                .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool-result"))
                 .map(|b| {
                     json!({
                         "type": "tool_result",
                         // The renderer pairs results to calls by this id; a
                         // result that loses it renders as an orphan card.
                         "tool_use_id": b.get("toolCallId").cloned().unwrap_or(Value::Null),
-                        "content": tool_result_text(b.get("content")),
+                        "content": tool_result_content(b.get("content")),
                         "is_error": b.get("isError").and_then(Value::as_bool).unwrap_or(false),
                     })
                 })
@@ -534,7 +583,7 @@ fn normalize_event(event: &Value, delegations: &HashMap<String, Delegation>) -> 
             // batch is the one described rather than none.
             if let Some((delegation, block)) = blocks.iter().find_map(|b| {
                 let call_id = b.get("toolCallId").and_then(Value::as_str)?;
-                Some((delegations.get(call_id)?, b))
+                Some((delegations.get(call_id)?, *b))
             }) {
                 let at = event.get("time").and_then(Value::as_i64).unwrap_or(0);
                 record["toolUseResult"] = delegation_result(delegation, block, at);
@@ -948,6 +997,59 @@ mod tests {
         assert_eq!(block["tool_use_id"], "toolu_bdrk_01MUz");
         assert_eq!(block["content"], "[exit code: 1]");
         assert_eq!(block["is_error"], false);
+    }
+
+    /// dsh 0.2.x's shape: a `role:"tool"` message that is itself the result.
+    fn flat_tool_result(content: Value) -> Value {
+        json!({
+            "type": "tool/result",
+            "seq": 636,
+            "time": 1793364273754i64,
+            "data": {
+                "message": {
+                    "role": "tool",
+                    "source": { "kind": "tool", "callId": "call_b045f" },
+                    "toolCallId": "call_b045f",
+                    "isError": false,
+                    "content": content
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn a_flat_tool_result_message_is_read_as_its_own_block() {
+        let out = normalize(&[flat_tool_result(json!([
+            { "type": "text", "text": "patched" }
+        ]))]);
+        assert_eq!(out.len(), 1, "a flat result must not be dropped");
+        let block = &out[0]["message"]["content"][0];
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], "call_b045f");
+        assert_eq!(block["content"], "patched");
+        assert_eq!(block["is_error"], false);
+    }
+
+    #[test]
+    fn an_image_result_keeps_its_image_block_after_the_text() {
+        let image = json!({
+            "type": "image",
+            "attachment": {
+                "attachmentId": "sha256:b04ab12118dc179952580725547e4f5676d61cdd6ece086e74f169b8b93d8581",
+                "mediaType": "image/webp",
+                "name": "viggle_edit.png"
+            }
+        });
+        let out = normalize(&[flat_tool_result(json!([
+            { "type": "text", "text": "<type>image</type>" },
+            image.clone()
+        ]))]);
+        let content = &out[0]["message"]["content"][0]["content"];
+        assert_eq!(
+            content[0],
+            json!({ "type": "text", "text": "<type>image</type>" })
+        );
+        assert_eq!(content[1], image);
     }
 
     /// The call and its result must agree on the id, or the pairing breaks.
