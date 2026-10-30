@@ -473,7 +473,25 @@ impl DshSource {
 
     /// A `session/list` stalled on a live server: restart it once per
     /// [`WEDGE_RESTART_INTERVAL`], otherwise back roster scans off.
+    ///
+    /// Never while a dsh session is mid-turn: every turn runs inside that one
+    /// process, so a restart kills them all. On 2026-10-30 one landed 13s after
+    /// a session raised `ask_user_question`, and the card died with the turn. A
+    /// stalled roster costs a stale task list; a killed turn costs the work.
     fn handle_roster_stall(error: &str) {
+        let in_turn = lock(watcher_slot())
+            .as_ref()
+            .map(DshEventWatcher::sessions_in_turn)
+            .unwrap_or_default();
+        if !in_turn.is_empty() {
+            crate::log_debug(&format!(
+                "dsh source: session/list stalled but {} session(s) mid-turn ({}), backing roster scans off instead of restarting: {error}",
+                in_turn.len(),
+                in_turn.join(", ")
+            ));
+            *lock(roster_stall_slot()) = Some((std::time::Instant::now(), error.to_string()));
+            return;
+        }
         let mut last_restart = lock(wedge_restart_slot());
         if !wedge_restart_due(*last_restart) {
             crate::log_debug(&format!(

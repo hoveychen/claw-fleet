@@ -181,10 +181,11 @@ mod tests {
     }
 
     #[test]
-    fn classifies_both_decision_resume_headers() {
+    fn classifies_every_decision_resume_header() {
         for header in [
             crate::parked::RESUME_PROMPT_HEADER,
             crate::parked::STEPPED_ASIDE_RESUME_HEADER,
+            crate::parked::SERVER_LOST_RESUME_HEADER,
         ] {
             let prompt = header.to_string() + "【问题 1】发版？\n【回答】发";
             let got = classify(&prompt).unwrap_or_else(|| panic!("not classified: {header}"));

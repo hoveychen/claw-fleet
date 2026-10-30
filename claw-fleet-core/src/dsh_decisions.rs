@@ -366,19 +366,60 @@ fn worker(
             // The watcher was dropped: this server is gone or has moved to a new
             // port, so nothing here can ever be answered. Withdraw the questions
             // (an unanswered `ask_user_question` would hang its turn forever)
-            // and take the cards down.
+            // and take the cards down — except a question whose withdrawal the
+            // server could not even take: its turn died with the server, so the
+            // card is parked and the answer resumes the session later.
             Err(RecvTimeoutError::Disconnected) => {
                 let generation = generation(&client_id);
                 for (id, entry) in pending.drain() {
-                    if let (Pending::Question { .. } | Pending::Refuse, Some(client_id)) =
-                        (&entry, &generation)
-                    {
-                        let _ = client.refuse_event(client_id, &id, ABANDONED_MESSAGE);
+                    let withdrawn = match (&entry, &generation) {
+                        (Pending::Question { .. } | Pending::Refuse, Some(client_id)) => client
+                            .refuse_event(client_id, &id, ABANDONED_MESSAGE)
+                            .is_ok(),
+                        _ => false,
+                    };
+                    if let Pending::Question { request, .. } = &entry {
+                        if !withdrawn && park_lost_question(&id, request) {
+                            crate::elicitation::cleanup(&id);
+                            continue;
+                        }
                     }
                     entry.cleanup(&id);
                 }
                 return;
             }
+        }
+    }
+}
+
+/// Keep a question whose server died under it: park the card so it stays on
+/// the boss's screen, and let the answer reach the session as a new prompt
+/// (`parked::answer` resumes dsh sessions through `DshSource`). Only for
+/// sessions Fleet launched — a hand-started dsh session has no launch record
+/// to resume from. Returns whether the card was parked.
+fn park_lost_question(id: &str, request: &ElicitationRequest) -> bool {
+    let Some(workspace) = crate::parked::dsh_fleet_owned_cwd(&request.session_id) else {
+        return false;
+    };
+    let parked = crate::parked::park(
+        id,
+        crate::parked::ParkedKind::Elicitation,
+        &request.session_id,
+        &workspace,
+        request,
+    )
+    .and_then(|_| crate::parked::mark_server_lost(id));
+    match parked {
+        Ok(()) => {
+            crate::log_debug(&format!(
+                "dsh decisions: server gone under question {id} of {}, card parked",
+                request.session_id
+            ));
+            true
+        }
+        Err(e) => {
+            crate::log_debug(&format!("dsh decisions: park question {id}: {e}"));
+            false
         }
     }
 }
