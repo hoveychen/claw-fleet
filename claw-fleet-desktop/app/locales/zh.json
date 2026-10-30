@@ -2884,7 +2884,8 @@
     "badge": "已超时 · 任务已暂停",
     "hint": "等待超时，Fleet 已经掐掉那一轮并把问题留了下来。回复后会带着你的答复唤醒任务继续。",
     "submit": "回复并唤醒任务",
-    "discard": "丢弃"
+    "discard": "丢弃",
+    "answer_failed": "上次的回复没送到任务：{{error}}"
   },
   "artifacts": {
     "panel_title": "产出",

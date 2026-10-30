@@ -2892,7 +2892,8 @@
     "badge": "Timed out — task paused",
     "hint": "No answer arrived in time, so Fleet stopped this turn and kept the question. Answering resumes the task with your reply attached.",
     "submit": "Answer & wake the task",
-    "discard": "Discard"
+    "discard": "Discard",
+    "answer_failed": "Your last answer did not reach the session: {{error}}"
   },
   "artifacts": {
     "panel_title": "Artifacts",

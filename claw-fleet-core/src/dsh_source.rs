@@ -317,6 +317,11 @@ impl DshSource {
             server.pid(),
             server.port()
         ));
+        // Converge on this one server: an idle leftover would keep every session
+        // it loaded locked against it. Off-thread, since each probe is a
+        // `session/list` and the caller holds the server slot.
+        let keep = server.pid();
+        std::thread::spawn(move || crate::dsh_server::retire_idle_orphans(keep));
         Ok(server)
     }
 
@@ -742,7 +747,33 @@ impl DshSource {
         if id.is_empty() {
             return Err("dsh follow-up: session_id is required".into());
         }
-        self.with_client(|client| Self::prompt_in_mode(client, id, text, "steer"))
+        self.with_session_writer(|client| Self::prompt_in_mode(client, id, text, "steer"))
+    }
+
+    /// [`Self::with_client`] for a call that writes to a session. dsh refuses it
+    /// with `session/writer-held` while another `dsh web` has the session
+    /// loaded, and only that process exiting releases it; when the holder is a
+    /// leftover no Fleet owns, retire it and try once more. On 2026-10-30 such a
+    /// leftover made every answer to a parked dsh card fail.
+    fn with_session_writer<T>(
+        &self,
+        f: impl Fn(&DshClient) -> Result<T, String>,
+    ) -> Result<T, String> {
+        match self.with_client(&f) {
+            Err(e) if is_writer_held(&e) => {
+                let retired = crate::dsh_server::retire_idle_orphans(Self::server_pid());
+                crate::log_debug(&format!(
+                    "dsh source: {e}; retired {retired} idle ownerless dsh web server(s)"
+                ));
+                if retired == 0 {
+                    return Err(format!(
+                        "{e} (another dsh web process has this session open and could not be retired)"
+                    ));
+                }
+                self.with_client(&f)
+            }
+            other => other,
+        }
     }
 
     /// Receive every raw follow item of `session_id` until the handle drops
@@ -979,6 +1010,11 @@ fn resolve_selection(
         (None, Some(effort)) => current().map(|spec| (spec, Some(effort))),
         (None, None) => None,
     }
+}
+
+/// Whether a dsh error is the refusal of a session write held by another server.
+fn is_writer_held(error: &str) -> bool {
+    error.contains("session/writer-held")
 }
 
 /// dsh's own id shape. Fleet mints one when the caller did not pre-assign an id,
@@ -1838,7 +1874,7 @@ impl AgentSource for DshSource {
         self.with_client(|_| Ok(()))?;
         let armed = Self::arm_turn_end(&session_id, on_exit);
 
-        let started = self.with_client(|client| {
+        let started = self.with_session_writer(|client| {
             Self::select_model(
                 client,
                 &session_id,
@@ -3086,6 +3122,19 @@ mod spend_refresh_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The refusal string as `DshRpcError` renders it, verbatim from a live
+    /// cross-server probe on 2026-10-30.
+    #[test]
+    fn writer_held_is_recognised_from_the_rendered_rpc_error() {
+        let e: String = crate::dsh_client::DshRpcError::Rpc {
+            code: "session/writer-held".into(),
+            message: "session \"session-1\" is already owned by an active write handle".into(),
+        }
+        .into();
+        assert!(is_writer_held(&e), "{e}");
+        assert!(!is_writer_held("dsh rpc gateway/internal: boom"));
+    }
 
     #[test]
     fn start_backoff_holds_off_only_inside_the_window() {

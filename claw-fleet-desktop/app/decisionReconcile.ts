@@ -31,6 +31,11 @@ export function noteRemovedLocally(id: string, now: number = Date.now()): void {
   removedLocallyAt.set(id, now);
 }
 
+/** Lift the hold on a card whose answer failed, so it comes straight back. */
+export function forgetRemovedLocally(id: string): void {
+  removedLocallyAt.delete(id);
+}
+
 /** Ids the reconcile must not re-add yet. Prunes entries past the grace. */
 export function suppressedIds(now: number = Date.now()): Set<string> {
   for (const [id, at] of removedLocallyAt) {
