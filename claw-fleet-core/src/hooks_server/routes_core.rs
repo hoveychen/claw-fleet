@@ -695,10 +695,7 @@ pub(crate) fn route_tool_result(
     let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
     let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
     let tool_use_id = query.get("tool_use_id").map(|s| s.as_str()).unwrap_or("");
-    match crate::message_trim::extract_full_tool_result(
-        std::path::Path::new(&file_path),
-        tool_use_id,
-    ) {
+    match crate::message_trim::extract_full_tool_result_at(&file_path, tool_use_id) {
         Ok(value) => {
             let body = serde_json::to_string(&value).unwrap_or_default();
             let _ =

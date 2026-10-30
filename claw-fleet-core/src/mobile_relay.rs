@@ -3219,14 +3219,7 @@ fn serve_tool_detail(params: &Value) -> Result<Value, String> {
         .ok_or("missing tool_use_id")?;
     let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
 
-    let sources = crate::agent_source::build_sources();
-    let source = crate::agent_source::find_source_for_path(&sources, path)
-        .ok_or_else(|| format!("no agent source for path: {path}"))?;
-    let resolved = source
-        .resolve_file_path(path)
-        .ok_or_else(|| format!("cannot resolve path: {path}"))?;
-
-    let mut detail = crate::message_trim::extract_full_tool_result(&resolved, tool_use_id)?;
+    let mut detail = crate::message_trim::extract_full_tool_result_at(path, tool_use_id)?;
     let obj = detail
         .as_object_mut()
         .expect("extract_full_tool_result returns an object");

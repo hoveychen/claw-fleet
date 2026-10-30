@@ -261,7 +261,19 @@ where
         else {
             continue;
         };
-        for block in content {
+        // An image is either a top-level block (a user's attachment) or inside
+        // a `tool_result`'s content (`read_image` output).
+        let blocks = content.iter_mut().flat_map(|block| {
+            if block.get("type").and_then(Value::as_str) == Some("tool_result") {
+                match block.get_mut("content").and_then(Value::as_array_mut) {
+                    Some(inner) => inner.iter_mut().collect::<Vec<_>>(),
+                    None => Vec::new(),
+                }
+            } else {
+                vec![block]
+            }
+        });
+        for block in blocks {
             if block.get("type").and_then(Value::as_str) != Some("image") {
                 continue;
             }
@@ -746,6 +758,55 @@ mod tests {
             bytes,
             "the fetched bytes must be readable at the rendered path"
         );
+
+        // SAFETY: serialized via fleet_home_lock
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// `read_image` output arrives inside a `tool_result`, not as a top-level
+    /// block; it must be rewritten all the same or the Read card shows nothing.
+    #[test]
+    fn resolve_rewrites_an_image_inside_a_tool_result() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet-dsh-tr-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let bytes = png();
+        let digest: String = sha2::Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut records = vec![json!({
+            "message": { "content": [{
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": [
+                    { "type": "text", "text": "<type>image</type>" },
+                    { "type": "image", "attachment": {
+                        "attachmentId": format!("sha256:{digest}"),
+                        "mediaType": "image/png",
+                        "name": "out.png",
+                    }},
+                ],
+            }]},
+        })];
+
+        resolve_image_blocks(&mut records, |_| Some(bytes.clone()));
+
+        let inner = &records[0]["message"]["content"][0]["content"];
+        assert_eq!(inner[0]["text"], "<type>image</type>");
+        assert_eq!(inner[1]["source"]["type"], "path");
+        let path = inner[1]["source"]["path"].as_str().unwrap().to_string();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
 
         // SAFETY: serialized via fleet_home_lock
         unsafe {
