@@ -8,16 +8,33 @@
  */
 
 import type { RawMessage } from "./types";
-import { messageToText } from "./messageRows";
 import { stripRefsBlock } from "../../shared-ts/sessionMentions";
+import { splitContextFiles } from "./userAttachments";
 
 /**
  * The text an echo is matched on. Core appends a `<fleet-referenced-sessions>`
  * summary to a prompt that `@`-mentions a session, so the landed row carries a
  * block the echoed (as-typed) text never had; both sides compare without it.
+ *
+ * The trailing `Context files:` block is dropped too: dsh (and codex) lift
+ * attached images out of it into image parts before delivery, so the landed
+ * row's text no longer carries the paths the echo was sent with, and an echo
+ * of a message with a screenshot never retired.
  */
 function echoKey(text: string): string {
-  return stripRefsBlock(text).trim();
+  return splitContextFiles(stripRefsBlock(text).trim()).body.trim();
+}
+
+/** Only the text blocks of a row: an image block is not something the echo
+ *  ever typed, so its `[image]` placeholder must stay out of the key. */
+function textOf(m: RawMessage): string {
+  const content = m.message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n\n");
 }
 
 /**
@@ -34,7 +51,7 @@ function echoKey(text: string): string {
 export function landedUserTexts(messages: RawMessage[]): Set<string> {
   const set = new Set<string>();
   for (const m of messages) {
-    if (m.type === "user" && !m.isMeta) set.add(echoKey(messageToText(m)));
+    if (m.type === "user" && !m.isMeta) set.add(echoKey(textOf(m)));
   }
   return set;
 }
@@ -76,7 +93,7 @@ export function settlePending(messages: RawMessage[], alive = true): RawMessage[
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.type !== "user" || m.isMeta) continue;
-    const text = echoKey(messageToText(m));
+    const text = echoKey(textOf(m));
     if (m.fleetPending) keep[i] = !laterReal.has(text);
     else laterReal.add(text);
   }
