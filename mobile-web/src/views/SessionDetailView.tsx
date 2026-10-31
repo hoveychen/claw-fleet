@@ -262,6 +262,23 @@ function userText(msg: RawMessage): string {
   return parts.join("\n\n").trim();
 }
 
+/** The key an optimistic echo is matched on. Drops the mention summary block
+ *  Fleet appends on delivery and the trailing `Context files:` block: dsh and
+ *  codex lift attached images out of it into image parts, so the landed row no
+ *  longer carries the paths the echo was sent with. Mirrors the desktop's
+ *  `optimisticEcho.ts::echoKey`. */
+function echoKey(text: string): string {
+  return splitContextFiles(stripRefsBlock(text).trim()).body.trim();
+}
+
+/** Text blocks only — an image block's placeholder is nothing the echo typed. */
+function echoTextOf(msg: RawMessage): string {
+  return blocksOf(msg)
+    .filter((b) => b.type === "text" && b.text)
+    .map((b) => b.text as string)
+    .join("\n\n");
+}
+
 const INTERRUPT_MARKERS = new Set([
   "[Request interrupted by user]",
   "[Request interrupted by user for tool use]",
@@ -2022,22 +2039,20 @@ export function SessionDetailView({
   const realUserTexts = useMemo(() => {
     const set = new Set<string>();
     for (const m of messages ?? []) {
-      // Compare without the mention summary block Fleet appended on delivery,
-      // which the optimistic echo (what the composer sent) never carries.
-      if (m.type === "user") set.add(stripRefsBlock(userText(m)));
+      if (m.type === "user") set.add(echoKey(echoTextOf(m)));
     }
     return set;
   }, [messages]);
 
   const pendingOptimistic = useMemo(
-    () => optimisticSends.filter((o) => !realUserTexts.has(o.text)),
+    () => optimisticSends.filter((o) => !realUserTexts.has(echoKey(o.text))),
     [optimisticSends, realUserTexts],
   );
 
   // Once an echo lands in the real transcript, prune it (dedup by trimmed text).
   useEffect(() => {
     setOptimisticSends((prev) => {
-      const next = prev.filter((o) => !realUserTexts.has(o.text));
+      const next = prev.filter((o) => !realUserTexts.has(echoKey(o.text)));
       return next.length === prev.length ? prev : next;
     });
   }, [realUserTexts]);

@@ -40,6 +40,27 @@ describe("landedUserTexts", () => {
     expect(stillPending(typed, landed)).toBe(false);
   });
 
+  // dsh lifts an attached screenshot out of the `Context files:` block into an
+  // image part, so the landed row holds the prose plus an image block and no
+  // paths. Matching on the full sent text kept the echo stuck at the bottom.
+  it("matches a dsh row whose attached image was lifted into an image part", () => {
+    const typed = "我什么都看不到？\n\nContext files:\n- /Users/x/.fleet/user-attachments/k/paste.png";
+    const landed = landedUserTexts([
+      {
+        type: "user",
+        timestamp: "2026-10-30T15:23:00.000Z",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "我什么都看不到？" },
+            { type: "image", source: { type: "path", media_type: "image/png", path: "/p.png" } },
+          ],
+        },
+      } as RawMessage,
+    ]);
+    expect(stillPending(typed, landed)).toBe(false);
+  });
+
   it("ignores leading and trailing whitespace on both sides", () => {
     const landed = landedUserTexts([user("  继续  ")]);
     expect(stillPending("继续\n", landed)).toBe(false);
