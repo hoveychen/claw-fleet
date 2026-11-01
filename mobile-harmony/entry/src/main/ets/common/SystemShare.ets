@@ -2,6 +2,33 @@ import { common } from '@kit.AbilityKit';
 import { fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { systemShare } from '@kit.ShareKit';
+import { uniformTypeDescriptor as utd } from '@kit.ArkData';
+
+/// ShareKit's `utd` takes a Uniform Type Descriptor (`general.markdown`), not a MIME type.
+/// Handing it a raw MIME string matched no native HarmonyOS share target, so the sheet only
+/// listed Android apps running under the compat layer (those accept anything). Resolve via
+/// MIME, then the filename extension; unknown lookups come back as dynamic `flex.*` types,
+/// which match nothing either, so those fall through to `general.file`.
+function resolveUtd(filename: string, mimeType: string): string {
+  try {
+    if (mimeType.length > 0) {
+      const byMime = utd.getUniformDataTypeByMIMEType(mimeType);
+      if (!byMime.startsWith('flex.')) {
+        return byMime;
+      }
+    }
+    const dot = filename.lastIndexOf('.');
+    if (dot >= 0) {
+      const byExt = utd.getUniformDataTypeByFilenameExtension(filename.substring(dot));
+      if (!byExt.startsWith('flex.')) {
+        return byExt;
+      }
+    }
+  } catch (e) {
+    // Fall through to the generic type.
+  }
+  return utd.UniformDataType.FILE;
+}
 
 /// System share — native end of `navigator.share` in ArkWeb.
 ///
@@ -32,9 +59,9 @@ export async function shareFile(
   }
 
   const record: systemShare.SharedRecord = {
-    // If we have a specific mime type, report it to let the receiver (WeChat, Notes, etc.) make
-    // the right choice; if we don't have it, fall back to a generic file type — anything is better than not sharing.
-    utd: mimeType.length > 0 ? mimeType : 'general.file',
+    // A specific type lets receivers (WeChat, Notes, etc.) offer themselves; the generic file
+    // type is the fallback — anything is better than not sharing.
+    utd: resolveUtd(safeName, mimeType),
     uri: fileUri.getUriFromPath(path),
     title: safeName,
   };
