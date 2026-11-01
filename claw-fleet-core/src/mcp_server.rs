@@ -1529,8 +1529,10 @@ fn hoist_misplaced_images(args: &mut Value) {
     };
     for q in questions.iter_mut() {
         if let Some(qo) = q.as_object_mut() {
-            if let Some(v @ Value::String(_)) = qo.remove("images") {
-                if let Some(a) = decode(v) {
+            // Only touch a string-encoded value: removing first and matching
+            // after would silently drop the normal array form.
+            if matches!(qo.get("images"), Some(Value::String(_))) {
+                if let Some(a) = qo.remove("images").and_then(decode) {
                     qo.insert("images".into(), Value::Array(a));
                 }
             }
@@ -3274,6 +3276,23 @@ mod tests {
         assert!(qs[0].images.is_empty());
         let names: Vec<_> = qs[1].images.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, vec!["x.png", "beach.png"]);
+    }
+
+    #[test]
+    fn well_formed_question_images_survive_hoisting() {
+        // The normal shape: `images` already an array inside the question.
+        // dfd7feb9 dropped it on every card from 2026-10-28 on.
+        let mut args = json!({
+            "questions": [
+                { "question": "a", "header": "a", "multiSelect": false,
+                  "images": [{ "name": "a.jpg", "path": "a.jpg", "caption": "c" }] }
+            ]
+        });
+        hoist_misplaced_images(&mut args);
+        let qs: Vec<crate::mcp_ipc::FleetAskQuestion> =
+            serde_json::from_value(args["questions"].clone()).unwrap();
+        let names: Vec<_> = qs[0].images.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["a.jpg"]);
     }
 
     #[test]
