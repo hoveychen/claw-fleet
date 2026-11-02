@@ -1,5 +1,5 @@
 //! Watches the per-id `~/.fleet` dirs every rescan re-reads (launch notes,
-//! marks, titles, task outcomes) and reports changes to
+//! marks, titles, task outcomes, handoff chains) and reports changes to
 //! `claw_fleet_core::json_dir_cache`, so a rescan with nothing new skips the
 //! ~17k `stat`s those dirs cost per pass. See `json_dir_cache::gate_dir`.
 //!
