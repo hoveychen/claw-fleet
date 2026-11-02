@@ -422,24 +422,18 @@ pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
 /// exactly while a `claude` process carries this session id in its argv (see
 /// [`crate::session::SessionInfo::proc_alive`]). `false` means "turn ended,
 /// process gone" — resumable. We additionally skip `RateLimited` (auto-resume
-/// owns those; a resume would just bounce off the limit) and sessions with a
-/// parked decision card (resuming would race the answer path).
+/// owns those; a resume would just bounce off the limit). A parked decision
+/// card is handled by the caller, [`drain_if_idle`].
 fn is_drainable(session: &crate::session::SessionInfo) -> bool {
     if session.proc_alive {
         return false;
     }
     // Auto-resume owns both RateLimited and ServerErrored recovery; draining a
     // pending message would race the retry path, so skip both.
-    if matches!(
+    !matches!(
         session.status,
         crate::session::SessionStatus::RateLimited | crate::session::SessionStatus::ServerErrored
-    ) {
-        return false;
-    }
-    if crate::parked::has_parked_for_session(&session.id) {
-        return false;
-    }
-    true
+    )
 }
 
 /// If `session` has queued follow-ups and its turn is over, combine them into one
@@ -513,6 +507,16 @@ where
     if still_live {
         return;
     }
+    // A parked card would otherwise hold the queue until the boss answers it —
+    // hours, for a card that timed out unattended (kaiju-bay d688686b,
+    // 2026-11-02: four messages sat behind one). A `fleet__ask` card steps
+    // aside instead, as it does for a message injected into a live wait; any
+    // other parked kind still blocks, since resuming would race its answer.
+    if crate::parked::has_parked_for_session(&session.id)
+        && crate::ask_preempt::unpark_for_messages(&session.id).is_none()
+    {
+        return;
+    }
 
     // Claim first (see doc): the rename is the double-fire guard, and only the
     // thread/process that wins it may spawn. Everyone else finds no queue file
@@ -525,7 +529,12 @@ where
         return;
     }
 
-    let prompt = q.messages.join("\n\n");
+    let mut prompt = q.messages.join("\n\n");
+    // The woken turn has to know its card is still open, or it would never
+    // `wait` on it and could not raise another.
+    if let Some(open) = crate::ask_preempt::detached_for_session(&session.id) {
+        prompt.insert_str(0, &crate::ask_preempt::woken_with_open_card_notice(&open));
+    }
     let workspace = if q.workspace_path.trim().is_empty() {
         session.workspace_path.clone()
     } else {
@@ -933,6 +942,72 @@ mod tests {
             assert_eq!(q.messages, vec!["x".to_string()]);
             // Missing queue file is likewise a no-op success.
             remove_at("sess-never", 0).unwrap();
+        });
+    }
+
+    #[test]
+    fn parked_ask_steps_aside_and_the_drain_names_the_open_card() {
+        with_temp_home(|| {
+            let req = crate::mcp_ipc::FleetAskRequest {
+                id: "card-1".into(),
+                session_id: "sess-parked".into(),
+                workspace_name: String::new(),
+                ai_title: None,
+                task: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                parked: false,
+                task_complete: false,
+                questions: Vec::new(),
+                review_docs: Vec::new(),
+            };
+            crate::parked::park("card-1", crate::parked::ParkedKind::FleetAsk, "sess-parked", "/ws", &req)
+                .unwrap();
+            write_queue(
+                &queue_path("sess-parked").unwrap(),
+                &PendingQueue {
+                    session_id: "sess-parked".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["hello".into()],
+                },
+            )
+            .unwrap();
+            let log = std::cell::RefCell::new(Vec::new());
+            let s = base_session("sess-parked", SessionStatus::WaitingInput, false);
+            drain_if_idle(&s, recording_spawn(&log));
+            let fired = log.borrow();
+            assert_eq!(fired.len(), 1, "a parked fleet__ask card no longer holds the queue");
+            assert!(fired[0].1.contains("card-1"), "{}", fired[0].1);
+            assert!(fired[0].1.ends_with("hello"), "{}", fired[0].1);
+            assert!(!crate::parked::is_parked("card-1"));
+            assert!(crate::ask_preempt::is_detached("card-1"));
+        });
+    }
+
+    #[test]
+    fn parked_elicitation_still_holds_the_queue() {
+        with_temp_home(|| {
+            crate::parked::park(
+                "elic-1",
+                crate::parked::ParkedKind::Elicitation,
+                "sess-elic",
+                "/ws",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+            write_queue(
+                &queue_path("sess-elic").unwrap(),
+                &PendingQueue {
+                    session_id: "sess-elic".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["hello".into()],
+                },
+            )
+            .unwrap();
+            let log = std::cell::RefCell::new(Vec::new());
+            let s = base_session("sess-elic", SessionStatus::WaitingInput, false);
+            drain_if_idle(&s, recording_spawn(&log));
+            assert!(log.borrow().is_empty());
+            assert!(get("sess-elic").is_some(), "queue kept for after the answer");
         });
     }
 

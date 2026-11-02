@@ -633,6 +633,12 @@ pub fn reservation(session_id: &str) -> Option<String> {
     reservation_with(session_id, &real_probes())
 }
 
+/// Whether a Running lease on `session_id` still holds — a turn is in flight,
+/// including the first seconds of a resume whose process is not visible yet.
+pub fn turn_in_flight(session_id: &str) -> bool {
+    with_state(session_id, &real_probes(), |state, _| state.running.is_some()).unwrap_or(false)
+}
+
 fn reservation_with(session_id: &str, probes: &Probes<'_>) -> Option<String> {
     with_state(session_id, probes, |state, _| {
         // `with_state` has already dropped a Running lease that stopped holding.
