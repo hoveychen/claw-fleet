@@ -67,7 +67,7 @@ pub fn downscale_image(
         // the original back and let the caller's frame guard decide.
         return (bytes, mime.to_string());
     };
-    let mut work = img;
+    let mut work = preshrink(img, target, min_dim);
     // Smallest encode seen so far — returned if no resolution/quality combo
     // reaches the target. Never stays None: the ladder runs at least once.
     let mut best: Option<Vec<u8>> = None;
@@ -103,6 +103,38 @@ pub fn downscale_image(
     }
 }
 
+/// Pixels allowed per target byte before the ladder starts — 0.25 bits per
+/// pixel. Even the bottom of the quality ladder compresses a real screenshot to
+/// well over that (measured: 12 KiB tail thumbs land at ~7 px/byte), so anything
+/// bigger than this budget would have been shrunk below it by the ladder anyway.
+const PRESHRINK_PIXELS_PER_TARGET_BYTE: u64 = 32;
+
+/// Jump straight to the resolution the shrink loop would have reached instead
+/// of walking there 20% at a time. Starting from the source resolution, a
+/// 1920px screenshot squeezed to a 12 KiB thumbnail ran ~8 rounds of seven full
+/// encodes plus a Lanczos3 resize each — 0.5–7s per image on an idle machine,
+/// and the phone's `tail` thumbs a whole window of them (83s logged under load).
+/// One Triangle resize here is what keeps that window cheap; the ladder below
+/// still does the fine-tuning, so output size and quality are unchanged.
+fn preshrink(img: image::DynamicImage, target: usize, min_dim: u32) -> image::DynamicImage {
+    let (w, h) = (img.width() as u64, img.height() as u64);
+    let budget = (target as u64).saturating_mul(PRESHRINK_PIXELS_PER_TARGET_BYTE);
+    if w * h <= budget {
+        return img;
+    }
+    let longest = w.max(h) as f64;
+    // Never pre-shrink past `min_dim`: the loop's stopping rule is defined there.
+    let scale = (budget as f64 / (w * h) as f64)
+        .sqrt()
+        .max(min_dim as f64 / longest);
+    if scale >= 1.0 {
+        return img;
+    }
+    let nw = ((w as f64 * scale).round() as u32).max(1);
+    let nh = ((h as f64 * scale).round() as u32).max(1);
+    img.resize_exact(nw, nh, image::imageops::FilterType::Triangle)
+}
+
 /// Re-encode `img` as an opaque RGB JPEG at `quality` (0-100). JPEG can't carry
 /// alpha, so the image is flattened to RGB first. Returns None only on an
 /// encoder error.
@@ -120,4 +152,38 @@ fn encode_jpeg(img: &image::DynamicImage, quality: u8) -> Option<Vec<u8>> {
         )
         .ok()?;
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn img(w: u32, h: u32) -> image::DynamicImage {
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(w, h, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x ^ y) % 239) as u8])
+        }))
+    }
+
+    #[test]
+    fn preshrink_jumps_a_large_image_down_to_the_pixel_budget() {
+        let out = preshrink(img(1920, 1080), 12 * 1024, 256);
+        let pixels = out.width() as u64 * out.height() as u64;
+        assert!(pixels <= 12 * 1024 * PRESHRINK_PIXELS_PER_TARGET_BYTE + 2_000);
+        // Aspect ratio survives the single resize.
+        let ratio = out.width() as f64 / out.height() as f64;
+        assert!((ratio - 1920.0 / 1080.0).abs() < 0.02, "ratio {ratio}");
+    }
+
+    #[test]
+    fn preshrink_never_goes_below_min_dim() {
+        // A long strip: the pixel budget alone would take the long edge under 256.
+        let out = preshrink(img(4000, 40), 1024, 256);
+        assert!(out.width().max(out.height()) >= 256);
+    }
+
+    #[test]
+    fn preshrink_leaves_images_within_budget_untouched() {
+        let out = preshrink(img(640, 480), 50 * 1024, 320);
+        assert_eq!((out.width(), out.height()), (640, 480));
+    }
 }

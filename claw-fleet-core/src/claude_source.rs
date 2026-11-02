@@ -14,14 +14,23 @@ use crate::ui_types::SourceUsageSummary;
 pub const FLEET_AGENT_SOURCE_CLAUDE: &str = "claude-code";
 
 pub struct ClaudeCodeSource {
-    pub scan_cache: crate::session::ScanCache,
+    /// Loaded on the first scan, not at construction. `ScanCache::new` parses
+    /// the whole persisted `session-cache.json` (2.6 MB on a busy host), and most
+    /// sources built via `build_sources()` never scan — the phone's `tail`,
+    /// `tail_delta` and `transcript_image` only resolve a path to read one file,
+    /// and were paying 1.4–3.7s per call for that parse.
+    scan_cache: std::sync::OnceLock<crate::session::ScanCache>,
 }
 
 impl ClaudeCodeSource {
     pub fn new() -> Self {
         Self {
-            scan_cache: crate::session::ScanCache::new(),
+            scan_cache: std::sync::OnceLock::new(),
         }
+    }
+
+    fn scan_cache(&self) -> &crate::session::ScanCache {
+        self.scan_cache.get_or_init(crate::session::ScanCache::new)
     }
 }
 
@@ -44,7 +53,7 @@ impl AgentSource for ClaudeCodeSource {
 
     fn scan_sessions(&self) -> Vec<SessionInfo> {
         match get_claude_dir() {
-            Some(dir) => crate::session::scan_claude_sessions(&dir, &self.scan_cache),
+            Some(dir) => crate::session::scan_claude_sessions(&dir, self.scan_cache()),
             None => vec![],
         }
     }
