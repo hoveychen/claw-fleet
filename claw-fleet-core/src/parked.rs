@@ -442,6 +442,9 @@ pub fn discard(id: &str) -> Result<(), String> {
     let Some(path) = card_path(id) else {
         return Err("cannot determine home dir".into());
     };
+    // `with_card_lock`'s sibling; whoever is blocked on it re-checks
+    // `is_parked` once it gets in, so removing it under the lock is safe.
+    let _ = fs::remove_file(path.with_extension("json.lock"));
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -897,7 +900,22 @@ pub fn try_resolve(id: &str, response: &Value, dismissed: bool) -> Option<Result
     if !is_parked(id) {
         return None;
     }
-    Some(resolve_with(id, response, dismissed, answer))
+    // Under the card lock: `ask_preempt::unpark_for_messages` may be turning
+    // this card back into an open request right now.
+    with_card_lock(id, || {
+        if !is_parked(id) {
+            return None;
+        }
+        Some(resolve_with(id, response, dismissed, answer))
+    })
+}
+
+/// Run `f` holding the exclusive lock of parked card `id`.
+pub fn with_card_lock<R>(id: &str, f: impl FnOnce() -> R) -> R {
+    match card_path(id) {
+        Some(path) => crate::atomic_json::with_file_lock(&path, f),
+        None => f(),
+    }
 }
 
 /// [`try_resolve`]'s body with the wake-up injected, so tests can exercise the

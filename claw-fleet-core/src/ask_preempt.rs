@@ -352,6 +352,64 @@ pub fn resolved_notice(request_id: &str) -> String {
     )
 }
 
+/// Prefixed to a queued-message resume when the session still has a detached
+/// card, so the woken turn knows the card is open and how to get back to it.
+pub fn woken_with_open_card_notice(request_id: &str) -> String {
+    format!(
+        "[fleet] 你之前发出的决策卡 `{request_id}` 还没得到答复，仍然显示在老板的屏幕上。有新消息进来了，Fleet 先唤醒你处理它们（就在下面）。\n\
+         处理完后：\n\
+         - 这张卡仍然需要答复 → 调用 `fleet__ask`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 继续等老板的回答；\n\
+         - 新消息已经让这张卡过时 → 调用 `fleet__ask`，参数 `{{\"action\":\"withdraw\",\"request_id\":\"{request_id}\"}}` 把它从老板的屏幕上撤下。\n\
+         这张卡没 wait 或 withdraw 之前，不要再发新卡。\n\n---\n\n"
+    )
+}
+
+// ── Parked card steps aside ──────────────────────────────────────────────────
+
+/// Turn `session_id`'s parked `fleet__ask` card back into an open request with
+/// a detached record, so queued messages can wake the session instead of
+/// waiting behind the boss's answer. Returns the card id when it did.
+///
+/// A parked card has no request file (parking moved it into the parked store),
+/// which is what makes the answer path resume the session. After this the card
+/// is an ordinary detached one: the woken turn `wait`s on it or `withdraw`s it,
+/// and an answer that lands once that turn is over goes through the orphan
+/// recovery / [`sweep_idle`].
+///
+/// `None` when there is nothing to convert, or the parked card cannot step
+/// aside: only `fleet__ask` has `wait` / `withdraw`, so an elicitation or plan
+/// approval keeps blocking the queue as before.
+pub fn unpark_for_messages(session_id: &str) -> Option<String> {
+    let mut cards = crate::parked::list()
+        .into_iter()
+        .filter(|c| c.session_id == session_id);
+    let card = cards.next()?;
+    if cards.next().is_some() || card.kind != crate::parked::ParkedKind::FleetAsk {
+        return None;
+    }
+    let mut req: crate::mcp_ipc::FleetAskRequest = serde_json::from_value(card.request).ok()?;
+    req.parked = false;
+    // Held across the swap so an answer arriving now either resolves the parked
+    // card first (and we find it gone) or finds the open request after.
+    crate::parked::with_card_lock(&card.id, || {
+        if !crate::parked::is_parked(&card.id) {
+            return None;
+        }
+        crate::mcp_ipc::write_request(&req).ok()?;
+        mark_detached(&req.id, session_id);
+        if let Err(e) = crate::parked::discard(&req.id) {
+            crate::log_debug(&format!("ask_preempt: unpark {}: {e}; keeping it parked", req.id));
+            crate::mcp_ipc::cleanup(&req.id);
+            return None;
+        }
+        crate::log_debug(&format!(
+            "ask_preempt: parked card {} of {session_id} stepped aside for queued messages",
+            req.id
+        ));
+        Some(req.id.clone())
+    })
+}
+
 // ── Answer while detached ────────────────────────────────────────────────────
 
 /// Called by `mcp_ipc::write_response` once the write-time orphan recovery has
@@ -667,6 +725,37 @@ mod tests {
         });
         assert_eq!(calls, 1);
         assert!(!is_detached("r1"));
+    }
+
+    fn park_request(id: &str, session_id: &str, kind: crate::parked::ParkedKind) {
+        write_request(id, session_id);
+        let req = crate::mcp_ipc::read_request(id).unwrap();
+        crate::parked::park(id, kind, session_id, "/ws", &req).unwrap();
+        // Parking drops the live request file; mirror the producer.
+        crate::mcp_ipc::cleanup(id);
+    }
+
+    #[test]
+    fn unpark_turns_a_parked_ask_into_an_open_detached_card() {
+        let _home = TempHome::new("unpark");
+        park_request("p1", "s1", crate::parked::ParkedKind::FleetAsk);
+        assert!(crate::parked::has_parked_for_session("s1"));
+        assert_eq!(unpark_for_messages("s1").as_deref(), Some("p1"));
+        assert!(!crate::parked::is_parked("p1"));
+        let req = crate::mcp_ipc::read_request("p1").expect("request file is back");
+        assert!(!req.parked, "the reopened card must not render as timed out");
+        assert_eq!(detached_for_session("s1").as_deref(), Some("p1"));
+        // Nothing left to convert the second time.
+        assert!(unpark_for_messages("s1").is_none());
+    }
+
+    #[test]
+    fn unpark_leaves_cards_without_wait_parked() {
+        let _home = TempHome::new("unpark-other");
+        park_request("e1", "s1", crate::parked::ParkedKind::Elicitation);
+        assert!(unpark_for_messages("s1").is_none());
+        assert!(crate::parked::is_parked("e1"));
+        assert!(detached_for_session("s1").is_none());
     }
 
     #[test]

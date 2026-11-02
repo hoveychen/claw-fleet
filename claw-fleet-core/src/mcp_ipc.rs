@@ -422,9 +422,19 @@ fn stamp_task_outcome(resp: &FleetAskResponse) {
 /// cancellation cleans it up, while a real answer resumes the session through
 /// the source-aware parked path.
 pub fn recover_orphaned_response(id: &str) -> Result<bool, String> {
+    // A detached card's session may be in the first seconds of a resume (the
+    // queued-message drain that woke it) with no process visible yet; resuming
+    // it again here would be refused by the drive lease and strand the answer.
+    // Its `wait` picks the answer up, and `ask_preempt::sweep_idle` covers a
+    // turn that ends without one. Other cards have no such fallback, so they
+    // keep the plain process check.
+    let detached = crate::ask_preempt::was_detached(id);
     recover_orphaned_response_with(
         id,
-        crate::parked::session_alive,
+        |session_id| {
+            crate::parked::session_alive(session_id)
+                || (detached && crate::session_driver::turn_in_flight(session_id))
+        },
         |session_id, workspace, prompt, model, effort, permission_mode| {
             crate::parked::resume_session(
                 session_id,
