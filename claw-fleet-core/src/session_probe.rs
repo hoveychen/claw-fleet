@@ -323,8 +323,20 @@ fn read_tail_verdict(path: &Path, source: Option<&str>) -> TailVerdict {
     if source == Some("codex") {
         return codex_file_verdict(path);
     }
-    let lines = crate::jsonl_tail::read_tail_lines_as_json(path, TAIL_LINES).unwrap_or_default();
-    claude_tail_verdict(&lines)
+    // Newest first, stopping at the first line that decides: parsing the whole
+    // window when the answer is nearly always on the last line or two made
+    // this most of the sub-task rail's cost.
+    crate::jsonl_tail::find_map_tail_line(path, TAIL_LINES, |line| {
+        // A user/assistant record names its type; anything else is skipped
+        // without the parse.
+        if !line.contains("\"user\"") && !line.contains("\"assistant\"") {
+            return None;
+        }
+        claude_line_verdict(&serde_json::from_str(line).ok()?)
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(TailVerdict::Empty)
 }
 
 /// How the last turn of the Codex rollout at `path` ended.
@@ -390,38 +402,46 @@ fn is_interrupt_record(v: &Value) -> bool {
 /// `assistant` line carrying `end_turn` is a finished turn; any later `user`
 /// line (a prompt or a tool result) reopens it.
 pub fn claude_tail_verdict(lines: &[Value]) -> TailVerdict {
-    for v in lines.iter().rev() {
-        let t = v["type"].as_str();
-        if !matches!(t, Some("user") | Some("assistant")) || v["isSidechain"] == true {
-            continue;
+    lines
+        .iter()
+        .rev()
+        .find_map(claude_line_verdict)
+        .unwrap_or(TailVerdict::Empty)
+}
+
+/// The verdict one record decides, or `None` when it is not a main-thread
+/// user/assistant record and the walk moves on to the one before it.
+fn claude_line_verdict(v: &Value) -> Option<TailVerdict> {
+    let t = v["type"].as_str();
+    if !matches!(t, Some("user") | Some("assistant")) || v["isSidechain"] == true {
+        return None;
+    }
+    if t == Some("user") {
+        if is_interrupt_record(v) {
+            return Some(TailVerdict::Interrupted);
         }
-        if t == Some("user") {
-            if is_interrupt_record(v) {
-                return TailVerdict::Interrupted;
+        return Some(TailVerdict::InFlight);
+    }
+    Some(if v["isApiErrorMessage"] == true {
+        match v["error"].as_str() {
+            Some("rate_limit") => TailVerdict::RateLimited,
+            Some("server_error") => TailVerdict::ServerError,
+            // The unparseable-tool-call record (no enum) and the transient
+            // "403 Request not allowed" (`authentication_failed`) are
+            // retried like a server error (see `detect_server_error`).
+            _ if crate::session::detect_server_error(std::slice::from_ref(v)) => {
+                TailVerdict::ServerError
             }
-            return TailVerdict::InFlight;
+            other => TailVerdict::Fatal(api_error_text(v, other)),
         }
-        if v["isApiErrorMessage"] == true {
-            return match v["error"].as_str() {
-                Some("rate_limit") => TailVerdict::RateLimited,
-                Some("server_error") => TailVerdict::ServerError,
-                // The unparseable-tool-call record (no enum) and the transient
-                // "403 Request not allowed" (`authentication_failed`) are
-                // retried like a server error (see `detect_server_error`).
-                _ if crate::session::detect_server_error(std::slice::from_ref(v)) => {
-                    TailVerdict::ServerError
-                }
-                other => TailVerdict::Fatal(api_error_text(v, other)),
-            };
-        }
-        return match v["message"]["stop_reason"].as_str() {
+    } else {
+        match v["message"]["stop_reason"].as_str() {
             Some("end_turn") | Some("stop_sequence") | Some("max_tokens") | Some("refusal") => {
                 TailVerdict::Ended
             }
             _ => TailVerdict::InFlight,
-        };
-    }
-    TailVerdict::Empty
+        }
+    })
 }
 
 fn api_error_text(v: &Value, kind: Option<&str>) -> String {
@@ -924,6 +944,40 @@ mod tests {
     /// in that order (`json!` would sort the keys and bury `type`).
     fn cx_line(v: &Value) -> String {
         format!(r#"{{"timestamp":{},"type":{},"payload":{}}}"#, v["timestamp"], v["type"], v["payload"])
+    }
+
+    #[test]
+    fn claude_file_verdict_matches_the_whole_window_verdict() {
+        use std::io::Write as _;
+        let user = json!({"type":"user","message":{"content":"go"}});
+        let side = json!({"type":"assistant","isSidechain":true,"message":{"stop_reason":"tool_use"}});
+        let progress = json!({"type":"progress","data":"x".repeat(100_000)});
+        let rate = json!({"type":"assistant","isApiErrorMessage":true,"error":"rate_limit"});
+        let cases: Vec<Vec<Value>> = vec![
+            vec![],
+            vec![user.clone(), asst("end_turn")],
+            vec![asst("end_turn"), user.clone()],
+            vec![user.clone(), asst("end_turn"), side.clone(), progress.clone(), progress.clone()],
+            vec![user.clone(), rate, progress.clone()],
+            vec![progress.clone(), side],
+            // The deciding record scrolled out of the window: both say Empty.
+            std::iter::once(asst("end_turn"))
+                .chain(std::iter::repeat(json!({"type":"system"})).take(TAIL_LINES))
+                .collect(),
+        ];
+        for lines in cases {
+            let mut f = tempfile::Builder::new().suffix(".jsonl").tempfile().unwrap();
+            for v in &lines {
+                writeln!(f, "{v}").unwrap();
+            }
+            let window = crate::jsonl_tail::read_tail_lines_as_json(f.path(), TAIL_LINES).unwrap();
+            assert_eq!(
+                read_tail_verdict(f.path(), None),
+                claude_tail_verdict(&window),
+                "{} lines",
+                lines.len()
+            );
+        }
     }
 
     #[test]

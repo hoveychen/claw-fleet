@@ -96,6 +96,79 @@ pub fn read_tail_lines_filtered(
     ))
 }
 
+/// Walk the last `max_lines` non-empty lines of `path` newest first, handing
+/// each to `f` until it returns `Some`, and return that answer.
+///
+/// For callers after the latest record of some kind: it reads backward one
+/// chunk at a time and stops as soon as `f` answers, so it reads and parses
+/// only the lines it skips over. [`read_tail_lines_as_json`] reads and parses
+/// the whole window first — the sub-task rail asked it for 400 lines per child
+/// to look at the last one or two, and that parse was ~60% of a 26 s
+/// `subtasks_recovery` (stall sample, 2026-11-01).
+pub fn find_map_tail_line<R>(
+    path: &Path,
+    max_lines: usize,
+    mut f: impl FnMut(&str) -> Option<R>,
+) -> std::io::Result<Option<R>> {
+    let mut file = File::open(path)?;
+    let mut pos = file.metadata()?.len();
+    let mut seen = 0usize;
+    // `None` = keep walking, `Some(answer)` = stop (the answer may be `None`
+    // when the window ran out).
+    let mut visit = |bytes: &[u8]| -> Option<Option<R>> {
+        let line = String::from_utf8_lossy(bytes);
+        if line.trim().is_empty() {
+            return None;
+        }
+        if seen == max_lines {
+            return Some(None);
+        }
+        seen += 1;
+        f(&line).map(Some)
+    };
+    // Pieces of the line that runs into chunks not read yet, in read order
+    // (later in the file first). Kept apart so one huge line costs one join,
+    // not a copy per chunk.
+    let mut open_line: Vec<Vec<u8>> = Vec::new();
+    while pos > 0 {
+        let read_len = std::cmp::min(CHUNK_SIZE as u64, pos);
+        pos -= read_len;
+        file.seek(SeekFrom::Start(pos))?;
+        let mut chunk = vec![0u8; read_len as usize];
+        file.read_exact(&mut chunk)?;
+        let (Some(first_nl), Some(last_nl)) = (
+            chunk.iter().position(|&b| b == b'\n'),
+            chunk.iter().rposition(|&b| b == b'\n'),
+        ) else {
+            open_line.push(chunk);
+            continue;
+        };
+        // The open line starts right after this chunk's last newline.
+        let mut line = chunk[last_nl + 1..].to_vec();
+        for piece in open_line.drain(..).rev() {
+            line.extend_from_slice(&piece);
+        }
+        if let Some(answer) = visit(&line) {
+            return Ok(answer);
+        }
+        if last_nl > first_nl {
+            for seg in chunk[first_nl + 1..last_nl].split(|&b| b == b'\n').rev() {
+                if let Some(answer) = visit(seg) {
+                    return Ok(answer);
+                }
+            }
+        }
+        chunk.truncate(first_nl);
+        open_line.push(chunk);
+    }
+    // At the start of the file the open line is complete: it is the first.
+    let mut line = Vec::new();
+    for piece in open_line.drain(..).rev() {
+        line.extend_from_slice(&piece);
+    }
+    Ok(visit(&line).flatten())
+}
+
 /// Parse a *forward* incremental tail buffer read from a saved byte offset to
 /// EOF, returning the JSON-parsed complete lines plus the number of bytes that
 /// were definitively consumed — the length up to and including the last `\n` in
@@ -141,6 +214,64 @@ mod tests {
         let mut f = File::create(&path).unwrap();
         f.write_all(content).unwrap();
         path
+    }
+
+    /// Every line `find_map_tail_line` visits, newest first.
+    fn walk(path: &Path, max_lines: usize) -> Vec<String> {
+        let mut seen = Vec::new();
+        let none = find_map_tail_line(path, max_lines, |l| {
+            seen.push(l.to_string());
+            None::<()>
+        })
+        .unwrap();
+        assert!(none.is_none());
+        seen
+    }
+
+    #[test]
+    fn tail_walk_matches_the_lines_across_chunk_boundaries() {
+        // Lines of every size around the chunk: short ones, one straddling a
+        // boundary, one spanning several chunks, blank lines, no final newline.
+        let lines: Vec<String> = vec![
+            "first".into(),
+            "x".repeat(CHUNK_SIZE - 3),
+            String::new(),
+            "y".repeat(CHUNK_SIZE * 3 + 17),
+            "a".into(),
+            "b".into(),
+            "z".repeat(CHUNK_SIZE / 2),
+            "last".into(),
+        ];
+        let p = write_tmp("walk_chunks", lines.join("\n").as_bytes());
+        let want: Vec<String> = lines
+            .iter()
+            .rev()
+            .filter(|l| !l.is_empty())
+            .cloned()
+            .collect();
+        assert_eq!(walk(&p, 100), want);
+        assert_eq!(walk(&p, 3), want[..3].to_vec());
+        std::fs::remove_file(p).ok();
+
+        let p = write_tmp("walk_trailing_nl", b"one\ntwo\n\n");
+        assert_eq!(walk(&p, 10), vec!["two", "one"]);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn tail_walk_stops_at_the_first_answer() {
+        let p = write_tmp("walk_stop", b"1\n2\n3\n4\n");
+        let mut visited = 0;
+        let hit = find_map_tail_line(&p, 10, |l| {
+            visited += 1;
+            (l == "3").then(|| l.to_string())
+        })
+        .unwrap();
+        assert_eq!((hit.as_deref(), visited), (Some("3"), 2));
+        // Out of window before the match.
+        let miss = find_map_tail_line(&p, 1, |l| (l == "3").then_some(())).unwrap();
+        assert!(miss.is_none());
+        std::fs::remove_file(p).ok();
     }
 
     #[test]

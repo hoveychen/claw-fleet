@@ -389,7 +389,7 @@ fn pending_dir() -> Option<PathBuf> {
     handoffs_dir().map(|d| d.join("pending"))
 }
 
-fn chain_dir() -> Option<PathBuf> {
+pub(crate) fn chain_dir() -> Option<PathBuf> {
     handoffs_dir().map(|d| d.join("chain"))
 }
 
@@ -665,7 +665,9 @@ fn record_link_in(
         handed_at: now,
     });
     let json = serde_json::to_string_pretty(&chain).map_err(|e| format!("serialize: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("write chain: {e}"))
+    fs::write(&path, json).map_err(|e| format!("write chain: {e}"))?;
+    crate::json_dir_cache::note_changed(&path);
+    Ok(())
 }
 
 /// Remove one `from -> to` link from a chain file (best effort — the callers
@@ -681,11 +683,10 @@ fn unlink_in(dir: &Path, chain_id: &str, from_session_id: &str, to_session_id: &
         .retain(|l| !(l.from_session_id == from_session_id && l.to_session_id == to_session_id));
     if chain.links.is_empty() {
         let _ = fs::remove_file(&path);
-        return;
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&chain) {
+    } else if let Ok(json) = serde_json::to_string_pretty(&chain) {
         let _ = fs::write(&path, json);
     }
+    crate::json_dir_cache::note_changed(&path);
 }
 
 fn read_chain_file(path: &Path) -> Option<HandoffChain> {

@@ -157,13 +157,18 @@ impl Gate {
 static GATES: Mutex<Vec<Gate>> = Mutex::new(Vec::new());
 
 /// The per-id dirs a scan re-reads every tick, and so the ones worth gating:
-/// launch notes, manual marks, title overrides and task outcomes.
+/// launch notes, manual marks, title overrides, task outcomes and handoff
+/// chains. The chains are looked up once per row by the sub-task rail
+/// (`subtask_recovery::descendants_of` → `handoff::chain_containing`);
+/// ungated, each lookup `stat`ed all ~1000 chain files under this cache's
+/// lock — ~40% of a 26 s phone `subtasks_recovery` (stall sample, 2026-11-01).
 pub fn gateable_dirs() -> Vec<PathBuf> {
     [
         crate::launch_spec::spec_dir(),
         crate::session_mark::mark_dir(),
         crate::session_title::title_dir(),
         crate::task_outcome::outcome_dir(),
+        crate::handoff::chain_dir(),
     ]
     .into_iter()
     .flatten()
