@@ -2118,6 +2118,36 @@ fn local_date_from_ms(ms: u64) -> Option<String> {
 
 /// Cheap overlap gate for the live multi-source session cache. Exact inclusion
 /// is decided later by the per-turn projection, so false positives are harmless.
+/// Copy the usage-cache fingerprint fields from the live scan onto the
+/// reporting projections built by [`scan_sessions_for_date`].
+///
+/// Those projections leave `last_activity_ms` and the token totals at 0, while
+/// the live scan carries the real values, and `today_usage`'s projection cache
+/// is keyed by session id alone. Each report pass therefore saw every one of
+/// today's sessions as stale, re-folded it from disk and stored the zero
+/// fingerprint; the next receipt poll and the scan-loop warm then saw them
+/// stale again and re-folded them back. Two full cold folds every ten
+/// minutes, the report's one held under the cache lock for 40s–2min, with the
+/// phone's `today_usage` queued behind it (534s logged). The report itself
+/// never reads these fields — it folds its own metrics — so sharing the live
+/// values only makes both callers agree on what "unchanged" means.
+fn adopt_live_usage_fingerprints(
+    sessions: &mut [crate::session::SessionInfo],
+    live: &[crate::session::SessionInfo],
+) {
+    let by_key: HashMap<(&str, &str), &crate::session::SessionInfo> = live
+        .iter()
+        .map(|s| ((s.agent_source.as_str(), s.id.as_str()), s))
+        .collect();
+    for s in sessions.iter_mut() {
+        if let Some(l) = by_key.get(&(s.agent_source.as_str(), s.id.as_str())) {
+            s.last_activity_ms = l.last_activity_ms;
+            s.total_input_tokens = l.total_input_tokens;
+            s.total_output_tokens = l.total_output_tokens;
+        }
+    }
+}
+
 pub fn session_overlaps_date(si: &crate::session::SessionInfo, date: &str) -> bool {
     let Some(created) = local_date_from_ms(si.created_at_ms) else {
         return false;
@@ -2318,6 +2348,7 @@ fn run_backfill_check(
         }
 
         let mut sessions = scan_sessions_for_date(&date);
+        adopt_live_usage_fingerprints(&mut sessions, live_sessions);
         let mut known: HashSet<(String, String)> = sessions
             .iter()
             .map(|s| (s.agent_source.clone(), s.id.clone()))
@@ -2459,6 +2490,53 @@ fn run_backfill_check(
 
 #[cfg(test)]
 mod tests {
+    fn fingerprint_session(id: &str, input: u64, output: u64, last: u64) -> crate::session::SessionInfo {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "workspacePath": "/tmp",
+            "workspaceName": "tmp",
+            "isSubagent": false,
+            "parentSessionId": null,
+            "agentType": null,
+            "agentDescription": null,
+            "slug": null,
+            "aiTitle": null,
+            "status": "idle",
+            "tokenSpeed": 0.0,
+            "agentTokenSpeed": 0.0,
+            "totalOutputTokens": output,
+            "totalInputTokens": input,
+            "totalCostUsd": 0.0,
+            "agentTotalCostUsd": 0.0,
+            "costSpeedUsdPerMin": 0.0,
+            "lastMessagePreview": null,
+            "lastActivityMs": last,
+            "createdAtMs": 0,
+            "jsonlPath": "/tmp/x.jsonl",
+            "model": null,
+            "thinkingLevel": null,
+            "pid": null,
+            "pidPrecise": false,
+            "agentSource": "claude-code"
+        }))
+        .expect("construct SessionInfo")
+    }
+
+    #[test]
+    fn report_projections_share_the_live_usage_fingerprint() {
+        let live = vec![fingerprint_session("a", 10, 20, 30)];
+        let mut scanned = vec![
+            fingerprint_session("a", 0, 0, 0),
+            fingerprint_session("b", 0, 0, 0),
+        ];
+        super::adopt_live_usage_fingerprints(&mut scanned, &live);
+        let fp = |s: &crate::session::SessionInfo| {
+            (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens)
+        };
+        assert_eq!(fp(&scanned[0]), (30, 10, 20), "matching session adopts the live values");
+        assert_eq!(fp(&scanned[1]), (0, 0, 0), "a session the live scan lacks is left alone");
+    }
+
     use super::*;
 
     #[test]

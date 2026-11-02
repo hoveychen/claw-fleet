@@ -487,8 +487,15 @@ pub(crate) fn sessions_usage_for_date(
     sessions: &[&SessionInfo],
     date: &str,
 ) -> Vec<Vec<ModelReceiptLine>> {
+    // Batched like `warm_usage_cache` (see WARM_BATCH): a report pass over a
+    // day of ~90 cold sessions held this lock for minutes, and the phone's and
+    // the sidebar's `today_usage` polls queued behind it the whole time.
+    let mut result = Vec::with_capacity(sessions.len());
+    for batch in sessions.chunks(WARM_BATCH) {
+        let mut cache = usage_cache().lock().unwrap();
+        result.extend(sessions_usage_for_date_with(&mut cache, batch, date));
+    }
     let mut cache = usage_cache().lock().unwrap();
-    let result = sessions_usage_for_date_with(&mut cache, sessions, date);
     persist_cache(&mut cache);
     result
 }
