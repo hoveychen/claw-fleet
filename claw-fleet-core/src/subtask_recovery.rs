@@ -114,6 +114,13 @@ pub fn class_of(
     match phase {
         Phase::Running => RecoveryClass::Running,
         Phase::Parked => RecoveryClass::Parked,
+        // The probe holds every fresh failure in Blocked for its grace window,
+        // a deliberate interrupt included. Nothing retries an interrupt by
+        // itself, so calling it Blocked here would refuse a boss-confirmed
+        // resume for three minutes with a "Fleet is still retrying" message.
+        Phase::Blocked if tail == Some(&TailVerdict::Interrupted) => {
+            RecoveryClass::UserInterrupted
+        }
         Phase::Blocked => RecoveryClass::Blocked,
         Phase::Unknown => RecoveryClass::Unknown,
         Phase::Done => RecoveryClass::Done,
@@ -698,6 +705,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fresh_interrupt_is_user_interrupted_not_blocked() {
+        let i = TailVerdict::Interrupted;
+        assert_eq!(class_of(Phase::Blocked, Some(&i), false, false), RecoveryClass::UserInterrupted);
+        let rl = TailVerdict::RateLimited;
+        assert_eq!(class_of(Phase::Blocked, Some(&rl), false, false), RecoveryClass::Blocked);
+        assert_eq!(class_of(Phase::Blocked, None, false, false), RecoveryClass::Blocked);
+    }
+
+    #[test]
     fn interrupted_resumes_only_with_boss_confirmation() {
         use RecoveryClass as C;
         assert!(may_resume(C::Recoverable, false));
@@ -812,11 +828,14 @@ mod tests {
                 class_of(Phase::Parked, tail.as_ref(), false, false),
                 RecoveryClass::Parked
             );
-            // Inside the grace window / retries pending: the scheduler owns it.
-            assert_eq!(
-                class_of(Phase::Blocked, tail.as_ref(), false, false),
+            // Inside the grace window / retries pending: the scheduler owns it
+            // — except a deliberate interrupt, which nothing retries.
+            let blocked = if tail == Some(TailVerdict::Interrupted) {
+                RecoveryClass::UserInterrupted
+            } else {
                 RecoveryClass::Blocked
-            );
+            };
+            assert_eq!(class_of(Phase::Blocked, tail.as_ref(), false, false), blocked);
             assert_eq!(
                 class_of(Phase::Unknown, tail.as_ref(), false, false),
                 RecoveryClass::Unknown
