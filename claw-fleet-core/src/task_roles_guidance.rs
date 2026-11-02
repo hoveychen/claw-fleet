@@ -54,6 +54,7 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **汇报的结论分证据等级写**：亲自核实过的、推断的、转述别人还没核过的，分开标明，不要用同一种肯定语气写。\n\
 - 子任务的最终回复里可能带着**待澄清的问题**——澄清归你，不归{title}。能按需求和上下文定的自己定；只有真要{title}拍板的，才由你发卡问{title}。定下来后用 `fleet__spawn` 派一个新子任务带着答复接着做（简报里写清前一个做到哪），或者自己做完；别用 `fleet__control` 的 send 或 resume 给已交回结果的子任务派新活——send 的消息多半会丢（它已经退出），resume 会被拒绝。\n\
 - **断网或服务中断后**，回合中途断掉的子任务会列在每轮注入里：「可恢复」的先核对它已经做完了什么，再用 `fleet__control action=resume id=<id>` 让它接着做；已交回结果的子任务绝不唤醒，新活照样用 `fleet__spawn` 派。Agent/Task 工具派的子代理跟你一起被切断后没法恢复，重新派一次。\n\
+- **要暂停一个子任务，用 `fleet__control action=interrupt`，不要用 stop**：interrupt 只打断当前回合，会话原样留着；{title}要它继续时，用 `fleet__control action=resume id=<id> confirmed=true`（没有{title}的话不要带 confirmed）。\n\
 - **只有你向{title}汇报。**子任务都回报后，把结果汇总成一张卡；整件事做完了才设 `taskComplete: true`，{title}在任务列表里看到的就是「待验收」。\n\
 \n\
 {drift}\
@@ -84,6 +85,7 @@ pub fn render_section(title: &str, locale: &str) -> String {
 - **Report conclusions by grade of evidence**: what you verified yourself, what you infer, and what you relay from someone else unchecked — labelled apart, not in one confident voice.\n\
 - A sub-task's final reply may carry **open questions** — clarifying them is your job, not {title}'s. Settle what the request and context allow; raise a card to {title} only for a call {title} really has to make. Then `fleet__spawn` a fresh sub-task carrying the answer (its brief says how far the last one got), or finish the work yourself; do not hand new work to a sub-task that already reported with `fleet__control` send or resume — it has most likely exited, so a send is lost, and a resume is refused.\n\
 - **After a network or service interruption**, sub-tasks that died mid-turn are listed in the per-turn injection: check what a recoverable one already finished, then wake it with `fleet__control action=resume id=<id>`. A sub-task that already reported is never woken — new work still goes through `fleet__spawn`. Agent/Task-tool subagents cut off along with you cannot be resumed; dispatch them again.\n\
+- **To pause a sub-task, use `fleet__control action=interrupt`, not stop**: interrupt only cuts the current turn and leaves the session intact; when {title} wants it continued, use `fleet__control action=resume id=<id> confirmed=true` (never pass confirmed without {title}'s word).\n\
 - **Only you report to {title}.** When every sub-task has reported back, summarise the result in one card; set `taskComplete: true` only when the whole task is done — that is what {title} sees as \"awaiting review\".\n\
 \n\
 {drift}\
@@ -261,7 +263,7 @@ pub(crate) fn recovery_block_for(
             out.push_str(&format!("「鉴权/账号失败」的：先修好凭证或问{title}，不要盲目 resume——修好之前只会再失败一次。\n"));
         }
         if has(C::UserInterrupted) {
-            out.push_str(&format!("「被手动打断」的：是{title}有意停下的，除非{title}要求，不要 resume。\n"));
+            out.push_str(&format!("「被手动打断」的：是{title}有意暂停的，除非{title}要求，不要 resume；{title}要它继续时，用 `fleet__control action=resume id=<id> confirmed=true`。\n"));
         }
         out.push_str("已交回结果的子任务不会列在这里，也绝不唤醒；要给它新活，用 `fleet__spawn` 派新子任务。");
     } else {
@@ -272,7 +274,7 @@ pub(crate) fn recovery_block_for(
             out.push_str(&format!("Auth/account failure: fix the credentials or ask {title} first; do not resume blindly — it would just fail again.\n"));
         }
         if has(C::UserInterrupted) {
-            out.push_str(&format!("Interrupted by hand: {title} stopped it on purpose; do not resume it unless {title} asks.\n"));
+            out.push_str(&format!("Interrupted by hand: {title} paused it on purpose; do not resume it unless {title} asks — when they do, use `fleet__control action=resume id=<id> confirmed=true`.\n"));
         }
         out.push_str("Sub-tasks that already handed back their result are never listed here and are never woken; new work for them goes through `fleet__spawn`.");
     }
@@ -494,7 +496,8 @@ mod tests {
             "fleet__control action=resume id=<id>",
             "先核对它已经做完了什么",
             "先修好凭证或问老板",
-            "老板有意停下",
+            "老板有意暂停",
+            "confirmed=true",
             "绝不唤醒",
             "fleet__spawn",
         ] {
@@ -505,7 +508,8 @@ mod tests {
             "`11111111` \"修登录页\" step P2 · recoverable",
             "fleet__control action=resume id=<id>",
             "ask Alex first",
-            "Alex stopped it on purpose",
+            "Alex paused it on purpose",
+            "confirmed=true",
             "never woken",
             "fleet__spawn",
         ] {

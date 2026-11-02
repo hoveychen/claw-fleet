@@ -41,17 +41,25 @@ export interface ResumeOutcome {
 }
 
 /** Classes listed in the confirm list but not selectable: failures the boss
- *  should see, where a blind resume would fail again or undo a deliberate
- *  stop. Everything else that is not recoverable (done, closed, running,
- *  parked, still being retried, unreadable) stays out of the list. */
+ *  should see, where a blind resume would fail again. Everything else that is
+ *  not resumable (done, closed, running, parked, still being retried,
+ *  unreadable) stays out of the list. */
 const SHOWN_DISABLED: ReadonlySet<RecoveryClass> = new Set<RecoveryClass>([
   "authFailed",
-  "userInterrupted",
   "failed",
 ]);
 
+/** Classes the boss can tick. `userInterrupted` is a deliberate pause: it is
+ *  selectable (ticking it is the boss asking for it to continue) but never
+ *  pre-ticked. */
+const SELECTABLE: ReadonlySet<RecoveryClass> = new Set<RecoveryClass>([
+  "recoverable",
+  "userInterrupted",
+]);
+
+/** How many sub-tasks the boss could resume — what gates the entry button. */
 export function recoverableCount(list: readonly SubtaskStatus[] | null | undefined): number {
-  return (list ?? []).filter((s) => s.class === "recoverable").length;
+  return (list ?? []).filter((s) => SELECTABLE.has(s.class)).length;
 }
 
 export interface RecoveryRow {
@@ -60,13 +68,14 @@ export interface RecoveryRow {
   selectable: boolean;
 }
 
-/** The confirm list: recoverable sub-tasks first, then the greyed failures,
- *  each group in the core's order. */
+/** The confirm list: recoverable sub-tasks first, then paused ones, then the
+ *  greyed failures, each group in the core's order. */
 export function recoveryRows(list: readonly SubtaskStatus[]): RecoveryRow[] {
   const live = list.filter((s) => s.class === "recoverable");
+  const paused = list.filter((s) => s.class === "userInterrupted");
   const greyed = list.filter((s) => SHOWN_DISABLED.has(s.class));
   return [
-    ...live.map((status) => ({ status, selectable: true })),
+    ...[...live, ...paused].map((status) => ({ status, selectable: true })),
     ...greyed.map((status) => ({ status, selectable: false })),
   ];
 }

@@ -187,7 +187,7 @@ export function RecoverDialog({
                       )}
                     </span>
                     <span className={styles.row_detail}>
-                      {!selectable && `${t(`home.recover_class_${s.class}`, s.class)} · `}
+                      {s.class !== "recoverable" && `${t(`home.recover_class_${s.class}`, s.class)} · `}
                       {s.via &&
                         `${t("home.recover_via", "Spawned by \"{{title}}\"", {
                           title: titleOf(s.via) ?? shortId(s.via),
