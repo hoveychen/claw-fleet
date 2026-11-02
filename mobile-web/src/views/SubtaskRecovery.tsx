@@ -178,7 +178,7 @@ function RecoverSheet({
                       {s.step && <span className={styles.step}>{t("第 {0} 步", s.step.replace(/^P/, ""))}</span>}
                     </span>
                     <span className={styles.rowDetail}>
-                      {!selectable && label && `${t(label)} · `}
+                      {s.class !== "recoverable" && label && `${t(label)} · `}
                       {s.via && `${t("由「{0}」派出", titleOf(s.via) ?? shortId(s.via))} · `}
                       {s.detail}
                     </span>

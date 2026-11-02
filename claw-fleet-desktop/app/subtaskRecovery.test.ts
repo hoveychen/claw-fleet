@@ -28,18 +28,18 @@ describe("subtask recovery list", () => {
     st("run", "running"),
   ];
 
-  it("counts only recoverable sub-tasks", () => {
-    expect(recoverableCount(list)).toBe(2);
+  it("counts recoverable and paused sub-tasks", () => {
+    expect(recoverableCount(list)).toBe(3);
     expect(recoverableCount(null)).toBe(0);
   });
 
-  it("lists recoverable first, greys failures, hides done/closed/running", () => {
+  it("lists recoverable, then paused, greys failures, hides done/closed/running", () => {
     const rows = recoveryRows(list);
     expect(rows.map((r) => [r.status.sessionId, r.selectable])).toEqual([
       ["a", true],
       ["b", true],
+      ["esc", true],
       ["auth", false],
-      ["esc", false],
     ]);
   });
 
@@ -48,8 +48,9 @@ describe("subtask recovery list", () => {
     const picked = defaultRecoverySelection(list);
     expect([...picked].sort()).toEqual(["a", "b"]);
     picked.add("auth");
+    picked.add("esc");
     picked.add("done");
     picked.delete("a");
-    expect(selectedRecoveryIds(rows, picked)).toEqual(["b"]);
+    expect(selectedRecoveryIds(rows, picked)).toEqual(["b", "esc"]);
   });
 });

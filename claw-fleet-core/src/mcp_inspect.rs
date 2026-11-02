@@ -47,14 +47,15 @@ pub fn inspect_tool_def() -> Value {
 pub fn control_tool_def() -> Value {
     json!({
         "name": "fleet__control",
-        "description": "Signal another agent session. `send` queues a follow-up message for a Fleet-owned session — it is delivered as a new turn the moment that session's current turn ends, so it is the way to steer a headless session that is already running (those do not appear in `ListAgents` and `SendMessage` cannot reach them). `resume` wakes a sub-task whose turn died mid-way (network drop, server errors past their retries, process killed): Fleet re-probes it first and REFUSES anything else — a sub-task that ended cleanly (already handed back its result) is never woken, nor one that is running, retrying by itself, waiting on a card, interrupted on purpose, failing on auth / account, or whose task the boss closed; the refusal says which. `text` is the resume prompt (default: continue from where the interruption hit). `stop` and `interrupt` are DESTRUCTIVE and not undoable: `stop` terminates the target's whole process tree (SIGTERM, or SIGKILL with `force: true`) and `interrupt` aborts its in-flight tool call; confirm with the user before signalling a session you did not start. Use this instead of the `fleet send` / `fleet stop` / `fleet interrupt` CLI. Actions: send (`id` + `text`), resume (`id`, optional `text`), stop (`id`), interrupt (`id`). To find ids first, use `fleet__inspect` action=list.",
+        "description": "Signal another agent session. `send` queues a follow-up message for a Fleet-owned session — it is delivered as a new turn the moment that session's current turn ends, so it is the way to steer a headless session that is already running (those do not appear in `ListAgents` and `SendMessage` cannot reach them). `resume` wakes a sub-task whose turn died mid-way (network drop, server errors past their retries, process killed): Fleet re-probes it first and REFUSES anything else — a sub-task that ended cleanly (already handed back its result) is never woken, nor one that is running, retrying by itself, waiting on a card, failing on auth / account, or whose task the boss closed; the refusal says which. A sub-task interrupted on purpose (`interrupt` is how you pause one) is refused too, unless the boss has asked for it to continue and you pass `confirmed: true`. `text` is the resume prompt (default: continue from where the interruption hit). `stop` and `interrupt` are DESTRUCTIVE and not undoable: `stop` terminates the target's whole process tree (SIGTERM, or SIGKILL with `force: true`) and `interrupt` aborts its in-flight tool call; confirm with the user before signalling a session you did not start. Use this instead of the `fleet send` / `fleet stop` / `fleet interrupt` CLI. Actions: send (`id` + `text`), resume (`id`, optional `text`), stop (`id`), interrupt (`id`). To find ids first, use `fleet__inspect` action=list.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["send", "stop", "interrupt", "resume"]},
                 "id": {"type": "string", "description": "Agent id or workspace-name prefix (resume: full session id or a ≥6-char id prefix). Required."},
                 "text": {"type": "string", "description": "send: message to deliver at the end of the target's current turn (required). resume: optional prompt for the resumed turn."},
-                "force": {"type": "boolean", "description": "SIGKILL instead of SIGTERM (stop only)."}
+                "force": {"type": "boolean", "description": "SIGKILL instead of SIGTERM (stop only)."},
+                "confirmed": {"type": "boolean", "description": "resume only: the boss explicitly asked for this deliberately interrupted (paused) sub-task to continue. Never set it on your own judgment."}
             },
             "required": ["action", "id"],
             "additionalProperties": false
@@ -520,7 +521,8 @@ pub fn handle_control(args: &Value, action: &str) -> Result<String, String> {
             .filter(|t| !t.is_empty())
             .unwrap_or(crate::subtask_recovery::DEFAULT_RESUME_PROMPT);
         let framed = crate::live_inject::frame_as_agent(text);
-        return crate::subtask_recovery::resume_child(&id, Some(&framed));
+        let confirmed = crate::mcp_control::flag(args, "confirmed");
+        return crate::subtask_recovery::resume_child(&id, Some(&framed), confirmed);
     }
     let sessions = load_sessions();
     let target = resolve(&sessions, &id)?;

@@ -45,7 +45,9 @@ pub enum RecoveryClass {
     /// Waiting for the boss on a decision card / permission prompt.
     Parked,
     /// Cut off on purpose (Esc, SIGINT, `turn_aborted`). Not auto-woken: the
-    /// interrupt may have been the point.
+    /// interrupt may have been the point. Resumable only on the boss's say-so
+    /// (see [`resume_child`]'s `boss_confirmed`) — this is how a paused
+    /// sub-task is continued.
     UserInterrupted,
     /// Authentication / account / credit failure (403, OAuth expired, out of
     /// credits). Waking it would just fail again; listed so the boss sees it.
@@ -514,6 +516,11 @@ impl VerdictCache {
     }
 }
 
+/// Whether [`resume_child`] may wake a sub-task of this class.
+fn may_resume(class: RecoveryClass, boss_confirmed: bool) -> bool {
+    class.is_recoverable() || (boss_confirmed && class == RecoveryClass::UserInterrupted)
+}
+
 /// Why [`resume_child`] will not wake a session of this class. Agent-facing.
 fn refusal(class: RecoveryClass) -> &'static str {
     match class {
@@ -532,7 +539,8 @@ fn refusal(class: RecoveryClass) -> &'static str {
         RecoveryClass::Parked => "it is waiting for the boss on a decision card",
         RecoveryClass::UserInterrupted => {
             "it was interrupted on purpose (Esc / interrupt), not by a failure — ask the boss \
-             before restarting it"
+             first; once the boss has asked for it to continue, call resume again with \
+             confirmed: true"
         }
         RecoveryClass::AuthFailed => {
             "its last turn failed on authentication / account access; resuming would fail the \
@@ -545,15 +553,21 @@ fn refusal(class: RecoveryClass) -> &'static str {
 }
 
 /// Wake one sub-task that died mid-turn. Re-probes first and refuses anything
-/// that is not [`RecoveryClass::Recoverable`]; a [`RecoveryClass::Done`]
-/// sub-task is always refused. `prompt` falls back to
-/// [`DEFAULT_RESUME_PROMPT`] when empty. Returns a one-line `ok: …` report.
-pub fn resume_child(child_id: &str, prompt: Option<&str>) -> Result<String, String> {
+/// that is not [`RecoveryClass::Recoverable`] — or, with `boss_confirmed`,
+/// [`RecoveryClass::UserInterrupted`] (a deliberate pause the boss now wants
+/// continued); a [`RecoveryClass::Done`] sub-task is always refused. `prompt`
+/// falls back to [`DEFAULT_RESUME_PROMPT`] when empty. Returns a one-line
+/// `ok: …` report.
+pub fn resume_child(
+    child_id: &str,
+    prompt: Option<&str>,
+    boss_confirmed: bool,
+) -> Result<String, String> {
     let child = crate::session_probe::resolve_id(child_id)?;
     let parent = crate::launch_spec::spawned_by_of(&child).unwrap_or_default();
     let st = status_of(&child, &parent);
     let short = short_id(&child);
-    if !st.class.is_recoverable() {
+    if !may_resume(st.class, boss_confirmed) {
         return Err(format!(
             "refused to resume {short}: {} (class {:?}; {})",
             refusal(st.class),
@@ -638,9 +652,10 @@ pub struct ResumeOutcome {
 /// Resume a batch of sub-tasks — the manual "recover interrupted sub-tasks"
 /// action. Each id goes through [`resume_child`] on its own, so a refusal on
 /// one never blocks the rest. Blank and repeated ids are dropped; order is
-/// kept.
+/// kept. Every caller is the boss ticking rows in that dialog, so a
+/// deliberately interrupted sub-task they ticked counts as confirmed.
 pub fn resume_children(session_ids: &[String], prompt: Option<&str>) -> Vec<ResumeOutcome> {
-    resume_children_with(session_ids, |id| resume_child(id, prompt))
+    resume_children_with(session_ids, |id| resume_child(id, prompt, true))
 }
 
 fn resume_children_with(
@@ -681,6 +696,17 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_resumes_only_with_boss_confirmation() {
+        use RecoveryClass as C;
+        assert!(may_resume(C::Recoverable, false));
+        assert!(!may_resume(C::UserInterrupted, false));
+        assert!(may_resume(C::UserInterrupted, true));
+        for c in [C::Done, C::Running, C::Blocked, C::Parked, C::AuthFailed, C::Failed, C::Closed, C::Unknown] {
+            assert!(!may_resume(c, true), "{c:?} must never be resumed");
+        }
+    }
 
     const ALL_PHASES: [Phase; 6] = [
         Phase::Running,
