@@ -9,6 +9,7 @@ import { initTheme } from "./theme";
 import { initWakeLock } from "./wakeLock";
 import { installNativeWakeLock } from "./wakeLockNative";
 import { lockZoom } from "./lockZoom";
+import { installKeyboardInset } from "./keyboardInset";
 import { ConfirmProvider } from "./confirmDialog";
 import { Skeleton, SkeletonCard } from "./views/loading";
 // Inter, bundled like the desktop's (claw-fleet-desktop/app/fonts.ts) — the
@@ -25,6 +26,7 @@ initWakeLock();
 // After installation, wakeLock module re-aligns lock state itself.
 void installNativeWakeLock();
 lockZoom();
+installKeyboardInset();
 
 const cloudMode = import.meta.env.MODE === "cloud";
 

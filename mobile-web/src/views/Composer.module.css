@@ -2,13 +2,15 @@
   composes: sheet_enter from "../motion.module.css";
   position: fixed;
   inset: 0;
+  /* Stop above the iOS soft keyboard (see keyboardInset.ts). */
+  bottom: var(--kb-inset, 0px);
   z-index: 40;
   background: var(--color-bg);
 }
 
 .sheet {
   width: 100%;
-  height: 100dvh;
+  height: 100%;
   background: var(--color-bg);
   display: flex;
   flex-direction: column;
@@ -439,6 +441,13 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* With the soft keyboard up the page already ends at the keyboard's top edge:
+   the home-indicator inset and the peek bar (now hidden behind the keyboard)
+   would only open a gap between the pill and the keys. */
+:global(html[data-kb-open]) .resumeBox {
+  bottom: 6px;
 }
 
 /* 胶囊底下那层渐隐。玻璃只挡住胶囊自己那一块，胶囊上方的配置 chip 仍然直接压在
