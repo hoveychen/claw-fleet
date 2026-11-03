@@ -7,6 +7,7 @@ import {
   type AssistantSelection,
 } from "../../../shared-ts/sessionExplain";
 import { t } from "../i18n";
+import { keyboardInset } from "../keyboardInset";
 import type { ExplainPreset } from "../sessionExplain";
 import { Spinner } from "./loading";
 import styles from "./SelectionAskBar.module.css";
@@ -137,7 +138,10 @@ export function SelectionAskBar({
     const height = barRef.current?.offsetHeight ?? 40;
     const margin = 8;
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    // Visible height: the iOS soft keyboard overlays the bottom of the layout
+    // viewport while the custom-question input is focused.
+    const vv = window.visualViewport;
+    const vh = window.innerHeight - (vv ? keyboardInset(window.innerHeight, vv.height, vv.offsetTop) : 0);
     // The passage scrolled off screen: nothing to hang the bar on until it is
     // back (the scroll listener re-reads and this runs again).
     if (rect.bottom < 0 || rect.top > vh) {

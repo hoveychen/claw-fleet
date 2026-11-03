@@ -128,7 +128,8 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* Ride on top of the iOS soft keyboard (see keyboardInset.ts). */
+  bottom: var(--kb-inset, 0px);
   z-index: 81;
   display: flex;
   flex-direction: column;
@@ -162,7 +163,7 @@
 }
 
 .sheet {
-  height: 72dvh;
+  height: min(72dvh, calc(var(--vv-height, 100dvh) - 24px));
   gap: 8px;
 }
 

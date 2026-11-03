@@ -10,6 +10,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Folder, Plus, Square, Trash2 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
+import { keyboardInset } from "../keyboardInset";
 import type { FleetTransport } from "../transport";
 import { clearProc, killProc, listProcs, runProc, type ProcRecord } from "../terminal";
 import { isDefaultShellCommand } from "../../../shared-ts/procShell";
@@ -66,7 +67,7 @@ function useKeyboardInset(): number {
     if (!vv) return; // Older browsers: fall back to layout viewport, which shrinks
                      // naturally when keyboard pops (most Android behavior)
     const apply = () => {
-      setInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      setInset(keyboardInset(window.innerHeight, vv.height, vv.offsetTop));
     };
     apply();
     vv.addEventListener("resize", apply);
