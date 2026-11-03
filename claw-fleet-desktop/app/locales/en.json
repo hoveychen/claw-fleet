@@ -74,6 +74,7 @@
       "offset_chars": "Char offset",
       "limit_chars": "Char limit",
       "force": "Force",
+      "confirmed": "Boss confirmed",
       "workspace": "Project",
       "duration": "Duration",
       "kind": "Kind",

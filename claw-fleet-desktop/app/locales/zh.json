@@ -74,6 +74,7 @@
       "offset_chars": "字符偏移",
       "limit_chars": "字符上限",
       "force": "强制",
+      "confirmed": "老板已确认",
       "workspace": "项目",
       "duration": "时长",
       "kind": "类型",
