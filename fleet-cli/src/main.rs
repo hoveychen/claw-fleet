@@ -1726,6 +1726,13 @@ fn main() {
 
     let cli = Cli::parse();
 
+    if !matches!(
+        cli.command,
+        Commands::Serve { .. } | Commands::WebUi { .. } | Commands::Mcp | Commands::Acp { .. }
+    ) {
+        claw_fleet_core::dsh_source::disable_event_watcher();
+    }
+
     match cli.command {
         Commands::Agents { all, json } => commands::agents::cmd_agents(all, json),
         Commands::Agent { id, json } => commands::agents::cmd_agent(&id, json),
