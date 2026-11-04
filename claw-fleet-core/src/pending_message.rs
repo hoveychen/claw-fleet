@@ -289,6 +289,15 @@ pub fn enqueue(
         crate::ask_preempt::touch_inbox(session_id, sender);
         return Ok(Delivery::Injected);
     }
+    // Another agent's message (a subtask's report, a watch firing, a card
+    // answered) goes the same way, in Fleet's peer frame: through the socket it
+    // would sit behind a foreground command until that command ends. The
+    // socket below stays the fallback — it still reaches a turn after its first
+    // `result` has closed the host's stdin.
+    if sender == Sender::Agent && crate::claude_host::send_agent_message(session_id, text).is_ok() {
+        crate::ask_preempt::touch_inbox(session_id, sender);
+        return Ok(Delivery::Injected);
+    }
     let signed;
     let injected_text = match sender {
         Sender::User => {
@@ -299,16 +308,6 @@ pub fn enqueue(
     };
     if crate::live_inject::inject(session_id, injected_text).is_ok() {
         // A turn blocked on a decision card polls this to step aside.
-        crate::ask_preempt::touch_inbox(session_id, sender);
-        return Ok(Delivery::Injected);
-    }
-    // Windows has no socket path, so another agent's message goes through the
-    // turn's stdin holder instead, in Fleet's own peer frame and without
-    // backgrounding anything — the same semantics the socket gives it on unix.
-    if sender == Sender::Agent
-        && crate::claude_host::AGENT_MESSAGES_VIA_HOST
-        && crate::claude_host::send_agent_message(session_id, text).is_ok()
-    {
         crate::ask_preempt::touch_inbox(session_id, sender);
         return Ok(Delivery::Injected);
     }

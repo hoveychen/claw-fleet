@@ -334,16 +334,18 @@ pub struct Reply {
 /// it backgrounds whatever foreground task blocks the next tool boundary.
 const OP_USER: &str = "user";
 
-/// Control op for a message from another agent (`Sender::Agent`): delivered in
-/// Fleet's peer frame and absorbed at the next tool boundary on its own, the
-/// way the CLI socket delivers it — no task is backgrounded for it.
+/// Control op for a message from another agent (`Sender::Agent`: a subtask's
+/// report, a watch firing, a card answered): delivered in Fleet's peer frame,
+/// and it backgrounds the blocking foreground task just like the user's words.
+///
+/// It used to wait for the tool boundary on its own, the way the CLI socket
+/// delivers it. Measured over 2026-10-27..11-04: 87 such messages hit a
+/// foreground Bash and sat queued for a median 36s (max 596s), while the
+/// user's 17 were all absorbed within 8s. A probe with the agent frame plus
+/// `background_tasks` was absorbed in 4.9s against 46.0s without, and the
+/// backgrounded command ran to completion (wiki
+/// `architecture/session-orchestration/foreground-task-preemption-measured`).
 const OP_AGENT: &str = "agent";
-
-/// Whether agent messages go through the host. Only where the CLI's own
-/// socket ([`crate::live_inject`]) is unavailable, i.e. Windows: on unix the
-/// socket already delivers them with a real peer origin, and unlike the host
-/// it keeps working after the turn's first `result` closes stdin.
-pub const AGENT_MESSAGES_VIA_HOST: bool = cfg!(not(unix));
 
 /// Control op that ends claude when its turn is over and it is only waiting
 /// for background tasks. Refused while the model is working.
@@ -648,8 +650,8 @@ impl Turn {
         BgOrder { tool_use_id: f.tool_use_id.clone(), at: (f.started + BACKGROUND_GRACE).max(now) }
     }
 
-    /// A user message was just written to stdin.
-    fn on_user_message(&mut self, now: std::time::Instant) -> Vec<BgOrder> {
+    /// A message (the user's or an agent's) was just written to stdin.
+    fn on_message(&mut self, now: std::time::Instant) -> Vec<BgOrder> {
         self.awaiting_boundary = true;
         self.foreground.iter().map(|f| Self::order_for(f, now)).collect()
     }
@@ -844,11 +846,9 @@ mod host {
                 Err(e) => fail(e),
             };
         }
-        let from_user = match req.op.as_str() {
-            OP_USER => true,
-            OP_AGENT => false,
-            _ => return fail("unknown op".into()),
-        };
+        if req.op != OP_USER && req.op != OP_AGENT {
+            return fail("unknown op".into());
+        }
         if req.text.trim().is_empty() {
             return fail("empty text".into());
         }
@@ -860,13 +860,7 @@ mod host {
             if let Err(e) = write_stdin(&mut shared, &user_line(&req.text)) {
                 return fail(e);
             }
-            // An agent message waits for the next tool boundary like a socket
-            // delivery does; only the user's words cut a running task short.
-            if from_user {
-                shared.turn.on_user_message(std::time::Instant::now())
-            } else {
-                Vec::new()
-            }
+            shared.turn.on_message(std::time::Instant::now())
         };
         let backgrounded = orders.iter().map(|o| o.tool_use_id.clone()).collect();
         eprintln!("[fleet-claude-host] {} message delivered, background {backgrounded:?}", req.op);
@@ -1110,11 +1104,11 @@ mod tests {
         let mut turn = Turn::default();
         turn.on_event(started("a"), t0);
         // Arrives 0.5s into the command: wait out the rest of the grace.
-        let orders = turn.on_user_message(t0 + Duration::from_millis(500));
+        let orders = turn.on_message(t0 + Duration::from_millis(500));
         assert_eq!(orders, vec![BgOrder { tool_use_id: "a".into(), at: t0 + BACKGROUND_GRACE }]);
         // Arrives 10s in: now.
         let late = t0 + Duration::from_secs(10);
-        assert_eq!(turn.on_user_message(late)[0].at, late);
+        assert_eq!(turn.on_message(late)[0].at, late);
         assert!(turn.still_due("a"));
         turn.on_event(Event::TaskReleased { task_id: "t-a".into() }, late);
         assert!(!turn.still_due("a"));
@@ -1124,7 +1118,7 @@ mod tests {
     fn a_message_with_nothing_running_catches_the_next_task_before_the_boundary() {
         let t0 = Instant::now();
         let mut turn = Turn::default();
-        assert!(turn.on_user_message(t0).is_empty());
+        assert!(turn.on_message(t0).is_empty());
         let (orders, _) = turn.on_event(started("b"), t0);
         assert_eq!(orders, vec![BgOrder { tool_use_id: "b".into(), at: t0 + BACKGROUND_GRACE }]);
         // The boundary absorbs the message; later tasks run undisturbed.
@@ -1364,12 +1358,12 @@ exit 3
         host_runs_a_turn(true);
     }
 
-    /// The Windows agent path, over the control file: the message reaches
-    /// stdin in Fleet's peer frame and no `background_tasks` follows, even
-    /// with a foreground task running well past the grace window.
+    /// The agent path, over the control file: the message reaches stdin in
+    /// Fleet's peer frame, and the foreground task blocking the tool boundary
+    /// is backgrounded once the grace window is over, as for the user's words.
     #[cfg(unix)]
     #[test]
-    fn an_agent_message_is_framed_and_backgrounds_nothing() {
+    fn an_agent_message_is_framed_and_backgrounds_the_foreground_task() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1409,7 +1403,7 @@ while read -r rest; do printf '%s\n' "$rest" >> "$1"; done
         std::thread::sleep(Duration::from_millis(300));
         let framed = crate::live_inject::frame_as_agent("watch fired");
         let reply = send_in(&registry, "sess-a", OP_AGENT, &framed).unwrap();
-        assert!(reply.ok && reply.backgrounded.is_empty(), "{reply:?}");
+        assert!(reply.ok && reply.backgrounded == ["toolu_1"], "{reply:?}");
 
         assert_eq!(host.join().unwrap().unwrap(), 0);
         let lines: Vec<serde_json::Value> = std::fs::read_to_string(&log)
@@ -1417,9 +1411,12 @@ while read -r rest; do printf '%s\n' "$rest" >> "$1"; done
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
-        assert_eq!(lines.len(), 2, "nothing but the prompt and the message: {lines:?}");
+        assert_eq!(lines.len(), 3, "the prompt, the message and one background order: {lines:?}");
         assert_eq!(lines[1]["type"], "user");
         let text = lines[1]["message"]["content"].as_str().unwrap();
         assert_eq!(crate::live_inject::strip_agent_frame(text), Some("watch fired"));
+        assert_eq!(lines[2]["type"], "control_request");
+        assert_eq!(lines[2]["request"]["subtype"], "background_tasks");
+        assert_eq!(lines[2]["request"]["tool_use_id"], "toolu_1");
     }
 }
