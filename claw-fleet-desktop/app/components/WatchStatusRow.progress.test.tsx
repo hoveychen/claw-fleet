@@ -124,7 +124,10 @@ describe("WatchStatusRow progress", () => {
   });
 
   it("draws elapsed against the expected wait when only expect-by is known", () => {
-    render(watch({ expectBy: Date.now() + 30 * MIN }));
+    // One clock read for both ends: two separate Date.now() calls can straddle
+    // a millisecond and render the expected wait as "~59m59s".
+    const t = Date.now();
+    render(watch({ created: t - 30 * MIN, expectBy: t + 30 * MIN }));
     expect(container.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("50");
     expect(container.textContent).toMatch(/30m\d\ds of ~1h00m/);
   });
