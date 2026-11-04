@@ -483,7 +483,7 @@ fn permission_prompt_tool_def() -> Value {
 fn a2ui_render_tool_def() -> Value {
     json!({
         "name": "fleet__render_a2ui",
-        "description": "Render an A2UI v0.9 agent-to-client message tree in Fleet's Decision Panel via the official @a2ui/react renderer, then return the user's Action payload. Reach for this when the UI needs richer layout than fleet__ask's flat formFields (Tabs / Modal / Card / Video / etc.). For simple form or option asks, prefer fleet__ask.",
+        "description": "Render an A2UI v0.9 agent-to-client message tree in Fleet's Decision Panel via the official @a2ui/react renderer, then return the user's Action payload. Reach for this when the UI needs richer layout than fleet__ask's flat formFields (Tabs / Modal / Card / Video / etc.). For simple form or option asks, prefer fleet__ask. If a new message reaches your turn while the card waits, the call returns early with the card still open: handle the message, then call `fleet__render_a2ui` with `action: \"wait\"` (or `\"withdraw\"`) and that `request_id` before raising any other card.",
         "inputSchema": crate::mcp_a2ui_ipc::a2ui_render_input_schema(),
     })
 }
@@ -1392,9 +1392,10 @@ fn handle_fleet_ask_withdraw(params: &Value, args: &Value) -> Result<Value, Json
 }
 
 /// Refusal for a new card while an earlier one stepped aside and is still open.
-fn detached_card_refusal(open: &str) -> Value {
+fn detached_card_refusal(open: &crate::ask_preempt::DetachedCard) -> Value {
+    let (tool, id) = (open.kind.tool_name(), open.request_id.as_str());
     tool_error(format!(
-        "Card {open} is still open on the boss's screen. Call fleet__ask with {{\"action\":\"wait\",\"request_id\":\"{open}\"}} or {{\"action\":\"withdraw\",\"request_id\":\"{open}\"}} first, then raise a new card."
+        "Card {id} is still open on the boss's screen. Call {tool} with {{\"action\":\"wait\",\"request_id\":\"{id}\"}} or {{\"action\":\"withdraw\",\"request_id\":\"{id}\"}} first, then raise a new card."
     ))
 }
 
@@ -1903,7 +1904,8 @@ fn await_card(
             ));
         }
         if preempt.poll() {
-            crate::ask_preempt::mark_detached(request_id, &req.session_id);
+            let kind = crate::ask_preempt::CardTool::FleetAsk;
+            crate::ask_preempt::mark_detached(kind, request_id, &req.session_id);
             // An answer that landed before the record existed got no resolved
             // notice; take it here instead of detaching.
             if let Some(r) = crate::mcp_ipc::try_read_response(request_id) {
@@ -1911,7 +1913,7 @@ fn await_card(
                 break Some(r);
             }
             return Ok(json!({
-                "content": [{ "type": "text", "text": crate::ask_preempt::detached_notice(request_id) }],
+                "content": [{ "type": "text", "text": crate::ask_preempt::detached_notice(kind, request_id) }],
                 "isError": false,
             }));
         }
@@ -2056,6 +2058,18 @@ fn persist_fleet_ask_history(
 
 fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    match args.get("action").and_then(Value::as_str).unwrap_or("render") {
+        "render" => run_a2ui_render(params, &args),
+        "wait" => handle_a2ui_wait(params, &args),
+        "withdraw" => handle_a2ui_withdraw(params, &args),
+        other => Err(JsonRpcError {
+            code: -32602,
+            message: format!("Unknown `action` {other:?}: expected render, wait or withdraw"),
+        }),
+    }
+}
+
+fn run_a2ui_render(params: &Value, args: &Value) -> Result<Value, JsonRpcError> {
     let message_tree = match args.get("messageTree").cloned() {
         Some(t) if t.is_object() => t,
         Some(_) => {
@@ -2093,7 +2107,7 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     if crate::parked::has_parked_for_session(&session_id) {
         return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
     }
-    // A fleet__ask card that stepped aside is still open: no second card.
+    // A card that stepped aside is still open: no second card.
     if let Some(open) = crate::ask_preempt::detached_for_session(&session_id) {
         return Ok(detached_card_refusal(&open));
     }
@@ -2126,34 +2140,124 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
         )));
     }
 
+    await_a2ui(&req, params)
+}
+
+/// The request of an A2UI card this session may `wait` on or `withdraw`: its
+/// request file still exists and it was raised by the calling session.
+fn owned_open_a2ui(args: &Value) -> Result<crate::mcp_a2ui_ipc::A2uiRenderRequest, String> {
+    let id = args
+        .get("request_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if id.is_empty() {
+        return Err("`request_id` is required for action wait / withdraw.".into());
+    }
+    let session_id = current_session_id();
+    match crate::mcp_a2ui_ipc::read_request(id) {
+        Some(req) if !session_id.is_empty() && req.session_id == session_id => Ok(req),
+        _ => Err(format!(
+            "No open card {id} for this session (it may already be answered/delivered or withdrawn)."
+        )),
+    }
+}
+
+/// `fleet__render_a2ui action=wait`: go back to waiting on a card that stepped
+/// aside for a message. Returns at once when the boss already acted on it.
+fn handle_a2ui_wait(params: &Value, args: &Value) -> Result<Value, JsonRpcError> {
+    let req = match owned_open_a2ui(args) {
+        Ok(req) => req,
+        Err(e) => return Ok(tool_error(e)),
+    };
+    if !crate::parked::register_inflight_ask(&req.session_id, &req.id) {
+        return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+    let _inflight = InflightGuard::new(&req.session_id, &req.id);
+    crate::ask_preempt::clear_detached(&req.id);
+    await_a2ui(&req, params)
+}
+
+/// `fleet__render_a2ui action=withdraw`: take a card the agent no longer needs
+/// off the boss's screen. An action that is already in is handed back exactly
+/// as `wait` would have returned it (see [`crate::mcp_a2ui_ipc::withdraw`]).
+fn handle_a2ui_withdraw(params: &Value, args: &Value) -> Result<Value, JsonRpcError> {
+    let req = match owned_open_a2ui(args) {
+        Ok(req) => req,
+        Err(e) => return Ok(tool_error(e)),
+    };
+    match crate::mcp_a2ui_ipc::withdraw(&req.id) {
+        crate::mcp_a2ui_ipc::WithdrawOutcome::Withdrawn => Ok(json!({
+            "content": [{ "type": "text", "text": format!("Card {} withdrawn; it is no longer on the boss's screen.", req.id) }],
+            "isError": false,
+        })),
+        crate::mcp_a2ui_ipc::WithdrawOutcome::Answered(_) => {
+            let mut result = handle_a2ui_wait(params, args)?;
+            let note = format!(
+                "Card {} was not withdrawn: the boss had already resolved it. Act on their response above.",
+                req.id
+            );
+            // Appended, never prepended: agents parse the first block of an
+            // answered result as the action JSON.
+            if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
+                content.push(json!({ "type": "text", "text": note }));
+            }
+            if let Some(structured) = result.get_mut("structuredContent").and_then(Value::as_object_mut) {
+                structured.insert("withdrawRefused".into(), json!(note));
+            }
+            Ok(result)
+        }
+        crate::mcp_a2ui_ipc::WithdrawOutcome::Gone => Ok(tool_error(format!(
+            "No open card {} for this session (it may already be answered/delivered or withdrawn).",
+            req.id
+        ))),
+    }
+}
+
+/// Wait for the boss to act on A2UI card `req` and turn the outcome into the
+/// tool result. Shared by the first render and every `wait` on it; the timeout
+/// clock starts afresh with each wait. Steps aside for an injected message the
+/// same way [`await_card`] does.
+fn await_a2ui(
+    req: &crate::mcp_a2ui_ipc::A2uiRenderRequest,
+    params: &Value,
+) -> Result<Value, JsonRpcError> {
+    let request_id = req.id.as_str();
     let timeout = fleet_ask_timeout();
     let liveness = heartbeat_window();
     let poll = std::time::Duration::from_millis(200);
     let started = Instant::now();
+    let mut preempt = crate::ask_preempt::Preempter::new(&req.session_id);
     let response = loop {
-        if let Some(r) = crate::mcp_a2ui_ipc::try_read_response(&request_id) {
+        if let Some(r) = crate::mcp_a2ui_ipc::try_read_response(request_id) {
             break Some(r);
         }
         if started.elapsed() > timeout {
             break None;
         }
         if !crate::consumer_heartbeat::consumer_status(liveness).is_alive() {
-            crate::mcp_a2ui_ipc::cleanup(&request_id);
+            crate::mcp_a2ui_ipc::cleanup(request_id);
             return Ok(tool_error(
                 "Fleet consumer heartbeat lost while waiting for your A2UI action.".into(),
             ));
         }
+        if preempt.poll() {
+            match a2ui_step_aside(req) {
+                Ok(stepped_aside) => return Ok(stepped_aside),
+                Err(r) => break Some(r),
+            }
+        }
         std::thread::sleep(poll);
     };
 
-    crate::mcp_a2ui_ipc::cleanup(&request_id);
+    crate::mcp_a2ui_ipc::cleanup(request_id);
 
     let Some(resp) = response else {
         if crate::parked::park_and_stop(
-            &request_id,
+            request_id,
             crate::parked::ParkedKind::A2uiRender,
             &req.session_id,
-            &req,
+            req,
             client_tool_use_id(params),
         ) {
             return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
@@ -2163,26 +2267,45 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
             timeout.as_secs()
         )));
     };
+    Ok(a2ui_action_result(&resp))
+}
 
-    if resp.cancelled {
-        return Ok(tool_error(
-            "User cancelled the fleet__render_a2ui Decision Card.".into(),
-        ));
+/// Detach `req` for an injected message and return the step-aside result, or
+/// `Err(response)` when a response landed before the detached record existed:
+/// it got no resolved notice, so the caller takes it instead of detaching.
+fn a2ui_step_aside(
+    req: &crate::mcp_a2ui_ipc::A2uiRenderRequest,
+) -> Result<Value, crate::mcp_a2ui_ipc::A2uiRenderResponse> {
+    let kind = crate::ask_preempt::CardTool::A2uiRender;
+    crate::ask_preempt::mark_detached(kind, &req.id, &req.session_id);
+    if let Some(r) = crate::mcp_a2ui_ipc::try_read_response(&req.id) {
+        crate::ask_preempt::clear_detached(&req.id);
+        return Err(r);
     }
+    Ok(json!({
+        "content": [{ "type": "text", "text": crate::ask_preempt::detached_notice(kind, &req.id) }],
+        "isError": false,
+    }))
+}
 
+/// The tool result for a resolved A2UI card.
+fn a2ui_action_result(resp: &crate::mcp_a2ui_ipc::A2uiRenderResponse) -> Value {
+    if resp.cancelled {
+        return tool_error("User cancelled the fleet__render_a2ui Decision Card.".into());
+    }
     let payload = json!({
         "actionName": resp.action_name,
         "actionContext": resp.action_context,
     });
     let text = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
-    Ok(json!({
+    json!({
         "content": [{
             "type": "text",
             "text": text,
         }],
         "structuredContent": payload,
         "isError": false,
-    }))
+    })
 }
 
 fn tool_error(message: String) -> Value {
@@ -2852,7 +2975,8 @@ mod tests {
             .iter()
             .find(|t| t["name"] == "fleet__render_a2ui")
             .unwrap();
-        assert_eq!(a2ui["inputSchema"]["required"][0], "messageTree");
+        assert!(a2ui["inputSchema"]["properties"]["messageTree"].is_object());
+        assert!(a2ui["inputSchema"]["properties"]["request_id"].is_object());
 
         let set_title = tools
             .iter()
@@ -3979,7 +4103,7 @@ mod tests {
     fn withdraw_closes_an_open_card_but_never_swallows_an_answer() {
         let _env = CardOwnerEnv::new("withdraw", "s-me");
         queue_card("r-open", "s-me");
-        crate::ask_preempt::mark_detached("r-open", "s-me");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::FleetAsk, "r-open", "s-me");
         let out = card_action("withdraw", "r-open");
         assert!(!is_error(&out), "{out}");
         assert!(crate::mcp_ipc::read_request("r-open").is_none());
@@ -4021,6 +4145,131 @@ mod tests {
                     if r.id == "r-answered"
                         && r.outcome == crate::decision_history::FleetAskOutcome::Answered));
         assert!(answered, "the answer is recorded as answered, not withdrawn");
+    }
+
+    fn queue_a2ui_card(id: &str, session_id: &str) {
+        crate::mcp_a2ui_ipc::write_request(&crate::mcp_a2ui_ipc::A2uiRenderRequest {
+            id: id.into(),
+            session_id: session_id.into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            task: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            parked: false,
+            message_tree: json!({}),
+        })
+        .unwrap();
+    }
+
+    fn a2ui_action(action: &str, id: &str) -> Value {
+        let params = json!({ "arguments": { "action": action, "request_id": id } });
+        handle_a2ui_render_call(&params).unwrap()
+    }
+
+    fn first_text(v: &Value) -> String {
+        v["content"][0]["text"].as_str().unwrap_or_default().to_string()
+    }
+
+    #[test]
+    fn a2ui_card_steps_aside_for_an_injected_message_and_blocks_a_second_card() {
+        let _env = CardOwnerEnv::new("a2ui-aside", "s-me");
+        crate::consumer_heartbeat::write_heartbeat();
+        // The message lands while the card waits. A fallback response keeps a
+        // broken preemption from hanging the test for the full wait window.
+        let injector = std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            crate::ask_preempt::touch_inbox("s-me", crate::pending_message::Sender::User);
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            for id in crate::mcp_a2ui_ipc::list_pending_requests() {
+                let _ = crate::mcp_a2ui_ipc::write_response(&crate::mcp_a2ui_ipc::A2uiRenderResponse {
+                    id,
+                    action_name: Some("fallback".into()),
+                    action_context: Default::default(),
+                    cancelled: false,
+                });
+            }
+        });
+        let params = json!({ "arguments": { "messageTree": { "surfaceUpdate": {} } } });
+        let out = handle_a2ui_render_call(&params).unwrap();
+        let open = crate::ask_preempt::detached_for_session("s-me").expect("card is detached, not closed");
+        injector.join().unwrap();
+        assert_eq!(open.kind, crate::ask_preempt::CardTool::A2uiRender);
+        assert!(!is_error(&out), "{out}");
+        assert_eq!(
+            first_text(&out),
+            crate::ask_preempt::detached_notice(crate::ask_preempt::CardTool::A2uiRender, &open.request_id)
+        );
+        assert!(crate::mcp_a2ui_ipc::read_request(&open.request_id).is_some(), "still on the boss's screen");
+
+        // One open card per session: the refusal names the tool to wait on.
+        let refused = handle_a2ui_render_call(&params).unwrap();
+        assert!(is_error(&refused), "{refused}");
+        assert!(first_text(&refused).contains("Call fleet__render_a2ui with"), "{refused}");
+        assert!(first_text(&refused).contains(&open.request_id), "{refused}");
+    }
+
+    #[test]
+    fn a2ui_wait_returns_the_action_exactly_as_the_first_call_would_have() {
+        let _env = CardOwnerEnv::new("a2ui-wait", "s-me");
+        crate::consumer_heartbeat::write_heartbeat();
+        queue_a2ui_card("a-wait", "s-me");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "a-wait", "s-me");
+        crate::mcp_a2ui_ipc::write_response_file_for_test("a-wait", 0);
+        let expected = a2ui_action_result(&crate::mcp_a2ui_ipc::try_read_response("a-wait").unwrap());
+        let out = a2ui_action("wait", "a-wait");
+        assert_eq!(out, expected);
+        assert_eq!(out["structuredContent"], json!({ "actionName": "submit", "actionContext": { "k": "v" } }));
+        assert_eq!(serde_json::from_str::<Value>(&first_text(&out)).unwrap(), out["structuredContent"]);
+        assert!(crate::mcp_a2ui_ipc::read_request("a-wait").is_none(), "consumed");
+        assert!(!crate::ask_preempt::is_detached("a-wait"));
+        // Nothing left to wait on.
+        assert!(is_error(&a2ui_action("wait", "a-wait")));
+    }
+
+    #[test]
+    fn a2ui_withdraw_closes_an_open_card_but_never_swallows_an_action() {
+        let _env = CardOwnerEnv::new("a2ui-withdraw", "s-me");
+        crate::consumer_heartbeat::write_heartbeat();
+        queue_a2ui_card("a-open", "s-me");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "a-open", "s-me");
+        let out = a2ui_action("withdraw", "a-open");
+        assert!(!is_error(&out), "{out}");
+        assert!(first_text(&out).contains("withdrawn"), "{out}");
+        assert!(crate::mcp_a2ui_ipc::read_request("a-open").is_none());
+        assert!(!crate::ask_preempt::is_detached("a-open"));
+
+        // An action that landed first is handed back instead of being dropped.
+        queue_a2ui_card("a-answered", "s-me");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "a-answered", "s-me");
+        crate::mcp_a2ui_ipc::write_response_file_for_test("a-answered", 0);
+        let out = a2ui_action("withdraw", "a-answered");
+        assert!(!is_error(&out), "{out}");
+        assert_eq!(out["structuredContent"]["actionName"], "submit", "{out}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&first_text(&out)).unwrap()["actionName"],
+            "submit",
+            "action stays block one"
+        );
+        assert!(out.to_string().contains("was not withdrawn"), "{out}");
+        assert!(crate::mcp_a2ui_ipc::read_request("a-answered").is_none(), "consumed like a wait");
+    }
+
+    #[test]
+    fn a2ui_wait_and_withdraw_refuse_unknown_and_foreign_cards() {
+        let _env = CardOwnerEnv::new("a2ui-foreign", "s-me");
+        queue_a2ui_card("a-other", "s-other");
+        // A fleet__ask card is not reachable through fleet__render_a2ui.
+        queue_card("q-mine", "s-me");
+        for action in ["wait", "withdraw"] {
+            assert!(is_error(&a2ui_action(action, "a-missing")), "{action} unknown id");
+            assert!(is_error(&a2ui_action(action, "a-other")), "{action} foreign id");
+            assert!(is_error(&a2ui_action(action, "q-mine")), "{action} other tool's card");
+            assert!(is_error(&a2ui_action(action, "")), "{action} empty id");
+        }
+        assert!(crate::mcp_a2ui_ipc::read_request("a-other").is_some());
+        assert!(crate::mcp_ipc::read_request("q-mine").is_some());
+        let bad = json!({ "arguments": { "action": "pause" } });
+        assert!(handle_a2ui_render_call(&bad).is_err());
     }
 
     #[test]

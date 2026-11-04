@@ -1867,10 +1867,10 @@ fn defer_to_live_turn(rec: &WatchRecord, prompt: &str) -> Option<Result<String, 
     )
 }
 
-/// A turn whose only pending decision is a `fleet__ask` card, on a session that
-/// takes live injects, needs no interrupt: the inject makes the card step aside
-/// (see [`crate::ask_preempt`]) and the event is handled in this turn. Codex has
-/// no inject socket, so it keeps the interrupt. On Windows the turn's claude
+/// A turn whose only pending decision is a `fleet__ask` / `fleet__render_a2ui`
+/// card, on a session that takes live injects, needs no interrupt: the inject
+/// makes the card step aside (see [`crate::ask_preempt`]) and the event is
+/// handled in this turn. Codex has no inject socket, so it keeps the interrupt. On Windows the turn's claude
 /// host stands in for the socket (see `pending_message::enqueue`).
 fn card_steps_aside(session_id: &str) -> bool {
     !crate::codex_source::session_has_unpreemptible_decision(session_id)

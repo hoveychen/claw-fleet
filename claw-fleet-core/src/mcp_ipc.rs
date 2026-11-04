@@ -1752,7 +1752,7 @@ mod tests {
 
         // A card that stepped aside and whose turn then ended: write-time path.
         plant("aside-1");
-        crate::ask_preempt::mark_detached("aside-1", session_id);
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::FleetAsk, "aside-1", session_id);
         let prompt = recover_prompt("aside-1");
         assert!(prompt.starts_with(crate::parked::STEPPED_ASIDE_RESUME_HEADER), "{prompt}");
         assert!(!prompt.contains("等待超时"), "{prompt}");
@@ -1762,7 +1762,7 @@ mod tests {
 
         // Same through the sweep, which holds the record under its claim name.
         plant("aside-2");
-        crate::ask_preempt::mark_detached("aside-2", session_id);
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::FleetAsk, "aside-2", session_id);
         let dir = home.dir.join(".fleet/fleet-ask-detached");
         std::fs::rename(dir.join("aside-2.json"), dir.join("aside-2.sweeping")).unwrap();
         let prompt = recover_prompt("aside-2");

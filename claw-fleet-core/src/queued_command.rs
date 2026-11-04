@@ -308,7 +308,7 @@ mod tests {
     /// signature is Fleet or another agent speaking — never the user's bubble.
     #[test]
     fn an_unsigned_peer_prompt_is_an_agent_notice() {
-        let notice = crate::ask_preempt::resolved_notice("req-1");
+        let notice = crate::ask_preempt::resolved_notice(crate::ask_preempt::CardTool::FleetAsk, "req-1");
         let mut msg = row(json!({"kind": "peer", "from": "unknown"}), &notice);
         unfold(&mut msg);
         assert_eq!(msg["type"], "user");
@@ -328,7 +328,7 @@ mod tests {
     /// framed; the row has no origin at all.
     #[test]
     fn a_framed_stdin_notice_is_an_agent_notice() {
-        let framed = crate::live_inject::frame_as_agent(&crate::ask_preempt::resolved_notice("r"));
+        let framed = crate::live_inject::frame_as_agent(&crate::ask_preempt::resolved_notice(crate::ask_preempt::CardTool::FleetAsk, "r"));
         let mut msg = json!({"type": "attachment", "attachment": {
             "type": "queued_command", "prompt": framed, "commandMode": "prompt"}});
         unfold(&mut msg);

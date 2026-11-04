@@ -509,9 +509,10 @@ where
     }
     // A parked card would otherwise hold the queue until the boss answers it —
     // hours, for a card that timed out unattended (kaiju-bay d688686b,
-    // 2026-11-02: four messages sat behind one). A `fleet__ask` card steps
-    // aside instead, as it does for a message injected into a live wait; any
-    // other parked kind still blocks, since resuming would race its answer.
+    // 2026-11-02: four messages sat behind one). A `fleet__ask` or
+    // `fleet__render_a2ui` card steps aside instead, as it does for a message
+    // injected into a live wait; any other parked kind still blocks, since
+    // resuming would race its answer.
     if crate::parked::has_parked_for_session(&session.id)
         && crate::ask_preempt::unpark_for_messages(&session.id).is_none()
     {
@@ -533,7 +534,10 @@ where
     // The woken turn has to know its card is still open, or it would never
     // `wait` on it and could not raise another.
     if let Some(open) = crate::ask_preempt::detached_for_session(&session.id) {
-        prompt.insert_str(0, &crate::ask_preempt::woken_with_open_card_notice(&open));
+        prompt.insert_str(
+            0,
+            &crate::ask_preempt::woken_with_open_card_notice(open.kind, &open.request_id),
+        );
     }
     let workspace = if q.workspace_path.trim().is_empty() {
         session.workspace_path.clone()
@@ -980,6 +984,43 @@ mod tests {
             assert!(fired[0].1.ends_with("hello"), "{}", fired[0].1);
             assert!(!crate::parked::is_parked("card-1"));
             assert!(crate::ask_preempt::is_detached("card-1"));
+        });
+    }
+
+    #[test]
+    fn parked_a2ui_steps_aside_and_the_drain_names_its_tool() {
+        with_temp_home(|| {
+            let req = crate::mcp_a2ui_ipc::A2uiRenderRequest {
+                id: "a2ui-1".into(),
+                session_id: "sess-a2ui".into(),
+                workspace_name: String::new(),
+                ai_title: None,
+                task: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                parked: false,
+                message_tree: serde_json::json!({}),
+            };
+            crate::parked::park("a2ui-1", crate::parked::ParkedKind::A2uiRender, "sess-a2ui", "/ws", &req)
+                .unwrap();
+            write_queue(
+                &queue_path("sess-a2ui").unwrap(),
+                &PendingQueue {
+                    session_id: "sess-a2ui".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["hello".into()],
+                },
+            )
+            .unwrap();
+            let log = std::cell::RefCell::new(Vec::new());
+            let s = base_session("sess-a2ui", SessionStatus::WaitingInput, false);
+            drain_if_idle(&s, recording_spawn(&log));
+            let fired = log.borrow();
+            assert_eq!(fired.len(), 1, "a parked A2UI card no longer holds the queue");
+            assert!(fired[0].1.contains("`fleet__render_a2ui`"), "{}", fired[0].1);
+            assert!(!fired[0].1.contains("fleet__ask"), "{}", fired[0].1);
+            assert!(fired[0].1.ends_with("hello"), "{}", fired[0].1);
+            assert!(crate::mcp_a2ui_ipc::read_request("a2ui-1").is_some());
+            assert!(crate::ask_preempt::is_detached("a2ui-1"));
         });
     }
 

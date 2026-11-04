@@ -1,5 +1,6 @@
-//! Let a message that reaches a session blocked on a `fleet__ask` card be
-//! handled first, instead of sitting behind the card until the boss answers.
+//! Let a message that reaches a session blocked on a decision card (`fleet__ask`
+//! or `fleet__render_a2ui`) be handled first, instead of sitting behind the
+//! card until the boss answers.
 //!
 //! While a card waits, Claude Code is inside one tool call: a message injected
 //! over the session socket ([`crate::live_inject`]) sits in the CLI's queue and
@@ -16,9 +17,11 @@
 //!    agent to deal with the message first, then `wait` on the card again or
 //!    `withdraw` it. The card itself stays open on the boss's screen; the
 //!    **detached store** (`~/.fleet/fleet-ask-detached/<request_id>.json`) is the
-//!    record that no producer is polling it right now.
-//! 3. **Answer while detached** — `mcp_ipc::write_response` tells a live
-//!    session (without the answer's content) that the card was resolved, and
+//!    record that no producer is polling it right now; its [`CardTool`] says
+//!    which tool's request files and `wait` / `withdraw` the card has.
+//! 3. **Answer while detached** — each tool's `write_response` (`mcp_ipc`,
+//!    `mcp_a2ui_ipc`) tells a live session (without the answer's content) that
+//!    the card was resolved, and
 //!    [`sweep_idle`] covers a session whose turn ended with the card detached:
 //!    the answer resumes it through the ordinary parked path.
 
@@ -126,6 +129,84 @@ fn mark_inbox_handled(session_id: &str, at_ms: u64) {
 
 // ── Detached store ───────────────────────────────────────────────────────────
 
+/// The tool that raised a detached card. Decides where its request lives, how
+/// an answer that outlived the turn is recovered, and which tool the agent is
+/// told to call `wait` / `withdraw` on.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CardTool {
+    /// Records written before the field existed were all `fleet__ask` cards.
+    #[default]
+    FleetAsk,
+    A2uiRender,
+}
+
+impl CardTool {
+    pub fn tool_name(self) -> &'static str {
+        match self {
+            CardTool::FleetAsk => "fleet__ask",
+            CardTool::A2uiRender => "fleet__render_a2ui",
+        }
+    }
+
+    fn from_parked(kind: crate::parked::ParkedKind) -> Option<Self> {
+        match kind {
+            crate::parked::ParkedKind::FleetAsk => Some(CardTool::FleetAsk),
+            crate::parked::ParkedKind::A2uiRender => Some(CardTool::A2uiRender),
+            _ => None,
+        }
+    }
+
+    /// The card's request file still exists.
+    fn request_open(self, id: &str) -> bool {
+        match self {
+            CardTool::FleetAsk => crate::mcp_ipc::read_request(id).is_some(),
+            CardTool::A2uiRender => crate::mcp_a2ui_ipc::read_request(id).is_some(),
+        }
+    }
+
+    fn response_age_ms(self, id: &str) -> Option<u64> {
+        match self {
+            CardTool::FleetAsk => crate::mcp_ipc::response_age_ms(id),
+            CardTool::A2uiRender => crate::mcp_a2ui_ipc::response_age_ms(id),
+        }
+    }
+
+    fn recover_orphaned_response(self, id: &str) -> Result<bool, String> {
+        match self {
+            CardTool::FleetAsk => crate::mcp_ipc::recover_orphaned_response(id),
+            CardTool::A2uiRender => crate::mcp_a2ui_ipc::recover_orphaned_response(id),
+        }
+    }
+
+    /// Write a parked card's request back as an open (unparked) request file.
+    /// Returns its id.
+    fn reopen(self, request: serde_json::Value) -> Option<String> {
+        match self {
+            CardTool::FleetAsk => {
+                let mut req: crate::mcp_ipc::FleetAskRequest = serde_json::from_value(request).ok()?;
+                req.parked = false;
+                crate::mcp_ipc::write_request(&req).ok()?;
+                Some(req.id)
+            }
+            CardTool::A2uiRender => {
+                let mut req: crate::mcp_a2ui_ipc::A2uiRenderRequest =
+                    serde_json::from_value(request).ok()?;
+                req.parked = false;
+                crate::mcp_a2ui_ipc::write_request(&req).ok()?;
+                Some(req.id)
+            }
+        }
+    }
+
+    fn cleanup(self, id: &str) {
+        match self {
+            CardTool::FleetAsk => crate::mcp_ipc::cleanup(id),
+            CardTool::A2uiRender => crate::mcp_a2ui_ipc::cleanup(id),
+        }
+    }
+}
+
 /// A card that is still open on the boss's screen while no producer polls it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +214,8 @@ pub struct DetachedCard {
     pub request_id: String,
     pub session_id: String,
     pub detached_at: u64,
+    #[serde(default)]
+    pub kind: CardTool,
 }
 
 fn detached_dir() -> Option<PathBuf> {
@@ -144,7 +227,7 @@ fn detached_path(request_id: &str) -> Option<PathBuf> {
     detached_dir().map(|d| d.join(format!("{name}.json")))
 }
 
-pub fn mark_detached(request_id: &str, session_id: &str) {
+pub fn mark_detached(kind: CardTool, request_id: &str, session_id: &str) {
     if let Some(path) = detached_path(request_id) {
         write_json(
             &path,
@@ -152,12 +235,14 @@ pub fn mark_detached(request_id: &str, session_id: &str) {
                 request_id: request_id.to_string(),
                 session_id: session_id.to_string(),
                 detached_at: now_ms(),
+                kind,
             },
         );
     }
 }
 
-/// Idempotent. `mcp_ipc::cleanup` calls it, so every way a card closes (answer
+/// Idempotent. Each tool's `cleanup` (`mcp_ipc`, `mcp_a2ui_ipc`) calls it, so
+/// every way a card closes (answer
 /// consumed, orphan recovery, withdraw, timeout) drops the record too.
 pub fn clear_detached(request_id: &str) {
     if let Some(path) = detached_path(request_id) {
@@ -196,14 +281,14 @@ fn list_detached() -> Vec<DetachedCard> {
 
 /// The open detached card of `session_id`, if any. A record whose request file
 /// is gone (answered and consumed elsewhere, or removed by hand) is pruned.
-pub fn detached_for_session(session_id: &str) -> Option<String> {
+pub fn detached_for_session(session_id: &str) -> Option<DetachedCard> {
     if session_id.trim().is_empty() {
         return None;
     }
     let mut found = None;
     for card in list_detached().into_iter().filter(|c| c.session_id == session_id) {
-        if crate::mcp_ipc::read_request(&card.request_id).is_some() {
-            found.get_or_insert(card.request_id);
+        if card.kind.request_open(&card.request_id) {
+            found.get_or_insert(card);
         } else {
             clear_detached(&card.request_id);
         }
@@ -297,8 +382,8 @@ pub fn transcript_queue_pending(session_id: &str, since_ms: u64) -> bool {
     cc_queue_pending(&buf, since_ms)
 }
 
-/// Per-wait preemption probe for a blocking call (the `fleet__ask` producer, a
-/// `fleet__job` wait). The transcript clause is evaluated once, on the first
+/// Per-wait preemption probe for a blocking call (the `fleet__ask` and
+/// `fleet__render_a2ui` producers, a `fleet__job` wait). The transcript clause is evaluated once, on the first
 /// poll.
 pub struct Preempter {
     session_id: String,
@@ -333,13 +418,14 @@ impl Preempter {
 
 /// What the agent reads when its card steps aside. Chinese: agent-facing
 /// product text, like the rest of Fleet's injected guidance.
-pub fn detached_notice(request_id: &str) -> String {
+pub fn detached_notice(kind: CardTool, request_id: &str) -> String {
+    let tool = kind.tool_name();
     format!(
         "[fleet] 有新消息进来了，决策卡 `{request_id}` 先让路——它没有撤回，仍然显示在老板的屏幕上，老板随时可以回答。\n\
          紧接着这条结果之后就是那条新消息：先处理它。\n\
          处理完后：\n\
-         - 这张卡仍然需要答复 → 调用 `fleet__ask`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 继续等老板的回答；\n\
-         - 新消息已经让这张卡过时 → 调用 `fleet__ask`，参数 `{{\"action\":\"withdraw\",\"request_id\":\"{request_id}\"}}` 把它从老板的屏幕上撤下。\n\
+         - 这张卡仍然需要答复 → 调用 `{tool}`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 继续等老板的回答；\n\
+         - 新消息已经让这张卡过时 → 调用 `{tool}`，参数 `{{\"action\":\"withdraw\",\"request_id\":\"{request_id}\"}}` 把它从老板的屏幕上撤下。\n\
          这张卡没 wait 或 withdraw 之前，不要再发新卡。"
     )
 }
@@ -358,29 +444,32 @@ pub fn job_wait_stepped_aside_notice(job_id: &str) -> String {
 /// What a live session is told when its detached card gets resolved. Never
 /// carries the answer itself: the agent fetches it with `wait`, which also
 /// writes the decision history.
-pub fn resolved_notice(request_id: &str) -> String {
+pub fn resolved_notice(kind: CardTool, request_id: &str) -> String {
+    let tool = kind.tool_name();
     format!(
-        "[fleet] 决策卡 `{request_id}` 老板已经处理了。调用 `fleet__ask`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 取回结果，再按结果继续。"
+        "[fleet] 决策卡 `{request_id}` 老板已经处理了。调用 `{tool}`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 取回结果，再按结果继续。"
     )
 }
 
 /// Prefixed to a queued-message resume when the session still has a detached
 /// card, so the woken turn knows the card is open and how to get back to it.
-pub fn woken_with_open_card_notice(request_id: &str) -> String {
+pub fn woken_with_open_card_notice(kind: CardTool, request_id: &str) -> String {
+    let tool = kind.tool_name();
     format!(
         "[fleet] 你之前发出的决策卡 `{request_id}` 还没得到答复，仍然显示在老板的屏幕上。有新消息进来了，Fleet 先唤醒你处理它们（就在下面）。\n\
          处理完后：\n\
-         - 这张卡仍然需要答复 → 调用 `fleet__ask`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 继续等老板的回答；\n\
-         - 新消息已经让这张卡过时 → 调用 `fleet__ask`，参数 `{{\"action\":\"withdraw\",\"request_id\":\"{request_id}\"}}` 把它从老板的屏幕上撤下。\n\
+         - 这张卡仍然需要答复 → 调用 `{tool}`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 继续等老板的回答；\n\
+         - 新消息已经让这张卡过时 → 调用 `{tool}`，参数 `{{\"action\":\"withdraw\",\"request_id\":\"{request_id}\"}}` 把它从老板的屏幕上撤下。\n\
          这张卡没 wait 或 withdraw 之前，不要再发新卡。\n\n---\n\n"
     )
 }
 
 // ── Parked card steps aside ──────────────────────────────────────────────────
 
-/// Turn `session_id`'s parked `fleet__ask` card back into an open request with
-/// a detached record, so queued messages can wake the session instead of
-/// waiting behind the boss's answer. Returns the card id when it did.
+/// Turn `session_id`'s parked `fleet__ask` / `fleet__render_a2ui` card back
+/// into an open request with a detached record, so queued messages can wake the
+/// session instead of waiting behind the boss's answer. Returns the card id
+/// when it did.
 ///
 /// A parked card has no request file (parking moved it into the parked store),
 /// which is what makes the answer path resume the session. After this the card
@@ -389,63 +478,73 @@ pub fn woken_with_open_card_notice(request_id: &str) -> String {
 /// recovery / [`sweep_idle`].
 ///
 /// `None` when there is nothing to convert, or the parked card cannot step
-/// aside: only `fleet__ask` has `wait` / `withdraw`, so an elicitation or plan
-/// approval keeps blocking the queue as before.
+/// aside: only the [`CardTool`]s have `wait` / `withdraw`, so an elicitation or
+/// plan approval keeps blocking the queue as before.
 pub fn unpark_for_messages(session_id: &str) -> Option<String> {
     let mut cards = crate::parked::list()
         .into_iter()
         .filter(|c| c.session_id == session_id);
     let card = cards.next()?;
-    if cards.next().is_some() || card.kind != crate::parked::ParkedKind::FleetAsk {
+    if cards.next().is_some() {
         return None;
     }
-    let mut req: crate::mcp_ipc::FleetAskRequest = serde_json::from_value(card.request).ok()?;
-    req.parked = false;
+    let kind = CardTool::from_parked(card.kind)?;
     // Held across the swap so an answer arriving now either resolves the parked
     // card first (and we find it gone) or finds the open request after.
     crate::parked::with_card_lock(&card.id, || {
         if !crate::parked::is_parked(&card.id) {
             return None;
         }
-        crate::mcp_ipc::write_request(&req).ok()?;
-        mark_detached(&req.id, session_id);
-        if let Err(e) = crate::parked::discard(&req.id) {
-            crate::log_debug(&format!("ask_preempt: unpark {}: {e}; keeping it parked", req.id));
-            crate::mcp_ipc::cleanup(&req.id);
+        let id = kind.reopen(card.request.clone())?;
+        mark_detached(kind, &id, session_id);
+        if let Err(e) = crate::parked::discard(&id) {
+            crate::log_debug(&format!("ask_preempt: unpark {id}: {e}; keeping it parked"));
+            kind.cleanup(&id);
             return None;
         }
         crate::log_debug(&format!(
-            "ask_preempt: parked card {} of {session_id} stepped aside for queued messages",
-            req.id
+            "ask_preempt: parked {} card {id} of {session_id} stepped aside for queued messages",
+            kind.tool_name()
         ));
-        Some(req.id.clone())
+        Some(id)
     })
 }
 
 // ── Answer while detached ────────────────────────────────────────────────────
 
-/// Called by `mcp_ipc::write_response` once the write-time orphan recovery has
-/// declined the response (the session is still running). A detached card has no
+/// Called by each tool's `write_response` (`mcp_ipc`, `mcp_a2ui_ipc`) once the
+/// write-time orphan recovery has declined the response (the session is still running). A detached card has no
 /// producer to read it, so tell the live turn to fetch it.
 pub fn notify_resolved_if_detached(request_id: &str) {
+    notify_resolved_with(request_id, crate::parked::session_alive, |session_id, notice| {
+        let workspace = crate::parked::parkable_workspace(session_id)
+            .ok_or_else(|| "session is not Fleet-owned".to_string())?;
+        crate::pending_message::enqueue(
+            session_id,
+            &workspace,
+            notice,
+            crate::pending_message::Sender::Agent,
+        )
+        .map(|how| format!("{how:?}"))
+    });
+}
+
+/// [`notify_resolved_if_detached`] with liveness and delivery injected.
+fn notify_resolved_with(
+    request_id: &str,
+    alive: impl FnOnce(&str) -> bool,
+    send: impl FnOnce(&str, &str) -> Result<String, String>,
+) {
     let Some(card) = get_detached(request_id) else {
         return;
     };
-    if !crate::parked::session_alive(&card.session_id) {
+    if !alive(&card.session_id) {
         // The turn is over: `sweep_idle` resumes it with the answer.
         return;
     }
-    let Some(workspace) = crate::parked::parkable_workspace(&card.session_id) else {
-        return;
-    };
-    match crate::pending_message::enqueue(
-        &card.session_id,
-        &workspace,
-        &resolved_notice(request_id),
-        crate::pending_message::Sender::Agent,
-    ) {
+    match send(&card.session_id, &resolved_notice(card.kind, request_id)) {
         Ok(how) => crate::log_debug(&format!(
-            "ask_preempt: detached card {request_id} resolved -> notice {how:?} to {}",
+            "ask_preempt: detached card {request_id} resolved -> notice {how} to {}",
             card.session_id
         )),
         Err(e) => crate::log_debug(&format!(
@@ -463,7 +562,7 @@ pub fn notify_resolved_if_detached(request_id: &str) {
 pub fn sweep_idle() {
     for card in list_detached() {
         sweep_one(&card, crate::parked::session_alive, |id| {
-            crate::mcp_ipc::recover_orphaned_response(id)
+            card.kind.recover_orphaned_response(id)
         });
     }
 }
@@ -474,11 +573,11 @@ fn sweep_one(
     recover: impl FnOnce(&str) -> Result<bool, String>,
 ) {
     let id = card.request_id.as_str();
-    if crate::mcp_ipc::read_request(id).is_none() {
+    if !card.kind.request_open(id) {
         clear_detached(id);
         return;
     }
-    let Some(age) = crate::mcp_ipc::response_age_ms(id) else {
+    let Some(age) = card.kind.response_age_ms(id) else {
         return;
     };
     if age < SWEEP_SETTLE_MS || alive(&card.session_id) {
@@ -704,10 +803,10 @@ mod tests {
     fn detached_for_session_prunes_records_without_a_request() {
         let _home = TempHome::new("detached");
         write_request("r-live", "s1");
-        mark_detached("r-live", "s1");
-        mark_detached("r-gone", "s1");
-        mark_detached("r-other", "s2");
-        assert_eq!(detached_for_session("s1").as_deref(), Some("r-live"));
+        mark_detached(CardTool::FleetAsk, "r-live", "s1");
+        mark_detached(CardTool::FleetAsk, "r-gone", "s1");
+        mark_detached(CardTool::FleetAsk, "r-other", "s2");
+        assert_eq!(detached_for_session("s1").map(|c| c.request_id).as_deref(), Some("r-live"));
         assert!(!is_detached("r-gone"), "a record whose request is gone is pruned");
         assert!(detached_for_session("s3").is_none());
         // `mcp_ipc::cleanup` is the single close path and drops the record.
@@ -720,7 +819,7 @@ mod tests {
     fn sweep_waits_for_settle_and_a_dead_session_then_claims_once() {
         let _home = TempHome::new("sweep");
         write_request("r1", "s1");
-        mark_detached("r1", "s1");
+        mark_detached(CardTool::FleetAsk, "r1", "s1");
         let card = get_detached("r1").unwrap();
         // No response yet: nothing to do.
         sweep_one(&card, |_| false, |_| panic!("no response yet"));
@@ -756,7 +855,7 @@ mod tests {
         assert!(!crate::parked::is_parked("p1"));
         let req = crate::mcp_ipc::read_request("p1").expect("request file is back");
         assert!(!req.parked, "the reopened card must not render as timed out");
-        assert_eq!(detached_for_session("s1").as_deref(), Some("p1"));
+        assert_eq!(detached_for_session("s1").map(|c| c.request_id).as_deref(), Some("p1"));
         // Nothing left to convert the second time.
         assert!(unpark_for_messages("s1").is_none());
     }
@@ -770,11 +869,133 @@ mod tests {
         assert!(detached_for_session("s1").is_none());
     }
 
+    fn write_a2ui_request(id: &str, session_id: &str) {
+        let req = crate::mcp_a2ui_ipc::A2uiRenderRequest {
+            id: id.into(),
+            session_id: session_id.into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            task: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            parked: false,
+            message_tree: serde_json::json!({}),
+        };
+        crate::mcp_a2ui_ipc::write_request(&req).unwrap();
+    }
+
+    #[test]
+    fn records_without_a_kind_are_fleet_ask_cards() {
+        let old: DetachedCard =
+            serde_json::from_str(r#"{"requestId":"r","sessionId":"s","detachedAt":1}"#).unwrap();
+        assert_eq!(old.kind, CardTool::FleetAsk);
+        let a2ui = DetachedCard { kind: CardTool::A2uiRender, ..old };
+        let json = serde_json::to_string(&a2ui).unwrap();
+        assert!(json.contains(r#""kind":"a2uiRender""#), "{json}");
+    }
+
+    #[test]
+    fn notices_name_the_tool_that_raised_the_card() {
+        for (kind, tool, other) in [
+            (CardTool::FleetAsk, "`fleet__ask`", "fleet__render_a2ui"),
+            (CardTool::A2uiRender, "`fleet__render_a2ui`", "fleet__ask"),
+        ] {
+            for notice in [
+                detached_notice(kind, "r-9"),
+                resolved_notice(kind, "r-9"),
+                woken_with_open_card_notice(kind, "r-9"),
+            ] {
+                assert!(notice.contains(tool), "{notice}");
+                assert!(!notice.contains(other), "{notice}");
+                assert!(notice.contains(r#"{"action":"wait","request_id":"r-9"}"#), "{notice}");
+            }
+            for notice in [detached_notice(kind, "r-9"), woken_with_open_card_notice(kind, "r-9")] {
+                assert!(notice.contains(r#"{"action":"withdraw","request_id":"r-9"}"#), "{notice}");
+            }
+        }
+    }
+
+    #[test]
+    fn detached_for_session_checks_the_request_of_the_cards_own_tool() {
+        let _home = TempHome::new("detached-a2ui");
+        write_a2ui_request("a-live", "s1");
+        mark_detached(CardTool::A2uiRender, "a-live", "s1");
+        // A fleet__ask request with this id does not keep an A2UI record alive.
+        write_request("a-wrong", "s1");
+        mark_detached(CardTool::A2uiRender, "a-wrong", "s1");
+        let open = detached_for_session("s1").expect("open A2UI card");
+        assert_eq!((open.request_id.as_str(), open.kind), ("a-live", CardTool::A2uiRender));
+        assert!(!is_detached("a-wrong"), "a record whose own request is gone is pruned");
+        // `mcp_a2ui_ipc::cleanup` drops the record like `mcp_ipc::cleanup` does.
+        crate::mcp_a2ui_ipc::cleanup("a-live");
+        assert!(!is_detached("a-live"));
+    }
+
+    #[test]
+    fn resolved_notice_reaches_a_live_session_only() {
+        let _home = TempHome::new("resolved-live");
+        write_a2ui_request("a1", "s1");
+        mark_detached(CardTool::A2uiRender, "a1", "s1");
+        let mut sent = None;
+        notify_resolved_with("a1", |sid| sid == "s1", |sid, notice| {
+            sent = Some((sid.to_string(), notice.to_string()));
+            Ok("Injected".into())
+        });
+        let (sid, notice) = sent.expect("a live session is told its card was resolved");
+        assert_eq!(sid, "s1");
+        assert_eq!(notice, resolved_notice(CardTool::A2uiRender, "a1"));
+        // Turn over: left to `sweep_idle`.
+        notify_resolved_with("a1", |_| false, |_, _| panic!("dead session must not be notified"));
+        // Not detached: the producer itself reads the response.
+        notify_resolved_with("a-none", |_| true, |_, _| panic!("no record, no notice"));
+    }
+
+    #[test]
+    fn sweep_recovers_an_a2ui_card_through_its_own_store() {
+        let _home = TempHome::new("sweep-a2ui");
+        write_a2ui_request("a1", "s1");
+        mark_detached(CardTool::A2uiRender, "a1", "s1");
+        let card = get_detached("a1").unwrap();
+        // A fleet__ask response under the same id is not this card's answer.
+        write_request("a1", "s1");
+        crate::mcp_ipc::write_response_file_for_test("a1", SWEEP_SETTLE_MS + 1_000);
+        sweep_one(&card, |_| false, |_| panic!("no A2UI response yet"));
+        crate::mcp_a2ui_ipc::write_response_file_for_test("a1", SWEEP_SETTLE_MS + 1_000);
+        sweep_one(&card, |_| true, |_| panic!("session is alive"));
+        let mut calls = 0;
+        sweep_one(&card, |_| false, |id| {
+            assert_eq!(id, "a1");
+            calls += 1;
+            Ok(true)
+        });
+        assert_eq!(calls, 1);
+        assert!(!is_detached("a1"));
+        // A record whose A2UI request is gone is dropped without recovery.
+        mark_detached(CardTool::A2uiRender, "a-gone", "s1");
+        sweep_one(&get_detached("a-gone").unwrap(), |_| false, |_| panic!("request is gone"));
+        assert!(!is_detached("a-gone"));
+    }
+
+    #[test]
+    fn unpark_turns_a_parked_a2ui_card_into_an_open_detached_card() {
+        let _home = TempHome::new("unpark-a2ui");
+        write_a2ui_request("p1", "s1");
+        let req = crate::mcp_a2ui_ipc::read_request("p1").unwrap();
+        crate::parked::park("p1", crate::parked::ParkedKind::A2uiRender, "s1", "/ws", &req).unwrap();
+        crate::mcp_a2ui_ipc::cleanup("p1");
+        assert_eq!(unpark_for_messages("s1").as_deref(), Some("p1"));
+        assert!(!crate::parked::is_parked("p1"));
+        let back = crate::mcp_a2ui_ipc::read_request("p1").expect("A2UI request file is back");
+        assert!(!back.parked, "the reopened card must not render as timed out");
+        assert!(crate::mcp_ipc::read_request("p1").is_none(), "not filed as a fleet__ask card");
+        let open = detached_for_session("s1").unwrap();
+        assert_eq!(open.kind, CardTool::A2uiRender);
+    }
+
     #[test]
     fn sweep_leaves_a_fresh_response_to_the_write_time_recovery() {
         let _home = TempHome::new("sweep-fresh");
         write_request("r1", "s1");
-        mark_detached("r1", "s1");
+        mark_detached(CardTool::FleetAsk, "r1", "s1");
         let card = get_detached("r1").unwrap();
         crate::mcp_ipc::write_response_file_for_test("r1", 0);
         sweep_one(&card, |_| false, |_| panic!("response is too fresh"));
