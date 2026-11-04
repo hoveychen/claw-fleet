@@ -297,8 +297,9 @@ pub fn transcript_queue_pending(session_id: &str, since_ms: u64) -> bool {
     cc_queue_pending(&buf, since_ms)
 }
 
-/// Per-wait preemption probe for the `fleet__ask` producer. The transcript
-/// clause is evaluated once, on the first poll.
+/// Per-wait preemption probe for a blocking call (the `fleet__ask` producer, a
+/// `fleet__job` wait). The transcript clause is evaluated once, on the first
+/// poll.
 pub struct Preempter {
     session_id: String,
     wait_start_ms: u64,
@@ -340,6 +341,17 @@ pub fn detached_notice(request_id: &str) -> String {
          - 这张卡仍然需要答复 → 调用 `fleet__ask`，参数 `{{\"action\":\"wait\",\"request_id\":\"{request_id}\"}}` 继续等老板的回答；\n\
          - 新消息已经让这张卡过时 → 调用 `fleet__ask`，参数 `{{\"action\":\"withdraw\",\"request_id\":\"{request_id}\"}}` 把它从老板的屏幕上撤下。\n\
          这张卡没 wait 或 withdraw 之前，不要再发新卡。"
+    )
+}
+
+/// What the agent reads when a `fleet__job` wait steps aside for a message.
+/// The job is untouched; only the wait returned.
+pub fn job_wait_stepped_aside_notice(job_id: &str) -> String {
+    format!(
+        "[fleet] 有新消息进来了，对作业 `{job_id}` 的等待先让路——作业本身没有停，仍在后台跑。\n\
+         紧接着这条结果之后就是那条新消息：先处理它（没看到新消息就直接继续等）。\n\
+         处理完后，作业的结果仍然需要 → 调用 `fleet__job`，参数 `{{\"action\":\"wait\",\"id\":\"{job_id}\"}}` 接着等；\n\
+         新消息让这个作业没必要了 → 调用 `fleet__job`，参数 `{{\"action\":\"stop\",\"id\":\"{job_id}\"}}` 停掉它。"
     )
 }
 
