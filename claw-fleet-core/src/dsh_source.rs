@@ -182,6 +182,22 @@ static ROSTER_STALL: OnceLock<Mutex<Option<(std::time::Instant, String)>>> = Onc
 /// When a stalled `session/list` last made Fleet restart `dsh web`.
 static WEDGE_RESTART: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
 
+/// Set once a process declares itself short-lived; see [`disable_event_watcher`].
+static WATCHER_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Never start the downlink follower (`dsh-events` + `dsh-decisions` threads)
+/// in this process.
+///
+/// For one-shot processes such as `fleet send` or `fleet agents`: they exit
+/// within seconds, so a follower they start only reconnects to the server's
+/// mux socket, may pick up a decision frame it will never see through, and is
+/// torn down again. Without it their dsh rows carry the roster's status rather
+/// than the live phase, which is all a one-shot listing needs. Long-lived
+/// processes (desktop, `fleet serve` / `webui` / `mcp` / `acp`) never call it.
+pub fn disable_event_watcher() {
+    WATCHER_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn roster_stall_slot() -> &'static Mutex<Option<(std::time::Instant, String)>> {
     ROSTER_STALL.get_or_init(|| Mutex::new(None))
 }
@@ -554,6 +570,9 @@ impl DshSource {
     ///
     /// [`with_client`]: Self::with_client
     fn ensure_watcher(port: u16, launch_token: &str) {
+        if WATCHER_DISABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let mut guard = lock(watcher_slot());
         if guard
             .as_ref()

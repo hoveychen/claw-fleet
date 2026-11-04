@@ -414,12 +414,91 @@ fn vet_send_target<'a>(
         ));
     }
     if self_id == Some(target.id.as_str()) {
-        return Err(
-            "that is this session — write the note down yourself instead of queueing it"
-                .to_string(),
-        );
+        return Err(SELF_SEND_REFUSAL.to_string());
     }
     Ok(target)
+}
+
+const SELF_SEND_REFUSAL: &str =
+    "that is this session — write the note down yourself instead of queueing it";
+
+/// Shortest id prefix [`resolve_in_registry`] answers. `short_id` prints 8
+/// characters, which is what gets copied around; anything shorter is as likely
+/// a workspace name (`cafe`, `beef`) as an id, and goes through the roster.
+const REGISTRY_MIN_PREFIX: usize = 8;
+
+/// What [`send_message`] needs to know about its target.
+#[derive(Debug, PartialEq)]
+struct SendTarget {
+    id: String,
+    workspace_path: String,
+    workspace_name: String,
+}
+
+/// Resolve an id or id prefix against the launch-note directory alone.
+///
+/// A full roster scan reads every transcript and some 30k state files — 5–7s
+/// for a one-shot `fleet send` on a machine with real history (measured
+/// 2026-11-04) — while every session `send` can reach is one Fleet launched and
+/// so has a `<id>.json` note: `enqueue` refuses anything else anyway. Matching
+/// file names costs one `readdir`.
+///
+/// `None` means "not answerable here, ask the roster": a needle that cannot be
+/// an id prefix, no matching note, or a note too old to record its workspace.
+/// Subagents never get a note of their own and forks are skipped, so neither
+/// can come back as a target.
+fn resolve_in_registry(
+    dir: &std::path::Path,
+    needle: &str,
+) -> Option<Result<SendTarget, String>> {
+    let n = needle.trim().to_lowercase();
+    if n.len() < REGISTRY_MIN_PREFIX || !n.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    let read = |id: &str| -> Option<crate::launch_spec::LaunchSpec> {
+        serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{id}.json"))).ok()?).ok()
+    };
+    // An exact id is one stat, not a listing.
+    let hits: Vec<(String, crate::launch_spec::LaunchSpec)> = match read(&n) {
+        Some(spec) => vec![(n.clone(), spec)],
+        None => std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                let id = name.strip_suffix(".json")?;
+                id.to_lowercase().starts_with(&n).then(|| id.to_string())
+            })
+            .filter_map(|id| read(&id).map(|spec| (id, spec)))
+            .collect(),
+    };
+    let mut hits: Vec<_> = hits
+        .into_iter()
+        .filter(|(_, spec)| spec.kind.as_deref() != Some("fork"))
+        .collect();
+    match hits.len() {
+        0 => None,
+        1 => {
+            let (id, spec) = hits.pop()?;
+            let workspace = spec.workspace.filter(|w| !w.trim().is_empty())?;
+            Some(Ok(SendTarget {
+                id,
+                workspace_name: crate::session::workspace_name(&workspace),
+                workspace_path: workspace,
+            }))
+        }
+        _ => {
+            hits.sort_by(|a, b| a.0.cmp(&b.0));
+            Some(Err(format!(
+                "'{needle}' matches {} agents: {} — use a longer prefix",
+                hits.len(),
+                hits.iter()
+                    .map(|(id, _)| short_id(id).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+        }
+    }
 }
 
 /// Send `text` as a follow-up turn to another session — into its running turn
@@ -428,9 +507,40 @@ fn vet_send_target<'a>(
 /// The one lever an agent has for steering a session that is *already running*.
 /// Shared by the `fleet__control action=send` tool and the `fleet send` CLI.
 pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
-    let sessions = load_sessions();
     let self_id = crate::codex_launch::resolve_fleet_session_id_from_env();
-    let target = vet_send_target(&sessions, needle, self_id.as_deref())?;
+    let registry = crate::launch_spec::spec_dir()
+        .and_then(|dir| resolve_in_registry(&dir, needle))
+        .transpose()?;
+    let (target, sender_name) = match registry {
+        Some(target) => {
+            if self_id.as_deref() == Some(target.id.as_str()) {
+                return Err(SELF_SEND_REFUSAL.to_string());
+            }
+            let sender_name = self_id.as_deref().and_then(|id| {
+                crate::launch_spec::get(id)?
+                    .workspace
+                    .filter(|w| !w.trim().is_empty())
+                    .map(|w| crate::session::workspace_name(&w))
+            });
+            (target, sender_name)
+        }
+        // Workspace-name needles, short prefixes and sessions Fleet holds no
+        // launch note for need the full roster.
+        None => {
+            let sessions = load_sessions();
+            let row = vet_send_target(&sessions, needle, self_id.as_deref())?;
+            let sender_name = self_id
+                .as_deref()
+                .and_then(|id| sessions.iter().find(|s| s.id == id))
+                .map(|s| s.workspace_name.clone());
+            let target = SendTarget {
+                id: row.id.clone(),
+                workspace_path: row.workspace_path.clone(),
+                workspace_name: row.workspace_name.clone(),
+            };
+            (target, sender_name)
+        }
+    };
     // `enqueue` itself refuses a session Fleet does not own — one it cannot
     // `claude --resume` without putting a second process on somebody's
     // transcript — so that gate is not repeated here.
@@ -441,9 +551,7 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
     // the return address is written into the body here, once, for both.
     let body = with_reply_address(
         text,
-        self_id
-            .as_deref()
-            .map(|id| (id, sessions.iter().find(|s| s.id == id))),
+        self_id.as_deref().map(|id| (id, sender_name.as_deref())),
     );
     let delivery = crate::pending_message::enqueue(
         &target.id,
@@ -484,17 +592,17 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
 ///
 /// `sender` is `None` when the caller has no session of its own (a person
 /// running `fleet send` in a terminal) — there is nothing to reply to then, so
-/// the body goes out untouched. The sender's own scan row is optional too: a
-/// session that has not been scanned yet still has a usable id.
+/// the body goes out untouched. The sender's workspace name is optional too: a
+/// session with neither a scan row nor a launch note still has a usable id.
 ///
 /// The transcript views parse this footer back out (`shared-ts/agentMail.ts`)
 /// to render the turn as mail from the sender — change both together.
-fn with_reply_address(text: &str, sender: Option<(&str, Option<&SessionInfo>)>) -> String {
-    let Some((id, row)) = sender else {
+fn with_reply_address(text: &str, sender: Option<(&str, Option<&str>)>) -> String {
+    let Some((id, workspace)) = sender else {
         return text.to_string();
     };
-    let from = match row {
-        Some(s) => format!("{id}（{}）", s.workspace_name),
+    let from = match workspace {
+        Some(ws) => format!("{id}（{ws}）"),
         None => id.to_string(),
     };
     format!(
@@ -699,8 +807,7 @@ mod tests {
     fn reply_address_names_the_sender_only_when_there_is_one() {
         assert_eq!(with_reply_address("hi", None), "hi");
 
-        let me = sample("cccccccc-3333", "gamma", SessionStatus::Executing);
-        let got = with_reply_address("hi", Some(("cccccccc-3333", Some(&me))));
+        let got = with_reply_address("hi", Some(("cccccccc-3333", Some("gamma"))));
         assert!(got.starts_with("hi\n\n---\n"), "{got}");
         assert!(got.contains("cccccccc-3333（gamma）"), "{got}");
         assert!(got.contains("action=send id=cccccccc-3333"), "{got}");
@@ -708,6 +815,45 @@ mod tests {
         let got = with_reply_address("hi", Some(("dddddddd-4444", None)));
         assert!(got.contains("dddddddd-4444"), "{got}");
         assert!(!got.contains("（gamma）"), "{got}");
+    }
+
+    fn note(dir: &std::path::Path, id: &str, body: &str) {
+        std::fs::write(dir.join(format!("{id}.json")), body).unwrap();
+    }
+
+    /// The launch-note fast path answers ids and id prefixes on its own, and
+    /// hands everything it cannot answer back to the roster scan.
+    #[test]
+    fn registry_resolves_ids_and_defers_the_rest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let full = "75268590-1111-2222-3333-444444444444";
+        note(dir, full, r#"{"source":"claude","workspace":"/w/alpha"}"#);
+        note(dir, "aaaaaaaa-1111-2222-3333-444444444444", r#"{"source":"dsh","workspace":"/w/x"}"#);
+        note(dir, "aaaaaaaa-5555-2222-3333-444444444444", r#"{"source":"dsh","workspace":"/w/y"}"#);
+        note(dir, "bbbbbbbb-1111-2222-3333-444444444444", r#"{"source":"claude","kind":"fork","workspace":"/w/f"}"#);
+        note(dir, "cccccccc-1111-2222-3333-444444444444", r#"{"model":"opus"}"#);
+
+        let want = SendTarget {
+            id: full.into(),
+            workspace_path: "/w/alpha".into(),
+            workspace_name: "alpha".into(),
+        };
+        assert_eq!(resolve_in_registry(dir, full), Some(Ok(want)));
+        let by_prefix = resolve_in_registry(dir, "75268590").unwrap().unwrap();
+        assert_eq!(by_prefix.id, full);
+
+        let err = resolve_in_registry(dir, "aaaaaaaa").unwrap().unwrap_err();
+        assert!(err.contains("matches 2 agents"), "{err}");
+
+        // Forks are not sessions; a note without a workspace cannot be queued
+        // for; short or non-hex needles may be workspace names; misses fall
+        // through. All of these are the roster's to answer.
+        assert_eq!(resolve_in_registry(dir, "bbbbbbbb"), None);
+        assert_eq!(resolve_in_registry(dir, "cccccccc"), None);
+        assert_eq!(resolve_in_registry(dir, "7526"), None);
+        assert_eq!(resolve_in_registry(dir, "claude-fleet"), None);
+        assert_eq!(resolve_in_registry(dir, "00000000-dead-beef-0000-000000000000"), None);
     }
 
     /// Ambiguity must be refused here too — queueing a steering message for the
