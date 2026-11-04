@@ -60,19 +60,47 @@ pub fn is_done(rec: &ProcRecord) -> bool {
     rec.status == ProcStatus::Exited
 }
 
-/// Block until the job exits or `max_secs` (clamped to [`MAX_WAIT_SECS`])
-/// passes. Returns the latest record either way; check [`is_done`].
-pub fn wait(id: &str, max_secs: u64) -> Result<ProcRecord, String> {
-    let dir = proc_runner::dir_of(id)?;
-    wait_in(&dir, id, Duration::from_secs(max_secs.min(MAX_WAIT_SECS)))
+/// How a [`wait`] ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitEnd {
+    /// The job exited.
+    Done,
+    /// `max_secs` passed with the job still running.
+    Deadline,
+    /// `step_aside` asked the wait to return early with the job still running.
+    SteppedAside,
 }
 
-fn wait_in(dir: &Path, id: &str, max: Duration) -> Result<ProcRecord, String> {
+/// Block until the job exits, `max_secs` (clamped to [`MAX_WAIT_SECS`])
+/// passes, or `step_aside` returns true (polled between checks — the MCP wait
+/// uses it to give way to a message injected into the turn). Returns the latest
+/// record either way.
+pub fn wait(
+    id: &str,
+    max_secs: u64,
+    step_aside: impl FnMut() -> bool,
+) -> Result<(ProcRecord, WaitEnd), String> {
+    let dir = proc_runner::dir_of(id)?;
+    wait_in(&dir, id, Duration::from_secs(max_secs.min(MAX_WAIT_SECS)), step_aside)
+}
+
+fn wait_in(
+    dir: &Path,
+    id: &str,
+    max: Duration,
+    mut step_aside: impl FnMut() -> bool,
+) -> Result<(ProcRecord, WaitEnd), String> {
     let deadline = Instant::now() + max;
     loop {
         let rec = proc_runner::get_proc_in(dir, id)?;
-        if is_done(&rec) || Instant::now() >= deadline {
-            return Ok(rec);
+        if is_done(&rec) {
+            return Ok((rec, WaitEnd::Done));
+        }
+        if Instant::now() >= deadline {
+            return Ok((rec, WaitEnd::Deadline));
+        }
+        if step_aside() {
+            return Ok((rec, WaitEnd::SteppedAside));
         }
         std::thread::sleep(WAIT_POLL.min(deadline.saturating_duration_since(Instant::now())));
     }
@@ -403,8 +431,9 @@ mod tests {
         };
         write(dir.path(), &rec);
 
-        let early = wait_in(dir.path(), "pwait", Duration::from_millis(300)).unwrap();
+        let (early, end) = wait_in(dir.path(), "pwait", Duration::from_millis(300), || false).unwrap();
         assert!(!is_done(&early));
+        assert_eq!(end, WaitEnd::Deadline);
 
         let d = dir.path().to_path_buf();
         let flip = std::thread::spawn(move || {
@@ -415,10 +444,43 @@ mod tests {
             write(&d, &rec);
         });
         let started = Instant::now();
-        let done = wait_in(dir.path(), "pwait", Duration::from_secs(30)).unwrap();
+        let (done, end) = wait_in(dir.path(), "pwait", Duration::from_secs(30), || false).unwrap();
         flip.join().unwrap();
         assert!(is_done(&done));
+        assert_eq!(end, WaitEnd::Done);
         assert_eq!(done.exit_code, Some(7));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn wait_steps_aside_while_the_job_still_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid = std::process::id();
+        let rec = ProcRecord {
+            id: "paside".into(),
+            workspace_path: "/ws".into(),
+            command: "x".into(),
+            status: ProcStatus::Running,
+            child_pid: Some(1),
+            host_pid: Some(pid),
+            host_start_time: crate::session::process_start_time(pid),
+            exit_code: None,
+            started_ms: now_ms(),
+            finished_ms: None,
+            cols: 80,
+            rows: 24,
+        };
+        write(dir.path(), &rec);
+
+        let mut polls = 0;
+        let started = Instant::now();
+        let (got, end) = wait_in(dir.path(), "paside", Duration::from_secs(30), || {
+            polls += 1;
+            polls >= 2
+        })
+        .unwrap();
+        assert_eq!(end, WaitEnd::SteppedAside);
+        assert!(!is_done(&got));
         assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

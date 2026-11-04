@@ -712,7 +712,14 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                 Some(v) => return Err(format!("`timeout` must be > 0, got {v}")),
                 None => job::MAX_WAIT_SECS,
             };
-            let rec = job::wait(&id, secs)?;
+            // Give way to a message injected into this session's turn, the same
+            // way a waiting fleet__ask card does: while this call blocks, the
+            // CLI cannot absorb the message, and the boss sees it queued.
+            let mut preempt = sid.map(crate::ask_preempt::Preempter::new);
+            let (rec, end) = job::wait(&id, secs, || preempt.as_mut().is_some_and(|p| p.poll()))?;
+            if end == job::WaitEnd::SteppedAside {
+                return Ok(crate::ask_preempt::job_wait_stepped_aside_notice(&id));
+            }
             let mut out = job::render(&rec, tail);
             if !job::is_done(&rec) {
                 out.push_str(&format!(
