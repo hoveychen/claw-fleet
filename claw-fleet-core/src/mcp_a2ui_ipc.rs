@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -105,25 +105,175 @@ pub fn try_read_response(id: &str) -> Option<A2uiRenderResponse> {
 
 /// Write a response file. Called by the desktop / fleet serve after the user
 /// resolves the rendered A2UI surface.
+///
+/// Same contract as [`crate::mcp_ipc::write_response`]: the existence check and
+/// the write share [`withdraw`]'s lock, and an answer whose producer is gone
+/// resumes the Fleet-owned session ([`recover_orphaned_response`]). When the
+/// session is still running but the card stepped aside for a message, nobody
+/// polls this file, so the live turn is told to fetch it.
 pub fn write_response(resp: &A2uiRenderResponse) -> Result<(), String> {
-    // Only a live pending request may be answered — see guard::write_response.
-    if !request_path(&resp.id).map(|p| p.exists()).unwrap_or(false) {
-        return Err(format!("no pending request for id {}", resp.id));
-    }
+    let req_path = request_path(&resp.id).ok_or("cannot determine home dir")?;
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("write fleet-render-a2ui response: {e}"))
+    // Only a live pending request may be answered — see guard::write_response.
+    crate::atomic_json::with_file_lock(&req_path, || {
+        if !req_path.exists() {
+            return Err(format!("no pending request for id {}", resp.id));
+        }
+        fs::write(&path, json).map_err(|e| format!("write fleet-render-a2ui response: {e}"))
+    })?;
+    if !recover_orphaned_response(&resp.id)? {
+        crate::ask_preempt::notify_resolved_if_detached(&resp.id);
+    }
+    Ok(())
 }
 
-/// Remove the request + response pair. Called by the MCP server once it has
-/// consumed the response.
+/// How long ago the response for `id` was written, or `None` when there is
+/// none. `ask_preempt::sweep_idle` waits this out before it takes over.
+pub fn response_age_ms(id: &str) -> Option<u64> {
+    let modified = fs::metadata(response_path(id)?).ok()?.modified().ok()?;
+    Some(
+        std::time::SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    )
+}
+
+/// Write an answered response for `id` (action `submit`, context `k=v`),
+/// back-dated by `age_ms`.
+#[cfg(test)]
+pub(crate) fn write_response_file_for_test(id: &str, age_ms: u64) {
+    let path = response_path(id).unwrap();
+    fs::write(&path, r#"{"id":"x","actionName":"submit","actionContext":{"k":"v"}}"#).unwrap();
+    let f = fs::File::options().write(true).open(&path).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_millis(age_ms))
+        .unwrap();
+}
+
+/// Recover an answered request whose MCP producer no longer exists — the
+/// `fleet__render_a2ui` twin of [`crate::mcp_ipc::recover_orphaned_response`].
+///
+/// `Ok(false)`: the live producer (or the live turn of a detached card) still
+/// owns the response, or the session is not Fleet-owned. `Ok(true)`: consumed
+/// here — a cancellation is cleaned up, an action resumes the session through
+/// the parked path.
+pub fn recover_orphaned_response(id: &str) -> Result<bool, String> {
+    // See `mcp_ipc::recover_orphaned_response`: a detached card's session may be
+    // in the first seconds of the resume that woke it.
+    let detached = crate::ask_preempt::was_detached(id);
+    recover_orphaned_response_with(
+        id,
+        |session_id| {
+            crate::parked::session_alive(session_id)
+                || (detached && crate::session_driver::turn_in_flight(session_id))
+        },
+        crate::parked::resume_session,
+    )
+}
+
+fn recover_orphaned_response_with<A, S>(id: &str, alive: A, spawn: S) -> Result<bool, String>
+where
+    A: FnOnce(&str) -> bool,
+    S: FnOnce(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>) -> Result<(), String>,
+{
+    let Some(req) = read_request(id) else {
+        return Ok(false);
+    };
+    let Some(resp) = try_read_response(id) else {
+        return Ok(false);
+    };
+    if alive(&req.session_id) {
+        return Ok(false);
+    }
+    let Some(workspace) = crate::parked::parkable_workspace(&req.session_id) else {
+        return Ok(false);
+    };
+
+    if resp.cancelled {
+        cleanup(id);
+    } else {
+        let stepped_aside = crate::ask_preempt::was_detached(id);
+        let model = crate::session::resolve_session_model_spec(&req.session_id);
+        let effort = crate::launch_spec::effort_of(&req.session_id);
+        crate::parked::park_with(
+            id,
+            crate::parked::ParkedKind::A2uiRender,
+            &req.session_id,
+            &workspace,
+            &req,
+            model.as_deref(),
+            effort.as_deref(),
+        )?;
+        if stepped_aside {
+            crate::parked::mark_stepped_aside(id)?;
+        }
+        cleanup(id);
+        let payload = serde_json::to_value(&resp)
+            .map_err(|e| format!("serialize orphaned fleet-render-a2ui response: {e}"))?;
+        crate::parked::answer_with(id, &payload, spawn)?;
+    }
+    crate::log_debug(&format!(
+        "fleet-render-a2ui orphan recovery: consumed {id} for session {} (cancelled={})",
+        req.session_id, resp.cancelled
+    ));
+    Ok(true)
+}
+
+/// Remove the request + response pair (and any detached-card record). Called
+/// by the MCP server once it has consumed the response.
 pub fn cleanup(id: &str) {
     if let Some(p) = request_path(id) {
+        let _ = fs::remove_file(lock_path(&p));
         let _ = fs::remove_file(p);
     }
     if let Some(p) = response_path(id) {
         let _ = fs::remove_file(p);
     }
+    crate::ask_preempt::clear_detached(id);
+}
+
+/// The sibling file [`crate::atomic_json::with_file_lock`] locks for `path`.
+fn lock_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// What [`withdraw`] found.
+#[derive(Debug)]
+pub enum WithdrawOutcome {
+    /// The card is closed: request and any detached record are gone.
+    Withdrawn,
+    /// The boss acted first. The card is left open with its response, for the
+    /// caller to consume like any answer.
+    Answered(A2uiRenderResponse),
+    /// No open card with this id.
+    Gone,
+}
+
+/// Close a card unless a response is already in, atomically with respect to
+/// [`write_response`] — same protocol as [`crate::mcp_ipc::withdraw`].
+pub fn withdraw(id: &str) -> WithdrawOutcome {
+    let Some(req_path) = request_path(id) else {
+        return WithdrawOutcome::Gone;
+    };
+    let claimed = req_path.with_extension("withdrawing");
+    let outcome = crate::atomic_json::with_file_lock(&req_path, || {
+        if fs::rename(&req_path, &claimed).is_err() {
+            return WithdrawOutcome::Gone;
+        }
+        if let Some(resp) = try_read_response(id) {
+            let _ = fs::rename(&claimed, &req_path);
+            return WithdrawOutcome::Answered(resp);
+        }
+        let _ = fs::remove_file(&claimed);
+        WithdrawOutcome::Withdrawn
+    });
+    if matches!(outcome, WithdrawOutcome::Withdrawn) {
+        cleanup(id);
+    }
+    outcome
 }
 
 /// Soft list of pending request ids; returns empty on any failure.
@@ -164,17 +314,27 @@ fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
 
 /// JSONSchema describing `fleet__render_a2ui` arguments. The MCP `tools/list`
 /// response embeds this verbatim so the agent sees the same shape the Rust
-/// types deserialize.
+/// types deserialize. `messageTree` is checked in code rather than listed as
+/// required, so `wait` / `withdraw` can omit it (same as `fleet__ask`'s
+/// `questions`).
 pub fn a2ui_render_input_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["render", "wait", "withdraw"],
+                "description": "Default `render` (raise a card; `messageTree` required). A card steps aside when a new message reaches your turn and comes back with its request id: `wait` resumes waiting on it (returns at once if the boss already acted), `withdraw` takes it off the boss's screen when the message made it obsolete. Both need `request_id`."
+            },
+            "request_id": {
+                "type": "string",
+                "description": "For action `wait` / `withdraw`: the id of the card that stepped aside."
+            },
             "messageTree": {
                 "type": "object",
-                "description": "A2UI v0.9 agent-to-client message tree (passed through to @a2ui/web_core MessageProcessor). See https://github.com/google/A2UI/tree/main/specification/v0_9 for the full schema."
+                "description": "A2UI v0.9 agent-to-client message tree (passed through to @a2ui/web_core MessageProcessor). See https://github.com/google/A2UI/tree/main/specification/v0_9 for the full schema. Required for action `render`."
             }
-        },
-        "required": ["messageTree"]
+        }
     })
 }
 
@@ -323,11 +483,224 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Private `FLEET_HOME` / `CODEX_HOME`, restored on drop. A Codex rollout
+    /// is the cheapest way to make a session Fleet-owned for the recovery gate.
+    struct TmpHome {
+        dir: std::path::PathBuf,
+        previous_fleet: Option<std::ffi::OsString>,
+        previous_codex: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TmpHome {
+        fn new(tag: &str) -> Self {
+            let lock = crate::session::fleet_home_lock();
+            let dir = fresh_tmp_dir(tag);
+            std::fs::create_dir_all(&dir).unwrap();
+            let previous_fleet = std::env::var_os("FLEET_HOME");
+            let previous_codex = std::env::var_os("CODEX_HOME");
+            unsafe {
+                std::env::set_var("FLEET_HOME", &dir);
+                std::env::set_var("CODEX_HOME", dir.join(".codex"));
+            }
+            Self { dir, previous_fleet, previous_codex, _lock: lock }
+        }
+
+        fn plant_codex_session(&self, id: &str, workspace: &std::path::Path) {
+            let sessions = self.dir.join(".codex/sessions/2026/11/04");
+            std::fs::create_dir_all(&sessions).unwrap();
+            let record = json!({
+                "type": "session_meta",
+                "payload": { "id": id, "session_id": id, "originator": "fleet", "cwd": workspace, "source": "exec" }
+            });
+            std::fs::write(
+                sessions.join(format!("rollout-2026-11-04T00-00-00-{id}.jsonl")),
+                format!("{record}\n"),
+            )
+            .unwrap();
+        }
+    }
+
+    impl Drop for TmpHome {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous_fleet.take() {
+                    Some(v) => std::env::set_var("FLEET_HOME", v),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+                match self.previous_codex.take() {
+                    Some(v) => std::env::set_var("CODEX_HOME", v),
+                    None => std::env::remove_var("CODEX_HOME"),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn open_request(id: &str, session_id: &str) {
+        write_request(&A2uiRenderRequest {
+            id: id.into(),
+            session_id: session_id.into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            task: None,
+            timestamp: "2026-11-04T10:00:00Z".into(),
+            parked: false,
+            message_tree: json!({}),
+        })
+        .unwrap();
+    }
+
+    fn submitted(id: &str) -> A2uiRenderResponse {
+        A2uiRenderResponse {
+            id: id.into(),
+            action_name: Some("submit".into()),
+            action_context: BTreeMap::from([("k".into(), "v".into())]),
+            cancelled: false,
+        }
+    }
+
+    /// Recover `id` (already planted with a response) and return the resume prompt.
+    fn recover_prompt(id: &str) -> String {
+        let mut prompt = None;
+        assert!(recover_orphaned_response_with(
+            id,
+            |_| false,
+            |_, _, p, _, _, _| {
+                prompt = Some(p.to_string());
+                Ok(())
+            },
+        )
+        .unwrap());
+        prompt.expect("orphan must resume")
+    }
+
     #[test]
-    fn input_schema_advertises_message_tree() {
+    fn detached_orphan_resumes_with_the_stepped_aside_header_and_the_action() {
+        let home = TmpHome::new("orphan-detached");
+        let workspace = home.dir.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let session_id = "019f6aba-6dd8-7c90-a70e-c969ea896be1";
+        home.plant_codex_session(session_id, &workspace);
+        let plant = |id: &str| {
+            open_request(id, session_id);
+            std::fs::write(response_path(id).unwrap(), serde_json::to_vec(&submitted(id)).unwrap())
+                .unwrap();
+        };
+
+        // A card that timed out keeps the timeout wording.
+        plant("plain-1");
+        let prompt = recover_prompt("plain-1");
+        assert!(prompt.starts_with(crate::parked::RESUME_PROMPT_HEADER), "{prompt}");
+
+        // Stepped aside, turn ended on its own: answered after that.
+        plant("aside-1");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "aside-1", session_id);
+        let prompt = recover_prompt("aside-1");
+        assert!(prompt.starts_with(crate::parked::STEPPED_ASIDE_RESUME_HEADER), "{prompt}");
+        assert!(prompt.contains("【A2UI 操作】submit"), "{prompt}");
+        assert!(prompt.contains("【k】v"), "{prompt}");
+        assert!(!crate::ask_preempt::is_detached("aside-1"));
+        assert!(read_request("aside-1").is_none());
+        assert!(try_read_response("aside-1").is_none());
+        assert!(!crate::parked::is_parked("aside-1"), "answered, so the parked copy is gone too");
+
+        // Same through the sweep, which holds the record under its claim name.
+        plant("aside-2");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "aside-2", session_id);
+        let dir = home.dir.join(".fleet/fleet-ask-detached");
+        std::fs::rename(dir.join("aside-2.json"), dir.join("aside-2.sweeping")).unwrap();
+        let prompt = recover_prompt("aside-2");
+        assert!(prompt.starts_with(crate::parked::STEPPED_ASIDE_RESUME_HEADER), "{prompt}");
+    }
+
+    #[test]
+    fn live_session_keeps_the_response_and_cancellation_resumes_nothing() {
+        let home = TmpHome::new("orphan-live");
+        let workspace = home.dir.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let session_id = "019f6aba-6dd8-7c90-a70e-c969ea896be2";
+        home.plant_codex_session(session_id, &workspace);
+
+        open_request("live-1", session_id);
+        std::fs::write(response_path("live-1").unwrap(), serde_json::to_vec(&submitted("live-1")).unwrap())
+            .unwrap();
+        let recovered =
+            recover_orphaned_response_with("live-1", |_| true, |_, _, _, _, _, _| panic!("live turn owns it"))
+                .unwrap();
+        assert!(!recovered);
+        assert!(try_read_response("live-1").is_some());
+
+        open_request("cancel-1", session_id);
+        let mut cancel = submitted("cancel-1");
+        cancel.cancelled = true;
+        std::fs::write(response_path("cancel-1").unwrap(), serde_json::to_vec(&cancel).unwrap()).unwrap();
+        assert!(recover_orphaned_response_with(
+            "cancel-1",
+            |_| false,
+            |_, _, _, _, _, _| panic!("a dismissal wakes nobody")
+        )
+        .unwrap());
+        assert!(read_request("cancel-1").is_none());
+    }
+
+    #[test]
+    fn withdraw_returns_a_response_that_is_already_in() {
+        let _home = TmpHome::new("withdraw-answered");
+        open_request("w-ans", "s1");
+        write_response_file_for_test("w-ans", 0);
+        match withdraw("w-ans") {
+            WithdrawOutcome::Answered(resp) => assert_eq!(resp.action_name.as_deref(), Some("submit")),
+            other => panic!("expected the response, got {other:?}"),
+        }
+        assert!(read_request("w-ans").is_some(), "the card stays open for the caller to consume");
+        assert!(try_read_response("w-ans").is_some());
+        assert!(matches!(withdraw("w-missing"), WithdrawOutcome::Gone));
+    }
+
+    #[test]
+    fn response_after_withdraw_is_refused_not_dropped() {
+        let home = TmpHome::new("withdraw-then-answer");
+        open_request("w-1", "s1");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "w-1", "s1");
+        assert!(matches!(withdraw("w-1"), WithdrawOutcome::Withdrawn));
+        assert!(read_request("w-1").is_none());
+        assert!(!crate::ask_preempt::is_detached("w-1"));
+        let err = write_response(&submitted("w-1")).unwrap_err();
+        assert!(err.contains("no pending request"), "{err}");
+        assert!(try_read_response("w-1").is_none());
+        // No claim file or lock is left that a listing could mistake for a card.
+        let names: Vec<String> = std::fs::read_dir(home.dir.join(".fleet/fleet-render-a2ui"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("w-1") && !n.ends_with(".lock"))
+            .collect();
+        assert!(names.is_empty(), "{names:?}");
+    }
+
+    #[test]
+    fn write_response_to_a_detached_card_of_a_dead_unowned_session_keeps_it() {
+        // Not Fleet-owned, so neither recovery nor the notice can act: the
+        // response stays for a later `wait`.
+        let _home = TmpHome::new("write-detached");
+        open_request("d-1", "s-unowned");
+        crate::ask_preempt::mark_detached(crate::ask_preempt::CardTool::A2uiRender, "d-1", "s-unowned");
+        write_response(&submitted("d-1")).unwrap();
+        assert_eq!(try_read_response("d-1").unwrap().action_name.as_deref(), Some("submit"));
+        assert!(crate::ask_preempt::is_detached("d-1"));
+    }
+
+    #[test]
+    fn input_schema_advertises_message_tree_and_wait_withdraw() {
         let s = a2ui_render_input_schema();
         assert_eq!(s["type"], "object");
-        assert_eq!(s["required"][0], "messageTree");
         assert!(s["properties"]["messageTree"].get("type").is_some());
+        assert_eq!(s["properties"]["action"]["enum"], json!(["render", "wait", "withdraw"]));
+        assert!(s["properties"]["request_id"].is_object());
+        assert!(
+            s.get("required").is_none(),
+            "`messageTree` is checked in code so wait/withdraw can omit it"
+        );
     }
 }

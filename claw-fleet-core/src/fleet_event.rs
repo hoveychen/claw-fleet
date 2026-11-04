@@ -203,7 +203,7 @@ mod tests {
     /// the row's content as a bare string (codex) or as text blocks (claude).
     #[test]
     fn a_drained_agent_frame_becomes_a_notice() {
-        let notice = crate::ask_preempt::resolved_notice("req-9");
+        let notice = crate::ask_preempt::resolved_notice(crate::ask_preempt::CardTool::FleetAsk, "req-9");
         let framed = crate::live_inject::frame_as_agent(&notice);
         for content in [json!(framed.clone()), json!([{"type": "text", "text": framed}])] {
             let mut msg = user_row(content);
@@ -256,7 +256,7 @@ mod tests {
     /// Origin, not wording: the user typing Fleet's notice text is the user.
     #[test]
     fn the_users_own_fleet_lookalike_text_is_not_an_event() {
-        let mut msg = user_row(json!(crate::ask_preempt::resolved_notice("r1")));
+        let mut msg = user_row(json!(crate::ask_preempt::resolved_notice(crate::ask_preempt::CardTool::FleetAsk, "r1")));
         annotate(&mut msg);
         assert!(msg.get("fleetEvent").is_none());
         let mut msg = user_row(json!(format!("{}hi", crate::live_inject::AGENT_FRAME_HEAD)));

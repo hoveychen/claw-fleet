@@ -5524,19 +5524,24 @@ pub fn session_has_pending_decision(session_id: &str) -> bool {
     session_has_unpreemptible_decision(session_id) || session_has_pending_fleet_ask(session_id)
 }
 
-/// True when an unanswered `fleet__ask` card belongs to this session — whether
-/// its producer is still polling it or it stepped aside for a message (see
-/// [`crate::ask_preempt`]).
+/// True when an unanswered `fleet__ask` or `fleet__render_a2ui` card belongs to
+/// this session — whether its producer is still polling it or it stepped aside
+/// for a message (see [`crate::ask_preempt`]).
 pub fn session_has_pending_fleet_ask(session_id: &str) -> bool {
-    crate::mcp_ipc::list_pending_requests()
+    let ask = crate::mcp_ipc::list_pending_requests()
         .iter()
         .filter_map(|id| crate::mcp_ipc::read_request(id))
+        .any(|r| r.session_id == session_id);
+    ask || crate::mcp_a2ui_ipc::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::mcp_a2ui_ipc::read_request(id))
         .any(|r| r.session_id == session_id)
 }
 
-/// [`session_has_pending_decision`] minus `fleet__ask`: the channels whose
-/// blocked tool call cannot step aside for an injected message (guard,
-/// elicitation, A2UI, plan approval, permission prompt).
+/// [`session_has_pending_decision`] minus the step-aside cards (`fleet__ask`,
+/// `fleet__render_a2ui`): the channels whose blocked tool call cannot step
+/// aside for an injected message (guard, elicitation, plan approval,
+/// permission prompt).
 pub fn session_has_unpreemptible_decision(session_id: &str) -> bool {
     let guard = crate::guard::list_pending_requests()
         .iter()
@@ -5550,13 +5555,6 @@ pub fn session_has_unpreemptible_decision(session_id: &str) -> bool {
         .filter_map(|id| crate::elicitation::read_request(id))
         .any(|r| r.session_id == session_id);
     if elicitation {
-        return true;
-    }
-    let a2ui = crate::mcp_a2ui_ipc::list_pending_requests()
-        .iter()
-        .filter_map(|id| crate::mcp_a2ui_ipc::read_request(id))
-        .any(|r| r.session_id == session_id);
-    if a2ui {
         return true;
     }
     let plan = crate::plan_approval::list_pending_requests()
