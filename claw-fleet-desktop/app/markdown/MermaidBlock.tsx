@@ -78,6 +78,10 @@ export function MermaidBlock({ code }: { code: string }) {
           // mermaid runs its own DOMPurify pass at this level, so labels
           // carrying HTML can't smuggle script into the SVG we inject below.
           securityLevel: "strict",
+          // On a parse error mermaid draws its "Syntax error in text" bomb into
+          // a scratch node on <body> and throws before removing it, so the bomb
+          // stayed pinned to the window corner. We render our own fallback.
+          suppressErrorRendering: true,
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;
