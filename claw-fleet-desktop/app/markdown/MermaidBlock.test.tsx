@@ -12,7 +12,8 @@ import { createRoot, type Root } from "react-dom/client";
 const render = vi.fn(async (_id: string, _code: string) => ({
   svg: '<svg viewBox="0 0 120 60" class="diagram-svg"></svg>',
 }));
-vi.mock("mermaid", () => ({ default: { initialize: vi.fn(), render } }));
+const initialize = vi.fn();
+vi.mock("mermaid", () => ({ default: { initialize, render } }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -75,5 +76,15 @@ describe("mermaid diagram stability", () => {
     act(() => root.render(<MermaidBlock key="b" code={code} />));
     expect(host.querySelector("svg.diagram-svg")).not.toBeNull();
     expect(render).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks mermaid not to leave its syntax-error bomb on <body>", async () => {
+    // Without this flag mermaid 11 draws the error diagram into a scratch node
+    // on <body> and throws before removing it; the bomb stayed in the corner.
+    act(() => root.render(<MermaidBlock code={"flowchart TB\n  BombA --> BombB"} />));
+    await flush();
+    expect(initialize).toHaveBeenCalledWith(
+      expect.objectContaining({ suppressErrorRendering: true }),
+    );
   });
 });

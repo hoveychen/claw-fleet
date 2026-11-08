@@ -81,6 +81,10 @@ export function MermaidBlock({ code }: { code: string }) {
           // same stack — see mermaidTheme comment).
           ...mermaidThemeConfig(theme),
           securityLevel: "strict",
+          // On a parse error mermaid draws its "Syntax error in text" bomb into
+          // a scratch node on <body> and throws before removing it, so the bomb
+          // stayed pinned to the page. We render our own fallback.
+          suppressErrorRendering: true,
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;
