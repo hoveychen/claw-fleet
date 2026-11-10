@@ -230,6 +230,20 @@ export function classifySyntheticError(
     };
   }
 
+  // "an image in the conversation could not be processed and was removed"
+  // (`apiError: "media_removed"`, seen on 2.1.310) also arrives as
+  // `invalid_request`. Claude Code has already dropped the image, so the
+  // context is fine and a retry carries on without it; compaction would not
+  // address anything.
+  if (src.apiError === "media_removed") {
+    return {
+      ...base,
+      severity: "transient",
+      titleKey: "detail.api_error.media_removed",
+      actions: ["retry"],
+    };
+  }
+
   switch (code) {
     case "rate_limit":
       // Both shapes can offer a model switch; only the window shape is a wait.

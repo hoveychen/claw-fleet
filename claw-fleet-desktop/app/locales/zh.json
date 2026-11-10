@@ -2063,6 +2063,7 @@
       "model_quota": "该模型额度已用完",
       "server": "连不上 API",
       "network_blocked": "网络被拦截",
+      "media_removed": "图片无法处理",
       "too_long": "上下文超长",
       "compaction_blocked": "压缩也被配额挡住了",
       "billing": "余额不足",
