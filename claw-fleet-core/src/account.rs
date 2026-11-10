@@ -643,7 +643,50 @@ async fn fetch_via_anthropic() -> Result<RawAccount, String> {
     ))
 }
 
+/// How long a successful account/usage read is reused before the next caller
+/// goes back to the network.
+const ACCOUNT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Last successful read, shared by every caller in the process.
+static ACCOUNT_CACHE: std::sync::Mutex<Option<(std::time::Instant, AccountInfo)>> =
+    std::sync::Mutex::new(None);
+
+/// Serialises cache misses so callers that arrive together share one request.
+static ACCOUNT_FETCH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn cached_account(ttl: std::time::Duration) -> Option<AccountInfo> {
+    let guard = ACCOUNT_CACHE.lock().ok()?;
+    guard
+        .as_ref()
+        .filter(|(at, _)| at.elapsed() < ttl)
+        .map(|(_, info)| info.clone())
+}
+
+/// Account details plus current usage, cached for `ACCOUNT_CACHE_TTL` and
+/// single-flight.
+///
+/// Every client funnels into this: the desktop UI, each browser tab on the
+/// relay tunnel (`/sources/claude/account`), the phone's `account_usage`, MCP
+/// inspect and the background sampler. Uncached, N open tabs meant N direct
+/// Usage API calls per poll, and Anthropic answered with 429. Failures are not
+/// cached, so the next caller retries.
 pub async fn fetch_account_info() -> Result<AccountInfo, String> {
+    if let Some(info) = cached_account(ACCOUNT_CACHE_TTL) {
+        return Ok(info);
+    }
+    let _gate = ACCOUNT_FETCH_GATE.lock().await;
+    // Whoever held the gate before us may have just filled the cache.
+    if let Some(info) = cached_account(ACCOUNT_CACHE_TTL) {
+        return Ok(info);
+    }
+    let info = fetch_account_info_uncached().await?;
+    if let Ok(mut guard) = ACCOUNT_CACHE.lock() {
+        *guard = Some((std::time::Instant::now(), info.clone()));
+    }
+    Ok(info)
+}
+
+async fn fetch_account_info_uncached() -> Result<AccountInfo, String> {
     // Prefer foxy-switcher when its daemon is alive: it already polls Anthropic's
     // usage endpoint once a minute for the in-use account, so reading from it
     // avoids a redundant Anthropic call (and the rate limits that come with it).
@@ -677,9 +720,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
             ),
         ),
         FoxyLookup::Unavailable(e) => return Err(e),
-        FoxyLookup::NotInstalled => {
-            ("anthropic".to_string(), fetch_via_anthropic().await?)
-        }
+        FoxyLookup::NotInstalled => ("anthropic".to_string(), fetch_via_anthropic().await?),
     };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -832,6 +873,33 @@ pub fn start_background_sampler(interval: std::time::Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh cached read is served without touching the network; a stale
+    /// one is not. This is the guard against N relay tabs each calling the
+    /// Usage API and drawing 429s.
+    #[test]
+    fn account_cache_serves_fresh_and_expires_stale() {
+        let info = AccountInfo {
+            email: "cache-probe@example.invalid".into(),
+            ..Default::default()
+        };
+        *ACCOUNT_CACHE.lock().unwrap() = Some((std::time::Instant::now(), info));
+        let got = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(fetch_account_info())
+            .expect("a fresh cache entry must be returned without a network call");
+        assert_eq!(got.email, "cache-probe@example.invalid");
+
+        let stale =
+            std::time::Instant::now() - ACCOUNT_CACHE_TTL - std::time::Duration::from_secs(1);
+        ACCOUNT_CACHE.lock().unwrap().as_mut().unwrap().0 = stale;
+        assert!(
+            cached_account(ACCOUNT_CACHE_TTL).is_none(),
+            "stale entry must not be served"
+        );
+        *ACCOUNT_CACHE.lock().unwrap() = None;
+    }
 
     fn snap_at(ts: i64) -> SnapshotEntry {
         SnapshotEntry {
