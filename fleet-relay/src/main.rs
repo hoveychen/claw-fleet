@@ -26,6 +26,7 @@ mod limits;
 mod notify_target;
 mod push;
 mod registry;
+mod static_files;
 mod ws;
 #[cfg(test)]
 mod ws_e2e_tests;
@@ -36,7 +37,6 @@ use std::sync::Arc;
 
 use axum::routing::get;
 use axum::{Json, Router};
-use tower_http::services::{ServeDir, ServeFile};
 
 use applinks::AppLinks;
 use harmony_push::HarmonyPush;
@@ -215,10 +215,8 @@ async fn main() {
         applinks,
     });
 
-    let index = static_dir.join("index.html");
-    let static_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
-
-    let app = build_api(state).fallback_service(static_service);
+    // Mobile web at `/`, desktop web at `/desktop/` — see static_files.rs.
+    let app = build_api(state).merge(static_files::router(&static_dir));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     log::info!("fleet-relay listening on {addr}");

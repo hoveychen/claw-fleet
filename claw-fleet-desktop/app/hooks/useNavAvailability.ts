@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useUIStore } from "../store";
-import { isWebBuild, showsMobilePanel } from "../hostEnv";
+import { isRelayTunnel, isWebBuild, showsMobilePanel } from "../hostEnv";
 import type { NavAvailability } from "../components/navGroups";
 
 /** Which conditional pages this host has, for the nav rail and the section
@@ -13,6 +13,11 @@ export function useNavAvailability(): NavAvailability {
   const lobsters = useUIStore((s) => s.lobsterFleetEnabled);
   // The pairing code belongs to the process that opens the relay channel; a
   // loopback-only webui has no host a phone can reach (see showsMobilePanel).
-  const mobile = showsMobilePanel(isWebBuild(), window.location.protocol, window.location.hostname);
+  const mobile = showsMobilePanel(
+    isWebBuild(),
+    window.location.protocol,
+    window.location.hostname,
+    isRelayTunnel(),
+  );
   return useMemo(() => ({ terminal, mobile, lobsters }), [terminal, mobile, lobsters]);
 }

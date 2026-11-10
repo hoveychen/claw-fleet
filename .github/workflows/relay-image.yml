@@ -1,6 +1,7 @@
 name: Relay Image
 
-# Builds the fleet-relay container (relay binary + mobile-web bundle) and pushes
+# Builds the fleet-relay container (relay binary + mobile-web bundle at / +
+# desktop web bundle at /desktop/) and pushes
 # it to GHCR, so muvee pulls a pre-built image instead of compiling from source.
 #
 # The muvee "fleet-relay" project is (or should be) an image-type project pointed
@@ -25,6 +26,22 @@ on:
       # 它是构建输入而不只是官网素材，漏掉这条的后果和上面两类一样——改了 fixtures
       # 的那次推送 CI 全绿、没有镜像、线上还是旧 bundle。
       - 'scripts/site/fixtures/**'
+      # The desktop web bundle served at /desktop/. Its Rust/Tauri half ships
+      # nothing into this image; negations follow the glob they carve out of.
+      # Anything not listed here (a new front-end config file) still triggers,
+      # which errs toward a spare rebuild rather than a stale bundle.
+      - 'claw-fleet-desktop/**'
+      - '!claw-fleet-desktop/src/**'
+      - '!claw-fleet-desktop/tests/**'
+      - '!claw-fleet-desktop/gen/**'
+      - '!claw-fleet-desktop/capabilities/**'
+      - '!claw-fleet-desktop/icons/**'
+      - '!claw-fleet-desktop/nsis/**'
+      - '!claw-fleet-desktop/resources/**'
+      - '!claw-fleet-desktop/Cargo.toml'
+      - '!claw-fleet-desktop/build.rs'
+      - '!claw-fleet-desktop/tauri.conf.json'
+      - '!claw-fleet-desktop/*.plist'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/relay-image.yml'
@@ -68,7 +85,9 @@ jobs:
             type=sha,format=long
 
       # Build context is the repo root: fleet-relay/Dockerfile COPYs the
-      # workspace Cargo.toml/Cargo.lock and the mobile-web/ tree from there.
+      # workspace Cargo.toml/Cargo.lock, the mobile-web/ and claw-fleet-desktop/
+      # trees from there. cache-to mode=max keeps every stage's layers, so each
+      # front end's `pnpm install` layer is reused until its lockfile changes.
       # linux/amd64 only — muvee deploy nodes run amd64.
       - name: Build and push
         uses: docker/build-push-action@v7

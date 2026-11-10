@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # fleet-relay image for muvee — pairs the Fleet desktop (agent) with the
-# mobile web (client) and serves the mobile web bundle at /.
+# mobile web (client) and serves the mobile web bundle at / and the desktop web
+# bundle at /desktop/ (static layout and fallbacks: fleet-relay/src/static_files.rs).
 #
 # Build from the REPO ROOT (the workspace Cargo.toml is needed):
 #   docker build -f fleet-relay/Dockerfile -t fleet-relay .
@@ -37,6 +38,27 @@ ARG APP_COMMIT=""
 ENV VITE_APP_COMMIT=$APP_COMMIT
 RUN pnpm build
 
+# ── desktop web bundle ───────────────────────────────────────────────────────
+# The same `vite build` the Tauri app and `fleet webui` ship (vite base is "./",
+# so one dist works at / and under /desktop/). Served at /desktop/, where it
+# tunnels its data routes to the paired Mac over the relay socket
+# (claw-fleet-desktop/app/relay/). Same shape as deploy/lean's webui stage.
+# The whole package is copied (Rust src included) to stay in step with that
+# stage instead of hand-maintaining a list of front-end inputs; relay-image.yml
+# keeps Rust-only desktop changes from triggering a rebuild.
+FROM node:22-alpine AS desktopweb
+RUN corepack enable
+WORKDIR /src/claw-fleet-desktop
+COPY claw-fleet-desktop/package.json claw-fleet-desktop/pnpm-lock.yaml claw-fleet-desktop/pnpm-workspace.yaml claw-fleet-desktop/.npmrc ./
+RUN pnpm install --frozen-lockfile
+COPY claw-fleet-desktop/ ./
+# Cross-package sources imported from outside the package dir (see the web
+# stage above). The desktop needs the whole fixtures dir, not just the JSON:
+# app/mock/website.ts also imports `en|zh/review.html?raw`.
+COPY shared-ts/ /src/shared-ts/
+COPY scripts/site/fixtures/ /src/scripts/site/fixtures/
+RUN pnpm run build
+
 # ── relay binary ─────────────────────────────────────────────────────────────
 # Debian (not alpine): web-push's hyper-tls needs OpenSSL; glibc keeps the
 # build boring. Only the fleet-relay crate is compiled from the workspace.
@@ -67,6 +89,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && useradd -u 10001 -m relay
 COPY --from=build /src/target/release/fleet-relay /usr/local/bin/fleet-relay
 COPY --from=web /src/mobile-web/dist /srv/static
+COPY --from=desktopweb /src/claw-fleet-desktop/dist /srv/static/desktop
 COPY fleet-relay/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV RELAY_STATIC_DIR=/srv/static RELAY_DATA_DIR=/data RELAY_PORT=8080
