@@ -489,6 +489,29 @@ fn encode_reply(status: u16, content_type: &str, bytes: Vec<u8>) -> Value {
     })
 }
 
+/// Answer `GET /sessions_snapshot` from the process's registered session
+/// tracker (the desktop app's), when there is one — see
+/// `relay_events::set_sessions_snapshot_provider`. Same contract as the route:
+/// the full frame, or `204` when `since` already names its seq. `None` means
+/// no provider, and the request goes to the loopback server as usual.
+fn local_sessions_snapshot_reply(req: &TunnelRequest) -> Option<Value> {
+    if req.method != "GET" || req.path != crate::routes::SESSIONS_SNAPSHOT {
+        return None;
+    }
+    let frame = crate::relay_events::local_sessions_snapshot()?;
+    let since = req
+        .query
+        .iter()
+        .rev()
+        .find(|(k, _)| k == "since")
+        .and_then(|(_, v)| v.parse::<u64>().ok());
+    if since == Some(frame.seq()) {
+        return Some(encode_reply(204, "application/json", Vec::new()));
+    }
+    let body = serde_json::to_vec(&frame).unwrap_or_default();
+    Some(encode_reply(200, "application/json", body))
+}
+
 /// The `http` relay method.
 pub fn serve_http(params: &Value) -> Result<Value, String> {
     Ok(serve_http_via(params, resolve_target))
@@ -510,6 +533,9 @@ fn serve_http_via(
                 req.method, req.path
             ),
         );
+    }
+    if let Some(reply) = local_sessions_snapshot_reply(&req) {
+        return reply;
     }
     match target() {
         Ok(t) => forward(t, req),
@@ -730,6 +756,41 @@ mod tests {
             })
         });
         assert_eq!(reply["status"], 502);
+    }
+
+    /// With a registered tracker (the desktop app's), `/sessions_snapshot` is
+    /// answered from it — never the loopback server, whose tracker numbers a
+    /// different seq space — with the route's `since` → 204 contract.
+    #[test]
+    fn sessions_snapshot_comes_from_the_registered_tracker() {
+        crate::relay_events::set_sessions_snapshot_provider(|| {
+            crate::session_delta::SessionsFrame::Full {
+                seq: 7,
+                sessions: vec![json!({"id": "s1"})],
+            }
+        });
+        let no_loopback = || -> Result<LoopbackTarget, String> {
+            panic!("must not reach the loopback server")
+        };
+        let reply = serve_http_via(
+            &json!({"method": "GET", "path": "/sessions_snapshot"}),
+            no_loopback,
+        );
+        assert_eq!(reply["status"], 200);
+        let frame: Value = serde_json::from_str(reply["body"].as_str().unwrap()).unwrap();
+        assert_eq!(frame["kind"], "full");
+        assert_eq!(frame["seq"], 7);
+        let reply = serve_http_via(
+            &json!({"method": "GET", "path": "/sessions_snapshot", "query": {"since": "7"}}),
+            no_loopback,
+        );
+        assert_eq!(reply["status"], 204);
+        assert!(reply["body"].is_null());
+        let reply = serve_http_via(
+            &json!({"method": "GET", "path": "/sessions_snapshot", "query": {"since": 6}}),
+            no_loopback,
+        );
+        assert_eq!(reply["status"], 200);
     }
 
     #[test]

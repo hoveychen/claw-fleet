@@ -144,7 +144,11 @@ async function boot() {
           window.clearTimeout(bootSkeletonTimer);
           return;
         }
-        await installWebTransport({ probeBase: relay.prefix, eventStream: false });
+        const { relayEventStream } = await import("./relay/relayEvents");
+        await installWebTransport({
+          probeBase: relay.prefix,
+          eventStream: relayEventStream(relay.socket),
+        });
       } else {
         await installWebTransport();
       }

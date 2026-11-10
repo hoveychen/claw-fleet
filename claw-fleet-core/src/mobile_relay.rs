@@ -930,8 +930,14 @@ fn should_gzip(raw_len: usize, all_support_gzip: bool) -> bool {
 /// stays a pure transport concern. Falls back to sealing the raw bytes if gzip
 /// itself fails — never to plaintext (that would defeat the encryption).
 fn encode_payload(payload: &Value) -> Outbound {
+    encode_payload_with(payload, all_clients_support_gzip())
+}
+
+/// [`encode_payload`] with the gzip capability decided by the caller — for a
+/// payload addressed to one known kind of reader (see [`publish_desktop_event`]).
+fn encode_payload_with(payload: &Value, gzip_ok: bool) -> Outbound {
     let raw = payload.to_string();
-    let (bytes, gz) = if should_gzip(raw.len(), all_clients_support_gzip()) {
+    let (bytes, gz) = if should_gzip(raw.len(), gzip_ok) {
         match gzip_bytes(raw.as_bytes()) {
             Some(gz) => (gz, true),
             None => (raw.into_bytes(), false),
@@ -1080,6 +1086,14 @@ pub fn publish_notification(title: &str, body: &str, tag: &str) -> bool {
 /// Tell mobile clients a decision disappeared (answered elsewhere / timed out).
 pub fn publish_decision_resolved(kind: &str, id: &str) {
     send_out(encode_payload(&build_decision_resolved_payload(kind, id)));
+}
+
+/// Push one `desktop_event` payload (see `relay_events`). Gzip follows the
+/// subscribing desktop tab's capability, not the phones': these frames are for
+/// that tab alone, and a phone that cannot inflate one loses only a frame it
+/// would have ignored anyway.
+pub fn publish_desktop_event(payload: &Value, gzip_ok: bool) {
+    send_out(encode_payload_with(payload, gzip_ok));
 }
 
 /// Fields the mobile client actually reads (mobile-web/src/types.ts
@@ -2687,6 +2701,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         // The desktop web bundle's fetches, replayed against this host's own
         // `fleet serve` routes behind a whitelist — see relay_http.
         "http" => crate::relay_http::serve_http(params),
+        // Lease for the live events that tab renders from (relay_events).
+        "desktop_events" => crate::relay_events::serve_subscribe(params),
         other => Err(format!("unknown method: {other}")),
     }
 }

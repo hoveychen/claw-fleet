@@ -99,6 +99,31 @@ describe("RelaySocket", () => {
     s.close();
   });
 
+  it("hands unsolicited payloads (gzipped too) to push listeners, not to pending requests", async () => {
+    FakeWs.mac = () => null;
+    const s = new RelaySocket(SECRET, "https://relay.example");
+    const pushes: Record<string, unknown>[] = [];
+    s.onPush((p) => pushes.push(p));
+    s.connect();
+    await s.waitAuthed(2000);
+    const { encKey } = await deriveKeys(SECRET);
+    const plain = { event: "desktop_event", name: "sessions-frame", data: { kind: "delta", seq: 2 } };
+    FakeWs.last!.deliver({ type: "msg", payload: await seal(encKey, JSON.stringify(plain)) });
+    const gz = new Uint8Array(
+      await new Response(
+        new Blob([JSON.stringify({ ...plain, name: "guard-request" })])
+          .stream()
+          .pipeThrough(new CompressionStream("gzip")),
+      ).arrayBuffer(),
+    );
+    const { sealBytes } = await import("../../../shared-ts/relayCrypto");
+    FakeWs.last!.deliver({ type: "msg", payload: { ...(await sealBytes(encKey, gz)), z: true } });
+    await vi.waitFor(() => expect(pushes).toHaveLength(2));
+    expect(pushes[0]).toEqual(plain);
+    expect(pushes[1].name).toBe("guard-request");
+    s.close();
+  });
+
   it("fails fast when the relay drops the frame", async () => {
     FakeWs.mac = () => null;
     const s = new RelaySocket(SECRET, "https://relay.example");

@@ -4,10 +4,11 @@
  * Speaks the same envelope as `mobile-web/src/relay.ts` (auth → `msg` frames
  * carrying `{enc:"box"}` sealed payloads, `req`/`reply` correlation by
  * `req_id`) and seals with the very same code (`shared-ts/relayCrypto.ts`).
- * It is deliberately a *subset*: this page only ever asks the Mac one thing —
- * `request("http", …)` — so the phone's session snapshots, decision pushes,
- * presence hellos and push subscriptions are not handled here. Frames it does
- * not care about are dropped.
+ * It is deliberately a *subset*: this page asks the Mac for `http` (the
+ * tunnel) and `desktop_events` (the live-event lease, see `relayEvents.ts`),
+ * and hands unsolicited payloads to `onPush` listeners. The phone's session
+ * snapshots, decision pushes, presence hellos and push subscriptions are not
+ * handled here; listeners filter for what they want.
  *
  * It does not announce itself with `client_hello`: the Mac's device list and
  * its gzip/delta capability gates are built from hellos, and a desktop tab
@@ -77,6 +78,8 @@ export class RelaySocket implements RelayRequester {
   private keysReady?: Promise<void>;
   /** Resolvers waiting for the first successful auth. */
   private authWaiters: Array<() => void> = [];
+  private readonly pushListeners = new Set<(payload: Record<string, unknown>) => void>();
+  private readonly statusListeners = new Set<(s: RelaySocketStatus) => void>();
 
   constructor(
     private readonly secret: string,
@@ -125,8 +128,26 @@ export class RelaySocket implements RelayRequester {
     });
   }
 
+  get status(): RelaySocketStatus {
+    return { connected: this.authed, agentOnline: this.agentOnline };
+  }
+
+  /** Every payload that is not a reply to one of this page's requests. */
+  onPush(fn: (payload: Record<string, unknown>) => void): () => void {
+    this.pushListeners.add(fn);
+    return () => this.pushListeners.delete(fn);
+  }
+
+  /** Connection / agent presence changes, in addition to the constructor's. */
+  onStatusChange(fn: (s: RelaySocketStatus) => void): () => void {
+    this.statusListeners.add(fn);
+    return () => this.statusListeners.delete(fn);
+  }
+
   private emitStatus(error?: string) {
-    this.onStatus?.({ connected: this.authed, agentOnline: this.agentOnline, error });
+    const s = { connected: this.authed, agentOnline: this.agentOnline, error };
+    this.onStatus?.(s);
+    for (const fn of this.statusListeners) fn(s);
   }
 
   private async open() {
@@ -212,7 +233,10 @@ export class RelaySocket implements RelayRequester {
   }
 
   private handlePayload(payload: Record<string, unknown>) {
-    if (payload.event !== "reply") return;
+    if (payload.event !== "reply") {
+      for (const fn of this.pushListeners) fn(payload);
+      return;
+    }
     const reqId = String(payload.req_id ?? "");
     const entry = this.pending.get(reqId);
     if (!entry) return;
