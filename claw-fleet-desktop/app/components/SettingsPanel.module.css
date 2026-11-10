@@ -504,3 +504,38 @@
   display: inline-flex;
   align-items: center;
 }
+
+/* ── Relay read-only mode ────────────────────────────────────────────────── */
+
+/* Wraps the tab content so one `disabled` covers every control; with it off
+   (desktop, `fleet webui`) it must be layout-neutral. */
+.readonly_fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.readonly_banner {
+  margin: 10px 20px 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* A disabled switch still shows the host's value; it just stops inviting a click. */
+.toggle input:disabled + .toggle_slider {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.unknown_value {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  font-style: italic;
+  flex-shrink: 0;
+}

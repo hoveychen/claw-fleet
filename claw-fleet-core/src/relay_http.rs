@@ -149,6 +149,31 @@ pub const HTTP_TUNNEL_ROUTES: &[(&str, &str)] = &[
     ("GET", crate::routes::SETUP_STATUS),
     ("GET", crate::routes::PROJECTS),
     ("GET", crate::routes::SCRATCHPAD_DIR),
+    // ── Settings page, read side only ───────────────────────────────────
+    // Without these the settings panel fell back to its built-in defaults and
+    // showed them as if they were the host's values. Each is GET-only here;
+    // the POST on the same path (the save) stays denied, and the panel renders
+    // read-only over the tunnel. Each GET handler was checked to only load
+    // and serialize: the four config pairs return `load()` (booleans and
+    // numbers), the LLM pair is provider/model names (no keys), the binary
+    // pair is install paths found by a filesystem scan (no subprocess), the
+    // diagnostics read prefs, the consumer heartbeat and the MCP registration,
+    // and the usage buckets are token counts.
+    //
+    // Deliberately still denied: `/harness_statuses` (each call spawns
+    // `<bin> --version` subprocesses and reads `~/.codex/auth.json`),
+    // `/ssh_hosts` and `/remote_workspaces` (the host book names machines and
+    // key paths — internal per `hooks_server::auth`).
+    ("GET", crate::routes::AUTO_RESUME_CONFIG),
+    ("GET", crate::routes::PLAN_REVIVE_CONFIG),
+    ("GET", crate::routes::RESUME_TRIGGERS_CONFIG),
+    ("GET", crate::routes::DECISION_PANEL_CONFIG),
+    ("GET", crate::routes::LLM_CONFIG),
+    ("GET", crate::routes::LLM_PROVIDERS),
+    ("GET", crate::routes::CLAUDE_BINARY_OVERRIDE),
+    ("GET", crate::routes::LIST_CLAUDE_BINARIES),
+    ("GET", crate::routes::INTERACTION_DIAGNOSTICS),
+    ("GET", crate::routes::FLEET_LLM_USAGE_DAILY),
     // Attachments for answering a card (phone: upload_attachment). Writes
     // only into the attachment staging directory.
     ("POST", crate::routes::ELICITATION_UPLOAD),
@@ -865,6 +890,42 @@ mod tests {
         assert!(!is_allowed("GET", "/ssh_hosts"));
         assert!(!is_allowed("GET", "/audit"));
         assert!(is_allowed("POST", "/elicitation/upload"));
+    }
+
+    /// The settings panel's reads are forwarded; the saves on the same paths,
+    /// the switch writers and the reads with side effects or secrets are not.
+    #[test]
+    fn settings_reads_allowed_but_writes_and_sensitive_reads_denied() {
+        use crate::routes as r;
+        let reads = [
+            r::AUTO_RESUME_CONFIG,
+            r::PLAN_REVIVE_CONFIG,
+            r::RESUME_TRIGGERS_CONFIG,
+            r::DECISION_PANEL_CONFIG,
+            r::LLM_CONFIG,
+            r::LLM_PROVIDERS,
+            r::CLAUDE_BINARY_OVERRIDE,
+            r::LIST_CLAUDE_BINARIES,
+            r::INTERACTION_DIAGNOSTICS,
+            r::FLEET_LLM_USAGE_DAILY,
+            r::HOOKS_PLAN,
+            r::SOURCES_CONFIG,
+        ];
+        for p in reads {
+            assert!(is_allowed("GET", p), "settings read {p} must be tunnelled");
+            assert!(!is_allowed("POST", p), "settings write {p} must stay denied");
+        }
+        for p in [
+            r::HARNESS_STATUSES,
+            r::SSH_HOSTS,
+            r::REMOTE_WORKSPACES,
+            r::APPLY_GUARD_HOOK,
+            r::TEST_DECISION_END_TO_END,
+            r::TEST_DECISION_VIA_CLAUDE_CLI,
+        ] {
+            assert!(!is_allowed("GET", p), "{p} must stay denied over GET");
+            assert!(!is_allowed("POST", p), "{p} must stay denied over POST");
+        }
     }
 
     /// Every whitelisted exact path must be a route `fleet serve` actually
