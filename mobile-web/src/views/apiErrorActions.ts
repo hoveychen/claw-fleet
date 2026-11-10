@@ -7,7 +7,11 @@
  * pinning: a retry that resumes with a prompt silently replaces the interrupted
  * work, and a resume without an idempotency key can be delivered twice.
  */
-import type { ErrorAction, SyntheticErrorInfo } from "../../../shared-ts/syntheticError";
+import {
+  RETRY_LIVE_PROMPT,
+  type ErrorAction,
+  type SyntheticErrorInfo,
+} from "../../../shared-ts/syntheticError";
 import { retiredSuccessor } from "../../../shared-ts/retiredSession";
 import { t } from "../i18n";
 import type { FleetTransport } from "../relay";
@@ -16,12 +20,17 @@ export interface ApiErrorSession {
   id: string;
   workspacePath: string;
   agentSource?: string | null;
+  /** The session's process is still running (`canEnqueueSession`). A failed
+   *  main-thread turn leaves it alive while a background subagent runs, and a
+   *  resume is then refused by the drive lease. */
+  live?: boolean;
 }
 
 /** What the card should say afterwards. `null` = nothing to report (the action
  *  opened a picker, or a tab). */
 export type ActionOutcome =
   | { kind: "resumed" }
+  | { kind: "sentLive" }
   | { kind: "loginStarted" }
   | { kind: "failed"; detail: string }
   | null;
@@ -100,6 +109,21 @@ export async function runApiErrorAction(
 ): Promise<ActionOutcome> {
   switch (action) {
     case "retry":
+      if (env.session.live) {
+        // A live process cannot be resumed; hand it a "carry on" message the
+        // way the composer's enqueue mode does.
+        try {
+          await env.client.request("enqueue_message", {
+            sessionId: env.session.id,
+            workspacePath: env.session.workspacePath,
+            text: RETRY_LIVE_PROMPT,
+            idempotencyKey: (env.newKey ?? defaultKey)(),
+          });
+          return { kind: "sentLive" };
+        } catch (e) {
+          return { kind: "failed", detail: String(e) };
+        }
+      }
       // No prompt — the agent picks up the turn the failure cut off. A prompt
       // here would quietly replace that work with a new instruction.
       return resumeOverRelay(env);

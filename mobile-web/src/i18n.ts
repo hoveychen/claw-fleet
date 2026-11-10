@@ -1125,6 +1125,7 @@ const DICT: Record<string, string> = {
   "没有可切换的模型": "No other models to switch to",
   "处理中…": "Working…",
   "已重新拉起，等任务接上…": "Resumed — waiting for the task to pick up…",
+  "已把「继续」送进正在运行的任务…": "Sent \"carry on\" into the running task…",
   "没能执行：": "Couldn't run it: ",
   "登录已在终端页启动，去那边粘贴授权码": "Login started on the 终端 page — paste the code there",
   // ── Side questions about a passage (SelectionAskBar / SessionExplainsTab) ──

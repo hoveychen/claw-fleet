@@ -1011,6 +1011,7 @@ export function SessionDetail({
       workspacePath: s.workspacePath,
       agentSource: s.agentSource,
       isSubagent: s.isSubagent,
+      live: canEnqueueSession(s),
     };
   }, [liveSession, session]);
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  actionsForLiveSession,
   quotaResetsInMs,
   type ErrorAction,
   type SyntheticErrorInfo,
@@ -64,7 +65,9 @@ export function ApiErrorCard({
     setNote(
       outcome.kind === "resumed"
         ? t("已重新拉起，等任务接上…")
-        : outcome.kind === "loginStarted"
+        : outcome.kind === "sentLive"
+          ? t("已把「继续」送进正在运行的任务…")
+          : outcome.kind === "loginStarted"
           ? t("登录已在终端页启动，去那边粘贴授权码")
           : t("没能执行：") + outcome.detail,
     );
@@ -99,7 +102,8 @@ export function ApiErrorCard({
 
   // Never draw a button with nothing behind it — offline, or a transcript with
   // no live session, means the classification renders alone.
-  const actions = canAct ? info.actions : [];
+  // A live process cannot be resumed with new launch settings either.
+  const actions = !canAct ? [] : session?.live ? actionsForLiveSession(info.actions) : info.actions;
 
   return (
     <div className={styles.apiErrorCard} data-severity={info.severity} data-testid="api-error-card">

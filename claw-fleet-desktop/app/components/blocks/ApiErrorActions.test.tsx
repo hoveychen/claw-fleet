@@ -48,7 +48,7 @@ vi.mock("../ProcTerminal", () => ({
   ProcTerminal: () => <div data-testid="proc-terminal" />,
 }));
 
-import { classifySyntheticError } from "../../../../shared-ts/syntheticError";
+import { RETRY_LIVE_PROMPT, classifySyntheticError } from "../../../../shared-ts/syntheticError";
 import { ApiErrorActions, type ApiErrorContext } from "./ApiErrorActions";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -115,6 +115,25 @@ describe("ApiErrorActions", () => {
     // No prompt: the agent picks up the turn the failure cut off. A prompt here
     // would silently replace the interrupted work with a new instruction.
     expect(invoke.mock.calls[0][1]).not.toHaveProperty("prompt");
+  });
+
+  it("retries a live session by sending into it, since a resume would be refused", async () => {
+    // A failed main-thread turn leaves `claude -p` running while a background
+    // subagent works; the drive lease then refuses every resume.
+    const el = draw({ info: SERVER, ctx: { ...CTX, live: true } });
+    await click(el, '[data-action="retry"]');
+    expect(invoke).toHaveBeenCalledWith("enqueue_session_message", {
+      sessionId: "sess-1",
+      workspacePath: "/repo",
+      text: RETRY_LIVE_PROMPT,
+    });
+    expect(invoke).not.toHaveBeenCalledWith("resume_rate_limited_session", expect.anything());
+    expect(el.querySelector("[data-testid=api-error-done]")).toBeTruthy();
+  });
+
+  it("hides resume-only actions on a live session", () => {
+    const el = draw({ info: TOO_LONG, ctx: { ...CTX, live: true } });
+    expect(actionsOf(el)).toEqual(["retry"]);
   });
 
   it("sends /compact for an over-long context", async () => {

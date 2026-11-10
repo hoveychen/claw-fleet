@@ -128,6 +128,7 @@ import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
 import { ApiErrorCard } from "./ApiErrorCard";
+import type { ApiErrorSession } from "./apiErrorActions";
 import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { Presence } from "../Presence";
 import {
@@ -1177,7 +1178,7 @@ interface MessageRowProps {
   /** Identity behind a failed-turn card's buttons (retry / switch model / sign
    *  in). Absent for a transcript with no live session; the card then renders
    *  its classification without buttons it could not honour. */
-  session?: { id: string; workspacePath: string; agentSource?: string | null } | null;
+  session?: ApiErrorSession | null;
   /** A row of a prepended relay leg: display only. No selection anchors (so
    *  no side question forks this session over another leg's prose). */
   readOnly?: boolean;
@@ -1604,6 +1605,19 @@ export function SessionDetailView({
     if (target === "sheet") setSheetOpen(true);
     else setPane(target);
   }, []);
+  // Identity for a failed-turn card's buttons, plus whether the process is
+  // still alive (then retry must go into it, not resume it). Memoised so the
+  // memo'd MessageRow is not re-rendered on every poll.
+  const errorCardLive = canEnqueueSession(session);
+  const errorCardSession = useMemo(
+    () => ({
+      id: session.id,
+      workspacePath: session.workspacePath,
+      agentSource: session.agentSource,
+      live: errorCardLive,
+    }),
+    [session.id, session.workspacePath, session.agentSource, errorCardLive],
+  );
   const statusPills = useMemo(
     () => buildStatusPills(session, { pendingDecisions }),
     [session, pendingDecisions],
@@ -2429,7 +2443,7 @@ export function SessionDetailView({
                 turnUsage={turnUsage.get(unit.startLocal)}
                 client={client}
                 jsonlPath={detailPath}
-                session={session}
+                session={errorCardSession}
               />
             );
           });

@@ -2091,6 +2091,7 @@
       "pick_model": "Switch to",
       "no_models": "Loading models…",
       "failed": "Couldn't run it: {{err}}",
+      "sent_live": "Sent \"carry on\" into the running task…",
       "resumed": "Resumed — waiting for the task to pick up…",
       "retry_blocked": "Retry once the quota resets",
       "models_unavailable": "Couldn't load the model list."
