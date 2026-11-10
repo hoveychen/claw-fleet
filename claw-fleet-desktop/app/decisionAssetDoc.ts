@@ -36,84 +36,13 @@
  */
 
 import { decisionAssetUrl } from "./decisionAssets";
-
-/**
- * `src` attributes on `<img>` tags in the served document.
- *
- * Only images: they are the documented contract for `fleet__ask`'s `images`
- * (`<img src="chart.png">`), and they are what the auto-gallery emits. A
- * stylesheet or script the agent referenced relatively would still break, but
- * nothing generates those today and inlining arbitrary subresources would mean
- * parsing the document rather than one attribute.
- *
- * Unquoted values (`<img src=chart.png>`) count too: agents write them as often
- * as the quoted form, and missing them leaves a broken-image glyph.
- */
-const IMG_SRC_RE = /(<img\b[^>]*?\bsrc\s*=\s*)(?:(["'])([^"']*)\2|([^\s"'=<>`]+))/gi;
-
-/**
- * A ref that resolves against the asset directory, i.e. one we have to fetch
- * ourselves. Anything with a scheme (`https:`, `data:`, `blob:`), a
- * protocol-relative `//host`, an absolute `/path` or a bare `#frag` is already
- * reachable — or already inline — and is left alone.
- */
-export function isRelativeAssetRef(ref: string): boolean {
-  return ref.length > 0 && !/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/|#)/i.test(ref);
-}
-
-/**
- * Replace every relative `<img src>` in `html` with what `load` returns for it.
- *
- * A ref whose `load` rejects keeps its original attribute: the picture is no
- * worse off than it is today, and one unreachable image must not blank the
- * whole preview.
- */
-export async function inlineRelativeImages(
-  html: string,
-  load: (rel: string) => Promise<string>,
-): Promise<string> {
-  const refs = new Set<string>();
-  for (const m of html.matchAll(IMG_SRC_RE)) {
-    const ref = m[3] ?? m[4];
-    if (isRelativeAssetRef(ref)) refs.add(ref);
-  }
-  if (refs.size === 0) return html;
-
-  const resolved = new Map<string, string>();
-  await Promise.all(
-    [...refs].map(async (rel) => {
-      try {
-        resolved.set(rel, await load(rel));
-      } catch (err) {
-        console.warn(`[decision-asset] inlining ${rel} failed:`, err);
-      }
-    }),
-  );
-
-  return html.replace(
-    IMG_SRC_RE,
-    (whole, pre: string, quote: string | undefined, quoted: string | undefined, bare: string | undefined) => {
-      const url = resolved.get(quoted ?? bare ?? "");
-      // An unquoted ref comes back double-quoted: a data: URL may hold
-      // characters an unquoted attribute value cannot.
-      const q = quote ?? '"';
-      return url ? `${pre}${q}${url}${q}` : whole;
-    },
-  );
-}
-
-/** Read a fetched image into the `data:` URL the sandboxed frame can load. */
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(blob);
-  });
-}
+import { fetchSandboxDoc } from "./sandboxDoc";
 
 /**
  * The document to hand `AutoHeightFrame`'s `srcDoc` for one card question.
+ *
+ * The inlining itself is the shared `sandboxDoc.ts` (images, scripts,
+ * stylesheets); this only knows where a card's files live.
  *
  * `theme` cannot ride along as `?theme=` any more — a `srcDoc` document has no
  * URL for core's prelude (`mcp_ipc::THEME_PRELUDE`) to read — so the used
@@ -126,21 +55,10 @@ export async function fetchDecisionAssetDoc(
   theme?: "dark" | "light",
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
-  const res = await fetchImpl(decisionAssetUrl(id, qidx, "index.html", theme));
-  if (!res.ok) throw new Error(`decision asset index.html → HTTP ${res.status}`);
-  const html = await res.text();
-
-  const inlined = await inlineRelativeImages(html, async (rel) => {
-    const r = await fetchImpl(decisionAssetUrl(id, qidx, rel));
-    if (!r.ok) throw new Error(`${rel} → HTTP ${r.status}`);
-    const blob = await r.blob();
-    // A gateway that answers 200 with a login page would otherwise be inlined
-    // as an `image/…`-shaped data URL and fail silently in the frame.
-    if (blob.type.startsWith("text/html")) {
-      throw new Error(`${rel} answered HTML, not bytes — an auth gateway intercepted it`);
-    }
-    return blobToDataUrl(blob);
-  });
-
+  const inlined = await fetchSandboxDoc(
+    "index.html",
+    (path) => decisionAssetUrl(id, qidx, path, path === "index.html" ? theme : undefined),
+    fetchImpl,
+  );
   return theme ? `${inlined}<style>:root{color-scheme:${theme}}</style>` : inlined;
 }
