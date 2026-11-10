@@ -6,7 +6,7 @@ import { REPORT_AUTO_POPUP_KEY, useAuditStore, useUIStore, type ViewMode } from 
 import { ChevronRight } from "lucide-react";
 import { useNavAvailability } from "../hooks/useNavAvailability";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { isWebBuild } from "../hostEnv";
+import { isRelayTunnel, isWebBuild } from "../hostEnv";
 import {
   getItem,
   setItem,
@@ -141,13 +141,16 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
 };
 
 /** A labelled on/off row in the house style (label, dim description, slider). */
-function ToggleRow({ label, desc, checked, onChange, loading }: {
+function ToggleRow({ label, desc, checked, onChange, loading, unknown }: {
   label: string;
   desc: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   /** Backend value not loaded yet: show a placeholder, not the default. */
   loading?: boolean;
+  /** The read failed (e.g. denied over the relay tunnel): say so rather than
+   *  drawing the placeholder default as if it were the host's value. */
+  unknown?: boolean;
 }) {
   return (
     <div className={styles.row}>
@@ -159,12 +162,42 @@ function ToggleRow({ label, desc, checked, onChange, loading }: {
       </div>
       {loading ? (
         <ToggleSkeleton />
+      ) : unknown ? (
+        <UnknownValue />
       ) : (
         <label className={styles.toggle}>
           <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
           <span className={styles.toggle_slider} />
         </label>
       )}
+    </div>
+  );
+}
+
+/** Stand-in for a value the host could not be asked for. Never a default. */
+export function UnknownValue() {
+  const { t } = useTranslation();
+  return (
+    <span
+      className={styles.unknown_value}
+      data-testid="settings-unknown"
+      title={t("settings.value_unknown_hint")}
+    >
+      {t("settings.value_unknown")}
+    </span>
+  );
+}
+
+/** Whole-tab notice for a page whose state lives only in the host app. */
+function RelayTabUnavailable() {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.section}>
+      <div className={styles.row} data-testid="settings-relay-tab-unavailable">
+        <span className={styles.row_label} style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
+          {t("settings.relay_tab_unavailable")}
+        </span>
+      </div>
     </div>
   );
 }
@@ -248,6 +281,10 @@ function SecurityLinks({ onClose }: { onClose: () => void }) {
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  // Opened from a relay origin: reads are tunnelled to the host, writes are
+  // not (403), so the panel shows the host's values read-only instead of
+  // controls that flip locally and silently fail to save.
+  const relayReadOnly = isRelayTunnel();
   // Advanced group starts expanded only when an advanced tab is somehow the
   // initial tab; otherwise everyday users see just the 3 base tabs.
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -307,6 +344,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [sourcesNeedRestart, setSourcesNeedRestart] = useState(false);
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
+  const [sourcesFailed, setSourcesFailed] = useState(false);
   // Source whose enable switch is being written (the checkbox only moves once
   // the backend accepts it, so the row spins meanwhile).
   const [pendingSource, setPendingSource] = useState<string | null>(null);
@@ -314,7 +352,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     invoke<SourceInfo[]>("get_sources_config")
       .then(setSources)
-      .catch(() => {})
+      .catch(() => setSourcesFailed(true))
       .finally(() => setSourcesLoaded(true));
   }, []);
 
@@ -337,8 +375,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [claudeBinaryNeedRestart, setClaudeBinaryNeedRestart] = useState(false);
   // The raw path picker stays collapsed unless the user already has a manual
   // override set — auto-detect covers everyone else.
-  const [showBinaryPicker, setShowBinaryPicker] = useState(false);
+  // Over the relay the disclosure button is disabled with the rest of the
+  // panel, so the picker starts open to keep the value visible.
+  const [showBinaryPicker, setShowBinaryPicker] = useState(relayReadOnly);
   const [binariesLoading, setBinariesLoading] = useState(true);
+  const [binaryOverrideFailed, setBinaryOverrideFailed] = useState(false);
 
   useEffect(() => {
     invoke<ClaudeBinary[]>("list_claude_binaries")
@@ -350,7 +391,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setClaudeBinaryOverrideState(p ?? "");
         if (p) setShowBinaryPicker(true);
       })
-      .catch(() => {});
+      .catch(() => setBinaryOverrideFailed(true));
   }, []);
 
   const handleClaudeBinaryChange = useCallback(async (value: string) => {
@@ -388,6 +429,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [rwHostsLoaded, setRwHostsLoaded] = useState(false);
   const [rwWorkspacesLoaded, setRwWorkspacesLoaded] = useState(false);
   const [rwProfilesLoaded, setRwProfilesLoaded] = useState(false);
+  // Either list could not be read (denied over the relay tunnel): "no hosts"
+  // would be a claim about the host book we cannot make.
+  const [rwListFailed, setRwListFailed] = useState(false);
   // Key ("host:<id>" / "ws:<path>") of a remove in flight.
   const [rwRemoving, setRwRemoving] = useState<string | null>(null);
 
@@ -405,13 +449,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
-      .catch(() => {})
+      .catch(() => setRwListFailed(true))
       .finally(() => setRwWorkspacesLoaded(true));
     // The host book a session resolves a workspace's `hostId` against; it also
     // feeds the add-a-host picker below.
     invoke<SshHost[]>("list_ssh_hosts")
       .then((hosts) => setSshHosts(hosts ?? []))
-      .catch(() => {})
+      .catch(() => setRwListFailed(true))
       .finally(() => setRwHostsLoaded(true));
     invoke<string[]>("list_ssh_profiles")
       .then((profiles) => setRwSshProfiles(profiles ?? []))
@@ -550,6 +594,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // below hold only the localStorage copy and may flip when the backend prefs
   // land, so their controls render as skeletons.
   const [prefsSettled, setPrefsSettled] = useState(false);
+  // The plan read failed: the tristates hold only this browser's localStorage
+  // copy, which says nothing about the host.
+  const [prefsFailed, setPrefsFailed] = useState(false);
+  const prefsKnown = prefsSettled && !prefsFailed;
 
   // ── Guard state ────────────────────────────────────────────────────────
   const [guardState, setGuardState] = useState<FeatureState>(
@@ -839,7 +887,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setNotesHintState(states["notes-hint-enabled"]);
         setLessonsState(states["lessons-enabled"]);
       })
-      .catch(() => {})
+      .catch(() => setPrefsFailed(true))
       .finally(() => setPrefsSettled(true));
   }, []);
 
@@ -964,7 +1012,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [fixingAll, setFixingAll] = useState(false);
   // Raw timing parameters are tucked behind this collapsed expander at the
   // bottom of the Interaction tab — most users never need them.
-  const [showInteractionAdvanced, setShowInteractionAdvanced] = useState(false);
+  // Starts open over the relay for the same reason as the binary picker.
+  const [showInteractionAdvanced, setShowInteractionAdvanced] = useState(relayReadOnly);
   // `interactionChecks` starts as [] which would read as "no problems": track
   // whether a run has completed (and whether it failed) so the status card
   // shows a skeleton / error instead of a premature green "all OK".
@@ -1193,6 +1242,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   // Sync notification mode to backend on mount
   useEffect(() => {
+    // Over the relay this browser's own selection must not be pushed to the
+    // host (and the write is denied anyway).
+    if (relayReadOnly) return;
     invoke("set_notification_mode", { mode: notifMode }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1244,12 +1296,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // localStorage guess.
   const [llmProvidersLoaded, setLlmProvidersLoaded] = useState(false);
   const [llmConfigLoaded, setLlmConfigLoaded] = useState(false);
-  const llmLoaded = llmProvidersLoaded && llmConfigLoaded;
+  const [llmFailed, setLlmFailed] = useState(false);
+  const llmSettled = llmProvidersLoaded && llmConfigLoaded;
+  const llmLoaded = llmSettled && !llmFailed;
 
   useEffect(() => {
     invoke<LlmProviderInfo[]>("list_llm_providers")
       .then(setLlmProviders)
-      .catch(() => {})
+      .catch(() => setLlmFailed(true))
       .finally(() => setLlmProvidersLoaded(true));
     invoke<LlmConfig>("get_llm_config").then((cfg) => {
       setLlmConfigState(cfg);
@@ -1257,7 +1311,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       setItem("llm-model-fast", cfg.fastModel);
       setItem("llm-model-standard", cfg.standardModel);
       setItem("llm-daily-report-preference", cfg.dailyReportPreference || cfg.provider || "claude");
-    }).catch(() => {})
+    }).catch(() => setLlmFailed(true))
       .finally(() => setLlmConfigLoaded(true));
   }, []);
 
@@ -1323,11 +1377,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // The defaults above are placeholders for the save round-trip, not values
   // to show: the switches render as skeletons until the real config arrives.
   const [autoResumeLoaded, setAutoResumeLoaded] = useState(false);
+  const [autoResumeFailed, setAutoResumeFailed] = useState(false);
 
   useEffect(() => {
     invoke<AutoResumeConfig>("get_auto_resume_config")
       .then(setAutoResume)
-      .catch(() => {})
+      .catch(() => setAutoResumeFailed(true))
       .finally(() => setAutoResumeLoaded(true));
   }, []);
 
@@ -1345,11 +1400,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // ── Plan reviver ────────────────────────────────────────────────────────
   const [planRevive, setPlanRevive] = useState(true);
   const [planReviveLoaded, setPlanReviveLoaded] = useState(false);
+  const [planReviveFailed, setPlanReviveFailed] = useState(false);
 
   useEffect(() => {
     invoke<{ enabled: boolean }>("get_plan_revive_config")
       .then((c) => setPlanRevive(c.enabled))
-      .catch(() => {})
+      .catch(() => setPlanReviveFailed(true))
       .finally(() => setPlanReviveLoaded(true));
   }, []);
 
@@ -1367,11 +1423,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   });
 
   const [triggersLoaded, setTriggersLoaded] = useState(false);
+  const [triggersFailed, setTriggersFailed] = useState(false);
 
   useEffect(() => {
     invoke<ResumeTriggersConfig>("get_resume_triggers_config")
       .then(setTriggers)
-      .catch(() => {})
+      .catch(() => setTriggersFailed(true))
       .finally(() => setTriggersLoaded(true));
   }, []);
 
@@ -1441,6 +1498,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
           {/* ── Right: content ── */}
           <div className={styles.content}>
+            {relayReadOnly && (
+              <div className={styles.readonly_banner} data-testid="settings-relay-readonly">
+                {t("settings.relay_readonly_banner")}
+              </div>
+            )}
+            {/* Over the relay every control below is disabled natively (the
+                host refuses the writes); elsewhere the fieldset is inert. */}
+            <fieldset className={styles.readonly_fieldset} disabled={relayReadOnly}>
             {/* ── General ── */}
             {activeTab === "general" && (
               <div className={styles.section}>
@@ -1491,11 +1556,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       {t("settings.auto_update_check_desc")}
                     </span>
                   </div>
-                  <TriStateToggle
-                    value={autoUpdateCheckState}
-                    defaultOn={featureDefault("auto-update-check")}
-                    onChange={handleToggleAutoUpdateCheck}
-                  />
+                  {relayReadOnly ? (
+                    <UnknownValue />
+                  ) : (
+                    <TriStateToggle
+                      value={autoUpdateCheckState}
+                      defaultOn={featureDefault("auto-update-check")}
+                      onChange={handleToggleAutoUpdateCheck}
+                    />
+                  )}
                 </div>
 
                 <div className={styles.row}>
@@ -1505,11 +1574,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       {t("settings.report_auto_popup_desc")}
                     </span>
                   </div>
-                  <TriStateToggle
-                    value={reportAutoPopupState}
-                    defaultOn={featureDefault(REPORT_AUTO_POPUP_KEY)}
-                    onChange={handleToggleReportAutoPopup}
-                  />
+                  {relayReadOnly ? (
+                    <UnknownValue />
+                  ) : (
+                    <TriStateToggle
+                      value={reportAutoPopupState}
+                      defaultOn={featureDefault(REPORT_AUTO_POPUP_KEY)}
+                      onChange={handleToggleReportAutoPopup}
+                    />
+                  )}
                 </div>
 
                 <ToggleRow
@@ -1568,8 +1641,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={autoResume.enabled}
                   onChange={(v) => handleAutoResumeChange({ enabled: v })}
                   loading={!autoResumeLoaded}
+                  unknown={autoResumeFailed}
                 />
-                {autoResume.enabled && (
+                {autoResume.enabled && !autoResumeFailed && (
                   <div className={styles.row}>
                     <div>
                       <span className={styles.row_label}>{t("settings.auto_resume_max_wait")}</span>
@@ -1600,6 +1674,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={autoResume.retryServerErrors}
                   onChange={(v) => handleAutoResumeChange({ retryServerErrors: v })}
                   loading={!autoResumeLoaded}
+                  unknown={autoResumeFailed}
                 />
                 <ToggleRow
                   label={t("settings.plan_revive")}
@@ -1607,6 +1682,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={planRevive}
                   onChange={handlePlanReviveChange}
                   loading={!planReviveLoaded}
+                  unknown={planReviveFailed}
                 />
                 <ToggleRow
                   label={t("settings.finish_continue")}
@@ -1614,6 +1690,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={triggers.finishContinue}
                   onChange={(v) => handleTriggersChange({ finishContinue: v })}
                   loading={!triggersLoaded}
+                  unknown={triggersFailed}
                 />
                 <ToggleRow
                   label={t("settings.plan_gate")}
@@ -1621,6 +1698,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={triggers.planGate}
                   onChange={(v) => handleTriggersChange({ planGate: v })}
                   loading={!triggersLoaded}
+                  unknown={triggersFailed}
                 />
                 <ToggleRow
                   label={t("settings.handoff_successor")}
@@ -1628,6 +1706,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={triggers.handoffSuccessor}
                   onChange={(v) => handleTriggersChange({ handoffSuccessor: v })}
                   loading={!triggersLoaded}
+                  unknown={triggersFailed}
                 />
                 <ToggleRow
                   label={t("settings.codex_stall_watchdog")}
@@ -1635,6 +1714,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   checked={triggers.codexStallWatchdog}
                   onChange={(v) => handleTriggersChange({ codexStallWatchdog: v })}
                   loading={!triggersLoaded}
+                  unknown={triggersFailed}
                 />
 
               </div>
@@ -1661,11 +1741,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         </option>
                       ))}
                     </select>
+                  ) : llmSettled ? (
+                    <UnknownValue />
                   ) : (
                     <SkeletonNumber width={180} height={26} />
                   )}
                 </div>
-                {!llmLoaded && (
+                {!llmSettled && (
                   // Fast / standard model rows, as they will land.
                   <>
                     {[t("settings.llm_fast_model"), t("settings.llm_standard_model")].map((label) => (
@@ -1772,37 +1854,44 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={guardState}
                       defaultOn={featureDefault("guard-enabled")}
                       onChange={handleToggleGuard}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
-                  <TriStateToggle
-                    value={guardLlmState}
-                    defaultOn={featureDefault("guard-llm-analysis")}
-                    disabled={!guardEnabled}
-                    onChange={handleToggleGuardLlm}
-                  />
+                  {/* Kept in the host app's own localStorage, which the
+                      tunnel cannot read: this browser's copy is not it. */}
+                  {relayReadOnly ? (
+                    <UnknownValue />
+                  ) : (
+                    <TriStateToggle
+                      value={guardLlmState}
+                      defaultOn={featureDefault("guard-llm-analysis")}
+                      disabled={!guardEnabled}
+                      onChange={handleToggleGuardLlm}
+                    />
+                  )}
                 </div>
-                {guardEnabled && (
+                {(guardEnabled || (prefsSettled && !prefsKnown)) && (
                   <ToggleRow
                     label={t("settings.guard_confirm")}
                     desc={t("settings.guard_confirm_desc")}
                     checked={timeouts?.guard_confirm ?? false}
                     onChange={handleToggleGuardConfirm}
                     loading={!timeoutsSettled}
+                    unknown={!timeouts}
                   />
                 )}
               </div>
-
-                <SecurityLinks onClose={onClose} />
               </>
             )}
 
@@ -1828,14 +1917,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       {t("settings.user_title_desc")}
                     </span>
                   </div>
-                  <input
-                    type="text"
-                    className={styles.select}
-                    value={userTitle}
-                    placeholder={t("settings.user_title_placeholder")}
-                    onChange={(e) => handleUserTitleChange(e.target.value)}
-                    style={{ width: 120, textAlign: "center" }}
-                  />
+                  {relayReadOnly ? (
+                    <UnknownValue />
+                  ) : (
+                    <input
+                      type="text"
+                      className={styles.select}
+                      value={userTitle}
+                      placeholder={t("settings.user_title_placeholder")}
+                      onChange={(e) => handleUserTitleChange(e.target.value)}
+                      style={{ width: 120, textAlign: "center" }}
+                    />
+                  )}
                 </div>
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("account.panel_title")}</div>
                 <div className={styles.account_embed}>
@@ -1845,7 +1938,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             )}
 
             {/* ── Environment (advanced): harness install/upgrade/login health ── */}
-            {activeTab === "environment" && (
+            {/* Its probe route spawns subprocesses on the host and stays off
+                the relay tunnel, so there is nothing true to show here. */}
+            {activeTab === "environment" && relayReadOnly && <RelayTabUnavailable />}
+            {activeTab === "environment" && !relayReadOnly && (
               <div className={styles.section}>
                 <EnvironmentPanel />
               </div>
@@ -1862,7 +1958,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   {/* No plan yet → no verdict: a skeleton while loading, and
                       nothing (rather than a false "installed") if it failed. */}
                   {!hooksPlan ? (
-                    !prefsSettled && <SkeletonNumber width={120} height={12} />
+                    !prefsSettled ? <SkeletonNumber width={120} height={12} /> : <UnknownValue />
                   ) : hooksPlan.hooksGloballyDisabled ? (
                     <span className={styles.hooks_warn}>
                       {t("onboarding.hooks_setup.disabled_warning")}
@@ -1905,6 +2001,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       {binariesLoading && (
                         <Spinner size={12} className={styles.inline_spinner} />
                       )}
+                      {binaryOverrideFailed ? (
+                        <UnknownValue />
+                      ) : (
                       <select
                         className={styles.select}
                         value={claudeBinaryOverride}
@@ -1919,6 +2018,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                           </option>
                         ))}
                       </select>
+                      )}
                     </div>
                     {claudeBinaryOverride && !claudeBinaries.some((b) => b.path === claudeBinaryOverride) && (
                       <div className={styles.row}>
@@ -1948,6 +2048,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   </span>
                 </div>
                 {!sourcesLoaded && <SkeletonList rows={3} avatar meta={false} rowHeight={32} />}
+                {sourcesFailed && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label}>{t("settings.sources")}</span>
+                    <UnknownValue />
+                  </div>
+                )}
                 {sources.map((source) => (
                   <div className={styles.row} key={source.name}>
                     <div className={styles.source_row}>
@@ -1999,6 +2105,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 {!(rwHostsLoaded && rwWorkspacesLoaded) ? (
                   <SkeletonList rows={2} rowHeight={44} />
+                ) : rwListFailed ? (
+                  <div className={styles.row}>
+                    <span className={styles.row_label}>{t("settings.remote_hosts")}</span>
+                    <UnknownValue />
+                  </div>
                 ) : sshHosts.length === 0 && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -2142,6 +2253,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   </>
                 )}
 
+                {/* Adding a host installs software on it: not offered over the relay. */}
+                {!relayReadOnly && (
+                <>
                 {/* Add a host: pick an ssh target, install rca. No workspace
                     path — that is the composer's job. */}
                 <div className={styles.section_title} style={{ marginTop: 12 }}>
@@ -2223,6 +2337,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     ))}
                   </div>
                 )}
+                </>
+                )}
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
                 )}
@@ -2244,12 +2360,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.elicitation_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={elicitationState}
                       defaultOn={featureDefault("elicitation-enabled")}
                       onChange={handleToggleElicitation}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2263,12 +2381,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.plan_approval_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={planApprovalState}
                       defaultOn={featureDefault("plan-approval-enabled")}
                       onChange={handleTogglePlanApproval}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2283,19 +2403,21 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.interaction_mode_enabled")}</span>
-                    {prefsSettled && !elicitationEnabled && (
+                    {prefsKnown && !elicitationEnabled && (
                       <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
                         {t("settings.interaction_mode_requires_elicitation")}
                       </span>
                     )}
                   </div>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={interactionModeState}
                       defaultOn={featureDefault("interaction-mode-enabled")}
                       disabled={!elicitationEnabled}
                       onChange={handleToggleInteractionMode}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2577,12 +2699,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.prd_mode_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={prdModeState}
                       defaultOn={featureDefault("prd-mode-enabled")}
                       onChange={handleTogglePrdMode}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2594,12 +2718,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.recent_sessions_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={recentSessionsState}
                       defaultOn={featureDefault("recent-sessions-enabled")}
                       onChange={handleToggleRecentSessions}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2611,12 +2737,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.notes_hint_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={notesHintState}
                       defaultOn={featureDefault("notes-hint-enabled")}
                       onChange={handleToggleNotesHint}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2628,12 +2756,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.lessons_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={lessonsState}
                       defaultOn={featureDefault("lessons-enabled")}
                       onChange={handleToggleLessons}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2645,12 +2775,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.wiki_guidance_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={wikiGuidanceState}
                       defaultOn={featureDefault("wiki-guidance-enabled")}
                       onChange={handleToggleWikiGuidance}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2662,12 +2794,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.model_guidance_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={modelGuidanceState}
                       defaultOn={featureDefault("model-guidance-enabled")}
                       onChange={handleToggleModelGuidance}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2679,12 +2813,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.session_title_guidance_enabled")}</span>
-                  {prefsSettled ? (
+                  {prefsKnown ? (
                     <TriStateToggle
                       value={sessionTitleGuidanceState}
                       defaultOn={featureDefault("session-title-guidance-enabled")}
                       onChange={handleToggleSessionTitleGuidance}
                     />
+                  ) : prefsSettled ? (
+                    <UnknownValue />
                   ) : (
                     <TriStateSkeleton />
                   )}
@@ -2737,6 +2873,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                           <div className={styles.row} key={label}>
                             <span className={styles.row_label}>{label}</span>
                             <SkeletonNumber width={90} height={24} />
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {!timeoutsDraft && timeoutsSettled && (
+                      <>
+                        {[
+                          t("settings.timeouts_wait"),
+                          t("settings.timeouts_poll"),
+                          t("settings.timeouts_heartbeat"),
+                        ].map((label) => (
+                          <div className={styles.row} key={label}>
+                            <span className={styles.row_label}>{label}</span>
+                            <UnknownValue />
                           </div>
                         ))}
                       </>
@@ -2843,7 +2993,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             {/* ── Alerts — unified: master mute → system notifications →
                  sound/speech. Replaces the old separate Notifications + Sound
                  tabs. ── */}
-            {activeTab === "alerts" && (
+            {/* Alert preferences live in the host app's localStorage, out of
+                the tunnel's reach. */}
+            {activeTab === "alerts" && relayReadOnly && <RelayTabUnavailable />}
+            {activeTab === "alerts" && !relayReadOnly && (
               <div className={styles.section}>
                 {/* Master mute — the single switch that silences EVERYTHING.
                     Writes tts-muted, which both the front-end decision queue
@@ -2964,7 +3117,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             )}
 
             {/* ── Sound / speech — merged into Alerts ── */}
-            {activeTab === "alerts" && (
+            {activeTab === "alerts" && !relayReadOnly && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.tts")}</div>
                 {(["chime_and_speech", "chime_only", "off"] as const).map((mode) => (
@@ -3073,6 +3226,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 )}
               </div>
             )}
+
+            </fieldset>
+
+            {/* Navigation and read-only views stay usable over the relay. */}
+            {activeTab === "security" && <SecurityLinks onClose={onClose} />}
 
             {/* ── Usage ── */}
             {activeTab === "usage" && (
