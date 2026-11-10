@@ -38,4 +38,9 @@ describe("showsMobilePanel", () => {
   it("Hostname case doesn't affect loopback detection", () => {
     expect(showsMobilePanel(true, "https:", "LOCALHOST")).toBe(false);
   });
+
+  it("Hidden when the page runs over the relay tunnel, even on a public https origin", () => {
+    expect(showsMobilePanel(true, "https:", "fleet-relay.muveeai.com", true)).toBe(false);
+    expect(showsMobilePanel(true, "https:", "fleet-relay.muveeai.com", false)).toBe(true);
+  });
 });

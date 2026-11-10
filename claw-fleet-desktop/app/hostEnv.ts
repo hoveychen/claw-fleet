@@ -60,8 +60,13 @@ export function showsMobilePanel(
   webBuildHost: boolean,
   protocol: string,
   hostname: string,
+  relayTunnel = false,
 ): boolean {
   if (!webBuildHost) return true;
+  // Opened from a relay origin: the page is itself a client of an already
+  // paired Mac, and the relay origin is not a host that could own a pairing
+  // code (the Mac's pairing routes are not tunnelled either).
+  if (relayTunnel) return false;
   if (protocol !== "https:") return false;
   return !isLoopbackHostname(hostname);
 }
@@ -89,6 +94,11 @@ let webApiPrefix = "";
 /** Set once at boot by the relay transport. Nothing else may call this. */
 export function setWebApiPrefix(prefix: string): void {
   webApiPrefix = prefix.replace(/\/$/, "");
+}
+
+/** True when the data routes are tunnelled over the relay (`/desktop/` mount). */
+export function isRelayTunnel(): boolean {
+  return webApiPrefix !== "";
 }
 
 /**
