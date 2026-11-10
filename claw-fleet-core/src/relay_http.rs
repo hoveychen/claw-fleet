@@ -239,12 +239,31 @@ fn path_is_clean(path: &str) -> bool {
         return false;
     }
     let lowered = path.to_ascii_lowercase();
-    if lowered.contains("%2e") || lowered.contains("%2f") || lowered.contains("%5c") {
-        // Encoded dots and slashes are how a prefix match gets smuggled past;
-        // none of the whitelisted routes needs them in the path itself.
+    if lowered.contains("%2e") || lowered.contains("%5c") {
+        // Encoded dots and backslashes are how a prefix match gets smuggled
+        // past; none of the whitelisted routes needs them in the path itself.
+        return false;
+    }
+    if lowered.contains("%2f") && !encoded_slash_only_in_wiki_slug(&lowered) {
         return false;
     }
     !path.split('/').any(|seg| seg == ".." || seg == ".")
+}
+
+/// The one place an encoded `/` is legitimate: the slug segment of
+/// `/wiki_asset/<slug>/<version>/<rel…>`. Wiki slugs are `<project>/<folder>/
+/// <name>`, and `wikiFileUrl` encodes the slug's own slashes so the server's
+/// `splitn(3, '/')` keeps it in one part — rejecting `%2F` there broke every
+/// wiki HTML preview over the relay (found in the Tauri e2e run, 2026-11-10).
+/// Anywhere else — the version, the relpath, any other route — it stays out.
+fn encoded_slash_only_in_wiki_slug(lowered: &str) -> bool {
+    let Some(tail) = lowered.strip_prefix(crate::routes::WIKI_ASSET_PREFIX) else {
+        return false;
+    };
+    match tail.split_once('/') {
+        Some((_slug, rest)) => !rest.contains("%2f"),
+        None => false,
+    }
 }
 
 /// `encodeURIComponent`'s unreserved set — what the browser build uses for
@@ -677,6 +696,11 @@ mod tests {
             "/wiki_asset/../proc_run",
             "/wiki_asset/a/%2e%2e/b",
             "/decision_asset/a%2Fb",
+            "/wiki_asset/p%2Ff%2Fdoc/v1/a%2F..%2Fb",
+            "/wiki_asset/p%2Ff%2Fdoc/v1%2Fx/index.html",
+            "/wiki_asset/p%2F%2e%2e/v1/index.html",
+            "/wiki_asset/p%2Ff%2Fdoc",
+            "/sessions%2Fx",
             "/sessions?x=1",
             "sessions",
             "/wiki_asset/",
@@ -704,6 +728,17 @@ mod tests {
             .decode(reply["bodyB64"].as_str().unwrap())
             .unwrap();
         assert_eq!(back, png);
+    }
+
+    #[test]
+    fn wiki_asset_slug_keeps_its_encoded_slashes() {
+        // Wiki slugs are `<project>/<folder>/<name>`; `wikiFileUrl` encodes
+        // them into one segment. The path must reach the server verbatim.
+        let (target, rx) = fake_server(200, "text/html", b"<p>ok</p>".to_vec());
+        let path = "/wiki_asset/claude-fleet%2Fe2e%2Fwikidoc/20261110-164348/index.html";
+        let reply = serve_http_via(&json!({"method": "GET", "path": path}), || Ok(target));
+        assert_eq!(reply["status"], 200, "reply: {reply}");
+        assert_eq!(rx.recv().unwrap().url, path);
     }
 
     #[test]
