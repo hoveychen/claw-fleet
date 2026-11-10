@@ -2065,6 +2065,7 @@
       "rate_limit": "Usage limit reached",
       "model_quota": "Out of quota for this model",
       "server": "Can't reach the API",
+      "network_blocked": "Network blocked",
       "too_long": "Context too long",
       "compaction_blocked": "Compaction was blocked by the same limit",
       "billing": "Credit balance too low",

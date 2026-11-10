@@ -1108,6 +1108,7 @@ const DICT: Record<string, string> = {
   "已达用量上限": "Usage limit reached",
   "该模型额度已用完": "Out of quota for this model",
   "连不上 API": "Can't reach the API",
+  "网络被拦截": "Network blocked",
   "上下文超长": "Context too long",
   "压缩也被配额挡住了": "Compaction was blocked by the same limit",
   "余额不足": "Credit balance too low",

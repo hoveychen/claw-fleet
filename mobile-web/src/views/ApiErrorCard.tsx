@@ -180,6 +180,8 @@ function titleOf(info: SyntheticErrorInfo): string {
       return t("该模型额度已用完");
     case "detail.api_error.server":
       return t("连不上 API");
+    case "detail.api_error.network_blocked":
+      return t("网络被拦截");
     case "detail.api_error.too_long":
       return t("上下文超长");
     case "detail.api_error.compaction_blocked":

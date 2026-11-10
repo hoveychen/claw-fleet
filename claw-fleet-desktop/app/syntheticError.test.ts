@@ -146,6 +146,31 @@ describe("classifySyntheticError", () => {
     expect(info?.titleKey).toBe("detail.api_error.compaction_blocked");
   });
 
+  it("reads the 2.1.322 network-edge 403 as a network block, not an over-long prompt", () => {
+    const record = {
+      type: "assistant",
+      isApiErrorMessage: true,
+      error: "invalid_request",
+      apiError: "network_edge_blocked",
+      apiErrorStatus: 403,
+      message: {
+        model: "<synthetic>",
+        content: [
+          {
+            type: "text",
+            text: "API Error: Request blocked before it reached Anthropic's API (HTTP 403) · the network this request came from isn't allowed",
+          },
+        ],
+      },
+    };
+    for (const src of [record, { ...record, apiError: undefined }]) {
+      const info = classifySyntheticError(src);
+      expect(info?.titleKey).toBe("detail.api_error.network_blocked");
+      expect(info?.actions).toEqual(["retry"]);
+      expect(info?.severity).toBe("transient");
+    }
+  });
+
   it("still offers compaction for an ordinary over-long prompt", () => {
     const info = classifySyntheticError({
       ...COMPACTION_BLOCKED,
