@@ -1,4 +1,4 @@
-import { isWebBuild } from "./hostEnv";
+import { isWebBuild, webApiOrigin } from "./hostEnv";
 
 /**
  * URL of one decision-asset file through the `fleet-decision` custom protocol.
@@ -47,7 +47,7 @@ export function decisionAssetUrl(
 ): string {
   const path = [id, qidx, ...rel.split("/")].map(encodeURIComponent).join("/");
   const q = theme ? `?theme=${theme}` : "";
-  if (isWebBuild()) return `${window.location.origin}/decision_asset/${path}${q}`;
+  if (isWebBuild()) return `${webApiOrigin()}/decision_asset/${path}${q}`;
   return navigator.userAgent.includes("Windows")
     ? `http://fleet-decision.localhost/${path}${q}`
     : `fleet-decision://localhost/${path}${q}`;
